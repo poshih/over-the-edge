@@ -638,7 +638,9 @@ kbd {
 }
 
 .appearance-scroll select,
-.appearance-scroll input[type="file"] {
+.appearance-scroll input[type="file"],
+.tuning-history input,
+.tuning-history select {
   width: 100%;
   padding: 10px;
   border: 1px solid var(--line);
@@ -649,8 +651,64 @@ kbd {
   min-height: var(--control-height);
 }
 
-.appearance-scroll select {
+.appearance-scroll select,
+.tuning-history select {
   pointer-events: auto;
+}
+
+.tuning-history {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.tuning-history label {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tuning-profile-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.tuning-profile-row input,
+.tuning-profile-row select {
+  min-width: 0;
+}
+
+.touch-controls .tuning-history input,
+.touch-controls .tuning-history select {
+  font-size: 16px;
+}
+
+.tuning-profile-row .button {
+  padding-inline: 9px;
+  font-size: 10px;
+}
+
+.tuning-history select:focus-visible {
+  outline: 3px solid #94662b;
+  outline-offset: 4px;
+}
+
+.game-ui .tuning-history-help,
+.game-ui .tuning-history-error {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tuning-history-help {
+  color: var(--muted);
+}
+
+.tuning-history-error {
+  color: #743925;
 }
 
 .appearance-label {
@@ -696,7 +754,8 @@ kbd {
   font-weight: 600;
 }
 
-.game-ui .appearance-status {
+.game-ui .appearance-status,
+.game-ui .arm-ik-status {
   margin-top: 7px;
   font-size: 11px;
   line-height: 1.5;
@@ -704,6 +763,27 @@ kbd {
 
 .visual-alignment {
   margin-top: 20px;
+}
+
+.tuning-group.arm-ik-controls {
+  margin-top: 20px;
+}
+
+.arm-ik-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.arm-ik-actions .button,
+.arm-ik-flip {
+  padding-inline: 9px;
+  font-size: 10px;
+}
+
+.arm-ik-flip {
+  margin-top: 6px;
 }
 
 .appearance-footer .button {
@@ -894,6 +974,8 @@ kbd {
 }
 
 .tuning-field {
+  /* Keep absolute screen-reader hints inside their scrolling field. */
+  position: relative;
   margin-bottom: 12px;
 }
 
@@ -1125,6 +1207,10 @@ body[data-input-mode="touch"] .recenter-button kbd {
 .defaults-tuning {
   border-color: transparent;
   background: transparent;
+}
+
+.physics-footer > .defaults-tuning {
+  width: 100%;
 }
 
 .game-ui .workshop-footer p {
@@ -1397,10 +1483,10 @@ body[data-input-mode="touch"] .recenter-button kbd {
   }
 
   body.workshop-open .ui-notice {
-    right: 12px;
+    right: calc(var(--mobile-panel-width) + 12px);
     bottom: 90px;
-    left: auto;
-    width: min(350px, calc(100% - 24px));
+    left: 12px;
+    width: auto;
     max-height: 35dvh;
     overflow: auto;
   }

@@ -275,7 +275,33 @@ try {
   const savedTorque = (await snapshot()).tuning.hingeTorque;
   const savedTuning = (await snapshot()).tuning;
   assert.ok(savedTorque > initialTorque, 'A live range control must reach the physics motor settings.');
-  await page.getByRole('button', { name: 'Save tuning', exact: true }).click();
+  const nameInput = page.getByRole('textbox', { name: 'Tuning name', exact: true });
+  const pastTuning = page.getByRole('combobox', { name: 'Past tuning', exact: true });
+  const saveTuning = page.getByRole('button', { name: 'Save tuning', exact: true });
+  const loadTuning = page.getByRole('button', { name: 'Load tuning', exact: true });
+  const savedRecords = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage)
+    .filter((key) => key.startsWith('over-the-edge:tuning:snapshot:v3:'))
+    .map((key) => [key, localStorage.getItem(key)])));
+  assert.equal(await loadTuning.isDisabled(), true, 'An empty history must not offer a load action.');
+  await nameInput.fill('   ');
+  await saveTuning.click();
+  assert.deepEqual(await savedRecords(), {}, 'An empty name must not create a snapshot.');
+  assert.ok(await page.getByRole('status').filter({ hasText: 'Enter a tuning name' }).isVisible());
+  const beforeTyping = await snapshot();
+  await nameInput.fill('');
+  await nameInput.pressSequentially('r p c d 1234');
+  const afterTyping = await snapshot();
+  for (const key of ['practice', 'paused', 'debug', 'time']) assert.equal(afterTyping[key], beforeTyping[key],
+    'Typing a tuning name must not invoke game keyboard shortcuts.');
+  const experimentName = 'Light <hammer> & recoil';
+  await nameInput.fill(experimentName);
+  await nameInput.press('Enter');
+  const firstSave = await pastTuning.inputValue();
+  const originalRecord = (await savedRecords())[firstSave];
+  assert.deepEqual(JSON.parse(originalRecord).tuning, savedTuning);
+  assert.equal(JSON.parse(originalRecord).name, experimentName);
+  assert.ok(Number.isFinite(JSON.parse(originalRecord).savedAt));
+  assert.equal(await pastTuning.locator('hammer').count(), 0, 'Names must render as text, never markup.');
   await page.getByRole('button', { name: 'Defaults', exact: true }).click();
   assert.equal((await snapshot()).tuning.hingeTorque, initialTorque);
   const defaults = await snapshot();
@@ -287,7 +313,7 @@ try {
   assert.equal(defaults.bodyProperties.slider.inertia, 0.035);
   await page.reload({ waitUntil: 'networkidle' });
   await ready();
-  await page.getByRole('button', { name: 'Load tuning', exact: true }).click();
+  await loadTuning.click();
   assert.equal((await snapshot()).tuning.hingeTorque, savedTorque, 'A saved profile must survive a page reload.');
   assert.deepEqual((await snapshot()).tuning, savedTuning);
   assertMasses(await snapshot());
@@ -297,6 +323,90 @@ try {
     'The lightweight mass settings must remain usable on a ledge.');
   report.scenarios.lightMassHold = lightHold;
 
+  await hinge.press('ArrowRight');
+  const secondTuning = (await snapshot()).tuning;
+  await nameInput.fill(experimentName);
+  await saveTuning.click();
+  const secondSave = await pastTuning.inputValue();
+  assert.notEqual(secondSave, firstSave, 'Reusing a name must create a distinct snapshot.');
+  assert.equal((await savedRecords())[firstSave], originalRecord);
+  await page.getByRole('slider', { name: 'Hammer friction', exact: true }).press('ArrowRight');
+  const thirdTuning = (await snapshot()).tuning;
+  await nameInput.fill('Rock grip');
+  await saveTuning.click();
+  const thirdSave = await pastTuning.inputValue();
+  assert.equal(Object.keys(await savedRecords()).length, 3);
+  await pastTuning.selectOption(firstSave);
+  assert.deepEqual((await snapshot()).tuning, thirdTuning, 'Choosing a past save must not apply it until Load tuning.');
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, savedTuning);
+  await pastTuning.selectOption(secondSave);
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, secondTuning);
+  const historyBeforeDefaults = await savedRecords();
+  await page.getByRole('button', { name: 'Defaults', exact: true }).click();
+  assert.deepEqual(await savedRecords(), historyBeforeDefaults);
+  await page.reload({ waitUntil: 'networkidle' });
+  await ready();
+  assert.deepEqual((await snapshot()).tuning, defaults.tuning, 'Reload must not auto-load a saved experiment.');
+  assert.deepEqual(await savedRecords(), historyBeforeDefaults);
+  assert.equal(await pastTuning.inputValue(), thirdSave, 'The newest snapshot should be offered first.');
+  await pastTuning.selectOption(firstSave);
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, savedTuning);
+
+  const otherTab = await context.newPage();
+  otherTab.on('pageerror', (error) => report.errors.push(error.message));
+  const otherProtocol = await context.newCDPSession(otherTab);
+  await otherProtocol.send('Runtime.enable');
+  await otherProtocol.send('Log.enable');
+  otherProtocol.on('Runtime.consoleAPICalled', (event) => {
+    if (event.type === 'error' || event.type === 'assert') {
+      report.errors.push(event.args.map((arg) => 'value' in arg ? String(arg.value) : arg.description).join(' '));
+    }
+  });
+  otherProtocol.on('Log.entryAdded', ({ entry }) => { if (entry.level === 'error') report.errors.push(entry.text); });
+  try {
+    await otherTab.goto(address, { waitUntil: 'networkidle' });
+    await otherTab.waitForFunction(() => window.gettingOver);
+    await otherTab.getByRole('textbox', { name: 'Tuning name', exact: true }).fill('Other tab');
+    await otherTab.getByRole('button', { name: 'Save tuning', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('#past-tuning').options.length === 4);
+    assert.equal(await pastTuning.inputValue(), firstSave, 'Another tab must not replace the selected experiment.');
+    assert.deepEqual((await snapshot()).tuning, savedTuning);
+    await nameInput.fill('Original tab');
+    await saveTuning.click();
+    await otherTab.waitForFunction(() => document.querySelector('#past-tuning').options.length === 5);
+    assert.equal(Object.keys(await savedRecords()).length, 5, 'Independent tab saves must retain all snapshots.');
+  } finally {
+    await otherTab.close();
+  }
+
+  const beforeFailedSave = await savedRecords();
+  const beforeFailedTuning = (await snapshot()).tuning;
+  const beforeFailedSelection = await pastTuning.inputValue();
+  await nameInput.fill('Quota experiment');
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    window.restorePresetStorage = () => { Storage.prototype.setItem = original; delete window.restorePresetStorage; };
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith('over-the-edge:tuning:snapshot:v3:')) throw new DOMException('Storage quota probe', 'QuotaExceededError');
+      return original.call(this, key, value);
+    };
+  });
+  try {
+    await saveTuning.click();
+    assert.deepEqual(await savedRecords(), beforeFailedSave);
+    assert.deepEqual((await snapshot()).tuning, beforeFailedTuning);
+    assert.equal(await pastTuning.inputValue(), beforeFailedSelection);
+    assert.equal(await nameInput.inputValue(), 'Quota experiment');
+    assert.ok(await page.getByRole('status').filter({ hasText: 'Tuning could not be saved.' }).isVisible());
+  } finally {
+    await page.evaluate(() => window.restorePresetStorage());
+  }
+  await saveTuning.click();
+  assert.equal(Object.keys(await savedRecords()).length, 6);
+
   const legacyTuning = { ...savedTuning, hingeTorque: initialTorque + 20 };
   for (const key of ['shaftMass', 'hingeCarrierMass', 'sliderCarriageMass']) delete legacyTuning[key];
   const legacyRecord = JSON.stringify({ schemaVersion: 1, tuning: legacyTuning });
@@ -304,63 +414,63 @@ try {
     localStorage.setItem('over-the-edge:tuning:v1', record);
     localStorage.removeItem('over-the-edge:tuning:v2');
   }, legacyRecord);
-  const beforeBlockedMigration = (await snapshot()).tuning;
-  await page.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    window.restorePresetStorage = () => { Storage.prototype.setItem = original; delete window.restorePresetStorage; };
-    Storage.prototype.setItem = function (key, value) {
-      if (key === 'over-the-edge:tuning:v2') throw new DOMException('Storage quota probe', 'QuotaExceededError');
-      return original.call(this, key, value);
-    };
-  });
-  try {
-    await page.getByRole('button', { name: 'Load tuning', exact: true }).click();
-    assert.deepEqual((await snapshot()).tuning, beforeBlockedMigration, 'Failed migration writes must not partially apply tuning.');
-    assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), null);
-    assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v1')), legacyRecord);
-    assert.ok(await page.getByRole('status').filter({ hasText: 'Tuning could not be saved.' }).isVisible());
-  } finally {
-    await page.evaluate(() => window.restorePresetStorage());
-  }
-  await page.getByRole('button', { name: 'Load tuning', exact: true }).click();
+  await page.reload({ waitUntil: 'networkidle' });
+  await ready();
+  await pastTuning.selectOption('over-the-edge:tuning:v1');
+  await loadTuning.click();
   const migrated = await snapshot();
   assert.deepEqual(migrated.tuning, {
     ...legacyTuning, shaftMass: 0.66, hingeCarrierMass: 0.5, sliderCarriageMass: 0.5,
   });
   assertMasses(migrated);
   assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v1')), legacyRecord);
-  const upgradedRecord = await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2'));
-  assert.equal(JSON.parse(upgradedRecord).schemaVersion, 2);
-  await page.getByRole('button', { name: 'Load tuning', exact: true }).click();
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), upgradedRecord,
-    'Repeated loading must not repeat or rewrite a completed migration.');
-  await hinge.press('ArrowRight');
-  const validTuning = (await snapshot()).tuning;
+  await loadTuning.click();
+  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), null,
+    'Reading a legacy save must not rewrite storage.');
+  await nameInput.fill('Imported v1');
+  await saveTuning.click();
+  assert.deepEqual(JSON.parse((await savedRecords())[await pastTuning.inputValue()]).tuning, migrated.tuning);
+  const v2Record = JSON.stringify({ schemaVersion: 2, tuning: { ...savedTuning, gripFriction: 1.2 } });
+  await page.evaluate((record) => localStorage.setItem('over-the-edge:tuning:v2', record), v2Record);
+  await page.reload({ waitUntil: 'networkidle' });
+  await ready();
+  assert.equal(await pastTuning.locator('option[value="over-the-edge:tuning:v1"]').count(), 0);
+  await pastTuning.selectOption('over-the-edge:tuning:v2');
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, JSON.parse(v2Record).tuning);
+  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), v2Record);
+  const beforeInvalidLegacy = (await snapshot()).tuning;
   await page.evaluate(() => localStorage.setItem('over-the-edge:tuning:v2', '{broken'));
-  await page.getByRole('button', { name: 'Load tuning', exact: true }).click();
-  assert.deepEqual((await snapshot()).tuning, validTuning, 'Invalid stored data must not replace the active profile.');
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, beforeInvalidLegacy, 'An invalid v2 record must never cause v1 to be loaded.');
   assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), '{broken');
   assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v1')), legacyRecord);
   assert.ok(await page.getByRole('status').filter({ hasText: 'Saved tuning is invalid:' }).isVisible(),
     'Invalid profiles must produce a visible explanation.');
   await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
-  const malformedLegacy = JSON.stringify({ schemaVersion: 1, tuning: { ...legacyTuning, shaftMass: 0.2 } });
-  await page.evaluate((record) => {
-    localStorage.removeItem('over-the-edge:tuning:v2');
-    localStorage.setItem('over-the-edge:tuning:v1', record);
-  }, malformedLegacy);
-  await page.getByRole('button', { name: 'Load tuning', exact: true }).click();
-  assert.deepEqual((await snapshot()).tuning, validTuning, 'Malformed legacy data must not change live tuning.');
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v1')), malformedLegacy);
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), null);
-  await page.getByRole('button', { name: 'Save tuning', exact: true }).click();
-  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('over-the-edge:tuning:v2')).tuning), validTuning);
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v1')), malformedLegacy,
-    'Saving a new current profile must preserve an invalid legacy record too.');
+  await pastTuning.selectOption(firstSave);
+  const validTuning = (await snapshot()).tuning;
+  await page.evaluate((key) => localStorage.setItem(key, '{broken'), firstSave);
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, validTuning, 'A malformed snapshot must not change live tuning.');
+  assert.equal((await savedRecords())[firstSave], '{broken');
+  assert.equal(await pastTuning.locator(`option[value="${firstSave}"]`).isDisabled(), true);
+  assert.ok(await page.locator('.tuning-history-error').isVisible());
+  await pastTuning.selectOption(secondSave);
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, secondTuning, 'Other history must remain loadable when one record is unreadable.');
+  await nameInput.fill('After corrupt record');
+  await saveTuning.click();
+  assert.equal((await savedRecords())[firstSave], '{broken', 'Saving must never replace an unreadable record.');
+  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), '{broken');
   await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
-  await page.evaluate(() => localStorage.removeItem('over-the-edge:tuning:v1'));
+  await page.evaluate(() => {
+    localStorage.removeItem('over-the-edge:tuning:v1');
+    localStorage.removeItem('over-the-edge:tuning:v2');
+  });
   report.scenarios.persistence = {
-    savedTorque, migratedVersion: 2, legacyRetained: true, invalidRecordRetained: true, writeFailureSafe: true,
+    savedTorque, snapshots: Object.keys(await savedRecords()).length, repeatedNamesPreserved: true,
+    manualLoad: true, crossTabSafe: true, legacyRetained: true, invalidRecordRetained: true, writeFailureSafe: true,
   };
 
   await focusGame();

@@ -95,6 +95,7 @@ export class AppearanceRig {
       triangles: binding.model ? binding.model.triangles : 0,
       defaultsVisible: binding.defaults.every((object) => object.visible),
       anchor: { x: world.x, y: world.y, z: world.z },
+      transform: binding.anchor.matrixWorld.toArray(),
     };
   }
 

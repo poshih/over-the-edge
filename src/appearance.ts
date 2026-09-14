@@ -1,10 +1,10 @@
 import { AppearanceRig } from './appearance-rig';
 import { AppearanceStore } from './appearance-store';
 import {
-  ALIGNMENT_FIELDS, AppearanceError, DEFAULT_ALIGNMENT, isVisualPart, MODEL_LIMITS,
-  validateAlignment, validateStoredVisual, VISUAL_PARTS,
+  ALIGNMENT_FIELDS, AppearanceError, ARM_IK_FIELDS, DEFAULT_ALIGNMENT, DEFAULT_ARM_IK, isVisualPart, MODEL_LIMITS,
+  validateAlignment, validateArmIk, validateStoredVisual, VISUAL_PARTS,
 } from './appearance-types';
-import type { StoredVisual, VisualAlignment, VisualPartId } from './appearance-types';
+import type { ArmIkSettings, StoredVisual, VisualAlignment, VisualPartId } from './appearance-types';
 import { loadVisualModel } from './visual-model';
 
 export class Appearance {
@@ -18,6 +18,9 @@ export class Appearance {
   private readonly listeners = new Set<() => void>();
   private restoring = true;
   private storageIssue: string | null = null;
+  private armIk = { ...DEFAULT_ARM_IK };
+  private savedArmIk: ArmIkSettings | null = null;
+  private armIkIssue: string | null = null;
   private disposed = false;
 
   constructor(rig: AppearanceRig, notice: (message: string, kind: 'info' | 'error') => void) {
@@ -27,6 +30,15 @@ export class Appearance {
   }
 
   async restore(): Promise<void> {
+    try {
+      const saved = this.store.readArmIk();
+      if (saved !== null) {
+        this.armIk = saved;
+        this.savedArmIk = { ...saved };
+      }
+    } catch (error) {
+      this.reportArmIkError(error);
+    }
     try {
       const entries = await this.store.entries();
       for (const entry of entries) {
@@ -54,6 +66,35 @@ export class Appearance {
       }
     } finally {
       this.restoring = false;
+      this.changed();
+    }
+  }
+
+  armIkSettings(): Readonly<ArmIkSettings> {
+    return { ...this.armIk };
+  }
+
+  previewArmIk(value: unknown): void {
+    if (!this.canEdit()) return;
+    this.armIk = validateArmIk(value);
+    this.armIkIssue = null;
+    this.changed();
+  }
+
+  resetArmIk(): void {
+    this.previewArmIk(DEFAULT_ARM_IK);
+  }
+
+  saveArmIk(): void {
+    if (!this.canEdit()) return;
+    try {
+      this.store.writeArmIk(this.armIk);
+      this.savedArmIk = { ...this.armIk };
+      this.armIkIssue = null;
+      this.notice('Arm IK directions saved on this device.', 'info');
+    } catch (error) {
+      this.reportArmIkError(error);
+    } finally {
       this.changed();
     }
   }
@@ -125,9 +166,16 @@ export class Appearance {
   }
 
   snapshot() {
+    const savedArmIk = this.savedArmIk;
     return {
       restoring: this.restoring,
       error: this.storageIssue,
+      armIk: {
+        settings: this.armIkSettings(),
+        dirty: savedArmIk === null || ARM_IK_FIELDS.some((field) =>
+          this.armIk[field.key] !== savedArmIk[field.key]),
+        error: this.armIkIssue,
+      },
       parts: VISUAL_PARTS.map((part) => {
         const record = this.records.get(part.id);
         const draft = this.drafts.get(part.id);
@@ -160,13 +208,19 @@ export class Appearance {
     this.drafts.clear();
   }
 
-  private canEdit(slot: VisualPartId): boolean {
+  private canEdit(slot?: VisualPartId): boolean {
     if (this.disposed) return false;
-    if (this.restoring || this.busy.has(slot)) {
-      this.notice('Wait for this model operation to finish before editing the part.', 'error');
+    if (this.restoring || (slot !== undefined && this.busy.has(slot))) {
+      this.notice('Wait for this appearance operation to finish before editing.', 'error');
       return false;
     }
     return true;
+  }
+
+  private reportArmIkError(error: unknown): void {
+    if (!(error instanceof AppearanceError)) throw error;
+    this.armIkIssue = error.message;
+    this.notice(error.message, 'error');
   }
 
   private async run(slot: VisualPartId, operation: () => Promise<void>): Promise<void> {

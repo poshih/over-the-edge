@@ -30,6 +30,22 @@ export const DEFAULT_ALIGNMENT: Readonly<VisualAlignment> = Object.freeze({
   scale: 1, rotationX: 0, rotationY: 0, rotationZ: 0, offsetX: 0, offsetY: 0, offsetZ: 0,
 });
 
+export interface ArmIkSettings {
+  leftElbowAngle: number;
+  rightElbowAngle: number;
+}
+
+export const DEFAULT_ARM_IK: Readonly<ArmIkSettings> = Object.freeze({
+  leftElbowAngle: 0, rightElbowAngle: 0,
+});
+
+export const ARM_IK_LIMITS = { min: -180, max: 180, step: 1, unit: 'deg' } as const;
+export const ARM_IK_FIELDS = [
+  { side: 'left', key: 'leftElbowAngle', label: 'Left elbow direction' },
+  { side: 'right', key: 'rightElbowAngle', label: 'Right elbow direction' },
+] as const;
+export type ArmSide = (typeof ARM_IK_FIELDS)[number]['side'];
+
 export const ALIGNMENT_FIELDS: readonly {
   key: keyof VisualAlignment; label: string; min: number; max: number; step: number; unit: string;
 }[] = [
@@ -53,6 +69,23 @@ export const MODEL_LIMITS = {
 } as const;
 
 export class AppearanceError extends Error {}
+
+export function validateArmIk(value: unknown): ArmIkSettings {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
+    Object.keys(value).length !== ARM_IK_FIELDS.length) {
+    throw new AppearanceError('Arm IK settings must contain both elbow directions.');
+  }
+  const result = { ...DEFAULT_ARM_IK };
+  for (const field of ARM_IK_FIELDS) {
+    const angle: unknown = Reflect.get(value, field.key);
+    if (typeof angle !== 'number' || !Number.isFinite(angle) ||
+      angle < ARM_IK_LIMITS.min || angle > ARM_IK_LIMITS.max) {
+      throw new AppearanceError(`${field.label} must be between ${ARM_IK_LIMITS.min} and ${ARM_IK_LIMITS.max} degrees.`);
+    }
+    result[field.key] = angle;
+  }
+  return result;
+}
 
 export function isVisualPart(value: unknown): value is VisualPartId {
   return typeof value === 'string' && VISUAL_PARTS.some((part) => part.id === value);

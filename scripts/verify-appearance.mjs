@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { BoxGeometry } from 'three';
+import { BoxGeometry, Matrix4, Vector3 } from 'three';
 
 function pngChunk(type, bytes) {
   const content = Buffer.concat([Buffer.from(type), bytes]);
@@ -113,6 +113,54 @@ export async function verifyAppearance(page, artifacts) {
   const snapshot = () => page.evaluate(() => window.gettingOver.snapshot());
   const appearance = () => page.evaluate(() => window.gettingOver.appearance());
   const part = async (id) => (await appearance()).parts.find((entry) => entry.id === id);
+  const frames = () => page.evaluate(() => new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const armSettings = async () => (await appearance()).armIk.settings;
+  const armRecord = () => page.evaluate(() => localStorage.getItem('over-the-edge:appearance:arm-ik:v1'));
+  const armGeometry = async () => {
+    await frames();
+    const state = await snapshot();
+    const visuals = await appearance();
+    const point = (value) => new Vector3(value.x, value.y, value.z);
+    const endpoint = (part, y) => new Vector3(0, y, 0).applyMatrix4(new Matrix4().fromArray(part.transform));
+    const result = {};
+    for (const [side, shoulderX, depth, bend] of [['left', -0.17, 0.18, -1], ['right', 0.17, 0.63, 1]]) {
+      const upper = visuals.parts.find((part) => part.id === `${side}-upper-arm`);
+      const lower = visuals.parts.find((part) => part.id === `${side}-forearm`);
+      const elbow = point(visuals.parts.find((part) => part.id === `${side}-elbow`).anchor);
+      const hand = point(visuals.parts.find((part) => part.id === `${side}-hand`).anchor);
+      const shoulder = new Vector3(state.root.x + shoulderX, state.root.y + 0.74, depth);
+      assert.ok(endpoint(upper, -0.5).distanceTo(shoulder) < 1e-8, `${side} upper arm must start at the shoulder.`);
+      assert.ok(endpoint(upper, 0.5).distanceTo(elbow) < 1e-8, `${side} upper arm must end at the elbow.`);
+      assert.ok(endpoint(lower, -0.5).distanceTo(elbow) < 1e-8, `${side} forearm must start at the elbow.`);
+      assert.ok(endpoint(lower, 0.5).distanceTo(hand) < 1e-8, `${side} forearm must end at the grip.`);
+      assert.ok(Math.abs(shoulder.distanceTo(elbow) - 0.82) < 1e-8);
+      const distance = shoulder.distanceTo(hand);
+      if (distance <= 1.64) assert.ok(Math.abs(elbow.distanceTo(hand) - 0.82) < 1e-8, 'Reachable arms must keep both bone lengths.');
+      if (visuals.armIk.settings[`${side}ElbowAngle`] === 0 && distance > 0.0001) {
+        const along = Math.min(0.82, distance / 2);
+        const height = Math.sqrt(Math.max(0, 0.82 ** 2 - along ** 2)) * bend;
+        const dx = (hand.x - shoulder.x) / distance;
+        const dy = (hand.y - shoulder.y) / distance;
+        const original = new Vector3(shoulder.x + dx * along - dy * height,
+          shoulder.y + dy * along + dx * height, depth);
+        assert.ok(original.distanceTo(elbow) < 1e-8, 'Zero swivel must preserve the original arm pose.');
+        for (const limb of [upper, lower]) {
+          assert.ok(new Vector3(limb.transform[8], limb.transform[9], limb.transform[10])
+            .distanceTo(new Vector3(0, 0, 1)) < 1e-8, 'Default limbs must retain their original front-facing orientation.');
+        }
+      }
+      result[side] = { elbow: elbow.toArray(), hand: hand.toArray() };
+    }
+    return result;
+  };
+  const setElbowAngle = async (label, angle) => {
+    await page.getByRole('slider', { name: label, exact: true }).evaluate((input, angle) => {
+      input.value = String(angle);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, angle);
+    await frames();
+  };
   const physics = async () => {
     const state = await snapshot();
     return {
@@ -142,6 +190,74 @@ export async function verifyAppearance(page, artifacts) {
     if (!(await snapshot()).paused) await page.keyboard.press('p');
     await openEditor();
     assert.equal((await appearance()).parts.length, 13);
+    await frames();
+    const armPhysics = await physics();
+    const namedTunings = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage)
+      .filter((key) => key.startsWith('over-the-edge:tuning:'))
+      .map((key) => [key, localStorage.getItem(key)])));
+    const defaultArms = await armGeometry();
+    assert.deepEqual(await armSettings(), { leftElbowAngle: 0, rightElbowAngle: 0 });
+    await page.screenshot({ path: fileURLToPath(new URL('arm-ik-defaults.png', artifacts)) });
+    await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
+    const savedDefaults = await armRecord();
+    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
+    await frames();
+    const flipped = await armGeometry();
+    assert.deepEqual(await armSettings(), { leftElbowAngle: 180, rightElbowAngle: 0 });
+    assert.ok(new Vector3(...flipped.left.elbow).distanceTo(new Vector3(...defaultArms.left.elbow)) > 0.5,
+      'Flipping must visibly move the left elbow, not just change a setting.');
+    assert.deepEqual(flipped.right, defaultArms.right, 'Left elbow editing must not move the right arm.');
+    assert.deepEqual(flipped.left.hand, defaultArms.left.hand);
+    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
+    await frames();
+    assert.deepEqual((await armGeometry()).left, defaultArms.left);
+    const savedArmSettings = { leftElbowAngle: -90, rightElbowAngle: 90 };
+    await setElbowAngle('Left elbow direction', savedArmSettings.leftElbowAngle);
+    await setElbowAngle('Right elbow direction', savedArmSettings.rightElbowAngle);
+    const swiveled = await armGeometry();
+    for (const side of ['left', 'right']) {
+      assert.ok(swiveled[side].elbow[2] > defaultArms[side].elbow[2] + 0.25, 'Swivel must move the elbow in depth.');
+      assert.deepEqual(swiveled[side].hand, defaultArms[side].hand, 'Arm IK must not move the grip point.');
+    }
+    assert.deepEqual(await physics(), armPhysics, 'Arm IK changes must leave the complete physical rig unchanged.');
+    await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      window.restoreArmIkWrites = () => { Storage.prototype.setItem = original; delete window.restoreArmIkWrites; };
+      Storage.prototype.setItem = function (key, value) {
+        if (key === 'over-the-edge:appearance:arm-ik:v1') throw new DOMException('Arm IK quota probe', 'QuotaExceededError');
+        return original.call(this, key, value);
+      };
+    });
+    try {
+      await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
+      assert.ok((await appearance()).armIk.error.includes('could not be saved'));
+      assert.equal(await armRecord(), savedDefaults);
+      assert.deepEqual(await armSettings(), savedArmSettings, 'A failed save must retain the editable preview.');
+    } finally {
+      await page.evaluate(() => window.restoreArmIkWrites());
+    }
+    await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
+    const savedDirections = await armRecord();
+    assert.equal((await appearance()).armIk.dirty, false);
+    assert.equal((await appearance()).armIk.error, null);
+    await page.screenshot({ path: fileURLToPath(new URL('arm-ik-swivel.png', artifacts)) });
+    await page.getByRole('button', { name: 'Reset arm IK', exact: true }).click();
+    await frames();
+    assert.deepEqual(await armGeometry(), defaultArms);
+    assert.equal(await armRecord(), savedDirections, 'Reset must remain a preview until saved.');
+    assert.deepEqual(await physics(), armPhysics);
+    assert.deepEqual(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage)
+      .filter((key) => key.startsWith('over-the-edge:tuning:'))
+      .map((key) => [key, localStorage.getItem(key)]))), namedTunings);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction(() => window.gettingOver && !window.gettingOver.appearance().restoring);
+    await page.locator('#game').focus();
+    await page.keyboard.press('p');
+    await openEditor();
+    await frames();
+    assert.deepEqual(await armSettings(), savedArmSettings, 'Saved elbow directions must restore on reload.');
+    assert.equal((await appearance()).armIk.dirty, false);
+    await armGeometry();
     const before = await physics();
     const name = 'my <custom> pot.glb';
     await upload('pot', name, modelFixture({ textured: true }));
@@ -182,6 +298,16 @@ export async function verifyAppearance(page, artifacts) {
     await upload('hammer-head', 'hammer.glb', modelFixture({ size: [0.2, 0.58, 0.22] }));
     assert.deepEqual(await physics(), before, 'Appearance alignment and other part imports must leave physics unchanged.');
     assert.equal((await part('right-upper-arm')).custom, false, 'Left and right arm customization must be independent.');
+    const importedArm = (await part('left-upper-arm')).transform;
+    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
+    await frames();
+    await armGeometry();
+    assert.notDeepEqual((await part('left-upper-arm')).transform, importedArm,
+      'An imported arm must turn with the configured IK plane.');
+    assert.deepEqual(await physics(), before);
+    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
+    await frames();
+    assert.deepEqual(await armSettings(), savedArmSettings);
     await page.screenshot({ path: fileURLToPath(new URL('custom-visuals.png', artifacts)) });
 
     await page.reload({ waitUntil: 'networkidle' });
@@ -190,6 +316,8 @@ export async function verifyAppearance(page, artifacts) {
     await page.keyboard.press('p');
     await openEditor();
     assert.deepEqual((await part('pot')).alignment, alignment);
+    assert.deepEqual(await armSettings(), savedArmSettings);
+    await armGeometry();
     for (const id of ['pot', 'left-upper-arm', 'hammer-shaft', 'hammer-head']) {
       assert.equal((await part(id)).custom, true, `${id} must restore after reload.`);
     }
@@ -271,11 +399,20 @@ export async function verifyAppearance(page, artifacts) {
     });
     assert.equal((await part('pot')).defaultsVisible, true);
     assert.equal((await part('left-upper-arm')).custom, true, 'Restoring one part must not reset other imports.');
+    await page.evaluate(() => localStorage.setItem('over-the-edge:appearance:arm-ik:v1', '{broken'));
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver && !window.gettingOver.appearance().restoring);
     assert.equal((await part('pot')).custom, false, 'Default restoration must persist.');
     assert.equal((await part('hammer-head')).custom, true);
     await openEditor();
+    assert.ok((await appearance()).armIk.error.includes('invalid'));
+    assert.equal(await armRecord(), '{broken', 'Invalid arm settings must remain intact until explicitly saved over.');
+    assert.ok(await page.locator('.arm-ik-state').filter({ hasText: 'invalid' }).isVisible());
+    await page.getByRole('button', { name: 'Reset arm IK', exact: true }).click();
+    assert.equal(await armRecord(), '{broken');
+    await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
+    assert.deepEqual(JSON.parse(await armRecord()).settings, { leftElbowAngle: 0, rightElbowAngle: 0 });
+    assert.equal((await appearance()).armIk.error, null);
     for (const id of ['left-upper-arm', 'hammer-shaft', 'hammer-head']) {
       await page.getByLabel('Body part', { exact: true }).selectOption(id);
       await page.getByRole('button', { name: 'Use default', exact: true }).click();
@@ -288,6 +425,7 @@ export async function verifyAppearance(page, artifacts) {
     return {
       importedParts: 4, texturedPixels: magenta, alignmentSaved: true, reloadRestored: true,
       physicsUnchanged: true, followsIk: true, failedWritesPreserved: true, externalRequests: 0,
+      armIk: { independentBends: true, depthSwivel: true, handTargetsPreserved: true, savedDirections, resetIsPreview: true },
     };
   } finally {
     await page.unroute(/^https?:\/\//, intercept);

@@ -4,12 +4,8 @@ import { PRACTICES } from './course';
 import { inputModeForPointer } from './input';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
+import { createTuningHistoryUI } from './tuning-history-ui';
 
-const STORAGE_KEY = 'over-the-edge:tuning:v2';
-const LEGACY_STORAGE_KEY = 'over-the-edge:tuning:v1';
-const SCHEMA_VERSION = 2;
-// These were fixed physics values in v1, independent of future tuning defaults.
-const V1_TOOL_MASSES = { shaftMass: 0.66, hingeCarrierMass: 0.5, sliderCarriageMass: 0.5 } as const;
 const DESKTOP_QUERY = '(min-width: 1040px)';
 const WORKSHOP_CLASS = 'workshop-open';
 
@@ -33,34 +29,6 @@ function setPressed(button: HTMLButtonElement, pressed: boolean): void {
 function formatElapsed(seconds: number): string {
   const total = Math.floor(Math.max(0, seconds));
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
-class ProfileFormatError extends Error {}
-
-function decodeProfile(serialized: string, version: 1 | 2): Tuning {
-  const profile: unknown = JSON.parse(serialized);
-  if (typeof profile !== 'object' || profile === null || Array.isArray(profile) ||
-    Object.keys(profile).length !== 2 ||
-    !Object.hasOwn(profile, 'schemaVersion') || !Object.hasOwn(profile, 'tuning')) {
-    throw new ProfileFormatError('Expected a versioned tuning profile with exactly schemaVersion and tuning.');
-  }
-  if (Reflect.get(profile, 'schemaVersion') !== version) {
-    throw new ProfileFormatError(`Expected tuning profile version ${version}.`);
-  }
-  const settings: unknown = Reflect.get(profile, 'tuning');
-  if (version === 1) {
-    if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
-      throw new ProfileFormatError('Version 1 tuning must be an object.');
-    }
-    const legacyKeys = TUNING_FIELDS.map((field) => field.key)
-      .filter((key) => !Object.hasOwn(V1_TOOL_MASSES, key));
-    const keys = Object.keys(settings);
-    if (keys.length !== legacyKeys.length || keys.some((key) => !legacyKeys.some((known) => known === key))) {
-      throw new ProfileFormatError('Version 1 tuning contains missing or unknown settings.');
-    }
-    return validateTuning({ ...settings, ...V1_TOOL_MASSES });
-  }
-  return validateTuning(settings);
 }
 
 export function createUI(options: UiOptions): GameUi {
@@ -158,6 +126,8 @@ export function createUI(options: UiOptions): GameUi {
           <p class="practice-description">Choose a starting point. Your tuning stays with you.</p>
         </section>
 
+        <section class="tuning-history" aria-label="Saved tuning"></section>
+
         <section class="telemetry" aria-labelledby="telemetry-title">
           <div class="section-heading">
             <h3 id="telemetry-title">In the moment</h3>
@@ -182,11 +152,7 @@ export function createUI(options: UiOptions): GameUi {
 
       <section id="appearance-pane" class="appearance-pane" role="tabpanel" aria-labelledby="appearance-tab" hidden></section>
       <footer class="workshop-footer physics-footer">
-        <div class="persistence-actions" role="group" aria-label="Tuning profiles">
-          <button type="button" class="button button-primary save-tuning">Save tuning</button>
-          <button type="button" class="button load-tuning">Load tuning</button>
-          <button type="button" class="button defaults-tuning">Defaults</button>
-        </div>
+        <button type="button" class="button defaults-tuning">Defaults</button>
         <p>Saved on this device. Loaded only when you choose.</p>
       </footer>
     </aside>
@@ -354,76 +320,9 @@ export function createUI(options: UiOptions): GameUi {
     }
   }, listenerOptions);
 
-  function readStorage(version: 1 | 2): { storage: Storage; record: string | null } | null {
-    try {
-      const storage = window.localStorage;
-      return { storage, record: storage.getItem(version === 2 ? STORAGE_KEY : LEGACY_STORAGE_KEY) };
-    } catch (error) {
-      if (!(error instanceof DOMException)) throw error;
-      notice('Device storage is unavailable. Check your browser storage permissions; your live tuning is unchanged.', 'error');
-      return null;
-    }
-  }
-
-  function readProfile(record: string, version: 1 | 2): Tuning | null {
-    try {
-      return decodeProfile(record, version);
-    } catch (error) {
-      if (!(error instanceof SyntaxError) && !(error instanceof ProfileFormatError) && !(error instanceof TuningError)) throw error;
-      const recovery = version === 1
-        ? 'The original v1 record was left untouched. You can save a new v2 profile without deleting it.'
-        : 'The stored record was left untouched. Remove the invalid v2 record in browser storage before saving again.';
-      notice(`Saved tuning is invalid: ${error.message} ${recovery}`, 'error');
-      return null;
-    }
-  }
-
-  function writeProfile(storage: Storage, settings: Readonly<Tuning>): boolean {
-    const profile = { schemaVersion: SCHEMA_VERSION, tuning: validateTuning(settings) };
-    const serialized = JSON.stringify(profile);
-    try {
-      storage.setItem(STORAGE_KEY, serialized);
-    } catch (error) {
-      if (!(error instanceof DOMException)) throw error;
-      notice('Tuning could not be saved. Device storage may be full or blocked; your live tuning is unchanged.', 'error');
-      return false;
-    }
-    return true;
-  }
-
-  element<HTMLButtonElement>(root, '.save-tuning').addEventListener('click', () => {
-    const stored = readStorage(2);
-    if (!stored) return;
-    if (stored.record !== null && !readProfile(stored.record, 2)) return;
-    if (!writeProfile(stored.storage, tuning)) return;
-    notice('Tuning saved on this device. A little experiment worth keeping.', 'info');
-  }, listenerOptions);
-
-  element<HTMLButtonElement>(root, '.load-tuning').addEventListener('click', () => {
-    let stored = readStorage(2);
-    if (!stored) return;
-    let version: 1 | 2 = 2;
-    if (stored.record === null) {
-      stored = readStorage(1);
-      if (!stored) return;
-      version = 1;
-    }
-    if (stored.record === null) {
-      notice('No tuning is saved on this device yet. Choose Save tuning to keep your current setup.', 'error');
-      return;
-    }
-    const next = readProfile(stored.record, version);
-    if (!next) return;
-    if (version === 1 && !writeProfile(stored.storage, next)) return;
-    commitTuning(next);
-    notice(version === 1
-      ? 'Version 1 tuning upgraded with the original tool masses. The original saved record is preserved.'
-      : 'Saved tuning loaded. All controls are ready to try.', 'info');
-  }, listenerOptions);
-
   element<HTMLButtonElement>(root, '.defaults-tuning').addEventListener('click', () => {
     commitTuning(validateTuning(DEFAULT_TUNING));
-    notice('All tuning restored to defaults. Your saved profile was not changed.', 'info');
+    notice('All tuning restored to defaults. Your saved snapshots were not changed.', 'info');
   }, listenerOptions);
 
   const heightValue = element<HTMLSpanElement>(root, '.height-value');
@@ -504,6 +403,13 @@ export function createUI(options: UiOptions): GameUi {
   options.mount.append(root);
   setInputMode(options.initialInputMode);
   renderTuning(tuning);
+  createTuningHistoryUI({
+    mount: element<HTMLElement>(root, '.tuning-history'),
+    signal: events.signal,
+    getTuning: () => ({ ...tuning }),
+    onLoad: commitTuning,
+    onNotice: notice,
+  });
   setWorkshop(desktop.matches ? 'open' : 'closed');
 
   return {

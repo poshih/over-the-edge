@@ -141,6 +141,29 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal((await snapshot()).tuning.playerMass, mass);
       const stepBox = await increase.boundingBox();
       assert.ok(stepBox && stepBox.width >= 48 && stepBox.height >= 48);
+      const tuningName = page.getByRole('textbox', { name: 'Tuning name', exact: true });
+      const pastTuning = page.getByRole('combobox', { name: 'Past tuning', exact: true });
+      await tuningName.fill(`Touch ${name}`);
+      const savedTuning = (await snapshot()).tuning;
+      await page.getByRole('button', { name: 'Save tuning', exact: true }).tap();
+      const savedKey = await pastTuning.inputValue();
+      assert.ok(savedKey.startsWith('over-the-edge:tuning:snapshot:v3:'));
+      const noticeBox = await page.locator('.ui-notice').boundingBox();
+      assert.ok(noticeBox && (noticeBox.y + noticeBox.height <= panelBox.y || noticeBox.x + noticeBox.width <= panelBox.x),
+        'Save feedback must not cover the workshop controls.');
+      await increase.tap();
+      await pastTuning.selectOption(savedKey);
+      await page.getByRole('button', { name: 'Load tuning', exact: true }).tap();
+      assert.deepEqual((await snapshot()).tuning, savedTuning);
+      await tuningName.scrollIntoViewIfNeeded();
+      for (const control of [tuningName, pastTuning]) {
+        const box = await control.boundingBox();
+        assert.ok(box && box.height >= 48 && box.x >= panelBox.x && box.x + box.width <= panelBox.x + panelBox.width,
+          'Named tuning controls must fit the mobile workshop and retain touch-sized targets.');
+      }
+      assert.equal(await page.locator('#app').evaluate((app) => app.scrollTop), 0,
+        'Moving between saved tuning and deep physics controls must scroll only the workshop, never the game.');
+      assert.ok((await page.locator('#game').boundingBox()).y >= 0);
       await page.screenshot({ path: fileURLToPath(new URL(`mobile-${name}-workshop.png`, artifacts)) });
       await page.getByRole('button', { name: 'Close workshop', exact: true }).tap();
       assert.equal((await snapshot()).paused, false, 'Closing the editor must resume a previously running game.');
@@ -155,9 +178,25 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal((await snapshot()).paused, false, 'Play must close the compact editor and resume.');
       assert.equal(await page.locator('.workshop').isVisible(), false);
 
+      await page.getByRole('button', { name: 'Workshop', exact: true }).tap();
+      await page.getByRole('tab', { name: 'Appearance', exact: true }).tap();
+      await page.waitForFunction(() => !window.gettingOver.appearance().restoring);
+      const beforeArmEdit = await snapshot();
+      await page.getByRole('button', { name: 'Increase Left elbow direction', exact: true }).tap();
+      assert.deepEqual(await page.evaluate(() => window.gettingOver.appearance().armIk.settings),
+        { leftElbowAngle: 1, rightElbowAngle: 0 });
+      await page.getByRole('button', { name: 'Flip right elbow', exact: true }).tap();
+      assert.deepEqual(await page.evaluate(() => window.gettingOver.appearance().armIk.settings),
+        { leftElbowAngle: 1, rightElbowAngle: 180 });
+      await page.getByRole('button', { name: 'Save arm IK', exact: true }).tap();
+      assert.equal(await page.evaluate(() => window.gettingOver.appearance().armIk.dirty), false);
+      assert.deepEqual((await snapshot()).root, beforeArmEdit.root);
+      assert.deepEqual((await snapshot()).tuning, beforeArmEdit.tuning);
+      assert.equal(await page.locator('#app').evaluate((app) => app.scrollTop), 0);
+      const armControls = await page.getByRole('slider', { name: 'Left elbow direction', exact: true }).boundingBox();
+      assert.ok(armControls && armControls.height >= 48, 'Arm IK sliders must retain touch-sized targets.');
+      await page.screenshot({ path: fileURLToPath(new URL(`mobile-${name}-arm-ik.png`, artifacts)) });
       if (name === 'portrait') {
-        await page.getByRole('button', { name: 'Workshop', exact: true }).tap();
-        await page.getByRole('tab', { name: 'Appearance', exact: true }).tap();
         assert.equal(await page.getByRole('button', { name: 'Increase Visual scale', exact: true }).isDisabled(), true);
         await page.getByLabel('GLB model', { exact: true }).setInputFiles({
           name: 'touch-pot.glb', mimeType: 'model/gltf-binary', buffer: modelFixture(),

@@ -2,13 +2,15 @@ import {
   ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry,
   CanvasTexture, CircleGeometry, Color, CylinderGeometry, DirectionalLight, ExtrudeGeometry,
   Fog, Group, HemisphereLight, LatheGeometry, Line, LineBasicMaterial, LineDashedMaterial,
-  LineSegments, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
+  LineSegments, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
   RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D } from 'three';
 import { AppearanceRig } from './appearance-rig';
-import type { VisualPartId } from './appearance-types';
+import { ARM_IK_FIELDS } from './appearance-types';
+import type { ArmIkSettings, ArmSide, VisualPartId } from './appearance-types';
+import { solveArmPose } from './arm-ik';
 import { RIG } from './config';
 import type { InputMode, Point } from './config';
 import { COURSE, COURSE_LABELS, SUMMIT } from './course';
@@ -22,9 +24,6 @@ const VISUAL = {
   cameraMinimumY: 2.9,
   cameraResponse: 3.5,
   depth: 20,
-  upperArm: 0.82,
-  forearm: 0.82,
-  minimumDistance: 0.0001,
   compactWidth: 680,
   compactHeight: 580,
   reachMargin: 0.5,
@@ -68,7 +67,11 @@ export class GameView {
   private readonly playerMeshes = new Map<string, Group>();
   private readonly torso = new Group();
   private readonly customShaft = new Group();
-  private readonly arms: Arm[] = [];
+  private readonly arms = new Map<ArmSide, Arm>();
+  private readonly limbDirection = new Vector3();
+  private readonly limbSide = new Vector3();
+  private readonly limbNormal = new Vector3();
+  private readonly limbRotation = new Matrix4();
   private readonly cursor = new Group();
   private readonly targetLine: Line;
   private readonly targetPositions = new Float32Array(6);
@@ -140,7 +143,7 @@ export class GameView {
     this.recenter(initial);
   }
 
-  render(frame: PhysicsFrame, options: { dt: number; debug: boolean }): void {
+  render(frame: PhysicsFrame, options: { dt: number; debug: boolean; armIk: Readonly<ArmIkSettings> }): void {
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
     this.focus = { x: root.x, y: root.y };
@@ -162,7 +165,7 @@ export class GameView {
     }
     this.torso.position.set(root.x, root.y, 0.27);
     const slider = this.part(frame, 'slider');
-    this.updateArms(root, slider);
+    this.updateArms(root, slider, options.armIk);
     this.cursor.position.set(frame.cursor.x, frame.cursor.y, 1);
     if (this.appearance.isCustom('hammer-shaft')) {
       this.customShaft.position.set((slider.x + tip.x) / 2, (slider.y + tip.y) / 2, 0.22);
@@ -401,16 +404,15 @@ export class GameView {
     characterHead.add(reflection);
     this.torso.add(this.visualSlot('character-head', characterHead));
     this.scene.add(this.torso);
-    for (let i = 0; i < 2; i++) {
-      const side = i === 0 ? 'left' : 'right';
+    for (const { side } of ARM_IK_FIELDS) {
       const arm: Arm = {
-        upper: this.visualSlot(`${side}-upper-arm`, solid(new CylinderGeometry(0.065, 0.073, 1, 10), i === 0 ? dark : suit)),
+        upper: this.visualSlot(`${side}-upper-arm`, solid(new CylinderGeometry(0.065, 0.073, 1, 10), side === 'left' ? dark : suit)),
         lower: this.visualSlot(`${side}-forearm`, solid(new CylinderGeometry(0.055, 0.07, 1, 10), ceramic)),
         elbow: this.visualSlot(`${side}-elbow`, solid(new SphereGeometry(0.077, 12, 8), brass)),
         hand: this.visualSlot(`${side}-hand`, solid(new SphereGeometry(0.083, 12, 8), dark)),
       };
       for (const mesh of Object.values(arm)) this.scene.add(mesh);
-      this.arms.push(arm);
+      this.arms.set(side, arm);
     }
     const shaftSegments: Group[] = [];
     for (let index = 0; index < RIG.handleSegments; index++) {
@@ -451,32 +453,27 @@ export class GameView {
     return anchor;
   }
 
-  private updateArms(root: PartPose, slider: PartPose): void {
-    for (const [index, arm] of this.arms.entries()) {
-      const shoulder = { x: root.x + (index === 0 ? -0.17 : 0.17), y: root.y + 0.74 };
-      const hand = transformPoint({ x: index === 0 ? 0.04 : 0.22, y: 0 }, slider, slider.angle);
-      const dx = hand.x - shoulder.x;
-      const dy = hand.y - shoulder.y;
-      const distance = Math.max(VISUAL.minimumDistance, Math.hypot(dx, dy));
-      const along = clamp((VISUAL.upperArm ** 2 - VISUAL.forearm ** 2 + distance ** 2) /
-        (2 * distance), -VISUAL.upperArm, VISUAL.upperArm);
-      const height = Math.sqrt(Math.max(0, VISUAL.upperArm ** 2 - along ** 2)) * (index === 0 ? -1 : 1);
-      const elbow = {
-        x: shoulder.x + dx / distance * along - dy / distance * height,
-        y: shoulder.y + dy / distance * along + dx / distance * height,
-      };
-      const depth = index === 0 ? 0.18 : 0.63;
-      this.positionLimb(arm.upper, shoulder, elbow, depth);
-      this.positionLimb(arm.lower, elbow, hand, depth);
-      arm.elbow.position.set(elbow.x, elbow.y, depth);
-      arm.hand.position.set(hand.x, hand.y, depth);
+  private updateArms(root: PartPose, slider: PartPose, settings: Readonly<ArmIkSettings>): void {
+    for (const field of ARM_IK_FIELDS) {
+      const arm = this.arms.get(field.side);
+      if (!arm) throw new Error(`Missing visual arm: ${field.side}`);
+      const pose = solveArmPose(field.side, root, slider, settings[field.key]);
+      this.positionLimb(arm.upper, pose.shoulder, pose.elbow, pose.normal);
+      this.positionLimb(arm.lower, pose.elbow, pose.hand, pose.normal);
+      arm.elbow.position.copy(pose.elbow);
+      arm.hand.position.copy(pose.hand);
     }
   }
 
-  private positionLimb(mesh: Object3D, start: Point, end: Point, depth: number): void {
-    mesh.position.set((start.x + end.x) / 2, (start.y + end.y) / 2, depth);
-    mesh.rotation.z = Math.atan2(end.y - start.y, end.x - start.x) - Math.PI / 2;
-    mesh.scale.y = Math.hypot(end.x - start.x, end.y - start.y);
+  private positionLimb(mesh: Object3D, start: Vector3, end: Vector3, normal: Vector3): void {
+    mesh.position.addVectors(start, end).multiplyScalar(0.5);
+    this.limbDirection.subVectors(end, start);
+    mesh.scale.y = this.limbDirection.length();
+    this.limbDirection.normalize();
+    this.limbSide.crossVectors(this.limbDirection, normal).normalize();
+    this.limbNormal.crossVectors(this.limbSide, this.limbDirection);
+    this.limbRotation.makeBasis(this.limbSide, this.limbDirection, this.limbNormal);
+    mesh.quaternion.setFromRotationMatrix(this.limbRotation);
   }
 
   private updateDebug(frame: PhysicsFrame): void {

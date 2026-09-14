@@ -1,8 +1,8 @@
 import { Appearance } from './appearance';
 import {
-  ALIGNMENT_FIELDS, AppearanceError, isVisualPart, MODEL_LIMITS, VISUAL_PARTS,
+  ALIGNMENT_FIELDS, AppearanceError, ARM_IK_FIELDS, ARM_IK_LIMITS, isVisualPart, MODEL_LIMITS, VISUAL_PARTS,
 } from './appearance-types';
-import type { VisualAlignment, VisualPartId } from './appearance-types';
+import type { ArmIkSettings, VisualAlignment, VisualPartId } from './appearance-types';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
 
@@ -26,6 +26,16 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
         <p>Import a GLB for any visible part. The existing physics and arm IK keep driving it.</p>
         <p><strong>Cosmetic only:</strong> models do not change collision shapes, mass or grip.</p>
       </section>
+      <fieldset class="tuning-group arm-ik-controls"><legend>Arm IK direction</legend></fieldset>
+      <p class="appearance-format">Swivel each elbow around its shoulder-to-hand line.
+        0 keeps the original bend; 180 flips it. Hands stay on their hammer grips.</p>
+      <div class="arm-ik-actions">
+        <button type="button" class="button button-primary save-arm-ik">Save arm IK</button>
+        <button type="button" class="button reset-arm-ik">Reset arm IK</button>
+      </div>
+      <div class="appearance-state arm-ik-state" role="status" aria-live="polite" aria-atomic="true">
+        <p class="arm-ik-status"></p>
+      </div>
       <label class="appearance-label" for="visual-part">Body part</label>
       <select id="visual-part"></select>
       <p class="appearance-hint"></p>
@@ -33,7 +43,7 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
       <input id="visual-file" type="file" accept=".glb,model/gltf-binary" />
       <p class="appearance-format">Self-contained GLB 2.0, up to ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.
         Embed textures; export without Draco, Meshopt or KTX2 compression.</p>
-      <div class="appearance-state" role="status" aria-live="polite" aria-atomic="true">
+      <div class="appearance-state model-state" role="status" aria-live="polite" aria-atomic="true">
         <p class="appearance-source"></p>
         <p class="appearance-status"></p>
       </div>
@@ -66,12 +76,51 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
   const hint = get<HTMLParagraphElement>('.appearance-hint');
   const source = get<HTMLParagraphElement>('.appearance-source');
   const status = get<HTMLParagraphElement>('.appearance-status');
-  const statusBox = get<HTMLDivElement>('.appearance-state');
+  const statusBox = get<HTMLDivElement>('.model-state');
   const alignmentGroup = get<HTMLFieldSetElement>('.visual-alignment');
   const save = get<HTMLButtonElement>('.save-alignment');
   const reset = get<HTMLButtonElement>('.reset-alignment');
   const useDefault = get<HTMLButtonElement>('.default-visual');
   const controls = new Map<keyof VisualAlignment, RangeControl>();
+  const armControls = new Map<keyof ArmIkSettings, RangeControl>();
+  const armGroup = get<HTMLFieldSetElement>('.arm-ik-controls');
+  const armStatus = get<HTMLParagraphElement>('.arm-ik-status');
+  const armState = get<HTMLDivElement>('.arm-ik-state');
+  const saveArmIk = get<HTMLButtonElement>('.save-arm-ik');
+  const resetArmIk = get<HTMLButtonElement>('.reset-arm-ik');
+  const changeArmIk = (key: keyof ArmIkSettings, value: number): void => {
+    try {
+      options.appearance.previewArmIk({ ...options.appearance.armIkSettings(), [key]: value });
+    } catch (error) {
+      if (!(error instanceof AppearanceError)) throw error;
+      options.onNotice(error.message, 'error');
+      render();
+    }
+  };
+  for (const field of ARM_IK_FIELDS) {
+    const control = createRangeControl({
+      ...field, ...ARM_IK_LIMITS,
+      description: 'Bend-plane angle relative to the original pose. Use 180 degrees to flip the elbow; intermediate angles turn it in depth.',
+    }, {
+      id: `arm-ik-${field.key}`,
+      name: field.key,
+      signal: events.signal,
+      onInput: (value) => changeArmIk(field.key, value),
+    });
+    const flip = document.createElement('button');
+    flip.type = 'button';
+    flip.className = 'button arm-ik-flip';
+    flip.textContent = `Flip ${field.side} elbow`;
+    flip.addEventListener('click', () => {
+      const angle = options.appearance.armIkSettings()[field.key];
+      changeArmIk(field.key, angle <= 0 ? angle + ARM_IK_LIMITS.max : angle - ARM_IK_LIMITS.max);
+    }, listen);
+    control.row.append(flip);
+    armGroup.append(control.row);
+    armControls.set(field.key, control);
+  }
+  saveArmIk.addEventListener('click', () => options.appearance.saveArmIk(), listen);
+  resetArmIk.addEventListener('click', () => options.appearance.resetArmIk(), listen);
   for (const part of VISUAL_PARTS) {
     const option = document.createElement('option');
     option.value = part.id;
@@ -119,6 +168,20 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
 
   function render(): void {
     const snapshot = options.appearance.snapshot();
+    const armIk = snapshot.armIk;
+    armGroup.disabled = snapshot.restoring;
+    saveArmIk.disabled = snapshot.restoring || !armIk.dirty;
+    resetArmIk.disabled = snapshot.restoring;
+    armStatus.textContent = snapshot.restoring ? 'Restoring appearance...' :
+      armIk.error !== null ? armIk.error :
+        armIk.dirty ? 'Arm IK preview is not saved yet. Reset previews the original directions.' :
+          'Arm IK directions saved on this device.';
+    armState.dataset.kind = armIk.error !== null ? 'error' : armIk.dirty ? 'draft' : 'ready';
+    for (const field of ARM_IK_FIELDS) {
+      const control = armControls.get(field.key);
+      if (!control) throw new Error(`Missing arm IK control: ${field.key}`);
+      control.setValue(armIk.settings[field.key], { disabled: snapshot.restoring });
+    }
     const state = snapshot.parts.find((part) => part.id === selected);
     if (!state) throw new Error(`Missing appearance state for ${selected}`);
     partPicker.value = selected;

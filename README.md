@@ -124,13 +124,33 @@ contact friction, handle compliance, mouse sensitivity, and cursor settling.
 Zero handle frequency means rigid weld constraints; positive frequency enables
 rotational spring compliance.
 
-**Save tuning** and **Load tuning** use an explicit version-2 localStorage
-profile. Loading is manual. If there is no v2 profile, loading a valid v1 profile
-adds the original fixed tool masses and writes a v2 copy, preserving the v1 record
-for rollback. An invalid v2 record never causes a legacy profile to be loaded
-instead. Invalid records are reported and retained, not silently replaced by
-defaults. These are tuning presets, not saved body
-trajectories. Height and peak readouts describe the current attempt.
+Ground and every obstacle share a **3.0** rough-rock friction coefficient.
+The hammer defaults to **2.5**. Planck mixes the two as `sqrt(3.0 * 2.5)`,
+giving a contact coefficient of about **2.74**. This is ordinary contact
+friction, not a sticky constraint: the head must still press against a surface
+to hold. The pot's own friction coefficient remains **0.45**.
+
+In **Workshop / Physics / Saved tuning**, enter a **Tuning name** and choose
+**Save tuning** (or press Enter). Each save creates a separate timestamped
+snapshot of every Workshop physics setting. Reusing a name keeps both versions
+rather than overwriting the earlier experiment. Choose an entry in **Past tuning**,
+then **Load tuning** to apply it. Selecting an entry alone does not change the
+game. History survives reloads; loading remains manual.
+
+Snapshots are stored independently in this browser's localStorage, on this site,
+so saves from different tabs do not overwrite one shared record. Nothing is
+uploaded. The previous single-slot v2 save appears as **Previous saved tuning
+(v2)**. If v2 is absent, a v1 save is available instead, with its original fixed
+tool masses supplied when loaded. Loading never rewrites either old record;
+saving the loaded settings under a name creates a new v3 snapshot. An invalid
+v2 record never causes v1 to be loaded instead. Unreadable saves are marked and
+retained, while other valid snapshots remain available.
+
+These are tuning presets, not saved body trajectories. Height and peak readouts
+describe the current attempt.
+
+Saved profiles preserve their stored hammer friction. Use **Defaults** to
+return to the rough hammer preset.
 
 The practice positions make the important behaviors easy to revisit: resting
 on a ledge, smooth ground pushes, launches, and vaulting a low block. The
@@ -149,6 +169,27 @@ Imports are **cosmetic only**. They attach to the existing physics and visual-IK
 anchors; they do not replace colliders, change mass, or create new rigid bodies.
 Use the collision overlay to compare the visual with the actual contact shape.
 Collider authoring and whole-character animation retargeting are not included.
+
+### Arm IK direction
+
+In **Workshop / Appearance / Arm IK direction**, adjust **Left elbow direction**
+and **Right elbow direction** independently. Each angle swivels that elbow's
+bend plane around the shoulder-to-hand line: **0** preserves the original pose,
+**+/-90** turns it in depth, and **+/-180** reverses the bend. The **Flip left
+elbow** and **Flip right elbow** buttons make a half-turn immediately.
+
+The preview works with both procedural arms and imported arm parts. Hands keep
+their existing hammer grip points; these controls do not alter physics, reach,
+colliders, mass, or motor tuning. A fully extended arm has no sideways elbow
+bend to rotate.
+
+**Save arm IK** stores both directions on this device and restores them on
+reload. **Reset arm IK** previews the original directions; save afterward to
+keep the reset. Arm directions use a separate localStorage record, leaving
+model files, model alignment, and named physics presets unchanged. Invalid
+saved settings are reported and retained rather than silently rewritten.
+
+### Model files
 
 Use a self-contained **binary glTF 2.0 (`.glb`)** with embedded textures:
 
@@ -191,7 +232,8 @@ The browser exposes the read-only `window.gettingOver.snapshot()` and
 motor effort, camera state, and world-to-screen coordinates. They do not expose
 commands that bypass the game's input or motor mechanism.
 `window.gettingOver.appearance()` reports imported parts, saved/draft alignment,
-loading errors, and their current rendering anchors.
+loading errors, current rendering anchors and world transforms, and the arm IK
+settings and save state.
 
 ## Contributing
 

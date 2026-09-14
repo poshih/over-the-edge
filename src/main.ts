@@ -134,7 +134,7 @@ function animate(now: number): void {
     input.clear();
   }
   const frame = simulation.frame(paused ? 1 : clamp(accumulator / PHYSICS.dt, 0, 1));
-  view.render(frame, { dt, debug });
+  view.render(frame, { dt, debug, armIk: appearance.armIkSettings() });
   const state = simulation.snapshot();
   ui.update({
     height: state.height,
