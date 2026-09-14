@@ -1,0 +1,31 @@
+{
+  "name": "over-the-edge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "verify": "npm run build && node scripts/verify-runtime.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.4",
+    "playwright": "1.63.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2"
+  },
+  "dependencies": {
+    "planck": "1.4.2",
+    "three": "0.185.1"
+  },
+  "description": "An original browser-based physics climbing playground built with Three.js and Planck.js.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/poshih/over-the-edge.git"
+  }
+}
