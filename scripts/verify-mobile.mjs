@@ -182,18 +182,33 @@ export async function verifyMobile(browser, address, artifacts) {
       await page.getByRole('tab', { name: 'Appearance', exact: true }).tap();
       await page.waitForFunction(() => !window.gettingOver.appearance().restoring);
       const beforeArmEdit = await snapshot();
-      await page.getByRole('button', { name: 'Increase Left elbow direction', exact: true }).tap();
-      assert.deepEqual(await page.evaluate(() => window.gettingOver.appearance().armIk.settings),
-        { leftElbowAngle: 1, rightElbowAngle: 0 });
-      await page.getByRole('button', { name: 'Flip right elbow', exact: true }).tap();
-      assert.deepEqual(await page.evaluate(() => window.gettingOver.appearance().armIk.settings),
-        { leftElbowAngle: 1, rightElbowAngle: 180 });
-      await page.getByRole('button', { name: 'Save arm IK', exact: true }).tap();
+      const originalHints = await page.evaluate(() => window.gettingOver.appearance().armIk.settings);
+      await page.getByRole('button', { name: 'Increase Left elbow hint X', exact: true }).tap();
+      await page.getByRole('button', { name: 'Decrease Right elbow hint Y', exact: true }).tap();
+      const editedHints = await page.evaluate(() => window.gettingOver.appearance().armIk.settings);
+      assert.deepEqual(editedHints, { ...originalHints, leftHintX: -0.54, rightHintY: 0.14 });
+      const ikName = page.getByRole('textbox', { name: 'IK profile name', exact: true });
+      const pastIk = page.getByRole('combobox', { name: 'Past IK profiles', exact: true });
+      await ikName.fill(`Touch ${name} pose`);
+      await page.getByRole('button', { name: 'Save IK profile', exact: true }).tap();
+      const savedIk = await pastIk.inputValue();
       assert.equal(await page.evaluate(() => window.gettingOver.appearance().armIk.dirty), false);
+      await page.getByRole('button', { name: 'Reset arm IK', exact: true }).tap();
+      assert.deepEqual(await page.evaluate(() => window.gettingOver.appearance().armIk.settings), originalHints);
+      await pastIk.selectOption(savedIk);
+      await page.getByRole('button', { name: 'Load IK profile', exact: true }).tap();
+      assert.deepEqual(await page.evaluate(() => window.gettingOver.appearance().armIk.settings), editedHints);
       assert.deepEqual((await snapshot()).root, beforeArmEdit.root);
       assert.deepEqual((await snapshot()).tuning, beforeArmEdit.tuning);
       assert.equal(await page.locator('#app').evaluate((app) => app.scrollTop), 0);
-      const armControls = await page.getByRole('slider', { name: 'Left elbow direction', exact: true }).boundingBox();
+      for (const control of [ikName, pastIk]) {
+        await control.scrollIntoViewIfNeeded();
+        const box = await control.boundingBox();
+        assert.ok(box && box.height >= 48 && box.x >= panelBox.x && box.x + box.width <= panelBox.x + panelBox.width);
+      }
+      const hintSlider = page.getByRole('slider', { name: 'Left elbow hint X', exact: true });
+      await hintSlider.scrollIntoViewIfNeeded();
+      const armControls = await hintSlider.boundingBox();
       assert.ok(armControls && armControls.height >= 48, 'Arm IK sliders must retain touch-sized targets.');
       await page.screenshot({ path: fileURLToPath(new URL(`mobile-${name}-arm-ik.png`, artifacts)) });
       if (name === 'portrait') {

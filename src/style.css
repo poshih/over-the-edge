@@ -639,8 +639,8 @@ kbd {
 
 .appearance-scroll select,
 .appearance-scroll input[type="file"],
-.tuning-history input,
-.tuning-history select {
+.snapshot-history input,
+.snapshot-history select {
   width: 100%;
   padding: 10px;
   border: 1px solid var(--line);
@@ -652,17 +652,17 @@ kbd {
 }
 
 .appearance-scroll select,
-.tuning-history select {
+.snapshot-history select {
   pointer-events: auto;
 }
 
-.tuning-history {
+.snapshot-history {
   margin-top: 22px;
   padding-top: 18px;
   border-top: 1px solid var(--line);
 }
 
-.tuning-history label {
+.snapshot-history label {
   display: block;
   margin: 12px 0 6px;
   font-size: 11px;
@@ -681,8 +681,8 @@ kbd {
   min-width: 0;
 }
 
-.touch-controls .tuning-history input,
-.touch-controls .tuning-history select {
+.touch-controls .snapshot-history input,
+.touch-controls .snapshot-history select {
   font-size: 16px;
 }
 
@@ -691,23 +691,23 @@ kbd {
   font-size: 10px;
 }
 
-.tuning-history select:focus-visible {
+.snapshot-history select:focus-visible {
   outline: 3px solid #94662b;
   outline-offset: 4px;
 }
 
-.game-ui .tuning-history-help,
-.game-ui .tuning-history-error {
+.game-ui .snapshot-history-help,
+.game-ui .snapshot-history-error {
   margin-top: 10px;
   font-size: 11px;
   line-height: 1.5;
 }
 
-.tuning-history-help {
+.snapshot-history-help {
   color: var(--muted);
 }
 
-.tuning-history-error {
+.snapshot-history-error {
   color: #743925;
 }
 
@@ -770,20 +770,12 @@ kbd {
 }
 
 .arm-ik-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
   margin-top: 12px;
 }
 
-.arm-ik-actions .button,
-.arm-ik-flip {
+.arm-ik-actions .button {
   padding-inline: 9px;
   font-size: 10px;
-}
-
-.arm-ik-flip {
-  margin-top: 6px;
 }
 
 .appearance-footer .button {

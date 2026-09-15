@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { verifyAppearance } from './verify-appearance.mjs';
+import { inspectArmGeometry, verifyAppearance } from './verify-appearance.mjs';
 import { verifyMobile } from './verify-mobile.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -158,6 +158,11 @@ try {
     aiming.push({ goal, error, headContacts: aimed.headContacts, tip: aimed.tip, cursor: aimed.cursor });
     assert.equal(aimed.headContacts, 0, `${goal.name} must be a free-space aiming scenario.`);
     assert.ok(error < 0.03, `${goal.name} missed the drag target by ${error} m.`);
+    await focusGame();
+    await page.keyboard.press('p');
+    const arms = await inspectArmGeometry(page);
+    aiming[aiming.length - 1].arms = arms;
+    await page.keyboard.press('p');
     if (goal.name === 'near-up') {
       assert.deepEqual(aimed.cursor, before.cursor, 'Free-space targets must not drift toward the lagging head.');
     }

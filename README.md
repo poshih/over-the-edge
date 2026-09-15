@@ -170,24 +170,53 @@ anchors; they do not replace colliders, change mass, or create new rigid bodies.
 Use the collision overlay to compare the visual with the actual contact shape.
 Collider authoring and whole-character animation retargeting are not included.
 
-### Arm IK direction
+### Body-relative arm IK
 
-In **Workshop / Appearance / Arm IK direction**, adjust **Left elbow direction**
-and **Right elbow direction** independently. Each angle swivels that elbow's
-bend plane around the shoulder-to-hand line: **0** preserves the original pose,
-**+/-90** turns it in depth, and **+/-180** reverses the bend. The **Flip left
-elbow** and **Flip right elbow** buttons make a half-turn immediately.
+In **Workshop / Appearance / Body-relative elbow hints**, adjust each arm's
+**X**, **Y**, and **Z** hint coordinates independently. These are preferred elbow
+positions in torso-local metres: positive X goes right, positive Y goes up,
+and positive Z goes toward the camera. The torso origin follows the player root,
+not the shoulder. Defaults prefer elbows below and outside the shoulders, with
+separate front/back preferences.
 
-The preview works with both procedural arms and imported arm parts. Hands keep
-their existing hammer grip points; these controls do not alter physics, reach,
-colliders, mass, or motor tuning. A fully extended arm has no sideways elbow
-bend to rotate.
+The two-bone solver projects the hint onto the elbow's possible bend circle;
+the hint is not an exact elbow destination. Its reference follows the body,
+not the rotating shoulder-to-hand ray, so no up/down/left/right mode switching
+is required. Near a collinear hint, the solver transports the previous bend
+plane instead of normalizing an undefined direction. Bend rotation is bounded
+in radians per second, including when leaving a singular pose, so small hand
+movements cannot cause an instantaneous elbow half-turn. Reachable poses preserve
+both limb lengths. Fully extended arms have no lateral bend; unreachable grips
+retain the existing visual forearm stretching rather than moving the hammer.
 
-**Save arm IK** stores both directions on this device and restores them on
-reload. **Reset arm IK** previews the original directions; save afterward to
-keep the reset. Arm directions use a separate localStorage record, leaving
-model files, model alignment, and named physics presets unchanged. Invalid
-saved settings are reported and retained rather than silently rewritten.
+Shoulders use the torso's transform. Both hands grip and rotate with the
+rendered shaft, including its depth: the first segment for the procedural shaft,
+or the straight replacement's transform for an imported shaft. The preview
+works with procedural and imported arm parts. Model alignment remains cosmetic;
+it does not redefine skeleton anchors. These controls do not change colliders,
+mass, reach limits, or motor tuning. **D** / **Toggle collision overlay** also
+shows arm chains and crosses at the body-relative hints.
+
+Enter an **IK profile name**, then **Save IK profile** (or press Enter). Every
+save creates a timestamped snapshot of all six coordinates; reusing a name
+keeps earlier versions. Choose **Past IK profiles**, then **Load IK profile**
+to apply one. Selecting an entry alone does not change the preview. The last
+successfully saved or loaded profile restores on reload. **Reset arm IK** only
+previews the defaults; save a profile afterward to keep the reset.
+
+Profiles use independent localStorage keys and a separate active-profile
+reference. Other tabs refresh the history without replacing the current draft.
+If a profile saves but updating the active reference fails, the UI reports
+that partial result; the snapshot remains in history and can be loaded to retry.
+Malformed profiles are marked and preserved. An unreadable active profile or
+selection is reported, never silently replaced by another saved profile.
+Model files, model alignment, and named physics presets remain separate.
+
+The previous v1 swivel-angle record is left untouched for rollback. Those
+ray-relative angles cannot be faithfully converted to body-relative targets:
+when only that old selection exists, the editor explains the change and starts
+with the new hints. Saving a named profile does not rewrite or delete the old
+record.
 
 ### Model files
 
@@ -233,7 +262,7 @@ motor effort, camera state, and world-to-screen coordinates. They do not expose
 commands that bypass the game's input or motor mechanism.
 `window.gettingOver.appearance()` reports imported parts, saved/draft alignment,
 loading errors, current rendering anchors and world transforms, and the arm IK
-settings and save state.
+settings, selected profile, and save state.
 
 ## Contributing
 

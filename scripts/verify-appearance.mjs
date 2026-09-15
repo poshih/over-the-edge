@@ -95,6 +95,82 @@ export function modelFixture({ size = [1, 1, 1], externalTexture = false, textur
   return glb;
 }
 
+export async function inspectArmGeometry(page) {
+  await page.evaluate(() => new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.waitForFunction(() => {
+    const visuals = window.gettingOver.appearance();
+    const body = visuals.parts.find((part) => part.id === 'torso').transform;
+    const subtract = (a, b) => a.map((value, axis) => value - b[axis]);
+    const dot = (a, b) => a.reduce((sum, value, axis) => sum + value * b[axis], 0);
+    const project = (value, axis) => value.map((component, index) => component - axis[index] * dot(value, axis));
+    for (const side of ['left', 'right']) {
+      const upper = visuals.parts.find((part) => part.id === `${side}-upper-arm`).transform;
+      const shoulder = [upper[12] - upper[4] / 2, upper[13] - upper[5] / 2, upper[14] - upper[6] / 2];
+      const elbow = visuals.parts.find((part) => part.id === `${side}-elbow`).anchor;
+      const hand = visuals.parts.find((part) => part.id === `${side}-hand`).anchor;
+      const settings = visuals.armIk.settings;
+      const local = [settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]];
+      const hint = [0, 1, 2].map((row) => body[12 + row] +
+        local.reduce((sum, value, column) => sum + value * body[column * 4 + row], 0));
+      const reach = subtract([hand.x, hand.y, hand.z], shoulder);
+      const axis = reach.map((value) => value / Math.hypot(...reach));
+      const towardHint = subtract(hint, shoulder);
+      const desired = project(towardHint, axis);
+      const bend = project(subtract([elbow.x, elbow.y, elbow.z], shoulder), axis);
+      if (Math.hypot(...bend) > 1e-6 && Math.hypot(...desired) / Math.hypot(...towardHint) > 0.15 &&
+        dot(bend, desired) / Math.hypot(...bend) / Math.hypot(...desired) < 1 - 1e-8) return false;
+    }
+    return true;
+  });
+  const { state, visuals } = await page.evaluate(() => ({
+    state: window.gettingOver.snapshot(), visuals: window.gettingOver.appearance(),
+  }));
+  assert.equal(state.paused, true, 'Compare physics and rendered anchors on a paused frame.');
+  const point = (value) => new Vector3(value.x, value.y, value.z);
+  const endpoint = (part, y) => new Vector3(0, y, 0).applyMatrix4(new Matrix4().fromArray(part.transform));
+  const torso = new Matrix4().fromArray(visuals.parts.find((part) => part.id === 'torso').transform);
+  const shaft = visuals.parts.find((part) => part.id === 'hammer-shaft');
+  const firstSegment = state.parts.find((part) => part.id === 'handle-0');
+  const result = {};
+  for (const [side, shoulderX, shoulderZ, gripX] of [['left', -0.17, -0.09, 0.04], ['right', 0.17, 0.09, 0.22]]) {
+    const upper = visuals.parts.find((part) => part.id === `${side}-upper-arm`);
+    const lower = visuals.parts.find((part) => part.id === `${side}-forearm`);
+    const elbow = point(visuals.parts.find((part) => part.id === `${side}-elbow`).anchor);
+    const handPart = visuals.parts.find((part) => part.id === `${side}-hand`);
+    const hand = point(handPart.anchor);
+    const shoulder = new Vector3(shoulderX, 0.74, shoulderZ).applyMatrix4(torso);
+    const settings = visuals.armIk.settings;
+    const hint = new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(torso);
+    assert.ok(endpoint(upper, -0.5).distanceTo(shoulder) < 1e-8, `${side} upper arm must start at its torso-local shoulder.`);
+    assert.ok(endpoint(upper, 0.5).distanceTo(elbow) < 1e-8, `${side} upper arm must end at the elbow.`);
+    assert.ok(endpoint(lower, -0.5).distanceTo(elbow) < 1e-8, `${side} forearm must start at the elbow.`);
+    assert.ok(endpoint(lower, 0.5).distanceTo(hand) < 1e-8, `${side} forearm must end at the grip.`);
+    assert.ok(Math.abs(shoulder.distanceTo(elbow) - 0.82) < 1e-8);
+    const distance = shoulder.distanceTo(hand);
+    if (distance <= 1.64) assert.ok(Math.abs(elbow.distanceTo(hand) - 0.82) < 1e-8, 'Reachable arms must keep both bone lengths.');
+    const expectedHand = shaft.custom
+      ? new Vector3(gripX - 0.75, 0, 0).applyMatrix4(new Matrix4().fromArray(shaft.transform))
+      : new Vector3(firstSegment.x + (gripX - 0.25) * Math.cos(firstSegment.angle),
+        firstSegment.y + (gripX - 0.25) * Math.sin(firstSegment.angle), 0.22);
+    assert.ok(hand.distanceTo(expectedHand) < 1e-8, `${side} hand must grip the rendered shaft, including its actual depth.`);
+    const shaftDirection = shaft.custom
+      ? new Vector3(shaft.transform[0], shaft.transform[1], shaft.transform[2]).normalize()
+      : new Vector3(Math.cos(firstSegment.angle), Math.sin(firstSegment.angle), 0);
+    const handDirection = new Vector3(handPart.transform[0], handPart.transform[1], handPart.transform[2]).normalize();
+    assert.ok(handDirection.distanceTo(shaftDirection) < 1e-8, 'Hand orientation must follow the shaft.');
+    for (const limb of [upper, lower]) {
+      assert.ok(limb.transform.every(Number.isFinite), 'Actual rendered limb transforms must stay finite.');
+      const x = new Vector3(limb.transform[0], limb.transform[1], limb.transform[2]).normalize();
+      const y = new Vector3(limb.transform[4], limb.transform[5], limb.transform[6]).normalize();
+      const z = new Vector3(limb.transform[8], limb.transform[9], limb.transform[10]).normalize();
+      assert.ok(Math.abs(x.dot(y)) < 1e-8 && Math.abs(y.dot(z)) < 1e-8 && Math.abs(z.dot(x)) < 1e-8);
+    }
+    result[side] = { shoulder: shoulder.toArray(), elbow: elbow.toArray(), hand: hand.toArray(), hint: hint.toArray() };
+  }
+  return result;
+}
+
 export async function verifyAppearance(page, artifacts) {
   const foreignRequests = [];
   const uploads = [];
@@ -116,49 +192,21 @@ export async function verifyAppearance(page, artifacts) {
   const frames = () => page.evaluate(() => new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const armSettings = async () => (await appearance()).armIk.settings;
-  const armRecord = () => page.evaluate(() => localStorage.getItem('over-the-edge:appearance:arm-ik:v1'));
-  const armGeometry = async () => {
-    await frames();
-    const state = await snapshot();
-    const visuals = await appearance();
-    const point = (value) => new Vector3(value.x, value.y, value.z);
-    const endpoint = (part, y) => new Vector3(0, y, 0).applyMatrix4(new Matrix4().fromArray(part.transform));
-    const result = {};
-    for (const [side, shoulderX, depth, bend] of [['left', -0.17, 0.18, -1], ['right', 0.17, 0.63, 1]]) {
-      const upper = visuals.parts.find((part) => part.id === `${side}-upper-arm`);
-      const lower = visuals.parts.find((part) => part.id === `${side}-forearm`);
-      const elbow = point(visuals.parts.find((part) => part.id === `${side}-elbow`).anchor);
-      const hand = point(visuals.parts.find((part) => part.id === `${side}-hand`).anchor);
-      const shoulder = new Vector3(state.root.x + shoulderX, state.root.y + 0.74, depth);
-      assert.ok(endpoint(upper, -0.5).distanceTo(shoulder) < 1e-8, `${side} upper arm must start at the shoulder.`);
-      assert.ok(endpoint(upper, 0.5).distanceTo(elbow) < 1e-8, `${side} upper arm must end at the elbow.`);
-      assert.ok(endpoint(lower, -0.5).distanceTo(elbow) < 1e-8, `${side} forearm must start at the elbow.`);
-      assert.ok(endpoint(lower, 0.5).distanceTo(hand) < 1e-8, `${side} forearm must end at the grip.`);
-      assert.ok(Math.abs(shoulder.distanceTo(elbow) - 0.82) < 1e-8);
-      const distance = shoulder.distanceTo(hand);
-      if (distance <= 1.64) assert.ok(Math.abs(elbow.distanceTo(hand) - 0.82) < 1e-8, 'Reachable arms must keep both bone lengths.');
-      if (visuals.armIk.settings[`${side}ElbowAngle`] === 0 && distance > 0.0001) {
-        const along = Math.min(0.82, distance / 2);
-        const height = Math.sqrt(Math.max(0, 0.82 ** 2 - along ** 2)) * bend;
-        const dx = (hand.x - shoulder.x) / distance;
-        const dy = (hand.y - shoulder.y) / distance;
-        const original = new Vector3(shoulder.x + dx * along - dy * height,
-          shoulder.y + dy * along + dx * height, depth);
-        assert.ok(original.distanceTo(elbow) < 1e-8, 'Zero swivel must preserve the original arm pose.');
-        for (const limb of [upper, lower]) {
-          assert.ok(new Vector3(limb.transform[8], limb.transform[9], limb.transform[10])
-            .distanceTo(new Vector3(0, 0, 1)) < 1e-8, 'Default limbs must retain their original front-facing orientation.');
-        }
-      }
-      result[side] = { elbow: elbow.toArray(), hand: hand.toArray() };
-    }
-    return result;
-  };
-  const setElbowAngle = async (label, angle) => {
-    await page.getByRole('slider', { name: label, exact: true }).evaluate((input, angle) => {
-      input.value = String(angle);
+  const armPrefix = 'over-the-edge:appearance:arm-ik:profile:v2:';
+  const activeKey = 'over-the-edge:appearance:arm-ik:active:v2';
+  const armRecord = () => page.evaluate((key) => localStorage.getItem(key), activeKey);
+  const armRecords = () => page.evaluate((prefix) => Object.fromEntries(Object.keys(localStorage)
+    .filter((key) => key.startsWith(prefix)).map((key) => [key, localStorage.getItem(key)])), armPrefix);
+  const profileName = page.getByRole('textbox', { name: 'IK profile name', exact: true });
+  const pastProfiles = page.getByRole('combobox', { name: 'Past IK profiles', exact: true });
+  const saveProfile = page.getByRole('button', { name: 'Save IK profile', exact: true });
+  const loadProfile = page.getByRole('button', { name: 'Load IK profile', exact: true });
+  const armGeometry = () => inspectArmGeometry(page);
+  const setHint = async (label, value) => {
+    await page.getByRole('slider', { name: label, exact: true }).evaluate((input, value) => {
+      input.value = String(value);
       input.dispatchEvent(new Event('input', { bubbles: true }));
-    }, angle);
+    }, value);
     await frames();
   };
   const physics = async () => {
@@ -196,68 +244,163 @@ export async function verifyAppearance(page, artifacts) {
       .filter((key) => key.startsWith('over-the-edge:tuning:'))
       .map((key) => [key, localStorage.getItem(key)])));
     const defaultArms = await armGeometry();
-    assert.deepEqual(await armSettings(), { leftElbowAngle: 0, rightElbowAngle: 0 });
+    const defaultHints = {
+      leftHintX: -0.55, leftHintY: 0.15, leftHintZ: -0.35,
+      rightHintX: 0.55, rightHintY: 0.15, rightHintZ: 0.45,
+    };
+    assert.deepEqual(await armSettings(), defaultHints);
     await page.screenshot({ path: fileURLToPath(new URL('arm-ik-defaults.png', artifacts)) });
-    await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
+    await profileName.fill('   ');
+    await saveProfile.click();
+    assert.deepEqual(await armRecords(), {});
+    assert.ok((await appearance()).armIk.error.includes('Enter an IK profile name'));
+    await profileName.fill('Original pose');
+    await profileName.press('Enter');
+    const originalProfile = await pastProfiles.inputValue();
     const savedDefaults = await armRecord();
-    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
-    await frames();
-    const flipped = await armGeometry();
-    assert.deepEqual(await armSettings(), { leftElbowAngle: 180, rightElbowAngle: 0 });
-    assert.ok(new Vector3(...flipped.left.elbow).distanceTo(new Vector3(...defaultArms.left.elbow)) > 0.5,
-      'Flipping must visibly move the left elbow, not just change a setting.');
-    assert.deepEqual(flipped.right, defaultArms.right, 'Left elbow editing must not move the right arm.');
-    assert.deepEqual(flipped.left.hand, defaultArms.left.hand);
-    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
-    await frames();
-    assert.deepEqual((await armGeometry()).left, defaultArms.left);
-    const savedArmSettings = { leftElbowAngle: -90, rightElbowAngle: 90 };
-    await setElbowAngle('Left elbow direction', savedArmSettings.leftElbowAngle);
-    await setElbowAngle('Right elbow direction', savedArmSettings.rightElbowAngle);
-    const swiveled = await armGeometry();
-    for (const side of ['left', 'right']) {
-      assert.ok(swiveled[side].elbow[2] > defaultArms[side].elbow[2] + 0.25, 'Swivel must move the elbow in depth.');
-      assert.deepEqual(swiveled[side].hand, defaultArms[side].hand, 'Arm IK must not move the grip point.');
-    }
+    const originalProfileRecord = (await armRecords())[originalProfile];
+    await setHint('Left elbow hint X', 0.8);
+    await setHint('Left elbow hint Y', -0.1);
+    await setHint('Left elbow hint Z', 0.7);
+    const leftChanged = await armGeometry();
+    assert.ok(new Vector3(...leftChanged.left.elbow).distanceTo(new Vector3(...defaultArms.left.elbow)) > 0.3,
+      'Editing a hint must visibly move the elbow, not just change metadata.');
+    assert.ok(new Vector3(...leftChanged.right.elbow).distanceTo(new Vector3(...defaultArms.right.elbow)) < 1e-8,
+      'Left hint editing must not move the right elbow.');
+    assert.deepEqual(leftChanged.left.hand, defaultArms.left.hand);
+    const experimentName = 'r p c d 1234 <elbows>';
+    await profileName.fill('');
+    const beforeTyping = await snapshot();
+    await profileName.pressSequentially(experimentName);
+    const afterTyping = await snapshot();
+    for (const key of ['practice', 'paused', 'debug', 'time']) assert.equal(afterTyping[key], beforeTyping[key]);
+    await saveProfile.click();
+    const firstExperiment = await pastProfiles.inputValue();
+    assert.equal(await pastProfiles.locator('elbows').count(), 0, 'Profile names must be rendered as text.');
+    await setHint('Right elbow hint Y', 0.95);
+    await setHint('Right elbow hint Z', -0.65);
+    const savedArmSettings = await armSettings();
+    const tuned = await armGeometry();
+    assert.ok(new Vector3(...tuned.right.elbow).distanceTo(new Vector3(...defaultArms.right.elbow)) > 0.3);
+    for (const side of ['left', 'right']) assert.deepEqual(tuned[side].hand, defaultArms[side].hand);
     assert.deepEqual(await physics(), armPhysics, 'Arm IK changes must leave the complete physical rig unchanged.');
+    const beforeFailedSave = await armRecords();
+    const previousSelection = await armRecord();
     await page.evaluate(() => {
       const original = Storage.prototype.setItem;
       window.restoreArmIkWrites = () => { Storage.prototype.setItem = original; delete window.restoreArmIkWrites; };
       Storage.prototype.setItem = function (key, value) {
-        if (key === 'over-the-edge:appearance:arm-ik:v1') throw new DOMException('Arm IK quota probe', 'QuotaExceededError');
+        if (key.startsWith('over-the-edge:appearance:arm-ik:profile:v2:')) throw new DOMException('Arm IK quota probe', 'QuotaExceededError');
         return original.call(this, key, value);
       };
     });
     try {
-      await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
-      assert.ok((await appearance()).armIk.error.includes('could not be saved'));
-      assert.equal(await armRecord(), savedDefaults);
+      await saveProfile.click();
+      assert.ok((await appearance()).armIk.error.includes('storage'));
+      assert.deepEqual(await armRecords(), beforeFailedSave);
+      assert.equal(await armRecord(), previousSelection);
       assert.deepEqual(await armSettings(), savedArmSettings, 'A failed save must retain the editable preview.');
     } finally {
       await page.evaluate(() => window.restoreArmIkWrites());
     }
-    await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
+    await saveProfile.click();
+    const savedProfile = await pastProfiles.inputValue();
+    assert.notEqual(savedProfile, firstExperiment, 'Reusing a profile name must keep separate versions.');
+    assert.equal((await armRecords())[originalProfile], originalProfileRecord);
+    assert.deepEqual(JSON.parse((await armRecords())[savedProfile]).settings, savedArmSettings);
     const savedDirections = await armRecord();
     assert.equal((await appearance()).armIk.dirty, false);
     assert.equal((await appearance()).armIk.error, null);
-    await page.screenshot({ path: fileURLToPath(new URL('arm-ik-swivel.png', artifacts)) });
+    await page.screenshot({ path: fileURLToPath(new URL('arm-ik-hints.png', artifacts)) });
     await page.getByRole('button', { name: 'Reset arm IK', exact: true }).click();
-    await frames();
-    assert.deepEqual(await armGeometry(), defaultArms);
+    assert.deepEqual(await armSettings(), defaultHints);
+    const resetArms = await armGeometry();
+    for (const side of ['left', 'right']) {
+      assert.ok(new Vector3(...resetArms[side].elbow).distanceTo(new Vector3(...defaultArms[side].elbow)) < 1e-8);
+    }
     assert.equal(await armRecord(), savedDirections, 'Reset must remain a preview until saved.');
     assert.deepEqual(await physics(), armPhysics);
     assert.deepEqual(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage)
       .filter((key) => key.startsWith('over-the-edge:tuning:'))
       .map((key) => [key, localStorage.getItem(key)]))), namedTunings);
+    await pastProfiles.selectOption(savedProfile);
+    assert.deepEqual(await armSettings(), defaultHints, 'Selecting a profile must not apply it.');
+    await loadProfile.click();
+    assert.deepEqual(await armSettings(), savedArmSettings);
+
+    const otherTab = await page.context().newPage();
+    const otherErrors = [];
+    otherTab.on('pageerror', (error) => otherErrors.push(error.message));
+    const protocol = await page.context().newCDPSession(otherTab);
+    await protocol.send('Runtime.enable');
+    protocol.on('Runtime.consoleAPICalled', (event) => {
+      if (event.type === 'error' || event.type === 'assert') otherErrors.push(JSON.stringify(event.args));
+    });
+    const countBeforeOtherTab = Object.keys(await armRecords()).length;
+    await pastProfiles.selectOption(originalProfile);
+    try {
+      await otherTab.goto(page.url(), { waitUntil: 'networkidle' });
+      await otherTab.getByRole('tab', { name: 'Appearance', exact: true }).click();
+      await otherTab.waitForFunction(() => !window.gettingOver.appearance().restoring);
+      await otherTab.getByRole('textbox', { name: 'IK profile name', exact: true }).fill('Other tab pose');
+      await otherTab.getByRole('button', { name: 'Save IK profile', exact: true }).click();
+      await page.waitForFunction((count) => document.querySelector('#past-arm-ik').options.length === count, countBeforeOtherTab + 1);
+      assert.equal(await pastProfiles.inputValue(), originalProfile);
+      assert.deepEqual(await armSettings(), savedArmSettings, 'Other tabs may refresh history, never this preview.');
+      assert.deepEqual(otherErrors, []);
+    } finally {
+      await otherTab.close();
+    }
+    await loadProfile.click();
+    assert.deepEqual(await armSettings(), defaultHints);
+    assert.equal(await armRecord(), savedDefaults, 'Loading an older profile must persist that selection without rewriting its snapshot.');
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver && !window.gettingOver.appearance().restoring);
     await page.locator('#game').focus();
     await page.keyboard.press('p');
     await openEditor();
     await frames();
-    assert.deepEqual(await armSettings(), savedArmSettings, 'Saved elbow directions must restore on reload.');
+    assert.deepEqual(await armSettings(), defaultHints, 'The last loaded profile, not simply the newest save, must restore.');
+    await pastProfiles.selectOption(savedProfile);
+    await loadProfile.click();
+    assert.deepEqual(await armSettings(), savedArmSettings);
     assert.equal((await appearance()).armIk.dirty, false);
     await armGeometry();
+
+    await setHint('Left elbow hint Y', -0.4);
+    const partialPreview = await armSettings();
+    const beforePartial = await armRecords();
+    const beforePartialSelection = await armRecord();
+    await profileName.fill('Selection quota');
+    await page.evaluate((active) => {
+      const original = Storage.prototype.setItem;
+      window.restoreArmIkWrites = () => { Storage.prototype.setItem = original; delete window.restoreArmIkWrites; };
+      Storage.prototype.setItem = function (key, value) {
+        if (key === active) throw new DOMException('Selection quota probe', 'QuotaExceededError');
+        return original.call(this, key, value);
+      };
+    }, activeKey);
+    let partialKey;
+    try {
+      await saveProfile.click();
+      assert.ok((await appearance()).armIk.error.includes('saved in history'));
+      const created = Object.keys(await armRecords()).filter((key) => !Object.hasOwn(beforePartial, key));
+      assert.equal(created.length, 1, 'A completed history write must survive a subsequent selection failure.');
+      partialKey = created[0];
+      assert.equal(await armRecord(), beforePartialSelection);
+      assert.deepEqual(await armSettings(), partialPreview);
+      await pastProfiles.selectOption(originalProfile);
+      await loadProfile.click();
+      assert.deepEqual(await armSettings(), partialPreview, 'A failed activation must not apply the selected profile.');
+      assert.equal(await armRecord(), beforePartialSelection);
+    } finally {
+      await page.evaluate(() => window.restoreArmIkWrites());
+    }
+    await pastProfiles.selectOption(partialKey);
+    await loadProfile.click();
+    assert.equal((await appearance()).armIk.dirty, false);
+    await pastProfiles.selectOption(savedProfile);
+    await loadProfile.click();
     const before = await physics();
     const name = 'my <custom> pot.glb';
     await upload('pot', name, modelFixture({ textured: true }));
@@ -266,6 +409,7 @@ export async function verifyAppearance(page, artifacts) {
     assert.equal((await part('pot')).defaultsVisible, false);
     assert.equal((await part('torso')).custom, false);
     assert.deepEqual(await physics(), before, 'Importing a visual must not change physical bodies, colliders, masses or tuning.');
+    await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
 
     const pot = (await snapshot()).parts.find((part) => part.id === 'pot');
     const screen = await page.evaluate((pot) => window.gettingOver.project({ x: pot.x, y: pot.y - 0.1 }), pot);
@@ -284,7 +428,7 @@ export async function verifyAppearance(page, artifacts) {
       image.close();
       return count;
     }, crop.toString('base64'));
-    assert.ok(magenta > 500, 'The imported textured mesh must actually render on the pot, not merely update UI metadata.');
+    assert.ok(magenta > 500, `The imported textured mesh must render on the pot; found ${magenta} textured pixels.`);
 
     await page.getByRole('slider', { name: 'Visual scale', exact: true }).press('ArrowRight');
     await page.getByRole('slider', { name: 'Rotate Z', exact: true }).press('ArrowRight');
@@ -299,14 +443,12 @@ export async function verifyAppearance(page, artifacts) {
     assert.deepEqual(await physics(), before, 'Appearance alignment and other part imports must leave physics unchanged.');
     assert.equal((await part('right-upper-arm')).custom, false, 'Left and right arm customization must be independent.');
     const importedArm = (await part('left-upper-arm')).transform;
-    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
-    await frames();
+    await setHint('Left elbow hint Z', -0.6);
     await armGeometry();
     assert.notDeepEqual((await part('left-upper-arm')).transform, importedArm,
-      'An imported arm must turn with the configured IK plane.');
+      'An imported arm must turn toward the configured body-relative hint.');
     assert.deepEqual(await physics(), before);
-    await page.getByRole('button', { name: 'Flip left elbow', exact: true }).click();
-    await frames();
+    await setHint('Left elbow hint Z', savedArmSettings.leftHintZ);
     assert.deepEqual(await armSettings(), savedArmSettings);
     await page.screenshot({ path: fileURLToPath(new URL('custom-visuals.png', artifacts)) });
 
@@ -399,20 +541,50 @@ export async function verifyAppearance(page, artifacts) {
     });
     assert.equal((await part('pot')).defaultsVisible, true);
     assert.equal((await part('left-upper-arm')).custom, true, 'Restoring one part must not reset other imports.');
-    await page.evaluate(() => localStorage.setItem('over-the-edge:appearance:arm-ik:v1', '{broken'));
+    await page.evaluate((key) => localStorage.setItem(key, '{broken'), savedProfile);
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver && !window.gettingOver.appearance().restoring);
     assert.equal((await part('pot')).custom, false, 'Default restoration must persist.');
     assert.equal((await part('hammer-head')).custom, true);
     await openEditor();
     assert.ok((await appearance()).armIk.error.includes('invalid'));
-    assert.equal(await armRecord(), '{broken', 'Invalid arm settings must remain intact until explicitly saved over.');
+    assert.equal((await armRecords())[savedProfile], '{broken', 'An invalid profile must remain intact.');
+    assert.deepEqual(await armSettings(), defaultHints, 'An unreadable active profile must not silently load another saved profile.');
     assert.ok(await page.locator('.arm-ik-state').filter({ hasText: 'invalid' }).isVisible());
     await page.getByRole('button', { name: 'Reset arm IK', exact: true }).click();
-    assert.equal(await armRecord(), '{broken');
-    await page.getByRole('button', { name: 'Save arm IK', exact: true }).click();
-    assert.deepEqual(JSON.parse(await armRecord()).settings, { leftElbowAngle: 0, rightElbowAngle: 0 });
+    assert.equal((await armRecords())[savedProfile], '{broken');
+    await profileName.fill('After corruption');
+    await saveProfile.click();
+    assert.deepEqual(JSON.parse((await armRecords())[await pastProfiles.inputValue()]).settings, defaultHints);
+    assert.equal((await armRecords())[savedProfile], '{broken', 'A new save must not overwrite an unreadable profile.');
     assert.equal((await appearance()).armIk.error, null);
+    const previousRecord = JSON.stringify({ schemaVersion: 1, settings: { leftElbowAngle: 45, rightElbowAngle: -90 } });
+    const beforeMigration = await armRecords();
+    await page.evaluate(({ activeKey, previousRecord }) => {
+      localStorage.removeItem(activeKey);
+      localStorage.setItem('over-the-edge:appearance:arm-ik:v1', previousRecord);
+    }, { activeKey, previousRecord });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction(() => window.gettingOver && !window.gettingOver.appearance().restoring);
+    await openEditor();
+    assert.deepEqual(await armSettings(), defaultHints);
+    assert.equal((await appearance()).armIk.previousSave, true);
+    assert.equal(await page.locator('.arm-ik-migration').isVisible(), true);
+    assert.deepEqual(await armRecords(), beforeMigration, 'Opening the new editor must not rewrite either generation of saves.');
+    await profileName.fill('Body-space baseline');
+    await saveProfile.click();
+    assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:appearance:arm-ik:v1')), previousRecord);
+    assert.equal((await appearance()).armIk.previousSave, false);
+    const activeProfile = await pastProfiles.inputValue();
+    await page.evaluate((key) => localStorage.setItem(key, '{broken'), activeKey);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction(() => window.gettingOver && !window.gettingOver.appearance().restoring);
+    await openEditor();
+    assert.ok((await appearance()).armIk.error.includes('invalid'));
+    assert.equal(await armRecord(), '{broken', 'A malformed selection must not be silently replaced.');
+    await pastProfiles.selectOption(activeProfile);
+    await loadProfile.click();
+    assert.equal((await appearance()).armIk.profile.key, activeProfile);
     for (const id of ['left-upper-arm', 'hammer-shaft', 'hammer-head']) {
       await page.getByLabel('Body part', { exact: true }).selectOption(id);
       await page.getByRole('button', { name: 'Use default', exact: true }).click();
@@ -425,7 +597,8 @@ export async function verifyAppearance(page, artifacts) {
     return {
       importedParts: 4, texturedPixels: magenta, alignmentSaved: true, reloadRestored: true,
       physicsUnchanged: true, followsIk: true, failedWritesPreserved: true, externalRequests: 0,
-      armIk: { independentBends: true, depthSwivel: true, handTargetsPreserved: true, savedDirections, resetIsPreview: true },
+      armIk: { bodyRelativeHints: true, gripsOnShaft: true, namedProfiles: true, crossTabSafe: true,
+        activeProfileRestored: true, partialWriteReported: true, oldSwivelRetained: true, resetIsPreview: true },
     };
   } finally {
     await page.unroute(/^https?:\/\//, intercept);

@@ -3,8 +3,10 @@ import {
   ALIGNMENT_FIELDS, AppearanceError, ARM_IK_FIELDS, ARM_IK_LIMITS, isVisualPart, MODEL_LIMITS, VISUAL_PARTS,
 } from './appearance-types';
 import type { ArmIkSettings, VisualAlignment, VisualPartId } from './appearance-types';
+import { armIkProfiles } from './arm-ik-store';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
+import { createSnapshotPicker } from './snapshot-picker';
 
 interface AppearanceUiOptions {
   mount: HTMLElement;
@@ -26,11 +28,18 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
         <p>Import a GLB for any visible part. The existing physics and arm IK keep driving it.</p>
         <p><strong>Cosmetic only:</strong> models do not change collision shapes, mass or grip.</p>
       </section>
-      <fieldset class="tuning-group arm-ik-controls"><legend>Arm IK direction</legend></fieldset>
-      <p class="appearance-format">Swivel each elbow around its shoulder-to-hand line.
-        0 keeps the original bend; 180 flips it. Hands stay on their hammer grips.</p>
+      <div class="arm-ik-profiles"></div>
+      <p class="appearance-format">The last saved or loaded IK profile restores on reload.
+        Reset changes only the preview. Physics presets and model alignment are separate.</p>
+      <p class="appearance-format arm-ik-migration" role="status" hidden>
+        Arm IK now uses body-relative hints. Your previous swivel-angle save is untouched;
+        its angles cannot be converted exactly. Tune the new hints and save a named profile.
+      </p>
+      <fieldset class="tuning-group arm-ik-controls"><legend>Body-relative elbow hints</legend></fieldset>
+      <p class="appearance-format">Hints are preferred elbow positions relative to the torso:
+        X left/right, Y down/up, Z away/toward the camera, in metres.
+        Hands stay on the shaft. The collision overlay also shows hint crosses and arm chains.</p>
       <div class="arm-ik-actions">
-        <button type="button" class="button button-primary save-arm-ik">Save arm IK</button>
         <button type="button" class="button reset-arm-ik">Reset arm IK</button>
       </div>
       <div class="appearance-state arm-ik-state" role="status" aria-live="polite" aria-atomic="true">
@@ -86,8 +95,18 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
   const armGroup = get<HTMLFieldSetElement>('.arm-ik-controls');
   const armStatus = get<HTMLParagraphElement>('.arm-ik-status');
   const armState = get<HTMLDivElement>('.arm-ik-state');
-  const saveArmIk = get<HTMLButtonElement>('.save-arm-ik');
   const resetArmIk = get<HTMLButtonElement>('.reset-arm-ik');
+  const armMigration = get<HTMLParagraphElement>('.arm-ik-migration');
+  let selectedProfile: string | null = null;
+  const profiles = createSnapshotPicker({
+    mount: get('.arm-ik-profiles'), signal: events.signal, id: 'arm-ik', noun: 'IK profile', plural: 'IK profiles',
+    placeholder: 'e.g. Elbows down and out',
+    list: () => armIkProfiles.list(localStorage),
+    save: (name) => options.appearance.saveArmIk(name),
+    load: (key) => options.appearance.loadArmIk(key),
+    isStorageKey: (key) => armIkProfiles.isStorageKey(key),
+    onNotice: options.onNotice,
+  });
   const changeArmIk = (key: keyof ArmIkSettings, value: number): void => {
     try {
       options.appearance.previewArmIk({ ...options.appearance.armIkSettings(), [key]: value });
@@ -100,26 +119,16 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
   for (const field of ARM_IK_FIELDS) {
     const control = createRangeControl({
       ...field, ...ARM_IK_LIMITS,
-      description: 'Bend-plane angle relative to the original pose. Use 180 degrees to flip the elbow; intermediate angles turn it in depth.',
+      description: 'Preferred elbow position in torso-local metres. X increases right, Y up, and Z toward the camera. This never moves a hand grip.',
     }, {
       id: `arm-ik-${field.key}`,
       name: field.key,
       signal: events.signal,
       onInput: (value) => changeArmIk(field.key, value),
     });
-    const flip = document.createElement('button');
-    flip.type = 'button';
-    flip.className = 'button arm-ik-flip';
-    flip.textContent = `Flip ${field.side} elbow`;
-    flip.addEventListener('click', () => {
-      const angle = options.appearance.armIkSettings()[field.key];
-      changeArmIk(field.key, angle <= 0 ? angle + ARM_IK_LIMITS.max : angle - ARM_IK_LIMITS.max);
-    }, listen);
-    control.row.append(flip);
     armGroup.append(control.row);
     armControls.set(field.key, control);
   }
-  saveArmIk.addEventListener('click', () => options.appearance.saveArmIk(), listen);
   resetArmIk.addEventListener('click', () => options.appearance.resetArmIk(), listen);
   for (const part of VISUAL_PARTS) {
     const option = document.createElement('option');
@@ -170,12 +179,17 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
     const snapshot = options.appearance.snapshot();
     const armIk = snapshot.armIk;
     armGroup.disabled = snapshot.restoring;
-    saveArmIk.disabled = snapshot.restoring || !armIk.dirty;
+    profiles.setDisabled(snapshot.restoring);
+    if (armIk.profile !== null && armIk.profile.key !== selectedProfile) {
+      selectedProfile = armIk.profile.key;
+      profiles.select(selectedProfile);
+    }
     resetArmIk.disabled = snapshot.restoring;
+    armMigration.hidden = !armIk.previousSave;
     armStatus.textContent = snapshot.restoring ? 'Restoring appearance...' :
       armIk.error !== null ? armIk.error :
-        armIk.dirty ? 'Arm IK preview is not saved yet. Reset previews the original directions.' :
-          'Arm IK directions saved on this device.';
+        armIk.dirty || armIk.profile === null ? 'Unsaved elbow-hint preview. Save a named IK profile to keep it.' :
+          `Showing saved IK profile "${armIk.profile.name}".`;
     armState.dataset.kind = armIk.error !== null ? 'error' : armIk.dirty ? 'draft' : 'ready';
     for (const field of ARM_IK_FIELDS) {
       const control = armControls.get(field.key);

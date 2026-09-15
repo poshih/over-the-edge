@@ -5,6 +5,10 @@ import {
   validateAlignment, validateArmIk, validateStoredVisual, VISUAL_PARTS,
 } from './appearance-types';
 import type { ArmIkSettings, StoredVisual, VisualAlignment, VisualPartId } from './appearance-types';
+import { activateArmIk, armIkProfiles, readActiveArmIk } from './arm-ik-store';
+import type { ArmIkProfile } from './arm-ik-store';
+import { SnapshotError } from './named-snapshots';
+import type { SnapshotEntry } from './named-snapshots';
 import { loadVisualModel } from './visual-model';
 
 export class Appearance {
@@ -19,8 +23,9 @@ export class Appearance {
   private restoring = true;
   private storageIssue: string | null = null;
   private armIk = { ...DEFAULT_ARM_IK };
-  private savedArmIk: ArmIkSettings | null = null;
+  private savedArmIk: ArmIkProfile | null = null;
   private armIkIssue: string | null = null;
+  private previousArmIkSave = false;
   private disposed = false;
 
   constructor(rig: AppearanceRig, notice: (message: string, kind: 'info' | 'error') => void) {
@@ -31,11 +36,9 @@ export class Appearance {
 
   async restore(): Promise<void> {
     try {
-      const saved = this.store.readArmIk();
-      if (saved !== null) {
-        this.armIk = saved;
-        this.savedArmIk = { ...saved };
-      }
+      const { profile, previousSave } = readActiveArmIk(localStorage);
+      this.previousArmIkSave = previousSave;
+      if (profile !== null) this.adoptArmIk(profile);
     } catch (error) {
       this.reportArmIkError(error);
     }
@@ -85,18 +88,46 @@ export class Appearance {
     this.previewArmIk(DEFAULT_ARM_IK);
   }
 
-  saveArmIk(): void {
-    if (!this.canEdit()) return;
+  saveArmIk(name: string): SnapshotEntry | null {
+    if (!this.canEdit()) return null;
+    let saved: SnapshotEntry | null = null;
     try {
-      this.store.writeArmIk(this.armIk);
-      this.savedArmIk = { ...this.armIk };
-      this.armIkIssue = null;
-      this.notice('Arm IK directions saved on this device.', 'info');
+      saved = armIkProfiles.save(localStorage, name, this.armIk);
+      this.adoptArmIk(activateArmIk(localStorage, saved.key));
+      return saved;
     } catch (error) {
-      this.reportArmIkError(error);
+      if (saved !== null && (error instanceof DOMException || error instanceof SnapshotError || error instanceof AppearanceError)) {
+        this.reportArmIkError(new AppearanceError(
+          `Profile "${saved.name}" was saved in history, but could not be selected for reload. Load it to retry. The previous selection is unchanged.`,
+        ));
+      } else {
+        this.reportArmIkError(error);
+      }
+      return null;
     } finally {
       this.changed();
     }
+  }
+
+  loadArmIk(key: string): ArmIkProfile | null {
+    if (!this.canEdit()) return null;
+    try {
+      const profile = activateArmIk(localStorage, key);
+      this.adoptArmIk(profile);
+      return profile;
+    } catch (error) {
+      this.reportArmIkError(error);
+      return null;
+    } finally {
+      this.changed();
+    }
+  }
+
+  private adoptArmIk(profile: ArmIkProfile): void {
+    this.armIk = { ...profile.settings };
+    this.savedArmIk = profile;
+    this.armIkIssue = null;
+    this.previousArmIkSave = false;
   }
 
   async importFile(slot: VisualPartId, file: File): Promise<void> {
@@ -173,8 +204,10 @@ export class Appearance {
       armIk: {
         settings: this.armIkSettings(),
         dirty: savedArmIk === null || ARM_IK_FIELDS.some((field) =>
-          this.armIk[field.key] !== savedArmIk[field.key]),
+          this.armIk[field.key] !== savedArmIk.settings[field.key]),
         error: this.armIkIssue,
+        profile: savedArmIk === null ? null : { key: savedArmIk.key, name: savedArmIk.name },
+        previousSave: this.previousArmIkSave,
       },
       parts: VISUAL_PARTS.map((part) => {
         const record = this.records.get(part.id);
@@ -218,9 +251,14 @@ export class Appearance {
   }
 
   private reportArmIkError(error: unknown): void {
-    if (!(error instanceof AppearanceError)) throw error;
-    this.armIkIssue = error.message;
-    this.notice(error.message, 'error');
+    if (error instanceof DOMException) {
+      this.armIkIssue = 'IK profile storage is unavailable or full. The preview and previous selection are unchanged.';
+    } else if (error instanceof AppearanceError || error instanceof SnapshotError) {
+      this.armIkIssue = error.message;
+    } else {
+      throw error;
+    }
+    this.notice(this.armIkIssue, 'error');
   }
 
   private async run(slot: VisualPartId, operation: () => Promise<void>): Promise<void> {

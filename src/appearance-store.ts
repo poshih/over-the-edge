@@ -1,44 +1,13 @@
-import { AppearanceError, validateArmIk } from './appearance-types';
-import type { ArmIkSettings, StoredVisual, VisualPartId } from './appearance-types';
+import { AppearanceError } from './appearance-types';
+import type { StoredVisual, VisualPartId } from './appearance-types';
 
 const DATABASE = 'over-the-edge:appearance';
 const STORE = 'parts';
-const ARM_IK_KEY = 'over-the-edge:appearance:arm-ik:v1';
 
 export class AppearanceStore {
   private database: IDBDatabase | null = null;
   private opening: Promise<IDBDatabase> | null = null;
   private closed = false;
-
-  readArmIk(): ArmIkSettings | null {
-    if (this.closed) throw new AppearanceError('Visual storage has been closed.');
-    try {
-      const serialized = localStorage.getItem(ARM_IK_KEY);
-      if (serialized === null) return null;
-      const record: unknown = JSON.parse(serialized);
-      if (typeof record !== 'object' || record === null || Array.isArray(record) ||
-        Object.keys(record).length !== 2 || Reflect.get(record, 'schemaVersion') !== 1 ||
-        !Object.hasOwn(record, 'settings')) {
-        throw new AppearanceError('Saved arm IK has an unsupported format. The record was left untouched.');
-      }
-      return validateArmIk(Reflect.get(record, 'settings'));
-    } catch (error) {
-      if (error instanceof SyntaxError) throw new AppearanceError('Saved arm IK is invalid. The record was left untouched.');
-      if (error instanceof DOMException) throw new AppearanceError('Arm IK storage is unavailable. Check site storage permissions.');
-      throw error;
-    }
-  }
-
-  writeArmIk(settings: Readonly<ArmIkSettings>): void {
-    if (this.closed) throw new AppearanceError('Visual storage has been closed.');
-    const record = { schemaVersion: 1, settings: validateArmIk(settings) };
-    try {
-      localStorage.setItem(ARM_IK_KEY, JSON.stringify(record));
-    } catch (error) {
-      if (!(error instanceof DOMException)) throw error;
-      throw new AppearanceError('Arm IK directions could not be saved. Existing saved settings are unchanged.');
-    }
-  }
 
   private connect(): Promise<IDBDatabase> {
     if (this.closed) return Promise.reject(new AppearanceError('Visual storage has been closed.'));
