@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { inspectArmGeometry, verifyAppearance } from './verify-appearance.mjs';
 import { verifyMobile } from './verify-mobile.mjs';
 import { verifyLevel } from './verify-level.mjs';
+import { verifyTriggers } from './verify-triggers.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = new URL('../artifacts/', import.meta.url);
@@ -494,6 +495,7 @@ try {
   report.scenarios.appearance = await verifyAppearance(page, artifacts);
   report.scenarios.mobile = await verifyMobile(browser, address, artifacts);
   report.scenarios.level = await verifyLevel(browser, address, artifacts);
+  report.scenarios.triggers = await verifyTriggers(browser, address, artifacts);
   await page.setViewportSize({ width: 760, height: 600 });
   await page.waitForTimeout(300);
   const canvasBox = await page.locator('#game').boundingBox();

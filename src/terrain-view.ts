@@ -3,7 +3,8 @@ import {
   InstancedMesh, Matrix4, MeshStandardMaterial, Shape, Sphere,
 } from 'three';
 import { geometryKey, ILLUSION, LEVEL_LIMITS, shapeVertices } from './level';
-import type { LevelObject, LevelShape, TerrainEvent } from './level';
+import type { TerrainObject, LevelShape, TerrainEvent } from './level';
+import { markInstanceSlot } from './instancing';
 
 const CHUNK_SIZE = 32;
 const INITIAL_CAPACITY = 8;
@@ -31,7 +32,7 @@ interface Batch {
 }
 
 interface Instance {
-  object: LevelObject;
+  object: TerrainObject;
   readonly batch: Batch;
   slot: number;
 }
@@ -47,25 +48,8 @@ function materials(options: { fading: boolean }): MaterialPair {
   return [front, side];
 }
 
-function batchKey(object: LevelObject, shapeKey: string): string {
+function batchKey(object: TerrainObject, shapeKey: string): string {
   return `${Math.floor(object.x / CHUNK_SIZE)},${Math.floor(object.y / CHUNK_SIZE)}:${shapeKey}`;
-}
-
-function markSlot(attribute: InstancedBufferAttribute, slot: number): void {
-  let start = slot * attribute.itemSize;
-  let end = start + attribute.itemSize;
-  const ranges = attribute.updateRanges;
-  // Culled meshes can go many frames without uploading. Keep their pending ranges bounded.
-  for (let index = ranges.length - 1; index >= 0; index--) {
-    const range = ranges[index];
-    if (range.start <= end && range.start + range.count >= start) {
-      start = Math.min(start, range.start);
-      end = Math.max(end, range.start + range.count);
-      ranges.splice(index, 1);
-    }
-  }
-  attribute.addUpdateRange(start, end - start);
-  attribute.needsUpdate = true;
 }
 
 export class TerrainView {
@@ -175,7 +159,7 @@ export class TerrainView {
     this.disposed = true;
   }
 
-  private upsert(object: LevelObject): void {
+  private upsert(object: TerrainObject): void {
     const instance = this.instances.get(object.id);
     const key = geometryKey(object.shape);
     const destination = batchKey(object, key);
@@ -227,7 +211,7 @@ export class TerrainView {
     return template;
   }
 
-  private getBatch(object: LevelObject, shapeKey: string, phase: Phase | null): Batch {
+  private getBatch(object: TerrainObject, shapeKey: string, phase: Phase | null): Batch {
     const key = batchKey(object, shapeKey);
     const collection = phase ? phase.batches : this.opaque;
     const existing = collection.get(key);
@@ -261,7 +245,7 @@ export class TerrainView {
     return mesh;
   }
 
-  private insert(object: LevelObject, batch: Batch): void {
+  private insert(object: TerrainObject, batch: Batch): void {
     const slot = batch.entries.length;
     if (slot === batch.mesh.instanceMatrix.count) this.grow(batch);
     const instance: Instance = { object, batch, slot };
@@ -297,14 +281,14 @@ export class TerrainView {
       0, 0, 0, 1,
     );
     instance.batch.mesh.setMatrixAt(instance.slot, this.matrix);
-    markSlot(instance.batch.mesh.instanceMatrix, instance.slot);
+    markInstanceSlot(instance.batch.mesh.instanceMatrix, instance.slot);
     this.dirtyBounds.add(instance.batch);
     this.counters.matrixWrites++;
   }
 
   private writeColor(instance: Instance): void {
     instance.batch.mesh.setColorAt(instance.slot, this.color.setHex(instance.object.color));
-    markSlot(instance.batch.mesh.instanceColor!, instance.slot);
+    markInstanceSlot(instance.batch.mesh.instanceColor!, instance.slot);
     this.counters.colorWrites++;
   }
 
@@ -319,8 +303,8 @@ export class TerrainView {
       const color = batch.mesh.instanceColor!;
       matrix.array.copyWithin(instance.slot * 16, batch.entries.length * 16, (batch.entries.length + 1) * 16);
       color.array.copyWithin(instance.slot * 3, batch.entries.length * 3, (batch.entries.length + 1) * 3);
-      markSlot(matrix, instance.slot);
-      markSlot(color, instance.slot);
+      markInstanceSlot(matrix, instance.slot);
+      markInstanceSlot(color, instance.slot);
       this.counters.matrixWrites++;
       this.counters.colorWrites++;
     }

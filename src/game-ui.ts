@@ -11,7 +11,7 @@ export interface GameHudState {
   paused: boolean;
   pointerLocked: boolean;
   inputMode: InputMode;
-  summit: boolean;
+  timerRunning: boolean;
 }
 
 export function createGameUI(options: {
@@ -50,13 +50,8 @@ export function createGameUI(options: {
         </div>
         <div class="secondary-metrics">
           <div><p class="metric-label">PEAK</p><p class="metric-reading"><span class="peak-value">0.0</span><span class="small-unit">m</span></p></div>
-          <div><p class="metric-label">ELAPSED</p><p class="metric-reading elapsed-value">00:00</p></div>
+          <div><p class="metric-label timer-label">ELAPSED</p><p class="metric-reading elapsed-value">00:00</p></div>
         </div>
-      </section>
-      <section class="summit-notice" role="status" aria-live="polite" aria-atomic="true" hidden>
-        <span class="summit-mark" aria-hidden="true"></span>
-        <p class="eyebrow">SUMMIT REACHED</p><h2>A little closer to the sky.</h2>
-        <p>Take in the view. You earned it.</p>
       </section>
       <footer class="game-help" aria-label="How to play">
         <div class="climbing-guide">
@@ -87,7 +82,7 @@ export function createGameUI(options: {
   const height = element<HTMLElement>(root, '.height-value');
   const peak = element<HTMLElement>(root, '.peak-value');
   const elapsed = element<HTMLElement>(root, '.elapsed-value');
-  const summit = element<HTMLElement>(root, '.summit-notice');
+  const timerLabel = element<HTMLElement>(root, '.timer-label');
   const noticeBox = element<HTMLElement>(root, '.ui-notice');
   const noticeHeading = element<HTMLElement>(root, '.notice-heading');
   const noticeMessage = element<HTMLElement>(root, '.notice-message');
@@ -130,6 +125,7 @@ export function createGameUI(options: {
       setText(peak, state.bestHeight.toFixed(1));
       const seconds = Math.floor(Math.max(0, state.elapsed));
       setText(elapsed, `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`);
+      setText(timerLabel, state.timerRunning ? 'ELAPSED' : 'TIME STOPPED');
       setText(pauseLabel, state.paused ? 'Resume' : 'Pause');
       pause.classList.toggle('is-active', state.paused);
       play.classList.toggle('is-active', !state.paused && (state.pointerLocked || state.inputMode === 'touch'));
@@ -140,7 +136,6 @@ export function createGameUI(options: {
       setText(inputStateText, state.paused ? `Paused - ${pausedHint}` :
         touch ? 'Touch controls - drag anywhere' :
           state.pointerLocked ? 'Mouse captured - Esc to release' : 'Hold + drag, or Play to capture');
-      if (summit.hidden === state.summit) summit.hidden = !state.summit;
     },
     notice: (message: string, kind: 'info' | 'error'): void => {
       noticeBox.dataset.kind = kind;

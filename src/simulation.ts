@@ -1,6 +1,7 @@
 import { Vec2, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point, Tuning } from './config';
+import { isTerrainObject, levelSpawn } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { createPlayer, destroyPlayer, drivePlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
@@ -43,8 +44,8 @@ export class Simulation {
     this.level = level;
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
-    this.terrain = new TerrainWorld(this.world, level.objects, () => this.rig.pot);
-    this.rig = createPlayer(this.world, level.spawn, this.tuning);
+    this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot);
+    this.rig = createPlayer(this.world, levelSpawn(level), this.tuning);
     this.cursor = { ...this.rig.head.getPosition() };
     this.current = this.capture();
     this.previous = this.current;
@@ -60,7 +61,7 @@ export class Simulation {
     }
   }
 
-  reset(spawn: PlayerSpawn = this.level.spawn): void {
+  reset(spawn: Readonly<PlayerSpawn> = levelSpawn(this.level)): void {
     this.ensureLive();
     this.resetPlayer(spawn);
     this.terrain.reset();
@@ -69,7 +70,7 @@ export class Simulation {
   applyLevel(change: LevelChange): void {
     this.ensureLive();
     this.level = change.level;
-    if (change.kind === 'replace') this.resetPlayer(change.level.spawn);
+    if (change.kind === 'replace') this.resetPlayer(levelSpawn(change.level));
     this.terrain.apply(change);
   }
 
@@ -86,6 +87,13 @@ export class Simulation {
   terrainState() {
     this.ensureLive();
     return this.terrain.inspect();
+  }
+
+  get time(): number { return this.elapsed; }
+
+  playerPosition(): Readonly<Point> {
+    const root = this.rig.root.getPosition();
+    return { x: root.x, y: root.y + RIG.potBottom };
   }
 
   step(pointerDelta: Point): void {
@@ -149,7 +157,6 @@ export class Simulation {
     }
     const hingeTorque = this.rig.hinge.getMotorTorque(1 / PHYSICS.dt);
     const sliderForce = this.rig.slider.getMotorForce(1 / PHYSICS.dt);
-    const summit = this.level.summit;
     return {
       time: this.elapsed,
       height: Math.max(0, root.y + RIG.potBottom),
@@ -157,8 +164,6 @@ export class Simulation {
       contacts,
       hingeLoad: Math.abs(hingeTorque) / this.tuning.hingeTorque,
       sliderLoad: Math.abs(sliderForce) / this.tuning.sliderForce,
-      summit: root.x >= summit.xMin && root.x <= summit.xMax &&
-        root.y + RIG.potBottom >= summit.y - summit.arrivalTolerance,
     };
   }
 

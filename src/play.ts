@@ -9,7 +9,7 @@ const fatal = document.querySelector<HTMLElement>('#fatal-error');
 if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface mounts are required.');
 
 const game = new Game({
-  canvas, fatal, level,
+  canvas, fatal, eventMount: mount, level,
   onAction: (action, options) => game.perform(action, options),
   onNotice: (message) => ui.notice(message, 'error'),
 });

@@ -1,6 +1,12 @@
 import { RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
 import { transformPoint } from './math';
+import { upgradeLevelV1 } from './level-migration';
+import { fields, LevelError, number, point, text } from './level-validation';
+import type { TriggerAction } from './trigger-events';
+
+export { LevelError } from './level-validation';
+export type { TriggerAction } from './trigger-events';
 
 export const LEVEL_LIMITS = {
   objects: 1000,
@@ -17,13 +23,26 @@ export const LEVEL_LIMITS = {
 } as const;
 
 export const ILLUSION = { fadeSeconds: 0.8, minimumTopNormal: 0.5 } as const;
+export const TRIGGER_LIMITS = {
+  objects: 128,
+  events: 8,
+  title: 120,
+  message: 2000,
+  source: 2048,
+  coordinate: LEVEL_LIMITS.coordinate + LEVEL_LIMITS.maximumSize,
+  maximumSize: LEVEL_LIMITS.coordinate * 2,
+  exitMargin: 0.08,
+  endingHeight: RIG.maxReach * 2,
+} as const;
+export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + 1;
 export const ROCK_COLOR = 0x71817a;
 export const SHAPE_KINDS = ['box', 'ramp', 'triangle', 'circle', 'hexagon'] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
 export type LevelShape = { readonly type: ShapeKind } |
   { readonly type: 'polygon'; readonly vertices: readonly Readonly<Point>[] };
 
-export interface LevelObject {
+export interface TerrainObject {
+  readonly kind: 'terrain';
   readonly id: string;
   readonly shape: LevelShape;
   readonly x: number;
@@ -36,21 +55,35 @@ export interface LevelObject {
   readonly illusion: boolean;
 }
 
-export interface Summit {
-  readonly xMin: number;
-  readonly xMax: number;
-  readonly y: number;
-  readonly arrivalTolerance: number;
+export interface StartObject extends Readonly<Point> {
+  readonly kind: 'start';
+  readonly id: string;
+  readonly angle: number;
+  readonly extension: number;
 }
+
+export type TriggerRegion =
+  | { readonly type: 'circle'; readonly radius: number }
+  | { readonly type: 'box'; readonly width: number; readonly height: number };
+
+export interface TriggerObject extends Readonly<Point> {
+  readonly kind: 'trigger';
+  readonly id: string;
+  readonly name: string;
+  readonly region: TriggerRegion;
+  readonly activation: 'once' | 'on-enter';
+  readonly marker: 'none' | 'flag';
+  readonly events: readonly TriggerAction[];
+}
+
+export type LevelObject = TerrainObject | StartObject | TriggerObject;
 
 export interface LevelLabel extends Readonly<Point> {
   readonly text: string;
 }
 
 export interface LevelDefinition {
-  readonly schemaVersion: 1;
-  readonly spawn: Readonly<PlayerSpawn>;
-  readonly summit: Summit;
+  readonly schemaVersion: 2;
   readonly labels: readonly LevelLabel[];
   readonly objects: readonly LevelObject[];
 }
@@ -63,8 +96,8 @@ export interface LevelChange {
 }
 
 export type TerrainEvent =
-  | { readonly type: 'reset'; readonly objects: readonly LevelObject[] }
-  | { readonly type: 'upsert'; readonly object: LevelObject }
+  | { readonly type: 'reset'; readonly objects: readonly TerrainObject[] }
+  | { readonly type: 'upsert'; readonly object: TerrainObject }
   | { readonly type: 'remove' | 'disappear'; readonly id: string }
   | { readonly type: 'fade'; readonly id: string; readonly startedAt: number };
 
@@ -82,30 +115,6 @@ const SHAPE_VERTICES: Record<ShapeKind, readonly Readonly<Point>[]> = {
 for (const vertices of Object.values(SHAPE_VERTICES)) {
   for (const vertex of vertices) Object.freeze(vertex);
   Object.freeze(vertices);
-}
-
-export class LevelError extends Error {}
-
-function fields(value: unknown, keys: readonly string[], label: string): asserts value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) {
-    throw new LevelError(`${label} contains missing or unknown fields.`);
-  }
-}
-
-function number(value: unknown, min: number, max: number, label: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
-    throw new LevelError(`${label} must be between ${min} and ${max}.`);
-  }
-  return value;
-}
-
-function point(value: unknown, range: number, label: string): Readonly<Point> {
-  fields(value, ['x', 'y'], label);
-  return Object.freeze({
-    x: number(value.x, -range, range, `${label} X`),
-    y: number(value.y, -range, range, `${label} Y`),
-  });
 }
 
 function cross(a: Readonly<Point>, b: Readonly<Point>, c: Readonly<Point>): number {
@@ -150,12 +159,12 @@ export function geometryKey(shape: LevelShape): string {
   return shape.type === 'polygon' ? `polygon:${JSON.stringify(shape.vertices)}` : shape.type;
 }
 
-export function objectVertices(object: LevelObject): Point[] {
+export function objectVertices(object: TerrainObject): Point[] {
   return shapeVertices(object.shape).map((vertex) =>
     transformPoint({ x: vertex.x * object.width, y: vertex.y * object.height }, object, object.angle));
 }
 
-export function objectContains(object: LevelObject, position: Point): boolean {
+export function objectContains(object: TerrainObject, position: Point): boolean {
   const local = transformPoint({ x: position.x - object.x, y: position.y - object.y }, { x: 0, y: 0 }, -object.angle);
   const p = { x: local.x / object.width, y: local.y / object.height };
   if (Math.abs(p.x) > 0.5 || Math.abs(p.y) > 0.5) return false;
@@ -171,11 +180,36 @@ export function objectContains(object: LevelObject, position: Point): boolean {
   return inside;
 }
 
-export function validateLevelObject(value: unknown): LevelObject {
-  fields(value, ['id', 'shape', 'x', 'y', 'width', 'height', 'angle', 'depth', 'color', 'illusion'], 'Level object');
-  if (typeof value.id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(value.id)) {
+function objectId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(value)) {
     throw new LevelError('Object IDs must be unique letters, numbers, hyphens or underscores, up to 64 characters.');
   }
+  return value;
+}
+
+export function validateLevelObject(value: unknown): LevelObject {
+  if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'kind')) {
+    throw new LevelError('Choose a terrain, start, or trigger object.');
+  }
+  const kind: unknown = Reflect.get(value, 'kind');
+  if (kind === 'start') {
+    fields(value, ['kind', 'id', 'x', 'y', 'angle', 'extension'], 'Start object');
+    return Object.freeze({
+      kind, id: objectId(value.id),
+      x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Start X'),
+      y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Start Y'),
+      angle: number(value.angle, -Math.PI, Math.PI, 'Starting hammer angle'),
+      extension: number(value.extension, RIG.minExtension, RIG.maxExtension, 'Starting extension'),
+    });
+  }
+  if (kind === 'trigger') return validateTrigger(value);
+  if (kind !== 'terrain') throw new LevelError('Choose a terrain, start, or trigger object.');
+  return validateTerrain(value);
+}
+
+function validateTerrain(value: unknown): TerrainObject {
+  fields(value, ['kind', 'id', 'shape', 'x', 'y', 'width', 'height', 'angle', 'depth', 'color', 'illusion'], 'Terrain object');
+  const id = objectId(value.id);
   const raw = value.shape;
   if (typeof raw !== 'object' || raw === null || !Object.hasOwn(raw, 'type')) throw new LevelError('Choose a supported shape.');
   const type: unknown = Reflect.get(raw, 'type');
@@ -196,7 +230,7 @@ export function validateLevelObject(value: unknown): LevelObject {
   const color = number(value.color, 0, 0xffffff, 'Rock color');
   if (!Number.isInteger(color)) throw new LevelError('Rock color must be a whole RGB value.');
   return Object.freeze({
-    id: value.id, shape,
+    kind: 'terrain', id, shape,
     x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Position X'),
     y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Position Y'),
     width, height, angle: number(value.angle, -Math.PI, Math.PI, 'Rotation'),
@@ -205,22 +239,8 @@ export function validateLevelObject(value: unknown): LevelObject {
   });
 }
 
-export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'spawn' | 'summit' | 'labels'> {
-  fields(value, ['spawn', 'summit', 'labels'], 'Level settings');
-  fields(value.spawn, ['position', 'angle', 'extension'], 'Player start');
-  const spawn = Object.freeze({
-    position: point(value.spawn.position, LEVEL_LIMITS.coordinate, 'Player start'),
-    angle: number(value.spawn.angle, -Math.PI, Math.PI, 'Starting hammer angle'),
-    extension: number(value.spawn.extension, RIG.minExtension, RIG.maxExtension, 'Starting extension'),
-  });
-  fields(value.summit, ['xMin', 'xMax', 'y', 'arrivalTolerance'], 'Summit');
-  const summit = Object.freeze({
-    xMin: number(value.summit.xMin, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Summit left'),
-    xMax: number(value.summit.xMax, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Summit right'),
-    y: number(value.summit.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Summit height'),
-    arrivalTolerance: number(value.summit.arrivalTolerance, 0, 0.25, 'Summit tolerance'),
-  });
-  if (summit.xMax <= summit.xMin) throw new LevelError('The summit right edge must be to the right of its left edge.');
+export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'labels'> {
+  fields(value, ['labels'], 'Level settings');
   if (!Array.isArray(value.labels) || value.labels.length > LEVEL_LIMITS.labels) throw new LevelError('Too many course labels.');
   const labels = value.labels.map((label): LevelLabel => {
     fields(label, ['x', 'y', 'text'], 'Course label');
@@ -233,20 +253,118 @@ export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'sp
       text: label.text,
     });
   });
-  return { spawn, summit, labels: Object.freeze(labels) };
+  return { labels: Object.freeze(labels) };
 }
 
 export function validateLevel(value: unknown): LevelDefinition {
-  fields(value, ['schemaVersion', 'spawn', 'summit', 'labels', 'objects'], 'Level');
-  if (value.schemaVersion !== 1) throw new LevelError('This level format is not supported.');
-  const metadata = validateLevelMetadata({ spawn: value.spawn, summit: value.summit, labels: value.labels });
-  if (!Array.isArray(value.objects) || value.objects.length > LEVEL_LIMITS.objects) {
-    throw new LevelError(`A level supports up to ${LEVEL_LIMITS.objects} objects.`);
+  if (typeof value === 'object' && value !== null && Reflect.get(value, 'schemaVersion') === 1) {
+    value = upgradeLevelV1(value, { coordinate: LEVEL_LIMITS.coordinate, objects: LEVEL_LIMITS.objects, endingHeight: TRIGGER_LIMITS.endingHeight });
+  }
+  fields(value, ['schemaVersion', 'labels', 'objects'], 'Level');
+  if (value.schemaVersion !== 2) throw new LevelError('This level format is not supported.');
+  const metadata = validateLevelMetadata({ labels: value.labels });
+  if (!Array.isArray(value.objects) || value.objects.length > LEVEL_OBJECT_LIMIT) {
+    throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, and one start.`);
   }
   const objects = value.objects.map(validateLevelObject);
   if (new Set(objects.map((object) => object.id)).size !== objects.length) throw new LevelError('Every object needs a unique ID.');
-  if (new Set(objects.map((object) => geometryKey(object.shape))).size > LEVEL_LIMITS.geometryKinds) {
+  if (objects.filter((object) => object.kind === 'start').length !== 1) throw new LevelError('A level needs exactly one start location.');
+  const terrain = objects.filter(isTerrainObject);
+  if (terrain.length > LEVEL_LIMITS.objects) throw new LevelError(`A level supports up to ${LEVEL_LIMITS.objects} terrain objects.`);
+  if (objects.filter(isTriggerObject).length > TRIGGER_LIMITS.objects) throw new LevelError(`A level supports up to ${TRIGGER_LIMITS.objects} triggers.`);
+  if (new Set(terrain.map((object) => geometryKey(object.shape))).size > LEVEL_LIMITS.geometryKinds) {
     throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
   }
-  return Object.freeze({ schemaVersion: 1, ...metadata, objects: Object.freeze(objects) });
+  return Object.freeze({ schemaVersion: 2, ...metadata, objects: Object.freeze(objects) });
+}
+
+function validateTrigger(value: unknown): TriggerObject {
+  fields(value, ['kind', 'id', 'x', 'y', 'name', 'region', 'activation', 'marker', 'events'], 'Trigger object');
+  const raw = value.region;
+  if (typeof raw !== 'object' || raw === null) throw new LevelError('Choose a circle or box trigger region.');
+  const type: unknown = Reflect.get(raw, 'type');
+  let region: TriggerRegion;
+  if (type === 'circle') {
+    fields(raw, ['type', 'radius'], 'Circle region');
+    region = Object.freeze({ type, radius: number(raw.radius, Number.MIN_VALUE, TRIGGER_LIMITS.maximumSize / 2, 'Trigger radius') });
+  } else if (type === 'box') {
+    fields(raw, ['type', 'width', 'height'], 'Box region');
+    region = Object.freeze({
+      type,
+      width: number(raw.width, Number.MIN_VALUE, TRIGGER_LIMITS.maximumSize, 'Trigger width'),
+      height: number(raw.height, Number.MIN_VALUE, TRIGGER_LIMITS.maximumSize, 'Trigger height'),
+    });
+  } else throw new LevelError('Choose a circle or box trigger region.');
+  if (value.activation !== 'once' && value.activation !== 'on-enter') throw new LevelError('Choose once per run or on each entry.');
+  if (value.marker !== 'none' && value.marker !== 'flag') throw new LevelError('Choose no marker or a flag.');
+  if (!Array.isArray(value.events) || value.events.length === 0 || value.events.length > TRIGGER_LIMITS.events) {
+    throw new LevelError(`A trigger needs 1 to ${TRIGGER_LIMITS.events} events.`);
+  }
+  return Object.freeze({
+    kind: 'trigger', id: objectId(value.id), name: text(value.name, LEVEL_LIMITS.text, 'Trigger name'),
+    x: number(value.x, -TRIGGER_LIMITS.coordinate, TRIGGER_LIMITS.coordinate, 'Trigger X'),
+    y: number(value.y, -TRIGGER_LIMITS.coordinate, TRIGGER_LIMITS.coordinate, 'Trigger Y'),
+    region, activation: value.activation, marker: value.marker,
+    events: Object.freeze(value.events.map(validateTriggerAction)),
+  });
+}
+
+export function validateTriggerAction(value: unknown): TriggerAction {
+  if (typeof value !== 'object' || value === null) throw new LevelError('Choose a supported trigger event.');
+  const type: unknown = Reflect.get(value, 'type');
+  if (type === 'stop-timer') {
+    fields(value, ['type'], 'Stop timer event');
+    return Object.freeze({ type });
+  }
+  if (type === 'popup') {
+    fields(value, ['type', 'title', 'message'], 'Popup event');
+    return Object.freeze({
+      type, title: text(value.title, TRIGGER_LIMITS.title, 'Popup title'),
+      message: text(value.message, TRIGGER_LIMITS.message, 'Popup message'),
+    });
+  }
+  if (type === 'play-video') {
+    fields(value, ['type', 'source'], 'Video event');
+    const source = text(value.source, TRIGGER_LIMITS.source, 'Video source').trim();
+    let url: URL;
+    try {
+      url = new URL(source, 'https://level.invalid');
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      throw new LevelError('Use an HTTP(S) video URL or a site-relative /media/video path.');
+    }
+    const local = source.startsWith('/') && !source.startsWith('//') && url.origin === 'https://level.invalid';
+    const remote = /^https?:\/\//i.test(source) && (url.protocol === 'https:' || url.protocol === 'http:');
+    if ((!local && !remote) || url.username || url.password) throw new LevelError('Use an HTTP(S) video URL without credentials, or a site-relative /media/video path.');
+    return Object.freeze({ type, source });
+  }
+  throw new LevelError('Choose popup, play video, or stop timer.');
+}
+
+export function isTerrainObject(object: LevelObject): object is TerrainObject { return object.kind === 'terrain'; }
+export function isTriggerObject(object: LevelObject): object is TriggerObject { return object.kind === 'trigger'; }
+
+export function levelStart(level: LevelDefinition): StartObject {
+  const start = level.objects.find((object): object is StartObject => object.kind === 'start');
+  if (!start) throw new Error('Validated levels must contain a start location.');
+  return start;
+}
+
+export function levelSpawn(level: LevelDefinition): Readonly<PlayerSpawn> {
+  const start = levelStart(level);
+  return { position: { x: start.x, y: start.y }, angle: start.angle, extension: start.extension };
+}
+
+export function triggerBounds(object: TriggerObject) {
+  const halfWidth = object.region.type === 'circle' ? object.region.radius : object.region.width / 2;
+  const halfHeight = object.region.type === 'circle' ? object.region.radius : object.region.height / 2;
+  return { minX: object.x - halfWidth, maxX: object.x + halfWidth, minY: object.y - halfHeight, maxY: object.y + halfHeight };
+}
+
+export function triggerContains(object: TriggerObject, position: Readonly<Point>, margin = 0): boolean {
+  const dx = position.x - object.x;
+  const dy = position.y - object.y;
+  return object.region.type === 'circle'
+    ? dx * dx + dy * dy <= (object.region.radius + margin) ** 2
+    : Math.abs(dx) <= object.region.width / 2 + margin && Math.abs(dy) <= object.region.height / 2 + margin;
 }

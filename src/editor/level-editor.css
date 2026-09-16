@@ -15,12 +15,14 @@
 .level-editor .button,
 .level-editor select,
 .level-editor input:not([type="checkbox"]),
+.level-editor textarea,
 .level-checkbox {
   min-height: 48px;
 }
 
 .level-editor input:not([type="checkbox"]),
-.level-editor select {
+.level-editor select,
+.level-editor textarea {
   width: 100%;
   min-width: 0;
   padding: 8px;
@@ -29,6 +31,7 @@
   color: var(--ink);
   background: #faf9f2;
   font-size: 16px;
+  font-family: inherit;
 }
 
 .level-editor .button {
@@ -84,7 +87,8 @@
   margin: 0 0 20px;
 }
 
-.level-palette {
+.level-palette,
+.level-entity-palette {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
@@ -245,15 +249,70 @@
   stroke-dasharray: 3 4;
 }
 
-.level-start-marker,
-.level-summit-marker {
+/* Non-terrain entity gizmos (start location + trigger regions). These are cheap SVG shapes
+   living in world-space inside .level-camera-group, so panning/zooming only repaints via the
+   group's transform matrix; per-object geometry is rebuilt only on LevelChange deltas. */
+.level-gizmo-layer,
+.level-gizmo-selection-layer,
+.level-gizmo-ghost-layer {
+  pointer-events: none;
+}
+
+.level-gizmo circle,
+.level-gizmo line,
+.level-gizmo rect,
+.level-gizmo path {
+  vector-effect: non-scaling-stroke;
+}
+
+.level-gizmo-start {
   fill: #f8f3e4;
   stroke: #12594d;
   stroke-width: 2;
 }
 
-.level-summit-marker {
-  stroke: #8b560e;
+.level-gizmo-trigger .level-gizmo-region {
+  fill: rgb(148 102 43 / 12%);
+  stroke: #94662b;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.level-gizmo-trigger circle:last-of-type {
+  fill: #94662b;
+}
+
+.level-gizmo-direction {
+  stroke: #12594d;
+  stroke-width: 2;
+}
+
+.level-gizmo-flag path {
+  fill: #b23b2e;
+}
+
+.level-gizmo-flag line {
+  stroke: #4a3a1e;
+  stroke-width: 2;
+}
+
+.level-gizmo-selected {
+  filter: drop-shadow(0 0 0 transparent);
+}
+
+.level-gizmo-selected .level-gizmo-region,
+.level-gizmo-selected.level-gizmo-start {
+  stroke: #075a50;
+  stroke-width: 3;
+}
+
+.level-gizmo-ghost {
+  opacity: 0.6;
+}
+
+.level-gizmo-ghost .level-gizmo-region,
+.level-gizmo-ghost.level-gizmo-start {
+  stroke-dasharray: 6 4;
 }
 
 .level-guides text {
@@ -264,9 +323,53 @@
   font: bold 11px "Segoe UI", sans-serif;
 }
 
-.level-summit-marker text {
-  fill: #784504;
-  text-anchor: middle;
+/* Trigger event list authoring (add/edit/reorder/remove + explicit Apply/Revert). */
+.level-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.level-event-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #faf9f2;
+}
+
+.level-event-row-head {
+  align-items: center;
+  gap: 6px;
+}
+
+.level-event-row-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.level-event-row-head .button {
+  min-width: 44px;
+  padding: 6px;
+}
+
+.level-event-add {
+  align-items: end;
+}
+
+.level-event-new-type-label {
+  flex: 1;
+}
+
+.level-event-status {
+  margin: 8px 0 0;
 }
 
 @media (max-width: 600px) {
@@ -281,6 +384,7 @@
 
 @media (max-width: 1039px) and (orientation: landscape) {
   .level-palette,
+  .level-entity-palette,
   .level-action-row,
   .level-field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -13,7 +13,8 @@ import { ARM_GEOMETRY, PLAYER_DEPTH, solveArmPose } from './arm-ik';
 import type { ArmPose } from './arm-ik';
 import { RIG } from './config';
 import type { InputMode, Point } from './config';
-import type { LevelDefinition } from './level';
+import type { LevelChange, LevelDefinition, LevelLabel } from './level';
+import { FlagView } from './flag-view';
 import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
@@ -90,6 +91,7 @@ function disposeResources(root: Object3D): void {
 export class GameView {
   readonly canvas: HTMLCanvasElement;
   readonly terrain = new TerrainView();
+  private readonly flags = new FlagView();
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
   private readonly camera = new OrthographicCamera();
@@ -114,7 +116,7 @@ export class GameView {
   private worldHeight: number = VISUAL.viewHeight;
   private compact = false;
   private framing: CameraFraming | null = null;
-  private decorationLevel: LevelDefinition | null = null;
+  private labelDefinition: readonly LevelLabel[] | null = null;
   private focus: Point;
   private hammer: Point;
   private readonly projection = new Vector3();
@@ -143,8 +145,9 @@ export class GameView {
     this.camera.near = 0.1;
     this.camera.far = 100;
     this.buildScenery();
-    this.scene.add(this.terrain.root, this.decorations);
-    this.setLevel(level);
+    this.scene.add(this.terrain.root, this.flags.root, this.decorations);
+    this.setLabels(level.labels);
+    this.flags.setObjects(level.objects);
     this.buildPlayer();
 
     const cursorMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });
@@ -212,6 +215,7 @@ export class GameView {
     this.targetLine.geometry.attributes.position.needsUpdate = true;
     this.targetLine.computeLineDistances();
     this.terrain.update(frame.time);
+    this.flags.update();
     for (const layer of this.layers) layer.update(frame, armPoses);
     this.renderer.render(this.scene, this.camera);
   }
@@ -265,11 +269,13 @@ export class GameView {
 
   statistics() {
     return {
+      frames: this.renderer.info.render.frame,
       calls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       geometries: this.renderer.info.memory.geometries,
       textures: this.renderer.info.memory.textures,
       terrain: this.terrain.inspect(),
+      flags: this.flags.inspect(),
     };
   }
 
@@ -284,6 +290,7 @@ export class GameView {
     this.observer.disconnect();
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
+    this.flags.dispose();
     for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
     this.layers.clear();
     disposeResources(this.scene);
@@ -353,21 +360,17 @@ export class GameView {
       bounds.maxY + VISUAL.framingMargin - halfHeight, bounds.minY - VISUAL.framingMargin + halfHeight);
   }
 
-  setLevel(level: LevelDefinition): void {
-    if (this.decorationLevel?.labels === level.labels && this.decorationLevel.summit === level.summit) return;
-    this.decorationLevel = level;
+  applyLevel(change: LevelChange): void {
+    this.setLabels(change.level.labels);
+    this.flags.apply(change);
+  }
+
+  private setLabels(labels: readonly LevelLabel[]): void {
+    if (this.labelDefinition === labels) return;
+    this.labelDefinition = labels;
     disposeResources(this.decorations);
     this.decorations.clear();
-    for (const label of level.labels) this.addLabel(label.text, label);
-    const summit = level.summit;
-    const flagX = (summit.xMin + summit.xMax) / 2;
-    const poleMaterial = new MeshStandardMaterial({ color: 0xdbc9a0, roughness: 0.45, metalness: 0.4 });
-    this.decorations.add(solid(new CylinderGeometry(0.025, 0.035, 1.5, 8), poleMaterial, [flagX, summit.y + 0.75, -0.15]));
-    const flag = new Mesh(new ExtrudeGeometry(polygonShape([
-      { x: 0, y: 0 }, { x: 0.72, y: -0.12 }, { x: 0, y: -0.35 },
-    ]), { depth: 0.015, bevelEnabled: false }), new MeshStandardMaterial({ color: 0xdc714d, roughness: 1 }));
-    flag.position.set(flagX + 0.03, summit.y + 1.4, -0.1);
-    this.decorations.add(flag);
+    for (const label of labels) this.addLabel(label.text, label);
   }
 
   private buildScenery(): void {

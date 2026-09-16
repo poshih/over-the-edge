@@ -27,7 +27,8 @@ npm run preview
 
 The preview uses **http://localhost:4174**. Deploy `dist/` to any static host,
 including Cloudflare Pages. There is no backend, account, external asset
-download, or runtime network service.
+download, or runtime network service needed by the built-in course. Authored
+video events fetch the media URLs included in their level.
 
 The included `wrangler.toml` is an optional Cloudflare Workers configuration.
 Use your own Cloudflare account and configure any custom domains there.
@@ -206,15 +207,65 @@ Select an object to move it or adjust its position, dimensions, rotation, and
 illusion property. Dragging previews the change; releasing commits it.
 Pan and zoom let you work beyond the player's current camera view.
 
-Player-start and summit settings belong to the level as well. Playtest from the
-authored start, and use Reset to repeat the same course. Runtime effects never
-delete objects from the editor's authored definition.
+The start location and trigger zones are map objects, not special summit
+settings. Place or drag **Start location** to choose the spawn and adjust its
+initial hammer pose. Each level has one start. Playtest from that position,
+and use Reset to repeat the course. Runtime effects never delete objects from
+the editor's authored definition.
 
 Named level saves use the existing snapshot-history mechanism: repeated names
 keep separate versions, choosing an entry does not apply it, and loading is
 explicit. Export/import JSON to move level data between browsers or feed the
 game-only build. Imports are validated before replacing the current level;
 malformed files and unavailable storage produce visible errors.
+
+### Trigger objects and events
+
+Place a **Trigger** to define a circular or rectangular proximity zone.
+The player's foot position activates the zone; the hammer and terrain do not.
+**Ending trigger** is a preset of the same trigger type, with a flag and an
+ordered **Stop timer**, then **Popup** event list. Move it, change its region,
+or edit its events like any other trigger. Place a trigger around the start
+to play an intro or show instructions.
+
+Supported events:
+
+| Event | Behavior |
+| --- | --- |
+| Popup | Shows a plain-text title and message until Continue; Escape skips it |
+| Play video | Plays a public video URL or site-relative media path in a full-window overlay |
+| Stop timer | Freezes the run timer without stopping physics or illusion effects |
+
+Events execute in their authored order. Only one presentation runs at a time;
+simultaneous triggers queue deterministically. Popup/video presentation pauses
+gameplay and suspends hammer input until it closes. Skipping a presentation
+continues its remaining events. Failures are reported, not silently retried.
+The timer starts on a new attempt; Reset resets both its value and running state.
+
+**Once per run** claims activation before queuing, so repeated physics ticks
+cannot fire it again. **On each entry** requires leaving and re-entering;
+exit hysteresis avoids repeated activation at a zone boundary. Restarting
+rearms triggers. Removing or editing a trigger cancels its pending work and
+rearms the edited definition. Level replacement and shutdown cancel all pending
+events, so late media callbacks cannot resume an old run.
+
+Video sources are part of saved/exported level data. Use public URLs; do not
+put private signed links or credentials in a level you intend to publish.
+For bundled media, put the file in `public/media/` and use a path such as
+`/media/intro.webm`. Level JSON references videos rather than embedding or
+uploading them. The browser must support the file's codec.
+Autoplay with sound may require a user gesture: the overlay offers **Play video**
+when blocked. It always fills the game window; native browser fullscreen is
+requested through a user-operated fullscreen control.
+
+Level JSON now uses **schema version 2**, with typed terrain, start and trigger
+objects. Version 1 imports and saved snapshots are normalized at the boundary:
+terrain and labels are retained, spawn becomes a start object, and the old summit
+becomes an ending zone above its original arrival line. That zone extends two
+maximum hammer reaches upward and is editable. Original files and snapshots
+are not rewritten. Saving/exporting produces version 2; old game versions
+cannot read new trigger definitions, but their original version 1 saves remain
+available for rollback.
 
 ### Illusions
 
@@ -231,8 +282,9 @@ separate owners, so saving/exporting after playtesting still includes illusions.
 
 ### Performance boundaries
 
-The level format supports **1,000 objects**, **32 distinct geometry templates**,
-up to **64 vertices per custom polygon**, and **16 course labels**. Dimensions,
+The level format supports **1,000 terrain objects**, **128 triggers**, one start,
+**32 distinct terrain geometry templates**, up to **64 vertices per custom polygon**,
+and **16 course labels**. Each trigger supports up to **8 ordered events**. Dimensions,
 coordinates, winding, intersections, IDs, and import size are validated.
 Preset objects reuse normalized geometry rather than allocating a new mesh and
 material for every placement.
@@ -242,6 +294,10 @@ whole physics world; static terrain is not regenerated each frame. Illusion
 processing visits active landings/fades instead of polling every level object.
 Shared batched rendering and cached materials keep draw calls tied to visible
 geometry batches rather than the number of placed objects.
+Trigger proximity uses a spatial index rather than scanning the level every
+physics tick. Flag markers share instanced geometry, and their buffers update
+only when marker positions change. Runtime event state is separate from authored
+objects and remains available in editor diagnostics.
 
 These performance and editor-free release requirements are recorded in
 [`AGENTS.md`](AGENTS.md).
@@ -354,6 +410,9 @@ loading errors, current rendering anchors and world transforms, and the arm IK
 settings, selected profile, and save state.
 `window.gettingOver.level()` reports the immutable authored definition, current
 illusion/collider state, editor selection/mode, and render/cache counts.
+`window.gettingOver.events()` reports trigger/action lifecycles, presentation
+state, and the independent run timer. Restart resets the attempt; physics time
+continues to be available separately as `snapshot().time`.
 These globals are absent from the game-only release.
 
 ## Contributing

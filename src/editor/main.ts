@@ -4,6 +4,7 @@ import { PHYSICS } from '../config';
 import type { Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import { Game } from '../game';
+import { levelSpawn } from '../level';
 import { Appearance } from './appearance';
 import { AppearanceRig } from './appearance-rig';
 import { createAppearanceUI } from './appearance-ui';
@@ -24,7 +25,7 @@ let debug = false;
 let practice: PracticeId = 'start';
 let editing = false;
 const game = new Game({
-  canvas, fatal, level: level.definition(),
+  canvas, fatal, eventMount: mount, level: level.definition(),
   onAction: perform,
   onNotice: (message) => ui.notice(message, 'error'),
   onShortcut: (event) => {
@@ -78,7 +79,7 @@ const levelEditor = createLevelEditor({
 
 function resetPractice(id: PracticeId): void {
   practice = id;
-  game.reset(id === 'start' ? level.definition().spawn : practiceById(id));
+  game.reset(id === 'start' ? levelSpawn(level.definition()) : practiceById(id));
 }
 
 function updateWorkshop(state: WorkshopState): void {
@@ -86,7 +87,7 @@ function updateWorkshop(state: WorkshopState): void {
   if (nextEditing !== editing) {
     editing = nextEditing;
     if (editing) game.simulation.restoreTerrain();
-    game.input.setInteraction({ enabled: !editing });
+    game.setInputBlock({ reason: 'level-editor', blocked: editing });
     levelEditor.setMode(editing ? 'edit' : 'inactive');
   }
   game.setPause({ reason: 'workshop', paused: state.open && state.compact });
@@ -124,11 +125,12 @@ const diagnostics = Object.freeze({
       paused: reasons.length > 0, pauseReasons: reasons,
       pointerLocked: game.input.locked, inputMode: game.input.mode,
       camera: game.view.cameraState(), cursorScreen: game.view.project(state.cursor),
-      step: PHYSICS.dt, stopped: game.halted,
+      step: PHYSICS.dt, stopped: game.halted, timer: game.timerState(),
     };
   },
   project: (point: Point) => game.view.project(point),
   appearance: () => appearance.snapshot(),
+  events: () => game.eventState(),
   level: () => ({
     definition: level.definition(),
     terrain: game.simulation.terrainState(),

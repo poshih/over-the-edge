@@ -42,7 +42,7 @@ export const START_SPAWN: Readonly<PlayerSpawn> = {
   position: { x: 0, y: 0.65 }, angle: -0.42, extension: 0.2,
 };
 
-export const SUMMIT = { xMin: 15.25, xMax: 18.1, y: 12.2, arrivalTolerance: 0.08 } as const;
+export const ENDING_ZONE = { xMin: 15.25, xMax: 18.1, y: 12.2, arrivalTolerance: 0.08 } as const;
 
 export const COURSE_LABELS = [
   { x: 4.2, y: 1.1, text: '01 / THE LEDGE' },

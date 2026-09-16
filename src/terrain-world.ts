@@ -1,13 +1,13 @@
 import { Chain, Circle, Vec2, WorldManifold } from 'planck';
 import type { Body, Contact, ContactImpulse, World } from 'planck';
 import { PHYSICS } from './config';
-import { geometryKey, ILLUSION, shapeVertices } from './level';
-import type { LevelChange, LevelObject, TerrainEvent } from './level';
+import { geometryKey, ILLUSION, isTerrainObject, shapeVertices } from './level';
+import type { LevelChange, TerrainObject, TerrainEvent } from './level';
 
 export class TerrainWorld {
   private readonly world: World;
   private readonly getPot: () => Body;
-  private readonly objects = new Map<string, LevelObject>();
+  private readonly objects = new Map<string, TerrainObject>();
   private readonly bodies = new Map<string, Body>();
   private readonly ids = new Map<Body, string>();
   private readonly candidates = new Set<string>();
@@ -17,7 +17,7 @@ export class TerrainWorld {
   private readonly manifold = new WorldManifold();
   private disposed = false;
 
-  constructor(world: World, objects: readonly LevelObject[], getPot: () => Body) {
+  constructor(world: World, objects: readonly TerrainObject[], getPot: () => Body) {
     this.world = world;
     this.getPot = getPot;
     this.ensureMutable();
@@ -31,24 +31,30 @@ export class TerrainWorld {
   apply(change: LevelChange): void {
     this.ensureMutable();
     if (change.kind === 'replace') {
-      const retained = new Set(change.level.objects.map((object) => object.id));
+      const terrain = change.level.objects.filter(isTerrainObject);
+      const retained = new Set(terrain.map((object) => object.id));
       for (const id of this.objects.keys()) {
         if (!retained.has(id)) this.remove(id);
       }
-      for (const object of change.level.objects) this.upsert(object);
+      for (const object of terrain) this.upsert(object);
       this.emit({ type: 'reset', objects: [...this.objects.values()] });
       return;
     }
-    const removals = new Set(change.remove);
+    const removed = new Set(change.remove.filter((id) => this.objects.has(id)));
     for (const object of change.upsert) {
+      if (object.kind !== 'terrain' && this.objects.has(object.id)) removed.add(object.id);
+    }
+    const terrain = change.upsert.filter(isTerrainObject);
+    const removals = new Set(removed);
+    for (const object of terrain) {
       const previous = this.objects.get(object.id);
       if (previous && geometryKey(previous.shape) !== geometryKey(object.shape)) removals.add(object.id);
     }
-    for (const id of change.remove) this.remove(id);
-    for (const object of change.upsert) this.upsert(object);
+    for (const id of removed) this.remove(id);
+    for (const object of terrain) this.upsert(object);
     // Release replaced render templates before allocating any new template in this edit.
     for (const id of removals) this.emit({ type: 'remove', id });
-    for (const object of change.upsert) this.emit({ type: 'upsert', object });
+    for (const object of terrain) this.emit({ type: 'upsert', object });
   }
 
   reset(): void {
@@ -132,7 +138,7 @@ export class TerrainWorld {
     }
   };
 
-  private upsert(object: LevelObject): void {
+  private upsert(object: TerrainObject): void {
     const previous = this.objects.get(object.id);
     const body = this.bodies.get(object.id);
     this.objects.set(object.id, object);
@@ -165,14 +171,14 @@ export class TerrainWorld {
     this.disappeared.delete(id);
   }
 
-  private createBody(object: LevelObject): void {
+  private createBody(object: TerrainObject): void {
     const body = this.world.createBody({ position: new Vec2(object.x, object.y), angle: object.angle });
     this.createFixture(body, object);
     this.bodies.set(object.id, body);
     this.ids.set(body, object.id);
   }
 
-  private createFixture(body: Body, object: LevelObject): void {
+  private createFixture(body: Body, object: TerrainObject): void {
     const shape = object.shape.type === 'circle'
       ? new Circle(object.width / 2)
       : new Chain(shapeVertices(object.shape).map((vertex) =>
@@ -192,7 +198,7 @@ export class TerrainWorld {
     this.ids.delete(body);
   }
 
-  private object(id: string): LevelObject {
+  private object(id: string): TerrainObject {
     const object = this.objects.get(id);
     if (!object) throw new Error(`Unknown terrain object: ${id}.`);
     return object;

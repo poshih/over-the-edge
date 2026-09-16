@@ -2,29 +2,39 @@ import { RIG } from '../config';
 import type { Point } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import {
-  ILLUSION, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
-  objectContains, objectVertices, shapeVertices, validateLevel, validateLevelObject,
+  ILLUSION, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
+  objectContains, objectVertices, shapeVertices, TRIGGER_LIMITS, validateLevel, validateLevelObject,
 } from '../level';
-import type { LevelDefinition, LevelObject, LevelShape, ShapeKind } from '../level';
+import type { LevelDefinition, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion } from '../level';
+import { ENDING_EVENTS } from '../trigger-events';
+import type { TriggerAction } from '../trigger-events';
 import { element } from '../dom';
 import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
+import { EntityGizmos, objectGizmoBounds } from './object-gizmos';
 import { NamedSnapshots, SnapshotError } from './named-snapshots';
 import { createSnapshotPicker } from './snapshot-picker';
+import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
 
-type Tool = 'select' | 'pan' | 'place' | 'spawn' | 'summit';
+type Tool = 'select' | 'pan' | 'place' | 'place-trigger' | 'start';
 interface Bounds { left: number; right: number; bottom: number; top: number }
-interface Preset { id: string; label: string; shape: LevelShape; width: number; height: number }
+interface TerrainPreset { id: string; label: string; shape: LevelShape; width: number; height: number }
+interface TriggerPreset {
+  id: string; label: string; name: string; region: TriggerRegion;
+  activation: 'once' | 'on-enter'; marker: 'none' | 'flag';
+  events: readonly TriggerAction[]; anchorBottom: boolean;
+}
 type Gesture =
   | { kind: 'move'; pointerId: number; start: Point; world: Point; original: LevelObject; preview: LevelObject }
   | { kind: 'pan'; pointerId: number; start: Point; camera: EditorCamera; unitsPerPixel: number }
-  | { kind: 'place' | 'spawn' | 'summit'; pointerId: number; world: Point };
+  | { kind: 'place' | 'place-trigger' | 'start'; pointerId: number; world: Point };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEGREES = 180 / Math.PI;
 const DRAG_DISTANCE = 4;
+const HANDLE_PIXELS = 16;
 const MIN_VIEW_HEIGHT = 3;
 const MAX_VIEW_HEIGHT = LEVEL_LIMITS.coordinate * 4;
 const VIEW_PADDING = 1.2;
@@ -33,7 +43,6 @@ const WHEEL_ZOOM_RATE = 0.0015;
 const GRID_TARGET_PIXELS = 48;
 const DOWNLOAD_REVOKE_MS = 1000;
 const DEFAULT_OBJECT_DEPTH = 1.5;
-const STARTER_SUMMIT = { xMin: 4, xMax: 7, y: 0 } as const;
 const WHEEL_LINE_PIXELS = 16;
 const PRESET_SETTINGS: Record<ShapeKind, { label: string; width: number; height: number }> = {
   box: { label: 'Block', width: 2.5, height: 2 },
@@ -42,29 +51,79 @@ const PRESET_SETTINGS: Record<ShapeKind, { label: string; width: number; height:
   circle: { label: 'Circle', width: 2.5, height: 2.5 },
   hexagon: { label: 'Hexagon', width: 2.5, height: 2.5 },
 };
-const PRESETS: readonly Preset[] = SHAPE_KINDS.flatMap((type): Preset[] => {
+const PRESETS: readonly TerrainPreset[] = SHAPE_KINDS.flatMap((type): TerrainPreset[] => {
   const preset = { id: type, shape: Object.freeze({ type }), ...PRESET_SETTINGS[type] };
   return type === 'box'
     ? [preset, { id: 'platform', label: 'Platform', shape: preset.shape, width: 4, height: 0.4 }]
     : [preset];
 });
+const TRIGGER_PRESETS: readonly TriggerPreset[] = [
+  {
+    id: 'trigger', label: 'Trigger', name: 'Trigger', anchorBottom: false,
+    region: { type: 'circle', radius: 1.5 }, activation: 'once', marker: 'none',
+    events: [{ type: 'popup', title: 'Event', message: 'Describe what happens here.' }],
+  },
+  {
+    id: 'ending-trigger', label: 'Ending trigger', name: 'Ending', anchorBottom: true,
+    region: { type: 'box', width: 3, height: TRIGGER_LIMITS.endingHeight }, activation: 'once', marker: 'flag',
+    events: ENDING_EVENTS,
+  },
+];
 const history = new NamedSnapshots<LevelDefinition>({
   prefix: 'over-the-edge:level:snapshot:v1:', version: 1, field: 'level',
   label: 'level', namePrompt: 'Enter a level name',
   validate: validateLevel, isDataError: (error) => error instanceof LevelError,
 });
 
+function asTerrain(object: LevelObject | null): TerrainObject | null {
+  return object !== null && isTerrainObject(object) ? object : null;
+}
+function asStart(object: LevelObject | null): StartObject | null {
+  return object !== null && object.kind === 'start' ? object : null;
+}
+function asTrigger(object: LevelObject | null): TriggerObject | null {
+  return object !== null && isTriggerObject(object) ? object : null;
+}
+
 function objectBounds(object: LevelObject): Bounds {
-  const vertices = objectVertices(object);
-  return {
-    left: Math.min(...vertices.map((point) => point.x)), right: Math.max(...vertices.map((point) => point.x)),
-    bottom: Math.min(...vertices.map((point) => point.y)), top: Math.max(...vertices.map((point) => point.y)),
-  };
+  if (isTerrainObject(object)) {
+    const vertices = objectVertices(object);
+    return {
+      left: Math.min(...vertices.map((point) => point.x)), right: Math.max(...vertices.map((point) => point.x)),
+      bottom: Math.min(...vertices.map((point) => point.y)), top: Math.max(...vertices.map((point) => point.y)),
+    };
+  }
+  return objectGizmoBounds(object);
+}
+
+function anchorTrigger(object: TriggerObject, preset: TriggerPreset): TriggerObject {
+  if (!preset.anchorBottom || object.region.type !== 'box') return object;
+  return { ...object, y: object.y + object.region.height / 2 };
+}
+
+function triggerPlacement(preset: TriggerPreset, at: Point): TriggerObject {
+  return anchorTrigger({
+    kind: 'trigger', id: 'placement-preview', name: preset.name, x: at.x, y: at.y,
+    region: preset.region, activation: preset.activation, marker: preset.marker,
+    events: preset.events.map((action) => ({ ...action })),
+  }, preset);
 }
 
 function numericField(id: string, label: string, min: number, max: number, step = 0.1): string {
   return `<label class="level-field" for="level-${id}">${label}
     <input id="level-${id}" type="number" min="${min}" max="${max}" step="${step}" inputmode="decimal" />
+  </label>`;
+}
+
+function textField(id: string, label: string, maxlength: number): string {
+  return `<label class="level-field" for="level-${id}">${label}
+    <input id="level-${id}" type="text" maxlength="${maxlength}" />
+  </label>`;
+}
+
+function selectField(id: string, label: string, options: readonly { value: string; label: string }[]): string {
+  return `<label class="level-field" for="level-${id}">${label}
+    <select id="level-${id}">${options.map((option) => `<option value="${option.value}">${option.label}</option>`).join('')}</select>
   </label>`;
 }
 
@@ -92,7 +151,14 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button" data-level-tool="select" aria-pressed="true">Select / move</button>
           <button type="button" class="button" data-level-tool="pan" aria-pressed="false">Pan view</button>
         </div>
+        <p class="level-help">Terrain shapes</p>
         <div class="level-palette" aria-label="Shape palette"></div>
+        <p class="level-help">Start &amp; triggers</p>
+        <div class="level-action-row">
+          <button type="button" class="button" data-level-tool="start" aria-pressed="false">Start location</button>
+          <button type="button" class="button level-go-start">View start</button>
+        </div>
+        <div class="level-entity-palette" aria-label="Trigger palette"></div>
         <p class="level-help level-tool-help"></p>
         <div class="level-camera-controls" aria-label="Editor camera">
           <button type="button" class="button level-zoom-out" aria-label="Zoom out">−</button>
@@ -103,49 +169,64 @@ export function createLevelEditor(options: LevelEditorOptions) {
       <fieldset class="tuning-group level-inspector">
         <legend>Object properties</legend>
         <p class="level-selection-name"></p>
-        <div class="level-field-grid">
+        <div class="level-field-grid level-fields-common">
           ${numericField('x', 'Position X', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
           ${numericField('y', 'Position Y', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
-          ${numericField('width', 'Width / diameter', LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize)}
-          ${numericField('height', 'Height', LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize)}
-          ${numericField('angle', 'Rotation (°)', -180, 180, 1)}
-          ${numericField('depth', 'Depth', LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth)}
         </div>
-        <p class="level-help level-circle-help" hidden>Circle width is its diameter. Height is linked to width.</p>
-        <label class="level-checkbox" for="level-illusion">
-          <input id="level-illusion" type="checkbox" aria-describedby="level-illusion-help" /> Illusion
-        </label>
-        <p id="level-illusion-help" class="level-help">Only the player pot landing on top starts a
-          ${ILLUSION.fadeSeconds}s fade. Then collision and visuals disappear. Hammer, side and underside
-          contacts do not trigger it. Playtest resets disappeared objects; saved level data is unchanged.</p>
+        <div class="level-field-grid level-fields-angle">
+          ${numericField('angle', 'Rotation / hammer angle (°)', -180, 180, 1)}
+        </div>
+        <div class="level-fields-terrain">
+          <div class="level-field-grid">
+            ${numericField('width', 'Width / diameter', LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize)}
+            ${numericField('height', 'Height', LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize)}
+            ${numericField('depth', 'Depth', LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth)}
+          </div>
+          <p class="level-help level-circle-help" hidden>Circle width is its diameter. Height is linked to width.</p>
+          <label class="level-checkbox" for="level-illusion">
+            <input id="level-illusion" type="checkbox" aria-describedby="level-illusion-help" /> Illusion
+          </label>
+          <p id="level-illusion-help" class="level-help">Only the player pot landing on top starts a
+            ${ILLUSION.fadeSeconds}s fade. Then collision and visuals disappear. Hammer, side and underside
+            contacts do not trigger it. Playtest resets disappeared objects; saved level data is unchanged.</p>
+        </div>
+        <div class="level-fields-start">
+          <div class="level-field-grid">
+            ${numericField('extension', 'Hammer extension', RIG.minExtension, RIG.maxExtension, 0.01)}
+          </div>
+          <p class="level-help">Position is the starting pot center. Rotation is the starting hammer angle.
+            A level always has exactly one start; moving it here relocates it instead of creating another. Start
+            is only the spawn pose — it cannot carry events. For an intro popup or video, place a normal trigger
+            around the start position instead.</p>
+        </div>
+        <div class="level-fields-trigger">
+          <div class="level-field-grid">
+            ${textField('trigger-name', 'Name', LEVEL_LIMITS.text)}
+            ${selectField('trigger-region', 'Region shape', [{ value: 'circle', label: 'Circle' }, { value: 'box', label: 'Box' }])}
+          </div>
+          <div class="level-field-grid level-trigger-circle-fields">
+            ${numericField('trigger-radius', 'Radius', 0.1, TRIGGER_LIMITS.maximumSize / 2)}
+          </div>
+          <div class="level-field-grid level-trigger-box-fields">
+            ${numericField('trigger-width', 'Width', 0.1, TRIGGER_LIMITS.maximumSize)}
+            ${numericField('trigger-height', 'Height', 0.1, TRIGGER_LIMITS.maximumSize)}
+          </div>
+          <div class="level-field-grid">
+            ${selectField('trigger-activation', 'Activation', [{ value: 'once', label: 'Once per run' }, { value: 'on-enter', label: 'Every entry' }])}
+            ${selectField('trigger-marker', 'Marker', [{ value: 'none', label: 'None' }, { value: 'flag', label: 'Flag' }])}
+          </div>
+          <p class="level-help">Trigger regions are centered on Position X/Y and axis-aligned (no rotation).
+            Proximity uses the player's foot position; "Once per run" fires a single time, "Every entry" fires
+            again each time the player re-enters after leaving.</p>
+          <p class="level-help level-trigger-preview-events" hidden></p>
+          <div class="level-trigger-events"></div>
+        </div>
         <button type="button" class="button level-delete">Delete selected object</button>
       </fieldset>
-      <fieldset class="tuning-group level-course-settings">
-        <legend>Player start &amp; summit</legend>
-        <p class="level-help">Start coordinates are the pot center; leave space above the ground.
-          The summit line belongs at the top of a reachable surface.</p>
-        <div class="level-field-grid">
-          ${numericField('spawn-x', 'Start X', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
-          ${numericField('spawn-y', 'Start Y', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
-          ${numericField('spawn-angle', 'Hammer angle (°)', -180, 180, 1)}
-          ${numericField('spawn-extension', 'Hammer extension', RIG.minExtension, RIG.maxExtension)}
-        </div>
-        <div class="level-action-row">
-          <button type="button" class="button" data-level-tool="spawn" aria-pressed="false">Place start</button>
-          <button type="button" class="button level-go-start">View start</button>
-        </div>
-        <div class="level-field-grid">
-          ${numericField('summit-left', 'Summit left X', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
-          ${numericField('summit-right', 'Summit right X', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
-          ${numericField('summit-y', 'Summit height', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
-          ${numericField('summit-tolerance', 'Arrival tolerance', 0, 0.25, 0.01)}
-        </div>
-        <div class="level-action-row">
-          <button type="button" class="button" data-level-tool="summit" aria-pressed="false">Place summit</button>
-          <button type="button" class="button level-go-summit">View summit</button>
-        </div>
-        <button type="button" class="button level-clear-labels">Remove course labels</button>
+      <fieldset class="tuning-group level-labels">
+        <legend>Course labels</legend>
         <p class="level-help level-label-count"></p>
+        <button type="button" class="button level-clear-labels">Remove course labels</button>
       </fieldset>
       <div class="level-history"></div>
       <fieldset class="tuning-group level-files">
@@ -155,7 +236,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button level-import">Import level JSON</button>
         </div>
         <input class="level-file" type="file" accept=".json,application/json" aria-label="Import level JSON" hidden />
-        <p class="level-help">Exports level.json: course geometry, start, summit and labels only.
+        <p class="level-help">Exports level.json: terrain, start, triggers and labels only.
           Models, appearance, tuning and browser settings are never included. Import limit:
           ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Saved history loads only when you choose Load level.</p>
       </fieldset>
@@ -168,10 +249,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
   overlay.tabIndex = 0;
   overlay.setAttribute('aria-label', 'Level canvas. V selects, H pans, plus and minus zoom. Escape cancels; Delete removes selection.');
   overlay.innerHTML = `<svg class="level-guides" aria-hidden="true">
-    <polygon class="level-selection" vector-effect="non-scaling-stroke" hidden />
-    <polygon class="level-ghost" vector-effect="non-scaling-stroke" hidden />
-    <g class="level-start-marker"><circle r="8" /><path d="M -13 0 H 13 M 0 -13 V 13" /><text x="16" y="-12">START</text></g>
-    <g class="level-summit-marker"><path /><text>SUMMIT</text></g>
+    <g class="level-camera-group">
+      <polygon class="level-selection" vector-effect="non-scaling-stroke" hidden />
+      <polygon class="level-ghost" vector-effect="non-scaling-stroke" hidden />
+    </g>
   </svg>`;
   // A canvas sibling stays below the host's interface stacking context, including its toolbar.
   options.canvas.insertAdjacentElement('afterend', overlay);
@@ -181,18 +262,34 @@ export function createLevelEditor(options: LevelEditorOptions) {
     return node;
   };
   const svg = graphic<SVGSVGElement>('svg');
+  const cameraGroup = graphic<SVGGElement>('.level-camera-group');
   const selectionPolygon = graphic<SVGPolygonElement>('.level-selection');
   const ghostPolygon = graphic<SVGPolygonElement>('.level-ghost');
-  const startMarker = graphic<SVGGElement>('.level-start-marker');
-  const summitPath = graphic<SVGPathElement>('.level-summit-marker path');
-  const summitText = graphic<SVGTextElement>('.level-summit-marker text');
+  const entityGizmos = new EntityGizmos(cameraGroup);
   const inspector = element<HTMLFieldSetElement>(root, '.level-inspector');
   const input = (name: string) => element<HTMLInputElement>(root, `#level-${name}`);
+  const select = (name: string) => element<HTMLSelectElement>(root, `#level-${name}`);
   const saveStatus = element<HTMLParagraphElement>(root, '.level-save-status');
   const importButton = element<HTMLButtonElement>(root, '.level-import');
   const fileInput = element<HTMLInputElement>(root, '.level-file');
   const bounds = new Map(level.definition().objects.map((object) => [object.id, objectBounds(object)]));
+  entityGizmos.sync(level.definition().objects, []);
   const downloads = new Map<string, ReturnType<typeof setTimeout>>();
+  const triggerEvents = createTriggerEventEditor({
+    mount: element(root, '.level-trigger-events'), signal: events.signal, onNotice,
+    onApply: (id, actions) => {
+      try {
+        const target = level.object(id);
+        if (target.kind !== 'trigger') return false;
+        level.upsert({ ...target, events: actions });
+        return true;
+      } catch (error) {
+        if (!(error instanceof LevelError)) throw error;
+        report(error);
+        return false;
+      }
+    },
+  });
   let active = false;
   let disposed = false;
   let tool: Tool = 'select';
@@ -200,7 +297,6 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let presetId: string | null = null;
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
-  let markerPreview: Point | null = null;
   let savedDefinition = level.definition();
   let savedCamera: EditorCamera | null = null;
   let importGeneration = 0;
@@ -210,14 +306,21 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let commitCount = 0;
   let hitTestCount = 0;
 
-  const dirty = () => level.definition() !== savedDefinition;
+  const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts();
   const selectedObject = () => selectedId === null ? null : level.object(selectedId);
-  const inspectorObject = () => tool === 'place' ? placement : selectedObject();
+  const inspectorObject = (): LevelObject | null =>
+    (tool === 'place' || tool === 'place-trigger' || tool === 'start') ? placement : selectedObject();
   const pointFromEvent = (event: PointerEvent): Point => ({ x: event.clientX, y: event.clientY });
   const local = (point: Point): Point => {
     const client = camera.project(point);
     return { x: client.x - rect.left, y: client.y - rect.top };
   };
+  const ghostObject = (): LevelObject | null => {
+    if (gesture?.kind === 'move') return gesture.preview;
+    if (tool === 'place' || tool === 'place-trigger' || tool === 'start') return placement;
+    return null;
+  };
+  const handleRadius = (): number => HANDLE_PIXELS * camera.state().worldHeight / Math.max(1, rect.height);
 
   function report(error: unknown): void {
     if (error instanceof LevelError || error instanceof SnapshotError) {
@@ -240,90 +343,145 @@ export function createLevelEditor(options: LevelEditorOptions) {
     }
   }
 
+  function commitOrPreview(next: LevelObject): void {
+    if (tool === 'place' || tool === 'place-trigger' || tool === 'start') {
+      placement = validateLevelObject(next);
+      renderControls();
+      draw();
+    } else {
+      level.upsert(next);
+    }
+  }
+
   function confirmReplacement(action: string): boolean {
     return !dirty() || window.confirm(`${action} replaces your unsaved level changes.
 Save a named snapshot or export first if you want to keep them. Continue without saving?`);
   }
 
   function renderStatus(): void {
-    saveStatus.textContent = `${level.definition().objects.length} / ${LEVEL_LIMITS.objects} objects · ${
+    const counts = level.counts();
+    saveStatus.textContent = `${counts.terrain} / ${LEVEL_LIMITS.objects} terrain · ${counts.triggers} / ${TRIGGER_LIMITS.objects} triggers · ${
       importing ? 'Reading level file…' : dirty() ? 'Unsaved changes — save or export to keep them' : 'No unsaved changes'}`;
     saveStatus.dataset.dirty = String(dirty());
   }
 
   function renderControls(): void {
     const object = inspectorObject();
+    const terrain = asTerrain(object);
+    const start = asStart(object);
+    const trigger = asTrigger(object);
     inspector.disabled = object === null;
-    element(root, '.level-selection-name').textContent = object === null ? 'Select an object, or choose a shape to place.' :
-      tool === 'place' ? `New ${object.shape.type} — click / tap the canvas to place` : `${object.shape.type} · ${object.id}`;
-    for (const name of ['x', 'y', 'width', 'height', 'angle', 'depth'] as const) {
-      input(name).value = object === null ? '' : String(Number((name === 'angle' ? object.angle * DEGREES : object[name]).toFixed(4)));
+    element(root, '.level-fields-common').hidden = object === null;
+    element(root, '.level-fields-angle').hidden = trigger !== null || object === null;
+    element(root, '.level-fields-terrain').hidden = terrain === null;
+    element(root, '.level-fields-start').hidden = start === null;
+    element(root, '.level-fields-trigger').hidden = trigger === null;
+
+    element(root, '.level-selection-name').textContent =
+      object === null ? 'Select an object, choose a shape, or place a start/trigger.' :
+      tool === 'place' && terrain !== null ? `New ${terrain.shape.type} — click / tap the canvas to place` :
+      tool === 'place-trigger' ? `New ${presetId === 'ending-trigger' ? 'ending trigger' : 'trigger'} — click / tap the canvas to place` :
+      tool === 'start' ? 'Start location — click / tap the canvas to place' :
+      terrain !== null ? `${terrain.shape.type} · ${terrain.id}` :
+      start !== null ? `Start location · ${start.id}` :
+      trigger !== null ? `Trigger "${trigger.name}" · ${trigger.id}` : '';
+
+    if (object !== null) {
+      const coordLimit = trigger !== null ? TRIGGER_LIMITS.coordinate : LEVEL_LIMITS.coordinate;
+      input('x').max = String(coordLimit); input('x').min = String(-coordLimit);
+      input('y').max = String(coordLimit); input('y').min = String(-coordLimit);
+      input('x').value = String(Number(object.x.toFixed(4)));
+      input('y').value = String(Number(object.y.toFixed(4)));
+    } else {
+      input('x').value = ''; input('y').value = '';
     }
-    input('height').disabled = object?.shape.type === 'circle';
-    input('illusion').checked = object?.illusion === true;
-    element(root, '.level-circle-help').hidden = object?.shape.type !== 'circle';
-    element<HTMLButtonElement>(root, '.level-delete').disabled = selectedId === null || tool === 'place';
+
+    if (terrain !== null) {
+      input('angle').value = String(Number((terrain.angle * DEGREES).toFixed(4)));
+      input('width').value = String(Number(terrain.width.toFixed(4)));
+      input('height').value = String(Number(terrain.height.toFixed(4)));
+      input('depth').value = String(Number(terrain.depth.toFixed(4)));
+      input('height').disabled = terrain.shape.type === 'circle';
+      input('illusion').checked = terrain.illusion;
+      element(root, '.level-circle-help').hidden = terrain.shape.type !== 'circle';
+    } else if (start !== null) {
+      input('angle').value = String(Number((start.angle * DEGREES).toFixed(4)));
+      input('extension').value = String(Number(start.extension.toFixed(4)));
+    } else if (trigger !== null) {
+      input('trigger-name').value = trigger.name;
+      select('trigger-region').value = trigger.region.type;
+      select('trigger-activation').value = trigger.activation;
+      select('trigger-marker').value = trigger.marker;
+      const isCircle = trigger.region.type === 'circle';
+      element(root, '.level-trigger-circle-fields').hidden = !isCircle;
+      element(root, '.level-trigger-box-fields').hidden = isCircle;
+      if (isCircle) input('trigger-radius').value = String(Number(trigger.region.radius.toFixed(4)));
+      else {
+        input('trigger-width').value = String(Number(trigger.region.width.toFixed(4)));
+        input('trigger-height').value = String(Number(trigger.region.height.toFixed(4)));
+      }
+      const placing = tool === 'place-trigger';
+      const previewNote = element(root, '.level-trigger-preview-events');
+      previewNote.hidden = !placing;
+      previewNote.textContent = placing ? `Default events: ${describeEvents(trigger.events)}. Edit after placing.` : '';
+      element(root, '.level-trigger-events').hidden = placing;
+      if (placing) triggerEvents.hide();
+      else triggerEvents.show(trigger.id, trigger.events);
+    } else {
+      triggerEvents.hide();
+    }
+
+    const selected = selectedObject();
+    element<HTMLButtonElement>(root, '.level-delete').disabled = selected === null || tool !== 'select' || selected.kind === 'start';
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-tool]')) {
       button.setAttribute('aria-pressed', String(button.dataset.levelTool === tool));
     }
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-preset]')) {
-      button.setAttribute('aria-pressed', String(tool === 'place' && button.dataset.levelPreset === presetId));
+      button.setAttribute('aria-pressed', String((tool === 'place' || tool === 'place-trigger') && button.dataset.levelPreset === presetId));
     }
     const help: Record<Tool, string> = {
-      select: 'Click / tap to select; drag to move. V selects, H pans. Escape cancels a drag without changing the level.',
+      select: 'Click / tap to select; drag to move. Start and trigger objects select near their center handle. ' +
+        'V selects, H pans. Escape cancels a drag without changing the level.',
       pan: 'Drag the canvas to pan anywhere in the course. Use + / − or the mouse wheel to zoom.',
       place: 'Click / tap to place this shape. Adjust its properties first if needed. Escape cancels placement.',
-      spawn: 'Click / tap the new pot-center position. Escape cancels.',
-      summit: 'Click / tap the middle of the summit surface. Its current width is preserved. Escape cancels.',
+      'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
+      start: 'Click / tap the new pot-center position. Escape cancels.',
     };
     element(root, '.level-tool-help').textContent = help[tool];
     overlay.dataset.tool = tool;
-    const { spawn, summit, labels } = level.definition();
-    for (const [name, value] of Object.entries({
-      'spawn-x': spawn.position.x, 'spawn-y': spawn.position.y,
-      'spawn-angle': spawn.angle * DEGREES, 'spawn-extension': spawn.extension,
-      'summit-left': summit.xMin, 'summit-right': summit.xMax,
-      'summit-y': summit.y, 'summit-tolerance': summit.arrivalTolerance,
-    })) input(name).value = String(Number(value.toFixed(4)));
+    const { labels } = level.definition();
     element(root, '.level-label-count').textContent = `${labels.length} course labels. Edits, saves and exports preserve them unless you remove them.`;
     element<HTMLButtonElement>(root, '.level-clear-labels').disabled = labels.length === 0;
     renderStatus();
   }
 
-  function drawPolygon(polygon: SVGPolygonElement, object: LevelObject | null): void {
+  function drawPolygon(polygon: SVGPolygonElement, object: TerrainObject | null): void {
     polygon.toggleAttribute('hidden', object === null);
     if (object === null) return;
-    polygon.setAttribute('points', objectVertices(object).map((point) => {
-      const p = local(point);
-      return `${p.x},${p.y}`;
-    }).join(' '));
+    polygon.setAttribute('points', objectVertices(object).map((point) => `${point.x},${point.y}`).join(' '));
     polygon.classList.toggle('level-illusion-outline', object.illusion);
   }
 
   function draw(): void {
     if (!active || disposed || rect.width <= 0 || rect.height <= 0) return;
     drawCount++;
-    drawPolygon(selectionPolygon, selectedObject());
-    drawPolygon(ghostPolygon, gesture?.kind === 'move' ? gesture.preview : placement);
-    const { spawn, summit } = level.definition();
-    const start = local(tool === 'spawn' && markerPreview !== null ? markerPreview : spawn.position);
-    startMarker.setAttribute('transform', `translate(${start.x},${start.y})`);
-    const summitCenter = tool === 'summit' ? markerPreview : null;
-    const halfWidth = (summit.xMax - summit.xMin) / 2;
-    const left = local(summitCenter === null ? { x: summit.xMin, y: summit.y } :
-      { x: summitCenter.x - halfWidth, y: summitCenter.y });
-    const right = local(summitCenter === null ? { x: summit.xMax, y: summit.y } :
-      { x: summitCenter.x + halfWidth, y: summitCenter.y });
-    summitPath.setAttribute('d', `M ${left.x} ${left.y - 8} V ${left.y} H ${right.x} V ${right.y - 8}`);
-    summitText.setAttribute('x', String((left.x + right.x) / 2));
-    summitText.setAttribute('y', String(left.y - 12));
+    drawPolygon(selectionPolygon, asTerrain(selectedObject()));
+    const ghost = ghostObject();
+    drawPolygon(ghostPolygon, ghost !== null ? asTerrain(ghost) : null);
+    entityGizmos.setSelection(asStart(selectedObject()) ?? asTrigger(selectedObject()));
+    entityGizmos.setGhost(ghost !== null && !isTerrainObject(ghost) ? ghost : null);
   }
 
   function drawCamera(): void {
     if (!active || disposed) return;
     const origin = local({ x: 0, y: 0 });
-    const unit = local({ x: 1, y: 0 });
-    const pixelsPerUnit = Math.hypot(unit.x - origin.x, unit.y - origin.y);
+    const unitX = local({ x: 1, y: 0 });
+    const unitY = local({ x: 0, y: 1 });
+    // A single matrix on the camera group repositions every world-space gizmo/polygon at once,
+    // so panning and zooming never rebuild per-object geometry.
+    cameraGroup.setAttribute('transform',
+      `matrix(${unitX.x - origin.x} ${unitX.y - origin.y} ${unitY.x - origin.x} ${unitY.y - origin.y} ${origin.x} ${origin.y})`);
+    const pixelsPerUnit = Math.hypot(unitX.x - origin.x, unitX.y - origin.y);
     if (pixelsPerUnit > 0) {
       const spacing = 2 ** Math.ceil(Math.log2(GRID_TARGET_PIXELS / pixelsPerUnit)) * pixelsPerUnit;
       overlay.style.backgroundSize = `${spacing}px ${spacing}px`;
@@ -356,30 +514,28 @@ Save a named snapshot or export first if you want to keep them. Continue without
     gesture = null;
     if (previous !== null && overlay.hasPointerCapture(previous.pointerId)) overlay.releasePointerCapture(previous.pointerId);
     if (previous?.kind === 'pan' && active) setCamera(previous.camera);
-    markerPreview = null;
     draw();
   }
 
-  function chooseTool(next: Exclude<Tool, 'place'>): void {
+  function chooseTool(next: 'select' | 'pan' | 'start'): void {
     cancelGesture();
     tool = next;
-    placement = null;
-    markerPreview = null;
+    presetId = null;
+    placement = next === 'start' ? { ...level.start() } : null;
     renderControls();
     draw();
   }
 
   function fitCourse(): void {
     cancelGesture();
-    const { spawn, summit } = level.definition();
-    const combined: Bounds = {
-      left: Math.min(spawn.position.x, summit.xMin), right: Math.max(spawn.position.x, summit.xMax),
-      bottom: Math.min(spawn.position.y, summit.y), top: Math.max(spawn.position.y, summit.y),
-    };
+    let combined: Bounds | null = null;
     for (const bound of bounds.values()) {
-      combined.left = Math.min(combined.left, bound.left); combined.right = Math.max(combined.right, bound.right);
-      combined.bottom = Math.min(combined.bottom, bound.bottom); combined.top = Math.max(combined.top, bound.top);
+      combined = combined === null ? { ...bound } : {
+        left: Math.min(combined.left, bound.left), right: Math.max(combined.right, bound.right),
+        bottom: Math.min(combined.bottom, bound.bottom), top: Math.max(combined.top, bound.top),
+      };
     }
+    combined ??= { left: -1, right: 1, bottom: -1, top: 1 };
     const aspect = rect.width / Math.max(1, rect.height);
     setCamera({
       x: (combined.left + combined.right) / 2, y: (combined.bottom + combined.top) / 2,
@@ -420,7 +576,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       }
     },
     save: (name) => {
-      if (!active) return null;
+      if (!active || !triggerEvents.flush()) return null;
       try {
         const entry = history.save(localStorage, name, level.definition());
         markSaved();
@@ -471,7 +627,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       const view = camera.state();
       tool = 'place'; presetId = preset.id; selectedId = null;
       placement = {
-        id: 'placement-preview', shape: preset.shape, x: view.x, y: view.y,
+        kind: 'terrain', id: 'placement-preview', shape: preset.shape, x: view.x, y: view.y,
         width: preset.width, height: preset.height, angle: 0,
         depth: DEFAULT_OBJECT_DEPTH, color: ROCK_COLOR, illusion: false,
       };
@@ -481,105 +637,186 @@ Save a named snapshot or export first if you want to keep them. Continue without
     element(root, '.level-palette').append(button);
   }
 
+  for (const preset of TRIGGER_PRESETS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button level-preset';
+    button.dataset.levelPreset = preset.id;
+    button.setAttribute('aria-pressed', 'false');
+    const icon = document.createElementNS(SVG_NS, 'svg');
+    icon.setAttribute('viewBox', '-0.65 -0.65 1.3 1.3');
+    icon.setAttribute('aria-hidden', 'true');
+    const shape: SVGElement = document.createElementNS(SVG_NS, preset.region.type === 'circle' ? 'circle' : 'rect');
+    if (preset.region.type === 'circle') shape.setAttribute('r', '0.4');
+    else { shape.setAttribute('x', '-0.4'); shape.setAttribute('y', '-0.3'); shape.setAttribute('width', '0.8'); shape.setAttribute('height', '0.6'); }
+    shape.setAttribute('fill', 'none'); shape.setAttribute('stroke', 'currentColor'); shape.setAttribute('stroke-width', '0.08');
+    icon.append(shape);
+    button.append(icon, document.createTextNode(preset.label));
+    button.addEventListener('click', () => {
+      if (!active) return;
+      cancelGesture();
+      const view = camera.state();
+      tool = 'place-trigger'; presetId = preset.id; selectedId = null;
+      placement = triggerPlacement(preset, view);
+      renderControls();
+      draw();
+    }, listen);
+    element(root, '.level-entity-palette').append(button);
+  }
+
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-tool]')) {
     button.addEventListener('click', () => {
       if (!active) return;
       const next = button.dataset.levelTool;
-      if (next !== 'select' && next !== 'pan' && next !== 'spawn' && next !== 'summit') throw new Error('Unknown level tool.');
+      if (next !== 'select' && next !== 'pan' && next !== 'start') throw new Error('Unknown level tool.');
       chooseTool(next);
     }, listen);
   }
-  for (const name of ['x', 'y', 'width', 'height', 'angle', 'depth', 'illusion'] as const) {
+  for (const name of ['x', 'y'] as const) {
     input(name).addEventListener('change', () => {
       if (!active) return;
       const object = inspectorObject();
       if (object === null) return;
       cancelGesture();
-      applyEdit(() => {
-        const value = name === 'illusion' ? input(name).checked : input(name).valueAsNumber / (name === 'angle' ? DEGREES : 1);
-        const next = { ...object, [name]: value };
-        if (next.shape.type === 'circle' && (name === 'width' || name === 'height')) {
-          next.width = Number(value); next.height = Number(value);
-        }
-        if (tool === 'place') {
-          placement = validateLevelObject(next);
-          renderControls(); draw();
-        } else {
-          level.upsert(next);
-        }
-      });
+      applyEdit(() => commitOrPreview({ ...object, [name]: input(name).valueAsNumber }));
     }, listen);
   }
-  for (const name of ['spawn-x', 'spawn-y', 'spawn-angle', 'spawn-extension', 'summit-left', 'summit-right', 'summit-y', 'summit-tolerance']) {
+  input('angle').addEventListener('change', () => {
+    if (!active) return;
+    const object = inspectorObject();
+    if (object === null || object.kind === 'trigger') return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, angle: input('angle').valueAsNumber / DEGREES }));
+  }, listen);
+  for (const name of ['width', 'height', 'depth'] as const) {
     input(name).addEventListener('change', () => {
       if (!active) return;
+      const object = asTerrain(inspectorObject());
+      if (object === null) return;
       cancelGesture();
       applyEdit(() => {
-        const { spawn, summit, labels } = level.definition();
         const value = input(name).valueAsNumber;
-        const nextSpawn = {
-          ...spawn, position: {
-            x: name === 'spawn-x' ? value : spawn.position.x, y: name === 'spawn-y' ? value : spawn.position.y,
-          },
-          angle: name === 'spawn-angle' ? value / DEGREES : spawn.angle,
-          extension: name === 'spawn-extension' ? value : spawn.extension,
-        };
-        level.metadata({
-          spawn: nextSpawn, labels,
-          summit: {
-            xMin: name === 'summit-left' ? value : summit.xMin, xMax: name === 'summit-right' ? value : summit.xMax,
-            y: name === 'summit-y' ? value : summit.y,
-            arrivalTolerance: name === 'summit-tolerance' ? value : summit.arrivalTolerance,
-          },
-        });
+        const circle = object.shape.type === 'circle' && (name === 'width' || name === 'height');
+        commitOrPreview({ ...object, [name]: value, ...(circle ? { width: value, height: value } : {}) });
       });
     }, listen);
   }
+  input('illusion').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTerrain(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, illusion: input('illusion').checked }));
+  }, listen);
+  input('extension').addEventListener('change', () => {
+    if (!active) return;
+    const object = asStart(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, extension: input('extension').valueAsNumber }));
+  }, listen);
+  input('trigger-name').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTrigger(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, name: input('trigger-name').value }));
+  }, listen);
+  select('trigger-region').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTrigger(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => {
+      const type = select('trigger-region').value;
+      const region: TriggerRegion = type === 'circle'
+        ? { type: 'circle', radius: object.region.type === 'circle' ? object.region.radius : Math.max(object.region.width, object.region.height) / 2 }
+        : {
+          type: 'box',
+          width: object.region.type === 'box' ? object.region.width : object.region.radius * 2,
+          height: object.region.type === 'box' ? object.region.height : object.region.radius * 2,
+        };
+      commitOrPreview({ ...object, region });
+    });
+  }, listen);
+  input('trigger-radius').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTrigger(inspectorObject());
+    if (object === null || object.region.type !== 'circle') return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, region: { type: 'circle', radius: input('trigger-radius').valueAsNumber } }));
+  }, listen);
+  for (const name of ['trigger-width', 'trigger-height'] as const) {
+    input(name).addEventListener('change', () => {
+      if (!active) return;
+      const object = asTrigger(inspectorObject());
+      if (object === null || object.region.type !== 'box') return;
+      const region = object.region;
+      cancelGesture();
+      applyEdit(() => commitOrPreview({
+        ...object, region: {
+          type: 'box',
+          width: name === 'trigger-width' ? input(name).valueAsNumber : region.width,
+          height: name === 'trigger-height' ? input(name).valueAsNumber : region.height,
+        },
+      }));
+    }, listen);
+  }
+  select('trigger-activation').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTrigger(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, activation: select('trigger-activation').value === 'on-enter' ? 'on-enter' : 'once' }));
+  }, listen);
+  select('trigger-marker').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTrigger(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, marker: select('trigger-marker').value === 'flag' ? 'flag' : 'none' }));
+  }, listen);
 
   function action(selector: string, callback: () => void): void {
     element(root, selector).addEventListener('click', () => { if (active) callback(); }, listen);
   }
   function deleteSelected(): void {
-    if (selectedId === null || tool === 'place') return;
+    if (selectedId === null || tool !== 'select') return;
+    const object = selectedObject();
+    if (object === null || object.kind === 'start') return;
     cancelGesture();
     const id = selectedId;
     selectedId = null;
     level.remove(id);
   }
   action('.level-delete', deleteSelected);
-  action('.level-play', () => { cancelGesture(); options.onPlay(); });
+  action('.level-play', () => { if (triggerEvents.flush()) { cancelGesture(); options.onPlay(); } });
   action('.level-fit', fitCourse);
   action('.level-zoom-in', () => zoom(1 / ZOOM_FACTOR));
   action('.level-zoom-out', () => zoom(ZOOM_FACTOR));
   action('.level-go-start', () => {
     cancelGesture();
-    const { position } = level.definition().spawn;
-    setCamera({ ...camera.state(), x: position.x, y: position.y });
-  });
-  action('.level-go-summit', () => {
-    cancelGesture();
-    const summit = level.definition().summit;
-    setCamera({ ...camera.state(), x: (summit.xMin + summit.xMax) / 2, y: summit.y });
+    const { x, y } = level.start();
+    setCamera({ ...camera.state(), x, y });
   });
   action('.level-clear-labels', () => {
-    const { spawn, summit, labels } = level.definition();
+    const { labels } = level.definition();
     if (labels.length === 0 || !window.confirm(`Remove all ${labels.length} course labels? Saved snapshots are not changed.`)) return;
-    level.metadata({ spawn, summit, labels: [] });
+    level.metadata({ labels: [] });
   });
   action('.level-new', () => {
     if (!window.confirm(`Start a new level? ${dirty() ? 'Your unsaved changes will be discarded. Save or export first to keep them. ' : ''}
-This restores the default ground and player start, removes all other objects and labels, and puts the summit on the ground. Saved snapshots are kept.`)) return;
-    const ground = DEFAULT_LEVEL.objects.find((object) => object.id === 'ground');
-    if (ground === undefined) throw new Error('The starter level needs its authored ground.');
+This restores the default ground and start location, removes all other objects and labels. Saved snapshots are kept.`)) return;
+    const ground = DEFAULT_LEVEL.objects.find((object) => object.kind === 'terrain' && object.id === 'ground');
+    const start = DEFAULT_LEVEL.objects.find((object) => object.kind === 'start');
+    if (ground === undefined || start === undefined) throw new Error('The starter level needs its authored ground and start.');
     resetSelection();
-    level.replace({
-      ...DEFAULT_LEVEL, objects: [ground], labels: [],
-      summit: { ...DEFAULT_LEVEL.summit, ...STARTER_SUMMIT },
-    });
+    level.replace({ schemaVersion: 2, labels: [], objects: [ground, start] });
     fitCourse();
-    onNotice('New level started. Add a course, set its start and summit, then save or export before leaving.', 'info');
+    onNotice('New level started. Add terrain and place an ending trigger, then save or export before leaving.', 'info');
   });
   action('.level-export', () => {
+    if (!triggerEvents.flush()) return;
     const definition = validateLevel(level.definition());
     const url = URL.createObjectURL(new Blob([`${JSON.stringify(definition, null, 2)}\n`], { type: 'application/json' }));
     const link = document.createElement('a');
@@ -636,8 +873,16 @@ This restores the default ground and player start, removes all other objects and
   function hitTest(world: Point): LevelObject | null {
     hitTestCount++;
     const objects = level.definition().objects;
+    const radius = handleRadius();
+    // Start/trigger handles are picked first by proximity to their small center dot so a large
+    // (often invisible-in-play) trigger region never blocks selecting terrain underneath it.
     for (let index = objects.length - 1; index >= 0; index--) {
       const object = objects[index];
+      if (!isTerrainObject(object) && Math.hypot(world.x - object.x, world.y - object.y) <= radius) return object;
+    }
+    for (let index = objects.length - 1; index >= 0; index--) {
+      const object = objects[index];
+      if (!isTerrainObject(object)) continue;
       const bound = bounds.get(object.id);
       if (bound === undefined) throw new Error('Missing authored object bounds.');
       if (world.x >= bound.left && world.x <= bound.right && world.y >= bound.bottom && world.y <= bound.top &&
@@ -666,9 +911,14 @@ This restores the default ground and player start, removes all other objects and
     } else if (tool === 'place' && placement !== null) {
       placement = { ...placement, x: world.x, y: world.y };
       if (gesture?.kind === 'place') gesture.world = world;
-    } else if (tool === 'spawn' || tool === 'summit') {
-      markerPreview = world;
-      if (gesture?.kind === tool) gesture.world = world;
+    } else if (tool === 'place-trigger' && placement !== null && placement.kind === 'trigger') {
+      const preset = TRIGGER_PRESETS.find((candidate) => candidate.id === presetId) ?? null;
+      const moved = { ...placement, x: world.x, y: world.y };
+      placement = preset === null ? moved : anchorTrigger(moved, preset);
+      if (gesture?.kind === 'place-trigger') gesture.world = world;
+    } else if (tool === 'start' && placement !== null && placement.kind === 'start') {
+      placement = { ...placement, x: world.x, y: world.y };
+      if (gesture?.kind === 'start') gesture.world = world;
     }
     draw();
   }
@@ -697,7 +947,7 @@ This restores the default ground and player start, removes all other objects and
   }, listen);
   overlay.addEventListener('pointermove', (event) => {
     if (!active || (gesture !== null && gesture.pointerId !== event.pointerId)) return;
-    if (gesture === null && tool !== 'place' && tool !== 'spawn' && tool !== 'summit') return;
+    if (gesture === null && tool !== 'place' && tool !== 'place-trigger' && tool !== 'start') return;
     movePreview(event);
   }, listen);
   overlay.addEventListener('pointerup', (event) => {
@@ -715,20 +965,17 @@ This restores the default ground and player start, removes all other objects and
         level.upsert(object);
         selectedId = object.id;
         chooseTool('select');
-      } else if ((finished.kind === 'spawn' || finished.kind === 'summit') && inside) {
-        const { spawn, summit, labels } = level.definition();
-        const halfWidth = (summit.xMax - summit.xMin) / 2;
-        level.metadata({
-          labels,
-          spawn: finished.kind === 'spawn' ? { ...spawn, position: finished.world } : spawn,
-          summit: finished.kind === 'summit' ? {
-            ...summit, xMin: finished.world.x - halfWidth, xMax: finished.world.x + halfWidth, y: finished.world.y,
-          } : summit,
-        });
+      } else if (finished.kind === 'place-trigger' && inside && placement !== null) {
+        const object = { ...placement, id: `trigger-${crypto.randomUUID()}` };
+        level.upsert(object);
+        selectedId = object.id;
+        chooseTool('select');
+      } else if (finished.kind === 'start' && inside && placement !== null) {
+        level.upsert(placement);
+        selectedId = placement.id;
         chooseTool('select');
       }
     });
-    markerPreview = null;
     renderControls(); draw();
   }, listen);
   const cancelPointer = (event: PointerEvent): void => {
@@ -737,7 +984,7 @@ This restores the default ground and player start, removes all other objects and
   overlay.addEventListener('pointercancel', cancelPointer, listen);
   overlay.addEventListener('lostpointercapture', cancelPointer, listen);
   overlay.addEventListener('pointerleave', () => {
-    if (gesture === null) { markerPreview = null; draw(); }
+    if (gesture === null) draw();
   }, listen);
   overlay.addEventListener('wheel', (event) => {
     if (!active) return;
@@ -777,8 +1024,10 @@ This restores the default ground and player start, removes all other objects and
   resize.observe(options.canvas);
   const unsubscribe = level.subscribe((change) => {
     commitCount++;
-    for (const id of change.remove) bounds.delete(id);
+    for (const id of change.remove) { bounds.delete(id); triggerEvents.forget(id); }
     for (const object of change.upsert) bounds.set(object.id, objectBounds(object));
+    entityGizmos.sync(change.upsert, change.remove);
+    if (change.kind === 'replace') triggerEvents.clear();
     if (selectedId !== null && !bounds.has(selectedId)) selectedId = null;
     if (gesture !== null) cancelGesture();
     renderControls();
@@ -811,14 +1060,14 @@ This restores the default ground and player start, removes all other objects and
     snapshot() {
       const current = level.definition();
       const object = selectedObject();
+      const ghost = ghostObject();
       return Object.freeze({
         mode: active ? 'edit' as const : 'inactive' as const,
         tool, selectedId, selected: object, preset: presetId,
-        preview: gesture?.kind === 'move' ? Object.freeze({ ...gesture.preview }) :
-          placement === null ? null : Object.freeze({ ...placement }),
+        preview: ghost === null ? null : Object.freeze({ ...ghost }),
         dragging: gesture?.kind ?? null, capturedPointer: gesture?.pointerId ?? null,
         dirty: dirty(), importing, objectCount: current.objects.length,
-        spawn: current.spawn, summit: current.summit, labelCount: current.labels.length,
+        start: level.start(), counts: level.counts(), labelCount: current.labels.length,
         camera: Object.freeze({ ...camera.state() }),
         overlay: Object.freeze({ visible: active && !overlay.hidden, x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
         commits: commitCount, hitTests: hitTestCount, draws: drawCount,
@@ -832,6 +1081,7 @@ This restores the default ground and player start, removes all other objects and
       camera.set(null);
       for (const [url, timeout] of downloads) { clearTimeout(timeout); URL.revokeObjectURL(url); }
       downloads.clear(); bounds.clear();
+      entityGizmos.destroy();
       root.remove(); overlay.remove();
     },
   };

@@ -3,26 +3,28 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const SHAPES = ['box', 'platform', 'ramp', 'triangle', 'circle', 'hexagon'];
+const terrainObjects = definition => definition.objects.filter(object => object.kind === 'terrain');
+
+export async function observeBrowserPage(target, errors) {
+  target.on('pageerror', error => errors.push(error.message));
+  target.on('dialog', dialog => dialog.accept());
+  const protocol = await target.context().newCDPSession(target);
+  await protocol.send('Runtime.enable');
+  await protocol.send('Log.enable');
+  protocol.on('Runtime.consoleAPICalled', event => {
+    if (event.type === 'error' || event.type === 'assert') {
+      errors.push(event.args.map(arg => 'value' in arg ? String(arg.value) : arg.description).join(' '));
+    }
+  });
+  protocol.on('Log.entryAdded', ({ entry }) => { if (entry.level === 'error') errors.push(entry.text); });
+  return protocol;
+}
 
 export async function verifyLevel(browser, address, artifacts) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   const page = await context.newPage();
   const report = { errors: [], shapes: [] };
-  const observePage = async (target) => {
-    target.on('pageerror', error => report.errors.push(error.message));
-    target.on('dialog', dialog => dialog.accept());
-    const protocol = await target.context().newCDPSession(target);
-    await protocol.send('Runtime.enable');
-    await protocol.send('Log.enable');
-    protocol.on('Runtime.consoleAPICalled', event => {
-      if (event.type === 'error' || event.type === 'assert') {
-        report.errors.push(event.args.map(arg => 'value' in arg ? String(arg.value) : arg.description).join(' '));
-      }
-    });
-    protocol.on('Log.entryAdded', ({ entry }) => { if (entry.level === 'error') report.errors.push(entry.text); });
-    return protocol;
-  };
-  await observePage(page);
+  await observeBrowserPage(page, report.errors);
   const state = () => page.evaluate(() => window.gettingOver.level());
   const physics = () => page.evaluate(() => window.gettingOver.snapshot());
   const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -55,6 +57,9 @@ export async function verifyLevel(browser, address, artifacts) {
     await page.goto(address, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver?.snapshot().time > 0);
     const initial = await state();
+    const start = initial.definition.objects.find(object => object.kind === 'start');
+    assert.ok(start);
+    const initialSpawn = { position: { x: start.x, y: start.y }, angle: start.angle, extension: start.extension };
     await edit();
     const paused = await physics();
     assert.ok(paused.pauseReasons.includes('level-editor'));
@@ -70,8 +75,8 @@ export async function verifyLevel(browser, address, artifacts) {
       await page.mouse.click(point.x, point.y);
       const placed = await state();
       assert.equal(placed.definition.objects.length, initial.definition.objects.length + index + 1);
-      assert.equal(placed.terrain.bodyCount, placed.definition.objects.length);
-      assert.equal(placed.rendering.terrain.instances, placed.definition.objects.length);
+      assert.equal(placed.terrain.bodyCount, terrainObjects(placed.definition).length);
+      assert.equal(placed.rendering.terrain.instances, terrainObjects(placed.definition).length);
       assert.equal(placed.definition.objects.at(-1).shape.type, shape === 'platform' ? 'box' : shape);
       report.shapes.push(shape);
     }
@@ -143,7 +148,7 @@ export async function verifyLevel(browser, address, artifacts) {
     };
     const large = {
       schemaVersion: 1,
-      spawn: initial.definition.spawn,
+      spawn: initialSpawn,
       summit: { xMin: 26, xMax: 29, y: 42, arrivalTolerance: 0.1 }, labels: [],
       objects: [floor, ...Array.from({ length: 999 }, (_, index) => ({
         ...floor, id: `rock-${index}`, shape: { type: ['box', 'ramp', 'triangle', 'circle', 'hexagon'][index % 5] },
@@ -190,6 +195,9 @@ export async function verifyLevel(browser, address, artifacts) {
       ],
     };
     await importLevel(illusion);
+    const authoredIllusion = (await state()).definition;
+    assert.equal(authoredIllusion.schemaVersion, 2);
+    assert.equal(terrainObjects(authoredIllusion).length, illusion.objects.length);
     await page.locator('.level-play').click();
     await page.waitForFunction(() => !window.gettingOver.snapshot().paused && window.gettingOver.level().editor.mode === 'inactive');
     await page.waitForFunction(() => window.gettingOver.level().terrain.fading.some(item => item.id === 'vanishing-ledge'));
@@ -211,7 +219,7 @@ export async function verifyLevel(browser, address, artifacts) {
     const vanished = await state();
     assert.equal(vanished.terrain.bodyCount, 1);
     assert.equal(vanished.rendering.terrain.instances, 1);
-    assert.deepEqual(vanished.definition, illusion, 'Transient effects must not delete authored objects.');
+    assert.deepEqual(vanished.definition, authoredIllusion, 'Transient effects must not delete authored objects.');
     await page.keyboard.press('p');
     await page.keyboard.press('r');
     await frames();
@@ -228,7 +236,7 @@ export async function verifyLevel(browser, address, artifacts) {
     const downloadPromise = page.waitForEvent('download');
     await page.locator('.level-export').click();
     const download = await downloadPromise;
-    assert.deepEqual(JSON.parse(await readFile(await download.path(), 'utf8')), illusion);
+    assert.deepEqual(JSON.parse(await readFile(await download.path(), 'utf8')), authoredIllusion);
     report.illusion = { topLanding: true, solidDuringFade: true, paused: true, removedAfterFade: true, restartRestores: true, authoredExportPreserved: true };
     await page.goto('about:blank');
     const phone = await browser.newContext({
@@ -236,7 +244,7 @@ export async function verifyLevel(browser, address, artifacts) {
     });
     const touch = await phone.newPage();
     try {
-      const touchProtocol = await observePage(touch);
+      const touchProtocol = await observeBrowserPage(touch, report.errors);
       const touchEvent = (type, point) => touchProtocol.send('Input.dispatchTouchEvent', {
         type, touchPoints: point === undefined ? [] : [{ ...point, id: 1, radiusX: 1, radiusY: 1, force: 1 }],
       });
@@ -261,7 +269,7 @@ export async function verifyLevel(browser, address, artifacts) {
       const spot = { x: overlay.x + overlay.width * 0.7, y: overlay.y + overlay.height * 0.55 };
       await tapPoint(spot);
       const placed = await touch.evaluate(() => window.gettingOver.level());
-      assert.equal(placed.definition.objects.length, 4);
+      assert.equal(terrainObjects(placed.definition).length, 4);
       assert.equal(placed.terrain.bodyCount, 4);
       assert.equal(placed.definition.objects.at(-1).shape.type, 'circle');
       await tap(touch.locator('[data-level-tool="select"]'));

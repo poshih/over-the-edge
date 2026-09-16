@@ -1,0 +1,163 @@
+// Editor-only rendering helpers for the non-terrain entities (start location and triggers).
+// Terrain keeps using shapeVertices/objectVertices/objectContains from ../level; these gizmos
+// exist because those helpers are typed to TerrainObject only, and because start/trigger
+// objects need a lightweight, always-visible authoring representation that the runtime never
+// draws as a full mesh (triggers stay invisible in play except for an optional flag marker).
+import { RIG } from '../config';
+import { isTriggerObject, triggerBounds } from '../level';
+import type { LevelObject, StartObject, TriggerObject } from '../level';
+
+export interface Bounds { left: number; right: number; bottom: number; top: number }
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+export const START_MARKER_RADIUS = 0.6;
+const START_CROSS = 0.42;
+const HANDLE_RADIUS = 0.22;
+const FLAG_POLE_HEIGHT = 0.6;
+const FLAG_WIDTH = 0.36;
+
+function svg<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
+  return document.createElementNS(SVG_NS, tag);
+}
+
+function line(x1: number, y1: number, x2: number, y2: number): SVGLineElement {
+  const element = svg('line');
+  element.setAttribute('x1', String(x1));
+  element.setAttribute('y1', String(y1));
+  element.setAttribute('x2', String(x2));
+  element.setAttribute('y2', String(y2));
+  element.setAttribute('vector-effect', 'non-scaling-stroke');
+  return element;
+}
+
+function circle(radius: number, cy = 0): SVGCircleElement {
+  const element = svg('circle');
+  element.setAttribute('r', String(radius));
+  element.setAttribute('cy', String(cy));
+  element.setAttribute('vector-effect', 'non-scaling-stroke');
+  return element;
+}
+
+/** A small pole-and-pennant glyph anchored so its base sits at (0, baseY). */
+function flagGlyph(baseY: number): SVGGElement {
+  const group = svg('g');
+  group.setAttribute('class', 'level-gizmo-flag');
+  const pole = line(0, baseY, 0, baseY - FLAG_POLE_HEIGHT);
+  const pennant = svg('path');
+  const top = baseY - FLAG_POLE_HEIGHT;
+  pennant.setAttribute('d', `M 0 ${top} L ${FLAG_WIDTH} ${top + FLAG_POLE_HEIGHT * 0.22} L 0 ${top + FLAG_POLE_HEIGHT * 0.44} Z`);
+  group.append(pole, pennant);
+  return group;
+}
+
+function startGizmo(object: StartObject): SVGElement[] {
+  const reach = RIG.handleLength + object.extension;
+  const direction = line(0, 0, Math.cos(object.angle) * reach * 0.5, Math.sin(object.angle) * reach * 0.5);
+  direction.setAttribute('class', 'level-gizmo-direction');
+  return [
+    circle(START_MARKER_RADIUS * 0.55),
+    line(-START_CROSS, 0, START_CROSS, 0),
+    line(0, -START_CROSS, 0, START_CROSS),
+    direction,
+  ];
+}
+
+function triggerGizmo(object: TriggerObject): SVGElement[] {
+  const children: SVGElement[] = [];
+  const region: SVGElement = object.region.type === 'circle' ? svg('circle') : svg('rect');
+  if (object.region.type === 'circle') {
+    region.setAttribute('r', String(object.region.radius));
+  } else {
+    region.setAttribute('x', String(-object.region.width / 2));
+    region.setAttribute('y', String(-object.region.height / 2));
+    region.setAttribute('width', String(object.region.width));
+    region.setAttribute('height', String(object.region.height));
+  }
+  region.setAttribute('vector-effect', 'non-scaling-stroke');
+  region.setAttribute('class', 'level-gizmo-region');
+  children.push(region);
+  children.push(circle(HANDLE_RADIUS));
+  if (object.marker === 'flag') {
+    const baseY = object.region.type === 'circle' ? -object.region.radius : -object.region.height / 2;
+    children.push(flagGlyph(baseY));
+  }
+  return children;
+}
+
+export function objectGizmoBounds(object: StartObject | TriggerObject): Bounds {
+  if (isTriggerObject(object)) {
+    const region = triggerBounds(object);
+    return { left: region.minX, right: region.maxX, bottom: region.minY, top: region.maxY };
+  }
+  return {
+    left: object.x - START_MARKER_RADIUS, right: object.x + START_MARKER_RADIUS,
+    bottom: object.y - START_MARKER_RADIUS, top: object.y + START_MARKER_RADIUS,
+  };
+}
+
+export type GizmoMode = 'normal' | 'selected' | 'ghost';
+
+function applyGizmo(node: SVGGElement, object: StartObject | TriggerObject, mode: GizmoMode): void {
+  node.replaceChildren(...(object.kind === 'start' ? startGizmo(object) : triggerGizmo(object)));
+  node.setAttribute('transform', `translate(${object.x} ${object.y})`);
+  node.setAttribute('class', `level-gizmo level-gizmo-${object.kind} level-gizmo-${mode}`);
+}
+
+/**
+ * Manages the SVG representation of every start/trigger object plus one bounded selection node
+ * and one bounded ghost (drag/placement preview) node. All nodes live in world-space coordinates
+ * inside a single camera-transformed group, so panning/zooming never touches per-object geometry;
+ * only `sync` (driven by LevelChange deltas) rebuilds the handful of nodes that actually changed.
+ */
+export class EntityGizmos {
+  private readonly persistent = new Map<string, SVGGElement>();
+  private readonly layer: SVGGElement;
+  private readonly selectionNode: SVGGElement;
+  private readonly ghostNode: SVGGElement;
+
+  constructor(cameraGroup: SVGGElement) {
+    this.layer = svg('g');
+    this.layer.setAttribute('class', 'level-gizmo-layer');
+    this.selectionNode = svg('g');
+    this.selectionNode.setAttribute('class', 'level-gizmo-selection-layer');
+    this.ghostNode = svg('g');
+    this.ghostNode.setAttribute('class', 'level-gizmo-ghost-layer');
+    cameraGroup.append(this.layer, this.selectionNode, this.ghostNode);
+  }
+
+  sync(upsert: readonly LevelObject[], remove: readonly string[]): void {
+    for (const id of remove) this.remove(id);
+    for (const object of upsert) {
+      if (object.kind === 'terrain') { this.remove(object.id); continue; }
+      let node = this.persistent.get(object.id);
+      if (node === undefined) {
+        node = svg('g');
+        this.layer.append(node);
+        this.persistent.set(object.id, node);
+      }
+      applyGizmo(node, object, 'normal');
+    }
+  }
+
+  private remove(id: string): void {
+    this.persistent.get(id)?.remove();
+    this.persistent.delete(id);
+  }
+
+  setSelection(object: StartObject | TriggerObject | null): void {
+    if (object === null) { this.selectionNode.replaceChildren(); return; }
+    applyGizmo(this.selectionNode, object, 'selected');
+  }
+
+  setGhost(object: StartObject | TriggerObject | null): void {
+    if (object === null) { this.ghostNode.replaceChildren(); return; }
+    applyGizmo(this.ghostNode, object, 'ghost');
+  }
+
+  destroy(): void {
+    this.layer.remove();
+    this.selectionNode.remove();
+    this.ghostNode.remove();
+    this.persistent.clear();
+  }
+}
