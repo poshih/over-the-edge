@@ -1,5 +1,5 @@
-import { TuningError } from './config';
-import type { Tuning } from './config';
+import { TuningError } from './tuning-schema';
+import type { Tuning } from '../config';
 import { createSnapshotPicker } from './snapshot-picker';
 import {
   isTuningStorageKey, listSavedTunings, loadSavedTuning, saveTuningSnapshot, TuningHistoryError,

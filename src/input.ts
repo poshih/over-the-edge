@@ -1,9 +1,8 @@
-import type { InputMode, Point, PracticeId, UiAction, UiActionOptions } from './config';
-import { PRACTICES } from './course';
+import type { InputMode, Point, UiAction, UiActionOptions } from './config';
 
 interface InputCallbacks {
   onAction: (action: UiAction, options?: UiActionOptions) => void;
-  onPractice: (id: PracticeId) => void;
+  onShortcut?: (event: KeyboardEvent) => void;
   onNotice: (message: string) => void;
 }
 
@@ -24,6 +23,7 @@ export class PointerInput {
   private lastPoint: Point | null = null;
   private dragDistance = 0;
   private currentMode: InputMode;
+  private interactionEnabled = true;
 
   constructor(canvas: HTMLCanvasElement, callbacks: InputCallbacks) {
     this.canvas = canvas;
@@ -36,7 +36,7 @@ export class PointerInput {
       if (mode) this.setMode(mode);
     }, { ...options, capture: true });
     canvas.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0 || !event.isPrimary) return;
+      if (!this.interactionEnabled || event.button !== 0 || !event.isPrimary) return;
       if (this.locked && this.currentMode === 'mouse') return;
       canvas.focus({ preventScroll: true });
       this.dragId = event.pointerId;
@@ -45,7 +45,7 @@ export class PointerInput {
       canvas.setPointerCapture(event.pointerId);
     }, options);
     document.addEventListener('pointermove', (event) => {
-      if (!event.isPrimary) return;
+      if (!this.interactionEnabled || !event.isPrimary) return;
       if (this.locked && this.currentMode === 'mouse' && event.pointerType === 'mouse') {
         this.movement.x += event.movementX;
         this.movement.y += event.movementY;
@@ -59,7 +59,7 @@ export class PointerInput {
       }
     }, options);
     canvas.addEventListener('pointerup', (event) => {
-      if (event.pointerId !== this.dragId) return;
+      if (!this.interactionEnabled || event.pointerId !== this.dragId) return;
       const wasClick = this.dragDistance < CLICK_MOVEMENT_LIMIT;
       this.endDrag();
       if (wasClick && event.pointerType === 'mouse') this.callbacks.onAction('play', { inputMode: 'mouse' });
@@ -70,7 +70,7 @@ export class PointerInput {
     }, options);
     document.addEventListener('pointerlockchange', () => {
       this.clear();
-      if (this.locked && this.currentMode === 'touch') {
+      if (this.locked && (this.currentMode === 'touch' || !this.interactionEnabled)) {
         document.exitPointerLock();
       } else if (this.currentMode === 'mouse') {
         this.endDrag();
@@ -79,6 +79,7 @@ export class PointerInput {
     window.addEventListener('blur', () => this.cancelGesture(), options);
     window.addEventListener('resize', () => this.cancelGesture(), options);
     document.addEventListener('keydown', (event) => {
+      if (!this.interactionEnabled) return;
       if (event.key === 'Escape' && this.locked) {
         document.exitPointerLock();
         event.stopPropagation();
@@ -89,15 +90,12 @@ export class PointerInput {
         event.target.closest('input, select, textarea, [contenteditable="true"]')) return;
       const key = event.key.toLowerCase();
       if (key === ' ' && event.target instanceof HTMLElement && event.target.closest('button')) return;
-      const actions: Record<string, UiAction> = { r: 'reset', p: 'pause', ' ': 'pause', d: 'debug', c: 'recenter' };
+      const actions: Record<string, UiAction> = { r: 'reset', p: 'pause', ' ': 'pause', c: 'recenter' };
       const action = actions[key];
       if (action) {
         event.preventDefault();
         this.callbacks.onAction(action);
-      } else if (/^[1-4]$/.test(key)) {
-        event.preventDefault();
-        this.callbacks.onPractice(PRACTICES[Number(key) - 1].id);
-      }
+      } else this.callbacks.onShortcut?.(event);
     }, { ...options, capture: true });
   }
 
@@ -110,6 +108,10 @@ export class PointerInput {
   }
 
   activate(mode: InputMode): void {
+    if (!this.interactionEnabled) {
+      this.callbacks.onNotice('Finish the current interaction before playing.');
+      return;
+    }
     this.setMode(mode);
     if (mode === 'touch') {
       if (this.locked) document.exitPointerLock();
@@ -135,6 +137,13 @@ export class PointerInput {
   clear(): void {
     this.movement.x = 0;
     this.movement.y = 0;
+  }
+
+  setInteraction(options: { enabled: boolean }): void {
+    if (this.interactionEnabled === options.enabled) return;
+    this.interactionEnabled = options.enabled;
+    this.cancelGesture();
+    if (!options.enabled && this.locked) document.exitPointerLock();
   }
 
   dispose(): void {

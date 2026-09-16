@@ -1,10 +1,11 @@
-import { Chain, Vec2, World } from 'planck';
-import { DEFAULT_TUNING, PHYSICS, RIG } from './config';
-import type { Point, PracticeId, Tuning } from './config';
-import { COURSE, practiceById, SUMMIT } from './course';
+import { Vec2, World } from 'planck';
+import { PHYSICS, RIG } from './config';
+import type { PlayerSpawn, Point, Tuning } from './config';
+import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { createPlayer, destroyPlayer, drivePlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { angleDifference, clamp } from './math';
+import { TerrainWorld } from './terrain-world';
 
 export interface PartPose extends Point {
   id: string;
@@ -15,6 +16,7 @@ export interface PartPose extends Point {
 }
 
 export interface PhysicsFrame {
+  time: number;
   parts: PartPose[];
   cursor: Point;
 }
@@ -24,6 +26,8 @@ const IDLE_COMMAND: MotorCommand = { angularError: 0, extensionError: 0, angular
 export class Simulation {
   readonly world: World;
   private rig: PlayerRig;
+  private readonly terrain: TerrainWorld;
+  private level: LevelDefinition;
   private tuning: Tuning;
   private cursor: Point;
   private previous: PhysicsFrame;
@@ -32,23 +36,15 @@ export class Simulation {
   private elapsed = 0;
   private pointerSpeed = 0;
   private bestHeight = 0;
-  private practice: PracticeId = 'start';
   private disposed = false;
 
-  constructor(tuning: Readonly<Tuning> = DEFAULT_TUNING) {
+  constructor(tuning: Readonly<Tuning>, level: LevelDefinition) {
     this.tuning = { ...tuning };
+    this.level = level;
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
-    for (const terrain of COURSE) {
-      const body = this.world.createBody();
-      body.createFixture(new Chain(terrain.vertices.map((point) => new Vec2(point.x, point.y)), true), {
-        friction: PHYSICS.terrainFriction,
-        restitution: 0,
-        filterCategoryBits: PHYSICS.terrainCategory,
-        filterMaskBits: PHYSICS.playerCategory | PHYSICS.toolCategory,
-      });
-    }
-    this.rig = createPlayer(this.world, practiceById(this.practice), this.tuning);
+    this.terrain = new TerrainWorld(this.world, level.objects, () => this.rig.pot);
+    this.rig = createPlayer(this.world, level.spawn, this.tuning);
     this.cursor = { ...this.rig.head.getPosition() };
     this.current = this.capture();
     this.previous = this.current;
@@ -64,18 +60,32 @@ export class Simulation {
     }
   }
 
-  reset(practice: PracticeId): void {
+  reset(spawn: PlayerSpawn = this.level.spawn): void {
     this.ensureLive();
-    destroyPlayer(this.world, this.rig);
-    this.practice = practice;
-    this.rig = createPlayer(this.world, practiceById(practice), this.tuning);
-    this.cursor = { ...this.rig.head.getPosition() };
-    this.elapsed = 0;
-    this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
-    this.pointerSpeed = 0;
-    this.command = { ...IDLE_COMMAND };
-    this.current = this.capture();
-    this.previous = this.current;
+    this.resetPlayer(spawn);
+    this.terrain.reset();
+  }
+
+  applyLevel(change: LevelChange): void {
+    this.ensureLive();
+    this.level = change.level;
+    if (change.kind === 'replace') this.resetPlayer(change.level.spawn);
+    this.terrain.apply(change);
+  }
+
+  subscribeTerrain(listener: (event: TerrainEvent) => void): () => void {
+    this.ensureLive();
+    return this.terrain.subscribe(listener);
+  }
+
+  restoreTerrain(): void {
+    this.ensureLive();
+    this.terrain.reset();
+  }
+
+  terrainState() {
+    this.ensureLive();
+    return this.terrain.inspect();
   }
 
   step(pointerDelta: Point): void {
@@ -106,12 +116,14 @@ export class Simulation {
     this.command = drivePlayer(this.rig, this.cursor, this.tuning);
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
     this.elapsed += PHYSICS.dt;
+    this.terrain.advance(this.elapsed);
     this.bestHeight = Math.max(this.bestHeight, this.rig.root.getPosition().y + RIG.potBottom);
     this.current = this.capture();
   }
 
   frame(alpha: number): PhysicsFrame {
     return {
+      time: this.previous.time + (this.current.time - this.previous.time) * alpha,
       parts: this.current.parts.map((part, index) => {
         const previous = this.previous.parts[index];
         return {
@@ -128,7 +140,8 @@ export class Simulation {
     };
   }
 
-  snapshot() {
+  status() {
+    this.ensureLive();
     const root = this.rig.root.getPosition();
     let contacts = 0;
     for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
@@ -136,37 +149,46 @@ export class Simulation {
     }
     const hingeTorque = this.rig.hinge.getMotorTorque(1 / PHYSICS.dt);
     const sliderForce = this.rig.slider.getMotorForce(1 / PHYSICS.dt);
+    const summit = this.level.summit;
     return {
-      practice: this.practice,
       time: this.elapsed,
+      height: Math.max(0, root.y + RIG.potBottom),
+      bestHeight: this.bestHeight,
+      contacts,
+      hingeLoad: Math.abs(hingeTorque) / this.tuning.hingeTorque,
+      sliderLoad: Math.abs(sliderForce) / this.tuning.sliderForce,
+      summit: root.x >= summit.xMin && root.x <= summit.xMax &&
+        root.y + RIG.potBottom >= summit.y - summit.arrivalTolerance,
+    };
+  }
+
+  snapshot() {
+    const status = this.status();
+    const root = this.rig.root.getPosition();
+    return {
+      ...status,
       root: { x: root.x, y: root.y, angle: this.rig.root.getAngle() },
       tip: { ...this.rig.head.getPosition() },
       cursor: { ...this.cursor },
       rootVelocity: { ...this.rig.root.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
       extension: this.rig.slider.getJointTranslation(),
-      height: Math.max(0, root.y + RIG.potBottom),
-      bestHeight: this.bestHeight,
-      contacts,
       headContacts: this.headContactCount(),
       maxReach: RIG.maxReach,
-      hingeTorque,
-      sliderForce,
-      hingeLoad: Math.abs(hingeTorque) / this.tuning.hingeTorque,
-      sliderLoad: Math.abs(sliderForce) / this.tuning.sliderForce,
+      hingeTorque: this.rig.hinge.getMotorTorque(1 / PHYSICS.dt),
+      sliderForce: this.rig.slider.getMotorForce(1 / PHYSICS.dt),
       command: { ...this.command },
       tuning: { ...this.tuning },
       bodyProperties: Object.fromEntries(this.rig.parts.map(({ id, body }) =>
         [id, { mass: body.getMass(), inertia: body.getInertia() }] as const)),
       bodyCount: this.world.getBodyCount(),
       jointCount: this.world.getJointCount(),
-      summit: root.x >= SUMMIT.xMin && root.x <= SUMMIT.xMax &&
-        root.y + RIG.potBottom >= SUMMIT.y - SUMMIT.arrivalTolerance,
     };
   }
 
   dispose(): void {
     if (this.disposed) return;
+    this.terrain.dispose();
     destroyPlayer(this.world, this.rig);
     for (let body = this.world.getBodyList(); body;) {
       const next = body.getNext();
@@ -178,6 +200,7 @@ export class Simulation {
 
   private capture(): PhysicsFrame {
     return {
+      time: this.elapsed,
       parts: this.rig.parts.map((part) => {
         const position = part.body.getPosition();
         const angle = part.body.getAngle();
@@ -193,6 +216,18 @@ export class Simulation {
       }),
       cursor: { ...this.cursor },
     };
+  }
+
+  private resetPlayer(spawn: PlayerSpawn): void {
+    destroyPlayer(this.world, this.rig);
+    this.rig = createPlayer(this.world, spawn, this.tuning);
+    this.cursor = { ...this.rig.head.getPosition() };
+    this.elapsed = 0;
+    this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
+    this.pointerSpeed = 0;
+    this.command = { ...IDLE_COMMAND };
+    this.current = this.capture();
+    this.previous = this.current;
   }
 
   private headContactCount(): number {

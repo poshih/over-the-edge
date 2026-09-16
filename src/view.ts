@@ -1,22 +1,22 @@
 import {
-  ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry,
+  ACESFilmicToneMapping, AmbientLight, BoxGeometry, BufferAttribute, BufferGeometry,
   CanvasTexture, CircleGeometry, Color, CylinderGeometry, DirectionalLight, ExtrudeGeometry,
-  Fog, Group, HemisphereLight, LatheGeometry, Line, LineBasicMaterial, LineDashedMaterial,
-  LineSegments, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
+  Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial,
+  Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
   RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D } from 'three';
-import { AppearanceRig } from './appearance-rig';
-import { ARM_SIDES } from './appearance-types';
-import type { ArmIkSettings, ArmSide, VisualPartId } from './appearance-types';
+import { ARM_SIDES } from './character';
+import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
 import { ARM_GEOMETRY, PLAYER_DEPTH, solveArmPose } from './arm-ik';
 import type { ArmPose } from './arm-ik';
 import { RIG } from './config';
 import type { InputMode, Point } from './config';
-import { COURSE, COURSE_LABELS, SUMMIT } from './course';
-import { clamp, transformPoint } from './math';
+import type { LevelDefinition } from './level';
+import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
+import { TerrainView } from './terrain-view';
 
 const VISUAL = {
   viewHeight: 8.5,
@@ -32,8 +32,6 @@ const VISUAL = {
   visibleGroundDepth: 1.3,
   characterTop: 1.35,
   touchPixelsPerReach: 200,
-  hintMarkerRadius: 0.07,
-  armDebugEdges: 5,
 } as const;
 const POT_HALF_WIDTH = Math.max(...RIG.potVertices.map((point) => Math.abs(point.x)));
 const HAMMER_RADIUS = Math.max(...RIG.headVertices.map((point) => Math.hypot(point.x, point.y)));
@@ -61,13 +59,44 @@ interface Arm {
   pose: ArmPose | null;
 }
 
+export interface CameraFraming extends Point {
+  worldHeight: number;
+}
+
+export interface ViewLayer {
+  readonly root: Object3D;
+  update: (frame: PhysicsFrame, arms: readonly ArmPose[]) => void;
+  dispose: () => void;
+}
+
+function disposeResources(root: Object3D): void {
+  const geometries = new Set<BufferGeometry>();
+  const materials = new Set<Material>();
+  const textures = new Set<CanvasTexture>();
+  root.traverse((object) => {
+    if (object instanceof Mesh || object instanceof Line || object instanceof Sprite) {
+      if ('geometry' in object) geometries.add(object.geometry);
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        materials.add(material);
+        if ('map' in material && material.map instanceof CanvasTexture) textures.add(material.map);
+      }
+    }
+  });
+  for (const geometry of geometries) geometry.dispose();
+  for (const material of materials) material.dispose();
+  for (const texture of textures) texture.dispose();
+}
+
 export class GameView {
   readonly canvas: HTMLCanvasElement;
-  readonly appearance = new AppearanceRig();
+  readonly terrain = new TerrainView();
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
   private readonly camera = new OrthographicCamera();
   private readonly scenery = new Group();
+  private readonly decorations = new Group();
+  private readonly bindings = new Map<VisualPartId, VisualBinding>();
+  private readonly layers = new Set<ViewLayer>();
   private readonly playerMeshes = new Map<string, Group>();
   private readonly torso = new Group();
   private readonly customShaft = new Group();
@@ -79,18 +108,18 @@ export class GameView {
   private readonly cursor = new Group();
   private readonly targetLine: Line;
   private readonly targetPositions = new Float32Array(6);
-  private readonly debugLines: LineSegments;
-  private readonly debugPositions: Float32Array;
   private readonly observer: ResizeObserver;
   private width = 1;
   private height = 1;
   private worldHeight: number = VISUAL.viewHeight;
   private compact = false;
+  private framing: CameraFraming | null = null;
+  private decorationLevel: LevelDefinition | null = null;
   private focus: Point;
   private hammer: Point;
   private readonly projection = new Vector3();
 
-  constructor(canvas: HTMLCanvasElement, initial: PhysicsFrame) {
+  constructor(canvas: HTMLCanvasElement, initial: PhysicsFrame, level: LevelDefinition) {
     this.canvas = canvas;
     const root = this.part(initial, 'root');
     const head = this.part(initial, 'head');
@@ -114,7 +143,8 @@ export class GameView {
     this.camera.near = 0.1;
     this.camera.far = 100;
     this.buildScenery();
-    this.buildCourse();
+    this.scene.add(this.terrain.root, this.decorations);
+    this.setLevel(level);
     this.buildPlayer();
 
     const cursorMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });
@@ -130,32 +160,29 @@ export class GameView {
     this.targetLine.frustumCulled = false;
     this.scene.add(this.targetLine);
 
-    const edgeCount = ARM_SIDES.length * VISUAL.armDebugEdges +
-      COURSE.reduce((count, terrain) => count + terrain.vertices.length, 0) +
-      initial.parts.reduce((count, part) => count +
-        (part.collides ? part.vertices.length : part.vertices.length === 0 ? 2 : 0), 0);
-    this.debugPositions = new Float32Array(edgeCount * 6);
-    const debugGeometry = new BufferGeometry();
-    debugGeometry.setAttribute('position', new BufferAttribute(this.debugPositions, 3));
-    this.debugLines = new LineSegments(debugGeometry,
-      new LineBasicMaterial({ color: 0x35ffbe, depthTest: false, transparent: true, opacity: 0.9 }));
-    this.debugLines.frustumCulled = false;
-    this.debugLines.renderOrder = 30;
-    this.scene.add(this.debugLines);
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(canvas);
     this.resize();
     this.recenter(initial);
   }
 
-  render(frame: PhysicsFrame, options: { dt: number; debug: boolean; armIk: Readonly<ArmIkSettings> }): void {
+  get visuals(): ReadonlyMap<VisualPartId, VisualBinding> {
+    return this.bindings;
+  }
+
+  addLayer(layer: ViewLayer): void {
+    this.layers.add(layer);
+    this.scene.add(layer.root);
+  }
+
+  render(frame: PhysicsFrame, options: { dt: number; armIk: Readonly<ArmIkSettings>; shaft: CharacterState['shaft'] }): void {
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
     this.focus = { x: root.x, y: root.y };
     this.hammer = { x: tip.x, y: tip.y };
     this.updateFrustum();
     const target = this.cameraTarget();
-    const blend = 1 - Math.exp(-VISUAL.cameraResponse * options.dt);
+    const blend = this.framing === null ? 1 - Math.exp(-VISUAL.cameraResponse * options.dt) : 1;
     this.camera.position.x += (target.x - this.camera.position.x) * blend;
     this.camera.position.y += (target.y - this.camera.position.y) * blend;
     this.keepRigVisible();
@@ -175,7 +202,7 @@ export class GameView {
     this.customShaft.position.set((slider.x + tip.x) / 2, (slider.y + tip.y) / 2, PLAYER_DEPTH.tool);
     this.customShaft.rotation.z = Math.atan2(tip.y - slider.y, tip.x - slider.x);
     this.customShaft.scale.x = Math.hypot(tip.x - slider.x, tip.y - slider.y) / RIG.handleLength;
-    const customShaft = this.appearance.isCustom('hammer-shaft');
+    const customShaft = options.shaft === 'straight';
     const gripAnchor = customShaft ? this.customShaft : this.playerMeshes.get('handle-0');
     if (!gripAnchor) throw new Error('The rendered shaft must have a grip anchor.');
     gripAnchor.updateWorldMatrix(true, false);
@@ -184,8 +211,8 @@ export class GameView {
     this.targetPositions.set([tip.x, tip.y, 0.8, frame.cursor.x, frame.cursor.y, 0.8]);
     this.targetLine.geometry.attributes.position.needsUpdate = true;
     this.targetLine.computeLineDistances();
-    this.debugLines.visible = options.debug;
-    if (options.debug) this.updateDebug(frame, armPoses);
+    this.terrain.update(frame.time);
+    for (const layer of this.layers) layer.update(frame, armPoses);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -220,6 +247,32 @@ export class GameView {
     };
   }
 
+  unproject(client: Point): Point {
+    const rect = this.canvas.getBoundingClientRect();
+    this.projection.set((client.x - rect.left) / rect.width * 2 - 1,
+      1 - (client.y - rect.top) / rect.height * 2, 0).unproject(this.camera);
+    return { x: this.projection.x, y: this.projection.y };
+  }
+
+  setFraming(framing: CameraFraming | null): void {
+    if (framing !== null && (![framing.x, framing.y, framing.worldHeight].every(Number.isFinite) || framing.worldHeight <= 0)) {
+      throw new Error('Camera framing must have finite coordinates and a positive height.');
+    }
+    this.framing = framing === null ? null : { ...framing };
+    this.updateFrustum();
+    this.snapCamera();
+  }
+
+  statistics() {
+    return {
+      calls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      geometries: this.renderer.info.memory.geometries,
+      textures: this.renderer.info.memory.textures,
+      terrain: this.terrain.inspect(),
+    };
+  }
+
   cameraState() {
     return {
       x: this.camera.position.x, y: this.camera.position.y, width: this.width, height: this.height,
@@ -229,22 +282,12 @@ export class GameView {
 
   dispose(): void {
     this.observer.disconnect();
-    this.appearance.dispose();
-    const geometries = new Set<BufferGeometry>();
-    const materials = new Set<Material>();
-    const textures = new Set<CanvasTexture>();
-    this.scene.traverse((object) => {
-      if (object instanceof Mesh || object instanceof Line || object instanceof Sprite) {
-        if ('geometry' in object) geometries.add(object.geometry);
-        for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-          materials.add(material);
-          if ('map' in material && material.map instanceof CanvasTexture) textures.add(material.map);
-        }
-      }
-    });
-    for (const geometry of geometries) geometry.dispose();
-    for (const material of materials) material.dispose();
-    for (const texture of textures) texture.dispose();
+    this.terrain.root.removeFromParent();
+    this.terrain.dispose();
+    for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
+    this.layers.clear();
+    disposeResources(this.scene);
+    this.bindings.clear();
     this.renderer.dispose();
   }
 
@@ -273,7 +316,7 @@ export class GameView {
     const bounds = this.framingBounds();
     const span = 2 * (RIG.maxReach + VISUAL.reachMargin);
     const padding = 2 * VISUAL.framingMargin;
-    const worldHeight = this.compact ? Math.max(
+    const worldHeight = this.framing !== null ? this.framing.worldHeight : this.compact ? Math.max(
       span, span / aspect, bounds.maxY - bounds.minY + padding,
       (bounds.maxX - bounds.minX + padding) / aspect,
     ) : VISUAL.viewHeight;
@@ -289,6 +332,7 @@ export class GameView {
   }
 
   private cameraTarget(): Point {
+    if (this.framing !== null) return this.framing;
     return this.compact ? {
       x: this.focus.x + RIG.shoulder.x,
       y: Math.max(this.focus.y + RIG.shoulder.y, this.worldHeight / 2 - VISUAL.visibleGroundDepth),
@@ -299,7 +343,7 @@ export class GameView {
   }
 
   private keepRigVisible(): void {
-    if (!this.compact) return;
+    if (!this.compact || this.framing !== null) return;
     const bounds = this.framingBounds();
     const halfWidth = this.camera.right;
     const halfHeight = this.camera.top;
@@ -309,41 +353,21 @@ export class GameView {
       bounds.maxY + VISUAL.framingMargin - halfHeight, bounds.minY - VISUAL.framingMargin + halfHeight);
   }
 
-  private buildCourse(): void {
-    for (const terrain of COURSE) {
-      const geometry = new ExtrudeGeometry(polygonShape(terrain.vertices), {
-        depth: terrain.depth, bevelEnabled: false, steps: 1, curveSegments: 1,
-      });
-      const mesh = new Mesh(geometry, [
-        new MeshStandardMaterial({ color: terrain.color, roughness: 0.92 }),
-        new MeshStandardMaterial({ color: new Color(terrain.color).multiplyScalar(0.7), roughness: 1 }),
-      ]);
-      mesh.position.z = -terrain.depth;
-      this.scene.add(mesh);
-      const outline = terrain.vertices.flatMap((vertex) => [vertex.x, vertex.y, 0.015]);
-      outline.push(terrain.vertices[0].x, terrain.vertices[0].y, 0.015);
-      const edgeGeometry = new BufferGeometry();
-      edgeGeometry.setAttribute('position', new BufferAttribute(new Float32Array(outline), 3));
-      this.scene.add(new Line(edgeGeometry, new LineBasicMaterial({ color: 0x3c5550, transparent: true, opacity: 0.55 })));
-      for (let i = 0; i < terrain.vertices.length; i++) {
-        const a = terrain.vertices[i];
-        const b = terrain.vertices[(i + 1) % terrain.vertices.length];
-        if (Math.abs(a.y - b.y) < 0.01 && a.x > b.x && a.y >= 0) {
-          const trim = solid(new BoxGeometry(a.x - b.x, 0.035, 0.2),
-            new MeshStandardMaterial({ color: 0xa9b28a, roughness: 1 }),
-            [(a.x + b.x) / 2, a.y + 0.005, -0.07]);
-          this.scene.add(trim);
-        }
-      }
-    }
-    for (const label of COURSE_LABELS) this.addLabel(label.text, { x: label.x, y: label.y });
+  setLevel(level: LevelDefinition): void {
+    if (this.decorationLevel?.labels === level.labels && this.decorationLevel.summit === level.summit) return;
+    this.decorationLevel = level;
+    disposeResources(this.decorations);
+    this.decorations.clear();
+    for (const label of level.labels) this.addLabel(label.text, label);
+    const summit = level.summit;
+    const flagX = (summit.xMin + summit.xMax) / 2;
     const poleMaterial = new MeshStandardMaterial({ color: 0xdbc9a0, roughness: 0.45, metalness: 0.4 });
-    this.scene.add(solid(new CylinderGeometry(0.025, 0.035, 1.5, 8), poleMaterial, [16.3, SUMMIT.y + 0.75, -0.15]));
+    this.decorations.add(solid(new CylinderGeometry(0.025, 0.035, 1.5, 8), poleMaterial, [flagX, summit.y + 0.75, -0.15]));
     const flag = new Mesh(new ExtrudeGeometry(polygonShape([
       { x: 0, y: 0 }, { x: 0.72, y: -0.12 }, { x: 0, y: -0.35 },
     ]), { depth: 0.015, bevelEnabled: false }), new MeshStandardMaterial({ color: 0xdc714d, roughness: 1 }));
-    flag.position.set(16.33, SUMMIT.y + 1.4, -0.1);
-    this.scene.add(flag);
+    flag.position.set(flagX + 0.03, summit.y + 1.4, -0.1);
+    this.decorations.add(flag);
   }
 
   private buildScenery(): void {
@@ -437,10 +461,7 @@ export class GameView {
       this.scene.add(segment);
       shaftSegments.push(segment);
     }
-    this.appearance.register('hammer-shaft', this.customShaft, shaftSegments, new Box3(
-      new Vector3(-RIG.handleLength / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
-      new Vector3(RIG.handleLength / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
-    ));
+    this.bindings.set('hammer-shaft', { anchor: this.customShaft, defaults: shaftSegments });
     this.scene.add(this.customShaft);
     const head = new Group();
     const headMesh = new Mesh(new ExtrudeGeometry(polygonShape(RIG.headVertices), {
@@ -459,7 +480,8 @@ export class GameView {
   private visualSlot(slot: VisualPartId, model: Object3D): Group {
     const anchor = new Group();
     anchor.add(model);
-    this.appearance.register(slot, anchor, [model]);
+    if (this.bindings.has(slot)) throw new Error(`Duplicate visual slot: ${slot}`);
+    this.bindings.set(slot, { anchor, defaults: [model] });
     return anchor;
   }
 
@@ -499,38 +521,6 @@ export class GameView {
     mesh.quaternion.setFromRotationMatrix(this.limbRotation);
   }
 
-  private updateDebug(frame: PhysicsFrame, arms: readonly ArmPose[]): void {
-    let offset = 0;
-    const line = (a: Point, b: Point): void => {
-      this.debugPositions.set([a.x, a.y, 0.95, b.x, b.y, 0.95], offset);
-      offset += 6;
-    };
-    const outline = (vertices: readonly Point[], pose: Point = { x: 0, y: 0 }, angle = 0): void => {
-      for (let index = 0; index < vertices.length; index++) {
-        line(transformPoint(vertices[index], pose, angle),
-          transformPoint(vertices[(index + 1) % vertices.length], pose, angle));
-      }
-    };
-    for (const terrain of COURSE) outline(terrain.vertices);
-    for (const pose of frame.parts) {
-      if (pose.collides) outline(pose.vertices, pose, pose.angle);
-      if (pose.vertices.length === 0) {
-        line({ x: pose.x - 0.09, y: pose.y }, { x: pose.x + 0.09, y: pose.y });
-        line({ x: pose.x, y: pose.y - 0.09 }, { x: pose.x, y: pose.y + 0.09 });
-      }
-    }
-    for (const pose of arms) {
-      line(pose.shoulder, pose.elbow);
-      line(pose.elbow, pose.hand);
-      line(pose.shoulder, pose.hint);
-      const { x, y } = pose.hint;
-      line({ x: x - VISUAL.hintMarkerRadius, y }, { x: x + VISUAL.hintMarkerRadius, y });
-      line({ x, y: y - VISUAL.hintMarkerRadius }, { x, y: y + VISUAL.hintMarkerRadius });
-    }
-    this.debugLines.geometry.setDrawRange(0, offset / 3);
-    this.debugLines.geometry.attributes.position.needsUpdate = true;
-  }
-
   private addLabel(text: string, position: Point): void {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
@@ -545,7 +535,7 @@ export class GameView {
     const sprite = new Sprite(new SpriteMaterial({ map: new CanvasTexture(canvas), transparent: true, depthTest: false }));
     sprite.position.set(position.x, position.y, 0.04);
     sprite.scale.set(2.25, 0.42, 1);
-    this.scene.add(sprite);
+    this.decorations.add(sprite);
   }
 
   private part(frame: PhysicsFrame, id: string): PartPose {

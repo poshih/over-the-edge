@@ -3,8 +3,7 @@ import {
 } from 'planck';
 import type { Body, Joint, World } from 'planck';
 import { PHYSICS, RIG } from './config';
-import type { Point, Tuning } from './config';
-import type { Practice } from './course';
+import type { PlayerSpawn, Point, Tuning } from './config';
 import { angleDifference, clamp, transformPoint } from './math';
 
 export type PartKind = 'root' | 'pot' | 'carrier' | 'slider' | 'handle' | 'head';
@@ -50,7 +49,7 @@ function setMass(body: Body, mass: number): void {
   body.setMassData(data);
 }
 
-export function createPlayer(world: World, spawn: Practice, tuning: Readonly<Tuning>): PlayerRig {
+export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<Tuning>): PlayerRig {
   const parts: PlayerPart[] = [];
   const movingBody = (id: string, kind: PartKind, position: Point, angle: number, vertices: readonly Point[]): Body => {
     const body = world.createDynamicBody({

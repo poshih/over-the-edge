@@ -1,0 +1,296 @@
+.level-editor {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.level-editor [hidden],
+.level-overlay[hidden],
+.level-guides [hidden] {
+  display: none !important;
+}
+
+.level-editor .button,
+.level-editor select,
+.level-editor input:not([type="checkbox"]),
+.level-checkbox {
+  min-height: 48px;
+}
+
+.level-editor input:not([type="checkbox"]),
+.level-editor select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #faf9f2;
+  font-size: 16px;
+}
+
+.level-editor .button {
+  min-width: 48px;
+  justify-content: center;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.level-editor .button[aria-pressed="true"] {
+  border-color: var(--teal);
+  color: var(--paper);
+  background: var(--teal);
+}
+
+.level-editor :disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.level-top {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.level-editor .level-save-status {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.level-save-status[data-dirty="true"] {
+  color: #7a4c18;
+}
+
+.level-scroll {
+  overflow-x: hidden;
+}
+
+.level-action-row,
+.level-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.level-editor .tuning-group {
+  min-width: 0;
+  margin: 0 0 20px;
+}
+
+.level-palette {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.level-editor .level-preset {
+  display: flex;
+  min-height: 66px;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px;
+}
+
+.level-preset svg {
+  width: 28px;
+  height: 28px;
+  fill: currentColor;
+}
+
+.level-camera-controls {
+  display: grid;
+  grid-template-columns: 48px 48px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.level-editor .level-help {
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.level-editor .level-selection-name {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.level-field-grid {
+  margin: 12px 0;
+}
+
+.level-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.level-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.level-checkbox input {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
+.level-delete,
+.level-clear-labels {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.level-editor .level-history {
+  margin: 0 0 22px;
+}
+
+.level-editor .tuning-profile-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.level-save-dock {
+  margin-top: 8px;
+}
+
+.level-save-dock .tuning-profile-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.level-save-dock label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.level-editor .snapshot-history select:focus-visible,
+.level-editor select:focus-visible {
+  outline: 3px solid #94662b;
+  outline-offset: 2px;
+}
+
+.level-overlay {
+  position: fixed;
+  z-index: 1;
+  overflow: hidden;
+  background-image: linear-gradient(to right, rgb(54 94 86 / 13%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(54 94 86 / 13%) 1px, transparent 1px);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  overscroll-behavior: contain;
+}
+
+.level-overlay:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+}
+
+.level-overlay[data-tool="pan"] {
+  cursor: grab;
+}
+
+.level-overlay[data-tool="pan"]:active {
+  cursor: grabbing;
+}
+
+.level-guides {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.level-selection,
+.level-ghost {
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.level-selection {
+  fill: rgb(26 115 103 / 10%);
+  stroke: #075a50;
+}
+
+.level-ghost {
+  fill: rgb(188 133 53 / 20%);
+  stroke: #9a5c08;
+  stroke-dasharray: 6 4;
+}
+
+.level-illusion-outline {
+  stroke-dasharray: 3 4;
+}
+
+.level-start-marker,
+.level-summit-marker {
+  fill: #f8f3e4;
+  stroke: #12594d;
+  stroke-width: 2;
+}
+
+.level-summit-marker {
+  stroke: #8b560e;
+}
+
+.level-guides text {
+  fill: #173f35;
+  stroke: #f8f3e4;
+  stroke-width: 3px;
+  paint-order: stroke;
+  font: bold 11px "Segoe UI", sans-serif;
+}
+
+.level-summit-marker text {
+  fill: #784504;
+  text-anchor: middle;
+}
+
+@media (max-width: 600px) {
+  .level-top {
+    padding: 8px 12px;
+  }
+
+  .level-editor .button {
+    padding-inline: 6px;
+  }
+}
+
+@media (max-width: 1039px) and (orientation: landscape) {
+  .level-palette,
+  .level-action-row,
+  .level-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .level-camera-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .level-fit {
+    grid-column: 1 / -1;
+  }
+}

@@ -18,6 +18,7 @@ npm run dev
 
 Open **http://localhost:5181**. The port is fixed; Vite fails explicitly if it is
 occupied. Mouse/keyboard and one-finger touch controls are supported.
+This is the editor/workshop entry, including physics, appearance, and level tools.
 
 ```sh
 npm run build
@@ -31,6 +32,45 @@ download, or runtime network service.
 The included `wrangler.toml` is an optional Cloudflare Workers configuration.
 Use your own Cloudflare account and configure any custom domains there.
 
+### Game-only release
+
+The playable release has a separate HTML/TypeScript entry and stylesheet. It
+does not load the Workshop, level editor, model importer, saved editor profiles,
+practice shortcuts, collision overlay, or editor diagnostic globals.
+
+```sh
+npm run build:game
+npm run preview:game
+```
+
+Publish **`dist-game/`** for a game-only release; preview it at
+**http://localhost:4175**. `npm run dev:game` uses **http://localhost:5182**.
+The existing `npm run build` and `wrangler.toml` continue to target the
+editor/workshop in `dist/`, not this separate release.
+
+To release an authored course, export its JSON from the Level tab, place that
+file inside the project (for example `levels/my-level.json`), then build:
+
+```sh
+GAME_LEVEL=levels/my-level.json npm run build:game
+```
+
+Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
+validated and bundled at build time; the game needs no editor or external level
+service. This export contains level data, not private imported GLBs or browser
+physics/IK profiles. The game-only entry uses the game's default physics and
+character settings.
+
+`src/editor/` owns all authoring UI, persistence, imports, and debugging tools.
+The editor depends on the shared game runtime, never the reverse.
+`tsconfig.game.json` checks the playable dependency graph separately, and
+`vite.game.config.ts` fails the build if an editor module or editor asset enters
+that graph. Hiding editor controls with a runtime flag is not the release
+boundary.
+
+`npm run verify:game` exercises the release, custom-course builds, development
+entry, and editor-dependency rejection in isolation.
+
 ## Controls
 
 | Input | Action |
@@ -41,11 +81,11 @@ Use your own Cloudflare account and configure any custom domains there.
 | Hold and drag on the canvas | Move the hammer without pointer capture |
 | Lift and reposition a finger | Continue a relative touch drag without snapping the hammer |
 | Esc | Release the mouse |
-| R | Restart the current practice position |
+| R | Restart at the level start, or the selected editor practice |
 | P or Space | Pause / resume |
-| D | Toggle actual collision outlines and joint anchors |
+| D | Toggle collision outlines and joint anchors (editor only) |
 | C | Recenter the camera |
-| 1 / 2 / 3 / 4 | Ascent / ledge hold / ground push / vault |
+| 1 / 2 / 3 / 4 | Ascent / ledge hold / ground push / vault (editor only) |
 
 Touch gain is independent of camera zoom and orientation: at the default
 **Control sensitivity**, 200 CSS pixels correspond to the 2.65 m maximum reach
@@ -57,7 +97,7 @@ Compact viewports use wider reach-aware framing to keep the player and hammer
 visible. On phones, the Workshop is a bottom sheet in portrait and a side panel
 in landscape, with a visible game preview. Opening it pauses physics; closing
 it restores the previous pause state. Play closes the compact editor and resumes.
-Regular desktop Workshop use remains live.
+Desktop Physics and Appearance tabs remain live; Level editing always pauses.
 
 Touch-sized controls include `+` and `-` buttons for exact single-step adjustments
 to physics and appearance ranges. They respect limits and disabled settings.
@@ -157,6 +197,55 @@ on a ledge, smooth ground pushes, launches, and vaulting a low block. The
 controller and artwork are a prototype, not a claim of matching the original
 game's exact tuning.
 
+## Level editing
+
+Open **Workshop / Level** to edit the course. Editing pauses gameplay and
+separates placement gestures from hammer input. Choose a block, thin platform,
+ramp, triangle, circle, or hexagon, then click/tap the game preview to place it.
+Select an object to move it or adjust its position, dimensions, rotation, and
+illusion property. Dragging previews the change; releasing commits it.
+Pan and zoom let you work beyond the player's current camera view.
+
+Player-start and summit settings belong to the level as well. Playtest from the
+authored start, and use Reset to repeat the same course. Runtime effects never
+delete objects from the editor's authored definition.
+
+Named level saves use the existing snapshot-history mechanism: repeated names
+keep separate versions, choosing an entry does not apply it, and loading is
+explicit. Export/import JSON to move level data between browsers or feed the
+game-only build. Imports are validated before replacing the current level;
+malformed files and unavailable storage produce visible errors.
+
+### Illusions
+
+An illusion is initially an ordinary rough-rock obstacle. Only a supporting,
+upward-facing contact beneath the **player's pot** starts its fade. A hammer
+strike, side contact, underside contact, or merely being nearby does not.
+The obstacle fades over **0.8 seconds of simulation time**, remains solid during
+that fade, then loses both its collision and visible surface. Pausing freezes
+the effect. Restarting restores it.
+
+The physics callback records landings; body removal happens only after the
+physics step unlocks. Authored data and transient disappearance state have
+separate owners, so saving/exporting after playtesting still includes illusions.
+
+### Performance boundaries
+
+The level format supports **1,000 objects**, **32 distinct geometry templates**,
+up to **64 vertices per custom polygon**, and **16 course labels**. Dimensions,
+coordinates, winding, intersections, IDs, and import size are validated.
+Preset objects reuse normalized geometry rather than allocating a new mesh and
+material for every placement.
+
+Terrain changes are incremental. Moving an object does not reconstruct the
+whole physics world; static terrain is not regenerated each frame. Illusion
+processing visits active landings/fades instead of polling every level object.
+Shared batched rendering and cached materials keep draw calls tied to visible
+geometry batches rather than the number of placed objects.
+
+These performance and editor-free release requirements are recorded in
+[`AGENTS.md`](AGENTS.md).
+
 ## Custom visuals
 
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
@@ -168,7 +257,7 @@ do not need models.
 Imports are **cosmetic only**. They attach to the existing physics and visual-IK
 anchors; they do not replace colliders, change mass, or create new rigid bodies.
 Use the collision overlay to compare the visual with the actual contact shape.
-Collider authoring and whole-character animation retargeting are not included.
+GLB import does not author colliders or retarget whole-character animations.
 
 ### Body-relative arm IK
 
@@ -251,18 +340,21 @@ never modified.
 npm run verify
 ```
 
-This builds the app and exercises browser gameplay with Playwright. If Chromium
+This builds both entries and exercises browser gameplay with Playwright. If Chromium
 is not installed for Playwright, install it with `npx playwright install chromium`
 and rerun. Runtime artifacts are written to the ignored `artifacts/` directory.
 There is no unit-test suite.
 
-The browser exposes the read-only `window.gettingOver.snapshot()` and
+The editor entry exposes the read-only `window.gettingOver.snapshot()` and
 `window.gettingOver.project({ x, y })` diagnostics for observing actual physics,
 motor effort, camera state, and world-to-screen coordinates. They do not expose
 commands that bypass the game's input or motor mechanism.
 `window.gettingOver.appearance()` reports imported parts, saved/draft alignment,
 loading errors, current rendering anchors and world transforms, and the arm IK
 settings, selected profile, and save state.
+`window.gettingOver.level()` reports the immutable authored definition, current
+illusion/collider state, editor selection/mode, and render/cache counts.
+These globals are absent from the game-only release.
 
 ## Contributing
 

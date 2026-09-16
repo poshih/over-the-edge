@@ -45,7 +45,7 @@ export function sortSnapshots(entries: SnapshotEntry[]): SnapshotEntry[] {
 interface SnapshotOptions<T> {
   prefix: string;
   version: number;
-  field: 'tuning' | 'settings';
+  field: 'tuning' | 'settings' | 'level';
   label: string;
   namePrompt: string;
   validate: (value: unknown) => T;

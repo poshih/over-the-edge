@@ -1,5 +1,7 @@
 import { Box3, Euler, Group, MathUtils, Matrix4, Vector3 } from 'three';
 import type { Object3D } from 'three';
+import { RIG } from '../config';
+import type { VisualBinding as RuntimeBinding } from '../character';
 import { VISUAL_PARTS } from './appearance-types';
 import type { VisualAlignment, VisualPartId } from './appearance-types';
 import type { LoadedVisual } from './visual-model';
@@ -16,13 +18,18 @@ interface VisualBinding {
 export class AppearanceRig {
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
 
-  register(slot: VisualPartId, anchor: Group, defaults: readonly Object3D[], bounds?: Box3): void {
-    if (this.bindings.has(slot)) throw new Error(`Duplicate visual slot: ${slot}`);
-    if (anchor.parent !== null) throw new Error(`Register ${slot} before attaching its anchor to the live scene.`);
-    anchor.updateMatrixWorld(true);
-    const target = bounds ? bounds.clone() : new Box3().setFromObject(anchor, true);
-    if (target.isEmpty()) throw new Error(`The visual slot ${slot} has no fitting bounds.`);
-    this.bindings.set(slot, { anchor, defaults, bounds: target, model: null, replacement: null, orientation: null });
+  constructor(slots: ReadonlyMap<VisualPartId, RuntimeBinding>) {
+    for (const [slot, { anchor, defaults }] of slots) {
+      const template = new Group();
+      // Clone only object transforms: fitting must not inherit a live physics anchor's pose or scale.
+      if (slot !== 'hammer-shaft') for (const object of defaults) template.add(object.clone());
+      const bounds = slot === 'hammer-shaft' ? new Box3(
+        new Vector3(-RIG.handleLength / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
+        new Vector3(RIG.handleLength / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
+      ) : new Box3().setFromObject(template, true);
+      if (bounds.isEmpty()) throw new Error(`The visual slot ${slot} has no fitting bounds.`);
+      this.bindings.set(slot, { anchor, defaults, bounds, model: null, replacement: null, orientation: null });
+    }
   }
 
   assertComplete(): void {

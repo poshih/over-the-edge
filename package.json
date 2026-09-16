@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:game": "vite --config vite.game.config.ts",
     "build": "tsc --noEmit && vite build",
+    "build:game": "tsc --noEmit -p tsconfig.game.json && vite build --config vite.game.config.ts",
     "preview": "vite preview",
-    "verify": "npm run build && node scripts/verify-runtime.mjs"
+    "preview:game": "vite preview --config vite.game.config.ts",
+    "verify": "npm run build && node scripts/verify-runtime.mjs && npm run verify:game",
+    "verify:game": "npm run build:game && node scripts/verify-game.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

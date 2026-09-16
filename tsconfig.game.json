@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/play.ts", "src/game-level.d.ts"]
+}

@@ -1,0 +1,55 @@
+<aside id="edge-workshop" class="workshop" aria-labelledby="workshop-title" hidden>
+      <header class="workshop-header">
+        <div>
+          <p class="eyebrow">A LITTLE ROOM TO EXPERIMENT</p>
+          <h2 id="workshop-title">The workshop<span class="brass-period">.</span></h2>
+          <p class="workshop-pause-note">Game paused while editing</p>
+        </div>
+        <button type="button" class="icon-button workshop-close" aria-label="Close workshop">
+          <span class="close-icon" aria-hidden="true"></span>
+        </button>
+      </header>
+
+      <div class="workshop-tabs" role="tablist" aria-label="Workshop section">
+        <button id="physics-tab" type="button" role="tab" aria-selected="true" aria-controls="physics-pane">Physics</button>
+        <button id="appearance-tab" type="button" role="tab" aria-selected="false" aria-controls="appearance-pane" tabindex="-1">Appearance</button>
+        <button id="level-tab" type="button" role="tab" aria-selected="false" aria-controls="level-pane" tabindex="-1">Level</button>
+      </div>
+      <div id="physics-pane" class="workshop-scroll" role="tabpanel" aria-labelledby="physics-tab">
+        <section class="practice-section" aria-labelledby="practice-title">
+          <div class="section-heading"><h3 id="practice-title">Find your footing</h3><span class="practice-count"></span></div>
+          <div class="practice-grid" role="group" aria-label="Practice positions"></div>
+          <p class="practice-description">Choose a starting point. Your tuning stays with you.</p>
+        </section>
+
+        <section class="tuning-history" aria-label="Saved tuning"></section>
+
+        <section class="telemetry" aria-labelledby="telemetry-title">
+          <div class="section-heading">
+            <h3 id="telemetry-title">In the moment</h3>
+            <span class="contact-reading"><span class="contact-dot" aria-hidden="true"></span><span class="contact-value">0 contacts</span></span>
+          </div>
+          <div class="effort-label"><label id="hinge-effort-label" for="hinge-effort">Hinge effort</label><span class="hinge-effort-value">0%</span></div>
+          <meter id="hinge-effort" min="0" max="1" value="0" aria-labelledby="hinge-effort-label"></meter>
+          <div class="effort-label"><label id="slider-effort-label" for="slider-effort">Slider effort</label><span class="slider-effort-value">0%</span></div>
+          <meter id="slider-effort" min="0" max="1" value="0" aria-labelledby="slider-effort-label"></meter>
+        </section>
+
+        <div class="tuning-heading"><h3>Make it feel like you.</h3><p>Live adjustments. Hover a label for details.</p></div>
+        <div class="tuning-groups"></div>
+
+        <section class="workshop-tools" aria-label="View and input tools">
+          <button type="button" class="debug-button" data-action="debug" aria-pressed="false" title="Show physics geometry (D)">
+            <span>Physics overlay</span><span class="toggle-track" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="button recenter-button" data-action="recenter" title="Recenter the camera on the player (C)">Recenter camera <kbd>C</kbd></button>
+        </section>
+      </div>
+
+      <section id="appearance-pane" class="appearance-pane workshop-pane" role="tabpanel" aria-labelledby="appearance-tab" hidden></section>
+      <section id="level-pane" class="level-pane workshop-pane" role="tabpanel" aria-labelledby="level-tab" hidden></section>
+      <footer class="workshop-footer physics-footer">
+        <button type="button" class="button defaults-tuning">Defaults</button>
+        <p>Saved on this device. Loaded only when you choose.</p>
+      </footer>
+    </aside>

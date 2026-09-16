@@ -1,5 +1,5 @@
 import { MathUtils, Quaternion, Vector3 } from 'three';
-import type { ArmSide } from './appearance-types';
+import type { ArmSide } from './character';
 import { clamp } from './math';
 
 const ARM_LENGTH = { upper: 0.82, forearm: 0.82 } as const;

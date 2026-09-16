@@ -1,5 +1,5 @@
-import { TUNING_FIELDS, TuningError, validateTuning } from './config';
-import type { Tuning } from './config';
+import { TUNING_FIELDS, TuningError, validateTuning } from './tuning-schema';
+import type { Tuning } from '../config';
 import { expectSnapshotFields, NamedSnapshots, readSnapshotJson, SnapshotError, sortSnapshots } from './named-snapshots';
 import type { SnapshotEntry } from './named-snapshots';
 

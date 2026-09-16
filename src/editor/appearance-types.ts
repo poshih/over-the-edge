@@ -1,3 +1,8 @@
+import { DEFAULT_ARM_IK } from '../character';
+import type { ArmIkSettings, VisualPartId } from '../character';
+export { DEFAULT_ARM_IK, ARM_SIDES } from '../character';
+export type { ArmIkSettings, ArmSide, VisualPartId } from '../character';
+
 export const VISUAL_PARTS = [
   { id: 'pot', label: 'Pot', hint: 'Appearance only. The existing pot collider and mass stay unchanged.' },
   { id: 'torso', label: 'Torso and neck', hint: 'Follows the non-rotating player root.' },
@@ -14,8 +19,6 @@ export const VISUAL_PARTS = [
   { id: 'hammer-head', label: 'Hammer head', hint: 'Fit the model to the collision overlay. Importing does not change grip geometry or mass.' },
 ] as const;
 
-export type VisualPartId = (typeof VISUAL_PARTS)[number]['id'];
-
 export interface VisualAlignment {
   scale: number;
   rotationX: number;
@@ -30,22 +33,6 @@ export const DEFAULT_ALIGNMENT: Readonly<VisualAlignment> = Object.freeze({
   scale: 1, rotationX: 0, rotationY: 0, rotationZ: 0, offsetX: 0, offsetY: 0, offsetZ: 0,
 });
 
-export interface ArmIkSettings {
-  leftHintX: number;
-  leftHintY: number;
-  leftHintZ: number;
-  rightHintX: number;
-  rightHintY: number;
-  rightHintZ: number;
-}
-
-export const DEFAULT_ARM_IK: Readonly<ArmIkSettings> = Object.freeze({
-  leftHintX: -0.55, leftHintY: 0.15, leftHintZ: -0.35,
-  rightHintX: 0.55, rightHintY: 0.15, rightHintZ: 0.45,
-});
-
-export const ARM_SIDES = ['left', 'right'] as const;
-export type ArmSide = (typeof ARM_SIDES)[number];
 export const ARM_IK_LIMITS = { min: -2, max: 2, step: 0.01, unit: 'm' } as const;
 export const ARM_IK_FIELDS = [
   { side: 'left', key: 'leftHintX', label: 'Left elbow hint X' },
