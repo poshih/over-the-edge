@@ -1,5 +1,5 @@
 import { AppearanceRig } from './appearance-rig';
-import { AppearanceStore } from './appearance-store';
+import { VisualStore, VisualStoreError } from './visual-store';
 import {
   ALIGNMENT_FIELDS, AppearanceError, ARM_IK_FIELDS, DEFAULT_ALIGNMENT, DEFAULT_ARM_IK, isVisualPart, MODEL_LIMITS,
   validateAlignment, validateArmIk, validateStoredVisual, VISUAL_PARTS,
@@ -13,7 +13,9 @@ import { loadVisualModel } from './visual-model';
 
 export class Appearance {
   private readonly rig: AppearanceRig;
-  private readonly store = new AppearanceStore();
+  private readonly store = new VisualStore<StoredVisual>({
+    database: 'over-the-edge:appearance', store: 'parts', keyPath: 'slot',
+  });
   private readonly notice: (message: string, kind: 'info' | 'error') => void;
   private readonly records = new Map<VisualPartId, StoredVisual>();
   private readonly drafts = new Map<VisualPartId, VisualAlignment>();
@@ -62,7 +64,7 @@ export class Appearance {
         });
       }
     } catch (error) {
-      if (!(error instanceof AppearanceError)) throw error;
+      if (!(error instanceof AppearanceError || error instanceof VisualStoreError)) throw error;
       if (!this.disposed) {
         this.storageIssue = error.message;
         this.notice(error.message, 'error');
@@ -268,7 +270,7 @@ export class Appearance {
     try {
       await operation();
     } catch (error) {
-      if (!(error instanceof AppearanceError)) throw error;
+      if (!(error instanceof AppearanceError || error instanceof VisualStoreError)) throw error;
       if (!this.disposed) {
         this.errors.set(slot, error.message);
         this.notice(error.message, 'error');

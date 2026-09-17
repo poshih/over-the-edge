@@ -9,6 +9,7 @@ import type { LevelDefinition, LevelObject, LevelShape, ShapeKind, StartObject, 
 import { ENDING_EVENTS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 import { element } from '../dom';
+import { createJsonDownload } from './json-download';
 import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
 import { EntityGizmos, objectGizmoBounds } from './object-gizmos';
 import { NamedSnapshots, SnapshotError } from './named-snapshots';
@@ -41,7 +42,6 @@ const VIEW_PADDING = 1.2;
 const ZOOM_FACTOR = 1.35;
 const WHEEL_ZOOM_RATE = 0.0015;
 const GRID_TARGET_PIXELS = 48;
-const DOWNLOAD_REVOKE_MS = 1000;
 const DEFAULT_OBJECT_DEPTH = 1.5;
 const WHEEL_LINE_PIXELS = 16;
 const PRESET_SETTINGS: Record<ShapeKind, { label: string; width: number; height: number }> = {
@@ -274,7 +274,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const fileInput = element<HTMLInputElement>(root, '.level-file');
   const bounds = new Map(level.definition().objects.map((object) => [object.id, objectBounds(object)]));
   entityGizmos.sync(level.definition().objects, []);
-  const downloads = new Map<string, ReturnType<typeof setTimeout>>();
+  const downloadJson = createJsonDownload({ mount: root, signal: events.signal });
   const triggerEvents = createTriggerEventEditor({
     mount: element(root, '.level-trigger-events'), signal: events.signal, onNotice,
     onApply: (id, actions) => {
@@ -818,13 +818,7 @@ This restores the default ground and start location, removes all other objects a
   action('.level-export', () => {
     if (!triggerEvents.flush()) return;
     const definition = validateLevel(level.definition());
-    const url = URL.createObjectURL(new Blob([`${JSON.stringify(definition, null, 2)}\n`], { type: 'application/json' }));
-    const link = document.createElement('a');
-    link.href = url; link.download = 'level.json';
-    root.append(link);
-    link.click();
-    link.remove();
-    downloads.set(url, setTimeout(() => { URL.revokeObjectURL(url); downloads.delete(url); }, DOWNLOAD_REVOKE_MS));
+    downloadJson('level.json', `${JSON.stringify(definition, null, 2)}\n`);
     markSaved();
     onNotice('Exported level.json. It contains only authored level data, ready for a game-only build.', 'info');
   });
@@ -1079,8 +1073,7 @@ This restores the default ground and start location, removes all other objects a
       active = false; disposed = true; importGeneration++;
       events.abort(); resize.disconnect(); unsubscribe();
       camera.set(null);
-      for (const [url, timeout] of downloads) { clearTimeout(timeout); URL.revokeObjectURL(url); }
-      downloads.clear(); bounds.clear();
+      bounds.clear();
       entityGizmos.destroy();
       root.remove(); overlay.remove();
     },

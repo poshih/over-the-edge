@@ -18,7 +18,7 @@ npm run dev
 
 Open **http://localhost:5181**. The port is fixed; Vite fails explicitly if it is
 occupied. Mouse/keyboard and one-finger touch controls are supported.
-This is the editor/workshop entry, including physics, appearance, and level tools.
+This is the editor/workshop entry, including physics, appearance, sprite, and level tools.
 
 ```sh
 npm run build
@@ -38,6 +38,8 @@ Use your own Cloudflare account and configure any custom domains there.
 The playable release has a separate HTML/TypeScript entry and stylesheet. It
 does not load the Workshop, level editor, model importer, saved editor profiles,
 practice shortcuts, collision overlay, or editor diagnostic globals.
+Its HUD contains only current height and elapsed time. On-screen Play/Pause/Reset,
+peak height, branding, and help remain in the editor build, not the release.
 
 ```sh
 npm run build:game
@@ -48,6 +50,17 @@ Publish **`dist-game/`** for a game-only release; preview it at
 **http://localhost:4175**. `npm run dev:game` uses **http://localhost:5182**.
 The existing `npm run build` and `wrangler.toml` continue to target the
 editor/workshop in `dist/`, not this separate release.
+
+For Cloudflare Workers, `wrangler.game.toml` deploys only `dist-game/` to a
+separate **gettingover-play** Worker:
+
+```sh
+npm run build:game
+npx wrangler deploy --config wrangler.game.toml --keep-vars
+```
+
+Configure a separate custom domain for that Worker in your Cloudflare account.
+This leaves the existing Workshop Worker and its domain unchanged.
 
 To release an authored course, export its JSON from the Level tab, place that
 file inside the project (for example `levels/my-level.json`), then build:
@@ -69,15 +82,15 @@ The editor depends on the shared game runtime, never the reverse.
 that graph. Hiding editor controls with a runtime flag is not the release
 boundary.
 
-`npm run verify:game` exercises the release, custom-course builds, development
-entry, and editor-dependency rejection in isolation.
+`npm run verify:game` exercises the release, custom-course/sprite builds,
+development entry, and editor-dependency rejection in isolation.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| Play, or click the game canvas with a mouse | Capture the mouse |
-| Play on a touchscreen | Resume touch controls without mouse capture |
+| Click the game canvas with a mouse, or Play in the editor | Capture the mouse |
+| Play in the editor on a touchscreen | Resume touch controls without mouse capture |
 | Move the captured mouse | Rotate and extend the hammer |
 | Hold and drag on the canvas | Move the hammer without pointer capture |
 | Lift and reposition a finger | Continue a relative touch drag without snapping the hammer |
@@ -89,16 +102,17 @@ entry, and editor-dependency rejection in isolation.
 | 1 / 2 / 3 / 4 | Ascent / ledge hold / ground push / vault (editor only) |
 
 Touch gain is independent of camera zoom and orientation: at the default
-**Control sensitivity**, 200 CSS pixels correspond to the 2.65 m maximum reach
+**Control sensitivity**, 100 CSS pixels correspond to the 2.65 m maximum reach
 before reach clamping. The same swipe has the same effect in portrait and
-landscape. Mouse input continues to follow the displayed scene scale. Touch
+landscape, in both the game and editor. Mouse input continues to follow the
+displayed scene scale. Touch
 cancellation, focus loss and resizing clear pending gestures.
 
 Compact viewports use wider reach-aware framing to keep the player and hammer
 visible. On phones, the Workshop is a bottom sheet in portrait and a side panel
 in landscape, with a visible game preview. Opening it pauses physics; closing
 it restores the previous pause state. Play closes the compact editor and resumes.
-Desktop Physics and Appearance tabs remain live; Level editing always pauses.
+Desktop Physics, Appearance, and Sprites tabs remain live; Level editing always pauses.
 
 Touch-sized controls include `+` and `-` buttons for exact single-step adjustments
 to physics and appearance ranges. They respect limits and disabled settings.
@@ -303,6 +317,14 @@ These performance and editor-free release requirements are recorded in
 [`AGENTS.md`](AGENTS.md).
 
 ## Custom visuals
+
+The **Sprites** tab adds named PNG layers with anchor selection, size, local
+offsets/depth, rotation, and replace/overlay behavior. Save or exchange complete
+layouts as JSON, and select one with `GAME_SPRITES=skins/my-sprites.json` for
+an editor-free release. The renderer is game-agnostic, with a self-contained
+geometric example in `examples/sprites.mjs`. See [sprite authoring, runtime API,
+limits, and release instructions](docs/sprites.md). No external artwork is
+required or included in default builds.
 
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
 Parts can be replaced independently: pot, torso/neck, character head, each upper

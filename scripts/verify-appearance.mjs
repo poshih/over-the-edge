@@ -17,7 +17,7 @@ function pngChunk(type, bytes) {
   return result;
 }
 
-function texturePng() {
+export function texturePng() {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(2, 0);
   header.writeUInt32BE(2, 4);
@@ -123,14 +123,17 @@ export async function inspectArmGeometry(page) {
     }
     return true;
   });
-  const { state, visuals } = await page.evaluate(() => ({
+  const { state, visuals, spriteLayers } = await page.evaluate(() => ({
     state: window.gettingOver.snapshot(), visuals: window.gettingOver.appearance(),
+    spriteLayers: window.gettingOver.sprites().rendering.layers,
   }));
   assert.equal(state.paused, true, 'Compare physics and rendered anchors on a paused frame.');
   const point = (value) => new Vector3(value.x, value.y, value.z);
   const endpoint = (part, y) => new Vector3(0, y, 0).applyMatrix4(new Matrix4().fromArray(part.transform));
   const torso = new Matrix4().fromArray(visuals.parts.find((part) => part.id === 'torso').transform);
   const shaft = visuals.parts.find((part) => part.id === 'hammer-shaft');
+  const straightShaft = shaft.custom || spriteLayers.some(layer =>
+    layer.anchor === 'hammer-shaft' && layer.underlay === 'replace');
   const firstSegment = state.parts.find((part) => part.id === 'handle-0');
   const result = {};
   for (const [side, shoulderX, shoulderZ, gripX] of [['left', -0.17, -0.09, 0.04], ['right', 0.17, 0.09, 0.22]]) {
@@ -149,12 +152,12 @@ export async function inspectArmGeometry(page) {
     assert.ok(Math.abs(shoulder.distanceTo(elbow) - 0.82) < 1e-8);
     const distance = shoulder.distanceTo(hand);
     if (distance <= 1.64) assert.ok(Math.abs(elbow.distanceTo(hand) - 0.82) < 1e-8, 'Reachable arms must keep both bone lengths.');
-    const expectedHand = shaft.custom
+    const expectedHand = straightShaft
       ? new Vector3(gripX - 0.75, 0, 0).applyMatrix4(new Matrix4().fromArray(shaft.transform))
       : new Vector3(firstSegment.x + (gripX - 0.25) * Math.cos(firstSegment.angle),
         firstSegment.y + (gripX - 0.25) * Math.sin(firstSegment.angle), 0.22);
     assert.ok(hand.distanceTo(expectedHand) < 1e-8, `${side} hand must grip the rendered shaft, including its actual depth.`);
-    const shaftDirection = shaft.custom
+    const shaftDirection = straightShaft
       ? new Vector3(shaft.transform[0], shaft.transform[1], shaft.transform[2]).normalize()
       : new Vector3(Math.cos(firstSegment.angle), Math.sin(firstSegment.angle), 0);
     const handDirection = new Vector3(handPart.transform[0], handPart.transform[1], handPart.transform[2]).normalize();

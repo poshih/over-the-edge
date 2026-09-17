@@ -5,17 +5,24 @@ import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 import { DEFAULT_LEVEL } from './src/default-level';
 import { LEVEL_LIMITS, validateLevel } from './src/level';
+import { VISUAL_PART_IDS } from './src/character';
+import { spriteBundle } from './build/sprite-bundle';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 const moduleId = 'virtual:game-level';
 const resolvedModule = `\0${moduleId}`;
 
-function gameLevel(): Plugin {
-  const requested = process.env.GAME_LEVEL;
-  const levelPath = requested === undefined ? null : realpathSync(resolve(project, requested));
-  if (levelPath !== null && (!levelPath.startsWith(project) || !levelPath.endsWith('.json'))) {
-    throw new Error('GAME_LEVEL must name a JSON file inside this project.');
+function projectJson(variable: string): string | null {
+  const requested = process.env[variable];
+  const path = requested === undefined ? null : realpathSync(resolve(project, requested));
+  if (path !== null && (!path.startsWith(project) || !path.endsWith('.json'))) {
+    throw new Error(`${variable} must name a JSON file inside this project.`);
   }
+  return path;
+}
+
+function gameLevel(): Plugin {
+  const levelPath = projectJson('GAME_LEVEL');
   return {
     name: 'game-level-data',
     resolveId(id) { if (id === moduleId) return resolvedModule; },
@@ -66,7 +73,11 @@ export default defineConfig({
   root: resolve(project, 'play'),
   publicDir: resolve(project, 'public'),
   resolve: { alias: { '/src': resolve(project, 'src') } },
-  plugins: [gameLevel(), gameOnlyBoundary()],
+  plugins: [
+    gameLevel(),
+    spriteBundle({ path: projectJson('GAME_SPRITES'), anchors: VISUAL_PART_IDS }),
+    gameOnlyBoundary(),
+  ],
   build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },
   server: { host: '0.0.0.0', port: 5182, strictPort: true, fs: { allow: [project] } },
   preview: { host: '0.0.0.0', port: 4175, strictPort: true },

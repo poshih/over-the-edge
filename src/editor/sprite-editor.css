@@ -1,0 +1,77 @@
+.sprite-editor {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.sprite-editor select,
+.sprite-editor input[type="file"],
+.sprite-editor input[type="text"] {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #faf9f2;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.touch-controls .sprite-editor select,
+.touch-controls .sprite-editor input[type="file"],
+.touch-controls .sprite-editor input[type="text"] {
+  font-size: 16px;
+}
+
+.sprite-intro h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.game-ui .sprite-intro p,
+.game-ui .sprite-editor .appearance-format {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.sprite-editor .appearance-label:first-of-type {
+  margin-top: 20px;
+}
+
+.sprite-external-warning {
+  color: #7a4c18;
+}
+
+.sprite-layer-fields,
+.sprite-layer-transform,
+.sprite-files {
+  margin-top: 20px;
+}
+
+.sprite-delete-layer {
+  width: 100%;
+  margin: 6px 0 4px;
+}
+
+.sprite-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sprite-footer .button {
+  padding-inline: 7px;
+  font-size: 10px;
+}
+
+.touch-controls .sprite-footer .button,
+.touch-controls .sprite-action-row .button,
+.touch-controls .sprite-delete-layer {
+  font-size: 16px;
+}

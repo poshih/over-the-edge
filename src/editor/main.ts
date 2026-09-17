@@ -1,5 +1,7 @@
-import '../game.css';
+import '../game-shell.css';
+import './game-ui.css';
 import './style.css';
+import { Vector3 } from 'three';
 import { PHYSICS } from '../config';
 import type { Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
@@ -8,11 +10,13 @@ import { levelSpawn } from '../level';
 import { Appearance } from './appearance';
 import { AppearanceRig } from './appearance-rig';
 import { createAppearanceUI } from './appearance-ui';
+import { VISUAL_PARTS } from './appearance-types';
 import { CollisionOverlay } from './collision-overlay';
 import { createLevelEditor } from './level-editor';
 import { LevelState } from './level-state';
 import { PRACTICES, practiceById } from './practices';
 import { createUI } from './ui';
+import { createSpriteEditor } from './sprite-editor';
 import type { EditorAction, PracticeId, WorkshopState } from './ui-types';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
@@ -62,6 +66,16 @@ const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
   shaft: rig.isCustom('hammer-shaft') ? 'straight' : 'segmented',
 }));
+const spriteEditor = createSpriteEditor({
+  mount: ui.spriteMount, rig: game.view.sprites, onNotice: ui.notice,
+  anchors: VISUAL_PARTS.map(({ id, label }) => {
+    const binding = game.view.visuals.get(id);
+    if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);
+    const size = binding.bounds.getSize(new Vector3());
+    const center = binding.bounds.getCenter(new Vector3());
+    return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
+  }),
+});
 const collisionOverlay = new CollisionOverlay();
 game.view.addLayer(collisionOverlay);
 const unsubscribeOverlay = game.simulation.subscribeTerrain((event) => collisionOverlay.apply(event));
@@ -130,6 +144,7 @@ const diagnostics = Object.freeze({
   },
   project: (point: Point) => game.view.project(point),
   appearance: () => appearance.snapshot(),
+  sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.sprites.inspect() }),
   events: () => game.eventState(),
   level: () => ({
     definition: level.definition(),
@@ -156,8 +171,10 @@ if (import.meta.hot) {
     unsubscribeAppearance();
     unsubscribeOverlay();
     levelEditor.dispose();
+    spriteEditor.dispose();
     appearanceUi.dispose();
     appearance.dispose();
+    rig.dispose();
     ui.dispose();
     game.dispose();
     delete window.gettingOver;

@@ -7,7 +7,7 @@
  * panel and the rest of the in-game UI, restoring pointer-events so it can be operated
  * without click-through to the canvas underneath.
  *
- * Theme values are read from the CSS custom properties declared in game.css (--ink,
+ * Theme values are read from the CSS custom properties declared in game-shell.css (--ink,
  * --teal, --paper, --line, --brass, --mono, --game-gutter) with safe fallbacks so this
  * stylesheet also works if loaded on its own (e.g. in an isolated fixture).
  */

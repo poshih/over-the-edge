@@ -1,5 +1,5 @@
 import {
-  ACESFilmicToneMapping, AmbientLight, BoxGeometry, BufferAttribute, BufferGeometry,
+  ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry,
   CanvasTexture, CircleGeometry, Color, CylinderGeometry, DirectionalLight, ExtrudeGeometry,
   Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial,
   Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
@@ -18,6 +18,9 @@ import { FlagView } from './flag-view';
 import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
+import { SpriteRig } from './sprite-rig';
+import type { SpriteAnchor } from './sprite-rig';
+import { VisualVisibility } from './visual-visibility';
 
 const VISUAL = {
   viewHeight: 8.5,
@@ -32,7 +35,7 @@ const VISUAL = {
   framingMargin: 0.2,
   visibleGroundDepth: 1.3,
   characterTop: 1.35,
-  touchPixelsPerReach: 200,
+  touchPixelsPerReach: 100,
 } as const;
 const POT_HALF_WIDTH = Math.max(...RIG.potVertices.map((point) => Math.abs(point.x)));
 const HAMMER_RADIUS = Math.max(...RIG.headVertices.map((point) => Math.hypot(point.x, point.y)));
@@ -91,6 +94,7 @@ function disposeResources(root: Object3D): void {
 export class GameView {
   readonly canvas: HTMLCanvasElement;
   readonly terrain = new TerrainView();
+  readonly sprites: SpriteRig;
   private readonly flags = new FlagView();
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -149,6 +153,14 @@ export class GameView {
     this.setLabels(level.labels);
     this.flags.setObjects(level.objects);
     this.buildPlayer();
+    const spriteAnchors = new Map<string, SpriteAnchor>();
+    for (const [id, binding] of this.bindings) {
+      spriteAnchors.set(id, {
+        node: binding.anchor,
+        setCovered: (state) => binding.visibility.setCovered(state),
+      });
+    }
+    this.sprites = new SpriteRig(spriteAnchors);
 
     const cursorMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });
     this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
@@ -205,7 +217,7 @@ export class GameView {
     this.customShaft.position.set((slider.x + tip.x) / 2, (slider.y + tip.y) / 2, PLAYER_DEPTH.tool);
     this.customShaft.rotation.z = Math.atan2(tip.y - slider.y, tip.x - slider.x);
     this.customShaft.scale.x = Math.hypot(tip.x - slider.x, tip.y - slider.y) / RIG.handleLength;
-    const customShaft = options.shaft === 'straight';
+    const customShaft = options.shaft === 'straight' || this.sprites.replaces('hammer-shaft');
     const gripAnchor = customShaft ? this.customShaft : this.playerMeshes.get('handle-0');
     if (!gripAnchor) throw new Error('The rendered shaft must have a grip anchor.');
     gripAnchor.updateWorldMatrix(true, false);
@@ -276,6 +288,7 @@ export class GameView {
       textures: this.renderer.info.memory.textures,
       terrain: this.terrain.inspect(),
       flags: this.flags.inspect(),
+      sprites: this.sprites.inspect(),
     };
   }
 
@@ -288,6 +301,7 @@ export class GameView {
 
   dispose(): void {
     this.observer.disconnect();
+    this.sprites.dispose();
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
     this.flags.dispose();
@@ -464,7 +478,15 @@ export class GameView {
       this.scene.add(segment);
       shaftSegments.push(segment);
     }
-    this.bindings.set('hammer-shaft', { anchor: this.customShaft, defaults: shaftSegments });
+    this.bindings.set('hammer-shaft', {
+      anchor: this.customShaft,
+      defaults: shaftSegments,
+      bounds: new Box3(
+        new Vector3(-RIG.handleLength / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
+        new Vector3(RIG.handleLength / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
+      ),
+      visibility: new VisualVisibility(shaftSegments),
+    });
     this.scene.add(this.customShaft);
     const head = new Group();
     const headMesh = new Mesh(new ExtrudeGeometry(polygonShape(RIG.headVertices), {
@@ -484,7 +506,11 @@ export class GameView {
     const anchor = new Group();
     anchor.add(model);
     if (this.bindings.has(slot)) throw new Error(`Duplicate visual slot: ${slot}`);
-    this.bindings.set(slot, { anchor, defaults: [model] });
+    const defaults = [model];
+    this.bindings.set(slot, {
+      anchor, defaults, bounds: new Box3().setFromObject(model, true),
+      visibility: new VisualVisibility(defaults),
+    });
     return anchor;
   }
 

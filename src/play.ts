@@ -1,7 +1,9 @@
-import './game.css';
+import './game-shell.css';
+import './play.css';
 import level from 'virtual:game-level';
+import sprites from 'virtual:game-sprites';
 import { Game } from './game';
-import { createGameUI } from './game-ui';
+import { createPlayUI } from './play-ui';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
@@ -13,13 +15,20 @@ const game = new Game({
   onAction: (action, options) => game.perform(action, options),
   onNotice: (message) => ui.notice(message, 'error'),
 });
-const ui = createGameUI({
-  mount, initialInputMode: game.input.mode,
-  onAction: (action, options) => game.perform(action, options),
-});
-game.start(ui.update);
+const ui = createPlayUI({ mount });
+game.setInputBlock({ reason: 'sprite-loading', blocked: true });
 
 if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => { ui.dispose(); game.dispose(); });
+}
+
+try {
+  await game.loadSprites(sprites);
+  if (!game.halted) {
+    game.setInputBlock({ reason: 'sprite-loading', blocked: false });
+    game.start(ui.update);
+  }
+} catch (error) {
+  if (!game.halted || !(error instanceof DOMException) || error.name !== 'AbortError') throw error;
 }

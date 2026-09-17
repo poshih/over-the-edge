@@ -1,0 +1,7 @@
+name = "gettingover-play"
+compatibility_date = "2025-09-01"
+
+# Separate game-only Worker; never serve the Workshop's dist/ here.
+assets = { directory = "./dist-game", not_found_handling = "single-page-application" }
+
+# Custom domains are account-specific; configure your own in Cloudflare.

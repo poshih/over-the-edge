@@ -1,9 +1,9 @@
 import type { InputMode, Tuning, UiAction, UiActionOptions } from '../config';
-import type { GameHudState } from '../game-ui';
+import type { GameHudState } from './game-ui';
 
 export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
 export type EditorAction = UiAction | 'debug';
-export type WorkshopTab = 'physics' | 'appearance' | 'level';
+export type WorkshopTab = 'physics' | 'appearance' | 'sprites' | 'level';
 
 export interface HudState extends GameHudState {
   debug: boolean;
@@ -30,6 +30,7 @@ export interface UiOptions {
 
 export interface GameUi {
   appearanceMount: HTMLElement;
+  spriteMount: HTMLElement;
   levelMount: HTMLElement;
   workshopState: () => WorkshopState;
   closeWorkshop: () => void;

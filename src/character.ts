@@ -1,4 +1,5 @@
-import type { Group, Object3D } from 'three';
+import type { Box3, Group, Object3D } from 'three';
+import type { VisualVisibility } from './visual-visibility';
 
 export const VISUAL_PART_IDS = [
   'pot', 'torso', 'character-head', 'left-upper-arm', 'right-upper-arm', 'left-forearm', 'right-forearm',
@@ -30,4 +31,6 @@ export interface CharacterState {
 export interface VisualBinding {
   readonly anchor: Group;
   readonly defaults: readonly Object3D[];
+  readonly bounds: Readonly<Box3>;
+  readonly visibility: VisualVisibility;
 }

@@ -1,6 +1,7 @@
-import type { InputMode, UiAction, UiActionOptions } from './config';
-import { element, setText } from './dom';
-import { inputModeForPointer } from './input';
+import type { InputMode, UiAction, UiActionOptions } from '../config';
+import { element, formatElapsedTime, setText } from '../dom';
+import { inputModeForPointer } from '../input';
+import { createNotice } from '../notice';
 
 export const DESKTOP_QUERY = '(min-width: 1040px)';
 
@@ -65,13 +66,8 @@ export function createGameUI(options: {
         <p class="game-signature">TWO MOTORS. ONE MOUNTAIN. <span>YOUR WAY UP.</span></p>
       </footer>
     </div>
-    <div class="ui-notice" role="status" aria-live="polite" aria-atomic="true" hidden>
-      <div><p class="notice-heading">A QUICK NOTE</p><p class="notice-message"></p></div>
-      <button type="button" class="icon-button dismiss-notice" aria-label="Dismiss notification">
-        <span class="close-icon" aria-hidden="true"></span>
-      </button>
-    </div>
   `;
+  const notice = createNotice({ mount: root });
   const actions = element<HTMLElement>(root, '.game-actions');
   const play = element<HTMLButtonElement>(root, '[data-action="play"]');
   const pause = element<HTMLButtonElement>(root, '[data-action="pause"]');
@@ -83,9 +79,6 @@ export function createGameUI(options: {
   const peak = element<HTMLElement>(root, '.peak-value');
   const elapsed = element<HTMLElement>(root, '.elapsed-value');
   const timerLabel = element<HTMLElement>(root, '.timer-label');
-  const noticeBox = element<HTMLElement>(root, '.ui-notice');
-  const noticeHeading = element<HTMLElement>(root, '.notice-heading');
-  const noticeMessage = element<HTMLElement>(root, '.notice-message');
   const instructions = element<HTMLElement>(root, '.input-instructions');
   const mouseIcon = element<HTMLElement>(root, '.mouse-icon');
   const guideHeading = element<HTMLElement>(root, '.guide-heading');
@@ -95,7 +88,6 @@ export function createGameUI(options: {
       options.onAction(action, { inputMode: event instanceof PointerEvent ? inputModeForPointer(event.pointerType) : undefined });
     }, listen);
   }
-  element<HTMLButtonElement>(root, '.dismiss-notice').addEventListener('click', () => { noticeBox.hidden = true; }, listen);
   const density = (): void => {
     document.body.classList.toggle('touch-controls', inputMode === 'touch' || !desktop.matches);
   };
@@ -123,8 +115,7 @@ export function createGameUI(options: {
       if (inputMode !== state.inputMode) setMode(state.inputMode);
       setText(height, state.height.toFixed(1));
       setText(peak, state.bestHeight.toFixed(1));
-      const seconds = Math.floor(Math.max(0, state.elapsed));
-      setText(elapsed, `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`);
+      setText(elapsed, formatElapsedTime(state.elapsed));
       setText(timerLabel, state.timerRunning ? 'ELAPSED' : 'TIME STOPPED');
       setText(pauseLabel, state.paused ? 'Resume' : 'Pause');
       pause.classList.toggle('is-active', state.paused);
@@ -137,14 +128,10 @@ export function createGameUI(options: {
         touch ? 'Touch controls - drag anywhere' :
           state.pointerLocked ? 'Mouse captured - Esc to release' : 'Hold + drag, or Play to capture');
     },
-    notice: (message: string, kind: 'info' | 'error'): void => {
-      noticeBox.dataset.kind = kind;
-      setText(noticeHeading, kind === 'error' ? 'NEEDS ATTENTION' : 'A QUICK NOTE');
-      setText(noticeMessage, message);
-      noticeBox.hidden = false;
-    },
+    notice: notice.show,
     dispose: (): void => {
       events.abort();
+      notice.dispose();
       root.remove();
       document.body.classList.remove('touch-controls');
       delete document.body.dataset.inputMode;

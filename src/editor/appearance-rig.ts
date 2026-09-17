@@ -1,7 +1,7 @@
-import { Box3, Euler, Group, MathUtils, Matrix4, Vector3 } from 'three';
-import type { Object3D } from 'three';
-import { RIG } from '../config';
+import { Euler, Group, MathUtils, Matrix4, Vector3 } from 'three';
+import type { Box3, Object3D } from 'three';
 import type { VisualBinding as RuntimeBinding } from '../character';
+import type { VisualVisibility } from '../visual-visibility';
 import { VISUAL_PARTS } from './appearance-types';
 import type { VisualAlignment, VisualPartId } from './appearance-types';
 import type { LoadedVisual } from './visual-model';
@@ -10,6 +10,7 @@ interface VisualBinding {
   anchor: Group;
   defaults: readonly Object3D[];
   bounds: Box3;
+  visibility: VisualVisibility;
   model: LoadedVisual | null;
   replacement: Group | null;
   orientation: Group | null;
@@ -19,16 +20,9 @@ export class AppearanceRig {
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
 
   constructor(slots: ReadonlyMap<VisualPartId, RuntimeBinding>) {
-    for (const [slot, { anchor, defaults }] of slots) {
-      const template = new Group();
-      // Clone only object transforms: fitting must not inherit a live physics anchor's pose or scale.
-      if (slot !== 'hammer-shaft') for (const object of defaults) template.add(object.clone());
-      const bounds = slot === 'hammer-shaft' ? new Box3(
-        new Vector3(-RIG.handleLength / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
-        new Vector3(RIG.handleLength / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
-      ) : new Box3().setFromObject(template, true);
+    for (const [slot, { anchor, defaults, bounds, visibility }] of slots) {
       if (bounds.isEmpty()) throw new Error(`The visual slot ${slot} has no fitting bounds.`);
-      this.bindings.set(slot, { anchor, defaults, bounds, model: null, replacement: null, orientation: null });
+      this.bindings.set(slot, { anchor, defaults, bounds: bounds.clone(), visibility, model: null, replacement: null, orientation: null });
     }
   }
 
@@ -50,7 +44,7 @@ export class AppearanceRig {
     binding.model = model;
     binding.replacement = replacement;
     binding.orientation = orientation;
-    for (const object of binding.defaults) object.visible = false;
+    binding.visibility.setReplacement(replacement);
     this.align(slot, alignment);
   }
 
@@ -91,7 +85,7 @@ export class AppearanceRig {
     binding.model = null;
     binding.replacement = null;
     binding.orientation = null;
-    for (const object of binding.defaults) object.visible = true;
+    binding.visibility.setReplacement(null);
   }
 
   inspect(slot: VisualPartId) {

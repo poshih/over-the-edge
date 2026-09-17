@@ -1,7 +1,7 @@
 import { DEFAULT_TUNING } from '../config';
 import type { Tuning } from '../config';
 import { element, setPressed, setText } from '../dom';
-import { createGameUI, DESKTOP_QUERY } from '../game-ui';
+import { createGameUI, DESKTOP_QUERY } from './game-ui';
 import { inputModeForPointer } from '../input';
 import { PRACTICES } from './practices';
 import { createRangeControl } from './range-control';
@@ -12,7 +12,7 @@ import type { GameUi, HudState, PracticeId, UiOptions, WorkshopState, WorkshopTa
 import workshopMarkup from './workshop.html?raw';
 
 const WORKSHOP_CLASS = 'workshop-open';
-const TABS = ['physics', 'appearance', 'level'] as const;
+const TABS = ['physics', 'appearance', 'sprites', 'level'] as const;
 
 export function createUI(options: UiOptions): GameUi {
   let tuning = validateTuning(options.initialTuning);
@@ -34,6 +34,7 @@ export function createUI(options: UiOptions): GameUi {
   const panel = element<HTMLElement>(root, '.workshop');
   const workshopClose = element<HTMLButtonElement>(root, '.workshop-close');
   const appearanceMount = element<HTMLElement>(root, '#appearance-pane');
+  const spriteMount = element<HTMLElement>(root, '#sprites-pane');
   const levelMount = element<HTMLElement>(root, '#level-pane');
   const physicsFooter = element<HTMLElement>(root, '.physics-footer');
   const tabs = TABS.map((id) => ({
@@ -195,7 +196,7 @@ export function createUI(options: UiOptions): GameUi {
   });
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
-    appearanceMount, levelMount, workshopState,
+    appearanceMount, spriteMount, levelMount, workshopState,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
     setTuning: (next) => renderTuning(validateTuning(next)),

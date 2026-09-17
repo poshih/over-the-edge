@@ -11,6 +11,7 @@ import { GameView } from './view';
 import { TriggerRuntime } from './triggers';
 import type { TriggerAction, EventOutcome } from './trigger-events';
 import { EventPresenter } from './event-presenter';
+import type { SpriteDocument } from './sprite-data';
 
 export class Game {
   readonly simulation: Simulation;
@@ -142,6 +143,11 @@ export class Game {
     return { triggers: this.triggers.inspect(), presentation: this.presenter.inspect(), timer: this.timerState() };
   }
 
+  async loadSprites(document: SpriteDocument): Promise<void> {
+    if (this.stopped) throw new Error('Cannot load sprites into a stopped game.');
+    await this.view.sprites.replace(document, { signal: this.lifecycle.signal });
+  }
+
   setTuning(tuning: Readonly<Tuning>): void {
     this.simulation.setTuning(tuning);
     this.tuning = { ...tuning };
@@ -221,8 +227,11 @@ export class Game {
     cancelAnimationFrame(this.animationFrame);
     this.fatal.hidden = false;
     this.fatal.textContent = `The game stopped: ${message}`;
+    this.lifecycle.abort();
     this.triggers?.dispose();
     this.presenter?.dispose();
+    this.view?.sprites?.dispose();
+    this.input?.setInteraction({ enabled: false });
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 

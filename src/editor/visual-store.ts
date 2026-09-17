@@ -1,33 +1,34 @@
-import { AppearanceError } from './appearance-types';
-import type { StoredVisual, VisualPartId } from './appearance-types';
+export class VisualStoreError extends Error {}
 
-const DATABASE = 'over-the-edge:appearance';
-const STORE = 'parts';
-
-export class AppearanceStore {
+export class VisualStore<TRecord extends object> {
   private database: IDBDatabase | null = null;
   private opening: Promise<IDBDatabase> | null = null;
   private closed = false;
+  private readonly options: { database: string; store: string; keyPath: string };
+
+  constructor(options: { database: string; store: string; keyPath: string }) {
+    this.options = options;
+  }
 
   private connect(): Promise<IDBDatabase> {
-    if (this.closed) return Promise.reject(new AppearanceError('Visual storage has been closed.'));
+    if (this.closed) return Promise.reject(new VisualStoreError('Visual storage has been closed.'));
     if (this.opening) return this.opening;
     this.opening = new Promise((resolve, reject) => {
       let request: IDBOpenDBRequest;
       try {
-        request = indexedDB.open(DATABASE, 1);
+        request = indexedDB.open(this.options.database, 1);
       } catch (error) {
         if (!(error instanceof DOMException)) throw error;
-        reject(new AppearanceError('Browser storage is unavailable. Allow site storage to import models.'));
+        reject(new VisualStoreError('Browser storage is unavailable. Allow site storage to save visuals.'));
         return;
       }
-      request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: 'slot' });
-      request.onerror = () => reject(new AppearanceError('Could not open local model storage. Check this browser\'s site storage permissions.'));
+      request.onupgradeneeded = () => request.result.createObjectStore(this.options.store, { keyPath: this.options.keyPath });
+      request.onerror = () => reject(new VisualStoreError('Could not open local visual storage. Check this browser\'s site storage permissions.'));
       request.onsuccess = () => {
         const database = request.result;
         if (this.closed) {
           database.close();
-          reject(new AppearanceError('Visual storage was closed while opening.'));
+          reject(new VisualStoreError('Visual storage was closed while opening.'));
           return;
         }
         this.database = database;
@@ -43,14 +44,14 @@ export class AppearanceStore {
     return new Promise((resolve, reject) => {
       let transaction: IDBTransaction;
       try {
-        transaction = database.transaction(STORE, 'readonly');
+        transaction = database.transaction(this.options.store, 'readonly');
       } catch (error) {
         if (!(error instanceof DOMException)) throw error;
-        reject(new AppearanceError('Could not read saved models. Reload this page and check site storage.'));
+        reject(new VisualStoreError('Could not read saved visuals. Reload this page and check site storage.'));
         return;
       }
       const entries: { key: IDBValidKey; value: unknown }[] = [];
-      const request = transaction.objectStore(STORE).openCursor();
+      const request = transaction.objectStore(this.options.store).openCursor();
       request.onsuccess = () => {
         const cursor = request.result;
         if (cursor) {
@@ -59,16 +60,16 @@ export class AppearanceStore {
         }
       };
       transaction.oncomplete = () => resolve(entries);
-      transaction.onabort = () => reject(new AppearanceError('Reading saved models failed. Existing records were not changed.'));
+      transaction.onabort = () => reject(new VisualStoreError('Reading saved visuals failed. Existing records were not changed.'));
     });
   }
 
-  async write(record: StoredVisual): Promise<void> {
+  async write(record: TRecord): Promise<void> {
     await this.change((store) => store.put(record));
   }
 
-  async remove(slot: VisualPartId): Promise<void> {
-    await this.change((store) => store.delete(slot));
+  async remove(key: IDBValidKey): Promise<void> {
+    await this.change((store) => store.delete(key));
   }
 
   private async change(action: (store: IDBObjectStore) => void): Promise<void> {
@@ -76,15 +77,15 @@ export class AppearanceStore {
     await new Promise<void>((resolve, reject) => {
       let transaction: IDBTransaction;
       try {
-        transaction = database.transaction(STORE, 'readwrite');
-        action(transaction.objectStore(STORE));
+        transaction = database.transaction(this.options.store, 'readwrite');
+        action(transaction.objectStore(this.options.store));
       } catch (error) {
         if (!(error instanceof DOMException)) throw error;
-        reject(new AppearanceError('The model could not be saved. Browser storage may be blocked or full.'));
+        reject(new VisualStoreError('The visual could not be saved. Browser storage may be blocked or full.'));
         return;
       }
       transaction.oncomplete = () => resolve();
-      transaction.onabort = () => reject(new AppearanceError('The model could not be saved. Existing saved visuals are unchanged.'));
+      transaction.onabort = () => reject(new VisualStoreError('The visual could not be saved. Existing saved visuals are unchanged.'));
     });
   }
 

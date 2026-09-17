@@ -2,6 +2,27 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { modelFixture } from './verify-appearance.mjs';
 
+const TOUCH_DRAG_PIXELS = 40;
+const TOUCH_PIXELS_PER_REACH = 100;
+
+export async function dragTouch(page, protocol, { start, delta }) {
+  await protocol.send('Input.dispatchTouchEvent', {
+    type: 'touchStart', touchPoints: [{ ...start, id: 1, radiusX: 6, radiusY: 6, force: 1 }],
+  });
+  for (let step = 1; step <= 5; step++) {
+    await protocol.send('Input.dispatchTouchEvent', {
+      type: 'touchMove', touchPoints: [{
+        x: start.x + delta.x * step / 5, y: start.y + delta.y * step / 5,
+        id: 1, radiusX: 6, radiusY: 6, force: 1,
+      }],
+    });
+    await page.waitForTimeout(20);
+  }
+  await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.evaluate(() => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
 async function monitorInput(page) {
   const protocol = await page.context().newCDPSession(page);
   const errors = [];
@@ -44,22 +65,8 @@ export async function verifyMobile(browser, address, artifacts) {
       const snapshot = () => page.evaluate(() => window.gettingOver.snapshot());
       const frames = () => page.evaluate(() => new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      const drag = async (dx, dy, start = { x: width * 0.48, y: height * 0.65 }) => {
-        await protocol.send('Input.dispatchTouchEvent', {
-          type: 'touchStart', touchPoints: [{ ...start, id: 1, radiusX: 6, radiusY: 6, force: 1 }],
-        });
-        for (let step = 1; step <= 5; step++) {
-          await protocol.send('Input.dispatchTouchEvent', {
-            type: 'touchMove', touchPoints: [{
-              x: start.x + dx * step / 5, y: start.y + dy * step / 5,
-              id: 1, radiusX: 6, radiusY: 6, force: 1,
-            }],
-          });
-          await page.waitForTimeout(20);
-        }
-        await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-        await frames();
-      };
+      const drag = (dx, dy, start = { x: width * 0.48, y: height * 0.65 }) =>
+        dragTouch(page, protocol, { start, delta: { x: dx, y: dy } });
       const visibleRig = async () => {
         const info = await page.evaluate(() => {
           const state = window.gettingOver.snapshot();
@@ -92,10 +99,12 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal(await page.evaluate(() => window.captureAttempts), 0, 'Touch Play must never request mouse capture.');
       assert.equal((await snapshot()).pointerLocked, false);
       const beforeDrag = await snapshot();
-      await drag(0, -100);
+      await drag(0, -TOUCH_DRAG_PIXELS);
       const afterDrag = await snapshot();
       const distance = afterDrag.cursor.y - beforeDrag.cursor.y;
       assert.ok(distance > 0.5, 'Finger movement must drive the hammer target.');
+      assert.ok(Math.abs(distance - initial.maxReach * TOUCH_DRAG_PIXELS / TOUCH_PIXELS_PER_REACH) < 0.001,
+        'Touch gain must map 100 CSS pixels to one full hammer reach without changing with camera zoom.');
       await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, afterDrag.time + 1);
       const beforeClutch = await snapshot();
       await protocol.send('Input.dispatchTouchEvent', {
@@ -107,7 +116,7 @@ export async function verifyMobile(browser, address, artifacts) {
 
       const aim = await snapshot();
       const pivot = aim.parts.find((part) => part.id === 'carrier');
-      const pixelsPerWorld = 100 / distance;
+      const pixelsPerWorld = TOUCH_DRAG_PIXELS / distance;
       await drag((pivot.x - aim.maxReach * 0.98 - aim.cursor.x) * pixelsPerWorld,
         -(pivot.y - aim.cursor.y) * pixelsPerWorld, { x: width - 25, y: height * 0.6 });
       const aimedTime = (await snapshot()).time;
@@ -235,13 +244,13 @@ export async function verifyMobile(browser, address, artifacts) {
       }
       assert.equal(await page.evaluate(() => window.captureAttempts), 0);
       assert.deepEqual(errors, []);
-      results.push({ name, targetMovementFor100px: distance, worldHeight: initial.camera.worldHeight,
+      results.push({ name, dragPixels: TOUCH_DRAG_PIXELS, targetMovement: distance, worldHeight: initial.camera.worldHeight,
         gamePreview: { width: canvasBox.width, height: canvasBox.height }, autoPause: true, captureAttempts: 0 });
     } finally {
       await context.close();
     }
   }
-  assert.ok(Math.abs(results[0].targetMovementFor100px - results[1].targetMovementFor100px) < 0.001,
+  assert.ok(Math.abs(results[0].targetMovement - results[1].targetMovement) < 0.001,
     'Touch sensitivity must stay the same in portrait and landscape.');
 
   const hybrid = await browser.newContext({ viewport: { width: 1440, height: 900 }, hasTouch: true });

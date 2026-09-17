@@ -1,0 +1,275 @@
+:root {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: #243d3c;
+  background: #dddcd0;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: light;
+  --ink: #243d3c;
+  --muted: #62706a;
+  --teal: #365e56;
+  --teal-dark: #254a43;
+  --brass: #9d783d;
+  --paper: #f3f1e8;
+  --line: #d9ddd2;
+  --game-gutter: clamp(22px, 2.6vw, 44px);
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --control-height: 37px;
+  --icon-size: 32px;
+}
+
+body.touch-controls {
+  --control-height: 48px;
+  --icon-size: 48px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+#app {
+  position: relative;
+  height: 100dvh;
+  isolation: isolate;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+label {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+input:focus-visible,
+#game:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #94662b;
+  outline-offset: 4px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#game {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+#game:active {
+  cursor: grabbing;
+}
+
+#game:focus-visible {
+  outline-offset: -5px;
+}
+
+#interface,
+.game-ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#interface {
+  z-index: 2;
+}
+
+.game-ui p,
+.game-ui h1,
+.game-ui h2,
+.game-ui h3 {
+  margin: 0;
+}
+
+.game-ui button,
+.game-ui input {
+  pointer-events: auto;
+}
+
+.icon-button {
+  display: inline-flex;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #d1d8c9;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.icon-button:hover {
+  border-color: #9dab96;
+  background: #e4e8db;
+}
+
+.close-icon {
+  position: relative;
+  width: 12px;
+  height: 12px;
+}
+
+.close-icon::before,
+.close-icon::after {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: 12px;
+  height: 1px;
+  background: currentColor;
+  content: "";
+}
+
+.close-icon::before {
+  transform: rotate(45deg);
+}
+
+.close-icon::after {
+  transform: rotate(-45deg);
+}
+
+.ui-notice {
+  position: absolute;
+  z-index: 5;
+  bottom: 164px;
+  left: var(--game-gutter);
+  display: flex;
+  width: min(430px, calc(100% - 2 * var(--game-gutter)));
+  align-items: flex-start;
+  gap: 18px;
+  padding: 15px 16px;
+  border: 1px solid #adbda5;
+  border-left: 3px solid var(--teal);
+  border-radius: 6px;
+  background: #f6f6ed;
+  box-shadow: 0 8px 28px rgb(32 50 39 / 15%);
+  pointer-events: auto;
+}
+
+.ui-notice > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.notice-heading {
+  color: #4b6651;
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1.5;
+  letter-spacing: 0.12em;
+}
+
+.game-ui .notice-message {
+  max-height: 27dvh;
+  margin-top: 5px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.ui-notice .icon-button {
+  width: 25px;
+  height: 25px;
+}
+
+.ui-notice[data-kind="error"] {
+  border-color: #c79780;
+  border-left-color: #98533c;
+  background: #fff2e9;
+  color: #743925;
+}
+
+.ui-notice[data-kind="error"] .notice-heading {
+  color: #87432f;
+}
+
+.ui-notice[data-kind="error"] .icon-button {
+  border-color: #d2ac96;
+}
+
+.ui-notice[data-kind="error"] .icon-button:hover {
+  background: #f3dfd0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+#fatal-error {
+  position: absolute;
+  z-index: 10;
+  top: 50%;
+  left: 50%;
+  width: min(480px, calc(100% - 36px));
+  max-height: 80dvh;
+  overflow: auto;
+  padding: 26px;
+  border: 1px solid #bc876d;
+  border-radius: 8px;
+  background: #fff2e7;
+  color: #703b27;
+  box-shadow: 0 12px 40px rgb(33 45 36 / 20%);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  transform: translate(-50%, -50%);
+}
+
+@media (max-width: 680px) {
+  :root {
+    --game-gutter: 20px;
+  }
+
+  .ui-notice {
+    bottom: 153px;
+  }
+}
+
+@media (max-width: 390px) {
+  :root {
+    --game-gutter: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+}
