@@ -1,13 +1,15 @@
-import { DEFAULT_TUNING } from '../config';
 import type { Tuning } from '../config';
+import {
+  CURSOR_FIELDS, CURSOR_RETURN_IDLE_SECONDS, DEFAULT_GAME_SETTINGS, GameSettingsError, TUNING_FIELDS, validateGameSettings,
+} from '../game-settings';
+import type { CursorSettings, GameSettings } from '../game-settings';
 import { element, setPressed, setText } from '../dom';
 import { createGameUI, DESKTOP_QUERY } from './game-ui';
 import { inputModeForPointer } from '../input';
 import { PRACTICES } from './practices';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
-import { createTuningHistoryUI } from './tuning-history-ui';
-import { TUNING_FIELDS, TuningError, validateTuning } from './tuning-schema';
+import { createGameSettingsUI } from './game-settings-ui';
 import type { GameUi, HudState, PracticeId, UiOptions, WorkshopState, WorkshopTab } from './ui-types';
 import workshopMarkup from './workshop.html?raw';
 
@@ -15,7 +17,7 @@ const WORKSHOP_CLASS = 'workshop-open';
 const TABS = ['physics', 'appearance', 'sprites', 'level'] as const;
 
 export function createUI(options: UiOptions): GameUi {
-  let tuning = validateTuning(options.initialTuning);
+  let settings = validateGameSettings(options.initialSettings);
   let selectedTab: WorkshopTab = 'physics';
   const events = new AbortController();
   const listen = { signal: events.signal };
@@ -65,14 +67,19 @@ export function createUI(options: UiOptions): GameUi {
   }
   const groups = new Map<string, HTMLFieldSetElement>();
   const controls = new Map<keyof Tuning, RangeControl>();
+  const cursorControls = new Map<Exclude<keyof CursorSettings, 'returnToHammer'>, RangeControl>();
+  const returnToggle = document.createElement('input');
+  returnToggle.type = 'checkbox';
+  returnToggle.id = 'cursor-returnToHammer';
   const practiceButtons = new Map<PracticeId, HTMLButtonElement>();
   const tuningGroups = element<HTMLElement>(root, '.tuning-groups');
   const practiceGrid = element<HTMLElement>(root, '.practice-grid');
   const practiceDescription = element<HTMLElement>(root, '.practice-description');
   setText(element(root, '.practice-count'), `${PRACTICES.length} STARTING POINTS`);
 
-  function renderTuning(next: Readonly<Tuning>): void {
-    tuning = { ...next };
+  function renderSettings(next: GameSettings): void {
+    settings = next;
+    const tuning = settings.physics;
     for (const field of TUNING_FIELDS) {
       const control = controls.get(field.key);
       if (!control) throw new Error(`Missing tuning control: ${field.key}`);
@@ -80,10 +87,27 @@ export function createUI(options: UiOptions): GameUi {
       control.setValue(tuning[field.key], { disabled: inactive });
       control.row.classList.toggle('is-inactive', inactive);
     }
+    returnToggle.checked = settings.cursor.returnToHammer;
+    for (const field of CURSOR_FIELDS) {
+      const control = cursorControls.get(field.key);
+      if (!control) throw new Error(`Missing cursor control: ${field.key}`);
+      control.setValue(settings.cursor[field.key], { disabled: !settings.cursor.returnToHammer });
+      control.row.classList.toggle('is-inactive', !settings.cursor.returnToHammer);
+    }
   }
-  function commitTuning(next: Tuning): void {
-    renderTuning(next);
-    options.onTuningChange({ ...tuning });
+  function commitSettings(next: GameSettings): void {
+    const valid = validateGameSettings(next);
+    options.onSettingsChange(valid);
+    renderSettings(valid);
+  }
+  function editSettings(next: GameSettings): void {
+    try {
+      commitSettings(next);
+    } catch (error) {
+      if (!(error instanceof GameSettingsError)) throw error;
+      renderSettings(settings);
+      notice(error.message, 'error');
+    }
   }
   for (const practice of PRACTICES) {
     const button = document.createElement('button');
@@ -110,18 +134,7 @@ export function createUI(options: UiOptions): GameUi {
     }
     const control = createRangeControl(field, {
       id: `tuning-${field.key}`, name: field.key, signal: events.signal,
-      onInput: (value) => {
-        let next: Tuning;
-        try {
-          next = validateTuning({ ...tuning, [field.key]: value });
-        } catch (error) {
-          if (!(error instanceof TuningError)) throw error;
-          renderTuning(tuning);
-          notice(error.message, 'error');
-          return;
-        }
-        commitTuning(next);
-      },
+      onInput: (value) => editSettings({ ...settings, physics: { ...settings.physics, [field.key]: value } }),
     });
     if (field.key === 'handleDamping') {
       const reason = document.createElement('p');
@@ -134,6 +147,33 @@ export function createUI(options: UiOptions): GameUi {
     controls.set(field.key, control);
     group.append(control.row);
   }
+  const cursorGroup = document.createElement('fieldset');
+  cursorGroup.className = 'tuning-group cursor-settings';
+  const cursorLegend = document.createElement('legend');
+  cursorLegend.textContent = 'Cursor target';
+  const returnLabel = document.createElement('label');
+  returnLabel.className = 'cursor-return-toggle';
+  returnLabel.htmlFor = returnToggle.id;
+  returnLabel.append(returnToggle, document.createTextNode('Return target to hammer'));
+  const returnHelp = document.createElement('p');
+  returnHelp.id = 'cursor-return-help';
+  returnHelp.className = 'cursor-return-help';
+  returnHelp.textContent = `Off keeps a fixed world target. On eases toward the hammer plus its offset after ${CURSOR_RETURN_IDLE_SECONDS}s ` +
+    'without aiming, while the head touches a surface. X goes right; Y goes up. Offsets use world-space metres.';
+  returnToggle.setAttribute('aria-describedby', returnHelp.id);
+  returnToggle.addEventListener('change', () => editSettings({
+    ...settings, cursor: { ...settings.cursor, returnToHammer: returnToggle.checked },
+  }), listen);
+  cursorGroup.append(cursorLegend, returnLabel, returnHelp);
+  for (const field of CURSOR_FIELDS) {
+    const control = createRangeControl(field, {
+      id: `cursor-${field.key}`, name: field.key, signal: events.signal,
+      onInput: (value) => editSettings({ ...settings, cursor: { ...settings.cursor, [field.key]: value } }),
+    });
+    cursorControls.set(field.key, control);
+    cursorGroup.append(control.row);
+  }
+  tuningGroups.append(cursorGroup);
   function renderWorkshop(mode: 'open' | 'closed'): void {
     const open = mode === 'open';
     const focusInPanel = panel.contains(document.activeElement);
@@ -164,8 +204,8 @@ export function createUI(options: UiOptions): GameUi {
     }
   }, listen);
   element<HTMLButtonElement>(root, '.defaults-tuning').addEventListener('click', () => {
-    commitTuning(validateTuning(DEFAULT_TUNING));
-    notice('All tuning restored to defaults. Your saved snapshots were not changed.', 'info');
+    commitSettings(DEFAULT_GAME_SETTINGS);
+    notice('All game settings restored to defaults. Your saved profiles were not changed.', 'info');
   }, listen);
   const contacts = element<HTMLElement>(root, '.contact-value');
   const hinge = element<HTMLElement>(root, '.hinge-effort-value');
@@ -189,17 +229,16 @@ export function createUI(options: UiOptions): GameUi {
       if (active) setText(practiceDescription, practice.description);
     }
   }
-  renderTuning(tuning);
-  createTuningHistoryUI({
-    mount: element(root, '.tuning-history'), signal: events.signal,
-    getTuning: () => ({ ...tuning }), onLoad: commitTuning, onNotice: notice,
+  renderSettings(settings);
+  createGameSettingsUI({
+    mount: element(root, '.game-settings-history'), signal: events.signal,
+    getSettings: () => settings, onLoad: commitSettings, onNotice: notice,
   });
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
     appearanceMount, spriteMount, levelMount, workshopState,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
-    setTuning: (next) => renderTuning(validateTuning(next)),
     dispose: () => {
       events.abort();
       document.body.classList.remove(WORKSHOP_CLASS);

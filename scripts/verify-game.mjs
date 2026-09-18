@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, createServer, preview } from 'vite';
 import { chromium } from 'playwright';
@@ -10,6 +10,8 @@ import { texturePng } from './verify-appearance.mjs';
 
 const TOUCH_DRAG_PIXELS = 40;
 const TOUCH_PIXELS_PER_REACH = 100;
+const SETTINGS_MODULE = '\0virtual:game-settings';
+const SETTINGS_SAMPLE_TIMEOUT = 5000;
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = join(root, 'artifacts');
 const configFile = join(root, 'vite.game.config.ts');
@@ -17,10 +19,12 @@ await mkdir(artifacts, { recursive: true });
 const temporary = await mkdtemp(join(artifacts, 'release-proof-'));
 const levelPath = join(temporary, 'level.json');
 const spritePath = join(temporary, 'sprites.json');
+const settingsPath = join(temporary, 'settings.json');
 const customOutput = join(temporary, 'game');
 const previousLevel = process.env.GAME_LEVEL;
 const previousSprites = process.env.GAME_SPRITES;
-const report = { status: 'incomplete', errors: [], entries: [], blocked: [] };
+const previousSettings = process.env.GAME_SETTINGS;
+const report = { status: 'incomplete', errors: [], entries: [], blocked: [], settings: { invalid: [] } };
 let browser;
 
 const frames = page => page.evaluate(() => new Promise(resolve =>
@@ -96,6 +100,168 @@ function bundleModules(bundle) {
   const results = Array.isArray(bundle) ? bundle : [bundle];
   return results.flatMap(result => result.output.filter(file => file.type === 'chunk')
     .flatMap(file => Object.keys(file.modules)));
+}
+
+async function settingsBuild(expected, buildOptions) {
+  let embedded = false;
+  const bundle = await build({
+    configFile, logLevel: 'silent', build: buildOptions,
+    plugins: [{
+      name: 'release-settings-proof', enforce: 'pre',
+      transform(code, id) {
+        if (id !== SETTINGS_MODULE) return;
+        assert.deepEqual(JSON.parse(code.slice('export default '.length, -1)), expected);
+        embedded = true;
+      },
+    }],
+  });
+  const modules = bundleModules(bundle);
+  assert.ok(embedded && modules.includes(SETTINGS_MODULE), 'The release must embed its validated settings.');
+  assert.ok(!modules.some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
+}
+
+async function withSettingsDevelopment(page, inspect) {
+  const server = await createServer({
+    configFile, logLevel: 'silent', server: { host: '127.0.0.1', port: 0, strictPort: true },
+  });
+  try {
+    await server.listen();
+    const address = `http://127.0.0.1:${server.httpServer.address().port}/`;
+    return await inspect(server, address);
+  } finally {
+    try { await page.goto('about:blank'); }
+    finally { await server.close(); }
+  }
+}
+
+async function runtimeSettings(page, server) {
+  await page.waitForFunction(() => {
+    const elapsed = document.querySelector('.elapsed-value');
+    return elapsed !== null && elapsed.textContent !== '00:00';
+  });
+  const module = server.moduleGraph.getModuleById(join(root, 'src/game.ts'));
+  assert.ok(module);
+  return page.evaluate(async ({ url, timeout }) => {
+    const { Game } = await import(url);
+    const original = Game.prototype.state;
+    // Observe the live release instance on its next frame without adding a release debug API.
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        Game.prototype.state = original;
+        reject(new Error('The release did not produce a settings sample.'));
+      }, timeout);
+      Game.prototype.state = function () {
+        Game.prototype.state = original;
+        clearTimeout(timer);
+        resolve(this.settings());
+        return original.call(this);
+      };
+    });
+  }, { url: module.url, timeout: SETTINGS_SAMPLE_TIMEOUT });
+}
+
+async function verifySettings(page) {
+  delete process.env.GAME_SETTINGS;
+  const { defaults, fileBytes } = await withSettingsDevelopment(page, async (server, address) => {
+    const shared = await server.ssrLoadModule('/src/game-settings.ts');
+    const defaults = shared.DEFAULT_GAME_SETTINGS;
+    await settingsBuild(defaults, { write: false });
+    assert.equal((await page.goto(address, { waitUntil: 'networkidle' })).status(), 200);
+    assert.deepEqual(await runtimeSettings(page, server), defaults);
+    report.settings.defaults = { build: true, development: true, profile: defaults };
+    return { defaults, fileBytes: shared.GAME_SETTINGS_LIMITS.fileBytes };
+  });
+  const selected = {
+    ...defaults,
+    physics: { ...defaults.physics, playerMass: 14, mouseSensitivity: 1.75 },
+    cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
+  };
+  await writeFile(settingsPath, JSON.stringify(selected));
+  process.env.GAME_SETTINGS = relative(root, settingsPath);
+  const output = join(temporary, 'settings-game');
+  await settingsBuild(selected, { outDir: output });
+  const release = await preview({
+    configFile, logLevel: 'silent', build: { outDir: output },
+    preview: { host: '127.0.0.1', port: 0, strictPort: true },
+  });
+  try {
+    const address = `http://127.0.0.1:${release.httpServer.address().port}/`;
+    assert.equal((await fetch(address)).status, 200);
+    await page.goto(address, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => {
+      const elapsed = document.querySelector('.elapsed-value');
+      return elapsed !== null && elapsed.textContent !== '00:00';
+    });
+    await minimalHud(page, 1440);
+    report.settings.selected = { build: true, preview: true, profile: selected };
+  } finally {
+    try { await page.goto('about:blank'); }
+    finally {
+      await new Promise((resolve, reject) => release.httpServer.close(error => error ? reject(error) : resolve()));
+    }
+  }
+
+  process.env.GAME_SETTINGS = settingsPath;
+  await withSettingsDevelopment(page, async (server, address) => {
+    assert.equal((await page.goto(address, { waitUntil: 'networkidle' })).status(), 200);
+    assert.deepEqual(await runtimeSettings(page, server), selected);
+    report.settings.selected.development = true;
+    const edited = {
+      ...selected,
+      physics: { ...selected.physics, mouseSensitivity: 0.8 },
+      cursor: { returnToHammer: false, returnRate: 6, returnOffsetX: -0.4, returnOffsetY: 0.6 },
+    };
+    const reload = page.waitForEvent('domcontentloaded');
+    await writeFile(settingsPath, JSON.stringify(edited));
+    await reload;
+    assert.deepEqual(await runtimeSettings(page, server), edited);
+    report.settings.reload = { fullReload: true, profile: edited };
+  });
+
+  const invalidPath = join(temporary, 'invalid-settings.json');
+  const invalid = [
+    { name: 'malformed-json', source: '{broken', error: /JSON|Unexpected/ },
+    { name: 'unsupported-version', value: { ...defaults, schemaVersion: 2 }, error: /version is not supported/ },
+    {
+      name: 'invalid-physics', value: { ...defaults, physics: { ...defaults.physics, playerMass: 0 } },
+      error: /Player mass must be between/,
+    },
+    {
+      name: 'invalid-cursor', value: { ...defaults, cursor: { ...defaults.cursor, returnToHammer: 'yes' } },
+      error: /Return to hammer must be enabled or disabled/,
+    },
+    {
+      name: 'invalid-offset', value: { ...defaults, cursor: { ...defaults.cursor, returnOffsetX: 1000 } },
+      error: /Return offset X must be between/,
+    },
+    { name: 'missing-fields', value: { ...defaults, physics: {} }, error: /missing or unknown settings/ },
+    { name: 'unknown-field', value: { ...defaults, unknown: 1 }, error: /missing or unknown settings/ },
+    {
+      name: 'oversized', source: JSON.stringify(defaults) + ' '.repeat(fileBytes),
+      error: /GAME_SETTINGS exceeds the file size limit/,
+    },
+    { name: 'missing-file', path: join(temporary, 'missing-settings.json'), error: /ENOENT/ },
+    { name: 'empty-path', path: '', error: /GAME_SETTINGS must name a JSON file inside this project/ },
+    { name: 'non-json-file', path: join(root, 'src/play.ts'), error: /GAME_SETTINGS must name a JSON file inside this project/ },
+    { name: 'outside-project', path: join(root, '..'), error: /GAME_SETTINGS must name a JSON file inside this project/ },
+  ];
+  for (const scenario of invalid) {
+    if (scenario.path === undefined) {
+      await writeFile(invalidPath, scenario.source === undefined ? JSON.stringify(scenario.value) : scenario.source);
+    }
+    process.env.GAME_SETTINGS = scenario.path === undefined ? invalidPath : scenario.path;
+    await assert.rejects(build({ configFile, logLevel: 'silent', build: { write: false } }), scenario.error,
+      `${scenario.name} must fail the build instead of selecting defaults.`);
+    const development = () => withSettingsDevelopment(page, async (_server, address) => {
+      const response = await fetch(`${address}@id/__x00__virtual:game-settings`);
+      assert.equal(response.status, 500, `${scenario.name} must not serve default settings.`);
+      assert.match(await response.text(), scenario.error);
+    });
+    if (scenario.path === undefined) await development();
+    else await assert.rejects(development, scenario.error,
+      `${scenario.name} must fail development instead of selecting defaults.`);
+    report.settings.invalid.push({ case: scenario.name, build: true, development: true });
+  }
 }
 
 function customLevel(lift) {
@@ -174,7 +340,7 @@ try {
   report.modules = modules.length;
 
   for (const target of [
-    'tuning-schema.ts', 'style.css', 'workshop.html?raw', 'game-ui.ts', 'game-ui.css',
+    'game-settings-ui.ts', 'game-settings-store.ts', 'style.css', 'workshop.html?raw', 'game-ui.ts', 'game-ui.css',
     'sprite-editor.ts', 'sprite-editor.css', 'visual-store.ts',
   ]) {
     await assert.rejects(build({
@@ -339,14 +505,17 @@ try {
     await page.goto('about:blank');
     await development.close();
   }
+  await verifySettings(page);
   assert.deepEqual(report.errors, [], 'Release browser errors are not allowed.');
   report.status = 'passed';
-  console.log('Game-only release, sprites, updrafts, enemies, dependency boundary, custom level, and development scenarios passed.');
+  console.log('Game-only release, sprites, updrafts, enemies, dependency boundary, custom level, settings profiles, and development scenarios passed.');
 } finally {
   if (previousLevel === undefined) delete process.env.GAME_LEVEL;
   else process.env.GAME_LEVEL = previousLevel;
   if (previousSprites === undefined) delete process.env.GAME_SPRITES;
   else process.env.GAME_SPRITES = previousSprites;
+  if (previousSettings === undefined) delete process.env.GAME_SETTINGS;
+  else process.env.GAME_SETTINGS = previousSettings;
   await writeFile(join(artifacts, 'game-release-report.json'), JSON.stringify(report, null, 2));
   if (browser) await browser.close();
   await rm(temporary, { recursive: true });

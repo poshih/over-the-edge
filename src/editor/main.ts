@@ -49,12 +49,12 @@ const unsubscribeLevel = level.subscribe((change) => {
 });
 const ui = createUI({
   mount,
-  initialTuning: game.simulation.snapshot().tuning,
+  initialSettings: game.settings(),
   initialInputMode: game.input.mode,
   onAction: perform,
   onWorkshopChange: updateWorkshop,
   onPractice: resetPractice,
-  onTuningChange: (tuning) => game.setTuning(tuning),
+  onSettingsChange: (settings) => game.setSettings(settings),
 });
 const rig = new AppearanceRig(game.view.visuals);
 const appearance = new Appearance(rig, ui.notice);
@@ -144,6 +144,7 @@ const diagnostics = Object.freeze({
     };
   },
   project: (point: Point) => game.view.project(point),
+  settings: () => game.settings(),
   appearance: () => appearance.snapshot(),
   sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.sprites.inspect() }),
   events: () => game.eventState(),

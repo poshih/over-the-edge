@@ -28,7 +28,6 @@ export interface Tuning {
   handleFrequency: number;
   handleDamping: number;
   mouseSensitivity: number;
-  cursorRelaxation: number;
 }
 
 export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
@@ -50,7 +49,6 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   handleFrequency: 0,
   handleDamping: 0.9,
   mouseSensitivity: 1,
-  cursorRelaxation: 8,
 });
 
 export const PHYSICS = {
@@ -68,8 +66,6 @@ export const PHYSICS = {
   rootMassFraction: 0.25,
   guideInertiaPerMass: 0.07,
   aimEpsilon: 0.000001,
-  pointerSpeedResponse: 12,
-  cursorSettlingSpeed: 1.2,
 } as const;
 
 const POT_BOTTOM = -0.48;

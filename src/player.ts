@@ -247,16 +247,19 @@ export function tunePlayer(rig: PlayerRig, tuning: Readonly<Tuning>): void {
   }
 }
 
-export function drivePlayer(rig: PlayerRig, cursor: Point, tuning: Readonly<Tuning>): MotorCommand {
+export function drivePlayer(rig: PlayerRig, cursor: Readonly<Point>, tuning: Readonly<Tuning>): MotorCommand {
   const pivot = rig.root.getWorldPoint(RIG.shoulder);
   const targetX = cursor.x - pivot.x;
   const targetY = cursor.y - pivot.y;
+  const distance = Math.hypot(targetX, targetY);
   // The slider axis remains defined even when the head is at the hinge.
   const axisAngle = rig.carrier.getAngle();
-  const angularError = Math.hypot(targetX, targetY) <= PHYSICS.aimEpsilon
+  const angularError = distance <= PHYSICS.aimEpsilon
     ? 0 : angleDifference(Math.atan2(targetY, targetX), axisAngle);
+  // Bound the motor's workspace without moving the player's world-space target.
+  const reachScale = distance > RIG.maxReach ? RIG.maxReach / distance : 1;
   const projectedReach = clamp(
-    targetX * Math.cos(axisAngle) + targetY * Math.sin(axisAngle), 0, RIG.maxReach,
+    targetX * reachScale * Math.cos(axisAngle) + targetY * reachScale * Math.sin(axisAngle), 0, RIG.maxReach,
   );
   const extensionError = projectedReach - RIG.handleLength - rig.slider.getJointTranslation();
   const angularSpeed = clamp(

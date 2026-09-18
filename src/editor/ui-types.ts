@@ -1,4 +1,5 @@
-import type { InputMode, Tuning, UiAction, UiActionOptions } from '../config';
+import type { InputMode, UiAction, UiActionOptions } from '../config';
+import type { GameSettings } from '../game-settings';
 import type { GameHudState } from './game-ui';
 
 export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
@@ -20,12 +21,12 @@ export interface WorkshopState {
 
 export interface UiOptions {
   mount: HTMLElement;
-  initialTuning: Readonly<Tuning>;
+  initialSettings: Readonly<GameSettings>;
   initialInputMode: InputMode;
   onAction: (action: EditorAction, options?: UiActionOptions) => void;
   onWorkshopChange: (state: WorkshopState) => void;
   onPractice: (practice: PracticeId) => void;
-  onTuningChange: (tuning: Tuning) => void;
+  onSettingsChange: (settings: GameSettings) => void;
 }
 
 export interface GameUi {
@@ -35,7 +36,6 @@ export interface GameUi {
   workshopState: () => WorkshopState;
   closeWorkshop: () => void;
   update: (state: HudState) => void;
-  setTuning: (tuning: Readonly<Tuning>) => void;
   notice: (message: string, kind: 'info' | 'error') => void;
   dispose: () => void;
 }

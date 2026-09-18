@@ -71,9 +71,25 @@ GAME_LEVEL=levels/my-level.json npm run build:game
 
 Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
 validated and bundled at build time; the game needs no editor or external level
-service. This export contains level data, not private imported GLBs or browser
-physics/IK profiles. The game-only entry uses the game's default physics and
-character settings.
+service. Level exports do not contain gameplay settings, sprite layouts,
+private imported GLBs, or IK profiles.
+
+To publish your physics and cursor behavior, export a game-settings profile
+from **Workshop / Physics**, put it inside the project, and select it with
+`GAME_SETTINGS`:
+
+```sh
+GAME_SETTINGS=profiles/my-game.json npm run dev:game
+GAME_SETTINGS=profiles/my-game.json npm run build:game
+# Combine it with your level; GAME_SPRITES remains an independent input:
+GAME_LEVEL=levels/my-level.json GAME_SETTINGS=profiles/my-game.json npm run build:game
+```
+
+Omitting `GAME_SETTINGS` uses the built-in game settings, with cursor return
+**off**. A supplied profile is validated and embedded in the game; an invalid,
+missing, oversized, or outside-project file fails rather than reverting to
+defaults. Development reloads when the selected file changes. Browser-local
+saves do not change a release unless you export and select one.
 
 `src/editor/` owns all authoring UI, persistence, imports, and debugging tools.
 The editor depends on the shared game runtime, never the reverse.
@@ -82,7 +98,7 @@ The editor depends on the shared game runtime, never the reverse.
 that graph. Hiding editor controls with a runtime flag is not the release
 boundary.
 
-`npm run verify:game` exercises the release, custom-course/sprite builds,
+`npm run verify:game` exercises the release, custom-course/sprite/settings builds,
 development entry, and editor-dependency rejection in isolation.
 
 ### Included full-length course
@@ -122,11 +138,11 @@ open the [full-height map](docs/skyward-ruins-map.svg).
 | 1 / 2 / 3 / 4 | Ascent / ledge hold / ground push / vault (editor only) |
 
 Touch gain is independent of camera zoom and orientation: at the default
-**Control sensitivity**, 100 CSS pixels correspond to the 2.65 m maximum reach
-before reach clamping. The same swipe has the same effect in portrait and
-landscape, in both the game and editor. Mouse input continues to follow the
-displayed scene scale. Touch
-cancellation, focus loss and resizing clear pending gestures.
+**Control sensitivity**, 100 CSS pixels move the world-space target **2.65 m**.
+Target movement is not limited by hammer reach. The same swipe has the same
+effect in portrait and landscape, in both the game and editor. Mouse input
+continues to follow the displayed scene scale. Touch cancellation, focus loss
+and resizing clear pending gestures.
 
 Compact viewports use wider reach-aware framing to keep the player and hammer
 visible. On phones, the Workshop is a bottom sheet in portrait and a side panel
@@ -171,16 +187,20 @@ iterations are distinct. Rendering interpolates the previous and current
 physics poses. Catch-up is bounded under overload; switching tabs discards
 elapsed wall-clock time rather than advancing a huge physics step.
 
-Mouse motion updates a virtual world-space cursor. Camera translation never
-feeds back into that cursor. The cursor is limited to the head's actual maximum
-reach, 2.65 m from the hinge. The slider can retract the head all the way to the
-hinge, so there is no unreachable inner ring. The hinge's own orientation defines
-aim even at zero reach; aiming does not normalize a zero-length hinge-to-head vector.
+Mouse or touch movement updates the white circle's world-space target.
+By default the target stays where the player leaves it: hammer lag, terrain
+contact, character movement, and camera movement never pull it back or rebase it.
+Starting or resetting an attempt initializes it at the hammer head.
 
-Free-space drag targets remain fixed until further mouse input or reach
-clamping. Only a head touching terrain uses low-input-speed cursor settling,
-preventing blocked targets from continuously driving the mechanism. The head
-still cannot pass through solid terrain.
+Reach limits apply only to a derived motor target, not to the circle. A target
+beyond the head's **2.65 m** reach stays put while the hammer extends toward it
+as far as the rig allows. A target inside terrain also stays put; the head
+cannot pass through solid terrain and contact can transfer motor effort to
+the player. Optional cursor return is described below; it is disabled by default.
+
+The slider can retract the head all the way to the hinge, so there is no
+unreachable inner ring. The hinge's own orientation defines aim even at zero
+reach; aiming does not normalize a zero-length hinge-to-head vector.
 
 Motor velocity targets come from angular and axial errors with measured joint
 velocity damping, speed caps, and independent force/torque limits. All angular
@@ -188,7 +208,7 @@ quantities use radians. Collision visualization uses the authored physics
 geometry and fixture filters, so it does not draw the non-colliding shaft as a
 terrain collider.
 
-## Tuning
+## Game settings
 
 The workshop applies parameters to the existing mechanism without restarting.
 Its first section, **Mass & recoil**, groups head mass, player mass and rotation
@@ -198,7 +218,7 @@ inertia scales with mass. The new defaults preserve the original 0.66 kg shaft
 and 0.5 kg per guide body. All masses stay positive.
 
 The other sections include motor strength and speed limits, response gains, damping,
-contact friction, handle compliance, mouse sensitivity, and cursor settling.
+contact friction, handle compliance, and control sensitivity.
 Zero handle frequency means rigid weld constraints; positive frequency enables
 rotational spring compliance.
 
@@ -208,27 +228,50 @@ giving a contact coefficient of about **2.74**. This is ordinary contact
 friction, not a sticky constraint: the head must still press against a surface
 to hold. The pot's own friction coefficient remains **0.45**.
 
-In **Workshop / Physics / Saved tuning**, enter a **Tuning name** and choose
-**Save tuning** (or press Enter). Each save creates a separate timestamped
-snapshot of every Workshop physics setting. Reusing a name keeps both versions
-rather than overwriting the earlier experiment. Choose an entry in **Past tuning**,
-then **Load tuning** to apply it. Selecting an entry alone does not change the
-game. History survives reloads; loading remains manual.
+The **Cursor target** section includes **Return target to hammer**, a return
+speed, and X/Y return offsets in metres. Return is off by default. When enabled,
+the target eases toward the hammer-head centre plus the offset while the head
+touches a surface and no aiming input has arrived for **0.15 seconds** of
+simulation time. Player input always takes precedence. Positive X means right
+and positive Y means up; offsets do not rotate with the hammer. The default
+speed is **8 /s**, with zero offsets. Disabling return retains these values.
+This changes only the target, not the rig's forces or collision rules.
+
+In **Workshop / Physics**, enter a **Game settings name** and choose
+**Save game settings** (or press Enter). Each save creates a separate timestamped
+profile containing every physics setting and all cursor-return settings.
+Reusing a name keeps both versions. Choose an entry in **Past game settings**,
+then **Load game settings** to apply it. Selecting an entry alone does not
+change the game. History survives reloads; loading remains manual.
+
+**Export settings JSON** downloads the current complete profile as
+`game-settings.json`. **Import settings JSON** validates and applies a profile;
+save it under a name if you also want it in browser history. Files are limited
+to **64 KiB**, with strict schema, field, and numeric-range validation. A bad
+import leaves current settings and saved profiles unchanged. If settings change
+while a file is being read, the import is canceled rather than overwriting the
+newer edits. Use this same JSON with the `GAME_SETTINGS` build input above.
 
 Snapshots are stored independently in this browser's localStorage, on this site,
 so saves from different tabs do not overwrite one shared record. Nothing is
-uploaded. The previous single-slot v2 save appears as **Previous saved tuning
-(v2)**. If v2 is absent, a v1 save is available instead, with its original fixed
-tool masses supplied when loaded. Loading never rewrites either old record;
-saving the loaded settings under a name creates a new v3 snapshot. An invalid
-v2 record never causes v1 to be loaded instead. Unreadable saves are marked and
-retained, while other valid snapshots remain available.
+uploaded. New saves use a separate **game-settings v1** format containing a
+versioned physics/cursor document. Previous tuning v1-v4 records remain loadable,
+labeled **(physics only)**. They restore their physics values with the default
+cursor settings; their retired **Cursor settling** value is not reactivated.
 
-These are tuning presets, not saved body trajectories. Height and peak readouts
-describe the current attempt.
+The previous single-slot v2 save appears as **Previous saved tuning (v2)**.
+If v2 is absent, a v1 save is available instead, with its original fixed tool
+masses supplied when loaded. Loading never rewrites legacy records;
+saving loaded settings under a name creates a new game-settings profile. An invalid v2
+record never causes v1 to be loaded instead. Unreadable saves are marked and
+retained, while other valid snapshots remain available. Older releases can
+still read their original records and ignore the separate game-settings keys.
 
-Saved profiles preserve their stored hammer friction. Use **Defaults** to
-return to the rough hammer preset.
+Profiles contain gameplay configuration, not saved body trajectories, levels,
+or character artwork. Height and peak readouts describe the current attempt.
+
+Saved profiles preserve their stored hammer friction. **Defaults** restores
+all built-in physics and cursor settings without changing saved profiles.
 
 The practice positions make the important behaviors easy to revisit: resting
 on a ledge, smooth ground pushes, launches, and vaulting a low block. The

@@ -110,6 +110,7 @@ try {
       await page.waitForTimeout(16);
     }
     await page.mouse.up();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   };
   const dragWorld = (delta, seconds) => dragInput(seconds, (_state, progress, previous) => ({
     x: delta.x * (progress - previous), y: delta.y * (progress - previous),
@@ -170,23 +171,32 @@ try {
     }
   }
   await dragWorld({ x: 0, y: 1 }, 0.5);
-  const overreachTime = (await snapshot()).time;
-  await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, overreachTime + 1);
-  const capped = await snapshot();
-  const capPivot = capped.parts.find((part) => part.id === 'carrier');
-  assert.ok(capPivot);
-  const cappedRadius = Math.hypot(capped.cursor.x - capPivot.x, capped.cursor.y - capPivot.y);
-  assert.ok(Math.abs(cappedRadius - maxReach) < 0.02, 'The cursor must clamp to the physical maximum reach.');
-  assert.ok(Math.hypot(capped.tip.x - capped.cursor.x, capped.tip.y - capped.cursor.y) < 0.03,
-    'The head must reach the clamped outer target.');
-  report.scenarios.reachLimit = { maxReach, cappedRadius };
+  const overreach = await snapshot();
+  await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, overreach.time + 1);
+  const limited = await snapshot();
+  const pivot = limited.parts.find((part) => part.id === 'carrier');
+  assert.ok(pivot);
+  const targetRadius = Math.hypot(limited.cursor.x - pivot.x, limited.cursor.y - pivot.y);
+  const tipRadius = Math.hypot(limited.tip.x - pivot.x, limited.tip.y - pivot.y);
+  assert.deepEqual(limited.cursor, overreach.cursor, 'An unreachable target must stay at the player-selected world position.');
+  assert.ok(targetRadius > maxReach + 0.2, 'The target must remain beyond physical reach.');
+  assert.ok(tipRadius <= maxReach + 0.03, 'Only the physical rig and motor target must be reach-limited.');
+  report.scenarios.reachLimit = { maxReach, targetRadius, tipRadius, targetFixed: true };
 
+  await practice('2');
+  const fixedHold = await observe(10);
+  assert.deepEqual(fixedHold.end.cursor, fixedHold.first.cursor, 'Ledge contact must not move a fixed world target.');
+  assert.ok(fixedHold.end.headContacts > 0 && fixedHold.end.height > 0.8, 'A fixed target must still support the ledge hold.');
+  report.scenarios.fixedTargetLedge = fixedHold;
+  const returnTarget = page.getByRole('checkbox', { name: 'Return target to hammer', exact: true });
+  await returnTarget.check();
   await practice('2');
   const hold = await observe(10);
   report.scenarios.ledge = hold;
   assert.ok(hold.maxDrift < 0.03, `Ledge hold drifted ${hold.maxDrift} m.`);
   assert.ok(hold.end.height > 0.8, 'The ledge pose must remain suspended, not settle on the floor.');
   assert.ok(hold.maxPotAngle < 0.31, 'The pot must respect its limited hinge.');
+  await returnTarget.uncheck();
 
   await practice('3');
   const beforePush = await snapshot();
@@ -196,6 +206,7 @@ try {
   report.scenarios.groundPush = { beforePush, afterPush, ...pushed };
   assert.ok(afterPush.root.y > beforePush.root.y + 0.35, 'Real mouse input must lift the player through the slider motor.');
   assert.ok(pushed.end.headContacts > 0, 'The head, not the shaft, must support the ground push.');
+  assert.deepEqual(pushed.end.cursor, pushed.first.cursor, 'Terrain contact must not pull the target toward the head.');
   assert.ok(Math.abs(pushed.end.rootVelocity.y) < 0.2, 'The slow ground push must settle without continuing to bounce.');
 
   await practice('3');
@@ -282,30 +293,34 @@ try {
   const savedTorque = (await snapshot()).tuning.hingeTorque;
   const savedTuning = (await snapshot()).tuning;
   assert.ok(savedTorque > initialTorque, 'A live range control must reach the physics motor settings.');
-  const nameInput = page.getByRole('textbox', { name: 'Tuning name', exact: true });
-  const pastTuning = page.getByRole('combobox', { name: 'Past tuning', exact: true });
-  const saveTuning = page.getByRole('button', { name: 'Save tuning', exact: true });
-  const loadTuning = page.getByRole('button', { name: 'Load tuning', exact: true });
+  const nameInput = page.getByRole('textbox', { name: 'Game settings name', exact: true });
+  const pastTuning = page.getByRole('combobox', { name: 'Past game settings', exact: true });
+  const saveTuning = page.getByRole('button', { name: 'Save game settings', exact: true });
+  const loadTuning = page.getByRole('button', { name: 'Load game settings', exact: true });
   const savedRecords = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage)
-    .filter((key) => key.startsWith('over-the-edge:tuning:snapshot:v3:'))
+    .filter((key) => key.startsWith('over-the-edge:game-settings:snapshot:v1:'))
     .map((key) => [key, localStorage.getItem(key)])));
   assert.equal(await loadTuning.isDisabled(), true, 'An empty history must not offer a load action.');
   await nameInput.fill('   ');
   await saveTuning.click();
   assert.deepEqual(await savedRecords(), {}, 'An empty name must not create a snapshot.');
-  assert.ok(await page.getByRole('status').filter({ hasText: 'Enter a tuning name' }).isVisible());
+  assert.ok(await page.getByRole('status').filter({ hasText: 'Enter a game settings name' }).isVisible());
   const beforeTyping = await snapshot();
   await nameInput.fill('');
   await nameInput.pressSequentially('r p c d 1234');
   const afterTyping = await snapshot();
   for (const key of ['practice', 'paused', 'debug', 'time']) assert.equal(afterTyping[key], beforeTyping[key],
-    'Typing a tuning name must not invoke game keyboard shortcuts.');
+    'Typing a profile name must not invoke game keyboard shortcuts.');
   const experimentName = 'Light <hammer> & recoil';
   await nameInput.fill(experimentName);
   await nameInput.press('Enter');
   const firstSave = await pastTuning.inputValue();
   const originalRecord = (await savedRecords())[firstSave];
-  assert.deepEqual(JSON.parse(originalRecord).tuning, savedTuning);
+  assert.deepEqual(JSON.parse(originalRecord).settings.physics, savedTuning);
+  assert.equal(JSON.parse(originalRecord).schemaVersion, 1);
+  assert.deepEqual(JSON.parse(originalRecord).settings, await page.evaluate(() => window.gettingOver.settings()));
+  assert.equal(Object.hasOwn(JSON.parse(originalRecord).settings.physics, 'cursorRelaxation'), false);
+  assert.equal(await page.getByRole('slider', { name: 'Cursor settling', exact: true }).count(), 0);
   assert.equal(JSON.parse(originalRecord).name, experimentName);
   assert.ok(Number.isFinite(JSON.parse(originalRecord).savedAt));
   assert.equal(await pastTuning.locator('hammer').count(), 0, 'Names must render as text, never markup.');
@@ -344,7 +359,7 @@ try {
   const thirdSave = await pastTuning.inputValue();
   assert.equal(Object.keys(await savedRecords()).length, 3);
   await pastTuning.selectOption(firstSave);
-  assert.deepEqual((await snapshot()).tuning, thirdTuning, 'Choosing a past save must not apply it until Load tuning.');
+  assert.deepEqual((await snapshot()).tuning, thirdTuning, 'Choosing a past save must not apply it until explicitly loaded.');
   await loadTuning.click();
   assert.deepEqual((await snapshot()).tuning, savedTuning);
   await pastTuning.selectOption(secondSave);
@@ -376,14 +391,14 @@ try {
   try {
     await otherTab.goto(address, { waitUntil: 'networkidle' });
     await otherTab.waitForFunction(() => window.gettingOver);
-    await otherTab.getByRole('textbox', { name: 'Tuning name', exact: true }).fill('Other tab');
-    await otherTab.getByRole('button', { name: 'Save tuning', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('#past-tuning').options.length === 4);
+    await otherTab.getByRole('textbox', { name: 'Game settings name', exact: true }).fill('Other tab');
+    await otherTab.getByRole('button', { name: 'Save game settings', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('#past-game-settings').options.length === 4);
     assert.equal(await pastTuning.inputValue(), firstSave, 'Another tab must not replace the selected experiment.');
     assert.deepEqual((await snapshot()).tuning, savedTuning);
     await nameInput.fill('Original tab');
     await saveTuning.click();
-    await otherTab.waitForFunction(() => document.querySelector('#past-tuning').options.length === 5);
+    await otherTab.waitForFunction(() => document.querySelector('#past-game-settings').options.length === 5);
     assert.equal(Object.keys(await savedRecords()).length, 5, 'Independent tab saves must retain all snapshots.');
   } finally {
     await otherTab.close();
@@ -397,7 +412,7 @@ try {
     const original = Storage.prototype.setItem;
     window.restorePresetStorage = () => { Storage.prototype.setItem = original; delete window.restorePresetStorage; };
     Storage.prototype.setItem = function (key, value) {
-      if (key.startsWith('over-the-edge:tuning:snapshot:v3:')) throw new DOMException('Storage quota probe', 'QuotaExceededError');
+      if (key.startsWith('over-the-edge:game-settings:snapshot:v1:')) throw new DOMException('Storage quota probe', 'QuotaExceededError');
       return original.call(this, key, value);
     };
   });
@@ -407,7 +422,7 @@ try {
     assert.deepEqual((await snapshot()).tuning, beforeFailedTuning);
     assert.equal(await pastTuning.inputValue(), beforeFailedSelection);
     assert.equal(await nameInput.inputValue(), 'Quota experiment');
-    assert.ok(await page.getByRole('status').filter({ hasText: 'Tuning could not be saved.' }).isVisible());
+    assert.ok(await page.getByRole('status').filter({ hasText: 'Game settings could not be saved.' }).isVisible());
   } finally {
     await page.evaluate(() => window.restorePresetStorage());
   }
@@ -416,7 +431,7 @@ try {
 
   const legacyTuning = { ...savedTuning, hingeTorque: initialTorque + 20 };
   for (const key of ['shaftMass', 'hingeCarrierMass', 'sliderCarriageMass']) delete legacyTuning[key];
-  const legacyRecord = JSON.stringify({ schemaVersion: 1, tuning: legacyTuning });
+  const legacyRecord = JSON.stringify({ schemaVersion: 1, tuning: { ...legacyTuning, cursorRelaxation: 8 } });
   await page.evaluate((record) => {
     localStorage.setItem('over-the-edge:tuning:v1', record);
     localStorage.removeItem('over-the-edge:tuning:v2');
@@ -436,16 +451,54 @@ try {
     'Reading a legacy save must not rewrite storage.');
   await nameInput.fill('Imported v1');
   await saveTuning.click();
-  assert.deepEqual(JSON.parse((await savedRecords())[await pastTuning.inputValue()]).tuning, migrated.tuning);
-  const v2Record = JSON.stringify({ schemaVersion: 2, tuning: { ...savedTuning, gripFriction: 1.2 } });
+  assert.deepEqual(JSON.parse((await savedRecords())[await pastTuning.inputValue()]).settings.physics, migrated.tuning);
+  const v2Tuning = { ...savedTuning, gripFriction: 1.2 };
+  const v2Record = JSON.stringify({ schemaVersion: 2, tuning: { ...v2Tuning, cursorRelaxation: 8 } });
   await page.evaluate((record) => localStorage.setItem('over-the-edge:tuning:v2', record), v2Record);
   await page.reload({ waitUntil: 'networkidle' });
   await ready();
   assert.equal(await pastTuning.locator('option[value="over-the-edge:tuning:v1"]').count(), 0);
   await pastTuning.selectOption('over-the-edge:tuning:v2');
   await loadTuning.click();
-  assert.deepEqual((await snapshot()).tuning, JSON.parse(v2Record).tuning);
+  assert.deepEqual((await snapshot()).tuning, v2Tuning);
   assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), v2Record);
+  const v3Key = `over-the-edge:tuning:snapshot:v3:${'c'.repeat(32)}`;
+  const v3Tuning = { ...savedTuning, mouseSensitivity: 1.35 };
+  const v3Record = JSON.stringify({
+    schemaVersion: 3, name: 'Earlier named tuning', savedAt: Date.now(),
+    tuning: { ...v3Tuning, cursorRelaxation: 12 },
+  });
+  await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: v3Key, record: v3Record });
+  await page.reload({ waitUntil: 'networkidle' });
+  await ready();
+  await pastTuning.selectOption(v3Key);
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, v3Tuning);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), v3Key), v3Record);
+  await nameInput.fill('Imported v3');
+  await saveTuning.click();
+  const migratedV3 = JSON.parse((await savedRecords())[await pastTuning.inputValue()]);
+  assert.equal(migratedV3.schemaVersion, 1);
+  assert.deepEqual(migratedV3.settings.physics, v3Tuning);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), v3Key), v3Record);
+  const v4Key = `over-the-edge:tuning:snapshot:v4:${'d'.repeat(32)}`;
+  const v4Tuning = { ...savedTuning, gripFriction: 1.4 };
+  const v4Record = JSON.stringify({
+    schemaVersion: 4, name: 'Previous fixed target tuning', savedAt: Date.now(), tuning: v4Tuning,
+  });
+  await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: v4Key, record: v4Record });
+  await page.reload({ waitUntil: 'networkidle' });
+  await ready();
+  await pastTuning.selectOption(v4Key);
+  assert.ok((await pastTuning.locator('option:checked').textContent()).includes('(physics only)'));
+  await loadTuning.click();
+  assert.deepEqual((await snapshot()).tuning, v4Tuning);
+  assert.deepEqual((await page.evaluate(() => window.gettingOver.settings())).cursor, {
+    returnToHammer: false, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
+  });
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), v4Key), v4Record);
+  await pastTuning.selectOption('over-the-edge:tuning:v2');
+  await loadTuning.click();
   const beforeInvalidLegacy = (await snapshot()).tuning;
   await page.evaluate(() => localStorage.setItem('over-the-edge:tuning:v2', '{broken'));
   await loadTuning.click();
@@ -462,7 +515,7 @@ try {
   assert.deepEqual((await snapshot()).tuning, validTuning, 'A malformed snapshot must not change live tuning.');
   assert.equal((await savedRecords())[firstSave], '{broken');
   assert.equal(await pastTuning.locator(`option[value="${firstSave}"]`).isDisabled(), true);
-  assert.ok(await page.locator('.tuning-history-error').isVisible());
+  assert.ok(await page.locator('.game-settings-history-error').isVisible());
   await pastTuning.selectOption(secondSave);
   await loadTuning.click();
   assert.deepEqual((await snapshot()).tuning, secondTuning, 'Other history must remain loadable when one record is unreadable.');

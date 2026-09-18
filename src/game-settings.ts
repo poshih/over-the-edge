@@ -1,17 +1,49 @@
-import { DEFAULT_TUNING } from '../config';
-import type { Tuning } from '../config';
+import { DEFAULT_TUNING, RIG } from './config';
+import type { Tuning } from './config';
 
+export interface CursorSettings {
+  readonly returnToHammer: boolean;
+  readonly returnRate: number;
+  readonly returnOffsetX: number;
+  readonly returnOffsetY: number;
+}
 
-interface TuningField {
-  key: keyof Tuning;
+export interface GameSettings {
+  readonly schemaVersion: 1;
+  readonly physics: Readonly<Tuning>;
+  readonly cursor: Readonly<CursorSettings>;
+}
+
+export const GAME_SETTINGS_LIMITS = { fileBytes: 64 * 1024 } as const;
+export const CURSOR_RETURN_IDLE_SECONDS = 0.15;
+export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
+  returnToHammer: false, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
+});
+export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
+  schemaVersion: 1, physics: DEFAULT_TUNING, cursor: DEFAULT_CURSOR_SETTINGS,
+});
+
+interface NumericSetting {
   label: string;
-  group: 'Mass & recoil' | 'Motors' | 'Response' | 'Materials' | 'Input';
   min: number;
   max: number;
   step: number;
   unit: string;
   description: string;
 }
+
+interface TuningField extends NumericSetting {
+  key: keyof Tuning;
+  group: 'Mass & recoil' | 'Motors' | 'Response' | 'Materials' | 'Input';
+}
+
+type CursorField = NumericSetting & { key: Exclude<keyof CursorSettings, 'returnToHammer'> };
+
+export const CURSOR_FIELDS: readonly CursorField[] = [
+  { key: 'returnRate', label: 'Return speed', min: 0.5, max: 24, step: 0.5, unit: '/s', description: 'How quickly an idle target eases toward the hammer plus its offset while the head touches a surface.' },
+  { key: 'returnOffsetX', label: 'Return offset X', min: -RIG.maxReach, max: RIG.maxReach, step: 0.05, unit: 'm', description: 'World-space horizontal offset from the hammer center. Positive goes right.' },
+  { key: 'returnOffsetY', label: 'Return offset Y', min: -RIG.maxReach, max: RIG.maxReach, step: 0.05, unit: 'm', description: 'World-space vertical offset from the hammer center. Positive goes up.' },
+];
 
 export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'hammerMass', label: 'Hammer head mass', group: 'Mass & recoil', min: 0.5, max: 4, step: 0.1, unit: 'kg', description: 'Lower head mass reduces swing recoil; higher mass increases momentum and motor load.' },
@@ -32,26 +64,39 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'handleFrequency', label: 'Handle compliance', group: 'Materials', min: 0, max: 30, step: 1, unit: 'Hz', description: 'Zero uses rigid welds. Positive values enable rotational spring compliance.' },
   { key: 'handleDamping', label: 'Handle damping', group: 'Materials', min: 0.1, max: 1, step: 0.05, unit: '', description: 'Damping ratio of compliant handle welds; only active above zero Hz.' },
   { key: 'mouseSensitivity', label: 'Control sensitivity', group: 'Input', min: 0.3, max: 2.5, step: 0.05, unit: 'x', description: 'Relative pointer movement. Touch uses the same CSS-pixel gain in either orientation; mouse follows the scene scale.' },
-  { key: 'cursorRelaxation', label: 'Cursor settling', group: 'Input', min: 0, max: 24, step: 0.5, unit: '/s', description: 'At low input speed, a head touching terrain can settle its contact target. Free-space aiming is never relaxed.' },
 ];
 
-export class TuningError extends Error {}
+export class GameSettingsError extends Error {}
+
+function settingsFields(value: unknown, keys: readonly string[], label: string): asserts value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
+    Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) {
+    throw new GameSettingsError(`${label} contains missing or unknown settings.`);
+  }
+}
+
+function settingNumber(value: unknown, field: NumericSetting): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < field.min || value > field.max) {
+    throw new GameSettingsError(`${field.label} must be between ${field.min} and ${field.max}.`);
+  }
+  return value;
+}
 
 export function validateTuning(value: unknown): Tuning {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new TuningError('A tuning profile must contain a settings object.');
-  }
-  if (Object.keys(value).length !== TUNING_FIELDS.length) {
-    throw new TuningError('The tuning profile contains missing or unknown settings.');
-  }
+  settingsFields(value, TUNING_FIELDS.map((field) => field.key), 'Physics tuning');
   const result = { ...DEFAULT_TUNING };
   for (const field of TUNING_FIELDS) {
-    const candidate: unknown = Reflect.get(value, field.key);
-    if (typeof candidate !== 'number' || !Number.isFinite(candidate) ||
-      candidate < field.min || candidate > field.max) {
-      throw new TuningError(`${field.label} must be between ${field.min} and ${field.max}.`);
-    }
-    result[field.key] = candidate;
+    result[field.key] = settingNumber(value[field.key], field);
   }
-  return result;
+  return Object.freeze(result);
+}
+
+export function validateGameSettings(value: unknown): GameSettings {
+  settingsFields(value, ['schemaVersion', 'physics', 'cursor'], 'Game settings profile');
+  if (value.schemaVersion !== 1) throw new GameSettingsError('This game-settings profile version is not supported.');
+  settingsFields(value.cursor, ['returnToHammer', ...CURSOR_FIELDS.map((field) => field.key)], 'Cursor settings');
+  if (typeof value.cursor.returnToHammer !== 'boolean') throw new GameSettingsError('Return to hammer must be enabled or disabled.');
+  const cursor = { ...DEFAULT_CURSOR_SETTINGS, returnToHammer: value.cursor.returnToHammer };
+  for (const field of CURSOR_FIELDS) cursor[field.key] = settingNumber(value.cursor[field.key], field);
+  return Object.freeze({ schemaVersion: 1, physics: validateTuning(value.physics), cursor: Object.freeze(cursor) });
 }

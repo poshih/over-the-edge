@@ -222,6 +222,41 @@ body.touch-controls {
   color: #743925;
 }
 
+.game-settings-exchange {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.game-settings-exchange .button {
+  white-space: normal;
+  min-height: 48px;
+}
+
+.cursor-return-toggle {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.cursor-return-toggle input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
+.game-ui .cursor-return-help {
+  margin: 8px 0 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .appearance-label {
   display: block;
   margin: 20px 0 8px;

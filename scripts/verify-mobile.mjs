@@ -150,19 +150,19 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal((await snapshot()).tuning.playerMass, mass);
       const stepBox = await increase.boundingBox();
       assert.ok(stepBox && stepBox.width >= 48 && stepBox.height >= 48);
-      const tuningName = page.getByRole('textbox', { name: 'Tuning name', exact: true });
-      const pastTuning = page.getByRole('combobox', { name: 'Past tuning', exact: true });
+      const tuningName = page.getByRole('textbox', { name: 'Game settings name', exact: true });
+      const pastTuning = page.getByRole('combobox', { name: 'Past game settings', exact: true });
       await tuningName.fill(`Touch ${name}`);
       const savedTuning = (await snapshot()).tuning;
-      await page.getByRole('button', { name: 'Save tuning', exact: true }).tap();
+      await page.getByRole('button', { name: 'Save game settings', exact: true }).tap();
       const savedKey = await pastTuning.inputValue();
-      assert.ok(savedKey.startsWith('over-the-edge:tuning:snapshot:v3:'));
+      assert.ok(savedKey.startsWith('over-the-edge:game-settings:snapshot:v1:'));
       const noticeBox = await page.locator('.ui-notice').boundingBox();
       assert.ok(noticeBox && (noticeBox.y + noticeBox.height <= panelBox.y || noticeBox.x + noticeBox.width <= panelBox.x),
         'Save feedback must not cover the workshop controls.');
       await increase.tap();
       await pastTuning.selectOption(savedKey);
-      await page.getByRole('button', { name: 'Load tuning', exact: true }).tap();
+      await page.getByRole('button', { name: 'Load game settings', exact: true }).tap();
       assert.deepEqual((await snapshot()).tuning, savedTuning);
       await tuningName.scrollIntoViewIfNeeded();
       for (const control of [tuningName, pastTuning]) {

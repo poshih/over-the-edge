@@ -5,12 +5,11 @@ import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 import { DEFAULT_LEVEL } from './src/default-level';
 import { LEVEL_LIMITS, validateLevel } from './src/level';
+import { DEFAULT_GAME_SETTINGS, GAME_SETTINGS_LIMITS, validateGameSettings } from './src/game-settings';
 import { VISUAL_PART_IDS } from './src/character';
 import { spriteBundle } from './build/sprite-bundle';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
-const moduleId = 'virtual:game-level';
-const resolvedModule = `\0${moduleId}`;
 
 function projectJson(variable: string): string | null {
   const requested = process.env[variable];
@@ -21,23 +20,30 @@ function projectJson(variable: string): string | null {
   return path;
 }
 
-function gameLevel(): Plugin {
-  const levelPath = projectJson('GAME_LEVEL');
+function gameJson<T>(options: {
+  variable: string;
+  moduleId: string;
+  defaults: T;
+  fileBytes: number;
+  validate: (value: unknown) => T;
+}): Plugin {
+  const path = projectJson(options.variable);
+  const resolvedModule = `\0${options.moduleId}`;
   return {
-    name: 'game-level-data',
-    resolveId(id) { if (id === moduleId) return resolvedModule; },
+    name: `${options.moduleId.slice('virtual:'.length)}-data`,
+    resolveId(id) { if (id === options.moduleId) return resolvedModule; },
     load(id) {
       if (id !== resolvedModule) return;
-      let level = DEFAULT_LEVEL;
-      if (levelPath !== null) {
-        if (statSync(levelPath).size > LEVEL_LIMITS.fileBytes) throw new Error('GAME_LEVEL exceeds the level file size limit.');
-        this.addWatchFile(levelPath);
-        level = validateLevel(JSON.parse(readFileSync(levelPath, 'utf8')));
+      let data = options.defaults;
+      if (path !== null) {
+        if (statSync(path).size > options.fileBytes) throw new Error(`${options.variable} exceeds the file size limit.`);
+        this.addWatchFile(path);
+        data = options.validate(JSON.parse(readFileSync(path, 'utf8')));
       }
-      return `export default ${JSON.stringify(level)};`;
+      return `export default ${JSON.stringify(data)};`;
     },
     handleHotUpdate(context) {
-      if (context.file === levelPath) {
+      if (context.file === path) {
         const module = context.server.moduleGraph.getModuleById(resolvedModule);
         if (module) context.server.moduleGraph.invalidateModule(module);
         context.server.ws.send({ type: 'full-reload' });
@@ -74,7 +80,14 @@ export default defineConfig({
   publicDir: resolve(project, 'public'),
   resolve: { alias: { '/src': resolve(project, 'src') } },
   plugins: [
-    gameLevel(),
+    gameJson({
+      variable: 'GAME_LEVEL', moduleId: 'virtual:game-level', defaults: DEFAULT_LEVEL,
+      fileBytes: LEVEL_LIMITS.fileBytes, validate: validateLevel,
+    }),
+    gameJson({
+      variable: 'GAME_SETTINGS', moduleId: 'virtual:game-settings', defaults: DEFAULT_GAME_SETTINGS,
+      fileBytes: GAME_SETTINGS_LIMITS.fileBytes, validate: validateGameSettings,
+    }),
     spriteBundle({ path: projectJson('GAME_SPRITES'), anchors: VISUAL_PART_IDS }),
     gameOnlyBoundary(),
   ],

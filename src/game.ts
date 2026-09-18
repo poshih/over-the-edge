@@ -1,7 +1,9 @@
 import { DEFAULT_ARM_IK } from './character';
 import type { CharacterState } from './character';
-import { DEFAULT_TUNING, PHYSICS } from './config';
-import type { PlayerSpawn, Tuning, UiAction, UiActionOptions } from './config';
+import { PHYSICS } from './config';
+import type { PlayerSpawn, UiAction, UiActionOptions } from './config';
+import { DEFAULT_GAME_SETTINGS } from './game-settings';
+import type { GameSettings } from './game-settings';
 import { PointerInput } from './input';
 import { isTriggerObject } from './level';
 import type { LevelChange, LevelDefinition } from './level';
@@ -26,7 +28,6 @@ export class Game {
   private readonly inputBlocks = new Set<string>();
   private readonly unsubscribeTerrain: () => void;
   private readonly unsubscribeEnemies: () => void;
-  private tuning: Readonly<Tuning>;
   private character: CharacterState = { armIk: DEFAULT_ARM_IK, shaft: 'segmented' };
   private stopped = false;
   private started = false;
@@ -41,19 +42,18 @@ export class Game {
     fatal: HTMLElement;
     eventMount: HTMLElement;
     level: LevelDefinition;
-    tuning?: Readonly<Tuning>;
+    settings?: Readonly<GameSettings>;
     onAction: (action: UiAction, options?: UiActionOptions) => void;
     onNotice: (message: string) => void;
     onShortcut?: (event: KeyboardEvent) => void;
   }) {
     this.canvas = options.canvas;
     this.fatal = options.fatal;
-    this.tuning = options.tuning === undefined ? DEFAULT_TUNING : options.tuning;
     const listen = { signal: this.lifecycle.signal };
     window.addEventListener('error', (event) => this.stop(event.message), listen);
     window.addEventListener('unhandledrejection', (event) =>
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
-    this.simulation = new Simulation(this.tuning, options.level);
+    this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
     this.view = new GameView(options.canvas, this.simulation.frame(1), options.level);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
     this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => this.view.enemies.apply(event));
@@ -92,7 +92,7 @@ export class Game {
         this.accumulator += dt;
         const steps = Math.min(Math.floor(this.accumulator / PHYSICS.dt), PHYSICS.maxFrameSteps);
         if (steps > 0) {
-          const movement = this.view.pointerDelta(this.input.takeMovement(), this.tuning.mouseSensitivity, this.input.mode);
+          const movement = this.view.pointerDelta(this.input.takeMovement(), this.settings().physics.mouseSensitivity, this.input.mode);
           const perStep = { x: movement.x / steps, y: movement.y / steps };
           let completed = 0;
           for (; completed < steps;) {
@@ -150,10 +150,9 @@ export class Game {
     await this.view.sprites.replace(document, { signal: this.lifecycle.signal });
   }
 
-  setTuning(tuning: Readonly<Tuning>): void {
-    this.simulation.setTuning(tuning);
-    this.tuning = { ...tuning };
-  }
+  settings(): GameSettings { return this.simulation.gameSettings(); }
+
+  setSettings(settings: Readonly<GameSettings>): void { this.simulation.setSettings(settings); }
 
   setCharacter(state: CharacterState): void {
     this.character = { armIk: { ...state.armIk }, shaft: state.shaft };

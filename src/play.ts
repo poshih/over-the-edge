@@ -1,6 +1,7 @@
 import './game-shell.css';
 import './play.css';
 import level from 'virtual:game-level';
+import settings from 'virtual:game-settings';
 import sprites from 'virtual:game-sprites';
 import { Game } from './game';
 import { createPlayUI } from './play-ui';
@@ -11,7 +12,7 @@ const fatal = document.querySelector<HTMLElement>('#fatal-error');
 if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface mounts are required.');
 
 const game = new Game({
-  canvas, fatal, eventMount: mount, level,
+  canvas, fatal, eventMount: mount, level, settings,
   onAction: (action, options) => game.perform(action, options),
   onNotice: (message) => ui.notice(message, 'error'),
 });

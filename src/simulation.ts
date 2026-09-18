@@ -1,12 +1,14 @@
 import { Vec2, World } from 'planck';
 import { PHYSICS, RIG } from './config';
-import type { PlayerSpawn, Point, Tuning } from './config';
+import type { PlayerSpawn, Point } from './config';
+import { CURSOR_RETURN_IDLE_SECONDS, TUNING_FIELDS, validateGameSettings } from './game-settings';
+import type { GameSettings } from './game-settings';
 import { isEnemyObject, isTerrainObject, levelSpawn } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import type { LaunchSettings } from './trigger-events';
-import { angleDifference, clamp } from './math';
+import { angleDifference } from './math';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
 import type { EnemyEvent, EnemyPose } from './enemy-types';
@@ -36,23 +38,23 @@ export class Simulation {
   private readonly terrain: TerrainWorld;
   private readonly enemies: EnemyWorld;
   private level: LevelDefinition;
-  private tuning: Tuning;
+  private settings: GameSettings;
   private cursor: Point;
   private previous: PlayerFrame;
   private current: PlayerFrame;
   private command = { ...IDLE_COMMAND };
   private elapsed = 0;
-  private pointerSpeed = 0;
+  private lastPointerInput = 0;
   private bestHeight = 0;
   private disposed = false;
 
-  constructor(tuning: Readonly<Tuning>, level: LevelDefinition) {
-    this.tuning = { ...tuning };
+  constructor(settings: Readonly<GameSettings>, level: LevelDefinition) {
+    this.settings = validateGameSettings(settings);
     this.level = level;
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot);
-    this.rig = createPlayer(this.world, levelSpawn(level), this.tuning);
+    this.rig = createPlayer(this.world, levelSpawn(level), this.settings.physics);
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
       getHead: () => this.rig.head,
@@ -63,13 +65,17 @@ export class Simulation {
     this.previous = this.current;
   }
 
-  setTuning(tuning: Readonly<Tuning>): void {
+  gameSettings(): GameSettings { return this.settings; }
+
+  setSettings(settings: Readonly<GameSettings>): void {
     this.ensureLive();
-    this.tuning = { ...tuning };
-    tunePlayer(this.rig, this.tuning);
-    // Existing contacts cache mixed material values independently of fixtures.
-    for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
-      contact.resetFriction();
+    const next = validateGameSettings(settings);
+    const physicsChanged = TUNING_FIELDS.some((field) => next.physics[field.key] !== this.settings.physics[field.key]);
+    this.settings = next;
+    if (physicsChanged) {
+      tunePlayer(this.rig, next.physics);
+      // Existing contacts cache mixed material values independently of fixtures.
+      for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) contact.resetFriction();
     }
   }
 
@@ -127,7 +133,7 @@ export class Simulation {
       !Number.isFinite(settings.strength) || settings.strength <= 0) {
       throw new Error('Player launch height and strength must be positive finite numbers.');
     }
-    return launchPlayer(this.rig, settings, this.tuning);
+    return launchPlayer(this.rig, settings, this.settings.physics);
   }
 
   step(pointerDelta: Point): void {
@@ -136,26 +142,21 @@ export class Simulation {
       throw new Error('Pointer movement must be finite.');
     }
     this.previous = this.current;
-    this.cursor.x += pointerDelta.x;
-    this.cursor.y += pointerDelta.y;
-    this.pointerSpeed += (Math.hypot(pointerDelta.x, pointerDelta.y) / PHYSICS.dt - this.pointerSpeed) *
-      (1 - Math.exp(-PHYSICS.pointerSpeedResponse * PHYSICS.dt));
-    if (this.headContactCount() > 0) {
-      const settling = 1 - Math.exp(-this.tuning.cursorRelaxation * PHYSICS.dt *
-        clamp(1 - this.pointerSpeed / PHYSICS.cursorSettlingSpeed, 0, 1));
+    if (pointerDelta.x !== 0 || pointerDelta.y !== 0) {
+      const x = this.cursor.x + pointerDelta.x;
+      const y = this.cursor.y + pointerDelta.y;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Pointer target must remain finite.');
+      this.cursor = { x, y };
+      this.lastPointerInput = this.elapsed;
+    } else if (this.settings.cursor.returnToHammer &&
+      this.elapsed - this.lastPointerInput >= CURSOR_RETURN_IDLE_SECONDS && this.headContactCount() > 0) {
+      const { returnRate, returnOffsetX, returnOffsetY } = this.settings.cursor;
       const tip = this.rig.head.getPosition();
-      this.cursor.x += (tip.x - this.cursor.x) * settling;
-      this.cursor.y += (tip.y - this.cursor.y) * settling;
+      const blend = 1 - Math.exp(-returnRate * PHYSICS.dt);
+      this.cursor.x += (tip.x + returnOffsetX - this.cursor.x) * blend;
+      this.cursor.y += (tip.y + returnOffsetY - this.cursor.y) * blend;
     }
-    const pivot = this.rig.root.getWorldPoint(RIG.shoulder);
-    const dx = this.cursor.x - pivot.x;
-    const dy = this.cursor.y - pivot.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance > RIG.maxReach) {
-      this.cursor.x = pivot.x + dx * RIG.maxReach / distance;
-      this.cursor.y = pivot.y + dy * RIG.maxReach / distance;
-    }
-    this.command = drivePlayer(this.rig, this.cursor, this.tuning);
+    this.command = drivePlayer(this.rig, this.cursor, this.settings.physics);
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
     this.elapsed += PHYSICS.dt;
@@ -199,8 +200,8 @@ export class Simulation {
       height: Math.max(0, root.y + RIG.potBottom),
       bestHeight: this.bestHeight,
       contacts,
-      hingeLoad: Math.abs(hingeTorque) / this.tuning.hingeTorque,
-      sliderLoad: Math.abs(sliderForce) / this.tuning.sliderForce,
+      hingeLoad: Math.abs(hingeTorque) / this.settings.physics.hingeTorque,
+      sliderLoad: Math.abs(sliderForce) / this.settings.physics.sliderForce,
     };
   }
 
@@ -220,7 +221,7 @@ export class Simulation {
       hingeTorque: this.rig.hinge.getMotorTorque(1 / PHYSICS.dt),
       sliderForce: this.rig.slider.getMotorForce(1 / PHYSICS.dt),
       command: { ...this.command },
-      tuning: { ...this.tuning },
+      tuning: { ...this.settings.physics },
       bodyProperties: Object.fromEntries(this.rig.parts.map(({ id, body }) =>
         [id, { mass: body.getMass(), inertia: body.getInertia() }] as const)),
       bodyCount: this.world.getBodyCount(),
@@ -264,11 +265,11 @@ export class Simulation {
 
   private resetPlayer(spawn: PlayerSpawn): void {
     destroyPlayer(this.world, this.rig);
-    this.rig = createPlayer(this.world, spawn, this.tuning);
+    this.rig = createPlayer(this.world, spawn, this.settings.physics);
     this.cursor = { ...this.rig.head.getPosition() };
     this.elapsed = 0;
+    this.lastPointerInput = 0;
     this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
-    this.pointerSpeed = 0;
     this.command = { ...IDLE_COMMAND };
     this.current = this.capture();
     this.previous = this.current;
