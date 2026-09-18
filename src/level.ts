@@ -4,6 +4,9 @@ import { transformPoint } from './math';
 import { upgradeLevelV1 } from './level-migration';
 import { fields, LevelError, number, point, text } from './level-validation';
 import type { TriggerAction } from './trigger-events';
+import { LAUNCH_FIELDS } from './trigger-events';
+import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
+import type { EnemyFacing, EnemySpecies } from './enemy-types';
 
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
@@ -34,7 +37,8 @@ export const TRIGGER_LIMITS = {
   exitMargin: 0.08,
   endingHeight: RIG.maxReach * 2,
 } as const;
-export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + 1;
+export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + ENEMY_LIMITS.objects + 1;
+export const TRIGGER_MARKERS = ['none', 'flag', 'updraft'] as const;
 export const ROCK_COLOR = 0x71817a;
 export const SHAPE_KINDS = ['box', 'ramp', 'triangle', 'circle', 'hexagon'] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
@@ -72,11 +76,20 @@ export interface TriggerObject extends Readonly<Point> {
   readonly name: string;
   readonly region: TriggerRegion;
   readonly activation: 'once' | 'on-enter';
-  readonly marker: 'none' | 'flag';
+  readonly marker: (typeof TRIGGER_MARKERS)[number];
   readonly events: readonly TriggerAction[];
 }
 
-export type LevelObject = TerrainObject | StartObject | TriggerObject;
+export interface EnemyObject extends Readonly<Point> {
+  readonly kind: 'enemy';
+  readonly id: string;
+  readonly species: EnemySpecies;
+  readonly facing: EnemyFacing;
+  readonly patrolDistance: number;
+  readonly speed: number;
+}
+
+export type LevelObject = TerrainObject | StartObject | TriggerObject | EnemyObject;
 
 export interface LevelLabel extends Readonly<Point> {
   readonly text: string;
@@ -189,7 +202,7 @@ function objectId(value: unknown): string {
 
 export function validateLevelObject(value: unknown): LevelObject {
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'kind')) {
-    throw new LevelError('Choose a terrain, start, or trigger object.');
+    throw new LevelError('Choose a terrain, start, trigger, or enemy object.');
   }
   const kind: unknown = Reflect.get(value, 'kind');
   if (kind === 'start') {
@@ -203,8 +216,24 @@ export function validateLevelObject(value: unknown): LevelObject {
     });
   }
   if (kind === 'trigger') return validateTrigger(value);
-  if (kind !== 'terrain') throw new LevelError('Choose a terrain, start, or trigger object.');
+  if (kind === 'enemy') return validateEnemy(value);
+  if (kind !== 'terrain') throw new LevelError('Choose a terrain, start, trigger, or enemy object.');
   return validateTerrain(value);
+}
+
+function validateEnemy(value: unknown): EnemyObject {
+  fields(value, ['kind', 'id', 'species', 'x', 'y', 'facing', 'patrolDistance', 'speed'], 'Enemy object');
+  const species = ENEMY_SPECIES.find((candidate) => candidate === value.species);
+  const facing = ENEMY_FACINGS.find((candidate) => candidate === value.facing);
+  if (species === undefined) throw new LevelError('Choose a bird or hollow soldier.');
+  if (facing === undefined) throw new LevelError('Choose a left or right starting direction.');
+  return Object.freeze({
+    kind: 'enemy', id: objectId(value.id), species, facing,
+    x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Enemy X'),
+    y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Enemy Y'),
+    patrolDistance: number(value.patrolDistance, ENEMY_FIELDS.patrolDistance.min, ENEMY_FIELDS.patrolDistance.max, ENEMY_FIELDS.patrolDistance.label),
+    speed: number(value.speed, ENEMY_FIELDS.speed.min, ENEMY_FIELDS.speed.max, ENEMY_FIELDS.speed.label),
+  });
 }
 
 function validateTerrain(value: unknown): TerrainObject {
@@ -264,7 +293,7 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (value.schemaVersion !== 2) throw new LevelError('This level format is not supported.');
   const metadata = validateLevelMetadata({ labels: value.labels });
   if (!Array.isArray(value.objects) || value.objects.length > LEVEL_OBJECT_LIMIT) {
-    throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, and one start.`);
+    throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, ${ENEMY_LIMITS.objects} enemies, and one start.`);
   }
   const objects = value.objects.map(validateLevelObject);
   if (new Set(objects.map((object) => object.id)).size !== objects.length) throw new LevelError('Every object needs a unique ID.');
@@ -272,6 +301,7 @@ export function validateLevel(value: unknown): LevelDefinition {
   const terrain = objects.filter(isTerrainObject);
   if (terrain.length > LEVEL_LIMITS.objects) throw new LevelError(`A level supports up to ${LEVEL_LIMITS.objects} terrain objects.`);
   if (objects.filter(isTriggerObject).length > TRIGGER_LIMITS.objects) throw new LevelError(`A level supports up to ${TRIGGER_LIMITS.objects} triggers.`);
+  if (objects.filter(isEnemyObject).length > ENEMY_LIMITS.objects) throw new LevelError(`A level supports up to ${ENEMY_LIMITS.objects} enemies.`);
   if (new Set(terrain.map((object) => geometryKey(object.shape))).size > LEVEL_LIMITS.geometryKinds) {
     throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
   }
@@ -296,7 +326,8 @@ function validateTrigger(value: unknown): TriggerObject {
     });
   } else throw new LevelError('Choose a circle or box trigger region.');
   if (value.activation !== 'once' && value.activation !== 'on-enter') throw new LevelError('Choose once per run or on each entry.');
-  if (value.marker !== 'none' && value.marker !== 'flag') throw new LevelError('Choose no marker or a flag.');
+  const marker = TRIGGER_MARKERS.find((candidate) => candidate === value.marker);
+  if (marker === undefined) throw new LevelError('Choose no marker, a flag, or an updraft.');
   if (!Array.isArray(value.events) || value.events.length === 0 || value.events.length > TRIGGER_LIMITS.events) {
     throw new LevelError(`A trigger needs 1 to ${TRIGGER_LIMITS.events} events.`);
   }
@@ -304,7 +335,7 @@ function validateTrigger(value: unknown): TriggerObject {
     kind: 'trigger', id: objectId(value.id), name: text(value.name, LEVEL_LIMITS.text, 'Trigger name'),
     x: number(value.x, -TRIGGER_LIMITS.coordinate, TRIGGER_LIMITS.coordinate, 'Trigger X'),
     y: number(value.y, -TRIGGER_LIMITS.coordinate, TRIGGER_LIMITS.coordinate, 'Trigger Y'),
-    region, activation: value.activation, marker: value.marker,
+    region, activation: value.activation, marker,
     events: Object.freeze(value.events.map(validateTriggerAction)),
   });
 }
@@ -315,6 +346,14 @@ export function validateTriggerAction(value: unknown): TriggerAction {
   if (type === 'stop-timer') {
     fields(value, ['type'], 'Stop timer event');
     return Object.freeze({ type });
+  }
+  if (type === 'launch-player') {
+    fields(value, ['type', 'height', 'strength'], 'Launch player event');
+    return Object.freeze({
+      type,
+      height: number(value.height, LAUNCH_FIELDS.height.min, LAUNCH_FIELDS.height.max, LAUNCH_FIELDS.height.label),
+      strength: number(value.strength, LAUNCH_FIELDS.strength.min, LAUNCH_FIELDS.strength.max, LAUNCH_FIELDS.strength.label),
+    });
   }
   if (type === 'popup') {
     fields(value, ['type', 'title', 'message'], 'Popup event');
@@ -338,11 +377,12 @@ export function validateTriggerAction(value: unknown): TriggerAction {
     if ((!local && !remote) || url.username || url.password) throw new LevelError('Use an HTTP(S) video URL without credentials, or a site-relative /media/video path.');
     return Object.freeze({ type, source });
   }
-  throw new LevelError('Choose popup, play video, or stop timer.');
+  throw new LevelError('Choose popup, play video, stop timer, or launch player.');
 }
 
 export function isTerrainObject(object: LevelObject): object is TerrainObject { return object.kind === 'terrain'; }
 export function isTriggerObject(object: LevelObject): object is TriggerObject { return object.kind === 'trigger'; }
+export function isEnemyObject(object: LevelObject): object is EnemyObject { return object.kind === 'enemy'; }
 
 export function levelStart(level: LevelDefinition): StartObject {
   const start = level.objects.find((object): object is StartObject => object.kind === 'start');

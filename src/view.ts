@@ -15,6 +15,8 @@ import { RIG } from './config';
 import type { InputMode, Point } from './config';
 import type { LevelChange, LevelDefinition, LevelLabel } from './level';
 import { FlagView } from './flag-view';
+import { UpdraftView } from './updraft-view';
+import { EnemyView } from './enemy-view';
 import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
@@ -94,8 +96,10 @@ function disposeResources(root: Object3D): void {
 export class GameView {
   readonly canvas: HTMLCanvasElement;
   readonly terrain = new TerrainView();
+  readonly enemies = new EnemyView();
   readonly sprites: SpriteRig;
   private readonly flags = new FlagView();
+  private readonly updrafts = new UpdraftView();
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
   private readonly camera = new OrthographicCamera();
@@ -149,9 +153,10 @@ export class GameView {
     this.camera.near = 0.1;
     this.camera.far = 100;
     this.buildScenery();
-    this.scene.add(this.terrain.root, this.flags.root, this.decorations);
+    this.scene.add(this.terrain.root, this.flags.root, this.updrafts.root, this.enemies.root, this.decorations);
     this.setLabels(level.labels);
     this.flags.setObjects(level.objects);
+    this.updrafts.setObjects(level.objects);
     this.buildPlayer();
     const spriteAnchors = new Map<string, SpriteAnchor>();
     for (const [id, binding] of this.bindings) {
@@ -228,6 +233,8 @@ export class GameView {
     this.targetLine.computeLineDistances();
     this.terrain.update(frame.time);
     this.flags.update();
+    this.updrafts.update(frame.time);
+    this.enemies.update(frame.enemies, frame.time);
     for (const layer of this.layers) layer.update(frame, armPoses);
     this.renderer.render(this.scene, this.camera);
   }
@@ -288,6 +295,8 @@ export class GameView {
       textures: this.renderer.info.memory.textures,
       terrain: this.terrain.inspect(),
       flags: this.flags.inspect(),
+      updrafts: this.updrafts.inspect(),
+      enemies: this.enemies.inspect(),
       sprites: this.sprites.inspect(),
     };
   }
@@ -305,6 +314,8 @@ export class GameView {
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
     this.flags.dispose();
+    this.updrafts.dispose();
+    this.enemies.dispose();
     for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
     this.layers.clear();
     disposeResources(this.scene);
@@ -377,6 +388,7 @@ export class GameView {
   applyLevel(change: LevelChange): void {
     this.setLabels(change.level.labels);
     this.flags.apply(change);
+    this.updrafts.apply(change);
   }
 
   private setLabels(labels: readonly LevelLabel[]): void {

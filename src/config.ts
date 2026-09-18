@@ -62,6 +62,7 @@ export const PHYSICS = {
   terrainCategory: 1,
   playerCategory: 2,
   toolCategory: 4,
+  enemyCategory: 8,
   terrainFriction: 3,
   potFriction: 0.45,
   rootMassFraction: 0.25,

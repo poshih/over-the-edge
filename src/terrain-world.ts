@@ -187,7 +187,7 @@ export class TerrainWorld {
       friction: PHYSICS.terrainFriction,
       restitution: 0,
       filterCategoryBits: PHYSICS.terrainCategory,
-      filterMaskBits: PHYSICS.playerCategory | PHYSICS.toolCategory,
+      filterMaskBits: PHYSICS.playerCategory | PHYSICS.toolCategory | PHYSICS.enemyCategory,
     });
   }
 

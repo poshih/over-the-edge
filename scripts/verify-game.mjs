@@ -111,6 +111,56 @@ function customLevel(lift) {
   };
 }
 
+function updraftLevel() {
+  return {
+    schemaVersion: 2, labels: [],
+    objects: [
+      { ...customLevel(0).objects[0], kind: 'terrain', x: 0, y: -1 },
+      { kind: 'start', id: 'release-start', x: 0, y: 4, angle: 0, extension: 0.2 },
+      {
+        kind: 'trigger', id: 'release-updraft', name: 'Updraft', x: 0, y: 0.7,
+        region: { type: 'box', width: 2, height: 1.4 }, activation: 'on-enter', marker: 'updraft',
+        events: [{ type: 'launch-player', height: 8, strength: 1.25 }],
+      },
+    ],
+  };
+}
+
+function enemiesLevel() {
+  return {
+    schemaVersion: 2, labels: [],
+    objects: [
+      { ...customLevel(0).objects[0], kind: 'terrain', x: 0, y: -1 },
+      { kind: 'start', id: 'release-start', x: 0, y: 0.53, angle: 0, extension: 0.2 },
+      {
+        kind: 'enemy', id: 'release-bird', species: 'bird', x: 2.35, y: 1.2,
+        facing: 'left', patrolDistance: 0, speed: 0,
+      },
+      {
+        kind: 'enemy', id: 'release-soldier', species: 'hollow-soldier', x: -4, y: 0.7,
+        facing: 'right', patrolDistance: 0, speed: 0,
+      },
+    ],
+  };
+}
+
+async function observeEnemySprites(page) {
+  await page.addInitScript(() => {
+    window.enemySpriteDraw = { instances: 0 };
+    const prototype = WebGL2RenderingContext.prototype;
+    const clear = prototype.clear;
+    const draw = prototype.drawElementsInstanced;
+    prototype.clear = function (...args) {
+      if (this.canvas.id === 'game') window.enemySpriteDraw.instances = 0;
+      return clear.apply(this, args);
+    };
+    prototype.drawElementsInstanced = function (mode, count, type, offset, instances) {
+      if (this.canvas.id === 'game' && count === 6) window.enemySpriteDraw.instances = instances;
+      return draw.call(this, mode, count, type, offset, instances);
+    };
+  });
+}
+
 try {
   const bundle = await build({ configFile, logLevel: 'silent', build: { write: false } });
   const modules = bundleModules(bundle);
@@ -147,7 +197,7 @@ try {
     return elapsed !== null && elapsed.textContent !== '00:00';
   });
 
-  for (const mode of ['preview', 'development', 'custom', 'sprites']) {
+  for (const mode of ['preview', 'development', 'custom', 'sprites', 'updraft', 'enemies']) {
     if (mode === 'custom') {
       await writeFile(levelPath, JSON.stringify(customLevel(0)));
       process.env.GAME_LEVEL = levelPath;
@@ -179,19 +229,40 @@ try {
         'Uploaded PNG bytes must not be in executable JavaScript.');
       assert.ok(!bundleModules(skin).some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
     }
+    if (mode === 'updraft') {
+      await writeFile(levelPath, JSON.stringify(updraftLevel()));
+      const launch = await build({ configFile, logLevel: 'silent', build: { outDir: customOutput } });
+      assert.ok(!bundleModules(launch).some(id => id.includes('/src/editor/') || id.endsWith('/src/default-level.ts')));
+    }
+    if (mode === 'enemies') {
+      await writeFile(levelPath, JSON.stringify(enemiesLevel()));
+      const enemies = await build({ configFile, logLevel: 'silent', build: { outDir: customOutput } });
+      assert.ok(!bundleModules(enemies).some(id => id.includes('/src/editor/') || id.endsWith('/src/default-level.ts')));
+      await observeEnemySprites(page);
+    }
     const development = mode === 'development';
     const server = development
       ? await createServer({ configFile, logLevel: 'silent', server: { host: '127.0.0.1', port: 0, strictPort: true } })
       : await preview({
         configFile, logLevel: 'silent',
-        ...(['custom', 'sprites'].includes(mode) ? { build: { outDir: customOutput } } : {}),
+        ...(['custom', 'sprites', 'updraft', 'enemies'].includes(mode) ? { build: { outDir: customOutput } } : {}),
         preview: { host: '127.0.0.1', port: 0, strictPort: true },
       });
     try {
       if (development) await server.listen();
       const address = `http://127.0.0.1:${server.httpServer.address().port}/`;
       assert.equal((await fetch(address)).status, 200);
-      await page.goto(address, { waitUntil: 'networkidle' });
+      await page.goto(address, { waitUntil: mode === 'enemies' ? 'domcontentloaded' : 'networkidle' });
+      if (mode === 'enemies') {
+        await page.waitForFunction(() => window.enemySpriteDraw?.instances === 2);
+        await page.mouse.move(720, 500);
+        await page.mouse.down();
+        await page.mouse.move(800, 500, { steps: 6 });
+        await page.mouse.up();
+        await page.waitForFunction(() => window.enemySpriteDraw?.instances === 1);
+        report.enemies = { birdAndSoldierSprites: true, hammerKilledBird: true };
+        await page.screenshot({ path: join(artifacts, 'game-release-enemies.png') });
+      }
       await ready();
       const canvas = await minimalHud(page, 1440);
       if (mode === 'custom' || mode === 'sprites') {
@@ -199,6 +270,11 @@ try {
         const floor = customLevel(0).objects[0];
         assert.ok(Math.abs(height - (floor.y + floor.height / 2)) < 0.2,
           `The custom course must support the pot at its authored floor, not the built-in floor (${height}m).`);
+      }
+      if (mode === 'updraft') {
+        await page.waitForFunction(() => Number(document.querySelector('.height-value')?.textContent) > 11);
+        report.updraft = { height: 8, strength: 1.25, reached: Number(await page.locator('.height-value').textContent()) };
+        await page.screenshot({ path: join(artifacts, 'game-release-updraft.png') });
       }
       await page.locator('#game').focus();
       await page.keyboard.press('p');
@@ -211,6 +287,10 @@ try {
       if (mode === 'preview') await page.screenshot({ path: join(artifacts, 'game-release.png') });
       await page.keyboard.press('r');
       await page.waitForFunction(() => document.querySelector('.elapsed-value').textContent === '00:00');
+      if (mode === 'enemies') {
+        await page.waitForFunction(() => window.enemySpriteDraw?.instances === 2);
+        report.enemies.resetRestored = true;
+      }
       if (development) {
         await page.keyboard.press('p');
         await ready();
@@ -261,7 +341,7 @@ try {
   }
   assert.deepEqual(report.errors, [], 'Release browser errors are not allowed.');
   report.status = 'passed';
-  console.log('Game-only release, sprite assets, dependency boundary, custom level, and development scenarios passed.');
+  console.log('Game-only release, sprites, updrafts, enemies, dependency boundary, custom level, and development scenarios passed.');
 } finally {
   if (previousLevel === undefined) delete process.env.GAME_LEVEL;
   else process.env.GAME_LEVEL = previousLevel;

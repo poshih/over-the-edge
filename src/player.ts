@@ -5,6 +5,7 @@ import type { Body, Joint, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point, Tuning } from './config';
 import { angleDifference, clamp, transformPoint } from './math';
+import type { LaunchSettings } from './trigger-events';
 
 export type PartKind = 'root' | 'pot' | 'carrier' | 'slider' | 'handle' | 'head';
 
@@ -32,6 +33,52 @@ export interface MotorCommand {
   extensionError: number;
   angularSpeed: number;
   linearSpeed: number;
+}
+
+const LAUNCH_SOLVER_ITERATIONS = 32;
+const SMALL_DRAG_RATIO = 0.001;
+
+function clearAirRise(speed: number, damping: number): number {
+  const ratio = damping * speed / PHYSICS.gravity;
+  // The series avoids cancellation near zero drag, including the drag-free limit.
+  const factor = ratio < SMALL_DRAG_RATIO
+    ? 0.5 - ratio / 3 + ratio * ratio / 4 - ratio ** 3 / 5
+    : (ratio - Math.log1p(ratio)) / (ratio * ratio);
+  return speed * speed / PHYSICS.gravity * factor;
+}
+
+function launchSpeed(height: number, damping: number): number {
+  let low = Math.sqrt(2 * PHYSICS.gravity * height);
+  let high = low + 2 * damping * height;
+  for (let iteration = 0; iteration < LAUNCH_SOLVER_ITERATIONS; iteration++) {
+    const speed = (low + high) / 2;
+    if (clearAirRise(speed, damping) < height) low = speed;
+    else high = speed;
+  }
+  return (low + high) / 2;
+}
+
+export function launchPlayer(rig: PlayerRig, settings: LaunchSettings, tuning: Readonly<Tuning>) {
+  let mass = 0;
+  let momentum = 0;
+  for (const part of rig.parts) {
+    const partMass = part.body.getMass();
+    mass += partMass;
+    momentum += partMass * part.body.getLinearVelocity().y;
+  }
+  if (mass <= 0) throw new Error('The player rig must have positive mass to launch.');
+  const speed = launchSpeed(settings.height, tuning.bodyDamping) * settings.strength;
+  const delta = Math.max(0, speed - momentum / mass);
+  changePlayerVelocity(rig, { x: 0, y: delta });
+  return { speed, impulse: mass * delta, mass };
+}
+
+export function changePlayerVelocity(rig: PlayerRig, delta: Readonly<Point>): void {
+  // Equal velocity changes preserve relative motion without kicking individual joints.
+  for (const part of rig.parts) {
+    const mass = part.body.getMass();
+    part.body.applyLinearImpulse(new Vec2(delta.x * mass, delta.y * mass), part.body.getWorldCenter());
+  }
 }
 
 function attach<T extends Joint>(world: World, joint: T): T {
@@ -69,7 +116,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
     friction: PHYSICS.potFriction,
     restitution: 0,
     filterCategoryBits: PHYSICS.playerCategory,
-    filterMaskBits: PHYSICS.terrainCategory,
+    filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
   });
   attach(world, new RevoluteJoint({
     bodyA: root,
@@ -154,7 +201,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
     friction: tuning.gripFriction,
     restitution: 0,
     filterCategoryBits: PHYSICS.toolCategory,
-    filterMaskBits: PHYSICS.terrainCategory,
+    filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
   });
   welds.push(attach(world, new WeldJoint({
     bodyA: previous,

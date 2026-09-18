@@ -100,7 +100,7 @@ function updateWorkshop(state: WorkshopState): void {
   const nextEditing = state.open && state.tab === 'level';
   if (nextEditing !== editing) {
     editing = nextEditing;
-    if (editing) game.simulation.restoreTerrain();
+    if (editing) game.simulation.restoreLevelObjects();
     game.setInputBlock({ reason: 'level-editor', blocked: editing });
     levelEditor.setMode(editing ? 'edit' : 'inactive');
   }
@@ -149,6 +149,7 @@ const diagnostics = Object.freeze({
   level: () => ({
     definition: level.definition(),
     terrain: game.simulation.terrainState(),
+    enemies: game.simulation.enemyState(),
     editor: levelEditor.snapshot(),
     rendering: game.view.statistics(),
   }),

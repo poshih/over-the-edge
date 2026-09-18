@@ -1,0 +1,7232 @@
+{
+  "schemaVersion": 2,
+  "labels": [
+    {
+      "x": 1.575,
+      "y": 4.275,
+      "text": "01 / FOUNDRY STEPS"
+    },
+    {
+      "x": 23.024,
+      "y": 81.493,
+      "text": "02 / TILTED QUARRY"
+    },
+    {
+      "x": 41.024,
+      "y": 156.493,
+      "text": "03 / BELL SPIRES"
+    },
+    {
+      "x": 17.237,
+      "y": 231.493,
+      "text": "04 / THE UNRAVELING"
+    },
+    {
+      "x": -12.51,
+      "y": 306.493,
+      "text": "05 / WIND GALLERIES"
+    },
+    {
+      "x": -34.794,
+      "y": 381.493,
+      "text": "06 / WATCHKEEPERS"
+    },
+    {
+      "x": -10.463,
+      "y": 456.493,
+      "text": "07 / PRISM TEETH"
+    },
+    {
+      "x": 11.461,
+      "y": 531.493,
+      "text": "08 / QUIET CROWN"
+    },
+    {
+      "x": -3.1,
+      "y": 599.675,
+      "text": "600 m / THE QUIET CROWN"
+    }
+  ],
+  "objects": [
+    {
+      "kind": "terrain",
+      "id": "ground",
+      "shape": {
+        "type": "box"
+      },
+      "x": 0,
+      "y": -1,
+      "width": 128,
+      "height": 2,
+      "angle": 0,
+      "depth": 3,
+      "color": 5399646,
+      "illusion": false
+    },
+    {
+      "kind": "start",
+      "id": "player-start",
+      "x": 0,
+      "y": 0.65,
+      "angle": -0.42,
+      "extension": 0.2
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-01",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.3,
+      "y": 1.075,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-02",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.1,
+      "y": 2.675,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": 1.575,
+      "y": 4.275,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-04",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.199,
+      "y": 6.803,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-05",
+      "shape": {
+        "type": "box"
+      },
+      "x": 2.118,
+      "y": 9.205,
+      "width": 4.235,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-06",
+      "shape": {
+        "type": "box"
+      },
+      "x": 6.834,
+      "y": 11.483,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-07",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 4.689,
+      "y": 13.86,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-08",
+      "shape": {
+        "type": "box"
+      },
+      "x": 8.3,
+      "y": 16.513,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-09",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.764,
+      "y": 18.766,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-10",
+      "shape": {
+        "type": "box"
+      },
+      "x": 9.584,
+      "y": 21.368,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.66,
+      "y": 23.696,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": 11.999,
+      "y": 26.123,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-13",
+      "shape": {
+        "type": "box"
+      },
+      "x": 8.004,
+      "y": 28.651,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-14",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 11.384,
+      "y": 30.853,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": 8.922,
+      "y": 33.406,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-16",
+      "shape": {
+        "type": "box"
+      },
+      "x": 12.6,
+      "y": 35.934,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-17",
+      "shape": {
+        "type": "box"
+      },
+      "x": 9.3,
+      "y": 38.336,
+      "width": 3.906,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-18",
+      "shape": {
+        "type": "box"
+      },
+      "x": 13.516,
+      "y": 40.614,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-19",
+      "shape": {
+        "type": "box"
+      },
+      "x": 10.796,
+      "y": 43.216,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-20",
+      "shape": {
+        "type": "box"
+      },
+      "x": 14.501,
+      "y": 45.644,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-21",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 12.14,
+      "y": 47.847,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": 16.916,
+      "y": 50.399,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-23",
+      "shape": {
+        "type": "box"
+      },
+      "x": 13.036,
+      "y": 52.927,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-24",
+      "shape": {
+        "type": "box"
+      },
+      "x": 16.9,
+      "y": 55.179,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": 13.111,
+      "y": 57.682,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": 18.909,
+      "y": 60.109,
+      "width": 3.885,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-27",
+      "shape": {
+        "type": "box"
+      },
+      "x": 15.965,
+      "y": 62.462,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-28",
+      "shape": {
+        "type": "box"
+      },
+      "x": 19.801,
+      "y": 65.04,
+      "width": 2.4,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-29",
+      "shape": {
+        "type": "box"
+      },
+      "x": 17.671,
+      "y": 67.492,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-30",
+      "shape": {
+        "type": "box"
+      },
+      "x": 21.766,
+      "y": 69.745,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-31",
+      "shape": {
+        "type": "box"
+      },
+      "x": 19.478,
+      "y": 72.347,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-32",
+      "shape": {
+        "type": "box"
+      },
+      "x": 25.1,
+      "y": 74.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-01",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 21.794,
+      "y": 77.273,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-02",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 24.879,
+      "y": 79.545,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": 23.024,
+      "y": 81.493,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-04",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 26.595,
+      "y": 84.091,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-05",
+      "shape": {
+        "type": "box"
+      },
+      "x": 23.78,
+      "y": 86.114,
+      "width": 4.662,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-06",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 28.192,
+      "y": 88.636,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-07",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 26.733,
+      "y": 90.909,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-08",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 29.632,
+      "y": 93.182,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-09",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 28.088,
+      "y": 95.455,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-10",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 30.901,
+      "y": 97.727,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": 27.473,
+      "y": 99.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": 33.807,
+      "y": 101.948,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-13",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 30.308,
+      "y": 104.545,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-14",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 32.983,
+      "y": 106.818,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": 30.713,
+      "y": 108.766,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-16",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 33.881,
+      "y": 111.364,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-17",
+      "shape": {
+        "type": "box"
+      },
+      "x": 31.079,
+      "y": 113.386,
+      "width": 3.881,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-18",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 34.762,
+      "y": 115.909,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-19",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 33.017,
+      "y": 118.182,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-20",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 35.692,
+      "y": 120.455,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-21",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 33.993,
+      "y": 122.727,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": 38.527,
+      "y": 124.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-23",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 35.099,
+      "y": 127.273,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-24",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 37.912,
+      "y": 129.545,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": 34.568,
+      "y": 131.493,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": 40.203,
+      "y": 133.766,
+      "width": 3.672,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-27",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 37.808,
+      "y": 136.364,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-28",
+      "shape": {
+        "type": "box"
+      },
+      "x": 41.039,
+      "y": 138.386,
+      "width": 2.3,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-29",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 39.405,
+      "y": 140.909,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-30",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 42.451,
+      "y": 143.182,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-31",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 41.121,
+      "y": 145.455,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-32",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": 44.206,
+      "y": 147.727,
+      "width": 3.4,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-33",
+      "shape": {
+        "type": "box"
+      },
+      "x": 40.9,
+      "y": 149.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-01",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 42.26,
+      "y": 151.223,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-02",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 44.413,
+      "y": 153.495,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": 41.024,
+      "y": 156.493,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-04",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 43.461,
+      "y": 158.041,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-05",
+      "shape": {
+        "type": "box"
+      },
+      "x": 40.447,
+      "y": 161.114,
+      "width": 1.995,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-06",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 42.392,
+      "y": 162.586,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-07",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 39.2,
+      "y": 164.859,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-08",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 41.165,
+      "y": 167.132,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-09",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 37.888,
+      "y": 169.405,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-10",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 39.767,
+      "y": 171.677,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": 34.806,
+      "y": 174.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": 39.807,
+      "y": 176.948,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-13",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 34.775,
+      "y": 178.495,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-14",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 36.517,
+      "y": 180.768,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": 32.396,
+      "y": 183.766,
+      "width": 3.485,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-16",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 34.747,
+      "y": 185.314,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-17",
+      "shape": {
+        "type": "box"
+      },
+      "x": 31.428,
+      "y": 188.386,
+      "width": 1.85,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-18",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 32.962,
+      "y": 189.859,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-19",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 29.483,
+      "y": 192.132,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-20",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 31.225,
+      "y": 194.405,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-21",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 27.793,
+      "y": 196.677,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": 31.194,
+      "y": 199.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-23",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 26.233,
+      "y": 201.223,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-24",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 28.112,
+      "y": 203.495,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": 23.235,
+      "y": 206.493,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": 27.125,
+      "y": 208.766,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-27",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 23.608,
+      "y": 210.314,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-28",
+      "shape": {
+        "type": "box"
+      },
+      "x": 26.628,
+      "y": 213.386,
+      "width": 4.144,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-29",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 22.539,
+      "y": 214.859,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-30",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 24.651,
+      "y": 217.132,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-31",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 21.587,
+      "y": 219.405,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-32",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 23.74,
+      "y": 221.677,
+      "width": 2.1,
+      "height": 2.1,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-33",
+      "shape": {
+        "type": "box"
+      },
+      "x": 18.9,
+      "y": 224.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-01",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 20.368,
+      "y": 226.823,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-02",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 21.578,
+      "y": 229.095,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": 17.237,
+      "y": 231.493,
+      "width": 5.268,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-04",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 20.142,
+      "y": 233.641,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-05",
+      "shape": {
+        "type": "box"
+      },
+      "x": 16.418,
+      "y": 236.114,
+      "width": 3.929,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-06",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 18.587,
+      "y": 238.186,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-07",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 15.853,
+      "y": 240.459,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-08",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 16.876,
+      "y": 242.732,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-09",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 14.056,
+      "y": 245.005,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-10",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 14.993,
+      "y": 247.277,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": 10.289,
+      "y": 249.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": 14.748,
+      "y": 251.948,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-13",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 9.974,
+      "y": 254.095,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-14",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 10.773,
+      "y": 256.368,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.315,
+      "y": 258.766,
+      "width": 6.675,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-16",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 8.519,
+      "y": 260.914,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-17",
+      "shape": {
+        "type": "box"
+      },
+      "x": 4.104,
+      "y": 263.386,
+      "width": 4.554,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-18",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 6.248,
+      "y": 265.459,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-19",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 3.227,
+      "y": 267.732,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-20",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 4.026,
+      "y": 270.005,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-21",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": 1.052,
+      "y": 272.277,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.711,
+      "y": 274.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-23",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": -0.993,
+      "y": 276.823,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-24",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": -0.056,
+      "y": 279.095,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": -4.676,
+      "y": 281.493,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": -1.328,
+      "y": 283.766,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-27",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": -4.587,
+      "y": 285.914,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-28",
+      "shape": {
+        "type": "box"
+      },
+      "x": -2.068,
+      "y": 288.386,
+      "width": 4.629,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-29",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": -6.142,
+      "y": 290.459,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-30",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": -4.971,
+      "y": 292.732,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-31",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": -7.578,
+      "y": 295.005,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-32",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.3
+          },
+          {
+            "x": -0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.3,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.25
+          },
+          {
+            "x": 0.5,
+            "y": 0.25
+          },
+          {
+            "x": 0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.35,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.3
+          }
+        ]
+      },
+      "x": -6.368,
+      "y": 297.277,
+      "width": 3.4,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-33",
+      "shape": {
+        "type": "box"
+      },
+      "x": -11.1,
+      "y": 299.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-01",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -9.771,
+      "y": 301.823,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-02",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -8.101,
+      "y": 304.095,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": -12.51,
+      "y": 306.493,
+      "width": 5.126,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-04",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -9.416,
+      "y": 308.641,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-05",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -12.415,
+      "y": 310.914,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-06",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -10.849,
+      "y": 313.186,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-07",
+      "shape": {
+        "type": "box"
+      },
+      "x": -14.023,
+      "y": 315.659,
+      "width": 2.4,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-08",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -12.439,
+      "y": 317.732,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-09",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -15.599,
+      "y": 320.005,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-10",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -14.201,
+      "y": 322.277,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": -19.044,
+      "y": 324.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": -14.525,
+      "y": 326.948,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-13",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -19.439,
+      "y": 329.095,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-14",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -18.179,
+      "y": 331.368,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": -23.705,
+      "y": 333.766,
+      "width": 6.532,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-16",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -20.312,
+      "y": 335.914,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-17",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -23.688,
+      "y": 338.186,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-18",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -22.461,
+      "y": 340.459,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-19",
+      "shape": {
+        "type": "box"
+      },
+      "x": -25.921,
+      "y": 342.932,
+      "width": 2.4,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-20",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -24.561,
+      "y": 345.005,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-21",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -27.875,
+      "y": 347.277,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": -24.956,
+      "y": 349.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-23",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -29.799,
+      "y": 351.823,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-24",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -28.401,
+      "y": 354.095,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": -33.161,
+      "y": 356.493,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": -29.752,
+      "y": 358.766,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-27",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -33.151,
+      "y": 360.914,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-28",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -31.585,
+      "y": 363.186,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-29",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -34.584,
+      "y": 365.459,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-30",
+      "shape": {
+        "type": "box"
+      },
+      "x": -31.115,
+      "y": 367.932,
+      "width": 5.876,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-31",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -35.899,
+      "y": 370.005,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-32",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -34.229,
+      "y": 372.277,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-33",
+      "shape": {
+        "type": "box"
+      },
+      "x": -39.1,
+      "y": 374.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-01",
+      "shape": {
+        "type": "box"
+      },
+      "x": -36.646,
+      "y": 377.048,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-02",
+      "shape": {
+        "type": "box"
+      },
+      "x": -32.499,
+      "y": 379.32,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": -34.794,
+      "y": 381.493,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-04",
+      "shape": {
+        "type": "box"
+      },
+      "x": -30.663,
+      "y": 383.866,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-05",
+      "shape": {
+        "type": "box"
+      },
+      "x": -33.977,
+      "y": 386.114,
+      "width": 4.783,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-06",
+      "shape": {
+        "type": "box"
+      },
+      "x": -28.945,
+      "y": 388.236,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-07",
+      "shape": {
+        "type": "box"
+      },
+      "x": -31.343,
+      "y": 390.684,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-08",
+      "shape": {
+        "type": "box"
+      },
+      "x": -27.383,
+      "y": 392.957,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-09",
+      "shape": {
+        "type": "box"
+      },
+      "x": -29.867,
+      "y": 395.055,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-10",
+      "shape": {
+        "type": "box"
+      },
+      "x": -25.993,
+      "y": 397.502,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": -29.861,
+      "y": 399.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": -23.466,
+      "y": 401.948,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-13",
+      "shape": {
+        "type": "box"
+      },
+      "x": -27.404,
+      "y": 404.32,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-14",
+      "shape": {
+        "type": "box"
+      },
+      "x": -23.668,
+      "y": 406.593,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": -26.378,
+      "y": 408.766,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-16",
+      "shape": {
+        "type": "box"
+      },
+      "x": -22.65,
+      "y": 411.139,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-17",
+      "shape": {
+        "type": "box"
+      },
+      "x": -25.952,
+      "y": 413.386,
+      "width": 4.003,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-18",
+      "shape": {
+        "type": "box"
+      },
+      "x": -21.647,
+      "y": 415.509,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-19",
+      "shape": {
+        "type": "box"
+      },
+      "x": -24.332,
+      "y": 417.957,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-20",
+      "shape": {
+        "type": "box"
+      },
+      "x": -20.596,
+      "y": 420.23,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-21",
+      "shape": {
+        "type": "box"
+      },
+      "x": -23.234,
+      "y": 422.327,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": -18.139,
+      "y": 424.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-23",
+      "shape": {
+        "type": "box"
+      },
+      "x": -22.007,
+      "y": 427.048,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-24",
+      "shape": {
+        "type": "box"
+      },
+      "x": -18.133,
+      "y": 429.145,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": -21.917,
+      "y": 431.493,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": -15.169,
+      "y": 433.766,
+      "width": 5.776,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-27",
+      "shape": {
+        "type": "box"
+      },
+      "x": -19.055,
+      "y": 435.964,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-28",
+      "shape": {
+        "type": "box"
+      },
+      "x": -14.272,
+      "y": 438.386,
+      "width": 4.283,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-29",
+      "shape": {
+        "type": "box"
+      },
+      "x": -17.337,
+      "y": 440.684,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-30",
+      "shape": {
+        "type": "box"
+      },
+      "x": -13.231,
+      "y": 442.782,
+      "width": 2.8,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-31",
+      "shape": {
+        "type": "box"
+      },
+      "x": -15.501,
+      "y": 445.23,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-32",
+      "shape": {
+        "type": "box"
+      },
+      "x": -11.354,
+      "y": 447.502,
+      "width": 2.8,
+      "height": 0.45,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-33",
+      "shape": {
+        "type": "box"
+      },
+      "x": -15.1,
+      "y": 449.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-01",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -10.83,
+      "y": 451.873,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-02",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -7.923,
+      "y": 454.145,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": -10.463,
+      "y": 456.493,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-04",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -5.965,
+      "y": 458.691,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-05",
+      "shape": {
+        "type": "box"
+      },
+      "x": -9.585,
+      "y": 461.114,
+      "width": 4.905,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-06",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -4.126,
+      "y": 463.236,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-07",
+      "shape": {
+        "type": "triangle"
+      },
+      "x": -6.269,
+      "y": 465.509,
+      "width": 3.6,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-08",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -2.443,
+      "y": 467.782,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-09",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -5.776,
+      "y": 470.055,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-10",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -0.932,
+      "y": 472.327,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": -5.044,
+      "y": 474.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": 1.111,
+      "y": 476.948,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-13",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": -3.071,
+      "y": 479.145,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-14",
+      "shape": {
+        "type": "triangle"
+      },
+      "x": 0.53,
+      "y": 481.418,
+      "width": 3.6,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": -1.319,
+      "y": 483.766,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-16",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 2.775,
+      "y": 485.964,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-17",
+      "shape": {
+        "type": "box"
+      },
+      "x": -0.832,
+      "y": 488.386,
+      "width": 4.124,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-18",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 3.899,
+      "y": 490.509,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-19",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 0.365,
+      "y": 492.782,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-20",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 5.071,
+      "y": 495.055,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-21",
+      "shape": {
+        "type": "triangle"
+      },
+      "x": 2.689,
+      "y": 497.327,
+      "width": 3.6,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": 7.044,
+      "y": 499.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-23",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 2.932,
+      "y": 501.873,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-24",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 7.776,
+      "y": 504.145,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.748,
+      "y": 506.493,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": 10.831,
+      "y": 508.766,
+      "width": 6.924,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-27",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 6.126,
+      "y": 510.964,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-28",
+      "shape": {
+        "type": "box"
+      },
+      "x": 11.788,
+      "y": 513.386,
+      "width": 5.31,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-29",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 7.965,
+      "y": 515.509,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-30",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 13.043,
+      "y": 517.782,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-31",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 9.923,
+      "y": 520.055,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-32",
+      "shape": {
+        "type": "polygon",
+        "vertices": [
+          {
+            "x": -0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": -0.5
+          },
+          {
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.5
+          },
+          {
+            "x": 0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.2
+          },
+          {
+            "x": -0.15,
+            "y": 0.5
+          },
+          {
+            "x": -0.5,
+            "y": 0.5
+          }
+        ]
+      },
+      "x": 15.04,
+      "y": 522.327,
+      "width": 3.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-33",
+      "shape": {
+        "type": "box"
+      },
+      "x": 17.1,
+      "y": 524.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-01",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 12.503,
+      "y": 526.823,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-02",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 14.898,
+      "y": 529.095,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-03",
+      "shape": {
+        "type": "box"
+      },
+      "x": 11.461,
+      "y": 531.493,
+      "width": 3.43,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-04",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 14.431,
+      "y": 533.641,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-05",
+      "shape": {
+        "type": "box"
+      },
+      "x": 11.126,
+      "y": 536.114,
+      "width": 3.06,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-06",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 13.846,
+      "y": 538.186,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-07",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 10.896,
+      "y": 540.459,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-08",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 13.105,
+      "y": 542.732,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-09",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 10.07,
+      "y": 545.005,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-10",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 12.192,
+      "y": 547.277,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-11",
+      "shape": {
+        "type": "box"
+      },
+      "x": 7.473,
+      "y": 549.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-12",
+      "shape": {
+        "type": "box"
+      },
+      "x": 12.716,
+      "y": 551.948,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-13",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 7.927,
+      "y": 554.095,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-14",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 9.91,
+      "y": 556.368,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-15",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.357,
+      "y": 558.766,
+      "width": 4.834,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-16",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 8.626,
+      "y": 560.914,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-17",
+      "shape": {
+        "type": "box"
+      },
+      "x": 4.632,
+      "y": 563.386,
+      "width": 3.684,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-18",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 7.326,
+      "y": 565.459,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-19",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 4.09,
+      "y": 567.732,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-20",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 6.073,
+      "y": 570.005,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-21",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 2.884,
+      "y": 572.277,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-22",
+      "shape": {
+        "type": "box"
+      },
+      "x": 6.527,
+      "y": 574.675,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-23",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 1.808,
+      "y": 576.823,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-24",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 3.93,
+      "y": 579.095,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-25",
+      "shape": {
+        "type": "box"
+      },
+      "x": -0.705,
+      "y": 581.493,
+      "width": 5.4,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-26",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.429,
+      "y": 583.766,
+      "width": 2.85,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-27",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 0.154,
+      "y": 585.914,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-28",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.174,
+      "y": 588.386,
+      "width": 3.66,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-29",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -0.431,
+      "y": 590.459,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-30",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 1.924,
+      "y": 592.732,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-31",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": -0.898,
+      "y": 595.005,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-32",
+      "shape": {
+        "type": "hexagon"
+      },
+      "x": 1.497,
+      "y": 597.277,
+      "width": 3.2,
+      "height": 0.9,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-33",
+      "shape": {
+        "type": "box"
+      },
+      "x": -3.1,
+      "y": 599.675,
+      "width": 8,
+      "height": 0.65,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 4150617,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -1.4,
+      "y": 4.2,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z01-step-03-updraft",
+      "name": "Foundry Steps updraft",
+      "x": -1.4,
+      "y": 5.3,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 6.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.947,
+      "y": 33.331,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z01-step-15-updraft",
+      "name": "Foundry Steps updraft",
+      "x": 5.947,
+      "y": 34.431,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 6.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z01-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 22.401,
+      "y": 60.034,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7899521,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z01-step-26-updraft",
+      "name": "Foundry Steps updraft",
+      "x": 22.401,
+      "y": 61.134,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 6.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z1-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": 6.235,
+      "y": 15.571,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z1-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": 7.549,
+      "y": 20.427,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z1-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": 13.551,
+      "y": 49.558,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z1-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": 14.865,
+      "y": 54.413,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z1-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 13.699,
+      "y": 27.168,
+      "patrolDistance": 0.65,
+      "speed": 0.45
+    },
+    {
+      "kind": "enemy",
+      "id": "z1-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": 11.411,
+      "y": 58.727,
+      "patrolDistance": 0.65,
+      "speed": 0.45
+    },
+    {
+      "kind": "enemy",
+      "id": "z1-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": 9.664,
+      "y": 22.266,
+      "patrolDistance": 1.1,
+      "speed": 0.85
+    },
+    {
+      "kind": "enemy",
+      "id": "z1-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": 11.716,
+      "y": 53.824,
+      "patrolDistance": 1.1,
+      "speed": 0.85
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 20.049,
+      "y": 81.418,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z02-step-03-updraft",
+      "name": "Tilted Quarry updraft",
+      "x": 20.049,
+      "y": 82.518,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 27.738,
+      "y": 108.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z02-step-15-updraft",
+      "name": "Tilted Quarry updraft",
+      "x": 27.738,
+      "y": 109.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z02-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 43.589,
+      "y": 133.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 9797996,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z02-step-26-updraft",
+      "name": "Tilted Quarry updraft",
+      "x": 43.589,
+      "y": 134.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z2-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": 27.267,
+      "y": 92.17,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z2-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": 28.566,
+      "y": 96.716,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z2-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": 35.162,
+      "y": 123.988,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z2-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": 40.116,
+      "y": 142.17,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z2-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 35.507,
+      "y": 102.993,
+      "patrolDistance": 0.65,
+      "speed": 0.485
+    },
+    {
+      "kind": "enemy",
+      "id": "z2-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": 32.868,
+      "y": 132.538,
+      "patrolDistance": 0.65,
+      "speed": 0.485
+    },
+    {
+      "kind": "enemy",
+      "id": "z2-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": 31.488,
+      "y": 98.555,
+      "patrolDistance": 1.1,
+      "speed": 0.895
+    },
+    {
+      "kind": "enemy",
+      "id": "z2-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": 33.327,
+      "y": 128.1,
+      "patrolDistance": 1.1,
+      "speed": 0.895
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 38.049,
+      "y": 156.418,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z03-step-03-updraft",
+      "name": "Bell Spires updraft",
+      "x": 38.049,
+      "y": 157.518,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 29.103,
+      "y": 183.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z03-step-15-updraft",
+      "name": "Bell Spires updraft",
+      "x": 29.103,
+      "y": 184.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z03-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 30.1,
+      "y": 208.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 7049880,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z03-step-26-updraft",
+      "name": "Bell Spires updraft",
+      "x": 30.1,
+      "y": 209.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z3-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": 40.885,
+      "y": 164.897,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z3-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": 39.603,
+      "y": 169.443,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z3-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": 29.478,
+      "y": 196.716,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z3-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": 27.948,
+      "y": 201.261,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z3-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 41.507,
+      "y": 177.993,
+      "patrolDistance": 0.65,
+      "speed": 0.52
+    },
+    {
+      "kind": "enemy",
+      "id": "z3-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": 21.535,
+      "y": 207.538,
+      "patrolDistance": 0.65,
+      "speed": 0.52
+    },
+    {
+      "kind": "enemy",
+      "id": "z3-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": 41.488,
+      "y": 173.555,
+      "patrolDistance": 1.1,
+      "speed": 0.94
+    },
+    {
+      "kind": "enemy",
+      "id": "z3-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": 25.994,
+      "y": 203.1,
+      "patrolDistance": 1.1,
+      "speed": 0.94
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 13.053,
+      "y": 231.418,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z04-step-03-updraft",
+      "name": "The Unraveling updraft",
+      "x": 13.053,
+      "y": 232.518,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 0.427,
+      "y": 258.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z04-step-15-updraft",
+      "name": "The Unraveling updraft",
+      "x": 0.427,
+      "y": 259.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z04-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 1.647,
+      "y": 283.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10065580,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z04-step-26-updraft",
+      "name": "The Unraveling updraft",
+      "x": 1.647,
+      "y": 284.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z4-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": 18.188,
+      "y": 239.897,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z4-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": 16.421,
+      "y": 244.443,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z4-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.387,
+      "y": 271.716,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z4-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": 1.372,
+      "y": 276.261,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z4-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 16.448,
+      "y": 252.993,
+      "patrolDistance": 0.65,
+      "speed": 0.555
+    },
+    {
+      "kind": "enemy",
+      "id": "z4-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": -6.376,
+      "y": 282.538,
+      "patrolDistance": 0.65,
+      "speed": 0.555
+    },
+    {
+      "kind": "enemy",
+      "id": "z4-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": 17.456,
+      "y": 248.555,
+      "patrolDistance": 1.1,
+      "speed": 0.985
+    },
+    {
+      "kind": "enemy",
+      "id": "z4-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": -1.489,
+      "y": 278.1,
+      "patrolDistance": 1.1,
+      "speed": 0.985
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -16.623,
+      "y": 306.418,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z05-step-03-updraft",
+      "name": "Wind Galleries updraft",
+      "x": -16.623,
+      "y": 307.518,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 11.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -28.521,
+      "y": 333.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z05-step-15-updraft",
+      "name": "Wind Galleries updraft",
+      "x": -28.521,
+      "y": 334.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 11.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z05-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -26.777,
+      "y": 358.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 6789261,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z05-step-26-updraft",
+      "name": "Wind Galleries updraft",
+      "x": -26.777,
+      "y": 359.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 11.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z5-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": -12.188,
+      "y": 314.897,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z5-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": -13.334,
+      "y": 319.443,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z5-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": -25.64,
+      "y": 346.716,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z5-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": -27.534,
+      "y": 351.261,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z5-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": -12.825,
+      "y": 327.993,
+      "patrolDistance": 0.65,
+      "speed": 0.59
+    },
+    {
+      "kind": "enemy",
+      "id": "z5-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": -34.861,
+      "y": 357.538,
+      "patrolDistance": 0.65,
+      "speed": 0.59
+    },
+    {
+      "kind": "enemy",
+      "id": "z5-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": -11.999,
+      "y": 323.555,
+      "patrolDistance": 1.1,
+      "speed": 1.03
+    },
+    {
+      "kind": "enemy",
+      "id": "z5-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": -30.156,
+      "y": 353.1,
+      "patrolDistance": 1.1,
+      "speed": 1.03
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -37.769,
+      "y": 381.418,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z06-step-03-updraft",
+      "name": "Watchkeepers updraft",
+      "x": -37.769,
+      "y": 382.518,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -29.353,
+      "y": 408.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z06-step-15-updraft",
+      "name": "Watchkeepers updraft",
+      "x": -29.353,
+      "y": 409.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z06-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -10.731,
+      "y": 433.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10060152,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z06-step-26-updraft",
+      "name": "Watchkeepers updraft",
+      "x": -10.731,
+      "y": 434.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 7.5,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z6-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": -29.448,
+      "y": 392.17,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z6-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": -28.028,
+      "y": 396.716,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z6-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": -21.504,
+      "y": 423.988,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z6-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": -15.266,
+      "y": 442.17,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z6-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": -21.766,
+      "y": 402.993,
+      "patrolDistance": 0.65,
+      "speed": 0.625
+    },
+    {
+      "kind": "enemy",
+      "id": "z6-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": -23.617,
+      "y": 432.538,
+      "patrolDistance": 0.65,
+      "speed": 0.625
+    },
+    {
+      "kind": "enemy",
+      "id": "z6-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": -25.967,
+      "y": 398.555,
+      "patrolDistance": 1.1,
+      "speed": 1.075
+    },
+    {
+      "kind": "enemy",
+      "id": "z6-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": -23.339,
+      "y": 428.1,
+      "patrolDistance": 1.1,
+      "speed": 1.075
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -13.438,
+      "y": 456.418,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z07-step-03-updraft",
+      "name": "Prism Teeth updraft",
+      "x": -13.438,
+      "y": 457.518,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 8,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": -4.294,
+      "y": 483.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z07-step-15-updraft",
+      "name": "Prism Teeth updraft",
+      "x": -4.294,
+      "y": 484.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 8,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z07-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 15.843,
+      "y": 508.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 8622508,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z07-step-26-updraft",
+      "name": "Prism Teeth updraft",
+      "x": 15.843,
+      "y": 509.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 8,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z7-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": -4.808,
+      "y": 467.17,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z7-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": -3.267,
+      "y": 471.716,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z7-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.679,
+      "y": 498.988,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z7-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": 10.708,
+      "y": 517.17,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z7-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 2.811,
+      "y": 477.993,
+      "patrolDistance": 0.65,
+      "speed": 0.66
+    },
+    {
+      "kind": "enemy",
+      "id": "z7-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": 2.048,
+      "y": 507.538,
+      "patrolDistance": 0.65,
+      "speed": 0.66
+    },
+    {
+      "kind": "enemy",
+      "id": "z7-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": -1.271,
+      "y": 473.555,
+      "patrolDistance": 1.1,
+      "speed": 1.12
+    },
+    {
+      "kind": "enemy",
+      "id": "z7-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": 1.844,
+      "y": 503.1,
+      "patrolDistance": 1.1,
+      "speed": 1.12
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-03-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 8.196,
+      "y": 531.418,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z08-step-03-updraft",
+      "name": "Quiet Crown updraft",
+      "x": 8.196,
+      "y": 532.518,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 8,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-15-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 1.39,
+      "y": 558.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z08-step-15-updraft",
+      "name": "Quiet Crown updraft",
+      "x": 1.39,
+      "y": 559.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 8,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z08-step-26-wind-base",
+      "shape": {
+        "type": "box"
+      },
+      "x": 6.404,
+      "y": 583.691,
+      "width": 2.4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.5,
+      "color": 10923417,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "z08-step-26-updraft",
+      "name": "Quiet Crown updraft",
+      "x": 6.404,
+      "y": 584.791,
+      "region": {
+        "type": "box",
+        "width": 1.6,
+        "height": 1.4
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 8,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "terrain",
+      "id": "z8-illusion-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": 13.131,
+      "y": 539.897,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z8-illusion-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": 12.335,
+      "y": 544.443,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z8-illusion-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.119,
+      "y": 571.716,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": -0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "z8-illusion-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": 4.073,
+      "y": 576.261,
+      "width": 1.5,
+      "height": 0.28,
+      "angle": 0.10471975511965977,
+      "depth": 1.5,
+      "color": 12696496,
+      "illusion": true
+    },
+    {
+      "kind": "enemy",
+      "id": "z8-soldier-12",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 14.416,
+      "y": 552.993,
+      "patrolDistance": 0.65,
+      "speed": 0.695
+    },
+    {
+      "kind": "enemy",
+      "id": "z8-soldier-25",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": -2.405,
+      "y": 582.538,
+      "patrolDistance": 0.65,
+      "speed": 0.695
+    },
+    {
+      "kind": "enemy",
+      "id": "z8-bird-9",
+      "species": "bird",
+      "facing": "left",
+      "x": 13.67,
+      "y": 548.555,
+      "patrolDistance": 1.1,
+      "speed": 1.165
+    },
+    {
+      "kind": "enemy",
+      "id": "z8-bird-22",
+      "species": "bird",
+      "facing": "right",
+      "x": 1.327,
+      "y": 578.1,
+      "patrolDistance": 1.1,
+      "speed": 1.165
+    },
+    {
+      "kind": "trigger",
+      "id": "intro",
+      "name": "Skyward Ruins opening",
+      "x": 0,
+      "y": 1.25,
+      "region": {
+        "type": "box",
+        "width": 4,
+        "height": 2.5
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "play-video",
+          "source": "/media/skyward-ruins-intro.webm"
+        },
+        {
+          "type": "popup",
+          "title": "Skyward Ruins",
+          "message": "Eight districts. One summit.\n\nPale ledges give way under the pot. Wind rings launch you. The hammer can fend off the watchkeepers. Broad landings are resting places, not checkpoints."
+        }
+      ]
+    },
+    {
+      "kind": "trigger",
+      "id": "chapter-2",
+      "name": "Tilted Quarry",
+      "x": 22,
+      "y": 76.5,
+      "region": {
+        "type": "box",
+        "width": 4,
+        "height": 3
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "popup",
+          "title": "Tilted Quarry",
+          "message": "Work with the slopes. The side wind platforms are shortcuts, not the only way up."
+        }
+      ]
+    },
+    {
+      "kind": "trigger",
+      "id": "chapter-3",
+      "name": "Bell Spires",
+      "x": 44,
+      "y": 151.5,
+      "region": {
+        "type": "box",
+        "width": 4,
+        "height": 3
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "popup",
+          "title": "Bell Spires",
+          "message": "Rounded stone rewards a planted hammer. Take the broad landings when you need to reset your grip."
+        }
+      ]
+    },
+    {
+      "kind": "trigger",
+      "id": "chapter-4",
+      "name": "The Unraveling",
+      "x": 22,
+      "y": 226.5,
+      "region": {
+        "type": "box",
+        "width": 4,
+        "height": 3
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "popup",
+          "title": "The Unraveling",
+          "message": "Pale stone holds the hammer, but not the pot for long. The darker route remains after it disappears."
+        }
+      ]
+    },
+    {
+      "kind": "trigger",
+      "id": "chapter-5",
+      "name": "Wind Galleries",
+      "x": -8,
+      "y": 301.5,
+      "region": {
+        "type": "box",
+        "width": 4,
+        "height": 3
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "popup",
+          "title": "Wind Galleries",
+          "message": "A higher lift needs room for the hammer. The outside shafts lead back to broad landing lips."
+        }
+      ]
+    },
+    {
+      "kind": "trigger",
+      "id": "chapter-7",
+      "name": "Prism Teeth",
+      "x": -12,
+      "y": 451.5,
+      "region": {
+        "type": "box",
+        "width": 4,
+        "height": 3
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "popup",
+          "title": "Prism Teeth",
+          "message": "The guards can be outmaneuvered or struck. The last stretch rewards control more than speed."
+        }
+      ]
+    },
+    {
+      "kind": "trigger",
+      "id": "summit",
+      "name": "The Quiet Crown",
+      "x": -3.1,
+      "y": 602.42,
+      "region": {
+        "type": "box",
+        "width": 6,
+        "height": 5
+      },
+      "activation": "once",
+      "marker": "flag",
+      "events": [
+        {
+          "type": "stop-timer"
+        },
+        {
+          "type": "popup",
+          "title": "Above the weather",
+          "message": "600 metres, one continuous climb.\n\nYour time is stopped. The ruins below are still there; the summit is yours."
+        }
+      ]
+    }
+  ]
+}

@@ -88,11 +88,16 @@
 }
 
 .level-palette,
-.level-entity-palette {
+.level-entity-palette,
+.level-enemy-palette {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-top: 10px;
+}
+
+.level-enemy-palette {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .level-editor .level-preset {
@@ -249,7 +254,7 @@
   stroke-dasharray: 3 4;
 }
 
-/* Non-terrain entity gizmos (start location + trigger regions). These are cheap SVG shapes
+/* Non-terrain entity gizmos (start, triggers, and authored enemy homes). These are cheap SVG shapes
    living in world-space inside .level-camera-group, so panning/zooming only repaints via the
    group's transform matrix; per-object geometry is rebuilt only on LevelChange deltas. */
 .level-gizmo-layer,
@@ -294,6 +299,51 @@
 .level-gizmo-flag line {
   stroke: #4a3a1e;
   stroke-width: 2;
+}
+
+.level-gizmo-updraft {
+  fill: none;
+  stroke: #125f66;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.level-enemy-glyph-body {
+  fill: currentColor;
+  stroke: none;
+}
+
+.level-enemy-glyph-detail {
+  fill: none;
+  stroke: #f8f3e4;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.level-gizmo-enemy {
+  color: #7a4534;
+}
+
+.level-gizmo-enemy .level-gizmo-region {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.level-gizmo-patrol {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.level-gizmo-selected.level-gizmo-enemy {
+  color: #075a50;
+}
+
+.level-gizmo-ghost.level-gizmo-enemy {
+  color: #9a5c08;
 }
 
 .level-gizmo-selected {
@@ -385,6 +435,7 @@
 @media (max-width: 1039px) and (orientation: landscape) {
   .level-palette,
   .level-entity-palette,
+  .level-enemy-palette,
   .level-action-row,
   .level-field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

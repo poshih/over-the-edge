@@ -1,17 +1,19 @@
 import { RIG } from '../config';
 import type { Point } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
+import { ENEMY_BEHAVIOR, ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
+import type { EnemySpecies } from '../enemy-types';
 import {
   ILLUSION, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
-  objectContains, objectVertices, shapeVertices, TRIGGER_LIMITS, validateLevel, validateLevelObject,
+  objectContains, objectVertices, shapeVertices, TRIGGER_LIMITS, TRIGGER_MARKERS, validateLevel, validateLevelObject,
 } from '../level';
-import type { LevelDefinition, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion } from '../level';
-import { ENDING_EVENTS } from '../trigger-events';
+import type { EnemyObject, LevelDefinition, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion } from '../level';
+import { ENDING_EVENTS, UPDRAFT_EVENTS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 import { element } from '../dom';
 import { createJsonDownload } from './json-download';
 import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
-import { EntityGizmos, objectGizmoBounds } from './object-gizmos';
+import { EntityGizmos, enemyGlyph, objectGizmoBounds, updraftGlyph } from './object-gizmos';
 import { NamedSnapshots, SnapshotError } from './named-snapshots';
 import { createSnapshotPicker } from './snapshot-picker';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
@@ -19,18 +21,19 @@ import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
 
-type Tool = 'select' | 'pan' | 'place' | 'place-trigger' | 'start';
+type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'start';
+type Tool = 'select' | 'pan' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
 interface TerrainPreset { id: string; label: string; shape: LevelShape; width: number; height: number }
 interface TriggerPreset {
   id: string; label: string; name: string; region: TriggerRegion;
-  activation: 'once' | 'on-enter'; marker: 'none' | 'flag';
+  activation: TriggerObject['activation']; marker: TriggerObject['marker'];
   events: readonly TriggerAction[]; anchorBottom: boolean;
 }
 type Gesture =
   | { kind: 'move'; pointerId: number; start: Point; world: Point; original: LevelObject; preview: LevelObject }
   | { kind: 'pan'; pointerId: number; start: Point; camera: EditorCamera; unitsPerPixel: number }
-  | { kind: 'place' | 'place-trigger' | 'start'; pointerId: number; world: Point };
+  | { kind: PlacementTool; pointerId: number };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEGREES = 180 / Math.PI;
@@ -68,6 +71,11 @@ const TRIGGER_PRESETS: readonly TriggerPreset[] = [
     region: { type: 'box', width: 3, height: TRIGGER_LIMITS.endingHeight }, activation: 'once', marker: 'flag',
     events: ENDING_EVENTS,
   },
+  {
+    id: 'updraft', label: 'Updraft', name: 'Updraft', anchorBottom: true,
+    region: { type: 'box', width: 2, height: 1.4 }, activation: 'on-enter', marker: 'updraft',
+    events: UPDRAFT_EVENTS,
+  },
 ];
 const history = new NamedSnapshots<LevelDefinition>({
   prefix: 'over-the-edge:level:snapshot:v1:', version: 1, field: 'level',
@@ -84,6 +92,13 @@ function asStart(object: LevelObject | null): StartObject | null {
 function asTrigger(object: LevelObject | null): TriggerObject | null {
   return object !== null && isTriggerObject(object) ? object : null;
 }
+function asEnemy(object: LevelObject | null): EnemyObject | null {
+  return object !== null && object.kind === 'enemy' ? object : null;
+}
+
+function isPlacementTool(tool: Tool): tool is PlacementTool {
+  return tool !== 'select' && tool !== 'pan';
+}
 
 function objectBounds(object: LevelObject): Bounds {
   if (isTerrainObject(object)) {
@@ -94,6 +109,10 @@ function objectBounds(object: LevelObject): Bounds {
     };
   }
   return objectGizmoBounds(object);
+}
+
+function boundsContain(bounds: Bounds, point: Point): boolean {
+  return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.bottom && point.y <= bounds.top;
 }
 
 function anchorTrigger(object: TriggerObject, preset: TriggerPreset): TriggerObject {
@@ -107,6 +126,18 @@ function triggerPlacement(preset: TriggerPreset, at: Point): TriggerObject {
     region: preset.region, activation: preset.activation, marker: preset.marker,
     events: preset.events.map((action) => ({ ...action })),
   }, preset);
+}
+
+function anchorEnemy(object: EnemyObject): EnemyObject {
+  return { ...object, y: object.y + ENEMY_SPECS[object.species].height / 2 };
+}
+
+function enemyPlacement(species: EnemySpecies, at: Point): EnemyObject {
+  const spec = ENEMY_SPECS[species];
+  return anchorEnemy({
+    kind: 'enemy', id: 'placement-preview', species, x: at.x, y: at.y,
+    facing: 'right', patrolDistance: spec.patrolDistance, speed: spec.speed,
+  });
 }
 
 function numericField(id: string, label: string, min: number, max: number, step = 0.1): string {
@@ -159,6 +190,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button level-go-start">View start</button>
         </div>
         <div class="level-entity-palette" aria-label="Trigger palette"></div>
+        <p class="level-help">Enemies</p>
+        <div class="level-enemy-palette" aria-label="Enemy palette"></div>
         <p class="level-help level-tool-help"></p>
         <div class="level-camera-controls" aria-label="Editor camera">
           <button type="button" class="button level-zoom-out" aria-label="Zoom out">−</button>
@@ -199,6 +232,21 @@ export function createLevelEditor(options: LevelEditorOptions) {
             is only the spawn pose — it cannot carry events. For an intro popup or video, place a normal trigger
             around the start position instead.</p>
         </div>
+        <div class="level-fields-enemy">
+          <div class="level-field-grid">
+            ${selectField('enemy-facing', 'Facing', ENEMY_FACINGS.map((facing) => ({
+              value: facing, label: facing[0].toUpperCase() + facing.slice(1),
+            })))}
+            ${Object.entries(ENEMY_FIELDS).map(([name, field]) =>
+              numericField(`enemy-${name}`, field.label, field.min, field.max, field.step)).join('')}
+          </div>
+          <p class="level-help level-enemy-help"></p>
+          <p class="level-help">Position X/Y is the authored center/home; placement uses the clicked base.
+            The guide shows the patrol radius on either side. Body collisions knock the player back;
+            there is no player health system. Dead enemies return on Reset or an editor rebuild,
+            including entering Level mode.
+            Patrol motion and deaths never change saved positions.</p>
+        </div>
         <div class="level-fields-trigger">
           <div class="level-field-grid">
             ${textField('trigger-name', 'Name', LEVEL_LIMITS.text)}
@@ -213,7 +261,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
           </div>
           <div class="level-field-grid">
             ${selectField('trigger-activation', 'Activation', [{ value: 'once', label: 'Once per run' }, { value: 'on-enter', label: 'Every entry' }])}
-            ${selectField('trigger-marker', 'Marker', [{ value: 'none', label: 'None' }, { value: 'flag', label: 'Flag' }])}
+            ${selectField('trigger-marker', 'Marker', [
+              { value: 'none', label: 'None' }, { value: 'flag', label: 'Flag' }, { value: 'updraft', label: 'Updraft' },
+            ])}
           </div>
           <p class="level-help">Trigger regions are centered on Position X/Y and axis-aligned (no rotation).
             Proximity uses the player's foot position; "Once per run" fires a single time, "Every entry" fires
@@ -236,9 +286,11 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button level-import">Import level JSON</button>
         </div>
         <input class="level-file" type="file" accept=".json,application/json" aria-label="Import level JSON" hidden />
-        <p class="level-help">Exports level.json: terrain, start, triggers and labels only.
+        <p class="level-help">Exports level.json: terrain, start, triggers, enemies and labels only.
           Models, appearance, tuning and browser settings are never included. Import limit:
-          ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Saved history loads only when you choose Load level.</p>
+          ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Enemy motion/deaths are not saved.
+          New enemy kinds and trigger actions need an updated game runtime.
+          Saved history loads only when you choose Load level.</p>
       </fieldset>
     </div>
   `;
@@ -309,7 +361,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts();
   const selectedObject = () => selectedId === null ? null : level.object(selectedId);
   const inspectorObject = (): LevelObject | null =>
-    (tool === 'place' || tool === 'place-trigger' || tool === 'start') ? placement : selectedObject();
+    isPlacementTool(tool) ? placement : selectedObject();
   const pointFromEvent = (event: PointerEvent): Point => ({ x: event.clientX, y: event.clientY });
   const local = (point: Point): Point => {
     const client = camera.project(point);
@@ -317,7 +369,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   };
   const ghostObject = (): LevelObject | null => {
     if (gesture?.kind === 'move') return gesture.preview;
-    if (tool === 'place' || tool === 'place-trigger' || tool === 'start') return placement;
+    if (isPlacementTool(tool)) return placement;
     return null;
   };
   const handleRadius = (): number => HANDLE_PIXELS * camera.state().worldHeight / Math.max(1, rect.height);
@@ -344,7 +396,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   }
 
   function commitOrPreview(next: LevelObject): void {
-    if (tool === 'place' || tool === 'place-trigger' || tool === 'start') {
+    if (isPlacementTool(tool)) {
       placement = validateLevelObject(next);
       renderControls();
       draw();
@@ -361,6 +413,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function renderStatus(): void {
     const counts = level.counts();
     saveStatus.textContent = `${counts.terrain} / ${LEVEL_LIMITS.objects} terrain · ${counts.triggers} / ${TRIGGER_LIMITS.objects} triggers · ${
+      counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${
       importing ? 'Reading level file…' : dirty() ? 'Unsaved changes — save or export to keep them' : 'No unsaved changes'}`;
     saveStatus.dataset.dirty = String(dirty());
   }
@@ -370,21 +423,25 @@ Save a named snapshot or export first if you want to keep them. Continue without
     const terrain = asTerrain(object);
     const start = asStart(object);
     const trigger = asTrigger(object);
+    const enemy = asEnemy(object);
     inspector.disabled = object === null;
     element(root, '.level-fields-common').hidden = object === null;
-    element(root, '.level-fields-angle').hidden = trigger !== null || object === null;
+    element(root, '.level-fields-angle').hidden = terrain === null && start === null;
     element(root, '.level-fields-terrain').hidden = terrain === null;
     element(root, '.level-fields-start').hidden = start === null;
     element(root, '.level-fields-trigger').hidden = trigger === null;
+    element(root, '.level-fields-enemy').hidden = enemy === null;
 
     element(root, '.level-selection-name').textContent =
-      object === null ? 'Select an object, choose a shape, or place a start/trigger.' :
+      object === null ? 'Select an object, or place terrain, a start, a trigger or an enemy.' :
       tool === 'place' && terrain !== null ? `New ${terrain.shape.type} — click / tap the canvas to place` :
       tool === 'place-trigger' ? `New ${presetId === 'ending-trigger' ? 'ending trigger' : 'trigger'} — click / tap the canvas to place` :
+      tool === 'place-enemy' && enemy !== null ? `New ${ENEMY_SPECS[enemy.species].label} - click / tap its base to place` :
       tool === 'start' ? 'Start location — click / tap the canvas to place' :
       terrain !== null ? `${terrain.shape.type} · ${terrain.id}` :
       start !== null ? `Start location · ${start.id}` :
-      trigger !== null ? `Trigger "${trigger.name}" · ${trigger.id}` : '';
+      trigger !== null ? `Trigger "${trigger.name}" · ${trigger.id}` :
+      enemy !== null ? `${ENEMY_SPECS[enemy.species].label} - ${enemy.id}` : '';
 
     if (object !== null) {
       const coordLimit = trigger !== null ? TRIGGER_LIMITS.coordinate : LEVEL_LIMITS.coordinate;
@@ -407,6 +464,19 @@ Save a named snapshot or export first if you want to keep them. Continue without
     } else if (start !== null) {
       input('angle').value = String(Number((start.angle * DEGREES).toFixed(4)));
       input('extension').value = String(Number(start.extension.toFixed(4)));
+    } else if (enemy !== null) {
+      const spec = ENEMY_SPECS[enemy.species];
+      select('enemy-facing').value = enemy.facing;
+      for (const name of ['patrolDistance', 'speed'] as const) {
+        input(`enemy-${name}`).value = String(Number(enemy[name].toFixed(4)));
+      }
+      const behavior = enemy.species === 'bird'
+        ? 'Birds patrol, warn, then dive toward nearby players.'
+        : 'Hollow soldiers patrol their configured range, turning at terrain obstacles and edges.';
+      element(root, '.level-enemy-help').textContent =
+        `${behavior} Takes ${spec.health} separate hammer-head strike${spec.health === 1 ? '' : 's'} to defeat. ` +
+        `Strikes need at least ${ENEMY_BEHAVIOR.hitSpeed} m/s closing speed, with a ${ENEMY_BEHAVIOR.hitSeconds}s anti-jitter cooldown. ` +
+        'Brushing or holding the head against an enemy does not repeatedly deal damage.';
     } else if (trigger !== null) {
       input('trigger-name').value = trigger.name;
       select('trigger-region').value = trigger.region.type;
@@ -427,9 +497,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
       element(root, '.level-trigger-events').hidden = placing;
       if (placing) triggerEvents.hide();
       else triggerEvents.show(trigger.id, trigger.events);
-    } else {
-      triggerEvents.hide();
     }
+    if (trigger === null) triggerEvents.hide();
 
     const selected = selectedObject();
     element<HTMLButtonElement>(root, '.level-delete').disabled = selected === null || tool !== 'select' || selected.kind === 'start';
@@ -437,14 +506,25 @@ Save a named snapshot or export first if you want to keep them. Continue without
       button.setAttribute('aria-pressed', String(button.dataset.levelTool === tool));
     }
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-preset]')) {
-      button.setAttribute('aria-pressed', String((tool === 'place' || tool === 'place-trigger') && button.dataset.levelPreset === presetId));
+      button.setAttribute('aria-pressed', String(isPlacementTool(tool) && button.dataset.levelPreset === presetId));
+    }
+    const counts = level.counts();
+    for (const [selector, full] of [
+      ['.level-palette', counts.terrain >= LEVEL_LIMITS.objects],
+      ['.level-entity-palette', counts.triggers >= TRIGGER_LIMITS.objects],
+      ['.level-enemy-palette', counts.enemies >= ENEMY_LIMITS.objects],
+    ] as const) {
+      for (const button of root.querySelectorAll<HTMLButtonElement>(`${selector} [data-level-preset]`)) {
+        button.disabled = full;
+      }
     }
     const help: Record<Tool, string> = {
-      select: 'Click / tap to select; drag to move. Start and trigger objects select near their center handle. ' +
+      select: 'Click / tap to select; drag to move. Pick enemies on their bodies, starts and triggers near their center handle. ' +
         'V selects, H pans. Escape cancels a drag without changing the level.',
       pan: 'Drag the canvas to pan anywhere in the course. Use + / − or the mouse wheel to zoom.',
       place: 'Click / tap to place this shape. Adjust its properties first if needed. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
+      'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
       start: 'Click / tap the new pot-center position. Escape cancels.',
     };
     element(root, '.level-tool-help').textContent = help[tool];
@@ -465,10 +545,11 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function draw(): void {
     if (!active || disposed || rect.width <= 0 || rect.height <= 0) return;
     drawCount++;
-    drawPolygon(selectionPolygon, asTerrain(selectedObject()));
+    const selected = selectedObject();
+    drawPolygon(selectionPolygon, asTerrain(selected));
     const ghost = ghostObject();
     drawPolygon(ghostPolygon, ghost !== null ? asTerrain(ghost) : null);
-    entityGizmos.setSelection(asStart(selectedObject()) ?? asTrigger(selectedObject()));
+    entityGizmos.setSelection(selected !== null && !isTerrainObject(selected) ? selected : null);
     entityGizmos.setGhost(ghost !== null && !isTerrainObject(ghost) ? ghost : null);
   }
 
@@ -651,6 +732,11 @@ Save a named snapshot or export first if you want to keep them. Continue without
     else { shape.setAttribute('x', '-0.4'); shape.setAttribute('y', '-0.3'); shape.setAttribute('width', '0.8'); shape.setAttribute('height', '0.6'); }
     shape.setAttribute('fill', 'none'); shape.setAttribute('stroke', 'currentColor'); shape.setAttribute('stroke-width', '0.08');
     icon.append(shape);
+    if (preset.marker === 'updraft') {
+      const glyph = updraftGlyph();
+      glyph.setAttribute('transform', 'scale(1,-1)');
+      icon.append(glyph);
+    }
     button.append(icon, document.createTextNode(preset.label));
     button.addEventListener('click', () => {
       if (!active) return;
@@ -662,6 +748,32 @@ Save a named snapshot or export first if you want to keep them. Continue without
       draw();
     }, listen);
     element(root, '.level-entity-palette').append(button);
+  }
+
+  for (const species of ENEMY_SPECIES) {
+    const spec = ENEMY_SPECS[species];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button level-preset';
+    button.dataset.levelPreset = species;
+    button.setAttribute('aria-pressed', 'false');
+    const icon = document.createElementNS(SVG_NS, 'svg');
+    icon.setAttribute('viewBox', `${-spec.width / 2} ${-spec.height / 2} ${spec.width} ${spec.height}`);
+    icon.setAttribute('aria-hidden', 'true');
+    const upright = document.createElementNS(SVG_NS, 'g');
+    upright.setAttribute('transform', 'scale(1,-1)');
+    upright.append(enemyGlyph(species, 'right'));
+    icon.append(upright);
+    button.append(icon, document.createTextNode(spec.label));
+    button.addEventListener('click', () => {
+      if (!active) return;
+      cancelGesture();
+      tool = 'place-enemy'; presetId = species; selectedId = null;
+      placement = enemyPlacement(species, camera.state());
+      renderControls();
+      draw();
+    }, listen);
+    element(root, '.level-enemy-palette').append(button);
   }
 
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-tool]')) {
@@ -684,7 +796,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
   input('angle').addEventListener('change', () => {
     if (!active) return;
     const object = inspectorObject();
-    if (object === null || object.kind === 'trigger') return;
+    if (object === null || (object.kind !== 'terrain' && object.kind !== 'start')) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, angle: input('angle').valueAsNumber / DEGREES }));
   }, listen);
@@ -714,6 +826,26 @@ Save a named snapshot or export first if you want to keep them. Continue without
     if (object === null) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, extension: input('extension').valueAsNumber }));
+  }, listen);
+  for (const name of ['patrolDistance', 'speed'] as const) {
+    input(`enemy-${name}`).addEventListener('change', () => {
+      if (!active) return;
+      const object = asEnemy(inspectorObject());
+      if (object === null) return;
+      cancelGesture();
+      applyEdit(() => commitOrPreview({ ...object, [name]: input(`enemy-${name}`).valueAsNumber }));
+    }, listen);
+  }
+  select('enemy-facing').addEventListener('change', () => {
+    if (!active) return;
+    const object = asEnemy(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => {
+      const facing = ENEMY_FACINGS.find((candidate) => candidate === select('enemy-facing').value);
+      if (facing === undefined) throw new LevelError('Choose a supported enemy facing.');
+      commitOrPreview({ ...object, facing });
+    });
   }, listen);
   input('trigger-name').addEventListener('change', () => {
     if (!active) return;
@@ -774,7 +906,11 @@ Save a named snapshot or export first if you want to keep them. Continue without
     const object = asTrigger(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, marker: select('trigger-marker').value === 'flag' ? 'flag' : 'none' }));
+    applyEdit(() => {
+      const marker = TRIGGER_MARKERS.find((candidate) => candidate === select('trigger-marker').value);
+      if (marker === undefined) throw new LevelError('Choose a supported trigger marker.');
+      commitOrPreview({ ...object, marker });
+    });
   }, listen);
 
   function action(selector: string, callback: () => void): void {
@@ -868,19 +1004,23 @@ This restores the default ground and start location, removes all other objects a
     hitTestCount++;
     const objects = level.definition().objects;
     const radius = handleRadius();
-    // Start/trigger handles are picked first by proximity to their small center dot so a large
-    // (often invisible-in-play) trigger region never blocks selecting terrain underneath it.
+    // Enemy bodies and small entity handles take priority; trigger regions never block terrain.
     for (let index = objects.length - 1; index >= 0; index--) {
       const object = objects[index];
-      if (!isTerrainObject(object) && Math.hypot(world.x - object.x, world.y - object.y) <= radius) return object;
+      if (isTerrainObject(object)) continue;
+      if (Math.hypot(world.x - object.x, world.y - object.y) <= radius) return object;
+      if (object.kind === 'enemy') {
+        const bound = bounds.get(object.id);
+        if (bound === undefined) throw new Error('Missing authored object bounds.');
+        if (boundsContain(bound, world)) return object;
+      }
     }
     for (let index = objects.length - 1; index >= 0; index--) {
       const object = objects[index];
       if (!isTerrainObject(object)) continue;
       const bound = bounds.get(object.id);
       if (bound === undefined) throw new Error('Missing authored object bounds.');
-      if (world.x >= bound.left && world.x <= bound.right && world.y >= bound.bottom && world.y <= bound.top &&
-        objectContains(object, world)) return object;
+      if (boundsContain(bound, world) && objectContains(object, world)) return object;
     }
     return null;
   }
@@ -904,15 +1044,14 @@ This restores the default ground and start location, removes all other objects a
       } : gesture.original;
     } else if (tool === 'place' && placement !== null) {
       placement = { ...placement, x: world.x, y: world.y };
-      if (gesture?.kind === 'place') gesture.world = world;
     } else if (tool === 'place-trigger' && placement !== null && placement.kind === 'trigger') {
       const preset = TRIGGER_PRESETS.find((candidate) => candidate.id === presetId) ?? null;
       const moved = { ...placement, x: world.x, y: world.y };
       placement = preset === null ? moved : anchorTrigger(moved, preset);
-      if (gesture?.kind === 'place-trigger') gesture.world = world;
+    } else if (tool === 'place-enemy' && placement !== null && placement.kind === 'enemy') {
+      placement = anchorEnemy({ ...placement, x: world.x, y: world.y });
     } else if (tool === 'start' && placement !== null && placement.kind === 'start') {
       placement = { ...placement, x: world.x, y: world.y };
-      if (gesture?.kind === 'start') gesture.world = world;
     }
     draw();
   }
@@ -934,14 +1073,14 @@ This restores the default ground and start location, removes all other objects a
         unitsPerPixel: camera.state().worldHeight / Math.max(1, rect.height),
       };
     } else {
-      gesture = { kind: tool, pointerId: event.pointerId, world };
+      gesture = { kind: tool, pointerId: event.pointerId };
       movePreview(event);
     }
     if (gesture !== null) overlay.setPointerCapture(event.pointerId);
   }, listen);
   overlay.addEventListener('pointermove', (event) => {
     if (!active || (gesture !== null && gesture.pointerId !== event.pointerId)) return;
-    if (gesture === null && tool !== 'place' && tool !== 'place-trigger' && tool !== 'start') return;
+    if (gesture === null && !isPlacementTool(tool)) return;
     movePreview(event);
   }, listen);
   overlay.addEventListener('pointerup', (event) => {
@@ -961,6 +1100,11 @@ This restores the default ground and start location, removes all other objects a
         chooseTool('select');
       } else if (finished.kind === 'place-trigger' && inside && placement !== null) {
         const object = { ...placement, id: `trigger-${crypto.randomUUID()}` };
+        level.upsert(object);
+        selectedId = object.id;
+        chooseTool('select');
+      } else if (finished.kind === 'place-enemy' && inside && placement !== null) {
+        const object = { ...placement, id: `enemy-${crypto.randomUUID()}` };
         level.upsert(object);
         selectedId = object.id;
         chooseTool('select');
@@ -1019,7 +1163,10 @@ This restores the default ground and start location, removes all other objects a
   const unsubscribe = level.subscribe((change) => {
     commitCount++;
     for (const id of change.remove) { bounds.delete(id); triggerEvents.forget(id); }
-    for (const object of change.upsert) bounds.set(object.id, objectBounds(object));
+    for (const object of change.upsert) {
+      bounds.set(object.id, objectBounds(object));
+      if (object.kind !== 'trigger') triggerEvents.forget(object.id);
+    }
     entityGizmos.sync(change.upsert, change.remove);
     if (change.kind === 'replace') triggerEvents.clear();
     if (selectedId !== null && !bounds.has(selectedId)) selectedId = null;

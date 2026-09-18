@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { observeBrowserPage } from './verify-level.mjs';
 
 const VIDEO_DURATION_MS = 4000;
+const UPDRAFT_TRIANGLES = 76;
 const LEGACY_KEY = `over-the-edge:level:snapshot:v1:${'a'.repeat(32)}`;
 const FLOOR = {
   kind: 'terrain', id: 'floor', shape: { type: 'box' }, x: 0, y: -1,
@@ -255,7 +256,9 @@ export async function verifyTriggers(browser, address, artifacts) {
     assert.deepEqual((await triggerState('skipped')).actionStatuses, ['skipped', 'completed']);
     report.skipped = true;
 
-    await load(scene('aborted', [{ type: 'play-video', source }, { type: 'stop-timer' }]));
+    await load(scene('aborted', [
+      { type: 'play-video', source }, { type: 'launch-player', height: 8, strength: 1 }, { type: 'stop-timer' },
+    ]));
     await play();
     await startVideo();
     await page.evaluate(() => {
@@ -273,8 +276,142 @@ export async function verifyTriggers(browser, address, artifacts) {
     });
     await frames();
     assert.equal((await physics()).timer.running, true, 'A cancelled video cannot run its old next event.');
+    assert.equal((await physics()).rootVelocity.y, 0, 'A cancelled sequence cannot launch the new player rig.');
     assert.equal((await triggerState('aborted')).activationCount, 0);
-    report.aborted = { resetRemovedMedia: true, lateCompletionIgnored: true, nextActionCancelled: true };
+    report.aborted = { resetRemovedMedia: true, lateCompletionIgnored: true, nextActionCancelled: true, launchCancelled: true };
+
+    await load({ schemaVersion: 2, labels: [], objects: [FLOOR, START] });
+    await page.locator('[data-level-preset="updraft"]').click();
+    const base = await page.evaluate(() => window.gettingOver.project({ x: 0, y: 0 }));
+    await page.mouse.click(base.x, base.y);
+    await page.waitForFunction(() => window.gettingOver.level().definition.objects.some(object => object.kind === 'trigger'));
+    const placed = (await level()).definition.objects.find(object => object.kind === 'trigger');
+    assert.equal(placed.marker, 'updraft');
+    assert.equal(placed.activation, 'on-enter');
+    assert.ok(Math.abs(placed.y - placed.region.height / 2) < 0.01);
+    assert.deepEqual(placed.events, [{ type: 'launch-player', height: 8, strength: 1 }]);
+    const heightField = page.getByRole('spinbutton', { name: 'Lift height (m)', exact: true });
+    const strengthField = page.getByRole('spinbutton', { name: 'Launch strength (x)', exact: true });
+    await heightField.fill('6');
+    await strengthField.fill('1.25');
+    await page.locator('.level-event-apply').click();
+    const launchEvents = async () => (await level()).definition.objects.find(object => object.id === placed.id).events;
+    assert.deepEqual(await launchEvents(), [{ type: 'launch-player', height: 6, strength: 1.25 }]);
+    await heightField.fill('0');
+    await page.locator('.level-event-apply').click();
+    assert.deepEqual(await launchEvents(), [{ type: 'launch-player', height: 6, strength: 1.25 }],
+      'Invalid launch settings must not change the authored action.');
+    assert.match(await page.locator('.ui-notice').innerText(), /Lift height/);
+    await page.locator('.level-event-revert').click();
+    assert.equal(await heightField.inputValue(), '6');
+    await strengthField.fill('1');
+    await page.getByRole('textbox', { name: 'Level name', exact: true }).fill('Updraft layout');
+    await page.getByRole('textbox', { name: 'Level name', exact: true }).press('Enter');
+    const updraftKey = await page.getByRole('combobox', { name: 'Past levels', exact: true }).inputValue();
+    const updraftSave = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), updraftKey);
+    assert.deepEqual(updraftSave.level.objects.find(object => object.id === placed.id).events,
+      [{ type: 'launch-player', height: 6, strength: 1 }]);
+    const downloadReady = page.waitForEvent('download');
+    await page.locator('.level-export').click();
+    const download = await downloadReady;
+    const exported = JSON.parse(await readFile(await download.path(), 'utf8'));
+    assert.deepEqual(exported, updraftSave.level);
+    await load(exported);
+    assert.equal((await level()).rendering.updrafts.instances, 1);
+    assert.equal((await level()).terrain.bodyCount, 1);
+    assert.equal(await page.locator('.level-gizmo-layer .level-gizmo-updraft').count(), 1);
+    await page.screenshot({ path: fileURLToPath(new URL('updraft-editor.png', artifacts)) });
+    await play();
+    await page.waitForFunction(id => {
+      const trigger = window.gettingOver.events().triggers.triggers.find(trigger => trigger.id === id);
+      return trigger?.activationCount === 1 && trigger.status === 'completed';
+    }, placed.id);
+    const launched = await physics();
+    assert.ok(launched.rootVelocity.y > 0);
+    assert.equal(launched.jointCount, 7);
+    assert.equal(launched.bodyCount, 9, 'Updrafts must not add rigid bodies.');
+    await page.screenshot({ path: fileURLToPath(new URL('updraft-launch.png', artifacts)) });
+    await page.waitForFunction(() => {
+      const snapshot = window.gettingOver.snapshot();
+      return snapshot.rootVelocity.y < 0 && snapshot.height > 4;
+    });
+    const apex = (await physics()).bestHeight;
+    assert.ok(apex > 7 && apex < 9, `A 6 m lift from the entry zone should have a plausible pot apex (${apex}m).`);
+    await page.waitForFunction(id => window.gettingOver.events().triggers.triggers
+      .find(trigger => trigger.id === id)?.activationCount === 2, placed.id);
+    assert.deepEqual((await triggerState(placed.id)).actionStatuses, ['completed']);
+    await page.keyboard.press('r');
+    await page.waitForFunction(id => window.gettingOver.events().triggers.triggers
+      .find(trigger => trigger.id === id)?.activationCount === 1, placed.id);
+    report.updraft = { preset: true, savedAndExported: true, apex, reentry: true, resetRearmed: true, extraBodies: 0 };
+
+    const holding = {
+      ...placed, id: 'holding-updraft', x: 0, y: 25,
+      region: { type: 'box', width: 30, height: 50 }, events: [{ type: 'launch-player', height: 6, strength: 1 }],
+    };
+    await load({ schemaVersion: 2, labels: [], objects: [FLOOR, START, holding] });
+    await play();
+    await page.waitForFunction(() => window.gettingOver.snapshot().time > 4);
+    assert.equal((await triggerState(holding.id)).activationCount, 1, 'An occupied updraft must not apply force every tick.');
+    assert.equal((await triggerState(holding.id)).inside, true);
+    report.updraft.continuousOverlap = 'one activation';
+
+    await load({
+      ...exported,
+      objects: exported.objects.map(object => object.id === placed.id ? { ...object, activation: 'once' } : object),
+    });
+    await play();
+    await page.waitForFunction(() => window.gettingOver.snapshot().time > 5);
+    assert.equal((await triggerState(placed.id)).activationCount, 1);
+    assert.equal((await triggerState(placed.id)).consumed, true);
+    report.updraft.oncePerRun = true;
+
+    const markers = Array.from({ length: 128 }, (_, index) => ({
+      ...placed, id: `wind-${index}`, name: `Wind ${index}`,
+      x: (index % 16 - 8) * 3, y: Math.floor(index / 16) * 3 + 0.7,
+    }));
+    const crowded = { schemaVersion: 2, labels: [], objects: [FLOOR, START, ...markers] };
+    await load(crowded);
+    await frames();
+    const renderBefore = (await level()).rendering;
+    assert.equal(renderBefore.updrafts.instances, 128);
+    await page.evaluate(() => new Promise(resolve => {
+      let remaining = 120;
+      const tick = () => { if (--remaining === 0) resolve(); else requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    }));
+    assert.deepEqual((await level()).rendering.updrafts, renderBefore.updrafts,
+      'Idle rendering must not rewrite marker matrices or bounds.');
+    assert.equal((await level()).rendering.geometries, renderBefore.geometries);
+    await load({ ...crowded, objects: crowded.objects.map(object => object.kind === 'trigger' ? { ...object, name: 'Renamed wind' } : object) });
+    await frames();
+    assert.deepEqual((await level()).rendering.updrafts, renderBefore.updrafts, 'Name-only edits need no GPU work.');
+    const moved = { ...markers[0], x: markers[0].x + 0.5, region: { ...markers[0].region, width: 3 } };
+    await load({ ...crowded, objects: [FLOOR, START, moved, ...markers.slice(1)] });
+    await frames();
+    const renderMoved = (await level()).rendering.updrafts;
+    assert.equal(renderMoved.matrixWrites, renderBefore.updrafts.matrixWrites + 1);
+    assert.equal(renderMoved.boundsUpdates, renderBefore.updrafts.boundsUpdates + 1);
+    await load({ ...crowded, objects: [FLOOR, START, ...markers.map((marker, index) => ({ ...marker, marker: index % 2 ? 'flag' : 'updraft' }))] });
+    await frames();
+    assert.equal((await level()).rendering.updrafts.instances, 64);
+    assert.equal((await level()).rendering.flags.instances, 64);
+    assert.equal((await level()).rendering.calls, renderBefore.calls + 2);
+    await load({ ...crowded, objects: [FLOOR, START, ...markers.map(marker => ({ ...marker, marker: 'none' }))] });
+    await frames();
+    const withoutMarkers = (await level()).rendering;
+    assert.equal(withoutMarkers.updrafts.instances, 0);
+    assert.equal(withoutMarkers.flags.instances, 0);
+    assert.equal(renderBefore.calls - withoutMarkers.calls, 2, 'All updrafts must share two draw calls.');
+    assert.equal(renderBefore.triangles - withoutMarkers.triangles, markers.length * UPDRAFT_TRIANGLES);
+    await load({ schemaVersion: 2, labels: [], objects: [FLOOR, START] });
+    await frames();
+    assert.equal((await level()).rendering.updrafts.instances, 0);
+    assert.equal((await level()).rendering.flags.instances, 0);
+    report.updraft.capacity = {
+      instances: 128, drawCalls: 2, trianglesPerMarker: UPDRAFT_TRIANGLES,
+      stableFrames: 120, writesPerMovedMarker: 1, retypingPreservedFlags: true,
+    };
     assert.deepEqual(report.errors, []);
     return report;
   } finally {

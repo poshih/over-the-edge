@@ -220,6 +220,44 @@ export async function verifyMobile(browser, address, artifacts) {
       const armControls = await hintSlider.boundingBox();
       assert.ok(armControls && armControls.height >= 48, 'Arm IK sliders must retain touch-sized targets.');
       await page.screenshot({ path: fileURLToPath(new URL(`mobile-${name}-arm-ik.png`, artifacts)) });
+
+      await page.getByRole('tab', { name: 'Level', exact: true }).tap();
+      const commits = await page.evaluate(() => window.gettingOver.level().editor.commits);
+      await page.locator('.level-file').setInputFiles({
+        name: 'touch-updraft.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({
+          schemaVersion: 2, labels: [],
+          objects: [{ kind: 'start', id: 'touch-start', x: 0, y: 4, angle: 0, extension: 0.2 }],
+        })),
+      });
+      await page.waitForFunction(before => window.gettingOver.level().editor.commits > before, commits);
+      await page.locator('.ui-notice').getByRole('button').tap();
+      await page.locator('[data-level-preset="updraft"]').tap();
+      await frames();
+      const ventBase = await page.evaluate(() => window.gettingOver.project({ x: 0, y: 3.3 }));
+      await page.touchscreen.tap(ventBase.x, ventBase.y);
+      const liftHeight = page.getByRole('spinbutton', { name: 'Lift height (m)', exact: true });
+      const launchStrength = page.getByRole('spinbutton', { name: 'Launch strength (x)', exact: true });
+      await liftHeight.fill('6');
+      await launchStrength.fill('1.1');
+      for (const control of [liftHeight, launchStrength]) {
+        const box = await control.boundingBox();
+        assert.ok(box && box.height >= 48 && box.x >= panelBox.x && box.x + box.width <= panelBox.x + panelBox.width,
+          'Updraft controls must fit the mobile workshop and retain touch-sized targets.');
+      }
+      await page.getByRole('button', { name: 'Apply events', exact: true }).tap();
+      const vent = await page.evaluate(() => window.gettingOver.level().definition.objects.find(object => object.kind === 'trigger'));
+      assert.equal(vent.marker, 'updraft');
+      assert.deepEqual(vent.events, [{ type: 'launch-player', height: 6, strength: 1.1 }]);
+      await page.getByRole('textbox', { name: 'Level name', exact: true }).fill(`Touch updraft ${name}`);
+      await page.getByRole('button', { name: 'Save level', exact: true }).tap();
+      await page.getByRole('button', { name: 'Playtest', exact: true }).tap();
+      await page.waitForFunction(() => window.gettingOver.snapshot().height > 8);
+      assert.equal(await page.evaluate(id => window.gettingOver.events().triggers.triggers
+        .find(trigger => trigger.id === id).activationCount, vent.id), 1);
+      await page.screenshot({ path: fileURLToPath(new URL(`mobile-${name}-updraft.png`, artifacts)) });
+      await page.getByRole('button', { name: 'Workshop', exact: true }).tap();
+      await page.getByRole('tab', { name: 'Appearance', exact: true }).tap();
+
       if (name === 'portrait') {
         assert.equal(await page.getByRole('button', { name: 'Increase Visual scale', exact: true }).isDisabled(), true);
         await page.getByLabel('GLB model', { exact: true }).setInputFiles({
@@ -245,7 +283,8 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal(await page.evaluate(() => window.captureAttempts), 0);
       assert.deepEqual(errors, []);
       results.push({ name, dragPixels: TOUCH_DRAG_PIXELS, targetMovement: distance, worldHeight: initial.camera.worldHeight,
-        gamePreview: { width: canvasBox.width, height: canvasBox.height }, autoPause: true, captureAttempts: 0 });
+        gamePreview: { width: canvasBox.width, height: canvasBox.height }, autoPause: true, captureAttempts: 0,
+        updraft: { placed: true, tuned: true, saved: true, launched: true } });
     } finally {
       await context.close();
     }

@@ -25,6 +25,7 @@ export class Game {
   private readonly pauseReasons = new Set<string>();
   private readonly inputBlocks = new Set<string>();
   private readonly unsubscribeTerrain: () => void;
+  private readonly unsubscribeEnemies: () => void;
   private tuning: Readonly<Tuning>;
   private character: CharacterState = { armIk: DEFAULT_ARM_IK, shaft: 'segmented' };
   private stopped = false;
@@ -55,6 +56,7 @@ export class Game {
     this.simulation = new Simulation(this.tuning, options.level);
     this.view = new GameView(options.canvas, this.simulation.frame(1), options.level);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
+    this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => this.view.enemies.apply(event));
     this.input = new PointerInput(options.canvas, {
       onAction: options.onAction, onNotice: options.onNotice, onShortcut: options.onShortcut,
     });
@@ -216,6 +218,7 @@ export class Game {
     this.triggers.dispose();
     this.presenter.dispose();
     this.unsubscribeTerrain();
+    this.unsubscribeEnemies();
     this.input.dispose();
     this.view.dispose();
     this.simulation.dispose();
@@ -241,9 +244,13 @@ export class Game {
   }
 
   private executeEvent(action: TriggerAction, signal: AbortSignal): EventOutcome | Promise<EventOutcome> {
+    if (signal.aborted) return 'cancelled';
     if (action.type === 'stop-timer') {
-      if (signal.aborted) return 'cancelled';
       this.timerRunning = false;
+      return 'completed';
+    }
+    if (action.type === 'launch-player') {
+      this.simulation.launch(action);
       return 'completed';
     }
     return this.presenter.present(action, signal);

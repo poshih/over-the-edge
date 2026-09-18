@@ -85,6 +85,26 @@ boundary.
 `npm run verify:game` exercises the release, custom-course/sprite builds,
 development entry, and editor-dependency rejection in isolation.
 
+### Included full-length course
+
+**Skyward Ruins** is an original 600 m climb through eight districts, with
+384 placed objects: permanent and illusion terrain, updrafts, birds, hollow
+soldiers, an opening video, chapter events, and a timer-stopping summit.
+The 600 m height is a design target, not a verified measurement of another game.
+
+Import [`levels/skyward-ruins.json`](levels/skyward-ruins.json) in
+**Workshop / Level**, or select it for an editor-free release:
+
+```sh
+GAME_LEVEL=levels/skyward-ruins.json npm run dev:game
+# Or build the same course for hosting:
+GAME_LEVEL=levels/skyward-ruins.json npm run build:game
+```
+
+The default demo remains unchanged. See the [course guide](docs/skyward-ruins.md)
+for the object allocation, district progression, and media requirements, or
+open the [full-height map](docs/skyward-ruins-map.svg).
+
 ## Controls
 
 | Input | Action |
@@ -136,11 +156,14 @@ Dynamic root, rotation locked
                   +-- three welded handle segments --> hammer head
 ```
 
-There are eight dynamic bodies and seven joints. Only the hinge and slider have
-motors. Arms are visual two-bone IK, never collision bodies or actuators. The pot
-and hammer head collide with terrain; the shaft fixtures supply mass and
+The player rig has eight dynamic bodies and seven joints. Only its hinge and
+slider have motors. Arms are visual two-bone IK, never collision bodies or
+actuators. The pot and hammer head collide with terrain and nearby living enemies;
+the shaft fixtures supply mass and
 inertia but never generate contacts. Normal locomotion does not teleport bodies,
-apply assistance forces, or turn off the head's collisions.
+apply assistance forces, or turn off the head's collisions. Authored updrafts
+and enemy contact knockback apply explicit, mass-aware impulses without changing
+the rig or disabling collisions.
 
 The simulation runs at a fixed **240 Hz**, with continuous collision handling,
 64 velocity iterations and 20 position iterations. Time steps and solver
@@ -249,6 +272,7 @@ Supported events:
 | Popup | Shows a plain-text title and message until Continue; Escape skips it |
 | Play video | Plays a public video URL or site-relative media path in a full-window overlay |
 | Stop timer | Freezes the run timer without stopping physics or illusion effects |
+| Launch player | Applies a mass-aware upward impulse with configurable lift height and strength |
 
 Events execute in their authored order. Only one presentation runs at a time;
 simultaneous triggers queue deterministically. Popup/video presentation pauses
@@ -272,14 +296,77 @@ Autoplay with sound may require a user gesture: the overlay offers **Play video*
 when blocked. It always fills the game window; native browser fullscreen is
 requested through a user-operated fullscreen control.
 
-Level JSON now uses **schema version 2**, with typed terrain, start and trigger
-objects. Version 1 imports and saved snapshots are normalized at the boundary:
+Level JSON uses **schema version 2**, with typed terrain, start, trigger and enemy
+objects. Existing version 2 levels without enemies remain valid. Version 1
+imports and saved snapshots are normalized at the boundary:
 terrain and labels are retained, spawn becomes a start object, and the old summit
 becomes an ending zone above its original arrival line. That zone extends two
 maximum hammer reaches upward and is editable. Original files and snapshots
 are not rewritten. Saving/exporting produces version 2; old game versions
-cannot read new trigger definitions, but their original version 1 saves remain
+cannot read new enemy kinds or trigger actions/markers, but their original version 1 saves remain
 available for rollback.
+
+### Updrafts
+
+Choose **Workshop / Level / Updraft**, then click or tap the desired base position.
+This places a generic trigger preset with a visible wind marker and one
+**Launch player** event. It does not add a solid platform or an extra physics body.
+Move/resize its region like any trigger; activation uses the player's foot position.
+
+In **Trigger events**, adjust **Lift height (m)** and **Launch strength (x)**,
+then **Apply events**. Level saves/exports also apply valid pending event edits.
+The default is an 8 m lift at 1x strength. Height supports 0.5-100 m; strength
+supports 0.25-2x. The action serializes as
+`{"type":"launch-player","height":8,"strength":1}` and the visual marker is
+`"updraft"`. Existing levels and event types remain valid; levels using the new
+event/marker need an updated runtime.
+
+At 1x, height is the estimated clear-air rise of the whole rig's center of mass,
+compensating for the current body damping. Strength scales the upward launch
+speed, not the number of metres. Current mass determines the required impulse,
+so heavier tuning does not automatically weaken the vent. Falling momentum is
+cancelled first; a player already rising faster is never slowed down.
+The pot's exact apex depends on hammer pose, input, and terrain contacts.
+
+The impulse is distributed by mass across the existing player bodies at their
+centers of mass. It does not teleport, change horizontal/angular velocity, turn
+off collisions, or pull only one body against its joints.
+**Every entry** fires once per overlap, rearms after leaving, and resets with the
+run. Remaining inside a vent does not repeatedly apply force. Choose **Once per
+run** when a level needs a single-use launcher.
+
+Updrafts reuse the existing indexed/swept proximity detection and event lifecycle.
+Their base rings and wind arrows use two shared instanced batches; only changed
+marker transforms are uploaded. Wind motion uses one shader clock instead of
+per-vent simulation, allocation, or particle updates, and pauses with gameplay.
+The same runtime works in editor-free builds; authoring controls stay in the Workshop.
+
+### Enemies
+
+Choose **Workshop / Level / Bird** or **Hollow soldier**, then click/tap the
+desired base position. Select the enemy's body to drag or delete it. The inspector
+edits its center/home position, facing, **Patrol radius** and **Patrol speed**;
+the selection guide shows the radius on each side of home. Birds patrol, warn,
+then dive. Soldiers only patrol their configured range, turning at terrain
+obstacles and edges.
+
+A **hammer-head strike** with a closing speed of **at least 0.8 m/s** defeats a
+bird in one hit; a hollow soldier takes **two separated strikes**. Damage has a
+**0.25 s anti-jitter cooldown**: brushing or holding the head against an enemy
+does not repeatedly deal damage. The shaft does not deal damage.
+Body collisions knock the player back; there is no player health system.
+Dead enemies stay dead until Reset or an editor rebuild. Patrol positions,
+damage and deaths are runtime state: editor gizmos, saves and exports retain
+authored homes. Entering Level mode restores both authored enemy poses and terrain
+state, including dead enemies and disappeared illusions.
+
+Up to **64 enemies** share one sprite draw batch with original sprite artwork;
+the palette and editor guides use original SVG glyphs. Only nearby enemies allocate
+physics bodies: they wake within **18 m** and sleep beyond **26 m**. Distant enemies
+keep their authored/current sprites, with no physics bodies or AI work.
+Contact effects are deferred until the physics world unlocks. Exported enemies
+also work in editor-free releases using the updated runtime. No enemies are
+added to the built-in course.
 
 ### Illusions
 
@@ -296,7 +383,7 @@ separate owners, so saving/exporting after playtesting still includes illusions.
 
 ### Performance boundaries
 
-The level format supports **1,000 terrain objects**, **128 triggers**, one start,
+The level format supports **1,000 terrain objects**, **128 triggers**, **64 enemies**, one start,
 **32 distinct terrain geometry templates**, up to **64 vertices per custom polygon**,
 and **16 course labels**. Each trigger supports up to **8 ordered events**. Dimensions,
 coordinates, winding, intersections, IDs, and import size are validated.

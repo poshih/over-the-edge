@@ -1,5 +1,6 @@
 import { geometryKey, LEVEL_LIMITS, LevelError, levelStart, TRIGGER_LIMITS, validateLevel, validateLevelMetadata, validateLevelObject } from '../level';
 import type { LevelChange, LevelDefinition, LevelObject, StartObject } from '../level';
+import { ENEMY_LIMITS } from '../enemy-types';
 
 export class LevelState {
   private current: LevelDefinition;
@@ -7,6 +8,7 @@ export class LevelState {
   private startObject: StartObject;
   private terrainCount = 0;
   private triggerCount = 0;
+  private enemyCount = 0;
   private readonly geometryUse = new Map<string, number>();
   private readonly listeners = new Set<(change: LevelChange) => void>();
 
@@ -30,7 +32,7 @@ export class LevelState {
   start(): StartObject { return this.startObject; }
 
   counts() {
-    return { terrain: this.terrainCount, triggers: this.triggerCount, total: this.objects.size };
+    return { terrain: this.terrainCount, triggers: this.triggerCount, enemies: this.enemyCount, total: this.objects.size };
   }
 
   upsert(value: unknown): void {
@@ -42,8 +44,10 @@ export class LevelState {
     }
     const terrains = this.terrainCount + Number(object.kind === 'terrain') - Number(previous?.kind === 'terrain');
     const triggers = this.triggerCount + Number(object.kind === 'trigger') - Number(previous?.kind === 'trigger');
+    const enemies = this.enemyCount + Number(object.kind === 'enemy') - Number(previous?.kind === 'enemy');
     if (terrains > LEVEL_LIMITS.objects) throw new LevelError(`A level supports up to ${LEVEL_LIMITS.objects} terrain objects.`);
     if (triggers > TRIGGER_LIMITS.objects) throw new LevelError(`A level supports up to ${TRIGGER_LIMITS.objects} triggers.`);
+    if (enemies > ENEMY_LIMITS.objects) throw new LevelError(`A level supports up to ${ENEMY_LIMITS.objects} enemies.`);
     const nextKey = object.kind === 'terrain' ? geometryKey(object.shape) : null;
     const previousKey = previous?.kind === 'terrain' ? geometryKey(previous.shape) : null;
     const freed = previousKey !== null && previousKey !== nextKey && this.geometryUse.get(previousKey) === 1;
@@ -56,6 +60,7 @@ export class LevelState {
     if (object.kind === 'start') this.startObject = object;
     this.terrainCount = terrains;
     this.triggerCount = triggers;
+    this.enemyCount = enemies;
     this.objects.set(object.id, object);
     this.publish({ ...this.current, objects: Object.freeze([...this.objects.values()]) }, [object], []);
   }
@@ -66,7 +71,8 @@ export class LevelState {
     if (object.kind === 'terrain') {
       this.removeGeometry(geometryKey(object.shape));
       this.terrainCount--;
-    } else this.triggerCount--;
+    } else if (object.kind === 'trigger') this.triggerCount--;
+    else if (object.kind === 'enemy') this.enemyCount--;
     this.objects.delete(id);
     this.publish({ ...this.current, objects: Object.freeze([...this.objects.values()]) }, [], [id]);
   }
@@ -112,11 +118,13 @@ export class LevelState {
     this.geometryUse.clear();
     this.terrainCount = 0;
     this.triggerCount = 0;
+    this.enemyCount = 0;
     for (const object of this.objects.values()) {
       if (object.kind === 'terrain') {
         this.terrainCount++;
         this.addGeometry(geometryKey(object.shape));
       } else if (object.kind === 'trigger') this.triggerCount++;
+      else if (object.kind === 'enemy') this.enemyCount++;
     }
   }
 

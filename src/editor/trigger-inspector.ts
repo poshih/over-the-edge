@@ -4,16 +4,22 @@
 // typed data (e.g. a half-typed video URL) out of LevelState, while still guaranteeing that valid
 // pending edits are never silently dropped when the author moves on to save their level.
 import { TRIGGER_LIMITS } from '../level';
+import { DEFAULT_LAUNCH, LAUNCH_FIELDS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 
-const EVENT_TYPES = ['popup', 'play-video', 'stop-timer'] as const;
-type EventType = (typeof EVENT_TYPES)[number];
-const EVENT_LABELS: Record<EventType, string> = { popup: 'Popup', 'play-video': 'Play video', 'stop-timer': 'Stop timer' };
+const EVENT_TYPES = ['popup', 'play-video', 'stop-timer', 'launch-player'] as const;
+type EventType = TriggerAction['type'];
+const EVENT_LABELS: Record<EventType, string> = {
+  popup: 'Popup', 'play-video': 'Play video', 'stop-timer': 'Stop timer', 'launch-player': 'Launch player',
+};
 
 function defaultEvent(type: EventType): TriggerAction {
-  if (type === 'popup') return { type, title: 'Event', message: 'Describe what happens here.' };
-  if (type === 'play-video') return { type, source: '' };
-  return { type };
+  switch (type) {
+    case 'popup': return { type, title: 'Event', message: 'Describe what happens here.' };
+    case 'play-video': return { type, source: '' };
+    case 'stop-timer': return { type };
+    case 'launch-player': return { type, ...DEFAULT_LAUNCH };
+  }
 }
 
 function cloneEvents(events: readonly TriggerAction[]): TriggerAction[] {
@@ -177,6 +183,36 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
         + 'video URL or a /site-relative path that anyone with the level can reach — not a private upload or a '
         + 'URL that embeds a login/credential.';
       item.append(source, sourceHelp);
+    } else if (action.type === 'launch-player') {
+      const fields = document.createElement('div');
+      fields.className = 'level-field-grid';
+      const numericInput = (key: keyof typeof LAUNCH_FIELDS): HTMLInputElement => {
+        const field = LAUNCH_FIELDS[key];
+        const label = document.createElement('label');
+        label.className = 'level-field';
+        label.textContent = `${field.label} (${field.unit})`;
+        const input = document.createElement('input');
+        input.type = 'number'; input.inputMode = 'decimal';
+        input.min = String(field.min); input.max = String(field.max); input.step = String(field.step);
+        input.value = String(action[key]);
+        label.append(input);
+        fields.append(label);
+        return input;
+      };
+      const height = numericInput('height');
+      const strength = numericInput('strength');
+      const updateLaunch = (): void => {
+        entry.draft[index] = { type: 'launch-player', height: height.valueAsNumber, strength: strength.valueAsNumber };
+        renderStatus();
+      };
+      height.addEventListener('input', updateLaunch, listen);
+      strength.addEventListener('input', updateLaunch, listen);
+      const help = document.createElement('p');
+      help.className = 'level-help';
+      help.textContent = 'At 1x strength, lift height estimates clear-air rise with the current body damping. ' +
+        'Strength scales the upward launch speed; impulse automatically accounts for player and tool mass. ' +
+        'Falling momentum is cancelled; faster upward motion is never slowed. Terrain and hammer pose can change the exact apex.';
+      item.append(fields, help);
     } else {
       const note = document.createElement('p');
       note.className = 'level-help';
@@ -205,7 +241,9 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
   appendButton.addEventListener('click', () => {
     const entry = current();
     if (entry === null || entry.draft.length >= TRIGGER_LIMITS.events) return;
-    entry.draft.push(defaultEvent(newType.value as EventType));
+    const type = EVENT_TYPES.find((candidate) => candidate === newType.value);
+    if (type === undefined) throw new Error('Unknown trigger event type.');
+    entry.draft.push(defaultEvent(type));
     renderList();
   }, listen);
   applyButton.addEventListener('click', () => {
