@@ -5,7 +5,7 @@ import { ENEMY_BEHAVIOR, ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIE
 import type { EnemySpecies } from '../enemy-types';
 import {
   ILLUSION, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
-  objectContains, objectVertices, shapeVertices, TRIGGER_LIMITS, TRIGGER_MARKERS, validateLevel, validateLevelObject,
+  objectContains, objectVertices, shapeVertices, terrainFromOutline, TRIGGER_LIMITS, TRIGGER_MARKERS, validateLevel, validateLevelObject,
 } from '../level';
 import type { EnemyObject, LevelDefinition, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion } from '../level';
 import { ENDING_EVENTS, UPDRAFT_EVENTS } from '../trigger-events';
@@ -17,12 +17,13 @@ import { EntityGizmos, enemyGlyph, objectGizmoBounds, updraftGlyph } from './obj
 import { NamedSnapshots, SnapshotError } from './named-snapshots';
 import { createSnapshotPicker } from './snapshot-picker';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
+import { DRAWING, PolygonDraft } from './polygon-draft';
 import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
 
 type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'start';
-type Tool = 'select' | 'pan' | PlacementTool;
+type Tool = 'select' | 'pan' | 'draw' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
 interface TerrainPreset { id: string; label: string; shape: LevelShape; width: number; height: number }
 interface TriggerPreset {
@@ -33,6 +34,7 @@ interface TriggerPreset {
 type Gesture =
   | { kind: 'move'; pointerId: number; start: Point; world: Point; original: LevelObject; preview: LevelObject }
   | { kind: 'pan'; pointerId: number; start: Point; camera: EditorCamera; unitsPerPixel: number }
+  | { kind: 'draw'; pointerId: number; start: Point; samples: Point[]; unitsPerPixel: number }
   | { kind: PlacementTool; pointerId: number };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -97,7 +99,7 @@ function asEnemy(object: LevelObject | null): EnemyObject | null {
 }
 
 function isPlacementTool(tool: Tool): tool is PlacementTool {
-  return tool !== 'select' && tool !== 'pan';
+  return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'start';
 }
 
 function objectBounds(object: LevelObject): Bounds {
@@ -184,6 +186,15 @@ export function createLevelEditor(options: LevelEditorOptions) {
         </div>
         <p class="level-help">Terrain shapes</p>
         <div class="level-palette" aria-label="Shape palette"></div>
+        <button type="button" class="button level-draw-tool" data-level-tool="draw" aria-pressed="false">Draw shape</button>
+        <div class="level-drawing-controls" hidden>
+          <p class="level-help level-drawing-status" role="status" aria-live="polite"></p>
+          <div class="level-drawing-actions">
+            <button type="button" class="button button-primary level-drawing-finish">Finish shape</button>
+            <button type="button" class="button level-drawing-undo">Undo point / stroke</button>
+            <button type="button" class="button level-drawing-cancel">Cancel outline</button>
+          </div>
+        </div>
         <p class="level-help">Start &amp; triggers</p>
         <div class="level-action-row">
           <button type="button" class="button" data-level-tool="start" aria-pressed="false">Start location</button>
@@ -299,11 +310,17 @@ export function createLevelEditor(options: LevelEditorOptions) {
   overlay.className = 'level-overlay';
   overlay.hidden = true;
   overlay.tabIndex = 0;
-  overlay.setAttribute('aria-label', 'Level canvas. V selects, H pans, plus and minus zoom. Escape cancels; Delete removes selection.');
+  overlay.setAttribute('aria-label', 'Level canvas. V selects, H pans, plus and minus zoom. Enter finishes a drawing; Backspace undoes a stroke. Escape cancels; Delete removes selection.');
   overlay.innerHTML = `<svg class="level-guides" aria-hidden="true">
     <g class="level-camera-group">
       <polygon class="level-selection" vector-effect="non-scaling-stroke" hidden />
       <polygon class="level-ghost" vector-effect="non-scaling-stroke" hidden />
+      <g class="level-drawing-guide" hidden>
+        <polyline class="level-drawing-line" vector-effect="non-scaling-stroke" />
+        <path class="level-drawing-links" vector-effect="non-scaling-stroke" />
+        <path class="level-drawing-nodes" vector-effect="non-scaling-stroke" />
+        <circle class="level-drawing-first" vector-effect="non-scaling-stroke" />
+      </g>
     </g>
   </svg>`;
   // A canvas sibling stays below the host's interface stacking context, including its toolbar.
@@ -317,6 +334,12 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const cameraGroup = graphic<SVGGElement>('.level-camera-group');
   const selectionPolygon = graphic<SVGPolygonElement>('.level-selection');
   const ghostPolygon = graphic<SVGPolygonElement>('.level-ghost');
+  const drawingGuide = graphic<SVGGElement>('.level-drawing-guide');
+  const drawingLine = graphic<SVGPolylineElement>('.level-drawing-line');
+  const drawingLinks = graphic<SVGPathElement>('.level-drawing-links');
+  const drawingNodes = graphic<SVGPathElement>('.level-drawing-nodes');
+  const drawingFirst = graphic<SVGCircleElement>('.level-drawing-first');
+  const drawing = new PolygonDraft();
   const entityGizmos = new EntityGizmos(cameraGroup);
   const inspector = element<HTMLFieldSetElement>(root, '.level-inspector');
   const input = (name: string) => element<HTMLInputElement>(root, `#level-${name}`);
@@ -349,6 +372,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let presetId: string | null = null;
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
+  let drawingCursor: Point | null = null;
   let savedDefinition = level.definition();
   let savedCamera: EditorCamera | null = null;
   let importGeneration = 0;
@@ -358,7 +382,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let commitCount = 0;
   let hitTestCount = 0;
 
-  const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts();
+  const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts() ||
+    drawing.vertices.length > 0 || gesture?.kind === 'draw';
   const selectedObject = () => selectedId === null ? null : level.object(selectedId);
   const inspectorObject = (): LevelObject | null =>
     isPlacementTool(tool) ? placement : selectedObject();
@@ -414,7 +439,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
     const counts = level.counts();
     saveStatus.textContent = `${counts.terrain} / ${LEVEL_LIMITS.objects} terrain · ${counts.triggers} / ${TRIGGER_LIMITS.objects} triggers · ${
       counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${
-      importing ? 'Reading level file…' : dirty() ? 'Unsaved changes — save or export to keep them' : 'No unsaved changes'}`;
+      importing ? 'Reading level file…' : drawing.vertices.length > 0 ? 'Unfinished outline - finish or cancel before saving' :
+        dirty() ? 'Unsaved changes — save or export to keep them' : 'No unsaved changes'}`;
     saveStatus.dataset.dirty = String(dirty());
   }
 
@@ -509,6 +535,14 @@ Save a named snapshot or export first if you want to keep them. Continue without
       button.setAttribute('aria-pressed', String(isPlacementTool(tool) && button.dataset.levelPreset === presetId));
     }
     const counts = level.counts();
+    element<HTMLButtonElement>(root, '.level-draw-tool').disabled =
+      counts.terrain >= LEVEL_LIMITS.objects && drawing.vertices.length === 0 && tool !== 'draw';
+    element(root, '.level-drawing-controls').hidden = tool !== 'draw' && drawing.vertices.length === 0;
+    element(root, '.level-drawing-status').textContent =
+      `${drawing.vertices.length} / ${LEVEL_LIMITS.polygonVertices} points. Click / tap corners or drag a trace. ` +
+      'Tap the first point or finish to close. Freehand traces are simplified; concave outlines work, holes and crossing edges do not.';
+    element<HTMLButtonElement>(root, '.level-drawing-finish').disabled = drawing.vertices.length < 3;
+    element<HTMLButtonElement>(root, '.level-drawing-undo').disabled = drawing.vertices.length === 0;
     for (const [selector, full] of [
       ['.level-palette', counts.terrain >= LEVEL_LIMITS.objects],
       ['.level-entity-palette', counts.triggers >= TRIGGER_LIMITS.objects],
@@ -522,6 +556,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
       select: 'Click / tap to select; drag to move. Pick enemies on their bodies, starts and triggers near their center handle. ' +
         'V selects, H pans. Escape cancels a drag without changing the level.',
       pan: 'Drag the canvas to pan anywhere in the course. Use + / − or the mouse wheel to zoom.',
+      draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
+        'Escape cancels. Pan and zoom keep your unfinished outline.',
       place: 'Click / tap to place this shape. Adjust its properties first if needed. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
@@ -542,6 +578,28 @@ Save a named snapshot or export first if you want to keep them. Continue without
     polygon.classList.toggle('level-illusion-outline', object.illusion);
   }
 
+  function drawOutline(): void {
+    const points = gesture?.kind === 'draw' ? [...drawing.vertices, ...gesture.samples] : drawing.vertices;
+    drawingGuide.toggleAttribute('hidden', points.length === 0);
+    if (points.length === 0) return;
+    const unitsPerPixel = camera.state().worldHeight / Math.max(1, rect.height);
+    const radius = DRAWING.vertexPixels * unitsPerPixel;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const cursor = tool === 'draw' ? drawingCursor : null;
+    drawingLine.setAttribute('points', points.map((point) => `${point.x},${point.y}`).join(' '));
+    drawingLinks.setAttribute('d', `M ${last.x} ${last.y}` +
+      (cursor === null ? '' : ` L ${cursor.x} ${cursor.y}`) +
+      (points.length < 3 ? '' : ` L ${first.x} ${first.y}`));
+    drawingNodes.setAttribute('d', drawing.vertices.map((point) =>
+      `M ${point.x - radius} ${point.y} h ${radius * 2} M ${point.x} ${point.y - radius} v ${radius * 2}`).join(' '));
+    drawingFirst.setAttribute('cx', String(first.x));
+    drawingFirst.setAttribute('cy', String(first.y));
+    drawingFirst.setAttribute('r', String(DRAWING.closePixels * unitsPerPixel));
+    drawingFirst.classList.toggle('level-drawing-close', cursor !== null && drawing.vertices.length >= 3 &&
+      Math.hypot(cursor.x - first.x, cursor.y - first.y) <= DRAWING.closePixels * unitsPerPixel);
+  }
+
   function draw(): void {
     if (!active || disposed || rect.width <= 0 || rect.height <= 0) return;
     drawCount++;
@@ -551,6 +609,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     drawPolygon(ghostPolygon, ghost !== null ? asTerrain(ghost) : null);
     entityGizmos.setSelection(selected !== null && !isTerrainObject(selected) ? selected : null);
     entityGizmos.setGhost(ghost !== null && !isTerrainObject(ghost) ? ghost : null);
+    drawOutline();
   }
 
   function drawCamera(): void {
@@ -573,7 +632,12 @@ Save a named snapshot or export first if you want to keep them. Continue without
 
   function alignOverlay(): void {
     if (!active || disposed) return;
-    rect = options.canvas.getBoundingClientRect();
+    const next = options.canvas.getBoundingClientRect();
+    if (gesture?.kind === 'draw' &&
+      (next.left !== rect.left || next.top !== rect.top || next.width !== rect.width || next.height !== rect.height)) {
+      cancelGesture();
+    }
+    rect = next;
     Object.assign(overlay.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     svg.setAttribute('viewBox', `0 0 ${Math.max(1, rect.width)} ${Math.max(1, rect.height)}`);
     drawCamera();
@@ -593,14 +657,17 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function cancelGesture(): void {
     const previous = gesture;
     gesture = null;
+    if (previous?.kind === 'draw') drawingCursor = null;
     if (previous !== null && overlay.hasPointerCapture(previous.pointerId)) overlay.releasePointerCapture(previous.pointerId);
     if (previous?.kind === 'pan' && active) setCamera(previous.camera);
     draw();
   }
 
-  function chooseTool(next: 'select' | 'pan' | 'start'): void {
+  function chooseTool(next: 'select' | 'pan' | 'start' | 'draw'): void {
     cancelGesture();
     tool = next;
+    drawingCursor = null;
+    if (next === 'draw') selectedId = null;
     presetId = null;
     placement = next === 'start' ? { ...level.start() } : null;
     renderControls();
@@ -635,6 +702,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
 
   function resetSelection(): void {
     cancelGesture();
+    drawing.clear();
+    drawingCursor = null;
     selectedId = null;
     chooseTool('select');
   }
@@ -642,6 +711,39 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function markSaved(): void {
     savedDefinition = level.definition();
     renderStatus();
+  }
+
+  function prepareLevel(): boolean {
+    if (drawing.vertices.length > 0 || gesture?.kind === 'draw') {
+      onNotice('Finish shape or cancel your unfinished outline before saving, exporting, or playtesting. Your outline is still available in Level.', 'error');
+      return false;
+    }
+    return triggerEvents.flush();
+  }
+
+  function finishDrawing(): void {
+    if (gesture?.kind === 'draw') throw new LevelError('Release the current stroke before finishing the outline.');
+    const object = terrainFromOutline({
+      id: `shape-${crypto.randomUUID()}`, vertices: drawing.vertices,
+      color: ROCK_COLOR, depth: DEFAULT_OBJECT_DEPTH,
+    });
+    level.upsert(object);
+    drawing.clear();
+    selectedId = object.id;
+    chooseTool('select');
+  }
+
+  function undoDrawing(): void {
+    const previous = gesture;
+    cancelGesture();
+    if (previous?.kind !== 'draw') drawing.undo();
+    drawingCursor = null;
+    renderControls(); draw();
+  }
+
+  function cancelDrawing(): void {
+    drawing.clear();
+    chooseTool('select');
   }
 
   const picker = createSnapshotPicker({
@@ -657,7 +759,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       }
     },
     save: (name) => {
-      if (!active || !triggerEvents.flush()) return null;
+      if (!active || !prepareLevel()) return null;
       try {
         const entry = history.save(localStorage, name, level.definition());
         markSaved();
@@ -780,7 +882,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     button.addEventListener('click', () => {
       if (!active) return;
       const next = button.dataset.levelTool;
-      if (next !== 'select' && next !== 'pan' && next !== 'start') throw new Error('Unknown level tool.');
+      if (next !== 'select' && next !== 'pan' && next !== 'start' && next !== 'draw') throw new Error('Unknown level tool.');
       chooseTool(next);
     }, listen);
   }
@@ -926,7 +1028,10 @@ Save a named snapshot or export first if you want to keep them. Continue without
     level.remove(id);
   }
   action('.level-delete', deleteSelected);
-  action('.level-play', () => { if (triggerEvents.flush()) { cancelGesture(); options.onPlay(); } });
+  action('.level-drawing-finish', () => applyEdit(finishDrawing));
+  action('.level-drawing-undo', undoDrawing);
+  action('.level-drawing-cancel', cancelDrawing);
+  action('.level-play', options.onPlay);
   action('.level-fit', fitCourse);
   action('.level-zoom-in', () => zoom(1 / ZOOM_FACTOR));
   action('.level-zoom-out', () => zoom(ZOOM_FACTOR));
@@ -952,7 +1057,7 @@ This restores the default ground and start location, removes all other objects a
     onNotice('New level started. Add terrain and place an ending trigger, then save or export before leaving.', 'info');
   });
   action('.level-export', () => {
-    if (!triggerEvents.flush()) return;
+    if (!prepareLevel()) return;
     const definition = validateLevel(level.definition());
     downloadJson('level.json', `${JSON.stringify(definition, null, 2)}\n`);
     markSaved();
@@ -1036,7 +1141,19 @@ This restores the default ground and start location, removes all other objects a
       });
       return;
     }
-    if (gesture?.kind === 'move') {
+    if (gesture?.kind === 'draw') {
+      const previous = gesture.samples[gesture.samples.length - 1];
+      if (Math.hypot(world.x - previous.x, world.y - previous.y) >= DRAWING.samplePixels * gesture.unitsPerPixel) {
+        if (gesture.samples.length >= DRAWING.samples - 1) {
+          cancelGesture();
+          throw new LevelError(`A stroke supports up to ${DRAWING.samples} samples. It was canceled; use shorter strokes to continue your outline.`);
+        }
+        gesture.samples.push(world);
+      }
+      drawingCursor = world;
+    } else if (tool === 'draw') {
+      drawingCursor = world;
+    } else if (gesture?.kind === 'move') {
       const moved = Math.hypot(client.x - gesture.start.x, client.y - gesture.start.y) >= DRAG_DISTANCE;
       gesture.preview = moved ? {
         ...gesture.original, x: gesture.original.x + world.x - gesture.world.x,
@@ -1072,6 +1189,13 @@ This restores the default ground and start location, removes all other objects a
         kind: 'pan', pointerId: event.pointerId, start: client, camera: { ...camera.state() },
         unitsPerPixel: camera.state().worldHeight / Math.max(1, rect.height),
       };
+    } else if (tool === 'draw') {
+      gesture = {
+        kind: 'draw', pointerId: event.pointerId, start: client, samples: [world],
+        unitsPerPixel: camera.state().worldHeight / Math.max(1, rect.height),
+      };
+      drawingCursor = world;
+      draw();
     } else {
       gesture = { kind: tool, pointerId: event.pointerId };
       movePreview(event);
@@ -1080,12 +1204,13 @@ This restores the default ground and start location, removes all other objects a
   }, listen);
   overlay.addEventListener('pointermove', (event) => {
     if (!active || (gesture !== null && gesture.pointerId !== event.pointerId)) return;
-    if (gesture === null && !isPlacementTool(tool)) return;
-    movePreview(event);
+    if (gesture === null && !isPlacementTool(tool) && tool !== 'draw') return;
+    applyEdit(() => movePreview(event));
   }, listen);
   overlay.addEventListener('pointerup', (event) => {
     if (!active || gesture === null || gesture.pointerId !== event.pointerId) return;
-    movePreview(event);
+    applyEdit(() => movePreview(event));
+    if (gesture === null) return;
     const finished = gesture;
     gesture = null;
     if (overlay.hasPointerCapture(event.pointerId)) overlay.releasePointerCapture(event.pointerId);
@@ -1093,6 +1218,15 @@ This restores the default ground and start location, removes all other objects a
     applyEdit(() => {
       if (finished.kind === 'move') {
         if (finished.preview !== finished.original) level.upsert(finished.preview);
+      } else if (finished.kind === 'draw' && inside) {
+        const client = pointFromEvent(event);
+        const moved = finished.samples.length > 1 || Math.hypot(client.x - finished.start.x, client.y - finished.start.y) >= DRAG_DISTANCE;
+        const samples = moved ? [...finished.samples, camera.unproject(client)] : [finished.samples[0]];
+        const closure = drawing.append(samples, {
+          tolerance: DRAWING.tolerancePixels * finished.unitsPerPixel,
+          closeDistance: DRAWING.closePixels * finished.unitsPerPixel,
+        });
+        if (closure === 'closed') finishDrawing();
       } else if (finished.kind === 'place' && inside && placement !== null) {
         const object = { ...placement, id: `shape-${crypto.randomUUID()}` };
         level.upsert(object);
@@ -1122,7 +1256,7 @@ This restores the default ground and start location, removes all other objects a
   overlay.addEventListener('pointercancel', cancelPointer, listen);
   overlay.addEventListener('lostpointercapture', cancelPointer, listen);
   overlay.addEventListener('pointerleave', () => {
-    if (gesture === null) draw();
+    if (gesture === null) { drawingCursor = null; draw(); }
   }, listen);
   overlay.addEventListener('wheel', (event) => {
     if (!active) return;
@@ -1132,15 +1266,31 @@ This restores the default ground and start location, removes all other objects a
     zoom(Math.exp(Math.max(-1, Math.min(1, delta * WHEEL_ZOOM_RATE))), { x: event.clientX, y: event.clientY });
   }, { ...listen, passive: false });
   window.addEventListener('keydown', (event) => {
-    if (!active || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (!active || event.altKey) return;
     const target = event.target;
     if (target instanceof Element && target.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+    if (event.ctrlKey || event.metaKey) {
+      if (event.key.toLowerCase() !== 'z' || event.shiftKey || (drawing.vertices.length === 0 && gesture?.kind !== 'draw')) return;
+      undoDrawing();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     switch (event.key.toLowerCase()) {
-      case 'escape': cancelGesture(); selectedId = null; chooseTool('select'); break;
+      case 'escape': selectedId = null; cancelDrawing(); break;
       case 'v': chooseTool('select'); break;
       case 'h': chooseTool('pan'); break;
+      case 'enter':
+        if (target instanceof Element && target.closest('button, a[href], [role="button"], [role="tab"]')) return;
+        if (tool !== 'draw' && drawing.vertices.length === 0) return;
+        applyEdit(finishDrawing);
+        break;
       case 'delete':
-      case 'backspace': deleteSelected(); break;
+        deleteSelected(); break;
+      case 'backspace':
+        if (tool === 'draw' || drawing.vertices.length > 0) undoDrawing();
+        else deleteSelected();
+        break;
       case '+':
       case '=': zoom(1 / ZOOM_FACTOR); break;
       case '-': zoom(ZOOM_FACTOR); break;
@@ -1178,6 +1328,7 @@ This restores the default ground and start location, removes all other objects a
   root.inert = true;
 
   return {
+    preparePlay: prepareLevel,
     setMode(mode: 'edit' | 'inactive'): void {
       if (disposed) return;
       if (mode === 'edit') {
@@ -1191,6 +1342,9 @@ This restores the default ground and start location, removes all other objects a
         alignOverlay();
       } else {
         cancelGesture();
+        if (active && drawing.vertices.length > 0) {
+          onNotice('Your unfinished outline is kept in Workshop / Level. Finish shape to include it in the level.', 'info');
+        }
         active = false;
         importGeneration++; importing = false; importButton.disabled = false;
         root.hidden = true; root.inert = true; overlay.hidden = true;
@@ -1207,6 +1361,10 @@ This restores the default ground and start location, removes all other objects a
         tool, selectedId, selected: object, preset: presetId,
         preview: ghost === null ? null : Object.freeze({ ...ghost }),
         dragging: gesture?.kind ?? null, capturedPointer: gesture?.pointerId ?? null,
+        drawing: Object.freeze({
+          vertices: Object.freeze(drawing.vertices.map((point) => Object.freeze({ ...point }))),
+          strokeSamples: gesture?.kind === 'draw' ? gesture.samples.length : 0,
+        }),
         dirty: dirty(), importing, objectCount: current.objects.length,
         start: level.start(), counts: level.counts(), labelCount: current.labels.length,
         camera: Object.freeze({ ...camera.state() }),
@@ -1217,6 +1375,7 @@ This restores the default ground and start location, removes all other objects a
     dispose(): void {
       if (disposed) return;
       cancelGesture();
+      drawing.clear();
       active = false; disposed = true; importGeneration++;
       events.abort(); resize.disconnect(); unsubscribe();
       camera.set(null);

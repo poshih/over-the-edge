@@ -256,6 +256,46 @@ explicit. Export/import JSON to move level data between browsers or feed the
 game-only build. Imports are validated before replacing the current level;
 malformed files and unavailable storage produce visible errors.
 
+### Drawing terrain
+
+Choose **Workshop / Level / Draw shape**. Click or tap individual corners, or
+hold and drag to trace an outline. You can combine separate strokes and point
+placements. Freehand strokes are simplified with a two-screen-pixel tolerance
+at the drawing zoom, so pointer samples do not become hundreds of physics edges.
+
+Tap the first point, press **Enter**, or choose **Finish shape** to close the
+outline. Clockwise and counterclockwise input both work; the shared terrain
+converter normalizes winding and rejects invalid geometry. Concave outlines,
+including ledges and notches, use the same polygon format as the built-in course.
+
+**Undo point / stroke**, Backspace, or Ctrl/Cmd+Z removes the last point or
+completed stroke. During a stroke, undo cancels only that in-progress stroke.
+**Cancel outline** or Escape discards the draft without changing the level.
+Pointer cancellation or a viewport resize cancels the current stroke while
+retaining completed points. Pan, zoom, and switching Workshop tabs preserve
+the draft. Unfinished outlines must be finished or canceled before saving,
+exporting, or starting a playtest.
+Drafts are not saved terrain and do not create physics bodies or render meshes.
+
+Finished drawings are ordinary terrain objects: select, move, resize, rotate,
+set depth, or enable **Illusion** as usual. Named saves, JSON exchange, and
+editor-free game builds preserve them without a new level format.
+
+Outlines support **3-64 points**, **0.25-128 m** width and height, and the existing
+limit of **32 distinct terrain geometry templates** per level. Crossing or
+overlapping edges, holes, and zero-area shapes are rejected without changing the
+authored level; the draft remains available for undo or cancellation. Curves are
+polygonal approximations, not Bezier surfaces. Separate objects can surround an
+opening without requiring a polygon with holes.
+
+The built-in demo's large `ascent` obstacle is an **18-point hand-authored
+concave polygon** in `src/course.ts`, not a stack of blocks. Its extrusion has
+**68 triangles**, and its collision is one static closed chain with 18 edges.
+Geometry is cached and shared, and static objects do not rebuild geometry or
+rewrite instance transforms each frame. Drawing uses this same rendering and
+collision path; finished outlines cost according to their edge/template count,
+not their on-screen size.
+
 ### Trigger objects and events
 
 Place a **Trigger** to define a circular or rectangular proximity zone.

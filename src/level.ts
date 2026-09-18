@@ -124,6 +124,7 @@ const SHAPE_VERTICES: Record<ShapeKind, readonly Readonly<Point>[]> = {
   hexagon: [{ x: 0.5, y: 0 }, { x: 0.25, y: 0.5 }, { x: -0.25, y: 0.5 },
     { x: -0.5, y: 0 }, { x: -0.25, y: -0.5 }, { x: 0.25, y: -0.5 }],
 };
+const MIN_POLYGON_AREA = 5e-6;
 
 for (const vertices of Object.values(SHAPE_VERTICES)) {
   for (const vertex of vertices) Object.freeze(vertex);
@@ -139,17 +140,25 @@ function onSegment(a: Readonly<Point>, b: Readonly<Point>, p: Readonly<Point>): 
     p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y);
 }
 
+function polygonArea(vertices: readonly Readonly<Point>[]): number {
+  let area = 0;
+  for (let index = 0; index < vertices.length; index++) {
+    const a = vertices[index];
+    const b = vertices[(index + 1) % vertices.length];
+    area += a.x * b.y - b.x * a.y;
+  }
+  return area / 2;
+}
+
 function polygon(value: unknown): readonly Readonly<Point>[] {
   if (!Array.isArray(value) || value.length < 3 || value.length > LEVEL_LIMITS.polygonVertices) {
     throw new LevelError(`A polygon needs 3 to ${LEVEL_LIMITS.polygonVertices} vertices.`);
   }
   const vertices = value.map((entry) => point(entry, 0.5, 'Polygon vertex'));
-  let area = 0;
   for (let i = 0; i < vertices.length; i++) {
     const a = vertices[i];
     const b = vertices[(i + 1) % vertices.length];
     if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-5) throw new LevelError('Polygon edges must have nonzero length.');
-    area += a.x * b.y - b.x * a.y;
     for (let j = i + 1; j < vertices.length; j++) {
       if (j === i + 1 || (i === 0 && j === vertices.length - 1)) continue;
       const c = vertices[j];
@@ -160,8 +169,32 @@ function polygon(value: unknown): readonly Readonly<Point>[] {
       }
     }
   }
-  if (area <= 1e-5) throw new LevelError('Polygon vertices must enclose an area in counterclockwise order.');
+  if (polygonArea(vertices) <= MIN_POLYGON_AREA) throw new LevelError('Polygon vertices must enclose an area in counterclockwise order.');
   return Object.freeze(vertices);
+}
+
+export function terrainFromOutline(
+  outline: Pick<TerrainObject, 'id' | 'color' | 'depth'> & { readonly vertices: readonly Readonly<Point>[] },
+): TerrainObject {
+  if (outline.vertices.length < 3 || outline.vertices.length > LEVEL_LIMITS.polygonVertices) {
+    throw new LevelError(`An outline needs 3 to ${LEVEL_LIMITS.polygonVertices} points.`);
+  }
+  const minX = Math.min(...outline.vertices.map((vertex) => vertex.x));
+  const maxX = Math.max(...outline.vertices.map((vertex) => vertex.x));
+  const minY = Math.min(...outline.vertices.map((vertex) => vertex.y));
+  const maxY = Math.max(...outline.vertices.map((vertex) => vertex.y));
+  const width = number(maxX - minX, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Polygon width');
+  const height = number(maxY - minY, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Polygon height');
+  // Min-relative normalization keeps both extrema exactly inside the shape's [-0.5, 0.5] bounds.
+  const vertices = outline.vertices.map((vertex) => ({
+    x: (vertex.x - minX) / width - 0.5, y: (vertex.y - minY) / height - 0.5,
+  }));
+  if (polygonArea(vertices) < 0) vertices.reverse();
+  return validateTerrain({
+    kind: 'terrain', id: outline.id, shape: { type: 'polygon', vertices },
+    x: (minX + maxX) / 2, y: (minY + maxY) / 2, width, height, angle: 0,
+    color: outline.color, depth: outline.depth, illusion: false,
+  });
 }
 
 export function shapeVertices(shape: LevelShape): readonly Readonly<Point>[] {

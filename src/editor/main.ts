@@ -119,6 +119,7 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
     return;
   }
   if (action === 'play') {
+    if (editing && !levelEditor.preparePlay()) return;
     const startFromLevel = editing;
     const workshop = ui.workshopState();
     if (editing || workshop.compact) ui.closeWorkshop();

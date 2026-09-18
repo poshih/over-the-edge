@@ -100,6 +100,17 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.level-draw-tool {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.level-drawing-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .level-editor .level-preset {
   display: flex;
   min-height: 66px;
@@ -252,6 +263,32 @@
 
 .level-illusion-outline {
   stroke-dasharray: 3 4;
+}
+
+.level-drawing-line,
+.level-drawing-links,
+.level-drawing-nodes,
+.level-drawing-first {
+  fill: none;
+  stroke: #9a5c08;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.level-drawing-links {
+  stroke-dasharray: 5 4;
+  opacity: 0.65;
+}
+
+.level-drawing-first {
+  fill: rgb(188 133 53 / 12%);
+  stroke-width: 1.5;
+}
+
+.level-drawing-first.level-drawing-close {
+  fill: rgb(26 115 103 / 25%);
+  stroke: #075a50;
 }
 
 /* Non-terrain entity gizmos (start, triggers, and authored enemy homes). These are cheap SVG shapes

@@ -122,5 +122,6 @@ Enemies share their sprite atlas and draw batch, and only nearby enemies run
 physics and AI.
 
 `levels/skyward-ruins.json` is the authoritative editable level. This course
-does not add freehand drawing, per-surface friction, checkpoints, or new enemy
-behaviors. It uses the existing schema and runtime.
+does not add per-surface friction, checkpoints, or new enemy behaviors.
+It uses the existing schema and runtime. The Workshop's
+[drawing tool](../README.md#drawing-terrain) can add further custom terrain.
