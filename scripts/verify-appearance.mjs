@@ -480,11 +480,18 @@ export async function verifyAppearance(page, artifacts) {
     await page.keyboard.press('p');
     const canvas = await page.locator('#game').boundingBox();
     assert.ok(canvas);
-    await page.mouse.move(canvas.x + canvas.width * 0.48, canvas.y + canvas.height * 0.4);
+    const nextAim = { x: moved.maxReach * 0.5, y: moved.maxReach * 0.4 };
+    const pixelsPerMeter = moved.camera.height / moved.camera.worldHeight / moved.tuning.mouseSensitivity;
+    const pointer = { x: canvas.x + canvas.width * 0.48, y: canvas.y + canvas.height * 0.4 };
+    await page.mouse.move(pointer.x, pointer.y);
     await page.mouse.down();
-    await page.mouse.move(canvas.x + canvas.width * 0.48 + 100, canvas.y + canvas.height * 0.4 - 40, { steps: 12 });
+    await page.mouse.move(pointer.x + (nextAim.x - moved.cursorOffset.x) * pixelsPerMeter,
+      pointer.y - (nextAim.y - moved.cursorOffset.y) * pixelsPerMeter, { steps: 12 });
     await page.mouse.up();
-    const motionTime = (await snapshot()).time;
+    const motion = await snapshot();
+    assert.ok(Math.hypot(motion.cursorOffset.x - nextAim.x, motion.cursorOffset.y - nextAim.y) < 2 / pixelsPerMeter,
+      'The arm animation scenario must first reach its character-relative aiming pose.');
+    const motionTime = motion.time;
     await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, motionTime + 1.5);
     await page.locator('#game').focus();
     await page.keyboard.press('p');

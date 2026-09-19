@@ -286,14 +286,24 @@ export async function verifyLevel(browser, address, artifacts) {
       }
     };
     const aimHammer = async point => {
-      const before = await physics();
       const canvas = await page.locator('#game').boundingBox();
-      const scale = before.camera.height / before.camera.worldHeight / before.tuning.mouseSensitivity;
-      const origin = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height * 0.45 };
-      await page.mouse.move(origin.x, origin.y);
+      assert.ok(canvas);
+      const pointer = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height * 0.45 };
+      await page.mouse.move(pointer.x, pointer.y);
       await page.mouse.down();
-      await page.mouse.move(origin.x + (point.x - before.cursor.x) * scale,
-        origin.y - (point.y - before.cursor.y) * scale, { steps: 6 });
+      let current = await physics();
+      const started = current.time;
+      const deadline = Date.now() + 10_000;
+      // Keep aiming at the opponent as recoil carries the character-relative target.
+      while (current.time - started < 0.3) {
+        assert.ok(Date.now() < deadline && !current.paused && !current.stopped, 'Combat aiming must advance through live physics.');
+        const scale = current.camera.height / current.camera.worldHeight / current.tuning.mouseSensitivity;
+        pointer.x += (point.x - current.cursor.x) * scale;
+        pointer.y -= (point.y - current.cursor.y) * scale;
+        await page.mouse.move(pointer.x, pointer.y);
+        await frames();
+        current = await physics();
+      }
       await page.mouse.up();
     };
     const enemyState = async id => (await state()).enemies.enemies.find(enemy => enemy.id === id);

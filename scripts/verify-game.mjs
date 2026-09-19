@@ -174,7 +174,7 @@ async function verifySettings(page) {
   const selected = {
     ...defaults,
     physics: { ...defaults.physics, playerMass: 14, mouseSensitivity: 1.75 },
-    cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
+    cursor: { maxRadius: 3.4 },
   };
   await writeFile(settingsPath, JSON.stringify(selected));
   process.env.GAME_SETTINGS = relative(root, settingsPath);
@@ -209,7 +209,7 @@ async function verifySettings(page) {
     const edited = {
       ...selected,
       physics: { ...selected.physics, mouseSensitivity: 0.8 },
-      cursor: { returnToHammer: false, returnRate: 6, returnOffsetX: -0.4, returnOffsetY: 0.6 },
+      cursor: { maxRadius: 1.1 },
     };
     const reload = page.waitForEvent('domcontentloaded');
     await writeFile(settingsPath, JSON.stringify(edited));
@@ -218,21 +218,50 @@ async function verifySettings(page) {
     report.settings.reload = { fullReload: true, profile: edited };
   });
 
+  const legacy = {
+    schemaVersion: 1,
+    physics: { ...defaults.physics, hingeTorque: defaults.physics.hingeTorque + 70, mouseSensitivity: 1.35 },
+    cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
+  };
+  const normalizedLegacy = { schemaVersion: 2, physics: legacy.physics, cursor: defaults.cursor };
+  await writeFile(settingsPath, JSON.stringify(legacy));
+  process.env.GAME_SETTINGS = relative(root, settingsPath);
+  await settingsBuild(normalizedLegacy, { write: false });
+  await withSettingsDevelopment(page, async (server, address) => {
+    assert.equal((await page.goto(address, { waitUntil: 'networkidle' })).status(), 200);
+    assert.deepEqual(await runtimeSettings(page, server), normalizedLegacy);
+    report.settings.legacyNormalized = { build: true, development: true, source: legacy, normalized: normalizedLegacy };
+  });
+
   const invalidPath = join(temporary, 'invalid-settings.json');
   const invalid = [
     { name: 'malformed-json', source: '{broken', error: /JSON|Unexpected/ },
-    { name: 'unsupported-version', value: { ...defaults, schemaVersion: 2 }, error: /version is not supported/ },
+    { name: 'unsupported-version', value: { ...defaults, schemaVersion: 3 }, error: /version is not supported/ },
     {
       name: 'invalid-physics', value: { ...defaults, physics: { ...defaults.physics, playerMass: 0 } },
       error: /Player mass must be between/,
     },
     {
-      name: 'invalid-cursor', value: { ...defaults, cursor: { ...defaults.cursor, returnToHammer: 'yes' } },
-      error: /Return to hammer must be enabled or disabled/,
+      name: 'invalid-cursor', value: { ...defaults, cursor: { maxRadius: 1000 } },
+      error: /Maximum target radius must be between/,
     },
     {
-      name: 'invalid-offset', value: { ...defaults, cursor: { ...defaults.cursor, returnOffsetX: 1000 } },
-      error: /Return offset X must be between/,
+      name: 'invalid-legacy-cursor',
+      value: {
+        schemaVersion: 1,
+        physics: defaults.physics,
+        cursor: { returnToHammer: 'yes', returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
+      },
+      error: /retired return setting must be a boolean/i,
+    },
+    {
+      name: 'invalid-legacy-offset',
+      value: {
+        schemaVersion: 1,
+        physics: defaults.physics,
+        cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 1000, returnOffsetY: -0.25 },
+      },
+      error: /Retired return offset X must be between/,
     },
     { name: 'missing-fields', value: { ...defaults, physics: {} }, error: /missing or unknown settings/ },
     { name: 'unknown-field', value: { ...defaults, unknown: 1 }, error: /missing or unknown settings/ },

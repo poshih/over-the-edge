@@ -2,25 +2,21 @@ import { DEFAULT_TUNING, RIG } from './config';
 import type { Tuning } from './config';
 
 export interface CursorSettings {
-  readonly returnToHammer: boolean;
-  readonly returnRate: number;
-  readonly returnOffsetX: number;
-  readonly returnOffsetY: number;
+  readonly maxRadius: number;
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly physics: Readonly<Tuning>;
   readonly cursor: Readonly<CursorSettings>;
 }
 
 export const GAME_SETTINGS_LIMITS = { fileBytes: 64 * 1024 } as const;
-export const CURSOR_RETURN_IDLE_SECONDS = 0.15;
 export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
-  returnToHammer: false, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
+  maxRadius: RIG.maxReach,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 1, physics: DEFAULT_TUNING, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 2, physics: DEFAULT_TUNING, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -37,12 +33,10 @@ interface TuningField extends NumericSetting {
   group: 'Mass & recoil' | 'Motors' | 'Response' | 'Materials' | 'Input';
 }
 
-type CursorField = NumericSetting & { key: Exclude<keyof CursorSettings, 'returnToHammer'> };
+type CursorField = NumericSetting & { key: keyof CursorSettings };
 
 export const CURSOR_FIELDS: readonly CursorField[] = [
-  { key: 'returnRate', label: 'Return speed', min: 0.5, max: 24, step: 0.5, unit: '/s', description: 'How quickly an idle target eases toward the hammer plus its offset while the head touches a surface.' },
-  { key: 'returnOffsetX', label: 'Return offset X', min: -RIG.maxReach, max: RIG.maxReach, step: 0.05, unit: 'm', description: 'World-space horizontal offset from the hammer center. Positive goes right.' },
-  { key: 'returnOffsetY', label: 'Return offset Y', min: -RIG.maxReach, max: RIG.maxReach, step: 0.05, unit: 'm', description: 'World-space vertical offset from the hammer center. Positive goes up.' },
+  { key: 'maxRadius', label: 'Maximum target radius', min: 0.25, max: 10, step: 0.05, unit: 'm', description: 'Maximum distance from the character center. Aiming moves this offset; character movement carries it along. The hammer keeps its separate physical reach limit.' },
 ];
 
 export const TUNING_FIELDS: readonly TuningField[] = [
@@ -75,7 +69,7 @@ function settingsFields(value: unknown, keys: readonly string[], label: string):
   }
 }
 
-function settingNumber(value: unknown, field: NumericSetting): number {
+function settingNumber(value: unknown, field: Pick<NumericSetting, 'label' | 'min' | 'max'>): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < field.min || value > field.max) {
     throw new GameSettingsError(`${field.label} must be between ${field.min} and ${field.max}.`);
   }
@@ -93,10 +87,19 @@ export function validateTuning(value: unknown): Tuning {
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 1) throw new GameSettingsError('This game-settings profile version is not supported.');
-  settingsFields(value.cursor, ['returnToHammer', ...CURSOR_FIELDS.map((field) => field.key)], 'Cursor settings');
-  if (typeof value.cursor.returnToHammer !== 'boolean') throw new GameSettingsError('Return to hammer must be enabled or disabled.');
-  const cursor = { ...DEFAULT_CURSOR_SETTINGS, returnToHammer: value.cursor.returnToHammer };
+  if (value.schemaVersion === 1) {
+    settingsFields(value.cursor, ['returnToHammer', 'returnRate', 'returnOffsetX', 'returnOffsetY'], 'Retired cursor settings');
+    if (typeof value.cursor.returnToHammer !== 'boolean') throw new GameSettingsError('The retired return setting must be a boolean.');
+    for (const field of [
+      { key: 'returnRate', label: 'Retired return speed', min: 0.5, max: 24 },
+      { key: 'returnOffsetX', label: 'Retired return offset X', min: -2.65, max: 2.65 },
+      { key: 'returnOffsetY', label: 'Retired return offset Y', min: -2.65, max: 2.65 },
+    ]) settingNumber(value.cursor[field.key], field);
+    return Object.freeze({ schemaVersion: 2, physics: validateTuning(value.physics), cursor: DEFAULT_CURSOR_SETTINGS });
+  }
+  if (value.schemaVersion !== 2) throw new GameSettingsError('This game-settings profile version is not supported.');
+  settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
+  const cursor = { ...DEFAULT_CURSOR_SETTINGS };
   for (const field of CURSOR_FIELDS) cursor[field.key] = settingNumber(value.cursor[field.key], field);
-  return Object.freeze({ schemaVersion: 1, physics: validateTuning(value.physics), cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 2, physics: validateTuning(value.physics), cursor: Object.freeze(cursor) });
 }

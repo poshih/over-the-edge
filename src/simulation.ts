@@ -1,14 +1,14 @@
 import { Vec2, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
-import { CURSOR_RETURN_IDLE_SECONDS, TUNING_FIELDS, validateGameSettings } from './game-settings';
+import { TUNING_FIELDS, validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
 import { isEnemyObject, isTerrainObject, levelSpawn } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import type { LaunchSettings } from './trigger-events';
-import { angleDifference } from './math';
+import { angleDifference, clampLength } from './math';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
 import type { EnemyEvent, EnemyPose } from './enemy-types';
@@ -28,7 +28,7 @@ export interface PhysicsFrame {
   enemies: readonly EnemyPose[];
 }
 
-type PlayerFrame = Omit<PhysicsFrame, 'enemies'>;
+type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'cursor'> & { cursorOffset: Point };
 
 const IDLE_COMMAND: MotorCommand = { angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0 };
 
@@ -39,12 +39,11 @@ export class Simulation {
   private readonly enemies: EnemyWorld;
   private level: LevelDefinition;
   private settings: GameSettings;
-  private cursor: Point;
+  private cursorOffset: Point;
   private previous: PlayerFrame;
   private current: PlayerFrame;
   private command = { ...IDLE_COMMAND };
   private elapsed = 0;
-  private lastPointerInput = 0;
   private bestHeight = 0;
   private disposed = false;
 
@@ -60,7 +59,7 @@ export class Simulation {
       getHead: () => this.rig.head,
       onBump: (delta) => changePlayerVelocity(this.rig, delta),
     });
-    this.cursor = { ...this.rig.head.getPosition() };
+    this.cursorOffset = this.initialCursorOffset();
     this.current = this.capture();
     this.previous = this.current;
   }
@@ -71,7 +70,13 @@ export class Simulation {
     this.ensureLive();
     const next = validateGameSettings(settings);
     const physicsChanged = TUNING_FIELDS.some((field) => next.physics[field.key] !== this.settings.physics[field.key]);
+    const radiusChanged = next.cursor.maxRadius !== this.settings.cursor.maxRadius;
     this.settings = next;
+    if (radiusChanged) {
+      this.cursorOffset = clampLength(this.cursorOffset, next.cursor.maxRadius);
+      this.previous = { ...this.previous, cursorOffset: clampLength(this.previous.cursorOffset, next.cursor.maxRadius) };
+      this.current = { ...this.current, cursorOffset: { ...this.cursorOffset } };
+    }
     if (physicsChanged) {
       tunePlayer(this.rig, next.physics);
       // Existing contacts cache mixed material values independently of fixtures.
@@ -143,20 +148,12 @@ export class Simulation {
     }
     this.previous = this.current;
     if (pointerDelta.x !== 0 || pointerDelta.y !== 0) {
-      const x = this.cursor.x + pointerDelta.x;
-      const y = this.cursor.y + pointerDelta.y;
+      const x = this.cursorOffset.x + pointerDelta.x;
+      const y = this.cursorOffset.y + pointerDelta.y;
       if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Pointer target must remain finite.');
-      this.cursor = { x, y };
-      this.lastPointerInput = this.elapsed;
-    } else if (this.settings.cursor.returnToHammer &&
-      this.elapsed - this.lastPointerInput >= CURSOR_RETURN_IDLE_SECONDS && this.headContactCount() > 0) {
-      const { returnRate, returnOffsetX, returnOffsetY } = this.settings.cursor;
-      const tip = this.rig.head.getPosition();
-      const blend = 1 - Math.exp(-returnRate * PHYSICS.dt);
-      this.cursor.x += (tip.x + returnOffsetX - this.cursor.x) * blend;
-      this.cursor.y += (tip.y + returnOffsetY - this.cursor.y) * blend;
+      this.cursorOffset = clampLength({ x, y }, this.settings.cursor.maxRadius);
     }
-    this.command = drivePlayer(this.rig, this.cursor, this.settings.physics);
+    this.command = drivePlayer(this.rig, this.worldCursor(this.rig.root.getPosition(), this.cursorOffset), this.settings.physics);
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
     this.elapsed += PHYSICS.dt;
@@ -167,21 +164,24 @@ export class Simulation {
   }
 
   frame(alpha: number): PhysicsFrame {
+    const parts = this.current.parts.map((part, index) => {
+      const previous = this.previous.parts[index];
+      return {
+        ...part,
+        x: previous.x + (part.x - previous.x) * alpha,
+        y: previous.y + (part.y - previous.y) * alpha,
+        angle: previous.angle + angleDifference(part.angle, previous.angle) * alpha,
+      };
+    });
+    const root = parts.find((part) => part.kind === 'root');
+    if (!root) throw new Error('The physics frame is missing its character center.');
     return {
       time: this.previous.time + (this.current.time - this.previous.time) * alpha,
-      parts: this.current.parts.map((part, index) => {
-        const previous = this.previous.parts[index];
-        return {
-          ...part,
-          x: previous.x + (part.x - previous.x) * alpha,
-          y: previous.y + (part.y - previous.y) * alpha,
-          angle: previous.angle + angleDifference(part.angle, previous.angle) * alpha,
-        };
+      parts,
+      cursor: this.worldCursor(root, {
+        x: this.previous.cursorOffset.x + (this.current.cursorOffset.x - this.previous.cursorOffset.x) * alpha,
+        y: this.previous.cursorOffset.y + (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha,
       }),
-      cursor: {
-        x: this.previous.cursor.x + (this.current.cursor.x - this.previous.cursor.x) * alpha,
-        y: this.previous.cursor.y + (this.current.cursor.y - this.previous.cursor.y) * alpha,
-      },
       enemies: this.enemies.frame(alpha),
     };
   }
@@ -212,7 +212,8 @@ export class Simulation {
       ...status,
       root: { x: root.x, y: root.y, angle: this.rig.root.getAngle() },
       tip: { ...this.rig.head.getPosition() },
-      cursor: { ...this.cursor },
+      cursor: this.worldCursor(root, this.cursorOffset),
+      cursorOffset: { ...this.cursorOffset },
       rootVelocity: { ...this.rig.root.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
       extension: this.rig.slider.getJointTranslation(),
@@ -259,16 +260,15 @@ export class Simulation {
           collides: fixture !== null && fixture.getFilterMaskBits() !== 0,
         };
       }),
-      cursor: { ...this.cursor },
+      cursorOffset: { ...this.cursorOffset },
     };
   }
 
   private resetPlayer(spawn: PlayerSpawn): void {
     destroyPlayer(this.world, this.rig);
     this.rig = createPlayer(this.world, spawn, this.settings.physics);
-    this.cursor = { ...this.rig.head.getPosition() };
+    this.cursorOffset = this.initialCursorOffset();
     this.elapsed = 0;
-    this.lastPointerInput = 0;
     this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
     this.command = { ...IDLE_COMMAND };
     this.current = this.capture();
@@ -281,6 +281,16 @@ export class Simulation {
       if (edge.contact.isTouching()) count++;
     }
     return count;
+  }
+
+  private initialCursorOffset(): Point {
+    const center = this.rig.root.getPosition();
+    const tip = this.rig.head.getPosition();
+    return clampLength({ x: tip.x - center.x, y: tip.y - center.y }, this.settings.cursor.maxRadius);
+  }
+
+  private worldCursor(center: Readonly<Point>, offset: Readonly<Point>): Point {
+    return { x: center.x + offset.x, y: center.y + offset.y };
   }
 
   private ensureLive(): void {

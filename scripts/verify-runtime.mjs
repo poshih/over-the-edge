@@ -57,8 +57,21 @@ try {
     if (entry.level === 'error') report.errors.push(entry.text);
   });
   const snapshot = () => page.evaluate(() => window.gettingOver.snapshot());
+  const settings = () => page.evaluate(() => window.gettingOver.settings());
   const ready = () => page.waitForFunction(() => window.gettingOver && window.gettingOver.snapshot().time > 0);
   const focusGame = () => page.locator('#game').focus();
+  const radius = (point) => Math.hypot(point.x, point.y);
+  const assertCursorMatchesOffset = (state, message) => {
+    assert.ok(Math.abs((state.cursor.x - state.root.x) - state.cursorOffset.x) < 1e-9 &&
+      Math.abs((state.cursor.y - state.root.y) - state.cursorOffset.y) < 1e-9, message);
+  };
+  const assertCursorFollowsRoot = (before, after, message) => {
+    const drift = Math.hypot(
+      (after.cursor.x - before.cursor.x) - (after.root.x - before.root.x),
+      (after.cursor.y - before.cursor.y) - (after.root.y - before.root.y),
+    );
+    assert.ok(drift < 1e-9, `${message} (${drift}m drift).`);
+  };
   const practice = async (key) => {
     await focusGame();
     await page.keyboard.press(key);
@@ -133,70 +146,68 @@ try {
 
   await practice('3');
   const maxReach = (await snapshot()).maxReach;
+  const defaultCursor = (await settings()).cursor;
   const aiming = [];
   report.scenarios.aiming = aiming;
+  const outerRadius = maxReach - 0.8;
   const goals = [
-    { name: 'hinge', radius: 0, angle: 0 },
-    { name: 'near-right', radius: 0.15, angle: 0 },
-    { name: 'near-up', radius: 0.15, angle: Math.PI / 2 },
-    { name: 'near-left', radius: 0.15, angle: Math.PI },
-    { name: 'near-down', radius: 0.15, angle: -Math.PI / 2 },
-    { name: 'outer-right', radius: maxReach - 0.05, angle: 0 },
-    { name: 'outer-left', radius: maxReach - 0.05, angle: Math.PI },
-    { name: 'outer-up', radius: maxReach - 0.05, angle: Math.PI / 2 },
+    { name: 'center', offset: { x: 0, y: 0 } },
+    { name: 'near-right', offset: { x: 0.15, y: 0 } },
+    { name: 'near-up', offset: { x: 0, y: 0.15 } },
+    { name: 'near-left', offset: { x: -0.15, y: 0 } },
+    { name: 'near-down', offset: { x: 0, y: -0.15 } },
+    { name: 'outer-right', offset: { x: outerRadius, y: 0 } },
+    { name: 'outer-left', offset: { x: -outerRadius, y: 0 } },
+    { name: 'outer-up', offset: { x: 0, y: outerRadius } },
   ];
   for (const goal of goals) {
-    await dragInput(1.2, (state) => {
-      const pivot = state.parts.find((part) => part.id === 'carrier');
-      assert.ok(pivot);
-      return {
-        x: pivot.x + goal.radius * Math.cos(goal.angle) - state.cursor.x,
-        y: pivot.y + goal.radius * Math.sin(goal.angle) - state.cursor.y,
-      };
-    });
+    await dragInput(1.2, (state) => ({ x: goal.offset.x - state.cursorOffset.x, y: goal.offset.y - state.cursorOffset.y }));
     const before = await snapshot();
     await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, before.time + 0.6);
     const aimed = await snapshot();
     const error = Math.hypot(aimed.tip.x - aimed.cursor.x, aimed.tip.y - aimed.cursor.y);
-    aiming.push({ goal, error, headContacts: aimed.headContacts, tip: aimed.tip, cursor: aimed.cursor });
+    const offsetError = Math.hypot(aimed.cursorOffset.x - goal.offset.x, aimed.cursorOffset.y - goal.offset.y);
+    aiming.push({ goal, error, offsetError, headContacts: aimed.headContacts, tip: aimed.tip, cursor: aimed.cursor, cursorOffset: aimed.cursorOffset });
     assert.equal(aimed.headContacts, 0, `${goal.name} must be a free-space aiming scenario.`);
+    assert.ok(offsetError < 0.03, `${goal.name} stored offset missed by ${offsetError} m.`);
     assert.ok(error < 0.03, `${goal.name} missed the drag target by ${error} m.`);
+    assertCursorMatchesOffset(aimed, `${goal.name} world target must equal root plus the stored offset.`);
     await focusGame();
     await page.keyboard.press('p');
     const arms = await inspectArmGeometry(page);
     aiming[aiming.length - 1].arms = arms;
     await page.keyboard.press('p');
     if (goal.name === 'near-up') {
-      assert.deepEqual(aimed.cursor, before.cursor, 'Free-space targets must not drift toward the lagging head.');
+      assert.deepEqual(aimed.cursorOffset, before.cursorOffset, 'Free-space targets must not drift toward the lagging head.');
+      assertCursorFollowsRoot(before, aimed, 'Free-space world targets must only move with character translation.');
     }
   }
-  await dragWorld({ x: 0, y: 1 }, 0.5);
+  await dragInput(0.8, (state) => ({ x: -state.cursorOffset.x, y: defaultCursor.maxRadius * 1.5 - state.cursorOffset.y }));
   const overreach = await snapshot();
   await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, overreach.time + 1);
   const limited = await snapshot();
   const pivot = limited.parts.find((part) => part.id === 'carrier');
   assert.ok(pivot);
-  const targetRadius = Math.hypot(limited.cursor.x - pivot.x, limited.cursor.y - pivot.y);
+  const targetRadius = radius(limited.cursorOffset);
   const tipRadius = Math.hypot(limited.tip.x - pivot.x, limited.tip.y - pivot.y);
-  assert.deepEqual(limited.cursor, overreach.cursor, 'An unreachable target must stay at the player-selected world position.');
-  assert.ok(targetRadius > maxReach + 0.2, 'The target must remain beyond physical reach.');
+  assert.ok(Math.abs(radius(overreach.cursorOffset) - defaultCursor.maxRadius) < 0.02,
+    'Outward input must clamp immediately to the configured target radius.');
+  assert.deepEqual(limited.cursorOffset, overreach.cursorOffset, 'No-input after clamping must preserve the stored relative target.');
+  assertCursorFollowsRoot(overreach, limited, 'A clamped world target must translate with the character.');
+  assert.ok(Math.abs(targetRadius - defaultCursor.maxRadius) < 0.02, 'The stored cursor offset must stay inside the configured radius.');
   assert.ok(tipRadius <= maxReach + 0.03, 'Only the physical rig and motor target must be reach-limited.');
-  report.scenarios.reachLimit = { maxReach, targetRadius, tipRadius, targetFixed: true };
-
+  report.scenarios.reachLimit = { maxReach, maxTargetRadius: defaultCursor.maxRadius, targetRadius, tipRadius, targetRelative: true };
   await practice('2');
-  const fixedHold = await observe(10);
-  assert.deepEqual(fixedHold.end.cursor, fixedHold.first.cursor, 'Ledge contact must not move a fixed world target.');
-  assert.ok(fixedHold.end.headContacts > 0 && fixedHold.end.height > 0.8, 'A fixed target must still support the ledge hold.');
-  report.scenarios.fixedTargetLedge = fixedHold;
-  const returnTarget = page.getByRole('checkbox', { name: 'Return target to hammer', exact: true });
-  await returnTarget.check();
-  await practice('2');
-  const hold = await observe(10);
+  const startupHold = await observe(2);
+  assert.ok(startupHold.end.headContacts > 0 && startupHold.end.height > 0.8, 'The ledge pose must stay supported through startup settling.');
+  report.scenarios.ledgeStartup = startupHold;
+  const hold = await observe(6);
   report.scenarios.ledge = hold;
-  assert.ok(hold.maxDrift < 0.03, `Ledge hold drifted ${hold.maxDrift} m.`);
+  assert.ok(hold.maxDrift < 0.06, `Character-relative ledge hold drifted ${hold.maxDrift} m.`);
   assert.ok(hold.end.height > 0.8, 'The ledge pose must remain suspended, not settle on the floor.');
   assert.ok(hold.maxPotAngle < 0.31, 'The pot must respect its limited hinge.');
-  await returnTarget.uncheck();
+  assert.deepEqual(hold.end.cursorOffset, hold.first.cursorOffset, 'Ledge contact must preserve the stored relative target.');
+  assertCursorFollowsRoot(hold.first, hold.end, 'The ledge target must move only with character translation.');
 
   await practice('3');
   const beforePush = await snapshot();
@@ -206,7 +217,8 @@ try {
   report.scenarios.groundPush = { beforePush, afterPush, ...pushed };
   assert.ok(afterPush.root.y > beforePush.root.y + 0.35, 'Real mouse input must lift the player through the slider motor.');
   assert.ok(pushed.end.headContacts > 0, 'The head, not the shaft, must support the ground push.');
-  assert.deepEqual(pushed.end.cursor, pushed.first.cursor, 'Terrain contact must not pull the target toward the head.');
+  assert.deepEqual(pushed.end.cursorOffset, pushed.first.cursorOffset, 'Terrain contact must not recenter the stored target.');
+  assertCursorFollowsRoot(pushed.first, pushed.end, 'Terrain contact must leave the world target locked to the character translation.');
   assert.ok(Math.abs(pushed.end.rootVelocity.y) < 0.2, 'The slow ground push must settle without continuing to bounce.');
 
   await practice('3');
@@ -253,6 +265,42 @@ try {
   await page.keyboard.press('d');
   await page.screenshot({ path: fileURLToPath(new URL('colliders.png', artifacts)) });
   assert.equal(await page.locator('.tuning-group legend').first().textContent(), 'Mass & recoil');
+  assert.equal(await page.getByRole('checkbox', { name: 'Return target to hammer', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('slider', { name: 'Return speed', exact: true }).count(), 0);
+  const radiusControl = page.getByRole('slider', { name: 'Maximum target radius', exact: true });
+  const beforeRadiusEdit = await snapshot();
+  const configuredRadius = (await settings()).cursor.maxRadius;
+  const beforeRadius = radius(beforeRadiusEdit.cursorOffset);
+  assert.ok(beforeRadius > 0.5, 'The radius clamp scenario needs a meaningful stored target.');
+  await radiusControl.press('Home');
+  const clampedRadius = await snapshot();
+  assert.equal(clampedRadius.time, beforeRadiusEdit.time, 'Changing the cursor radius while paused must not advance time.');
+  assert.deepEqual(clampedRadius.tuning, beforeRadiusEdit.tuning,
+    'Changing the cursor radius must not retune physics.');
+  assert.deepEqual(clampedRadius.root, beforeRadiusEdit.root, 'Changing the cursor radius while paused must not move the player.');
+  assertCursorMatchesOffset(clampedRadius, 'Paused radius edits must keep the world cursor aligned with the stored offset.');
+  assert.ok(Math.abs(radius(clampedRadius.cursorOffset) - 0.25) < 0.01,
+    'Shrinking the cursor radius must immediately clamp the stored offset to the configured minimum.');
+  if (beforeRadius > 0.25) {
+    const sameDirection = (beforeRadiusEdit.cursorOffset.x * clampedRadius.cursorOffset.x +
+      beforeRadiusEdit.cursorOffset.y * clampedRadius.cursorOffset.y) / (beforeRadius * radius(clampedRadius.cursorOffset));
+    assert.ok(sameDirection > 0.999, 'Shrinking the cursor radius must project the stored offset inward without changing direction.');
+  }
+  await radiusControl.evaluate((input, value) => {
+    input.value = String(value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, configuredRadius);
+  const restoredRadius = await snapshot();
+  assert.equal(restoredRadius.time, beforeRadiusEdit.time, 'Growing the cursor radius while paused must not advance time.');
+  assert.deepEqual(restoredRadius.cursorOffset, clampedRadius.cursorOffset,
+    'Growing the cursor radius must keep the existing stored offset instead of re-extending it.');
+  report.scenarios.radiusClamp = {
+    configuredRadius,
+    before: beforeRadius,
+    clamped: radius(clampedRadius.cursorOffset),
+    restored: radius(restoredRadius.cursorOffset),
+  };
   const originalProperties = (await snapshot()).bodyProperties;
   const inertiaPerMass = Object.fromEntries(Object.entries(originalProperties)
     .map(([id, properties]) => [id, properties.inertia / properties.mass]));
@@ -298,7 +346,7 @@ try {
   const saveTuning = page.getByRole('button', { name: 'Save game settings', exact: true });
   const loadTuning = page.getByRole('button', { name: 'Load game settings', exact: true });
   const savedRecords = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage)
-    .filter((key) => key.startsWith('over-the-edge:game-settings:snapshot:v1:'))
+    .filter((key) => key.startsWith('over-the-edge:game-settings:snapshot:v2:'))
     .map((key) => [key, localStorage.getItem(key)])));
   assert.equal(await loadTuning.isDisabled(), true, 'An empty history must not offer a load action.');
   await nameInput.fill('   ');
@@ -317,7 +365,8 @@ try {
   const firstSave = await pastTuning.inputValue();
   const originalRecord = (await savedRecords())[firstSave];
   assert.deepEqual(JSON.parse(originalRecord).settings.physics, savedTuning);
-  assert.equal(JSON.parse(originalRecord).schemaVersion, 1);
+  assert.equal(JSON.parse(originalRecord).schemaVersion, 2);
+  assert.equal(JSON.parse(originalRecord).settings.schemaVersion, 2);
   assert.deepEqual(JSON.parse(originalRecord).settings, await page.evaluate(() => window.gettingOver.settings()));
   assert.equal(Object.hasOwn(JSON.parse(originalRecord).settings.physics, 'cursorRelaxation'), false);
   assert.equal(await page.getByRole('slider', { name: 'Cursor settling', exact: true }).count(), 0);
@@ -333,6 +382,8 @@ try {
   assert.equal(defaults.bodyProperties.carrier.inertia, 0.035);
   assert.equal(defaults.bodyProperties.slider.mass, 0.5);
   assert.equal(defaults.bodyProperties.slider.inertia, 0.035);
+  const defaultSettings = await settings();
+  assert.deepEqual(defaultSettings.cursor, { maxRadius: defaults.maxReach });
   await page.reload({ waitUntil: 'networkidle' });
   await ready();
   await loadTuning.click();
@@ -412,7 +463,7 @@ try {
     const original = Storage.prototype.setItem;
     window.restorePresetStorage = () => { Storage.prototype.setItem = original; delete window.restorePresetStorage; };
     Storage.prototype.setItem = function (key, value) {
-      if (key.startsWith('over-the-edge:game-settings:snapshot:v1:')) throw new DOMException('Storage quota probe', 'QuotaExceededError');
+      if (key.startsWith('over-the-edge:game-settings:snapshot:v2:')) throw new DOMException('Storage quota probe', 'QuotaExceededError');
       return original.call(this, key, value);
     };
   });
@@ -451,7 +502,11 @@ try {
     'Reading a legacy save must not rewrite storage.');
   await nameInput.fill('Imported v1');
   await saveTuning.click();
-  assert.deepEqual(JSON.parse((await savedRecords())[await pastTuning.inputValue()]).settings.physics, migrated.tuning);
+  const migratedV1Save = JSON.parse((await savedRecords())[await pastTuning.inputValue()]);
+  assert.equal(migratedV1Save.schemaVersion, 2);
+  assert.equal(migratedV1Save.settings.schemaVersion, 2);
+  assert.deepEqual(migratedV1Save.settings.physics, migrated.tuning);
+  assert.deepEqual(migratedV1Save.settings.cursor, defaultSettings.cursor);
   const v2Tuning = { ...savedTuning, gripFriction: 1.2 };
   const v2Record = JSON.stringify({ schemaVersion: 2, tuning: { ...v2Tuning, cursorRelaxation: 8 } });
   await page.evaluate((record) => localStorage.setItem('over-the-edge:tuning:v2', record), v2Record);
@@ -478,8 +533,10 @@ try {
   await nameInput.fill('Imported v3');
   await saveTuning.click();
   const migratedV3 = JSON.parse((await savedRecords())[await pastTuning.inputValue()]);
-  assert.equal(migratedV3.schemaVersion, 1);
+  assert.equal(migratedV3.schemaVersion, 2);
+  assert.equal(migratedV3.settings.schemaVersion, 2);
   assert.deepEqual(migratedV3.settings.physics, v3Tuning);
+  assert.deepEqual(migratedV3.settings.cursor, defaultSettings.cursor);
   assert.equal(await page.evaluate(key => localStorage.getItem(key), v3Key), v3Record);
   const v4Key = `over-the-edge:tuning:snapshot:v4:${'d'.repeat(32)}`;
   const v4Tuning = { ...savedTuning, gripFriction: 1.4 };
@@ -493,10 +550,35 @@ try {
   assert.ok((await pastTuning.locator('option:checked').textContent()).includes('(physics only)'));
   await loadTuning.click();
   assert.deepEqual((await snapshot()).tuning, v4Tuning);
-  assert.deepEqual((await page.evaluate(() => window.gettingOver.settings())).cursor, {
-    returnToHammer: false, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
-  });
+  assert.deepEqual((await settings()).cursor, defaultSettings.cursor);
   assert.equal(await page.evaluate(key => localStorage.getItem(key), v4Key), v4Record);
+  const v1ProfileKey = `over-the-edge:game-settings:snapshot:v1:${'e'.repeat(32)}`;
+  const v1ProfileSettings = {
+    schemaVersion: 1,
+    physics: { ...savedTuning, mouseSensitivity: 1.4 },
+    cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
+  };
+  const v1ProfileRecord = JSON.stringify({
+    schemaVersion: 1, name: 'Earlier full settings', savedAt: Date.now(), settings: v1ProfileSettings,
+  });
+  await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: v1ProfileKey, record: v1ProfileRecord });
+  await page.reload({ waitUntil: 'networkidle' });
+  await ready();
+  await pastTuning.selectOption(v1ProfileKey);
+  assert.ok((await pastTuning.locator('option:checked').textContent()).includes('(physics only)'));
+  await loadTuning.click();
+  const migratedFullProfile = await settings();
+  assert.deepEqual((await snapshot()).tuning, v1ProfileSettings.physics);
+  assert.deepEqual(migratedFullProfile.cursor, defaultSettings.cursor);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), v1ProfileKey), v1ProfileRecord);
+  await nameInput.fill('Imported v1 full profile');
+  await saveTuning.click();
+  const importedFullProfile = JSON.parse((await savedRecords())[await pastTuning.inputValue()]);
+  assert.equal(importedFullProfile.schemaVersion, 2);
+  assert.equal(importedFullProfile.settings.schemaVersion, 2);
+  assert.deepEqual(importedFullProfile.settings.physics, v1ProfileSettings.physics);
+  assert.deepEqual(importedFullProfile.settings.cursor, defaultSettings.cursor);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), v1ProfileKey), v1ProfileRecord);
   await pastTuning.selectOption('over-the-edge:tuning:v2');
   await loadTuning.click();
   const beforeInvalidLegacy = (await snapshot()).tuning;

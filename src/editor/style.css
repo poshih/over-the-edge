@@ -234,23 +234,7 @@ body.touch-controls {
   min-height: 48px;
 }
 
-.cursor-return-toggle {
-  display: flex;
-  min-height: 48px;
-  align-items: center;
-  gap: 12px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.cursor-return-toggle input {
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  accent-color: var(--teal);
-}
-
-.game-ui .cursor-return-help {
+.game-ui .cursor-target-help {
   margin: 8px 0 14px;
   color: var(--muted);
   font-size: 11px;

@@ -4,7 +4,7 @@ import {
 import type { Body, Joint, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point, Tuning } from './config';
-import { angleDifference, clamp, transformPoint } from './math';
+import { angleDifference, clamp, clampLength, transformPoint } from './math';
 import type { LaunchSettings } from './trigger-events';
 
 export type PartKind = 'root' | 'pot' | 'carrier' | 'slider' | 'handle' | 'head';
@@ -256,10 +256,10 @@ export function drivePlayer(rig: PlayerRig, cursor: Readonly<Point>, tuning: Rea
   const axisAngle = rig.carrier.getAngle();
   const angularError = distance <= PHYSICS.aimEpsilon
     ? 0 : angleDifference(Math.atan2(targetY, targetX), axisAngle);
-  // Bound the motor's workspace without moving the player's world-space target.
-  const reachScale = distance > RIG.maxReach ? RIG.maxReach / distance : 1;
+  // The cursor radius and the hammer's physical workspace are independent.
+  const reachable = clampLength({ x: targetX, y: targetY }, RIG.maxReach);
   const projectedReach = clamp(
-    targetX * reachScale * Math.cos(axisAngle) + targetY * reachScale * Math.sin(axisAngle), 0, RIG.maxReach,
+    reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), 0, RIG.maxReach,
   );
   const extensionError = projectedReach - RIG.handleLength - rig.slider.getJointTranslation();
   const angularSpeed = clamp(

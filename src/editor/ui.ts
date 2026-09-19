@@ -1,6 +1,6 @@
 import type { Tuning } from '../config';
 import {
-  CURSOR_FIELDS, CURSOR_RETURN_IDLE_SECONDS, DEFAULT_GAME_SETTINGS, GameSettingsError, TUNING_FIELDS, validateGameSettings,
+  CURSOR_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, TUNING_FIELDS, validateGameSettings,
 } from '../game-settings';
 import type { CursorSettings, GameSettings } from '../game-settings';
 import { element, setPressed, setText } from '../dom';
@@ -67,10 +67,7 @@ export function createUI(options: UiOptions): GameUi {
   }
   const groups = new Map<string, HTMLFieldSetElement>();
   const controls = new Map<keyof Tuning, RangeControl>();
-  const cursorControls = new Map<Exclude<keyof CursorSettings, 'returnToHammer'>, RangeControl>();
-  const returnToggle = document.createElement('input');
-  returnToggle.type = 'checkbox';
-  returnToggle.id = 'cursor-returnToHammer';
+  const cursorControls = new Map<keyof CursorSettings, RangeControl>();
   const practiceButtons = new Map<PracticeId, HTMLButtonElement>();
   const tuningGroups = element<HTMLElement>(root, '.tuning-groups');
   const practiceGrid = element<HTMLElement>(root, '.practice-grid');
@@ -87,12 +84,10 @@ export function createUI(options: UiOptions): GameUi {
       control.setValue(tuning[field.key], { disabled: inactive });
       control.row.classList.toggle('is-inactive', inactive);
     }
-    returnToggle.checked = settings.cursor.returnToHammer;
     for (const field of CURSOR_FIELDS) {
       const control = cursorControls.get(field.key);
       if (!control) throw new Error(`Missing cursor control: ${field.key}`);
-      control.setValue(settings.cursor[field.key], { disabled: !settings.cursor.returnToHammer });
-      control.row.classList.toggle('is-inactive', !settings.cursor.returnToHammer);
+      control.setValue(settings.cursor[field.key]);
     }
   }
   function commitSettings(next: GameSettings): void {
@@ -151,20 +146,11 @@ export function createUI(options: UiOptions): GameUi {
   cursorGroup.className = 'tuning-group cursor-settings';
   const cursorLegend = document.createElement('legend');
   cursorLegend.textContent = 'Cursor target';
-  const returnLabel = document.createElement('label');
-  returnLabel.className = 'cursor-return-toggle';
-  returnLabel.htmlFor = returnToggle.id;
-  returnLabel.append(returnToggle, document.createTextNode('Return target to hammer'));
-  const returnHelp = document.createElement('p');
-  returnHelp.id = 'cursor-return-help';
-  returnHelp.className = 'cursor-return-help';
-  returnHelp.textContent = `Off keeps a fixed world target. On eases toward the hammer plus its offset after ${CURSOR_RETURN_IDLE_SECONDS}s ` +
-    'without aiming, while the head touches a surface. X goes right; Y goes up. Offsets use world-space metres.';
-  returnToggle.setAttribute('aria-describedby', returnHelp.id);
-  returnToggle.addEventListener('change', () => editSettings({
-    ...settings, cursor: { ...settings.cursor, returnToHammer: returnToggle.checked },
-  }), listen);
-  cursorGroup.append(cursorLegend, returnLabel, returnHelp);
+  const cursorHelp = document.createElement('p');
+  cursorHelp.className = 'cursor-target-help';
+  cursorHelp.textContent = 'Aim inside a circle around the character center. The target moves with the character and keeps your chosen offset until you aim again. ' +
+    'There is no return to the hammer or center. The radius does not change the hammer\'s physical reach.';
+  cursorGroup.append(cursorLegend, cursorHelp);
   for (const field of CURSOR_FIELDS) {
     const control = createRangeControl(field, {
       id: `cursor-${field.key}`, name: field.key, signal: events.signal,

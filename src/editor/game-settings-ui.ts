@@ -55,7 +55,7 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
     },
   });
   element(options.mount, '.snapshot-history-help').textContent =
-    'Profiles include physics and cursor settings. Older tuning saves load as physics-only profiles with default cursor settings. Loading is manual.';
+    'Profiles include physics and the target radius. Older tuning and return profiles load physics with the default radius; return behavior is removed. Loading is manual.';
   const exchange = document.createElement('div');
   exchange.className = 'game-settings-exchange';
   exchange.innerHTML = `
@@ -103,7 +103,10 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
         return;
       }
       options.onLoad(settings);
-      options.onNotice('Imported game settings. Saved profiles were kept; save a named profile to retain these settings in this browser.', 'info');
+      const migrated = typeof value === 'object' && value !== null && 'schemaVersion' in value && value.schemaVersion !== settings.schemaVersion;
+      options.onNotice(migrated
+        ? 'Imported physics from the older profile with the default target radius. Return behavior is removed; save or export a new profile to keep the new format.'
+        : 'Imported game settings. Saved profiles were kept; save a named profile to retain these settings in this browser.', 'info');
     } catch (error) {
       if (!options.signal.aborted && request === generation) report(error, 'import');
       else if (!(error instanceof GameSettingsError) && !(error instanceof DOMException)) throw error;

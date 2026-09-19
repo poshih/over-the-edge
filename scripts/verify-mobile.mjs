@@ -4,6 +4,12 @@ import { modelFixture } from './verify-appearance.mjs';
 
 const TOUCH_DRAG_PIXELS = 40;
 const TOUCH_PIXELS_PER_REACH = 100;
+const clampLength = (point, max) => {
+  const length = Math.hypot(point.x, point.y);
+  if (length <= max || length === 0) return point;
+  const scale = max / length;
+  return { x: point.x * scale, y: point.y * scale };
+};
 
 export async function dragTouch(page, protocol, { start, delta }) {
   await protocol.send('Input.dispatchTouchEvent', {
@@ -99,12 +105,22 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal(await page.evaluate(() => window.captureAttempts), 0, 'Touch Play must never request mouse capture.');
       assert.equal((await snapshot()).pointerLocked, false);
       const beforeDrag = await snapshot();
+      const dragGain = initial.maxReach * TOUCH_DRAG_PIXELS / TOUCH_PIXELS_PER_REACH;
+      const expectedAfterDrag = clampLength({
+        x: beforeDrag.cursorOffset.x,
+        y: beforeDrag.cursorOffset.y + dragGain,
+      }, initial.maxReach);
       await drag(0, -TOUCH_DRAG_PIXELS);
       const afterDrag = await snapshot();
-      const distance = afterDrag.cursor.y - beforeDrag.cursor.y;
-      assert.ok(distance > 0.5, 'Finger movement must drive the hammer target.');
-      assert.ok(Math.abs(distance - initial.maxReach * TOUCH_DRAG_PIXELS / TOUCH_PIXELS_PER_REACH) < 0.001,
-        'Touch gain must map 100 CSS pixels to one full hammer reach without changing with camera zoom.');
+      const movedOffset = Math.hypot(
+        afterDrag.cursorOffset.x - beforeDrag.cursorOffset.x,
+        afterDrag.cursorOffset.y - beforeDrag.cursorOffset.y,
+      );
+      assert.ok(Math.hypot(
+        afterDrag.cursorOffset.x - expectedAfterDrag.x,
+        afterDrag.cursorOffset.y - expectedAfterDrag.y,
+      ) < 0.001, 'Finger movement must apply touch gain to the stored cursor offset, with radius clipping when needed.');
+      assert.ok(movedOffset > 0.3, 'Finger movement must drive the hammer target.');
       await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, afterDrag.time + 1);
       const beforeClutch = await snapshot();
       await protocol.send('Input.dispatchTouchEvent', {
@@ -112,15 +128,19 @@ export async function verifyMobile(browser, address, artifacts) {
       });
       await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       await frames();
-      assert.deepEqual((await snapshot()).cursor, beforeClutch.cursor, 'Lifting and repositioning a finger must not snap the target.');
+      assert.deepEqual((await snapshot()).cursorOffset, beforeClutch.cursorOffset,
+        'Lifting and repositioning a finger must not snap the stored target offset.');
 
       const aim = await snapshot();
-      const pivot = aim.parts.find((part) => part.id === 'carrier');
-      const pixelsPerWorld = TOUCH_DRAG_PIXELS / distance;
-      await drag((pivot.x - aim.maxReach * 0.98 - aim.cursor.x) * pixelsPerWorld,
-        -(pivot.y - aim.cursor.y) * pixelsPerWorld, { x: width - 25, y: height * 0.6 });
+      const pixelsPerWorld = TOUCH_PIXELS_PER_REACH / aim.maxReach;
+      const targetOffset = { x: -aim.maxReach * 0.98, y: 0 };
+      await drag((targetOffset.x - aim.cursorOffset.x) * pixelsPerWorld,
+        -(targetOffset.y - aim.cursorOffset.y) * pixelsPerWorld, { x: width - 25, y: height * 0.6 });
       const aimedTime = (await snapshot()).time;
       await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, aimedTime + 1.5);
+      const aimed = await snapshot();
+      assert.ok(Math.hypot(aimed.cursorOffset.x - targetOffset.x, aimed.cursorOffset.y - targetOffset.y) < 0.05,
+        'Touch aiming must land at the requested stored offset.');
       await visibleRig();
       await page.screenshot({ path: fileURLToPath(new URL(`mobile-${name}.png`, artifacts)) });
 
@@ -153,17 +173,20 @@ export async function verifyMobile(browser, address, artifacts) {
       const tuningName = page.getByRole('textbox', { name: 'Game settings name', exact: true });
       const pastTuning = page.getByRole('combobox', { name: 'Past game settings', exact: true });
       await tuningName.fill(`Touch ${name}`);
-      const savedTuning = (await snapshot()).tuning;
+      const savedSettings = await page.evaluate(() => window.gettingOver.settings());
       await page.getByRole('button', { name: 'Save game settings', exact: true }).tap();
       const savedKey = await pastTuning.inputValue();
-      assert.ok(savedKey.startsWith('over-the-edge:game-settings:snapshot:v1:'));
+      assert.ok(savedKey.startsWith('over-the-edge:game-settings:snapshot:v2:'));
+      const savedRecord = JSON.parse(await page.evaluate((key) => localStorage.getItem(key), savedKey));
+      assert.equal(savedRecord.schemaVersion, 2);
+      assert.equal(savedRecord.settings.schemaVersion, 2);
       const noticeBox = await page.locator('.ui-notice').boundingBox();
       assert.ok(noticeBox && (noticeBox.y + noticeBox.height <= panelBox.y || noticeBox.x + noticeBox.width <= panelBox.x),
         'Save feedback must not cover the workshop controls.');
       await increase.tap();
       await pastTuning.selectOption(savedKey);
       await page.getByRole('button', { name: 'Load game settings', exact: true }).tap();
-      assert.deepEqual((await snapshot()).tuning, savedTuning);
+      assert.deepEqual(await page.evaluate(() => window.gettingOver.settings()), savedSettings);
       await tuningName.scrollIntoViewIfNeeded();
       for (const control of [tuningName, pastTuning]) {
         const box = await control.boundingBox();
@@ -277,12 +300,13 @@ export async function verifyMobile(browser, address, artifacts) {
         const afterRotate = await snapshot();
         assert.equal(afterRotate.paused, true);
         assert.deepEqual(afterRotate.cursor, beforeRotate.cursor, 'Rotating the phone must not inject target movement.');
+        assert.deepEqual(afterRotate.cursorOffset, beforeRotate.cursorOffset);
         assert.deepEqual(afterRotate.root, beforeRotate.root);
         await visibleRig();
       }
       assert.equal(await page.evaluate(() => window.captureAttempts), 0);
       assert.deepEqual(errors, []);
-      results.push({ name, dragPixels: TOUCH_DRAG_PIXELS, targetMovement: distance, worldHeight: initial.camera.worldHeight,
+      results.push({ name, dragPixels: TOUCH_DRAG_PIXELS, targetMovement: movedOffset, worldHeight: initial.camera.worldHeight,
         gamePreview: { width: canvasBox.width, height: canvasBox.height }, autoPause: true, captureAttempts: 0,
         updraft: { placed: true, tuned: true, saved: true, launched: true } });
     } finally {
@@ -323,21 +347,26 @@ export async function verifyMobile(browser, address, artifacts) {
     await page.goto(address, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver);
     await page.clock.pauseAt(new Date(start.getTime() + 10_000));
-    const before = await page.evaluate(() => window.gettingOver.snapshot().cursor);
+    const before = await page.evaluate(() => window.gettingOver.snapshot());
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 190, y: 420, id: 1 }] });
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 230, y: 420, id: 1 }] });
     assert.ok(await page.evaluate(() => window.touchMoves > 0));
-    assert.deepEqual(await page.evaluate(() => window.gettingOver.snapshot().cursor), before);
+    assert.deepEqual(await page.evaluate(() => window.gettingOver.snapshot().cursorOffset), before.cursorOffset);
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
     await page.clock.runFor(50);
-    assert.deepEqual(await page.evaluate(() => window.gettingOver.snapshot().cursor), before,
+    assert.deepEqual(await page.evaluate(() => window.gettingOver.snapshot().cursorOffset), before.cursorOffset,
       'A cancelled gesture must discard movement queued before the next animation frame.');
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 190, y: 420, id: 2 }] });
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 210, y: 420, id: 2 }] });
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await page.clock.runFor(50);
-    const after = await page.evaluate(() => window.gettingOver.snapshot().cursor);
-    assert.ok(after.x > before.x + 0.2, 'A normal release must retain the last drag movement.');
+    const after = await page.evaluate(() => window.gettingOver.snapshot());
+    const expected = clampLength({
+      x: before.cursorOffset.x + before.maxReach * 20 / TOUCH_PIXELS_PER_REACH,
+      y: before.cursorOffset.y,
+    }, before.maxReach);
+    assert.ok(Math.hypot(after.cursorOffset.x - expected.x, after.cursorOffset.y - expected.y) < 0.001,
+      'A normal release must retain the last drag movement, clipped only by the target radius.');
     assert.deepEqual(errors, []);
     results.push({ name: 'cancellation', queuedMovementDiscarded: true, normalReleasePreserved: true });
   } finally {

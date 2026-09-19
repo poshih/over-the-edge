@@ -85,8 +85,8 @@ GAME_SETTINGS=profiles/my-game.json npm run build:game
 GAME_LEVEL=levels/my-level.json GAME_SETTINGS=profiles/my-game.json npm run build:game
 ```
 
-Omitting `GAME_SETTINGS` uses the built-in game settings, with cursor return
-**off**. A supplied profile is validated and embedded in the game; an invalid,
+Omitting `GAME_SETTINGS` uses the built-in game settings, with a **2.65 m**
+character-centered target radius. A supplied profile is validated and embedded in the game; an invalid,
 missing, oversized, or outside-project file fails rather than reverting to
 defaults. Development reloads when the selected file changes. Browser-local
 saves do not change a release unless you export and select one.
@@ -187,16 +187,21 @@ iterations are distinct. Rendering interpolates the previous and current
 physics poses. Catch-up is bounded under overload; switching tabs discards
 elapsed wall-clock time rather than advancing a huge physics step.
 
-Mouse or touch movement updates the white circle's world-space target.
-By default the target stays where the player leaves it: hammer lag, terrain
-contact, character movement, and camera movement never pull it back or rebase it.
-Starting or resetting an attempt initializes it at the hammer head.
+Mouse or touch movement updates the white circle's offset from the character
+center, limited to a configurable radius. Without input, that offset stays
+unchanged: walking, falling, or being launched carries the target with the
+character. It does not rotate with the pot, follow the hammer, or drift back
+to the center. Camera movement does not modify the offset.
 
-Reach limits apply only to a derived motor target, not to the circle. A target
-beyond the head's **2.65 m** reach stays put while the hammer extends toward it
-as far as the rig allows. A target inside terrain also stays put; the head
-cannot pass through solid terrain and contact can transfer motor effort to
-the player. Optional cursor return is described below; it is disabled by default.
+Motion beyond the circle is discarded, so reversing input responds immediately
+without unwinding accumulated movement. Starting or resetting an attempt aims
+toward the initial hammer position, clamped inside the chosen radius.
+
+The input radius and the head's **2.65 m** mechanical reach are separate.
+Mechanical reach is measured from the shoulder; input radius is measured from
+the character center. A larger radius does not lengthen the tool. The head
+still cannot pass through solid terrain, and contact can transfer motor effort
+to the player. There is no return-to-hammer behavior.
 
 The slider can retract the head all the way to the hinge, so there is no
 unreachable inner ring. The hinge's own orientation defines aim even at zero
@@ -228,18 +233,15 @@ giving a contact coefficient of about **2.74**. This is ordinary contact
 friction, not a sticky constraint: the head must still press against a surface
 to hold. The pot's own friction coefficient remains **0.45**.
 
-The **Cursor target** section includes **Return target to hammer**, a return
-speed, and X/Y return offsets in metres. Return is off by default. When enabled,
-the target eases toward the hammer-head centre plus the offset while the head
-touches a surface and no aiming input has arrived for **0.15 seconds** of
-simulation time. Player input always takes precedence. Positive X means right
-and positive Y means up; offsets do not rotate with the hammer. The default
-speed is **8 /s**, with zero offsets. Disabling return retains these values.
-This changes only the target, not the rig's forces or collision rules.
+The **Cursor target** section has a **Maximum target radius** slider:
+**0.25-10 m**, default **2.65 m**. Reducing the radius immediately clamps an
+out-of-range target, including while paused; increasing it preserves the
+current offset. Changing it does not restart the attempt, alter body masses,
+or change the rig's forces, mechanical reach, or collision rules.
 
 In **Workshop / Physics**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
-profile containing every physics setting and all cursor-return settings.
+profile containing every physics setting and the target radius.
 Reusing a name keeps both versions. Choose an entry in **Past game settings**,
 then **Load game settings** to apply it. Selecting an entry alone does not
 change the game. History survives reloads; loading remains manual.
@@ -254,10 +256,12 @@ newer edits. Use this same JSON with the `GAME_SETTINGS` build input above.
 
 Snapshots are stored independently in this browser's localStorage, on this site,
 so saves from different tabs do not overwrite one shared record. Nothing is
-uploaded. New saves use a separate **game-settings v1** format containing a
-versioned physics/cursor document. Previous tuning v1-v4 records remain loadable,
-labeled **(physics only)**. They restore their physics values with the default
-cursor settings; their retired **Cursor settling** value is not reactivated.
+uploaded. New saves use **game-settings v2**, with a cursor document containing
+only `maxRadius`. Previous game-settings v1 profiles and tuning v1-v4 records
+remain loadable, labeled **(physics only)**. They preserve their physics values
+and use the default target radius; retired return/settling settings are never
+reactivated. Importing or building with a valid v1 settings document performs
+the same conversion. Invalid older documents are rejected, not silently repaired.
 
 The previous single-slot v2 save appears as **Previous saved tuning (v2)**.
 If v2 is absent, a v1 save is available instead, with its original fixed tool
@@ -265,7 +269,7 @@ masses supplied when loaded. Loading never rewrites legacy records;
 saving loaded settings under a name creates a new game-settings profile. An invalid v2
 record never causes v1 to be loaded instead. Unreadable saves are marked and
 retained, while other valid snapshots remain available. Older releases can
-still read their original records and ignore the separate game-settings keys.
+still read their original records and ignore the separate v2 game-settings keys.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,
 or character artwork. Height and peak readouts describe the current attempt.
