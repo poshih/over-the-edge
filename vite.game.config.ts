@@ -8,6 +8,7 @@ import { LEVEL_LIMITS, validateLevel } from './src/level';
 import { DEFAULT_GAME_SETTINGS, GAME_SETTINGS_LIMITS, validateGameSettings } from './src/game-settings';
 import { VISUAL_PART_IDS } from './src/character';
 import { spriteBundle } from './build/sprite-bundle';
+import { gameTitle } from './build/game-title.ts';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 
@@ -75,11 +76,13 @@ function gameOnlyBoundary(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: resolve(project, 'play'),
+  envDir: project,
   publicDir: resolve(project, 'public'),
   resolve: { alias: { '/src': resolve(project, 'src') } },
   plugins: [
+    gameTitle({ mode, envDir: project }),
     gameJson({
       variable: 'GAME_LEVEL', moduleId: 'virtual:game-level', defaults: DEFAULT_LEVEL,
       fileBytes: LEVEL_LIMITS.fileBytes, validate: validateLevel,
@@ -94,4 +97,4 @@ export default defineConfig({
   build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },
   server: { host: '0.0.0.0', port: 5182, strictPort: true, fs: { allow: [project] } },
   preview: { host: '0.0.0.0', port: 4175, strictPort: true },
-});
+}));

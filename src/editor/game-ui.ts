@@ -1,3 +1,4 @@
+import gameTitle from 'virtual:game-title';
 import type { InputMode, UiAction, UiActionOptions } from '../config';
 import { element, formatElapsedTime, setText } from '../dom';
 import { inputModeForPointer } from '../input';
@@ -31,7 +32,7 @@ export function createGameUI(options: {
       <header class="game-header">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
-          <div><p class="eyebrow">PHYSICS PLAYGROUND / 01</p><h1>OVER THE EDGE</h1></div>
+          <div><p class="eyebrow">PHYSICS PLAYGROUND / 01</p><h1></h1></div>
         </div>
         <div class="game-toolbar">
           <div class="game-actions" role="group" aria-label="Game controls">
@@ -67,6 +68,9 @@ export function createGameUI(options: {
       </footer>
     </div>
   `;
+  const heading = element<HTMLHeadingElement>(root, '.brand h1');
+  setText(heading, gameTitle);
+  heading.title = gameTitle;
   const notice = createNotice({ mount: root });
   const actions = element<HTMLElement>(root, '.game-actions');
   const play = element<HTMLButtonElement>(root, '[data-action="play"]');

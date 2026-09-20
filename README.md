@@ -51,6 +51,31 @@ Publish **`dist-game/`** for a game-only release; preview it at
 The existing `npm run build` and `wrangler.toml` continue to target the
 editor/workshop in `dist/`, not this separate release.
 
+Set **`GAME_TITLE`** to publish under your own game name:
+
+```sh
+GAME_TITLE="My Climbing Game" npm run build:game
+GAME_TITLE="My Climbing Game" npm run dev:game
+```
+
+The same setting works with `npm run dev` and `npm run build` for the Workshop.
+It controls the browser tab title and Workshop heading; the game-only HUD
+still contains only height and elapsed time. Omit it to keep **Over the Edge**.
+Titles are plain text, support Unicode, and must contain 1-80 characters on
+one line after trimming surrounding spaces. Empty or invalid titles fail
+instead of silently using the default.
+
+To keep the name between commands, put this in the project-root `.env.local`
+(which is ignored by Git):
+
+```dotenv
+GAME_TITLE="My Climbing Game"
+```
+
+A command-line `GAME_TITLE` overrides the file. It can be combined with
+`GAME_LEVEL`, `GAME_SETTINGS`, and `GAME_SPRITES`. The setting changes display
+titles, not repository names, browser storage keys, or deployment identifiers.
+
 For Cloudflare Workers, `wrangler.game.toml` deploys only `dist-game/` to a
 separate **gettingover-play** Worker:
 

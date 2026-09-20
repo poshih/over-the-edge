@@ -1,3 +1,8 @@
+declare module 'virtual:game-title' {
+  const title: string;
+  export default title;
+}
+
 declare module 'virtual:game-level' {
   const level: import('./level').LevelDefinition;
   export default level;
