@@ -365,7 +365,7 @@ export function createSkeletonEditor(options: {
         </div>
         <button type="button" class="button skeleton-apply-tile">Apply tile</button>
       </div>
-      <p class="appearance-format">World units per horizontal texture repeat. Anchor-bound shaft replacements telescope with reach; head and grip artwork stay separate.</p>
+      <p class="appearance-format">World units per horizontal texture repeat. Shaft replacements follow the fixed-length physical handle; tiling never changes reach or grip positions.</p>
       <div class="skeleton-subsection">
         <p class="appearance-label" id="skeleton-directions-label">Visible directions</p>
         <div class="skeleton-direction-grid" role="group" aria-labelledby="skeleton-directions-label"></div>

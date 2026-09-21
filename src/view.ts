@@ -198,7 +198,7 @@ export class GameView {
     this.scene.add(layer.root);
   }
 
-  render(frame: PhysicsFrame, options: { dt: number; armIk: Readonly<ArmIkSettings>; shaft: CharacterState['shaft'] }): void {
+  render(frame: PhysicsFrame, options: CharacterState & { dt: number }): void {
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
     this.focus = { x: root.x, y: root.y };
@@ -220,10 +220,8 @@ export class GameView {
     }
     this.torso.position.set(root.x, root.y, PLAYER_DEPTH.torso);
     this.torso.updateWorldMatrix(true, false);
-    const slider = this.part(frame, 'slider');
+    const shaftBase = this.part(frame, 'slider');
     const aim = { x: frame.cursor.x - root.x, y: frame.cursor.y - root.y };
-    const tiledShaft = this.sprites.hasTiledReplacement('hammer-shaft', aim);
-    const shaftBase = tiledShaft ? this.part(frame, 'carrier') : slider;
     const shaftLength = Math.hypot(tip.x - shaftBase.x, tip.y - shaftBase.y);
     const shaftCenter = { x: (shaftBase.x + tip.x) / 2, y: (shaftBase.y + tip.y) / 2 };
     const shaftAngle = shaftLength <= PHYSICS.aimEpsilon ? shaftBase.angle : Math.atan2(tip.y - shaftBase.y, tip.x - shaftBase.x);
@@ -231,16 +229,9 @@ export class GameView {
     this.customShaft.position.set(shaftCenter.x, shaftCenter.y, PLAYER_DEPTH.tool);
     this.customShaft.rotation.z = shaftAngle;
     this.customShaft.scale.x = shaftLength / RIG.handleLength;
-    const customShaft = options.shaft === 'straight' || this.sprites.replaces('hammer-shaft', aim);
-    const gripAnchor = customShaft ? this.customShaft : this.playerMeshes.get('handle-0');
-    if (!gripAnchor) throw new Error('The rendered shaft must have a grip anchor.');
-    gripAnchor.updateWorldMatrix(true, false);
-    const gripMatrix = tiledShaft
-      ? this.gripFrame.makeRotationZ(shaftAngle).setPosition(shaftCenter.x, shaftCenter.y, PLAYER_DEPTH.tool)
-      : gripAnchor.matrixWorld;
-    const gripLength = tiledShaft ? shaftLength : customShaft ? RIG.handleLength : RIG.segmentLength;
-    const armPoses = this.updateArms(this.torso.matrixWorld, gripMatrix, gripLength,
-      { ...options, shaftAngle: customShaft ? shaftAngle : this.part(frame, 'handle-0').angle });
+    // Unscaled physical coordinates keep grip offsets independent of artwork and tiling.
+    this.gripFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, PLAYER_DEPTH.tool);
+    const armPoses = this.updateArms(this.torso.matrixWorld, this.gripFrame, shaftLength, { ...options, shaftAngle });
     for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {
       x: pose.hand.x, y: pose.hand.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
     });
@@ -557,7 +548,7 @@ export class GameView {
       const geometry = ARM_GEOMETRY[side];
       const pose = solveArmPose(side, {
         shoulder: new Vector3(...geometry.shoulder).applyMatrix4(body),
-        hand: new Vector3(Math.min(geometry.gripX, shaftLength) - shaftLength / 2, 0, 0).applyMatrix4(shaft),
+        hand: new Vector3(Math.min(geometry.gripX, shaftLength), 0, 0).applyMatrix4(shaft),
         hint: new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(body),
         shaftAxis: new Vector3(Math.cos(options.shaftAngle), Math.sin(options.shaftAngle), 0),
       }, { previous: arm.pose, dt: options.dt });

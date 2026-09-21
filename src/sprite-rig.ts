@@ -35,7 +35,6 @@ interface Attachment {
   legacyCount: number;
   covered: boolean;
   readonly coverageCounts: number[];
-  readonly tiledReplacementCounts: number[];
 }
 
 interface TileRuntime {
@@ -449,12 +448,6 @@ export class SpriteRig {
     return attachment.coverageCounts[directionIndex(this.queryDirection(aim))] > 0;
   }
 
-  hasTiledReplacement(anchor: string, aim?: RuntimePoint): boolean {
-    this.assertLive();
-    this.anchor(anchor);
-    return (this.attachments.get(anchor)?.tiledReplacementCounts[directionIndex(this.queryDirection(aim))] ?? 0) > 0;
-  }
-
   inspect() {
     const resources = [...this.resources.values()];
     const staged = [...this.replacement?.staged.values() ?? []];
@@ -641,7 +634,6 @@ export class SpriteRig {
           for (const direction of data.directions) {
             const index = directionIndex(direction);
             attachment.coverageCounts[index]++;
-            if (instance.kind === 'legacy' && instance.tile !== null) attachment.tiledReplacementCounts[index]++;
           }
         }
         instances.set(data.id, instance);
@@ -883,7 +875,6 @@ export class SpriteRig {
         legacyCount: 0,
         covered: false,
         coverageCounts: FACING_DIRECTIONS.map(() => 0),
-        tiledReplacementCounts: FACING_DIRECTIONS.map(() => 0),
       };
       attachments.set(name, attachment);
     }

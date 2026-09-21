@@ -42,7 +42,7 @@ local **+X**. The diagram selects bones; the numeric controls edit their bind
 pose. Bone coordinates are world-sized units, not image pixels.
 
 The skeleton follows its host's world translation only. It does not inherit
-host rotation or scaling, including a fully collapsed hammer shaft. A bone-bound
+host rotation or scaling. A bone-bound
 layer uses that bone's position and rotation plus the layer's placement. Its
 **Anchor** still identifies which original visual Replace hides. For example,
 a custom upper-arm bone can carry an image while replacing the original
@@ -83,7 +83,7 @@ clips, directional poses, and the default clip travel with the layout.
 Direction masks cannot invent unseen artwork. Supply the front/back/side images
 you need; a single PNG is not converted into a rotating 3D character.
 
-### Hands and the extendable hammer
+### Hands and hammer reach
 
 Add a two-bone IK chain with an upper bone, lower bone, hand bone, and target.
 The lower and hand origins must be at their parent's tip:
@@ -95,15 +95,16 @@ moves the physical hammer to compensate.
 This game supplies `left-grip` and `right-grip` from the same actual grip
 positions used by its existing arms. It also supplies `hammer-base`, `aim`,
 and the thirteen visual anchors as target ports. Offsets follow the target's
-orientation, so a grip adjustment rotates with the shaft.
+orientation, so a grip adjustment rotates with the shaft. The hammer base is
+the translating physical slider, not the shoulder-mounted carrier. Every shaft
+rendering mode shares the same physical base and grip targets; reach slides
+the fixed-length hammer and its grips outward or inward, and arm IK follows.
 
-For a seamless extending shaft, attach a layer to **hammer-shaft**, choose
+For a repeating shaft texture, attach a layer to **hammer-shaft**, choose
 Replace, and set its **tile length**: the world length represented by one
-horizontal image repeat. The shaft repeats its UVs as physical length changes,
-rather than stretching the pattern. An active, anchor-bound tiled replacement
-spans the hinge/carrier to the head, so it visibly telescopes with reach.
-Its grip frame uses fixed-size offsets from that base, clamped when the shaft
-fully retracts. Legacy sprites and GLB shafts retain the full sliding handle.
+horizontal image repeat. Tiling changes only texture repetition, not the
+shaft's endpoints, configured physical length, or grip positions. Changing
+tile length in the editor leaves physics and arm IK unchanged.
 Use tileable left/right image edges.
 Keep the head and grip artwork on separate anchors/bones so their size stays
 fixed. Tiling changes artwork density, not the physics reach limit.
@@ -163,7 +164,8 @@ Anchors are injected by the host game. `GameView` supplies this game's thirteen
 body/tool anchors, their stable fitting bounds, and visibility ownership.
 Arms use local Y along the segment; the full hammer shaft uses local X.
 Head coordinates are torso-local, so its fitting center is above the origin.
-Shaft replacement also selects the full rendered shaft's grip frame for IK.
+Shaft replacements and arm IK use the same physical slider-to-head frame,
+independently of the chosen artwork.
 Visuals do not create bodies or change colliders, masses, reach, or simulation.
 Coverage callbacks only update the host's underlay visibility; they must not
 re-enter the rig. Replacements snapshot validated metadata before awaiting

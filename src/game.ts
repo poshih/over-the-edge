@@ -28,7 +28,7 @@ export class Game {
   private readonly inputBlocks = new Set<string>();
   private readonly unsubscribeTerrain: () => void;
   private readonly unsubscribeEnemies: () => void;
-  private character: CharacterState = { armIk: DEFAULT_ARM_IK, shaft: 'segmented' };
+  private character: CharacterState = { armIk: DEFAULT_ARM_IK };
   private stopped = false;
   private started = false;
   private animationFrame = 0;
@@ -155,7 +155,7 @@ export class Game {
   setSettings(settings: Readonly<GameSettings>): void { this.simulation.setSettings(settings); }
 
   setCharacter(state: CharacterState): void {
-    this.character = { armIk: { ...state.armIk }, shaft: state.shaft };
+    this.character = { armIk: { ...state.armIk } };
   }
 
   setPause(options: { reason: string; paused: boolean }): void {

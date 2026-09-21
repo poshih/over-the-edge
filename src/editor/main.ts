@@ -65,7 +65,6 @@ const appearanceUi = createAppearanceUI({
 });
 const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
-  shaft: rig.isCustom('hammer-shaft') ? 'straight' : 'segmented',
 }));
 const spriteEditor = createSpriteEditor({
   mount: ui.spriteMount, rig: game.view.sprites, onNotice: ui.notice,

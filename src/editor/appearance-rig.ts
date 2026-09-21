@@ -74,10 +74,6 @@ export class AppearanceRig {
       .add(new Vector3(alignment.offsetX, alignment.offsetY, alignment.offsetZ));
   }
 
-  isCustom(slot: VisualPartId): boolean {
-    return this.binding(slot).model !== null;
-  }
-
   reset(slot: VisualPartId): void {
     const binding = this.binding(slot);
     binding.replacement?.removeFromParent();

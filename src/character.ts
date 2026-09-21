@@ -26,7 +26,6 @@ export const DEFAULT_ARM_IK: Readonly<ArmIkSettings> = Object.freeze({
 
 export interface CharacterState {
   armIk: Readonly<ArmIkSettings>;
-  shaft: 'segmented' | 'straight';
 }
 
 export interface VisualBinding {

@@ -527,7 +527,7 @@ required or included in default builds.
 
 The same tab supports [hybrid 2D skeletons](docs/sprites.md#hybrid-2d-rigging):
 bone-bound cutouts, weighted sprite meshes, eight-way artwork and poses,
-keyframed animation, hand IK, a tiled extending shaft, and cosmetic spring-bone
+keyframed animation, hand IK, a tiled fixed-length shaft, and cosmetic spring-bone
 hair with body circles. Save/export includes the complete rig; `GAME_SPRITES`
 bundles it without the editor. Supply directional artwork yourself. Rigging
 changes the character's appearance, not its physics or hammer reach.
@@ -562,9 +562,10 @@ movements cannot cause an instantaneous elbow half-turn. Reachable poses preserv
 both limb lengths. Fully extended arms have no lateral bend; unreachable grips
 retain the existing visual forearm stretching rather than moving the hammer.
 
-Shoulders use the torso's transform. Both hands grip and rotate with the
-rendered shaft, including its depth: the first segment for the procedural shaft,
-or the straight replacement's transform for an imported shaft. The preview
+Shoulders use the torso's transform. Both hands use fixed-distance grip offsets
+in the physical slider-to-head frame, including its depth. Procedural segments,
+straight replacements, GLB models, and tiled sprites share these same targets;
+artwork never changes hammer length or hand placement. The preview
 works with procedural and imported arm parts. Model alignment remains cosmetic;
 it does not redefine skeleton anchors. These controls do not change colliders,
 mass, reach limits, or motor tuning. **D** / **Toggle collision overlay** also
