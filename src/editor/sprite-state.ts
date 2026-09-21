@@ -1,9 +1,12 @@
 import type { SpriteRig } from '../sprite-rig';
 import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
-  validateSpriteLayer, encodePng, inspectPng,
+  validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteLayer, SpriteOffset } from '../sprite-data';
+import { SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
+import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin } from '../skeleton-data';
+import { autoWeights, restPose } from '../skeleton-pose';
 import { VisualStore, VisualStoreError } from './visual-store';
 
 export interface SpriteAnchorInput {
@@ -24,6 +27,10 @@ export interface SpriteLayerEdit {
   readonly y?: number;
   readonly z?: number;
   readonly rotation?: number;
+  readonly bone?: string | null;
+  readonly directions?: readonly FacingDirection[];
+  readonly skin?: SpriteSkin | null;
+  readonly tileLength?: number | null;
 }
 
 export interface SpriteEditorSnapshot {
@@ -36,6 +43,7 @@ export interface SpriteEditorSnapshot {
   readonly saved: SpriteDocument | null;
   readonly selectedLayerId: string | null;
   readonly externalSources: boolean;
+  readonly preview: SkeletonPreview | null;
 }
 
 interface StoredSprites {
@@ -66,13 +74,17 @@ function sameLayer(left: SpriteLayer, right: SpriteLayer): boolean {
     left.anchor === right.anchor && left.image === right.image &&
     left.width === right.width && left.height === right.height &&
     left.rotation === right.rotation && left.underlay === right.underlay &&
-    left.offset.x === right.offset.x && left.offset.y === right.offset.y && left.offset.z === right.offset.z;
+    left.offset.x === right.offset.x && left.offset.y === right.offset.y && left.offset.z === right.offset.z &&
+    left.bone === right.bone && left.tileLength === right.tileLength &&
+    left.directions.length === right.directions.length && left.directions.every((value, index) => value === right.directions[index]) &&
+    (left.skin === right.skin || JSON.stringify(left.skin) === JSON.stringify(right.skin));
 }
 
 function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (left === right) return true;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
-  return left.layers.every((layer, index) => sameLayer(layer, right.layers[index])) &&
+  return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
+    left.layers.every((layer, index) => sameLayer(layer, right.layers[index])) &&
     (left.images === right.images || left.images.every((image, index) => {
       const other = right.images[index];
       return image === other || image.id === other.id && image.name === other.name && image.source === other.source;
@@ -96,6 +108,7 @@ export class SpriteEditorState {
   private readonly anchors: readonly SpriteAnchorInput[];
   private readonly anchorMap: ReadonlyMap<string, SpriteAnchorInput>;
   private readonly anchorIds: ReadonlySet<string>;
+  private readonly targetIds: ReadonlySet<string>;
   private readonly notice: (message: string, kind: 'info' | 'error') => void;
   private readonly store = new VisualStore<StoredSprites>({
     database: 'over-the-edge:sprites', store: 'documents', keyPath: 'id',
@@ -105,6 +118,7 @@ export class SpriteEditorState {
   private draft: SpriteDocument = EMPTY_SPRITES;
   private saved: SpriteDocument | null = null;
   private selectedLayerId: string | null = null;
+  private preview: SkeletonPreview | null = null;
   private restoring = true;
   private busy = false;
   private error: string | null = null;
@@ -113,6 +127,7 @@ export class SpriteEditorState {
   constructor(options: {
     rig: SpriteRig;
     anchors: readonly SpriteAnchorInput[];
+    targetIds: readonly string[];
     onNotice: (message: string, kind: 'info' | 'error') => void;
   }) {
     if (options.anchors.length === 0) throw new Error('The sprite editor requires at least one anchor.');
@@ -134,6 +149,7 @@ export class SpriteEditorState {
       Object.freeze({ ...anchor, offset: Object.freeze({ ...anchor.offset }) })));
     this.anchorMap = new Map(this.anchors.map((anchor) => [anchor.id, anchor]));
     this.anchorIds = new Set(this.anchors.map((anchor) => anchor.id));
+    this.targetIds = new Set(options.targetIds);
     this.notice = options.onNotice;
   }
 
@@ -152,7 +168,7 @@ export class SpriteEditorState {
       let document: SpriteDocument;
       try {
         document = this.validateRecord(record.value);
-        validateSpriteAnchors(document, this.anchorIds);
+        validateSpriteAnchors(document, this.anchorIds, this.targetIds);
       } catch (error) {
         if (!(error instanceof SpriteError)) throw error;
         this.reportError(`Saved sprites were invalid and were left untouched in storage: ${error.message}`);
@@ -185,6 +201,7 @@ export class SpriteEditorState {
       saved: this.saved,
       selectedLayerId: this.selectedLayerId,
       externalSources: this.draft.images.some((image) => !isEmbedded(image.source)),
+      preview: this.preview,
     };
   }
 
@@ -233,11 +250,12 @@ export class SpriteEditorState {
       }
       const fit = fitWithinAnchor(anchor, size);
       const layer = validateSpriteLayer({
+        ...DEFAULT_SPRITE_RIGGING,
         id: nextId('layer', new Set(this.draft.layers.map((candidate) => candidate.id))),
         name: image.name, anchor: anchor.id, image: image.id,
         width: fit.width, height: fit.height, offset: { ...anchor.offset }, rotation: 0, underlay: 'replace',
       });
-      const document = validateSpriteDocument({ schemaVersion: 1, images, layers: [...this.draft.layers, layer] });
+      const document = validateSpriteDocument({ ...this.draft, images, layers: [...this.draft.layers, layer] });
       await this.replaceRig(document);
       if (this.disposed) return;
       this.draft = document;
@@ -249,9 +267,8 @@ export class SpriteEditorState {
     if (!this.canEdit()) return;
     const current = this.draft.layers.find((layer) => layer.id === id);
     if (current === undefined) throw new Error(`Unknown sprite layer "${id}".`);
-    let layer: SpriteLayer;
     try {
-      layer = validateSpriteLayer({
+      const layer = validateSpriteLayer({
         id: current.id, image: current.image,
         name: edit.name ?? current.name,
         anchor: edit.anchor ?? current.anchor,
@@ -260,21 +277,29 @@ export class SpriteEditorState {
         offset: { x: edit.x ?? current.offset.x, y: edit.y ?? current.offset.y, z: edit.z ?? current.offset.z },
         rotation: edit.rotation ?? current.rotation,
         underlay: edit.underlay ?? current.underlay,
+        bone: edit.bone === undefined ? current.bone : edit.bone,
+        directions: edit.directions === undefined ? current.directions : edit.directions,
+        skin: edit.skin === undefined ? current.skin : edit.skin,
+        tileLength: edit.tileLength === undefined ? current.tileLength : edit.tileLength,
       });
       if (sameLayer(current, layer)) {
         this.error = null;
         this.changed();
         return;
       }
+      const document = Object.freeze({
+        ...this.draft, layers: Object.freeze(this.draft.layers.map(candidate => candidate.id === id ? layer : candidate)),
+      });
+      validateSpriteRigging(document.layers, document.skeleton);
+      validateSpriteBudget(document);
       this.rig.upsert(layer);
+      this.draft = document;
     } catch (error) {
       if (!(error instanceof SpriteError)) throw error;
       this.reportError(error.message);
       return;
     }
     this.error = null;
-    const layers = Object.freeze(this.draft.layers.map((candidate) => candidate.id === id ? layer : candidate));
-    this.draft = Object.freeze({ ...this.draft, layers });
     this.changed();
   }
 
@@ -292,7 +317,7 @@ export class SpriteEditorState {
     const used = new Set(layers.map((layer) => layer.image));
     const images = this.draft.images.filter((image) => used.has(image.id));
     this.error = null;
-    this.draft = Object.freeze({ schemaVersion: 1, images: Object.freeze(images), layers: Object.freeze(layers) });
+    this.draft = Object.freeze({ ...this.draft, images: Object.freeze(images), layers: Object.freeze(layers) });
     if (this.selectedLayerId === id) this.selectedLayerId = layers[0]?.id ?? null;
     this.changed();
   }
@@ -306,6 +331,89 @@ export class SpriteEditorState {
       this.saved = document;
       this.draft = document;
     });
+  }
+
+  setSkeleton(value: SkeletonDefinition | null, options: { preview?: SkeletonPreview | null } = {}): void {
+    if (!this.canEdit()) return;
+    try {
+      const skeleton = value === null ? null : validateSkeleton(value);
+      const document = Object.freeze({ ...this.draft, skeleton });
+      validateSpriteRigging(document.layers, skeleton);
+      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
+      validateSpriteBudget(document);
+      let preview = options.preview === undefined ? this.preview : options.preview;
+      if (skeleton === null) {
+        if (options.preview !== undefined && preview !== null) throw new SpriteError('A preview requires a skeleton.');
+        preview = null;
+      } else if (preview !== null) {
+        const current = preview;
+        const missingClip = current.clip !== null && !skeleton.clips.some(clip => clip.id === current.clip);
+        const missingBone = current.pose.some(pose => !skeleton.bones.some(bone => bone.id === pose.bone));
+        preview = options.preview === undefined && (missingClip || missingBone) ? null : validateSkeletonPreview(current, skeleton);
+      }
+      this.rig.configureSkeleton(skeleton, { preview });
+      this.preview = preview;
+      this.draft = document;
+      this.error = null;
+      this.changed();
+    } catch (error) {
+      if (!(error instanceof SpriteError || error instanceof SkeletonError)) throw error;
+      this.reportError(error.message);
+    }
+  }
+
+  setPreview(value: SkeletonPreview | null): void {
+    if (!this.canEdit()) return;
+    try {
+      let preview: SkeletonPreview | null = null;
+      if (value !== null) {
+        const skeleton = this.draft.skeleton;
+        if (skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
+        preview = validateSkeletonPreview(value, skeleton);
+      }
+      this.rig.setPreview(preview);
+      this.preview = preview;
+      this.error = null;
+      this.changed();
+    } catch (error) {
+      if (!(error instanceof SpriteError || error instanceof SkeletonError)) throw error;
+      this.reportError(error.message);
+    }
+  }
+
+  bindMesh(id: string, options: { columns: number; rows: number; bones: readonly string[] }): void {
+    if (!this.canEdit()) return;
+    try {
+      const layer = this.draft.layers.find(candidate => candidate.id === id);
+      if (!layer || !this.draft.skeleton) throw new SpriteError('Select a layer and create a skeleton before binding a mesh.');
+      const { columns, rows } = options;
+      if (![columns, rows].every(value => Number.isInteger(value) && value >= 1 && value <= SKELETON_LIMITS.grid)) {
+        throw new SpriteError(`Mesh columns and rows must be whole numbers from 1 to ${SKELETON_LIMITS.grid}.`);
+      }
+      let xOffset = layer.offset.x, yOffset = layer.offset.y, rotation = layer.rotation;
+      if (layer.bone !== null) {
+        const bone = restPose(this.draft.skeleton).find(candidate => candidate.id === layer.bone);
+        if (bone === undefined) throw new SpriteError('The attached bone is missing.');
+        xOffset = bone.x + layer.offset.x * Math.cos(bone.angle) - layer.offset.y * Math.sin(bone.angle);
+        yOffset = bone.y + layer.offset.x * Math.sin(bone.angle) + layer.offset.y * Math.cos(bone.angle);
+        rotation = ((rotation + bone.angle * 180 / Math.PI) % 360 + 540) % 360 - 180;
+      }
+      const angle = rotation * Math.PI / 180;
+      const positions = [];
+      for (let row = 0; row <= rows; row++) for (let column = 0; column <= columns; column++) {
+        const x = (column / columns - 0.5) * layer.width;
+        const y = (0.5 - row / rows) * layer.height;
+        positions.push({
+          x: xOffset + x * Math.cos(angle) - y * Math.sin(angle),
+          y: yOffset + x * Math.sin(angle) + y * Math.cos(angle),
+        });
+      }
+      const skin = { columns, rows, weights: autoWeights(this.draft.skeleton, positions, options.bones) };
+      this.updateLayer(id, { skin, bone: null, tileLength: null, x: xOffset, y: yOffset, rotation });
+    } catch (error) {
+      if (!(error instanceof SpriteError || error instanceof SkeletonError)) throw error;
+      this.reportError(error.message);
+    }
   }
 
   async revert(): Promise<void> {
@@ -344,7 +452,7 @@ export class SpriteEditorState {
       const text = await file.text();
       if (this.disposed) return;
       const document = parseSpriteDocument(text);
-      validateSpriteAnchors(document, this.anchorIds);
+      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
       await this.replaceRig(document);
       if (this.disposed) return;
       this.draft = document;
@@ -391,6 +499,7 @@ export class SpriteEditorState {
 
   private async replaceRig(document: SpriteDocument): Promise<void> {
     await this.rig.replace(document, { signal: this.lifecycle.signal });
+    this.preview = null;
   }
 
   private canEdit(): boolean {

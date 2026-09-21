@@ -6,7 +6,7 @@ import { embeddedPng, EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, validat
 const MODULE = 'virtual:game-sprites';
 const RESOLVED = `\0${MODULE}`;
 
-export function spriteBundle(options: { path: string | null; anchors: readonly string[] }): Plugin {
+export function spriteBundle(options: { path: string | null; anchors: readonly string[]; targets: readonly string[] }): Plugin {
   let building = false;
   const emitted = new Map<string, string>();
   return {
@@ -21,7 +21,7 @@ export function spriteBundle(options: { path: string | null; anchors: readonly s
         if (statSync(options.path).size > SPRITE_LIMITS.documentBytes) throw new Error('GAME_SPRITES exceeds the sprite document size limit.');
         this.addWatchFile(options.path);
         document = parseSpriteDocument(readFileSync(options.path, 'utf8'));
-        validateSpriteAnchors(document, options.anchors);
+        validateSpriteAnchors(document, options.anchors, options.targets);
       }
       if (!building) return `export default ${JSON.stringify(document)};`;
       const images = document.images.map(image => {
@@ -38,7 +38,7 @@ export function spriteBundle(options: { path: string | null; anchors: readonly s
         }
         return `{id:${JSON.stringify(image.id)},name:${JSON.stringify(image.name)},source:${source}}`;
       });
-      return `export default {schemaVersion:1,images:[${images.join(',')}],layers:${JSON.stringify(document.layers)}};`;
+      return `export default {schemaVersion:${document.schemaVersion},images:[${images.join(',')}],layers:${JSON.stringify(document.layers)},skeleton:${JSON.stringify(document.skeleton)}};`;
     },
     handleHotUpdate(context) {
       if (context.file !== options.path) return;

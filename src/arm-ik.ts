@@ -20,6 +20,7 @@ interface ArmTargets {
 }
 
 export interface ArmPose {
+  side: ArmSide;
   shoulder: Vector3;
   hand: Vector3;
   hint: Vector3;
@@ -27,6 +28,7 @@ export interface ArmPose {
   normal: Vector3;
   axis: Vector3;
   bendDirection: Vector3;
+  shaftAxis: Vector3;
 }
 
 function initialBend(axis: Vector3, side: ArmSide): Vector3 {
@@ -75,5 +77,5 @@ export function solveArmPose(side: ArmSide, targets: ArmTargets, options: { prev
   const normal = new Vector3().crossVectors(axis, bendDirection).normalize()
     .multiplyScalar(ARM_GEOMETRY[side].normalSign);
   if (previous !== null && normal.dot(previous.normal) < -DIRECTION_EPSILON) normal.negate();
-  return { shoulder, elbow, hand, hint, normal, axis, bendDirection };
+  return { side, shoulder, elbow, hand, hint, normal, axis, bendDirection, shaftAxis };
 }

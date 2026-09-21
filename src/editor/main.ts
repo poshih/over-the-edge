@@ -3,6 +3,7 @@ import './game-ui.css';
 import './style.css';
 import { Vector3 } from 'three';
 import { PHYSICS } from '../config';
+import { SPRITE_TARGET_IDS } from '../character';
 import type { Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import { Game } from '../game';
@@ -68,6 +69,7 @@ const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
 }));
 const spriteEditor = createSpriteEditor({
   mount: ui.spriteMount, rig: game.view.sprites, onNotice: ui.notice,
+  targetIds: SPRITE_TARGET_IDS,
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);
     if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);

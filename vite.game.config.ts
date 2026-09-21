@@ -6,7 +6,7 @@ import type { Plugin } from 'vite';
 import { DEFAULT_LEVEL } from './src/default-level';
 import { LEVEL_LIMITS, validateLevel } from './src/level';
 import { DEFAULT_GAME_SETTINGS, GAME_SETTINGS_LIMITS, validateGameSettings } from './src/game-settings';
-import { VISUAL_PART_IDS } from './src/character';
+import { SPRITE_TARGET_IDS, VISUAL_PART_IDS } from './src/character';
 import { spriteBundle } from './build/sprite-bundle';
 import { gameTitle } from './build/game-title.ts';
 
@@ -91,7 +91,7 @@ export default defineConfig(({ mode }) => ({
       variable: 'GAME_SETTINGS', moduleId: 'virtual:game-settings', defaults: DEFAULT_GAME_SETTINGS,
       fileBytes: GAME_SETTINGS_LIMITS.fileBytes, validate: validateGameSettings,
     }),
-    spriteBundle({ path: projectJson('GAME_SPRITES'), anchors: VISUAL_PART_IDS }),
+    spriteBundle({ path: projectJson('GAME_SPRITES'), anchors: VISUAL_PART_IDS, targets: SPRITE_TARGET_IDS }),
     gameOnlyBoundary(),
   ],
   build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },

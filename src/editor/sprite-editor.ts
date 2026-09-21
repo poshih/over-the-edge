@@ -7,6 +7,7 @@ import { createJsonDownload } from './json-download';
 import type { RangeControl } from './range-control';
 import { SpriteEditorState } from './sprite-state';
 import type { SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
+import { createSkeletonEditor } from './skeleton-editor';
 import './sprite-editor.css';
 
 type SpriteFieldKey = (typeof SPRITE_FIELDS)[number]['key'];
@@ -26,6 +27,7 @@ export interface SpriteEditorOptions {
   mount: HTMLElement;
   rig: SpriteRig;
   anchors: readonly SpriteAnchorInput[];
+  targetIds: readonly string[];
   onNotice: (message: string, kind: 'info' | 'error') => void;
 }
 
@@ -36,7 +38,9 @@ export interface SpriteEditorHandle {
 }
 
 export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHandle {
-  const state = new SpriteEditorState({ rig: options.rig, anchors: options.anchors, onNotice: options.onNotice });
+  const state = new SpriteEditorState({
+    rig: options.rig, anchors: options.anchors, targetIds: options.targetIds, onNotice: options.onNotice,
+  });
   const events = new AbortController();
   const listen = { signal: events.signal };
   let selectedId: string | null = null;
@@ -80,6 +84,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       </fieldset>
       <fieldset class="tuning-group sprite-layer-transform" disabled><legend>Placement</legend></fieldset>
       <button type="button" class="button sprite-delete-layer" disabled>Delete selected layer</button>
+      <div class="sprite-skeleton-mount"></div>
 
       <p class="appearance-format sprite-external-warning" hidden>This document references external image URL(s).
         Export preserves these public references. Never use links containing credentials or private
@@ -179,7 +184,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   revertButton.addEventListener('click', () => void state.revert(), listen);
   newButton.addEventListener('click', () => {
     const snapshot = state.snapshot();
-    const hasContent = snapshot.document.layers.length > 0 || snapshot.document.images.length > 0;
+    const hasContent = snapshot.document.layers.length > 0 || snapshot.document.images.length > 0 || snapshot.document.skeleton !== null;
     if (hasContent && !window.confirm(
       'Start a new empty sprite layout? Unsaved changes will be discarded. Save or export first to keep them.',
     )) return;
@@ -230,7 +235,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     selectedId = snapshot.selectedLayerId;
     const layer = snapshot.document.layers.find((candidate) => candidate.id === selectedId) ?? null;
     const disabledAll = snapshot.restoring || snapshot.busy;
-    const hasContent = snapshot.document.layers.length > 0 || snapshot.document.images.length > 0;
+    const hasContent = snapshot.document.layers.length > 0 || snapshot.document.images.length > 0 || snapshot.document.skeleton !== null;
 
     newAnchorSelect.disabled = disabledAll;
     newFileInput.disabled = disabledAll;
@@ -290,6 +295,10 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   }
 
   options.mount.append(root);
+  const skeletonEditor = createSkeletonEditor({
+    mount: element<HTMLDivElement>(root, '.sprite-skeleton-mount'),
+    state, anchors: options.anchors, targetIds: options.targetIds, signal: events.signal,
+  });
   const unsubscribe = state.subscribe(render);
   const ready = state.restore();
 
@@ -299,6 +308,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     dispose: () => {
       events.abort();
       unsubscribe();
+      skeletonEditor.dispose();
       state.dispose();
       root.remove();
     },

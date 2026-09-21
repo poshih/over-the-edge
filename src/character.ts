@@ -6,6 +6,7 @@ export const VISUAL_PART_IDS = [
   'left-elbow', 'right-elbow', 'left-hand', 'right-hand', 'hammer-shaft', 'hammer-head',
 ] as const;
 export type VisualPartId = (typeof VISUAL_PART_IDS)[number];
+export const SPRITE_TARGET_IDS = [...VISUAL_PART_IDS, 'left-grip', 'right-grip', 'hammer-base', 'aim'] as const;
 export const ARM_SIDES = ['left', 'right'] as const;
 export type ArmSide = (typeof ARM_SIDES)[number];
 

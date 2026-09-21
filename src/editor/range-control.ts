@@ -49,8 +49,8 @@ export function createRangeControl(field: RangeSpec, options: {
     button.setAttribute('aria-label', `${action} ${field.label}`);
   }
   const updateButtons = (): void => {
-    decrease.disabled = input.disabled || input.valueAsNumber <= field.min;
-    increase.disabled = input.disabled || input.valueAsNumber >= field.max;
+    decrease.disabled = input.disabled || input.valueAsNumber <= Number(input.min);
+    increase.disabled = input.disabled || input.valueAsNumber >= Number(input.max);
   };
   const step = (direction: 'down' | 'up'): void => {
     if (input.matches(':disabled')) return;

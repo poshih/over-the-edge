@@ -1,0 +1,224 @@
+.skeleton-editor {
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.skeleton-editor select,
+.skeleton-editor input[type="text"],
+.skeleton-editor input[type="number"] {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #faf9f2;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.skeleton-editor select[multiple] {
+  min-height: 116px;
+  padding: 6px;
+}
+
+.touch-controls .skeleton-editor select,
+.touch-controls .skeleton-editor input[type="text"],
+.touch-controls .skeleton-editor input[type="number"] {
+  font-size: 16px;
+}
+
+.skeleton-intro {
+  margin-bottom: 14px;
+}
+
+.skeleton-state {
+  margin: 0 0 20px;
+}
+
+.skeleton-definition-group,
+.skeleton-bones-group,
+.skeleton-layer-group,
+.skeleton-pose-group,
+.skeleton-animation-group,
+.skeleton-ik-group,
+.skeleton-hair-group,
+.skeleton-collider-group {
+  margin-top: 18px;
+}
+
+.skeleton-action-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.skeleton-action-row-tight {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skeleton-diagram-panel {
+  margin-top: 14px;
+}
+
+.skeleton-diagram-shell {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfbf6;
+}
+
+.skeleton-diagram {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.skeleton-diagram [data-bone-id] {
+  cursor: pointer;
+}
+
+.skeleton-diagram-hint,
+.skeleton-layer-label,
+.skeleton-selection-note,
+.skeleton-hair-summary {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.skeleton-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.skeleton-token-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.skeleton-token {
+  overflow-wrap: anywhere;
+  color: #34534d;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.skeleton-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 10px;
+}
+
+.skeleton-inline-grid {
+  display: grid;
+  gap: 0 10px;
+}
+
+.skeleton-inline-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skeleton-inline-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.skeleton-toggle-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 132px) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.skeleton-toggle {
+  display: flex;
+  min-height: var(--control-height);
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.skeleton-toggle input[type="checkbox"],
+.skeleton-direction-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
+.skeleton-subsection {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.skeleton-subsection h4 {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.skeleton-direction-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+
+.skeleton-direction-toggle {
+  display: flex;
+  min-height: var(--control-height);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #faf9f2;
+  font-size: 11px;
+}
+
+.skeleton-weight-rows {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.skeleton-weight-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  gap: 8px;
+}
+
+.skeleton-weights-subsection.is-disabled {
+  opacity: 0.65;
+}
+
+.touch-controls .skeleton-direction-toggle,
+.touch-controls .skeleton-toggle,
+.touch-controls .skeleton-action-row .button,
+.touch-controls .skeleton-token {
+  font-size: 16px;
+}
+
+@media (max-width: 700px) {
+  .skeleton-form-grid,
+  .skeleton-inline-grid-2,
+  .skeleton-inline-grid-3,
+  .skeleton-action-row,
+  .skeleton-action-row-tight,
+  .skeleton-direction-grid,
+  .skeleton-weight-row,
+  .skeleton-toggle-row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -525,6 +525,13 @@ geometric example in `examples/sprites.mjs`. See [sprite authoring, runtime API,
 limits, and release instructions](docs/sprites.md). No external artwork is
 required or included in default builds.
 
+The same tab supports [hybrid 2D skeletons](docs/sprites.md#hybrid-2d-rigging):
+bone-bound cutouts, weighted sprite meshes, eight-way artwork and poses,
+keyframed animation, hand IK, a tiled extending shaft, and cosmetic spring-bone
+hair with body circles. Save/export includes the complete rig; `GAME_SPRITES`
+bundles it without the editor. Supply directional artwork yourself. Rigging
+changes the character's appearance, not its physics or hammer reach.
+
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
 Parts can be replaced independently: pot, torso/neck, character head, each upper
 arm, forearm, elbow and hand, the full hammer shaft, and the hammer head. Parts

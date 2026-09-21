@@ -1,3 +1,6 @@
+import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, validateSkeleton, validateSkin } from './skeleton-data.ts';
+import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
+
 export interface SpriteOffset {
   readonly x: number;
   readonly y: number;
@@ -20,17 +23,22 @@ export interface SpriteLayer {
   readonly offset: SpriteOffset;
   readonly rotation: number;
   readonly underlay: 'replace' | 'overlay';
+  readonly bone: string | null;
+  readonly directions: readonly FacingDirection[];
+  readonly skin: SpriteSkin | null;
+  readonly tileLength: number | null;
 }
 
 export interface SpriteDocument {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly images: readonly SpriteImage[];
   readonly layers: readonly SpriteLayer[];
+  readonly skeleton: SkeletonDefinition | null;
 }
 
 export const SPRITE_LIMITS = {
-  layers: 64,
-  images: 32,
+  layers: 256,
+  images: 128,
   id: 80,
   name: 120,
   imageBytes: 8 * 1024 * 1024,
@@ -44,6 +52,13 @@ export const SPRITE_LIMITS = {
   fetchMilliseconds: 30_000,
 } as const;
 
+export const DEFAULT_SPRITE_RIGGING = Object.freeze({
+  bone: null,
+  directions: Object.freeze([...FACING_DIRECTIONS]),
+  skin: null,
+  tileLength: null,
+});
+
 export const SPRITE_FIELDS = [
   { key: 'width', label: 'Sprite width', min: SPRITE_LIMITS.minimumSize, max: SPRITE_LIMITS.size, step: 0.01, unit: 'local' },
   { key: 'height', label: 'Sprite height', min: SPRITE_LIMITS.minimumSize, max: SPRITE_LIMITS.size, step: 0.01, unit: 'local' },
@@ -54,13 +69,27 @@ export const SPRITE_FIELDS = [
 ] as const;
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
-  schemaVersion: 1, images: Object.freeze([]), layers: Object.freeze([]),
+  schemaVersion: 2, images: Object.freeze([]), layers: Object.freeze([]), skeleton: null,
 });
 
 export class SpriteError extends Error {}
 
 const PNG_PREFIX = 'data:image/png;base64,';
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
+const imageJsonBytes = new WeakMap<readonly SpriteImage[], number>();
+
+export function validateSpriteBudget(document: SpriteDocument): void {
+  const encoder = new TextEncoder();
+  let images = imageJsonBytes.get(document.images);
+  if (images === undefined) {
+    images = encoder.encode(JSON.stringify(document.images)).byteLength;
+    if (Object.isFrozen(document.images) && document.images.every(Object.isFrozen)) imageJsonBytes.set(document.images, images);
+  }
+  const metadata = encoder.encode(JSON.stringify({ ...document, images: [] })).byteLength;
+  if (metadata + images - 2 > SPRITE_LIMITS.documentBytes) {
+    throw new SpriteError('The sprite document exceeds its file-size budget.');
+  }
+}
 
 function record(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value) ||
@@ -148,10 +177,30 @@ function imageSource(value: unknown): string {
 }
 
 export function validateSpriteLayer(value: unknown): SpriteLayer {
-  const layer = record(value, ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay'], 'A sprite layer');
+  const layer = record(value, ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay',
+    'bone', 'directions', 'skin', 'tileLength'], 'A sprite layer');
   const offset = record(layer.offset, ['x', 'y', 'z'], 'A sprite offset');
   if (layer.underlay !== 'replace' && layer.underlay !== 'overlay') {
     throw new SpriteError('Sprite underlay must be replace or overlay.');
+  }
+  let skin: SpriteSkin | null;
+  let directions: FacingDirection[];
+  try {
+    skin = layer.skin === null ? null : validateSkin(layer.skin);
+    if (!Array.isArray(layer.directions) || layer.directions.length === 0 || layer.directions.length > FACING_DIRECTIONS.length) {
+      throw new SpriteError('Choose 1-8 visible directions for each sprite layer.');
+    }
+    directions = layer.directions.map(validateDirection);
+  } catch (error) {
+    if (error instanceof SkeletonError) throw new SpriteError(error.message, { cause: error });
+    throw error;
+  }
+  if (new Set(directions).size !== directions.length) throw new SpriteError('A sprite direction must not be repeated.');
+  const bone = layer.bone === null ? null : text(layer.bone, SPRITE_LIMITS.id, 'Attachment bone');
+  const tileLength = layer.tileLength === null ? null :
+    number(layer.tileLength, SPRITE_LIMITS.minimumSize, SPRITE_LIMITS.size, 'Shaft tile length');
+  if (skin !== null && (bone !== null || tileLength !== null)) {
+    throw new SpriteError('A weighted mesh binds in skeleton space, not to a single bone or tiled shaft.');
   }
   return Object.freeze({
     id: text(layer.id, SPRITE_LIMITS.id, 'Sprite ID'),
@@ -167,15 +216,19 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
     }),
     rotation: number(layer.rotation, -SPRITE_LIMITS.rotation, SPRITE_LIMITS.rotation, 'Sprite rotation'),
     underlay: layer.underlay,
+    bone, directions: Object.freeze(directions), skin, tileLength,
   });
 }
 
 // The loader validates image bytes as it acquires them, without decoding cached sources again.
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
-  const document = record(value, ['schemaVersion', 'images', 'layers'], 'A sprite document');
-  if (document.schemaVersion !== 1 || !Array.isArray(document.images) || !Array.isArray(document.layers) ||
+  const legacy = typeof value === 'object' && value !== null && Reflect.get(value, 'schemaVersion') === 1;
+  const document = record(value, legacy ? ['schemaVersion', 'images', 'layers'] :
+    ['schemaVersion', 'images', 'layers', 'skeleton'], 'A sprite document');
+  if (document.schemaVersion !== 1 && document.schemaVersion !== 2 ||
+    !Array.isArray(document.images) || !Array.isArray(document.layers) ||
     document.images.length > SPRITE_LIMITS.images || document.layers.length > SPRITE_LIMITS.layers) {
-    throw new SpriteError(`Sprite documents use schema 1, at most ${SPRITE_LIMITS.images} images and ${SPRITE_LIMITS.layers} layers.`);
+    throw new SpriteError(`Sprite documents use schema 2, at most ${SPRITE_LIMITS.images} images and ${SPRITE_LIMITS.layers} layers.`);
   }
   const imageIds = new Set<string>();
   let bytes = 0;
@@ -194,7 +247,10 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const layerIds = new Set<string>();
   const usedImages = new Set<string>();
   const layers = document.layers.map((value: unknown) => {
-    const layer = validateSpriteLayer(value);
+    const input = legacy ? { ...record(value,
+      ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay'], 'A legacy sprite layer'),
+    ...DEFAULT_SPRITE_RIGGING } : value;
+    const layer = validateSpriteLayer(input);
     if (layerIds.has(layer.id)) throw new SpriteError(`Duplicate sprite layer ID: ${layer.id}.`);
     if (!imageIds.has(layer.image)) throw new SpriteError(`Sprite ${layer.id} references a missing image.`);
     layerIds.add(layer.id);
@@ -202,10 +258,18 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
     return layer;
   });
   if (usedImages.size !== imageIds.size) throw new SpriteError('Remove images that are not used by any sprite layer.');
-  const result: SpriteDocument = Object.freeze({ schemaVersion: 1, images: Object.freeze(images), layers: Object.freeze(layers) });
-  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > SPRITE_LIMITS.documentBytes) {
-    throw new SpriteError('The sprite document exceeds its file-size budget.');
+  let skeleton: SkeletonDefinition | null;
+  try {
+    skeleton = legacy || document.skeleton === null ? null : validateSkeleton(document.skeleton);
+  } catch (error) {
+    if (error instanceof SkeletonError) throw new SpriteError(error.message, { cause: error });
+    throw error;
   }
+  validateSpriteRigging(layers, skeleton);
+  const result: SpriteDocument = Object.freeze({
+    schemaVersion: 2, images: Object.freeze(images), layers: Object.freeze(layers), skeleton,
+  });
+  validateSpriteBudget(result);
   return result;
 }
 
@@ -227,10 +291,32 @@ export function validateSpriteDocument(value: unknown): SpriteDocument {
   return document;
 }
 
-export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>): void {
+export function validateSpriteRigging(layers: readonly SpriteLayer[], skeleton: SkeletonDefinition | null): void {
+  const bones = new Set(skeleton?.bones.map(bone => bone.id));
+  let vertices = 0;
+  for (const layer of layers) {
+    if (layer.bone !== null && !bones.has(layer.bone)) throw new SpriteError(`Sprite "${layer.name}" references a missing bone.`);
+    if (layer.skin !== null) {
+      vertices += layer.skin.weights.length;
+      for (const weights of layer.skin.weights) for (const weight of weights) {
+        if (!bones.has(weight.bone)) throw new SpriteError(`Sprite "${layer.name}" has a missing weight bone "${weight.bone}".`);
+      }
+    }
+  }
+  if (vertices > SKELETON_LIMITS.vertices) throw new SpriteError(`Weighted sprites exceed the ${SKELETON_LIMITS.vertices}-vertex budget.`);
+}
+
+export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>, targets?: Iterable<string>): void {
   const available = new Set(anchors);
   for (const layer of document.layers) {
     if (!available.has(layer.anchor)) throw new SpriteError(`Sprite ${layer.id} references unknown anchor "${layer.anchor}".`);
+  }
+  if (document.skeleton !== null) {
+    if (!available.has(document.skeleton.anchor)) throw new SpriteError(`Unknown skeleton anchor "${document.skeleton.anchor}".`);
+    const ports = new Set(targets === undefined ? available : targets);
+    for (const ik of document.skeleton.ik) {
+      if (!ports.has(ik.target)) throw new SpriteError(`Unknown IK target "${ik.target}".`);
+    }
   }
 }
 
