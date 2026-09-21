@@ -8,6 +8,8 @@ import type { RangeControl } from './range-control';
 import { SpriteEditorState } from './sprite-state';
 import type { SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
 import { createSkeletonEditor } from './skeleton-editor';
+import { createDirectionalEditor } from './directional-editor';
+import type { DirectionalViewport } from './directional-editor';
 import './sprite-editor.css';
 
 type SpriteFieldKey = (typeof SPRITE_FIELDS)[number]['key'];
@@ -28,12 +30,16 @@ export interface SpriteEditorOptions {
   rig: SpriteRig;
   anchors: readonly SpriteAnchorInput[];
   targetIds: readonly string[];
+  viewport: DirectionalViewport;
   onNotice: (message: string, kind: 'info' | 'error') => void;
 }
 
 export interface SpriteEditorHandle {
   ready: Promise<void>;
   snapshot: () => SpriteEditorSnapshot;
+  setActive: (active: boolean) => void;
+  updatePreview: () => void;
+  leavePreview: () => void;
   dispose: () => void;
 }
 
@@ -84,6 +90,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       </fieldset>
       <fieldset class="tuning-group sprite-layer-transform" disabled><legend>Placement</legend></fieldset>
       <button type="button" class="button sprite-delete-layer" disabled>Delete selected layer</button>
+      <div class="sprite-directional-mount"></div>
       <div class="sprite-skeleton-mount"></div>
 
       <p class="appearance-format sprite-external-warning" hidden>This document references external image URL(s).
@@ -109,7 +116,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
         <button type="button" class="button sprite-revert">Revert</button>
         <button type="button" class="button sprite-new">New</button>
       </div>
-      <p>Save keeps the current layout across reloads. Revert restores the last save.</p>
+      <p>Save keeps the layout, rig and directional presentation across reloads. Revert restores the last save.</p>
     </footer>
   `;
 
@@ -131,6 +138,17 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   const saveButton = element<HTMLButtonElement>(root, '.sprite-save');
   const revertButton = element<HTMLButtonElement>(root, '.sprite-revert');
   const newButton = element<HTMLButtonElement>(root, '.sprite-new');
+  const documentActions = {
+    save: () => { void state.save(); },
+    revert: () => { void state.revert(); },
+    importDocument: () => fileInput.click(),
+    exportDocument: () => {
+      const text = state.exportDocument();
+      if (text === null || events.signal.aborted) return;
+      downloadJson('sprites.json', text);
+      options.onNotice('Exported sprites.json with rig, directional settings, uploaded PNGs and authored URL references.', 'info');
+    },
+  };
 
   for (const select of [newAnchorSelect, anchorSelect]) {
     for (const anchor of options.anchors) {
@@ -180,28 +198,22 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   deleteButton.addEventListener('click', () => {
     if (selectedId !== null) state.deleteLayer(selectedId);
   }, listen);
-  saveButton.addEventListener('click', () => void state.save(), listen);
-  revertButton.addEventListener('click', () => void state.revert(), listen);
+  saveButton.addEventListener('click', documentActions.save, listen);
+  revertButton.addEventListener('click', documentActions.revert, listen);
   newButton.addEventListener('click', () => {
     const snapshot = state.snapshot();
-    const hasContent = snapshot.document.layers.length > 0 || snapshot.document.images.length > 0 || snapshot.document.skeleton !== null;
-    if (hasContent && !window.confirm(
+    if (snapshot.hasContent && !window.confirm(
       'Start a new empty sprite layout? Unsaved changes will be discarded. Save or export first to keep them.',
     )) return;
     void state.newDocument();
   }, listen);
-  importButton.addEventListener('click', () => fileInput.click(), listen);
+  importButton.addEventListener('click', documentActions.importDocument, listen);
   fileInput.addEventListener('change', () => {
     const file = fileInput.files?.[0];
     fileInput.value = '';
     if (file !== undefined) void state.importDocument(file);
   }, listen);
-  exportButton.addEventListener('click', () => {
-    const text = state.exportDocument();
-    if (text === null || events.signal.aborted) return;
-    downloadJson('sprites.json', text);
-    options.onNotice('Exported sprites.json with uploaded PNGs and authored URL references.', 'info');
-  }, listen);
+  exportButton.addEventListener('click', documentActions.exportDocument, listen);
 
   function syncLayerOptions(layers: SpriteEditorSnapshot['document']['layers']): void {
     const wanted = layers.length === 0 ? [''] : layers.map((layer) => layer.id);
@@ -235,7 +247,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     selectedId = snapshot.selectedLayerId;
     const layer = snapshot.document.layers.find((candidate) => candidate.id === selectedId) ?? null;
     const disabledAll = snapshot.restoring || snapshot.busy;
-    const hasContent = snapshot.document.layers.length > 0 || snapshot.document.images.length > 0 || snapshot.document.skeleton !== null;
+    const hasContent = snapshot.hasContent;
 
     newAnchorSelect.disabled = disabledAll;
     newFileInput.disabled = disabledAll;
@@ -285,7 +297,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       message = 'Unsaved sprite changes. Save to keep them across reloads.';
       kind = 'draft';
     } else {
-      message = snapshot.document.layers.length === 0
+      message = !snapshot.hasContent
         ? 'No sprite layers yet. Add a PNG image above.'
         : 'Sprites saved on this device.';
       kind = 'ready';
@@ -299,16 +311,25 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     mount: element<HTMLDivElement>(root, '.sprite-skeleton-mount'),
     state, anchors: options.anchors, targetIds: options.targetIds, signal: events.signal,
   });
+  const directionalEditor = createDirectionalEditor({
+    mount: element<HTMLDivElement>(root, '.sprite-directional-mount'),
+    state, viewport: options.viewport, presentationState: () => options.rig.presentationState(),
+    actions: documentActions, signal: events.signal,
+  });
   const unsubscribe = state.subscribe(render);
   const ready = state.restore();
 
   return {
     ready,
     snapshot: () => state.snapshot(),
+    setActive: directionalEditor.setActive,
+    updatePreview: directionalEditor.updatePreview,
+    leavePreview: directionalEditor.leavePreview,
     dispose: () => {
       events.abort();
       unsubscribe();
       skeletonEditor.dispose();
+      directionalEditor.dispose();
       state.dispose();
       root.remove();
     },

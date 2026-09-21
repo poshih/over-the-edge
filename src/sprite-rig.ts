@@ -4,16 +4,21 @@ import {
   inspectPng,
   SPRITE_LIMITS,
   SpriteError,
+  validateDirectionalReferences,
   validateSpriteAnchors,
   validateSpriteLayer,
   validateSpriteMetadata,
   validateSpriteRigging,
 } from './sprite-data';
 import type { SpriteDocument, SpriteLayer } from './sprite-data';
+import { DirectionalError, validateDirectionalPresentation } from './directional-data';
+import type { DirectionalPresentation } from './directional-data';
+import { DirectionalPose } from './directional-pose';
+import type { DirectionalFrame } from './directional-pose';
 import { FACING_DIRECTIONS, SkeletonError, validateSkeleton, validateSkeletonPreview } from './skeleton-data';
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview } from './skeleton-data';
-import { SkeletonPose, restPose, facingDirection } from './skeleton-pose';
-import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as RuntimeBoneWorld } from './skeleton-pose';
+import { SkeletonPose, restPose } from './skeleton-pose';
+import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as RuntimeBoneWorld, SkeletonRotation } from './skeleton-pose';
 
 export interface SpriteAnchor {
   readonly node: THREE.Object3D;
@@ -80,7 +85,8 @@ interface Replacement {
 
 interface SkeletonRuntime {
   readonly definition: SkeletonDefinition;
-  readonly pose: SkeletonPose;
+  pose: SkeletonPose;
+  previewPose: SkeletonPose | null;
   readonly group: THREE.Group;
   readonly bones: readonly THREE.Bone[];
   readonly boneIndex: ReadonlyMap<string, number>;
@@ -95,14 +101,17 @@ interface BuildState {
   readonly layers: Map<string, LayerInstance>;
   readonly attachments: Map<string, Attachment>;
   readonly skeleton: SkeletonRuntime | null;
+  readonly presentation: DirectionalPresentation | null;
+  readonly mode: 'replace' | 'edit';
 }
 
 const ALPHA_CUTOFF = 0.5;
-const AIM_EPSILON = 1e-6;
 const TILE_EPSILON = 1e-6;
 const EMPTY_POSE: SkeletonPreview['pose'] = Object.freeze([]);
+const EMPTY_BONES: readonly string[] = Object.freeze([]);
 const EMPTY_TARGETS = new Map<string, RuntimeTarget>();
 const SKIN_SAMPLE_LIMIT = 4;
+const DIRECTION_STEP_DEGREES = 360 / FACING_DIRECTIONS.length;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 function cancellation(signal: AbortSignal): DOMException {
@@ -256,6 +265,13 @@ export class SpriteRig {
   private attachments = new Map<string, Attachment>();
   private skeleton: SkeletonRuntime | null = null;
   private preview: SkeletonPreview | null = null;
+  private presentation: DirectionalPresentation | null = null;
+  private directionPose = new DirectionalPose(null);
+  private previewDirectionPose: DirectionalPose | null = null;
+  private directionalPreview: { readonly aim: RuntimePoint } | null = null;
+  private previewTime = 0;
+  private rotatedLayers: readonly LegacyLayerInstance[] = [];
+  private displayedPresentation: Readonly<DirectionalFrame> = this.directionPose.snapshot();
   private replacement: Replacement | null = null;
   private disposed = false;
   private pendingDecodes = 0;
@@ -277,6 +293,8 @@ export class SpriteRig {
   private readonly tempWorld = new THREE.Vector3();
   private readonly tempWorldB = new THREE.Vector3();
   private readonly tempWorldC = new THREE.Vector3();
+  private readonly presentationPivot = new THREE.Vector3();
+  private readonly presentationMatrix = new THREE.Matrix4();
 
   constructor(anchors: ReadonlyMap<string, SpriteAnchor>, options: { root: THREE.Object3D; targetIds: readonly string[] }) {
     this.anchors = new Map(anchors);
@@ -338,7 +356,8 @@ export class SpriteRig {
         images.set(image.id, resource);
       }
       checkSignal(signal);
-      const next = this.buildState(document.layers, document.skeleton, images, resources, { mode: 'replace', preview: null });
+      const next = this.buildState(document.layers, document.skeleton, images, resources,
+        { mode: 'replace', presentation: document.presentation });
       operation.staged.clear();
       this.commit(next, { preview: null });
     } finally {
@@ -358,12 +377,15 @@ export class SpriteRig {
       const skeleton = definition === null ? null : validateSkeleton(definition);
       const layers = this.layerData();
       validateSpriteRigging(layers, skeleton);
-      validateSpriteAnchors({ schemaVersion: 2, images: [], layers, skeleton }, this.anchors.keys(), this.targetIds);
+      validateDirectionalReferences(this.presentation, layers, skeleton);
+      validateSpriteAnchors({ schemaVersion: 3, images: [], layers, skeleton, presentation: this.presentation },
+        this.anchors.keys(), this.targetIds);
       const preview = options.preview === null ? null : (() => {
         if (skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
         return validateSkeletonPreview(options.preview, skeleton);
       })();
-      const next = this.buildState(layers, skeleton, new Map(this.images), new Map(this.resources), { mode: 'edit', preview });
+      const next = this.buildState(layers, skeleton, new Map(this.images), new Map(this.resources),
+        { mode: 'edit', presentation: this.presentation });
       this.commit(next, { preview });
     } catch (error) {
       throw this.spriteFailure(error);
@@ -371,29 +393,110 @@ export class SpriteRig {
   }
 
   setPreview(preview: SkeletonPreview | null): void {
-    this.assertMutable();
+    this.assertLive();
+    if (preview !== null) this.assertMutable();
     try {
       if (preview !== null) {
         if (this.skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
         preview = validateSkeletonPreview(preview, this.skeleton.definition);
       }
-      if (this.skeleton !== null) {
-        this.updateSkeletonRoot(this.skeleton);
-        this.evaluateSkeleton(this.skeleton, this.queryDirection(null, preview), preview);
-      }
+      if (this.skeleton !== null && (this.preview === null || preview === null)) this.skeleton.previewPose = null;
       this.preview = preview;
+      this.directionalPreview = null;
+      this.previewDirectionPose = null;
       this.refreshScene({ forceVisibility: true });
     } catch (error) {
       throw this.spriteFailure(error);
     }
   }
 
+  configurePresentation(presentation: DirectionalPresentation | null): void {
+    this.assertMutable();
+    try {
+      const settings = presentation === null ? null : validateDirectionalPresentation(presentation);
+      const layers = this.layerData();
+      const skeleton = this.skeleton?.definition ?? null;
+      validateDirectionalReferences(settings, layers, skeleton);
+      validateSpriteAnchors({ schemaVersion: 3, images: [], layers, skeleton, presentation: settings },
+        this.anchors.keys(), this.targetIds);
+      const next = this.buildState(layers, skeleton, new Map(this.images), new Map(this.resources),
+        { mode: 'edit', presentation: settings });
+      this.commit(next, { preview: this.preview });
+    } catch (error) {
+      throw this.spriteFailure(error);
+    }
+  }
+
+  setDirectionalPreview(preview: { readonly aim: RuntimePoint } | null): void {
+    this.assertLive();
+    if (preview === null && this.directionalPreview === null) return;
+    if (preview !== null) this.assertMutable();
+    if (preview !== null && (!Number.isFinite(preview.aim.x) || !Number.isFinite(preview.aim.y))) {
+      throw new SpriteError('Directional preview aim must have finite coordinates.');
+    }
+    if (preview === null) {
+      this.directionalPreview = null;
+      this.previewDirectionPose = null;
+      if (this.skeleton !== null) this.skeleton.previewPose = null;
+    } else {
+      if (this.directionalPreview === null) {
+        this.previewTime = this.lastFrame.time;
+        this.previewDirectionPose = new DirectionalPose(this.presentation);
+        this.previewDirectionPose.update({ time: this.previewTime, aim: preview.aim });
+        if (this.skeleton !== null) this.skeleton.previewPose = null;
+      }
+      this.preview = null;
+      this.directionalPreview = { aim: point(preview.aim) };
+    }
+    this.refreshScene({ forceVisibility: true });
+  }
+
+  resetPresentation(): void {
+    this.assertLive();
+    this.directionPose.reset();
+    this.preview = null;
+    this.directionalPreview = null;
+    this.previewDirectionPose = null;
+    if (this.skeleton !== null) {
+      this.skeleton.pose = new SkeletonPose(this.skeleton.definition);
+      this.skeleton.pose.configureRotation(this.presentation === null ? EMPTY_BONES : this.presentation.bones);
+      this.skeleton.previewPose = null;
+    }
+  }
+
+  presentationState() {
+    const runtime = this.skeleton;
+    return {
+      ...this.displayedPresentation,
+      enabled: this.presentation !== null,
+      preview: this.directionalPreview !== null,
+      posePreview: this.preview !== null,
+      pivot: this.presentation === null ? null : {
+        x: this.presentationPivot.x, y: this.presentationPivot.y, z: this.presentationPivot.z,
+      },
+      sockets: runtime === null ? [] : runtime.definition.hair.map(chain => {
+        const index = runtime.boneIndex.get(chain.bones[0]);
+        if (index === undefined) throw new SpriteError(`Missing hair attachment "${chain.bones[0]}".`);
+        const bone = runtime.evaluated[index];
+        return { id: chain.id, bone: bone.id, x: bone.x + runtime.originWorld.x, y: bone.y + runtime.originWorld.y };
+      }),
+    };
+  }
+
   update(frame: {
     time: number;
+    dt?: number;
     aim: { x: number; y: number };
     targets: ReadonlyMap<string, { x: number; y: number; angle: number }>;
   }): void {
     this.assertLive();
+    const dt = frame.dt === undefined ? Math.max(0, frame.time - this.lastFrame.time) : frame.dt;
+    if (!Number.isFinite(dt) || dt < 0) throw new SpriteError('Sprite frame duration must be finite and nonnegative.');
+    this.directionPose.update(frame);
+    if (this.directionalPreview !== null && this.previewDirectionPose !== null) {
+      this.previewTime += dt;
+      this.previewDirectionPose.update({ time: this.previewTime, aim: this.directionalPreview.aim });
+    }
     this.hasFrame = true;
     this.lastFrame = {
       time: frame.time,
@@ -420,8 +523,9 @@ export class SpriteRig {
       nextLayers[index] = layer;
     }
     validateSpriteRigging(nextLayers, this.skeleton?.definition ?? null);
+    validateDirectionalReferences(this.presentation, nextLayers, this.skeleton?.definition ?? null);
     const next = this.buildState(nextLayers, this.skeleton?.definition ?? null, new Map(this.images), new Map(this.resources),
-      { mode: 'edit', preview: this.preview });
+      { mode: 'edit', presentation: this.presentation });
     this.commit(next, { preview: this.preview });
   }
 
@@ -429,8 +533,9 @@ export class SpriteRig {
     this.assertMutable();
     if (!this.layers.has(id)) throw new SpriteError(`Unknown sprite layer "${id}".`);
     const nextLayers = this.layerData().filter(layer => layer.id !== id);
+    validateDirectionalReferences(this.presentation, nextLayers, this.skeleton?.definition ?? null);
     const next = this.buildState(nextLayers, this.skeleton?.definition ?? null, new Map(this.images), new Map(this.resources),
-      { mode: 'edit', preview: this.preview });
+      { mode: 'edit', presentation: this.presentation });
     this.commit(next, { preview: this.preview });
   }
 
@@ -440,12 +545,12 @@ export class SpriteRig {
     return (this.attachments.get(anchor)?.count ?? 0) > 0;
   }
 
-  replaces(anchor: string, aim?: { x: number; y: number }): boolean {
+  replaces(anchor: string): boolean {
     this.assertLive();
     this.anchor(anchor);
     const attachment = this.attachments.get(anchor);
     if (attachment === undefined) return false;
-    return attachment.coverageCounts[directionIndex(this.queryDirection(aim))] > 0;
+    return attachment.coverageCounts[directionIndex(this.currentDirection)] > 0;
   }
 
   inspect() {
@@ -498,6 +603,7 @@ export class SpriteRig {
       texturesCreated: this.texturesCreated,
       texturesDisposed: this.texturesDisposed,
       direction: this.currentDirection,
+      presentation: this.presentationState(),
       animation: this.preview !== null ? this.preview.clip : this.hasFrame ? this.skeleton?.definition.animation ?? null : null,
       preview: this.preview === null ? null : {
         ...this.preview,
@@ -533,6 +639,9 @@ export class SpriteRig {
     this.detachScene();
     this.disposeLayers(this.layers.values());
     this.layers.clear();
+    this.rotatedLayers = [];
+    this.directionalPreview = null;
+    this.previewDirectionPose = null;
     this.disposeSkeleton(this.skeleton);
     this.skeleton = null;
     for (const resource of this.resources.values()) this.releaseResource(resource);
@@ -606,7 +715,7 @@ export class SpriteRig {
     definition: SkeletonDefinition | null,
     images: Map<string, ImageResource>,
     resources: Map<string, ImageResource>,
-    options: { mode: 'replace' | 'edit'; preview: SkeletonPreview | null },
+    options: { mode: 'replace' | 'edit'; presentation: DirectionalPresentation | null },
   ): BuildState {
     const attachments = new Map<string, Attachment>();
     const instances = new Map<string, LayerInstance>();
@@ -614,10 +723,6 @@ export class SpriteRig {
     try {
       skeleton = options.mode === 'edit' && definition === (this.skeleton?.definition ?? null)
         ? this.skeleton : definition === null ? null : this.createSkeleton(definition);
-      if (skeleton !== null && skeleton !== this.skeleton) {
-        this.updateSkeletonRoot(skeleton);
-        this.evaluateSkeleton(skeleton, this.queryDirection(null, options.preview), options.preview);
-      }
       for (const data of layers) {
         const image = images.get(data.image);
         if (image === undefined) throw new SpriteError(`Sprite ${data.id} references missing image "${data.image}".`);
@@ -638,7 +743,8 @@ export class SpriteRig {
         }
         instances.set(data.id, instance);
       }
-      return { resources, images, layers: instances, attachments, skeleton };
+      return { resources, images, layers: instances, attachments, skeleton,
+        presentation: options.presentation, mode: options.mode };
     } catch (error) {
       for (const instance of instances.values()) if (this.layers.get(instance.data.id) !== instance) this.disposeLayer(instance);
       if (skeleton !== this.skeleton) this.disposeSkeleton(skeleton);
@@ -668,6 +774,7 @@ export class SpriteRig {
       const runtime: SkeletonRuntime = {
         definition,
         pose,
+        previewPose: null,
         group,
         bones,
         boneIndex,
@@ -886,8 +993,13 @@ export class SpriteRig {
     const oldLayers = this.layers;
     const oldAttachments = this.attachments;
     const oldSkeleton = this.skeleton;
+    const resetDirection = next.mode === 'replace' || next.presentation !== this.presentation;
     const previousCoverage = new Map([...oldAttachments].map(([name, attachment]) => [name, attachment.covered]));
     const retained = new Set(next.layers.values());
+    for (const instance of this.rotatedLayers) {
+      instance.mesh.matrix.copy(instance.localMatrix);
+      instance.mesh.matrixWorldNeedsUpdate = true;
+    }
     this.detachScene();
     for (const layer of oldLayers.values()) if (!retained.has(layer)) layer.mesh.removeFromParent();
     this.resources = next.resources;
@@ -895,7 +1007,30 @@ export class SpriteRig {
     this.layers = next.layers;
     this.attachments = next.attachments;
     this.skeleton = next.skeleton;
+    this.presentation = next.presentation;
     this.preview = options.preview;
+    if (next.mode === 'replace' || this.preview !== null) {
+      this.directionalPreview = null;
+      this.previewDirectionPose = null;
+    }
+    if (resetDirection) {
+      this.directionPose = new DirectionalPose(this.presentation);
+      if (this.hasFrame) this.directionPose.update(this.lastFrame);
+      if (this.directionalPreview !== null) {
+        this.previewDirectionPose = new DirectionalPose(this.presentation);
+        this.previewDirectionPose.update({ time: this.previewTime, aim: this.directionalPreview.aim });
+      }
+    }
+    const rotationBones = this.presentation === null ? EMPTY_BONES : this.presentation.bones;
+    this.skeleton?.pose.configureRotation(rotationBones);
+    this.skeleton?.previewPose?.configureRotation(rotationBones);
+    this.rotatedLayers = this.presentation === null ? [] : this.presentation.layers.map(id => {
+      const instance = this.layers.get(id);
+      if (instance === undefined || instance.kind !== 'legacy') {
+        throw new SpriteError(`Directional layer "${id}" must be an unbound rigid layer.`);
+      }
+      return instance;
+    });
     for (const instance of this.layers.values()) {
       if (instance.tile !== null && instance.resource.texture.wrapS !== THREE.RepeatWrapping) {
         instance.resource.texture.wrapS = THREE.RepeatWrapping;
@@ -931,16 +1066,24 @@ export class SpriteRig {
   }
 
   private refreshScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = {}): void {
-    const direction = this.queryDirection();
+    this.displayedPresentation = this.activePresentation();
+    const direction = this.displayedPresentation.direction;
     const changedDirection = direction !== this.currentDirection;
     if (changedDirection) this.currentDirection = direction;
     if (options.forceVisibility || changedDirection) this.applyDirection(direction, options.notifyCoverage !== false);
+    if (this.presentation !== null) {
+      const { pivot } = this.presentation;
+      const anchor = this.anchor(pivot.anchor).node;
+      anchor.updateWorldMatrix(true, false);
+      this.presentationPivot.set(pivot.x, pivot.y, 0).applyMatrix4(anchor.matrixWorld);
+    }
     if (this.skeleton !== null) {
       this.updateSkeletonRoot(this.skeleton);
-      this.evaluateSkeleton(this.skeleton, direction, this.preview);
+      this.evaluateSkeleton(this.skeleton);
       this.updateBoneAttachments(this.skeleton);
       this.skeleton.group.updateWorldMatrix(true, true);
     }
+    this.rotateLayers();
     for (const attachment of this.attachments.values()) {
       // Manual local matrices must follow moving anchors before UV density is measured.
       if (attachment.legacyCount > 0) attachment.group.updateWorldMatrix(true, true, true);
@@ -952,11 +1095,49 @@ export class SpriteRig {
     }
   }
 
-  private queryDirection(aim: RuntimePoint | null = null, preview: SkeletonPreview | null = this.preview): FacingDirection {
-    if (preview !== null) return preview.direction;
-    aim ??= this.lastFrame.aim;
-    if (Math.hypot(aim.x, aim.y) <= AIM_EPSILON) return this.currentDirection;
-    return facingDirection(Math.atan2(aim.y, aim.x));
+  private activePresentation(): Readonly<DirectionalFrame> {
+    if (this.preview !== null) {
+      const index = directionIndex(this.preview.direction);
+      return {
+        direction: this.preview.direction,
+        aimAngle: this.presentation === null ? index * DIRECTION_STEP_DEGREES : this.presentation.directions[index].neutralAngle,
+        targetRotation: 0, displayedRotation: 0,
+      };
+    }
+    if (this.directionalPreview !== null) {
+      if (this.previewDirectionPose === null) throw new SpriteError('Directional preview is missing its presentation state.');
+      return this.previewDirectionPose.snapshot();
+    }
+    return this.directionPose.snapshot();
+  }
+
+  private rotateLayers(): void {
+    if (this.rotatedLayers.length === 0) return;
+    const angle = THREE.MathUtils.degToRad(this.displayedPresentation.displayedRotation);
+    const cosine = Math.cos(angle), sine = Math.sin(angle);
+    const { x, y } = this.presentationPivot;
+    this.presentationMatrix.makeRotationZ(angle).setPosition(x - cosine * x + sine * y, y - sine * x - cosine * y, 0);
+    for (const instance of this.rotatedLayers) {
+      if (!instance.visible) continue;
+      if (angle === 0) {
+        this.tempMatrixA.copy(instance.localMatrix);
+      } else {
+        const parent = instance.mesh.parent;
+        if (parent === null) throw new SpriteError(`Directional layer "${instance.data.name}" is not attached.`);
+        parent.updateWorldMatrix(true, false);
+        const determinant = parent.matrixWorld.determinant();
+        if (!Number.isFinite(determinant) || determinant === 0) {
+          throw new SpriteError(`Directional layer "${instance.data.name}" needs an invertible anchor transform.`);
+        }
+        this.tempMatrixA.copy(parent.matrixWorld).invert();
+        this.tempMatrixB.multiplyMatrices(this.presentationMatrix, parent.matrixWorld);
+        this.tempMatrixA.multiply(this.tempMatrixB).multiply(instance.localMatrix);
+      }
+      if (!instance.mesh.matrix.equals(this.tempMatrixA)) {
+        instance.mesh.matrix.copy(this.tempMatrixA);
+        instance.mesh.matrixWorldNeedsUpdate = true;
+      }
+    }
   }
 
   private applyDirection(direction: FacingDirection, notifyCoverage: boolean): void {
@@ -988,34 +1169,44 @@ export class SpriteRig {
     runtime.group.matrixWorldNeedsUpdate = true;
   }
 
-  private evaluateSkeleton(runtime: SkeletonRuntime, direction: FacingDirection, preview: SkeletonPreview | null): void {
+  private skeletonRotation(runtime: SkeletonRuntime, frame: Readonly<DirectionalFrame>): SkeletonRotation | null {
+    if (this.presentation === null || !this.presentation.rotation || this.presentation.bones.length === 0) return null;
+    return {
+      pivot: { x: this.presentationPivot.x - runtime.originWorld.x, y: this.presentationPivot.y - runtime.originWorld.y },
+      angle: THREE.MathUtils.degToRad(frame.displayedRotation),
+    };
+  }
+
+  private evaluateSkeleton(runtime: SkeletonRuntime): void {
     try {
-      const input = preview !== null ? {
-        time: preview.time,
-        origin: runtime.originWorld,
-        direction: preview.direction,
-        targets: this.rigTargets(runtime.originWorld),
-        clip: preview.clip,
-        pose: preview.pose,
-        constraints: preview.constraints,
-      } : !this.hasFrame ? {
+      const live = this.directionPose.snapshot();
+      const constraints: 'enabled' | 'disabled' = this.hasFrame ? 'enabled' : 'disabled';
+      const input = {
         time: this.lastFrame.time,
         origin: runtime.originWorld,
-        direction,
-        targets: EMPTY_TARGETS,
-        clip: null,
+        direction: live.direction,
+        targets: this.hasFrame ? this.rigTargets(runtime.originWorld) : EMPTY_TARGETS,
+        clip: this.hasFrame ? runtime.definition.animation : null,
         pose: EMPTY_POSE,
-        constraints: 'disabled' as const,
-      } : {
-        time: this.lastFrame.time,
-        origin: runtime.originWorld,
-        direction,
-        targets: this.rigTargets(runtime.originWorld),
-        clip: runtime.definition.animation,
-        pose: EMPTY_POSE,
-        constraints: 'enabled' as const,
+        constraints,
+        rotation: this.skeletonRotation(runtime, live),
       };
-      const bones = runtime.pose.evaluate(input);
+      // Keep the live braid running independently while an editor preview owns the displayed pose.
+      let bones = runtime.pose.evaluate(input);
+      if (this.preview !== null || this.directionalPreview !== null) {
+        if (runtime.previewPose === null) {
+          runtime.previewPose = runtime.pose.fork();
+        }
+        bones = runtime.previewPose.evaluate({
+          ...input,
+          time: this.preview === null ? this.previewTime : this.preview.time,
+          direction: this.displayedPresentation.direction,
+          clip: this.preview === null ? input.clip : this.preview.clip,
+          pose: this.preview === null ? EMPTY_POSE : this.preview.pose,
+          constraints: this.preview === null ? constraints : this.preview.constraints,
+          rotation: this.skeletonRotation(runtime, this.displayedPresentation),
+        });
+      }
       runtime.evaluated = bones;
       this.applyBoneMatrices(runtime, bones);
       runtime.skeleton.update();
@@ -1147,6 +1338,7 @@ export class SpriteRig {
   private spriteFailure(error: unknown): SpriteError {
     if (error instanceof SpriteError) return error;
     if (error instanceof SkeletonError) return new SpriteError(error.message, { cause: error });
+    if (error instanceof DirectionalError) return new SpriteError(error.message, { cause: error });
     throw error;
   }
 }

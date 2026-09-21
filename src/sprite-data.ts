@@ -1,3 +1,8 @@
+import {
+  DIRECTIONAL_LIMITS, DirectionalError, validateDirectionalPresentation,
+  validateDirectionalReferences as validatePresentationReferences,
+} from './directional-data.ts';
+import type { DirectionalPresentation } from './directional-data.ts';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, validateSkeleton, validateSkin } from './skeleton-data.ts';
 import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
 
@@ -30,14 +35,16 @@ export interface SpriteLayer {
 }
 
 export interface SpriteDocument {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly images: readonly SpriteImage[];
   readonly layers: readonly SpriteLayer[];
   readonly skeleton: SkeletonDefinition | null;
+  // null preserves legacy fixed-sector facing without presentation rotation.
+  readonly presentation: DirectionalPresentation | null;
 }
 
 export const SPRITE_LIMITS = {
-  layers: 256,
+  layers: DIRECTIONAL_LIMITS.layers,
   images: 128,
   id: 80,
   name: 120,
@@ -69,7 +76,7 @@ export const SPRITE_FIELDS = [
 ] as const;
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
-  schemaVersion: 2, images: Object.freeze([]), layers: Object.freeze([]), skeleton: null,
+  schemaVersion: 3, images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
 
 export class SpriteError extends Error {}
@@ -222,13 +229,17 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
 
 // The loader validates image bytes as it acquires them, without decoding cached sources again.
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
-  const legacy = typeof value === 'object' && value !== null && Reflect.get(value, 'schemaVersion') === 1;
-  const document = record(value, legacy ? ['schemaVersion', 'images', 'layers'] :
-    ['schemaVersion', 'images', 'layers', 'skeleton'], 'A sprite document');
-  if (document.schemaVersion !== 1 && document.schemaVersion !== 2 ||
-    !Array.isArray(document.images) || !Array.isArray(document.layers) ||
+  const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
+  if (version !== 1 && version !== 2 && version !== 3) {
+    throw new SpriteError('Sprite documents require schema version 1, 2 or 3.');
+  }
+  const legacy = version === 1;
+  const document = record(value, legacy ? ['schemaVersion', 'images', 'layers'] : version === 2 ?
+    ['schemaVersion', 'images', 'layers', 'skeleton'] :
+    ['schemaVersion', 'images', 'layers', 'skeleton', 'presentation'], 'A sprite document');
+  if (!Array.isArray(document.images) || !Array.isArray(document.layers) ||
     document.images.length > SPRITE_LIMITS.images || document.layers.length > SPRITE_LIMITS.layers) {
-    throw new SpriteError(`Sprite documents use schema 2, at most ${SPRITE_LIMITS.images} images and ${SPRITE_LIMITS.layers} layers.`);
+    throw new SpriteError(`Sprite documents allow at most ${SPRITE_LIMITS.images} images and ${SPRITE_LIMITS.layers} layers.`);
   }
   const imageIds = new Set<string>();
   let bytes = 0;
@@ -259,15 +270,18 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   });
   if (usedImages.size !== imageIds.size) throw new SpriteError('Remove images that are not used by any sprite layer.');
   let skeleton: SkeletonDefinition | null;
+  let presentation: DirectionalPresentation | null;
   try {
     skeleton = legacy || document.skeleton === null ? null : validateSkeleton(document.skeleton);
+    presentation = version !== 3 || document.presentation === null ? null : validateDirectionalPresentation(document.presentation);
   } catch (error) {
-    if (error instanceof SkeletonError) throw new SpriteError(error.message, { cause: error });
+    if (error instanceof SkeletonError || error instanceof DirectionalError) throw new SpriteError(error.message, { cause: error });
     throw error;
   }
   validateSpriteRigging(layers, skeleton);
+  validateDirectionalReferences(presentation, layers, skeleton);
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: 2, images: Object.freeze(images), layers: Object.freeze(layers), skeleton,
+    schemaVersion: 3, images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation,
   });
   validateSpriteBudget(result);
   return result;
@@ -306,6 +320,19 @@ export function validateSpriteRigging(layers: readonly SpriteLayer[], skeleton: 
   if (vertices > SKELETON_LIMITS.vertices) throw new SpriteError(`Weighted sprites exceed the ${SKELETON_LIMITS.vertices}-vertex budget.`);
 }
 
+export function validateDirectionalReferences(
+  presentation: DirectionalPresentation | null,
+  layers: readonly SpriteLayer[],
+  skeleton: SkeletonDefinition | null,
+): void {
+  try {
+    validatePresentationReferences(presentation, layers, skeleton);
+  } catch (error) {
+    if (error instanceof DirectionalError) throw new SpriteError(error.message, { cause: error });
+    throw error;
+  }
+}
+
 export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>, targets?: Iterable<string>): void {
   const available = new Set(anchors);
   for (const layer of document.layers) {
@@ -318,6 +345,10 @@ export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterabl
       if (!ports.has(ik.target)) throw new SpriteError(`Unknown IK target "${ik.target}".`);
     }
   }
+  if (document.presentation !== null && !available.has(document.presentation.pivot.anchor)) {
+    throw new SpriteError(`Unknown directional pivot anchor "${document.presentation.pivot.anchor}".`);
+  }
+  validateDirectionalReferences(document.presentation, document.layers, document.skeleton);
 }
 
 export function parseSpriteDocument(serialized: string): SpriteDocument {

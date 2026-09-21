@@ -195,6 +195,9 @@ function buildBoneOptions(definition: SkeletonDefinition | null, blankLabel: str
 }
 
 function boneDeleteProblem(snapshot: SpriteEditorSnapshot, definition: SkeletonDefinition, boneId: string): string | null {
+  if (snapshot.document.presentation?.bones.includes(boneId)) {
+    return 'Remove this bone from Directional Presentation before deleting it.';
+  }
   if (definition.bones.length <= 1) return 'A skeleton needs at least one bone. Delete the whole skeleton instead.';
   if (definition.bones.some(bone => bone.parent === boneId)) {
     return 'Delete or reparent child bones before deleting this bone.';
@@ -224,6 +227,9 @@ function boneDeleteProblem(snapshot: SpriteEditorSnapshot, definition: SkeletonD
 }
 
 function skeletonDeleteProblem(snapshot: SpriteEditorSnapshot): string | null {
+  if (snapshot.document.presentation !== null && snapshot.document.presentation.bones.length > 0) {
+    return 'Clear controlled bones in Directional Presentation before deleting the skeleton.';
+  }
   if (snapshot.document.layers.some(layer => layer.bone !== null || layer.skin !== null)) {
     return 'Clear sprite bone bindings and meshes before deleting the skeleton.';
   }
@@ -1065,6 +1071,9 @@ export function createSkeletonEditor(options: {
     } else if (skeleton === null) {
       message = 'No skeleton yet. Create one to enable bone binding, animation and constraints.';
       kind = snapshot.dirty ? 'draft' : 'ready';
+    } else if (snapshot.directionalPreview) {
+      message = 'Directional aim preview is active on the game canvas. Return to live to end the preview.';
+      kind = 'draft';
     } else if (snapshot.preview !== null) {
       message = 'Explicit preview active. Return to live to resume the game-driven clip.';
       kind = 'draft';
@@ -1240,7 +1249,7 @@ export function createSkeletonEditor(options: {
     clearFramePoseButton.disabled = disabledAll || frame === null || bone === null || selectedFramePose === null;
     previewModeSelect.disabled = disabledAll || skeleton === null;
     previewConstraintsSelect.disabled = disabledAll || skeleton === null || previewMode === 'live';
-    previewLiveButton.disabled = disabledAll || snapshot.preview === null;
+    previewLiveButton.disabled = disabledAll || snapshot.preview === null && !snapshot.directionalPreview;
     if (previewModeSelect.value !== previewMode) previewModeSelect.value = previewMode;
     if (previewConstraintsSelect.value !== previewConstraints) previewConstraintsSelect.value = previewConstraints;
     previewTimeControl.input.disabled = disabledAll || previewMode !== 'clip' || clip === null;

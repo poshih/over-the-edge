@@ -4,6 +4,8 @@ import {
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteLayer, SpriteOffset } from '../sprite-data';
+import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
+import type { DirectionalPresentation } from '../directional-data';
 import { SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin } from '../skeleton-data';
 import { autoWeights, restPose } from '../skeleton-pose';
@@ -38,12 +40,14 @@ export interface SpriteEditorSnapshot {
   readonly busy: boolean;
   readonly error: string | null;
   readonly dirty: boolean;
+  readonly hasContent: boolean;
   readonly anchors: readonly SpriteAnchorInput[];
   readonly document: SpriteDocument;
   readonly saved: SpriteDocument | null;
   readonly selectedLayerId: string | null;
   readonly externalSources: boolean;
   readonly preview: SkeletonPreview | null;
+  readonly directionalPreview: boolean;
 }
 
 interface StoredSprites {
@@ -57,6 +61,10 @@ function isEmbedded(source: string): boolean {
 
 function isAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function isDocumentError(error: unknown): error is SpriteError | SkeletonError | DirectionalError {
+  return error instanceof SpriteError || error instanceof SkeletonError || error instanceof DirectionalError;
 }
 
 function nextId(prefix: string, taken: ReadonlySet<string>): string {
@@ -84,11 +92,16 @@ function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (left === right) return true;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
   return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
+    samePresentation(left.presentation, right.presentation) &&
     left.layers.every((layer, index) => sameLayer(layer, right.layers[index])) &&
     (left.images === right.images || left.images.every((image, index) => {
       const other = right.images[index];
       return image === other || image.id === other.id && image.name === other.name && image.source === other.source;
     }));
+}
+
+function samePresentation(left: DirectionalPresentation | null, right: DirectionalPresentation | null): boolean {
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
 
 function fitWithinAnchor(anchor: SpriteAnchorInput, size: { width: number; height: number }): { width: number; height: number } {
@@ -119,6 +132,7 @@ export class SpriteEditorState {
   private saved: SpriteDocument | null = null;
   private selectedLayerId: string | null = null;
   private preview: SkeletonPreview | null = null;
+  private directionalPreview = false;
   private restoring = true;
   private busy = false;
   private error: string | null = null;
@@ -170,7 +184,7 @@ export class SpriteEditorState {
         document = this.validateRecord(record.value);
         validateSpriteAnchors(document, this.anchorIds, this.targetIds);
       } catch (error) {
-        if (!(error instanceof SpriteError)) throw error;
+        if (!isDocumentError(error)) throw error;
         this.reportError(`Saved sprites were invalid and were left untouched in storage: ${error.message}`);
         return;
       }
@@ -182,7 +196,7 @@ export class SpriteEditorState {
       this.warnExternalSources(document);
     } catch (error) {
       if (this.disposed && isAbort(error)) return;
-      if (!(error instanceof SpriteError || error instanceof VisualStoreError)) throw error;
+      if (!(isDocumentError(error) || error instanceof VisualStoreError)) throw error;
       if (!this.disposed) this.reportError(error.message);
     } finally {
       this.restoring = false;
@@ -196,12 +210,15 @@ export class SpriteEditorState {
       busy: this.busy,
       error: this.error,
       dirty: this.saved === null || !sameDocument(this.draft, this.saved),
+      hasContent: this.draft.layers.length > 0 || this.draft.images.length > 0 ||
+        this.draft.skeleton !== null || this.draft.presentation !== null,
       anchors: this.anchors,
       document: this.draft,
       saved: this.saved,
       selectedLayerId: this.selectedLayerId,
       externalSources: this.draft.images.some((image) => !isEmbedded(image.source)),
       preview: this.preview,
+      directionalPreview: this.directionalPreview,
     };
   }
 
@@ -290,12 +307,11 @@ export class SpriteEditorState {
       const document = Object.freeze({
         ...this.draft, layers: Object.freeze(this.draft.layers.map(candidate => candidate.id === id ? layer : candidate)),
       });
-      validateSpriteRigging(document.layers, document.skeleton);
-      validateSpriteBudget(document);
+      this.validateDraft(document);
       this.rig.upsert(layer);
       this.draft = document;
     } catch (error) {
-      if (!(error instanceof SpriteError)) throw error;
+      if (!isDocumentError(error)) throw error;
       this.reportError(error.message);
       return;
     }
@@ -306,18 +322,20 @@ export class SpriteEditorState {
   deleteLayer(id: string): void {
     if (!this.canEdit()) return;
     if (!this.draft.layers.some((layer) => layer.id === id)) throw new Error(`Unknown sprite layer "${id}".`);
-    try {
-      this.rig.remove(id);
-    } catch (error) {
-      if (!(error instanceof SpriteError)) throw error;
-      this.reportError(error.message);
-      return;
-    }
     const layers = this.draft.layers.filter((layer) => layer.id !== id);
     const used = new Set(layers.map((layer) => layer.image));
     const images = this.draft.images.filter((image) => used.has(image.id));
+    const document = Object.freeze({ ...this.draft, images: Object.freeze(images), layers: Object.freeze(layers) });
+    try {
+      this.validateDraft(document);
+      this.rig.remove(id);
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message);
+      return;
+    }
     this.error = null;
-    this.draft = Object.freeze({ ...this.draft, images: Object.freeze(images), layers: Object.freeze(layers) });
+    this.draft = document;
     if (this.selectedLayerId === id) this.selectedLayerId = layers[0]?.id ?? null;
     this.changed();
   }
@@ -326,6 +344,7 @@ export class SpriteEditorState {
     if (!this.canEdit()) return;
     await this.run(async () => {
       const document = validateSpriteDocument(this.draft);
+      this.validateDraft(document);
       await this.store.write({ id: 'active', document });
       if (this.disposed) return;
       this.saved = document;
@@ -338,9 +357,7 @@ export class SpriteEditorState {
     try {
       const skeleton = value === null ? null : validateSkeleton(value);
       const document = Object.freeze({ ...this.draft, skeleton });
-      validateSpriteRigging(document.layers, skeleton);
-      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
-      validateSpriteBudget(document);
+      this.validateDraft(document);
       let preview = options.preview === undefined ? this.preview : options.preview;
       if (skeleton === null) {
         if (options.preview !== undefined && preview !== null) throw new SpriteError('A preview requires a skeleton.');
@@ -352,33 +369,102 @@ export class SpriteEditorState {
         preview = options.preview === undefined && (missingClip || missingBone) ? null : validateSkeletonPreview(current, skeleton);
       }
       this.rig.configureSkeleton(skeleton, { preview });
+      this.rig.setDirectionalPreview(null);
       this.preview = preview;
+      this.directionalPreview = false;
       this.draft = document;
       this.error = null;
       this.changed();
     } catch (error) {
-      if (!(error instanceof SpriteError || error instanceof SkeletonError)) throw error;
+      if (!isDocumentError(error)) throw error;
       this.reportError(error.message);
     }
   }
 
   setPreview(value: SkeletonPreview | null): void {
+    if (value === null) {
+      this.leavePreview();
+      return;
+    }
     if (!this.canEdit()) return;
     try {
-      let preview: SkeletonPreview | null = null;
-      if (value !== null) {
-        const skeleton = this.draft.skeleton;
-        if (skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
-        preview = validateSkeletonPreview(value, skeleton);
-      }
+      const skeleton = this.draft.skeleton;
+      if (skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
+      const preview = validateSkeletonPreview(value, skeleton);
       this.rig.setPreview(preview);
       this.preview = preview;
+      this.directionalPreview = false;
       this.error = null;
       this.changed();
     } catch (error) {
-      if (!(error instanceof SpriteError || error instanceof SkeletonError)) throw error;
+      if (!isDocumentError(error)) throw error;
       this.reportError(error.message);
     }
+  }
+
+  setPresentation(value: DirectionalPresentation | null): boolean {
+    if (!this.canEdit()) return false;
+    try {
+      const presentation = value === null ? null : validateDirectionalPresentation(value);
+      const document = Object.freeze({ ...this.draft, presentation });
+      this.validateDraft(document);
+      if (samePresentation(this.draft.presentation, presentation)) {
+        if (this.error !== null) {
+          this.error = null;
+          this.changed();
+        }
+        return true;
+      }
+      this.rig.configurePresentation(presentation);
+      this.draft = document;
+      this.error = null;
+      this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message);
+      return false;
+    }
+  }
+
+  setDirectionalPreview(value: { readonly aim: { readonly x: number; readonly y: number } } | null): boolean {
+    if (this.disposed) return false;
+    if (value === null) {
+      this.rig.setDirectionalPreview(null);
+      if (this.directionalPreview) {
+        this.directionalPreview = false;
+        this.changed();
+      }
+      return true;
+    }
+    if (!this.canEdit()) return false;
+    try {
+      if (![value.aim.x, value.aim.y].every(Number.isFinite) || value.aim.x === 0 && value.aim.y === 0) {
+        throw new DirectionalError('Preview aim must be a finite, nonzero vector.');
+      }
+      const notify = !this.directionalPreview || this.preview !== null || this.error !== null;
+      this.rig.setDirectionalPreview(value);
+      this.preview = null;
+      this.directionalPreview = true;
+      this.error = null;
+      // Aim movement is transient; subscribers only need preview-mode transitions.
+      if (notify) this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message);
+      return false;
+    }
+  }
+
+  leavePreview(): void {
+    if (this.disposed) return;
+    const changed = this.preview !== null || this.directionalPreview;
+    this.rig.setDirectionalPreview(null);
+    if (this.preview !== null) this.rig.setPreview(null);
+    this.preview = null;
+    this.directionalPreview = false;
+    if (changed) this.changed();
   }
 
   bindMesh(id: string, options: { columns: number; rows: number; bones: readonly string[] }): void {
@@ -411,7 +497,7 @@ export class SpriteEditorState {
       const skin = { columns, rows, weights: autoWeights(this.draft.skeleton, positions, options.bones) };
       this.updateLayer(id, { skin, bone: null, tileLength: null, x: xOffset, y: yOffset, rotation });
     } catch (error) {
-      if (!(error instanceof SpriteError || error instanceof SkeletonError)) throw error;
+      if (!isDocumentError(error)) throw error;
       this.reportError(error.message);
     }
   }
@@ -464,9 +550,11 @@ export class SpriteEditorState {
   exportDocument(): string | null {
     if (!this.canEdit()) return null;
     try {
-      return JSON.stringify(validateSpriteDocument(this.draft));
+      const document = validateSpriteDocument(this.draft);
+      this.validateDraft(document);
+      return JSON.stringify(document);
     } catch (error) {
-      if (!(error instanceof SpriteError)) throw error;
+      if (!isDocumentError(error)) throw error;
       this.reportError(error.message);
       return null;
     }
@@ -474,6 +562,7 @@ export class SpriteEditorState {
 
   dispose(): void {
     if (this.disposed) return;
+    this.leavePreview();
     this.disposed = true;
     this.lifecycle.abort(new DOMException('The sprite editor was disposed.', 'AbortError'));
     this.listeners.clear();
@@ -498,8 +587,17 @@ export class SpriteEditorState {
   }
 
   private async replaceRig(document: SpriteDocument): Promise<void> {
+    this.validateDraft(document);
+    this.leavePreview();
     await this.rig.replace(document, { signal: this.lifecycle.signal });
     this.preview = null;
+    this.directionalPreview = false;
+  }
+
+  private validateDraft(document: SpriteDocument): void {
+    validateSpriteRigging(document.layers, document.skeleton);
+    validateSpriteAnchors(document, this.anchorIds, this.targetIds);
+    validateSpriteBudget(document);
   }
 
   private canEdit(): boolean {
@@ -512,9 +610,10 @@ export class SpriteEditorState {
   }
 
   private reportError(message: string): void {
+    const repeated = this.error === message;
     this.error = message;
     if (!this.disposed) {
-      this.notice(message, 'error');
+      if (!repeated) this.notice(message, 'error');
       this.changed();
     }
   }
@@ -527,7 +626,7 @@ export class SpriteEditorState {
       await operation();
     } catch (error) {
       if (this.disposed && isAbort(error)) return;
-      if (!(error instanceof SpriteError || error instanceof VisualStoreError)) throw error;
+      if (!(isDocumentError(error) || error instanceof VisualStoreError)) throw error;
       if (!this.disposed) this.reportError(error.message);
     } finally {
       this.busy = false;

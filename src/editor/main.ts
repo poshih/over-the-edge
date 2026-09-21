@@ -68,6 +68,7 @@ const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
 }));
 const spriteEditor = createSpriteEditor({
   mount: ui.spriteMount, rig: game.view.sprites, onNotice: ui.notice,
+  viewport: { canvas, project: (point) => game.view.project(point) },
   targetIds: SPRITE_TARGET_IDS,
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);
@@ -93,11 +94,13 @@ const levelEditor = createLevelEditor({
 });
 
 function resetPractice(id: PracticeId): void {
+  spriteEditor.leavePreview();
   practice = id;
   game.reset(id === 'start' ? levelSpawn(level.definition()) : practiceById(id));
 }
 
 function updateWorkshop(state: WorkshopState): void {
+  spriteEditor.setActive(state.open && state.tab === 'sprites');
   const nextEditing = state.open && state.tab === 'level';
   if (nextEditing !== editing) {
     editing = nextEditing;
@@ -121,11 +124,13 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
   }
   if (action === 'play') {
     if (editing && !levelEditor.preparePlay()) return;
+    spriteEditor.leavePreview();
     const startFromLevel = editing;
     const workshop = ui.workshopState();
     if (editing || workshop.compact) ui.closeWorkshop();
     if (startFromLevel) resetPractice('start');
   }
+  if (action === 'pause' && game.pauseState().length > 0) spriteEditor.leavePreview();
   game.perform(action, options);
 }
 
@@ -166,7 +171,10 @@ declare global {
 window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
 void appearance.restore();
-game.start((state) => ui.update({ ...state, debug, practice }));
+game.start((state) => {
+  ui.update({ ...state, debug, practice });
+  spriteEditor.updatePreview();
+});
 
 if (import.meta.hot) {
   import.meta.hot.accept();

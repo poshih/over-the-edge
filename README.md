@@ -532,6 +532,14 @@ hair with body circles. Save/export includes the complete rig; `GAME_SPRITES`
 bundles it without the editor. Supply directional artwork yourself. Rigging
 changes the character's appearance, not its physics or hammer reach.
 
+**Directional Presentation** adds shared angle-sector boundaries, per-direction
+hysteresis, and smoothly limited head rotation around an authored neck pivot.
+Explicitly selected face, crown, and head owners move together; braid sockets
+follow before hair constraints run, without resetting the remaining particles.
+The editor's visual-only aim preview is separate from live gameplay state.
+See [directional controls and lifecycle](docs/sprites.md#directional-presentation).
+Older sprite layouts keep their fixed-sector behavior until opted in.
+
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
 Parts can be replaced independently: pot, torso/neck, character head, each upper
 arm, forearm, elbow and hand, the full hammer shaft, and the hammer head. Parts

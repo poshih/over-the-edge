@@ -26,6 +26,11 @@ export interface BoneWorld extends RigPoint {
   readonly length: number;
 }
 
+export interface SkeletonRotation {
+  readonly pivot: RigPoint;
+  readonly angle: number;
+}
+
 const DEG_TO_RAD = Math.PI / 180;
 const EIGHTH_TURN = Math.PI / 4;
 const JOINT_TOLERANCE = 1e-6;
@@ -39,6 +44,9 @@ const HAIR_TIME_EPSILON = 1e-9;
 const HAIR_CONSTRAINT_ITERATIONS = 8;
 const HAIR_STIFFNESS_FACTOR = 0.35;
 const HAIR_COLLISION_SLOP = 1e-6;
+const HAIR_STATE_VECTORS = [
+  'currentX', 'currentY', 'previousX', 'previousY', 'targetX', 'targetY', 'solvedTargetX', 'solvedTargetY',
+] as const;
 
 interface DensePose {
   readonly x: Float64Array;
@@ -431,6 +439,8 @@ export class SkeletonPose {
   private lastEvaluatedTime: number | null = null;
   private hairRemainder = 0;
   private constraintsActive = false;
+  private rotationRoots: readonly number[] = [];
+  private rotationTopology: readonly number[] = [];
 
   constructor(definition: SkeletonDefinition) {
     this.definition = definition;
@@ -473,6 +483,36 @@ export class SkeletonPose {
     this.solvedColliderWorldY = new Float64Array(this.colliders.length);
   }
 
+  configureRotation(bones: readonly string[]): void {
+    this.rotationRoots = bones.map(id => this.requireBone(id, 'Directional rotation bone'));
+    const roots = new Set(this.rotationRoots);
+    const affected = new Set<number>();
+    this.rotationTopology = this.topology.filter(index => {
+      if (!roots.has(index) && !affected.has(this.parentIndex[index])) return false;
+      affected.add(index);
+      return true;
+    });
+  }
+
+  fork(): SkeletonPose {
+    const copy = new SkeletonPose(this.definition);
+    copy.rotationRoots = this.rotationRoots;
+    copy.rotationTopology = this.rotationTopology;
+    copy.lastEvaluatedTime = this.lastEvaluatedTime;
+    copy.hairRemainder = this.hairRemainder;
+    copy.constraintsActive = this.constraintsActive;
+    copy.colliderWorldX.set(this.colliderWorldX);
+    copy.colliderWorldY.set(this.colliderWorldY);
+    copy.solvedColliderWorldX.set(this.solvedColliderWorldX);
+    copy.solvedColliderWorldY.set(this.solvedColliderWorldY);
+    for (const [index, chain] of this.hair.entries()) {
+      const state = copy.hair[index].state;
+      for (const key of HAIR_STATE_VECTORS) state[key].set(chain.state[key]);
+      state.initialized = chain.state.initialized;
+    }
+    return copy;
+  }
+
   evaluate(options: {
     time: number;
     origin: RigPoint;
@@ -481,6 +521,7 @@ export class SkeletonPose {
     clip: string | null;
     pose: readonly BonePose[];
     constraints: 'enabled' | 'disabled';
+    rotation?: SkeletonRotation | null;
   }): readonly BoneWorld[] {
     const time = requireFinite(options.time, 'Pose time');
     requirePoint(options.origin, 'Pose origin');
@@ -509,13 +550,15 @@ export class SkeletonPose {
 
     reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle);
 
+    if (options.constraints === 'enabled') this.solveIk(options.targets);
+    if (options.rotation !== undefined && options.rotation !== null) this.applyRotation(options.rotation);
+
     if (options.constraints === 'disabled') {
       this.constraintsActive = false;
       this.lastEvaluatedTime = time;
       return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle);
     }
 
-    this.solveIk(options.targets);
     if (this.hair.length > 0) this.solveHair(time, options.origin);
     else {
       this.constraintsActive = true;
@@ -523,6 +566,32 @@ export class SkeletonPose {
     }
 
     return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle);
+  }
+
+  private applyRotation(rotation: SkeletonRotation): void {
+    requireFinite(rotation.angle, 'Directional rotation');
+    requirePoint(rotation.pivot, 'Directional pivot');
+    if (rotation.angle === 0 || this.rotationRoots.length === 0) return;
+    for (const bone of this.rotationRoots) {
+      const x = this.worldX[bone] - rotation.pivot.x;
+      const y = this.worldY[bone] - rotation.pivot.y;
+      const rotatedX = rotation.pivot.x + rotateX(x, y, rotation.angle);
+      const rotatedY = rotation.pivot.y + rotateY(x, y, rotation.angle);
+      const parent = this.parentIndex[bone];
+      if (parent < 0) {
+        this.localX[bone] = rotatedX;
+        this.localY[bone] = rotatedY;
+      } else {
+        const dx = rotatedX - this.worldX[parent];
+        const dy = rotatedY - this.worldY[parent];
+        this.localX[bone] = rotateX(dx, dy, -this.worldAngle[parent]);
+        this.localY[bone] = rotateY(dx, dy, -this.worldAngle[parent]);
+      }
+      this.localAngle[bone] += rotation.angle;
+    }
+    // Move sockets and their collision guides before hair consumes them; particles stay in world space.
+    reflowPose(this.rotationTopology, this.parentIndex, this.localX, this.localY, this.localAngle,
+      this.worldX, this.worldY, this.worldAngle);
   }
 
   private requireBone(id: string, label: string): number {

@@ -83,6 +83,104 @@ clips, directional poses, and the default clip travel with the layout.
 Direction masks cannot invent unseen artwork. Supply the front/back/side images
 you need; a single PNG is not converted into a rotating 3D character.
 
+### Directional presentation
+
+Open **Sprites / Directional Presentation** to opt a layout into custom
+selection ranges, hysteresis, and limited aim-following rotation. The existing
+game viewport is the live character preview; the panel's aim handle changes
+only the visual preview, never the hammer target or gameplay input. The preview
+shows the neck pivot and braid attachment sockets, with readouts for aim,
+selected direction, target rotation, and displayed rotation.
+
+All angles in this panel and its saved settings are degrees: **right = 0,
+up = 90, left = 180, down = 270**, increasing counterclockwise. The diagram
+uses that convention even though screen Y increases downward. Existing sprite
+rotation remains a separate, static local artwork offset.
+
+The eight rows have three independent kinds of range:
+
+| Setting | Meaning |
+| --- | --- |
+| Selection start/end | Which image to choose when initializing or leaving the current hold range |
+| Clockwise/counterclockwise hold | Additional angle on either side where the active image may remain selected |
+| Minimum/maximum rotation | Allowed additional visual tilt, independent of selection and hold |
+| Neutral aim | Aim angle represented by the image at zero additional tilt |
+| Response time | Exponential damping time constant in seconds; zero responds immediately |
+
+Selection edges are shared. Editing one row's end also edits the next row's
+start, including the edge across zero. Ranges must make exactly one complete
+counterclockwise circle without gaps, overlaps, or empty sectors. A selection
+range includes its start and excludes its end: at an exact shared edge, the
+direction starting at that edge wins. Invalid edits are reported and leave
+the last valid draft intact.
+
+When hysteresis is enabled, the active direction wins throughout its expanded
+hold range, including either hold boundary. Hold ranges may overlap, but each
+must remain smaller than a full turn. For example, right can select from
+337.5 to 22.5 degrees and hold from 330 to 30 degrees. While right is active,
+25 degrees retains it; moving past 30 selects the destination sector directly.
+There is no traversal through intermediate images during a large aim jump.
+Disable hysteresis to use the selection ranges directly.
+
+Aim-following rotation takes the shortest signed difference between aim and
+the active image's neutral angle, clamps it to that row's limits, and damps
+toward it. Rotation limits include zero. At an image switch, the previous
+neutral angle plus displayed tilt is converted into the incoming image's
+coordinates and clamped immediately to its limits. Smoothing then continues
+from that legal orientation; repeatedly selecting the same direction does not
+restart it. An exact half-turn chooses clockwise. If the short angular path
+would pass through a forbidden rotation outside the limits, the display snaps
+to the legal target instead of making a long detour. Otherwise damping stays
+inside the permitted interval without overshoot.
+
+Eight images still depict eight authored poses. Hysteresis and bounded
+rotation reduce switching and snapping; they cannot synthesize missing facial
+poses. No crossfade is applied.
+
+#### Neck pivot and attachments
+
+Set the pivot's anchor and local X/Y coordinates to the neck, then explicitly
+select the affected head, face, fixed hair, and crown layers or bones. Nothing
+is implicitly rotated with the whole character. Unbound rigid layers can be
+selected directly. Bone-bound or weighted artwork follows its selected owner
+bone instead, avoiding double rotation. Selected bone subtrees must not overlap
+or own arm IK chains.
+
+For a simulated braid, select the non-simulated head or attachment-owner bone
+above the braid, not the simulated hair bones. That owner's displayed
+transform moves the socket and its attached collision guides **before** the
+hair constraints run. Existing world-space particle positions and velocities
+are retained when direction or head tilt changes; the whole braid is not
+rotated or reset with the head.
+Bones below simulated hair cannot be directional rotation owners either:
+their final parent transform is owned by the hair solver.
+
+#### Drafts and lifecycle
+
+Panel controls use the same sprite document and **Save**, **Revert**, and JSON
+import/export actions as the rest of the Sprites tab. Resetting defaults edits
+the draft only. Save alone writes the browser record. A disabled presentation
+is stored as `null`, preserving fixed 45-degree sectors and static artwork
+rotation. Authored settings never include active direction, preview aim,
+displayed rotation, or other smoothing state.
+
+| Event | Directional behavior |
+| --- | --- |
+| First frame / reset | Select directly and initialize at the clamped target; an initial zero-length aim uses 0 degrees |
+| Later zero-length or numerically negligible aim | Keep the last aim, direction, and target; existing smoothing may finish |
+| Paused simulation | Live selection and smoothing freeze with simulation time |
+| Same direction again | Preserve smoothing progress |
+| Clock rewind / gameplay reset | Reinitialize live directional state; gameplay reset also exits previews |
+| Document replacement | Initialize fresh state using the latest live aim |
+| Authored presentation edit | Reinitialize directional settings without reloading artwork |
+| Directional preview | Use an independent aim, clock, direction, and copy of the braid state |
+| Preview exit / leaving Sprites / Play | Discard preview state and show the independently maintained live state |
+
+The existing hair solver's bounded catch-up and backward-scrub reset rules
+still apply. The preview clock can advance while physics is paused. Live
+directional and hair state are maintained separately, so preview rotations
+and particle motion are not copied back into gameplay.
+
 ### Hands and hammer reach
 
 Add a two-bone IK chain with an upper bone, lower bone, hand bone, and target.
@@ -132,8 +230,9 @@ bodies, or collision fixtures to the game.
 
 ## Game-agnostic contract
 
-`src/sprite-data.ts` and `src/skeleton-data.ts` own the immutable, validated
-document format. `src/skeleton-pose.ts` evaluates poses, IK, and hair independently
+`src/sprite-data.ts`, `src/skeleton-data.ts`, and `src/directional-data.ts` own the
+immutable, validated document format. `src/directional-pose.ts` owns each
+character's direction and bounded rotation state. `src/skeleton-pose.ts` evaluates poses, IK, and hair independently
 of Three.js. `src/sprite-rig.ts` knows only named scene anchors and sprite rigs; it does not
 import this game's body-part IDs, physics, editor, or game-specific assets.
 
@@ -152,6 +251,7 @@ await rig.replace(document, { signal: lifecycle.signal });
 // Each rendered frame; target positions are world XY, angles are radians.
 rig.update({
   time: simulationTime,
+  dt: frameSeconds,
   aim: aimDirection,
   targets: new Map([['grip', { x: gripX, y: gripY, angle: gripAngle }]]),
 });
@@ -175,7 +275,8 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "presentation": null,
   "skeleton": null,
   "images": [
     { "id": "badge", "name": "Badge", "source": "/sprites/badge.png" }
@@ -207,8 +308,20 @@ or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
 Schema-1 layouts remain importable as unbound layers visible in all directions.
-Reading an old save does not rewrite it; an explicit Save/export writes schema 2.
-Keep an original export if it must also work in older releases.
+Schema-1 and schema-2 layouts explicitly migrate to schema 3 with
+`presentation: null`, preserving their original fixed-sector behavior.
+Reading or previewing an old save does not rewrite its stored record; an
+explicit Save/export writes schema 3. Keep an original export for rollback to
+an older release: old readers cannot understand the new authored presentation.
+There is no destructive storage migration.
+
+`DirectionalPresentation` in `src/directional-data.ts` defines `hysteresis`,
+`rotation`, eight shared `boundaries`, eight ordered `directions` rules,
+`pivot`, and controlled `layers` / `bones`. The arrays follow
+`FACING_DIRECTIONS`; each boundary is that direction's selection start.
+Unknown anchors, missing controlled references, overlapping controlled bone
+subtrees, and invalid angular partitions are rejected, not silently repaired.
+Remove directional references before deleting or rebinding their owners.
 
 The skeleton format is defined by `SkeletonDefinition` in
 `src/skeleton-data.ts`: `anchor`, `bones`, directional `poses`, `clips`,
@@ -218,6 +331,15 @@ validated skeleton edits without reloading images, and `setPreview()` selects
 an explicit `SkeletonPreview` or `null` for live playback.
 Skeleton edits default to live playback; pass `{ preview }` as the second
 `configureSkeleton()` argument to preserve a valid authoring preview atomically.
+`configurePresentation()` applies authored presentation edits without decoding
+images. `setDirectionalPreview({ aim })` supplies visual-only preview aim;
+passing `null` exits it. Skeleton and directional previews are mutually exclusive.
+`presentationState()`, `inspect()`, and `replaces()` read the cached presentation
+result and never advance hysteresis or smoothing. `update()` advances the
+character-local controllers once per rendered frame, and visibility, coverage,
+and directional skeleton poses consume the same selected direction. Optional
+`dt` is wall-clock frame duration for editor preview; callers that omit it use
+simulation-time elapsed duration for that preview clock.
 
 URLs remain references on export, not downloaded archives. Cross-origin images
 must permit CORS; fetches omit credentials. Do not publish private URLs, signed
@@ -239,6 +361,8 @@ original bytes, including any metadata; review that content before publishing.
 | IK chains / hair chains / body circles | 8 / 16 / 32 |
 | Mesh grid segments per axis | 1-32 |
 | Total weighted vertices / influences per vertex | 16,384 / 4 |
+| Directional sectors / maximum hold margin per edge | 8 / 180 degrees |
+| Directional response time / pivot coordinates | 0-10 seconds / -16 to 16 anchor-local units |
 
 The renderer shares one plane geometry for rigid cards and caches textures/materials by source.
 It uses unlit sRGB materials with tone mapping disabled for artwork, a 0.5 alpha
@@ -262,6 +386,10 @@ secondary motion update only the active rig, not the level or editor. There is
 no per-frame image decoding or geometry allocation. Each visible rigid card
 has two triangles; a weighted grid has two triangles per cell. Each visible
 layer has one draw call; shared materials do not imply instanced batching.
+Directional selection examines at most eight sectors. Additional layer
+rotation touches only explicitly controlled rigid layers; bone rotation uses
+compiled affected subtrees. Rotation reuses existing meshes, textures,
+materials, and geometry, and does not add draw calls.
 
 ## Editor-free releases
 
@@ -273,7 +401,7 @@ GAME_LEVEL=levels/my-level.json GAME_SPRITES=skins/my-sprites.json npm run build
 ```
 
 The build validates the document, anchors, bones, weights, and IK targets.
-Skeletons, clips, directional layers, hair, and tile settings use this same
+Skeletons, clips, directional presentation, layers, hair, and tile settings use this same
 `GAME_SPRITES` input; there is no separate rig profile. Embedded PNGs become separate
 hashed assets, deduplicated by content rather than embedded in executable
 JavaScript. Development uses the same document with embedded sources through

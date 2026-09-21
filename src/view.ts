@@ -239,7 +239,7 @@ export class GameView {
     this.spriteTargets.set('hammer-shaft', { ...shaftCenter, angle: shaftAngle });
     this.spriteTargets.set('hammer-head', { x: tip.x, y: tip.y, angle: tip.angle });
     this.spriteTargets.set('aim', { ...frame.cursor, angle: Math.atan2(aim.y, aim.x) });
-    this.sprites.update({ time: frame.time, aim, targets: this.spriteTargets });
+    this.sprites.update({ time: frame.time, dt: options.dt, aim, targets: this.spriteTargets });
     this.targetPositions.set([tip.x, tip.y, 0.8, frame.cursor.x, frame.cursor.y, 0.8]);
     this.targetLine.geometry.attributes.position.needsUpdate = true;
     this.targetLine.computeLineDistances();
