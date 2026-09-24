@@ -38,7 +38,7 @@ export function spriteBundle(options: { path: string | null; anchors: readonly s
         }
         return `{id:${JSON.stringify(image.id)},name:${JSON.stringify(image.name)},source:${source}}`;
       });
-      return `export default {schemaVersion:${document.schemaVersion},characterRiggingType:${JSON.stringify(document.characterRiggingType)},images:[${images.join(',')}],layers:${JSON.stringify(document.layers)},skeleton:${JSON.stringify(document.skeleton)},presentation:${JSON.stringify(document.presentation)}};`;
+      return `export default {schemaVersion:${document.schemaVersion},characterRiggingType:${JSON.stringify(document.characterRiggingType)},armForwardDistance:${document.armForwardDistance},images:[${images.join(',')}],layers:${JSON.stringify(document.layers)},skeleton:${JSON.stringify(document.skeleton)},presentation:${JSON.stringify(document.presentation)}};`;
     },
     handleHotUpdate(context) {
       if (context.file !== options.path) return;

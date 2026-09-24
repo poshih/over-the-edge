@@ -2,6 +2,8 @@ import { element, setText } from '../dom';
 import { CHARACTER_RIGGING_TYPES, SpriteError, SPRITE_LIMITS } from '../sprite-data';
 import type { CharacterRiggingType, SpriteDocument } from '../sprite-data';
 import type { SpriteEditorState } from './sprite-state';
+import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
+import { createRangeControl } from './range-control';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import './character-editor.css';
 
@@ -56,6 +58,18 @@ export function createCharacterEditor(options: {
       <p class="appearance-format">Hybrid has been removed. Older Hybrid profiles with sprites become pure 2D;
         those without sprites become Mesh parts. Incomplete sprite profiles no longer reveal missing 3D parts.</p>
 
+      <fieldset class="tuning-group character-arm-placement">
+        <legend>3D arm placement</legend>
+        <div class="character-arm-forward-control"></div>
+        <button type="button" class="button character-arm-forward-reset">Reset arm forward distance</button>
+        <p class="appearance-format">Moves the hand and hammer plane toward the camera, measured from the
+          configured chest front. The default is ${DEFAULT_ARM_FORWARD_DISTANCE} m.
+          This is visual only: the hammer still draws on top and gameplay physics stay unchanged.
+          Save the character profile to keep it.</p>
+        <p class="appearance-format character-arm-forward-inactive" hidden>Applies to Mesh parts and Avatar.
+          The saved value is retained in 2D mode, which keeps its authored sprite depths.</p>
+      </fieldset>
+
       <section class="character-example" aria-labelledby="character-avatar-heading">
         <h4 id="character-avatar-heading">Connected upper-body avatar</h4>
         <p class="appearance-format">An original, built-in skinned model with joined shoulders, arms, neck and
@@ -100,7 +114,7 @@ export function createCharacterEditor(options: {
           <button type="button" class="button character-import">Import profile JSON</button>
           <button type="button" class="button character-export">Export profile JSON</button>
         </div>
-        <p class="appearance-format">Includes the character type, sprite layout, 2D skeleton, directional settings
+        <p class="appearance-format">Includes the character type, 3D arm forward distance, sprite layout, 2D skeleton, directional settings
           and embedded PNGs. Public image URLs remain references. Import limit:
           ${Math.floor(SPRITE_LIMITS.documentBytes / 1024 ** 2)} MiB.</p>
       </fieldset>
@@ -134,6 +148,17 @@ export function createCharacterEditor(options: {
   const saveButton = element<HTMLButtonElement>(root, '.character-save');
   const revertButton = element<HTMLButtonElement>(root, '.character-revert');
   const externalWarning = element<HTMLParagraphElement>(root, '.character-external-warning');
+  const forwardReset = element<HTMLButtonElement>(root, '.character-arm-forward-reset');
+  const forwardInactive = element<HTMLParagraphElement>(root, '.character-arm-forward-inactive');
+  const forward = createRangeControl({
+    ...ARM_FORWARD_DISTANCE_LIMITS, label: 'Arm forward distance', unit: 'm',
+    description: 'Distance between the configured chest front and both hand/hammer grip targets. Applies to the two 3D character modes.',
+  }, {
+    id: 'character-arm-forward-distance', name: 'armForwardDistance', signal: events.signal,
+    onInput: value => { if (!options.state.setArmForwardDistance(value)) render(); },
+  });
+  element(root, '.character-arm-forward-control').append(forward.row);
+  forwardReset.addEventListener('click', () => { options.state.setArmForwardDistance(DEFAULT_ARM_FORWARD_DISTANCE); }, listen);
 
   for (const type of CHARACTER_RIGGING_TYPES) {
     const option = document.createElement('option');
@@ -181,6 +206,10 @@ export function createCharacterEditor(options: {
     const disabled = snapshot.restoring || snapshot.busy;
     typeSelect.disabled = disabled;
     typeSelect.value = profile.characterRiggingType;
+    const forwardDisabled = disabled || profile.characterRiggingType === 'sprite-2d';
+    forward.setValue(profile.armForwardDistance, { disabled: forwardDisabled });
+    forwardReset.disabled = forwardDisabled || profile.armForwardDistance === DEFAULT_ARM_FORWARD_DISTANCE;
+    forwardInactive.hidden = profile.characterRiggingType !== 'sprite-2d';
     exampleButton.disabled = disabled;
     avatarButton.disabled = disabled || profile.characterRiggingType === 'avatar-3d';
     importButton.disabled = disabled;

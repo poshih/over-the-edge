@@ -26,6 +26,14 @@ Only Save writes storage. A 2D character needs sprite artwork; load the example
 or import a profile before selecting it. Switch to Mesh parts or Avatar before deleting
 the last 2D layer.
 
+**Arm forward distance** controls the shared hand/hammer plane in Mesh parts
+and Avatar: 0-1 world metres from the configured chest front, in 0.01 m steps.
+The default is 0.25 m. It previews live, including while paused, and the reset
+button restores that default without saving. Save/Revert and profile
+import/export include `armForwardDistance`; `GAME_SPRITES` carries it into a
+game-only release. In pure 2D the control is disabled and its saved value is
+retained for the next 3D selection, without changing authored sprite depths.
+
 Both 3D modes hide and detach sprite rendering without discarding its resources;
 inactive sprite animation, hair, and UV work do not run. Sprite/skeleton
 previews require 2D. The Sprites tab offers **Use 2D sprite character** when
@@ -298,9 +306,11 @@ Use tileable left/right image edges.
 Keep the head and grip artwork on separate anchors/bones so their size stays
 fixed. Tiling changes artwork density, not the physics reach limit.
 
-The hammer's visual grip plane is 0.75 world units toward the camera, ahead
-of the torso at 0.27 and about 0.25 beyond its configured chest front. The
-existing mesh/avatar IK follows that same plane. The pot stays at its separate
+The default hammer grip plane is 0.75 world units toward the camera: the
+configured chest front at 0.50 plus `armForwardDistance` at 0.25. The torso
+remains at 0.27. Both 3D renderers and the tool use the same depth calculation;
+changing clearance never separates the hand targets from the hammer.
+The pot stays at its separate
 0.22 depth. No Z depth is added to the Planck physics or authored level data.
 A depth-isolated foreground pass keeps the hammer above opaque and transparent
 character art without disabling depth testing or altering shared materials.
@@ -378,8 +388,9 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "characterRiggingType": "sprite-2d",
+  "armForwardDistance": 0.25,
   "presentation": null,
   "skeleton": null,
   "images": [
@@ -411,7 +422,10 @@ or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
 Schema-1 layouts remain importable as unbound layers visible in all directions.
-Schema 5 exposes exactly pure sprites, Mesh parts and Avatar. Schemas 1-3 and
+Schema 6 exposes exactly pure sprites, Mesh parts and Avatar, and stores the
+3D arm clearance. Profiles from schemas 1-5 receive the unchanged 0.25 m default;
+invalid or missing schema-6 clearance values are rejected, not clamped.
+Schemas 1-3 and
 schema-4 Hybrid profiles explicitly migrate to pure 2D when they contain any
 sprite layers, otherwise to Mesh parts. Existing schema-4 2D/Mesh parts choices
 are retained. The obsolete `underlay` field is removed during migration.
@@ -421,7 +435,7 @@ receive `presentation: null`, retaining fixed-sector selection while enabling
 automatic tilt for safe head owners; schema-3
 directional settings are retained unchanged.
 Reading or previewing an old save does not rewrite its stored record; an
-explicit Save/export writes schema 5. Keep an original export for rollback to
+explicit Save/export writes schema 6. Keep an original export for rollback to
 an older release: old readers cannot understand the new authored type.
 There is no destructive storage migration.
 
@@ -445,11 +459,14 @@ Skeleton edits default to live playback; pass `{ preview }` as the second
 changing the host's physical anchors. It ends previews and reinitializes visual
 motion when the mode changes. `replaces()` reports whether sprites hide the
 host's underlying visuals: all are hidden in pure 2D, none in either 3D mode.
-Hosts that support Avatar must provide `onCharacterRiggingTypeChange` when
-constructing `SpriteRig`. This game uses that callback to enable the connected
+Hosts that support Avatar must provide `onCharacterPresentationChange` when
+constructing `SpriteRig`. It receives the character type and arm forward distance.
+This game uses that callback to update the shared grip depth, enable the connected
 avatar and disable the separate upper-body meshes; `VisualVisibility` retains
 the imported parts for switching back. Other hosts reject avatar profiles if
 they have no such renderer.
+`setArmForwardDistance()` updates that scalar without rebuilding the sprite
+layout, reloading assets, resetting motion, or creating a new avatar.
 The optional `headTracking: { anchor, pivot: { anchor, x, y } }` constructor
 setting injects the logical head slot and unbound neck pivot. Its compiled
 head-ownership plan is runtime-only and never enters the exported document.

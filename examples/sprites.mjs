@@ -2,6 +2,7 @@ import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SPRITE_RIGGING, validateSpriteDocument } from '../src/sprite-data.ts';
+import { DEFAULT_ARM_FORWARD_DISTANCE } from '../src/character-depth.ts';
 
 const [anchor, ...extra] = process.argv.slice(2);
 if (!anchor || extra.length > 0) {
@@ -11,8 +12,9 @@ if (!anchor || extra.length > 0) {
 // Original 32x32 geometric swatch, generated without external artwork.
 const TILE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR4AeyWMQrAIAxFg1PP0zt06lk69WyderFudf8Bw0eDIF/IEBL08SRo2a/7nxnFJi8BOAPv+Vlm4I07AGzIzgUgAzJAGziezVrBji0NwB4Q9QtABmSANhD9FaKxwzoNgBv05gKQARlwBlpv/Ygajq0DwIbsfH2AyGAFAAD//4tzEOYAAAAGSURBVAMABWeiYWqgyVwAAAAASUVORK5CYII=';
 const document = validateSpriteDocument({
-  schemaVersion: 5,
+  schemaVersion: 6,
   characterRiggingType: 'sprite-2d',
+  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
   skeleton: null,
   presentation: null,
   images: [{ id: 'tile', name: 'Geometric tile', source: TILE_PNG }],

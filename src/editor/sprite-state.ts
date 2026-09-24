@@ -3,9 +3,10 @@ import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
   DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType,
-  spriteMigrationNotice,
+  spriteMigrationNotice, validateArmForwardDistance,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteLayer, SpriteOffset } from '../sprite-data';
+import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
 import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
 import type { DirectionalPresentation } from '../directional-data';
 import { SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
@@ -91,7 +92,7 @@ function sameLayer(left: SpriteLayer, right: SpriteLayer): boolean {
 
 function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (left === right) return true;
-  if (left.characterRiggingType !== right.characterRiggingType) return false;
+  if (left.characterRiggingType !== right.characterRiggingType || left.armForwardDistance !== right.armForwardDistance) return false;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
   return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
     samePresentation(left.presentation, right.presentation) &&
@@ -215,6 +216,7 @@ export class SpriteEditorState {
       error: this.error,
       dirty: this.saved === null || !sameDocument(this.draft, this.saved),
       hasContent: this.draft.characterRiggingType !== DEFAULT_CHARACTER_RIGGING_TYPE ||
+        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE ||
         this.draft.layers.length > 0 || this.draft.images.length > 0 ||
         this.draft.skeleton !== null || this.draft.presentation !== null,
       anchors: this.anchors,
@@ -373,6 +375,31 @@ export class SpriteEditorState {
       this.draft = document;
       this.preview = null;
       this.directionalPreview = false;
+      this.error = null;
+      this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message);
+      return false;
+    }
+  }
+
+  setArmForwardDistance(value: unknown): boolean {
+    if (!this.canEdit()) return false;
+    try {
+      const armForwardDistance = validateArmForwardDistance(value);
+      if (armForwardDistance === this.draft.armForwardDistance) {
+        if (this.error !== null) {
+          this.error = null;
+          this.changed();
+        }
+        return true;
+      }
+      const document = Object.freeze({ ...this.draft, armForwardDistance });
+      this.validateDraft(document);
+      this.rig.setArmForwardDistance(armForwardDistance);
+      this.draft = document;
       this.error = null;
       this.changed();
       return true;

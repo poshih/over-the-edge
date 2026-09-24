@@ -9,7 +9,8 @@ import {
 import type { Material, Object3D } from 'three';
 import { ARM_SIDES, HEAD_GEOMETRY, SPRITE_TARGET_IDS } from './character';
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
-import { ARM_GEOMETRY, PLAYER_DEPTH, solveArmPose } from './arm-ik';
+import { ARM_GEOMETRY, solveArmPose } from './arm-ik';
+import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
 import type { ArmPose } from './arm-ik';
 import { AvatarView } from './avatar-view';
 import { HeadAim } from './head-aim';
@@ -24,7 +25,7 @@ import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import { SpriteRig } from './sprite-rig';
 import type { SpriteAnchor } from './sprite-rig';
-import type { CharacterRiggingType } from './sprite-data';
+import type { CharacterPresentation } from './sprite-data';
 import { VisualVisibility } from './visual-visibility';
 import type { RigTarget } from './skeleton-pose';
 
@@ -120,6 +121,7 @@ export class GameView {
   private readonly headOffset = new Vector3();
   private avatar: AvatarView | null = null;
   private readonly customShaft = new Group();
+  private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private readonly arms = new Map<ArmSide, Arm>();
   private readonly limbDirection = new Vector3();
   private readonly limbSide = new Vector3();
@@ -186,7 +188,7 @@ export class GameView {
     }
     this.sprites = new SpriteRig(spriteAnchors, {
       root: this.scene, targetIds: SPRITE_TARGET_IDS,
-      onCharacterRiggingTypeChange: (type) => this.setCharacterRiggingType(type),
+      onCharacterPresentationChange: (settings) => this.setCharacterPresentation(settings),
       headTracking: {
         anchor: 'character-head',
         pivot: { anchor: 'torso', x: HEAD_GEOMETRY.neck[0], y: HEAD_GEOMETRY.neck[1] },
@@ -221,15 +223,18 @@ export class GameView {
     this.scene.add(layer.root);
   }
 
-  private setCharacterRiggingType(type: CharacterRiggingType): void {
+  private setCharacterPresentation(settings: CharacterPresentation): void {
+    const type = settings.characterRiggingType;
+    this.toolDepth = getToolDepth(type === 'sprite-2d' ? DEFAULT_ARM_FORWARD_DISTANCE : settings.armForwardDistance);
     const avatar = type === 'avatar-3d';
     if (avatar && this.avatar === null) {
       this.avatar = new AvatarView();
     }
     if (this.avatar !== null) {
       this.avatar.root.visible = avatar;
-      if (avatar) this.scene.add(this.avatar.root);
-      else this.avatar.root.removeFromParent();
+      if (avatar) {
+        if (this.avatar.root.parent !== this.scene) this.scene.add(this.avatar.root);
+      } else this.avatar.root.removeFromParent();
     }
     for (const [id, binding] of this.bindings) {
       const separateProp = id === 'pot' || id === 'hammer-shaft' || id === 'hammer-head';
@@ -254,7 +259,7 @@ export class GameView {
     for (const part of frame.parts) {
       const mesh = this.playerMeshes.get(part.id);
       if (!mesh) continue;
-      mesh.position.set(part.x, part.y, part.kind === 'pot' ? PLAYER_DEPTH.pot : PLAYER_DEPTH.tool);
+      mesh.position.set(part.x, part.y, part.kind === 'pot' ? PLAYER_DEPTH.pot : this.toolDepth);
       mesh.rotation.z = part.angle;
     }
     this.torso.position.set(root.x, root.y, PLAYER_DEPTH.torso);
@@ -270,11 +275,11 @@ export class GameView {
     const shaftCenter = { x: (shaftBase.x + tip.x) / 2, y: (shaftBase.y + tip.y) / 2 };
     const shaftAngle = shaftLength <= PHYSICS.aimEpsilon ? shaftBase.angle : Math.atan2(tip.y - shaftBase.y, tip.x - shaftBase.x);
     this.cursor.position.set(frame.cursor.x, frame.cursor.y, 1);
-    this.customShaft.position.set(shaftCenter.x, shaftCenter.y, PLAYER_DEPTH.tool);
+    this.customShaft.position.set(shaftCenter.x, shaftCenter.y, this.toolDepth);
     this.customShaft.rotation.z = shaftAngle;
     this.customShaft.scale.x = shaftLength / RIG.handleLength;
     // Unscaled physical coordinates keep grip offsets independent of artwork and tiling.
-    this.gripFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, PLAYER_DEPTH.tool);
+    this.gripFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, this.toolDepth);
     const armPoses = this.updateArms(this.torso.matrixWorld, this.gripFrame, shaftLength, { ...options, shaftAngle });
     if (this.avatar?.root.visible) this.avatar.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
     for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {

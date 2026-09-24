@@ -5,6 +5,7 @@ import {
 import type { DirectionalPresentation } from './directional-data.ts';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, validateSkeleton, validateSkin } from './skeleton-data.ts';
 import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
+import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth.ts';
 
 export const CHARACTER_RIGGING_TYPES = ['sprite-2d', 'model-3d', 'avatar-3d'] as const;
 export type CharacterRiggingType = (typeof CHARACTER_RIGGING_TYPES)[number];
@@ -37,9 +38,13 @@ export interface SpriteLayer {
   readonly tileLength: number | null;
 }
 
-export interface SpriteDocument {
-  readonly schemaVersion: 5;
+export interface CharacterPresentation {
   readonly characterRiggingType: CharacterRiggingType;
+  readonly armForwardDistance: number;
+}
+
+export interface SpriteDocument extends CharacterPresentation {
+  readonly schemaVersion: 6;
   readonly images: readonly SpriteImage[];
   readonly layers: readonly SpriteLayer[];
   readonly skeleton: SkeletonDefinition | null;
@@ -80,11 +85,16 @@ export const SPRITE_FIELDS = [
 ] as const;
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
-  schemaVersion: 5, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
+  schemaVersion: 6, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
+  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
   images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
 
 export class SpriteError extends Error {}
+
+export function validateArmForwardDistance(value: unknown): number {
+  return number(value, ARM_FORWARD_DISTANCE_LIMITS.min, ARM_FORWARD_DISTANCE_LIMITS.max, 'Arm forward distance');
+}
 
 export function validateCharacterRiggingType(value: unknown, layerCount: number): CharacterRiggingType {
   for (const type of CHARACTER_RIGGING_TYPES) {
@@ -240,7 +250,7 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
 }
 
 function migrateSpriteLayer(value: unknown, version: number): unknown {
-  if (version === 5) return value;
+  if (version >= 5) return value;
   const keys = ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay'];
   if (version >= 2) keys.push('bone', 'directions', 'skin', 'tileLength');
   const old = record(value, keys, 'A legacy sprite layer');
@@ -274,14 +284,15 @@ export function spriteMigrationNotice(value: unknown): string | null {
 // The loader validates image bytes as it acquires them, without decoding cached sources again.
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
-    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4 or 5.');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) {
+    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5 or 6.');
   }
   const legacy = version === 1;
   const fields = ['schemaVersion', 'images', 'layers'];
   if (version >= 2) fields.push('skeleton');
   if (version >= 3) fields.push('presentation');
   if (version >= 4) fields.push('characterRiggingType');
+  if (version >= 6) fields.push('armForwardDistance');
   const document = record(value, fields, 'A sprite document');
   if (!Array.isArray(document.images) || !Array.isArray(document.layers) ||
     document.images.length > SPRITE_LIMITS.images || document.layers.length > SPRITE_LIMITS.layers) {
@@ -324,8 +335,10 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   validateSpriteRigging(layers, skeleton);
   validateDirectionalReferences(presentation, layers, skeleton);
   const characterRiggingType = migrateCharacterType(document.characterRiggingType, version, layers.length);
+  const armForwardDistance = version >= 6
+    ? validateArmForwardDistance(document.armForwardDistance) : DEFAULT_ARM_FORWARD_DISTANCE;
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: 5, characterRiggingType,
+    schemaVersion: 6, characterRiggingType, armForwardDistance,
     images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation,
   });
   validateSpriteBudget(result);
@@ -380,6 +393,7 @@ export function validateDirectionalReferences(
 
 export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>, targets?: Iterable<string>): void {
   validateCharacterRiggingType(document.characterRiggingType, document.layers.length);
+  validateArmForwardDistance(document.armForwardDistance);
   const available = new Set(anchors);
   for (const layer of document.layers) {
     if (!available.has(layer.anchor)) throw new SpriteError(`Sprite ${layer.id} references unknown anchor "${layer.anchor}".`);

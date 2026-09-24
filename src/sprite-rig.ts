@@ -5,6 +5,7 @@ import {
   DEFAULT_CHARACTER_RIGGING_TYPE,
   SPRITE_LIMITS,
   SpriteError,
+  validateArmForwardDistance,
   validateCharacterRiggingType,
   validateDirectionalReferences,
   validateSpriteAnchors,
@@ -12,7 +13,8 @@ import {
   validateSpriteMetadata,
   validateSpriteRigging,
 } from './sprite-data';
-import type { CharacterRiggingType, SpriteDocument, SpriteLayer } from './sprite-data';
+import type { CharacterPresentation, CharacterRiggingType, SpriteDocument, SpriteLayer } from './sprite-data';
+import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
 import { DirectionalError, validateDirectionalPresentation } from './directional-data';
 import type { DirectionalPresentation } from './directional-data';
 import { DirectionalPose } from './directional-pose';
@@ -98,7 +100,7 @@ interface SkeletonRuntime {
   originWorld: RuntimePoint;
 }
 
-interface BuildState {
+interface BuildState extends CharacterPresentation {
   readonly resources: Map<string, ImageResource>;
   readonly images: Map<string, ImageResource>;
   readonly layers: Map<string, LayerInstance>;
@@ -107,7 +109,6 @@ interface BuildState {
   readonly skeleton: SkeletonRuntime | null;
   readonly presentation: DirectionalPresentation | null;
   readonly headTracking: SpriteHeadTrackingPlan;
-  readonly characterRiggingType: CharacterRiggingType;
   readonly mode: 'replace' | 'edit';
 }
 
@@ -264,12 +265,13 @@ export class SpriteRig {
   private readonly anchors: ReadonlyMap<string, SpriteAnchor>;
   private readonly root: THREE.Object3D;
   private readonly targetIds: ReadonlySet<string>;
-  private readonly onCharacterRiggingTypeChange: ((type: CharacterRiggingType) => void) | undefined;
+  private readonly onCharacterPresentationChange: ((settings: CharacterPresentation) => void) | undefined;
   private readonly headTracking: SpriteHeadTracking | null;
   private headTrackingPlan: SpriteHeadTrackingPlan;
   private readonly geometry = new THREE.PlaneGeometry(1, 1);
   private readonly coverage = new Map<string, boolean>();
   private characterRiggingType: CharacterRiggingType = DEFAULT_CHARACTER_RIGGING_TYPE;
+  private armForwardDistance: number = DEFAULT_ARM_FORWARD_DISTANCE;
   private images = new Map<string, ImageResource>();
   private resources = new Map<string, ImageResource>();
   private layers = new Map<string, LayerInstance>();
@@ -311,14 +313,14 @@ export class SpriteRig {
   constructor(anchors: ReadonlyMap<string, SpriteAnchor>, options: {
     root: THREE.Object3D;
     targetIds: readonly string[];
-    onCharacterRiggingTypeChange?: (type: CharacterRiggingType) => void;
+    onCharacterPresentationChange?: (settings: CharacterPresentation) => void;
     headTracking?: SpriteHeadTracking;
   }) {
     this.anchors = new Map(anchors);
     for (const name of this.anchors.keys()) this.coverage.set(name, false);
     this.root = options.root;
     this.targetIds = new Set(options.targetIds);
-    this.onCharacterRiggingTypeChange = options.onCharacterRiggingTypeChange;
+    this.onCharacterPresentationChange = options.onCharacterPresentationChange;
     this.headTracking = options.headTracking === undefined ? null : {
       anchor: options.headTracking.anchor,
       pivot: { ...options.headTracking.pivot },
@@ -389,7 +391,8 @@ export class SpriteRig {
       }
       checkSignal(signal);
       const next = this.buildState(document.layers, document.skeleton, images, resources,
-        { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType });
+        { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
+          armForwardDistance: document.armForwardDistance });
       operation.staged.clear();
       this.commit(next, { preview: null });
     } finally {
@@ -405,8 +408,16 @@ export class SpriteRig {
     const characterRiggingType = validateCharacterRiggingType(value, this.layers.size);
     if (characterRiggingType === this.characterRiggingType) return;
     const next = this.buildState(this.layerData(), this.skeleton?.definition ?? null, new Map(this.images), new Map(this.resources),
-      { mode: 'edit', presentation: this.presentation, characterRiggingType });
+      { ...this.currentCharacterPresentation(), mode: 'edit', presentation: this.presentation, characterRiggingType });
     this.commit(next, { preview: null });
+  }
+
+  setArmForwardDistance(value: number): void {
+    this.assertMutable();
+    const distance = validateArmForwardDistance(value);
+    if (distance === this.armForwardDistance) return;
+    this.armForwardDistance = distance;
+    this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
   }
 
   configureSkeleton(
@@ -420,7 +431,7 @@ export class SpriteRig {
       const layers = this.layerData();
       validateSpriteRigging(layers, skeleton);
       validateDirectionalReferences(this.presentation, layers, skeleton);
-      validateSpriteAnchors({ schemaVersion: 5, characterRiggingType: this.characterRiggingType,
+      validateSpriteAnchors({ schemaVersion: 6, ...this.currentCharacterPresentation(),
         images: [], layers, skeleton, presentation: this.presentation },
         this.anchors.keys(), this.targetIds);
       const preview = options.preview === null ? null : (() => {
@@ -428,7 +439,7 @@ export class SpriteRig {
         return validateSkeletonPreview(options.preview, skeleton);
       })();
       const next = this.buildState(layers, skeleton, new Map(this.images), new Map(this.resources),
-        { mode: 'edit', presentation: this.presentation, characterRiggingType: this.characterRiggingType });
+        { ...this.currentCharacterPresentation(), mode: 'edit', presentation: this.presentation });
       this.commit(next, { preview });
     } catch (error) {
       throw this.spriteFailure(error);
@@ -461,11 +472,11 @@ export class SpriteRig {
       const layers = this.layerData();
       const skeleton = this.skeleton?.definition ?? null;
       validateDirectionalReferences(settings, layers, skeleton);
-      validateSpriteAnchors({ schemaVersion: 5, characterRiggingType: this.characterRiggingType,
+      validateSpriteAnchors({ schemaVersion: 6, ...this.currentCharacterPresentation(),
         images: [], layers, skeleton, presentation: settings },
         this.anchors.keys(), this.targetIds);
       const next = this.buildState(layers, skeleton, new Map(this.images), new Map(this.resources),
-        { mode: 'edit', presentation: settings, characterRiggingType: this.characterRiggingType });
+        { ...this.currentCharacterPresentation(), mode: 'edit', presentation: settings });
       this.commit(next, { preview: this.preview });
     } catch (error) {
       throw this.spriteFailure(error);
@@ -604,7 +615,7 @@ export class SpriteRig {
     validateSpriteRigging(nextLayers, this.skeleton?.definition ?? null);
     validateDirectionalReferences(this.presentation, nextLayers, this.skeleton?.definition ?? null);
     const next = this.buildState(nextLayers, this.skeleton?.definition ?? null, new Map(this.images), new Map(this.resources),
-      { mode: 'edit', presentation: this.presentation, characterRiggingType: this.characterRiggingType });
+      { ...this.currentCharacterPresentation(), mode: 'edit', presentation: this.presentation });
     this.commit(next, { preview: this.preview });
   }
 
@@ -614,7 +625,7 @@ export class SpriteRig {
     const nextLayers = this.layerData().filter(layer => layer.id !== id);
     validateDirectionalReferences(this.presentation, nextLayers, this.skeleton?.definition ?? null);
     const next = this.buildState(nextLayers, this.skeleton?.definition ?? null, new Map(this.images), new Map(this.resources),
-      { mode: 'edit', presentation: this.presentation, characterRiggingType: this.characterRiggingType });
+      { ...this.currentCharacterPresentation(), mode: 'edit', presentation: this.presentation });
     this.commit(next, { preview: this.preview });
   }
 
@@ -669,6 +680,7 @@ export class SpriteRig {
     return {
       disposed: this.disposed,
       characterRiggingType: this.characterRiggingType,
+      armForwardDistance: this.armForwardDistance,
       busy: !this.disposed && (this.replacement !== null || this.pendingDecodes > 0),
       pendingDecodeCount: this.pendingDecodes,
       layerCount: this.layers.size,
@@ -736,7 +748,9 @@ export class SpriteRig {
     this.skeletonMounts.clear();
     this.coverage.clear();
     for (const [name, covered] of previousCoverage) if (covered) this.anchor(name).setCovered({ covered: false });
-    this.onCharacterRiggingTypeChange?.(DEFAULT_CHARACTER_RIGGING_TYPE);
+    this.onCharacterPresentationChange?.({
+      characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+    });
   }
 
   private assertLive(): void {
@@ -757,7 +771,7 @@ export class SpriteRig {
   }
 
   private assertCharacterRenderer(type: CharacterRiggingType): void {
-    if (type === 'avatar-3d' && this.onCharacterRiggingTypeChange === undefined) {
+    if (type === 'avatar-3d' && this.onCharacterPresentationChange === undefined) {
       throw new SpriteError('This host has no connected avatar renderer.');
     }
   }
@@ -809,14 +823,19 @@ export class SpriteRig {
     return [...this.layers.values()].map(instance => instance.data);
   }
 
+  private currentCharacterPresentation(): CharacterPresentation {
+    return { characterRiggingType: this.characterRiggingType, armForwardDistance: this.armForwardDistance };
+  }
+
   private buildState(
     layers: readonly SpriteLayer[],
     definition: SkeletonDefinition | null,
     images: Map<string, ImageResource>,
     resources: Map<string, ImageResource>,
-    options: { mode: 'replace' | 'edit'; presentation: DirectionalPresentation | null; characterRiggingType: CharacterRiggingType },
+    options: CharacterPresentation & { mode: 'replace' | 'edit'; presentation: DirectionalPresentation | null },
   ): BuildState {
     validateCharacterRiggingType(options.characterRiggingType, layers.length);
+    validateArmForwardDistance(options.armForwardDistance);
     this.assertCharacterRenderer(options.characterRiggingType);
     const attachments = new Map<string, Attachment>();
     const skeletonMounts = new Map<THREE.Object3D, THREE.Group>();
@@ -846,7 +865,7 @@ export class SpriteRig {
       return { resources, images, layers: instances, attachments, skeletonMounts, skeleton,
         presentation: options.presentation,
         headTracking: compileSpriteHeadTracking(this.headTracking, layers, definition, options.presentation),
-        characterRiggingType: options.characterRiggingType, mode: options.mode };
+        characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance, mode: options.mode };
     } catch (error) {
       for (const instance of instances.values()) if (this.layers.get(instance.data.id) !== instance) this.disposeLayer(instance);
       if (skeleton !== this.skeleton) this.disposeSkeleton(skeleton);
@@ -1108,6 +1127,7 @@ export class SpriteRig {
     const oldLayers = this.layers;
     const oldSkeleton = this.skeleton;
     const changedType = next.characterRiggingType !== this.characterRiggingType;
+    const changedCharacter = changedType || next.armForwardDistance !== this.armForwardDistance;
     const presentation = next.presentation ?? next.headTracking.presentation;
     const resetDirection = changedType || next.mode === 'replace' || presentation !== this.runtimePresentation();
     const previousCoverage = new Map(this.coverage);
@@ -1127,6 +1147,7 @@ export class SpriteRig {
     this.presentation = next.presentation;
     this.headTrackingPlan = next.headTracking;
     this.characterRiggingType = next.characterRiggingType;
+    this.armForwardDistance = next.armForwardDistance;
     if (changedType && next.mode === 'edit') this.resetPresentation();
     this.preview = options.preview;
     if (changedType || next.mode === 'replace' || this.preview !== null) {
@@ -1162,7 +1183,7 @@ export class SpriteRig {
     for (const [name, covered] of this.coverage) {
       if (previousCoverage.get(name) !== covered) this.anchor(name).setCovered({ covered });
     }
-    if (changedType) this.onCharacterRiggingTypeChange?.(this.characterRiggingType);
+    if (changedCharacter) this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
     for (const layer of oldLayers.values()) if (!retained.has(layer)) this.disposeLayer(layer);
     if (oldSkeleton !== this.skeleton) this.disposeSkeleton(oldSkeleton);
     for (const [source, resource] of oldResources) {

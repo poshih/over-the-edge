@@ -6,14 +6,6 @@ export const ARM_LENGTH = { upper: 0.82, forearm: 0.82 } as const;
 const DIRECTION_EPSILON = 1e-8;
 const POLE_SINGULARITY_SINE = 0.15;
 const MAX_BEND_SPEED = 8;
-const TORSO_DEPTH = 0.27;
-const CHEST_FRONT_OFFSET = 0.23;
-const GRIP_CLEARANCE = 0.25;
-export const PLAYER_DEPTH = {
-  pot: 0.22,
-  torso: TORSO_DEPTH,
-  tool: TORSO_DEPTH + CHEST_FRONT_OFFSET + GRIP_CLEARANCE,
-} as const;
 export const ARM_GEOMETRY = {
   left: { shoulder: [-0.17, 0.74, -0.09], gripX: 0.04, normalSign: -1 },
   right: { shoulder: [0.17, 0.74, 0.09], gripX: 0.22, normalSign: 1 },

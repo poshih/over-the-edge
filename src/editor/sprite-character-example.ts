@@ -1,4 +1,5 @@
-import { ARM_GEOMETRY, PLAYER_DEPTH } from '../arm-ik';
+import { ARM_GEOMETRY } from '../arm-ik';
+import { DEFAULT_ARM_FORWARD_DISTANCE, PLAYER_DEPTH } from '../character-depth';
 import { ARM_SIDES } from '../character';
 import type { ArmSide, VisualPartId } from '../character';
 import { RIG } from '../config';
@@ -38,12 +39,11 @@ const DEPTH = {
   head: 0.4,
   rightArm: 0.46,
   rightElbow: 0.48,
-  shaft: PLAYER_DEPTH.tool,
-  hammer: PLAYER_DEPTH.tool + 0.02,
   leftHand: 0.57,
   rightHand: 0.59,
   pot: 0.62,
 } as const;
+const TOOL_DEPTH_OFFSET = { shaft: 0, head: 0.02 } as const;
 
 type ArtPoint = readonly [number, number];
 interface Artwork {
@@ -388,15 +388,16 @@ export function createSpriteCharacterExample(): SpriteDocument {
     layer({
       anchor: 'hammer-shaft', name: 'Paper Climber / shaft', image: ARTWORK.shaft.id,
       width: RIG.handleLength, height: RIG.handleHalfWidth * 2,
-      offset: { x: 0, y: 0, z: DEPTH.shaft - PLAYER_DEPTH.tool },
+      offset: { x: 0, y: 0, z: TOOL_DEPTH_OFFSET.shaft },
     }),
     layer({
       anchor: 'hammer-head', name: 'Paper Climber / hammer head', image: ARTWORK.hammer.id,
-      width: 0.24, height: 0.64, offset: { x: 0, y: 0, z: DEPTH.hammer - PLAYER_DEPTH.tool },
+      width: 0.24, height: 0.64, offset: { x: 0, y: 0, z: TOOL_DEPTH_OFFSET.head },
     }),
   );
   return validateSpriteDocument({
-    schemaVersion: 5, characterRiggingType: 'sprite-2d', images, layers, presentation: null,
+    schemaVersion: 6, characterRiggingType: 'sprite-2d', armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+    images, layers, presentation: null,
     skeleton: { anchor: 'torso', bones, poses: [], clips: [], animation: null, ik, hair: [], colliders: [] },
   });
 }
