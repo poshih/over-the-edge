@@ -4,7 +4,7 @@ import type { GameHudState } from './game-ui';
 
 export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
 export type EditorAction = UiAction | 'debug';
-export type WorkshopTab = 'physics' | 'appearance' | 'sprites' | 'level';
+export type WorkshopTab = 'physics' | 'character' | 'appearance' | 'sprites' | 'level';
 
 export interface HudState extends GameHudState {
   debug: boolean;
@@ -30,6 +30,7 @@ export interface UiOptions {
 }
 
 export interface GameUi {
+  characterMount: HTMLElement;
   appearanceMount: HTMLElement;
   spriteMount: HTMLElement;
   levelMount: HTMLElement;

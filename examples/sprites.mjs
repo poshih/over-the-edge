@@ -11,7 +11,8 @@ if (!anchor || extra.length > 0) {
 // Original 32x32 geometric swatch, generated without external artwork.
 const TILE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR4AeyWMQrAIAxFg1PP0zt06lk69WyderFudf8Bw0eDIF/IEBL08SRo2a/7nxnFJi8BOAPv+Vlm4I07AGzIzgUgAzJAGziezVrBji0NwB4Q9QtABmSANhD9FaKxwzoNgBv05gKQARlwBlpv/Ygajq0DwIbsfH2AyGAFAAD//4tzEOYAAAAGSURBVAMABWeiYWqgyVwAAAAASUVORK5CYII=';
 const document = validateSpriteDocument({
-  schemaVersion: 3,
+  schemaVersion: 4,
+  characterRiggingType: 'hybrid',
   skeleton: null,
   presentation: null,
   images: [{ id: 'tile', name: 'Geometric tile', source: TILE_PNG }],

@@ -1,0 +1,90 @@
+.character-editor {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.character-editor select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #faf9f2;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.character-intro h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.game-ui .character-intro p,
+.game-ui .character-rig-counts,
+.game-ui .character-status,
+.game-ui .character-example-error {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.character-intro p {
+  color: var(--muted);
+}
+
+.character-rig-summary,
+.character-example {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.character-rig-summary h4,
+.character-example h4 {
+  font-size: 12px;
+}
+
+.character-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.character-files .character-action-row {
+  margin-top: 10px;
+}
+
+.character-editor .button {
+  min-width: 0;
+  padding-inline: 8px;
+  white-space: normal;
+  font-size: 11px;
+}
+
+.character-load-example {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.character-example-error {
+  padding: 10px;
+  border: 1px solid #cc8f73;
+  border-radius: 5px;
+  color: #743925;
+  background: #fff1e8;
+}
+
+.game-ui .character-external-warning {
+  color: #7a4c18;
+}
+
+.touch-controls .character-editor select,
+.touch-controls .character-editor .button {
+  font-size: 16px;
+}

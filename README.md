@@ -517,6 +517,30 @@ These performance and editor-free release requirements are recorded in
 
 ## Custom visuals
 
+Open **Workshop / Character** to choose the character's presentation. The
+default is **3D meshes**: Three.js builds the character from procedural
+geometry, with visual arm IK. It is not an imported, animated 3D skeleton.
+All character types use the same Planck.js 2D physics and physical grip targets.
+
+| Character type | What is rendered |
+| --- | --- |
+| 3D meshes (built-in / GLB parts) | Procedural Three.js meshes, with optional per-part GLB replacements from Appearance |
+| 2D sprite character | PNG cutouts or a custom 2D bone/weighted rig; all 3D character underlays are hidden |
+| Hybrid (3D + sprites) | 3D parts plus per-layer sprite Replace/Overlay behavior |
+
+The choice is stored as `characterRiggingType` in the character/sprite profile.
+Changing it retains the other artwork, but does not silently save it. Use the
+profile's **Save**, **Revert**, and JSON controls. Older layouts migrate to
+Hybrid to preserve their appearance. GLB replacements remain separate,
+browser-local Appearance assets; whole-body 3D animation retargeting is not
+supported.
+
+For a complete starting point, choose **Load complete 2D example** in Character.
+**Paper Climber** supplies original PNG artwork for the body, pot, arms, hands,
+and hammer, plus a custom 2D arm rig that follows the actual grip targets.
+Loading it changes the draft only. Save it or export its embedded-PNG profile
+for an editor-free release; the example generator itself stays out of the game.
+
 The **Sprites** tab adds named PNG layers with anchor selection, size, local
 offsets/depth, rotation, and replace/overlay behavior. Save or exchange complete
 layouts as JSON, and select one with `GAME_SPRITES=skins/my-sprites.json` for

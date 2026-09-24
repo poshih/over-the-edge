@@ -14,7 +14,7 @@ import type { GameUi, HudState, PracticeId, UiOptions, WorkshopState, WorkshopTa
 import workshopMarkup from './workshop.html?raw';
 
 const WORKSHOP_CLASS = 'workshop-open';
-const TABS = ['physics', 'appearance', 'sprites', 'level'] as const;
+const TABS = ['physics', 'character', 'appearance', 'sprites', 'level'] as const;
 
 export function createUI(options: UiOptions): GameUi {
   let settings = validateGameSettings(options.initialSettings);
@@ -35,6 +35,7 @@ export function createUI(options: UiOptions): GameUi {
   hud.actions.append(workshopToggle);
   const panel = element<HTMLElement>(root, '.workshop');
   const workshopClose = element<HTMLButtonElement>(root, '.workshop-close');
+  const characterMount = element<HTMLElement>(root, '#character-pane');
   const appearanceMount = element<HTMLElement>(root, '#appearance-pane');
   const spriteMount = element<HTMLElement>(root, '#sprites-pane');
   const levelMount = element<HTMLElement>(root, '#level-pane');
@@ -222,7 +223,7 @@ export function createUI(options: UiOptions): GameUi {
   });
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
-    appearanceMount, spriteMount, levelMount, workshopState,
+    characterMount, appearanceMount, spriteMount, levelMount, workshopState,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
     dispose: () => {

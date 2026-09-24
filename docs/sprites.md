@@ -1,8 +1,40 @@
 # Sprite visuals
 
+## Character type
+
+**Workshop / Character** owns the explicit character type selection:
+
+| `characterRiggingType` | Editor label | Technology |
+| --- | --- | --- |
+| `model-3d` | 3D meshes (built-in / GLB parts) | Three.js procedural meshes with visual arm IK, optionally replaced by GLB parts |
+| `sprite-2d` | 2D sprite character | PNG planes, optionally attached to custom 2D bones or weighted GPU-skinned meshes |
+| `hybrid` | Hybrid (3D + sprites) | 3D underlays combined with per-layer sprite Replace/Overlay |
+
+The default 3D-looking character is built from geometry such as spheres,
+cylinders, and a lathed pot; it is not a pre-rigged 3D avatar. GLB imports replace
+individual visuals without retargeting a whole-body animation rig. Custom 2D
+skeletons use the project's pose/IK/hair solver and Three.js bones/skin
+rendering, not a separate game engine. All modes retain Planck.js 2D physics,
+the same hammer length and physical grips, and the same input behavior.
+
+The type is authored profile data, not an inferred result of which assets happen
+to be loaded. Save/Revert and JSON actions in Character and Sprites operate on
+the same profile. Mode changes keep existing sprites, skeletons, presentation
+settings, and separately stored GLB assets, and end transient previews.
+Only Save writes storage. A 2D character needs sprite artwork; load the example
+or import a profile before selecting it. Switch to 3D or Hybrid before deleting
+the last 2D layer.
+
+3D mode hides and detaches sprite rendering without discarding its resources;
+inactive sprite animation, hair, and UV work do not run. Sprite/skeleton
+previews require 2D or Hybrid. The Sprites tab offers **Preview as Hybrid** when
+the selected type is 3D. Switching back resumes from the current physical frame
+with fresh visual motion state, rather than replaying elapsed hidden animation.
+
 ## Authoring
 
-Open **Workshop / Sprites**. Choose an anchor and a PNG to add a named layer.
+Choose **Hybrid** to decorate 3D parts, or load a **2D sprite character**, then
+open **Workshop / Sprites**. Choose an anchor and a PNG to add a named layer.
 Layers have independent width, height, local X/Y/Z offsets, and local Z rotation
 in degrees. Select a layer to edit it; changes preview immediately, including
 while physics is paused. An unbound layer inherits its anchor's translation,
@@ -10,13 +42,17 @@ rotation, and scale. Bone attachments and weighted meshes instead use the custom
 skeleton described below. Artwork stays in its local XY plane; it is not an
 automatically camera-facing billboard.
 
-**Replace** hides the anchor's procedural visual or GLB replacement.
+In **Hybrid**, **Replace** hides the anchor's procedural visual or GLB replacement.
 **Overlay** keeps that underlay visible. Several layers can share an anchor;
 removing or hiding the last replacing layer restores the correct underlay, including a
 GLB imported while sprites covered it. A single shared visibility owner prevents
 the model and sprite systems from undoing each other's choices.
+These per-layer underlay choices are retained in other modes, but 2D mode
+always hides all 3D character underlays, and 3D mode always hides all sprites.
+Use Hybrid for partial replacements; a pure 2D profile must supply all artwork
+it intends to show, including the tool.
 
-**Save** persists the complete layout and uploaded PNGs in this browser.
+**Save** persists the type, complete layout, and uploaded PNGs in this browser.
 The acknowledged save restores on startup. **Revert** restores it without
 overwriting it; imports, deletions, and offset edits remain drafts until Save.
 JSON import/export transfers the same layout between browsers. Selecting a
@@ -65,7 +101,8 @@ Layer direction masks support **right, up-right, up, up-left, left, down-left,
 down, and down-right**. Facing is selected from the aiming direction; arm IK
 continues to track continuously within each sector. Use separate layers for
 different images, offsets, and front/back depth ordering in each direction.
-Hidden layers do not cover their underlying visuals.
+In Hybrid, hidden layers do not cover their underlying visuals. In pure 2D
+mode, hidden directional cards never reveal a 3D replacement underneath.
 
 Author directional bone poses and named animation clips with duration, looping,
 and timed keyframes. Pose values are offsets from the bind pose, not absolute
@@ -275,7 +312,8 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
+  "characterRiggingType": "hybrid",
   "presentation": null,
   "skeleton": null,
   "images": [
@@ -308,11 +346,13 @@ or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
 Schema-1 layouts remain importable as unbound layers visible in all directions.
-Schema-1 and schema-2 layouts explicitly migrate to schema 3 with
-`presentation: null`, preserving their original fixed-sector behavior.
+Schemas 1-3 explicitly migrate to schema 4 with `characterRiggingType: "hybrid"`,
+preserving their original per-layer rendering. Schema-1 and schema-2 layouts
+receive `presentation: null`, preserving fixed-sector behavior; schema-3
+directional settings are retained unchanged.
 Reading or previewing an old save does not rewrite its stored record; an
-explicit Save/export writes schema 3. Keep an original export for rollback to
-an older release: old readers cannot understand the new authored presentation.
+explicit Save/export writes schema 4. Keep an original export for rollback to
+an older release: old readers cannot understand the new authored type.
 There is no destructive storage migration.
 
 `DirectionalPresentation` in `src/directional-data.ts` defines `hysteresis`,
@@ -331,11 +371,15 @@ validated skeleton edits without reloading images, and `setPreview()` selects
 an explicit `SkeletonPreview` or `null` for live playback.
 Skeleton edits default to live playback; pass `{ preview }` as the second
 `configureSkeleton()` argument to preserve a valid authoring preview atomically.
+`setCharacterRiggingType()` switches presentation without reloading images or
+changing the host's physical anchors. It ends previews and reinitializes visual
+motion when the mode changes. `replaces()` reports actual underlay coverage,
+including the all-hidden underlays of pure 2D mode.
 `configurePresentation()` applies authored presentation edits without decoding
 images. `setDirectionalPreview({ aim })` supplies visual-only preview aim;
 passing `null` exits it. Skeleton and directional previews are mutually exclusive.
 `presentationState()`, `inspect()`, and `replaces()` read the cached presentation
-result and never advance hysteresis or smoothing. `update()` advances the
+result and never advance hysteresis or smoothing. In 2D/Hybrid, `update()` advances the
 character-local controllers once per rendered frame, and visibility, coverage,
 and directional skeleton poses consume the same selected direction. Optional
 `dt` is wall-clock frame duration for editor preview; callers that omit it use
@@ -401,7 +445,7 @@ GAME_LEVEL=levels/my-level.json GAME_SPRITES=skins/my-sprites.json npm run build
 ```
 
 The build validates the document, anchors, bones, weights, and IK targets.
-Skeletons, clips, directional presentation, layers, hair, and tile settings use this same
+Character type, skeletons, clips, directional presentation, layers, hair, and tile settings use this same
 `GAME_SPRITES` input; there is no separate rig profile. Embedded PNGs become separate
 hashed assets, deduplicated by content rather than embedded in executable
 JavaScript. Development uses the same document with embedded sources through
@@ -411,6 +455,26 @@ The release waits for its selected sprites before starting gameplay. It loads
 no editor UI, import controls, browser saves, GLB importer, or diagnostics.
 Without `GAME_SPRITES`, it uses the procedural character and includes no sprite
 artwork. Sprite JSON is independent of level JSON and browser physics/IK profiles.
+
+## Complete sprite-character example
+
+Open **Workshop / Character** and choose **Load complete 2D example**. This loads
+**Paper Climber** as a draft and selects the 2D sprite character type. Replacing
+existing content requires confirmation; the previous saved profile remains
+available through Revert until a new Save.
+
+The example covers all thirteen character/tool visual slots with original PNG
+artwork: pot, torso, head, both upper arms, forearms, elbows and gloves, shaft,
+and hammer head. Its custom 2D arm chains target `left-grip` and `right-grip`;
+the pot and hammer artwork follow their existing physical anchors. It is a
+complete character, unlike the decorative-card example below.
+
+Artwork is generated locally only when the example is explicitly loaded.
+Left/right pieces reuse images; aiming and switching character type do not
+regenerate them. The source lives in `src/editor/sprite-character-example.ts`.
+That authoring code is editor-only; exporting the profile embeds its generated
+PNGs as ordinary authored data, so the export can be used with `GAME_SPRITES`
+without including the generator or editor in a release.
 
 ## Self-contained sprite example
 

@@ -295,7 +295,7 @@ export function createSkeletonEditor(options: {
   root.className = 'skeleton-editor';
   root.innerHTML = `
     <section class="sprite-intro skeleton-intro">
-      <h3>Hybrid sprite rigging.</h3>
+      <h3>2D sprite rigging.</h3>
       <p>Create a compact bone rig, layer bindings, additive poses, clip animation and optional constraints.</p>
       <p class="appearance-format">Saved bone rotations use degrees. Meshes bind in skeleton-root space. Legacy layers stay anchor-driven until you bind them.</p>
     </section>
@@ -491,8 +491,12 @@ export function createSkeletonEditor(options: {
       </div>
       <div class="skeleton-subsection skeleton-preview-subsection">
         <h4>Preview</h4>
+        <p class="appearance-format skeleton-preview-unavailable" id="skeleton-preview-help" hidden>
+          Sprite previews are disabled in 3D mode. Select 2D or Hybrid in Character to preview this rig.
+          Bones, bindings and poses remain editable.
+        </p>
         <label class="appearance-label" for="skeleton-preview-mode">Preview mode</label>
-        <select id="skeleton-preview-mode">
+        <select id="skeleton-preview-mode" aria-describedby="skeleton-preview-help">
           <option value="live">Live game animation</option>
           <option value="direction">Directional pose</option>
           <option value="clip">Scrub selected clip</option>
@@ -724,6 +728,7 @@ export function createSkeletonEditor(options: {
   const previewModeSelect = get<HTMLSelectElement>('#skeleton-preview-mode');
   const previewConstraintsSelect = get<HTMLSelectElement>('#skeleton-preview-constraints');
   const previewLiveButton = get<HTMLButtonElement>('.skeleton-preview-live');
+  const previewUnavailable = get<HTMLParagraphElement>('.skeleton-preview-unavailable');
   const ikGroup = get<HTMLFieldSetElement>('.skeleton-ik-group');
   const ikSelect = get<HTMLSelectElement>('#skeleton-ik');
   const ikId = get<HTMLElement>('.skeleton-ik-id');
@@ -1044,6 +1049,9 @@ export function createSkeletonEditor(options: {
     const skeleton = snapshot.document.skeleton;
     const layer = selectedLayer(snapshot);
     const disabledAll = snapshot.restoring || snapshot.busy;
+    const spritesEnabled = snapshot.document.characterRiggingType !== 'model-3d';
+    const previewDisabled = disabledAll || !spritesEnabled;
+    previewUnavailable.hidden = spritesEnabled;
     const clip = currentClip(skeleton);
     const frame = currentFrame(clip);
     const bone = skeleton?.bones.find(entry => entry.id === selectedBoneId) ?? null;
@@ -1068,6 +1076,9 @@ export function createSkeletonEditor(options: {
     } else if (snapshot.error !== null) {
       message = snapshot.error;
       kind = 'error';
+    } else if (!spritesEnabled) {
+      message = 'Sprite rendering and pose preview are disabled in 3D. Edit the retained 2D rig here; select 2D or Hybrid in Character to preview it.';
+      kind = snapshot.dirty ? 'draft' : 'ready';
     } else if (skeleton === null) {
       message = 'No skeleton yet. Create one to enable bone binding, animation and constraints.';
       kind = snapshot.dirty ? 'draft' : 'ready';
@@ -1222,9 +1233,9 @@ export function createSkeletonEditor(options: {
       frameTimeInput.max = String(clip.duration);
       previewTimeControl.input.max = String(clip.duration);
       if (!Number.isNaN(previewTimeControl.input.valueAsNumber) && previewTimeControl.input.valueAsNumber > clip.duration) {
-        previewTimeControl.setValue(clip.duration, { disabled: disabledAll || previewMode !== 'clip' });
+        previewTimeControl.setValue(clip.duration, { disabled: previewDisabled || previewMode !== 'clip' });
       } else {
-        previewTimeControl.setValue(snapshot.preview?.time ?? 0, { disabled: disabledAll || previewMode !== 'clip' });
+        previewTimeControl.setValue(snapshot.preview?.time ?? 0, { disabled: previewDisabled || previewMode !== 'clip' });
       }
     } else {
       syncSelectOptions(frameSelect, [{ value: '', label: 'No keyframes yet' }]);
@@ -1247,12 +1258,12 @@ export function createSkeletonEditor(options: {
     deleteFrameButton.disabled = disabledAll || frame === null || clip?.frames.length === 1;
     applyFramePoseButton.disabled = disabledAll || frame === null || bone === null;
     clearFramePoseButton.disabled = disabledAll || frame === null || bone === null || selectedFramePose === null;
-    previewModeSelect.disabled = disabledAll || skeleton === null;
-    previewConstraintsSelect.disabled = disabledAll || skeleton === null || previewMode === 'live';
-    previewLiveButton.disabled = disabledAll || snapshot.preview === null && !snapshot.directionalPreview;
+    previewModeSelect.disabled = previewDisabled || skeleton === null;
+    previewConstraintsSelect.disabled = previewDisabled || skeleton === null || previewMode === 'live';
+    previewLiveButton.disabled = !spritesEnabled || snapshot.preview === null && !snapshot.directionalPreview;
     if (previewModeSelect.value !== previewMode) previewModeSelect.value = previewMode;
     if (previewConstraintsSelect.value !== previewConstraints) previewConstraintsSelect.value = previewConstraints;
-    previewTimeControl.input.disabled = disabledAll || previewMode !== 'clip' || clip === null;
+    previewTimeControl.input.disabled = previewDisabled || previewMode !== 'clip' || clip === null;
 
     ikGroup.disabled = disabledAll || skeleton === null;
     const blankBones = buildBoneOptions(skeleton, 'Select a bone');

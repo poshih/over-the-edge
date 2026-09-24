@@ -417,7 +417,7 @@ export function createDirectionalEditor(options: {
 
   function canDrag(handle: Handle): boolean {
     return active && !snapshot.busy && !snapshot.restoring &&
-      (handle.kind === 'aim' || snapshot.document.presentation !== null);
+      (handle.kind === 'aim' ? snapshot.document.characterRiggingType !== 'model-3d' : snapshot.document.presentation !== null);
   }
 
   function handleAngle(handle: Handle): number {
@@ -557,9 +557,16 @@ export function createDirectionalEditor(options: {
   function render(): void {
     if (disposed) return;
     const busy = snapshot.busy || snapshot.restoring;
+    const spritesEnabled = snapshot.document.characterRiggingType !== 'model-3d';
     if (busy) {
       cancelDrag();
       clearLocalError();
+    }
+    if (!spritesEnabled) {
+      cancelDrag();
+      overlay.hidden = true;
+      for (const readout of [currentAim, currentDirection, currentTarget, currentDisplayed]) setText(readout, '—');
+      setText(previewMode, '3D mode: sprite previews are inactive. Select 2D or Hybrid in Character to preview the retained artwork.');
     }
     const configured = snapshot.document.presentation !== null;
     settings = snapshot.document.presentation ?? createDirectionalPresentation(defaultAnchor());
@@ -592,11 +599,11 @@ export function createDirectionalEditor(options: {
       attribute(boundary.handle, 'aria-disabled', String(busy || !configured || !active));
       attribute(boundary.handle, 'tabindex', busy || !configured || !active ? '-1' : '0');
     }
-    attribute(aimHandle, 'aria-disabled', String(busy || !active));
-    attribute(aimHandle, 'tabindex', busy || !active ? '-1' : '0');
-    aimInput.disabled = busy || !active;
-    previewStart.disabled = busy || !active;
-    previewLive.disabled = snapshot.preview === null && !snapshot.directionalPreview;
+    attribute(aimHandle, 'aria-disabled', String(busy || !active || !spritesEnabled));
+    attribute(aimHandle, 'tabindex', busy || !active || !spritesEnabled ? '-1' : '0');
+    aimInput.disabled = busy || !active || !spritesEnabled;
+    previewStart.disabled = busy || !active || !spritesEnabled;
+    previewLive.disabled = !spritesEnabled || snapshot.preview === null && !snapshot.directionalPreview;
     resetButton.disabled = busy || !configured;
     saveButton.disabled = busy || !snapshot.dirty;
     revertButton.disabled = busy || !snapshot.dirty || snapshot.saved === null;
@@ -604,6 +611,7 @@ export function createDirectionalEditor(options: {
     exportButton.disabled = busy || !snapshot.hasContent;
     setText(status, snapshot.restoring ? 'Restoring the saved sprite document...' :
       snapshot.busy ? 'Working on the sprite document...' :
+      !spritesEnabled ? 'Sprite rendering and directional preview are disabled in 3D. Authored settings remain editable.' :
       !configured ? 'Legacy presentation. Enable above to author shared sectors and explicit rotation targets.' :
       snapshot.dirty ? 'Directional settings are part of the unsaved sprite draft.' : 'Directional settings are saved on this device.');
     renderError();
@@ -701,7 +709,7 @@ export function createDirectionalEditor(options: {
   }
 
   function updatePreview(): void {
-    if (disposed || !active) return;
+    if (disposed || !active || snapshot.document.characterRiggingType === 'model-3d') return;
     const live = options.presentationState();
     setText(currentAim, degrees(live.aimAngle));
     setText(currentDirection, live.direction);

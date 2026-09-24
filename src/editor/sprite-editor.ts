@@ -10,6 +10,7 @@ import type { SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
 import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
+import { createCharacterEditor } from './character-editor';
 import './sprite-editor.css';
 
 type SpriteFieldKey = (typeof SPRITE_FIELDS)[number]['key'];
@@ -27,6 +28,7 @@ function fieldValue(layer: SpriteLayer, key: SpriteFieldKey): number {
 
 export interface SpriteEditorOptions {
   mount: HTMLElement;
+  characterMount: HTMLElement;
   rig: SpriteRig;
   anchors: readonly SpriteAnchorInput[];
   targetIds: readonly string[];
@@ -58,9 +60,13 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   root.innerHTML = `
     <div class="workshop-scroll sprite-scroll">
       <section class="sprite-intro">
-        <h3>Dress up your visuals.</h3>
-        <p>Add a PNG layer anchored to any current visual. Replace hides the underlying
-          visual. Overlay keeps it visible; use depth to position the card in front.</p>
+        <h3>Author your sprite artwork.</h3>
+        <p>Add PNG cutouts or bind them to a custom 2D rig. Choose the global character type
+          and load a complete 2D example in Character. Uploading a PNG never switches the type.</p>
+      </section>
+      <section class="sprite-mode-banner" aria-label="Sprite rendering mode">
+        <p class="sprite-mode-status" role="status" aria-live="polite"></p>
+        <button type="button" class="button sprite-preview-hybrid" hidden>Preview as Hybrid</button>
       </section>
       <label class="appearance-label" for="sprite-new-anchor">New layer anchor</label>
       <select id="sprite-new-anchor"></select>
@@ -116,11 +122,14 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
         <button type="button" class="button sprite-revert">Revert</button>
         <button type="button" class="button sprite-new">New</button>
       </div>
-      <p>Save keeps the layout, rig and directional presentation across reloads. Revert restores the last save.</p>
+      <p>Save keeps the whole character / sprite profile: type, artwork, rig and directional presentation.
+        Revert restores the last save.</p>
     </footer>
   `;
 
   const newAnchorSelect = element<HTMLSelectElement>(root, '#sprite-new-anchor');
+  const modeStatus = element<HTMLParagraphElement>(root, '.sprite-mode-status');
+  const hybridButton = element<HTMLButtonElement>(root, '.sprite-preview-hybrid');
   const newFileInput = element<HTMLInputElement>(root, '#sprite-new-file');
   const layerSelect = element<HTMLSelectElement>(root, '#sprite-layer');
   const statusBox = element<HTMLDivElement>(root, '.sprite-state');
@@ -146,7 +155,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       const text = state.exportDocument();
       if (text === null || events.signal.aborted) return;
       downloadJson('sprites.json', text);
-      options.onNotice('Exported sprites.json with rig, directional settings, uploaded PNGs and authored URL references.', 'info');
+      options.onNotice('Exported sprites.json with character type, rig, directional settings, PNGs and authored URL references. GLB parts are stored separately.', 'info');
     },
   };
 
@@ -174,6 +183,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     controls.set(field.key, control);
   }
 
+  hybridButton.addEventListener('click', () => { state.setCharacterRiggingType('hybrid'); }, listen);
   newAnchorSelect.addEventListener('change', () => { newLayerAnchor = newAnchorSelect.value; }, listen);
   newFileInput.addEventListener('change', () => {
     const file = newFileInput.files?.[0];
@@ -203,7 +213,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   newButton.addEventListener('click', () => {
     const snapshot = state.snapshot();
     if (snapshot.hasContent && !window.confirm(
-      'Start a new empty sprite layout? Unsaved changes will be discarded. Save or export first to keep them.',
+      'Start a new built-in 3D character with an empty sprite profile? Unsaved changes will be discarded. Save or export first to keep them.',
     )) return;
     void state.newDocument();
   }, listen);
@@ -248,6 +258,15 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     const layer = snapshot.document.layers.find((candidate) => candidate.id === selectedId) ?? null;
     const disabledAll = snapshot.restoring || snapshot.busy;
     const hasContent = snapshot.hasContent;
+    const type = snapshot.document.characterRiggingType;
+    hybridButton.hidden = type !== 'model-3d';
+    hybridButton.disabled = disabledAll;
+    const modeMessage = type === 'model-3d' ?
+      '3D mode: sprite rendering and sprite previews are disabled. Artwork stays editable. Preview as Hybrid changes the profile draft; Save to keep it or Revert to your last save.' :
+      type === 'sprite-2d' ?
+        '2D mode: only the sprites in this profile are rendered; every 3D part is hidden. Underlay choices are retained for Hybrid mode.' :
+        'Hybrid mode: Replace hides a part under a visible sprite; Overlay keeps it. Use depth to place sprites in front of or behind 3D meshes.';
+    if (modeStatus.textContent !== modeMessage) modeStatus.textContent = modeMessage;
 
     newAnchorSelect.disabled = disabledAll;
     newFileInput.disabled = disabledAll;
@@ -294,12 +313,12 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       message = snapshot.error;
       kind = 'error';
     } else if (snapshot.dirty) {
-      message = 'Unsaved sprite changes. Save to keep them across reloads.';
+      message = 'Unsaved character / sprite profile changes. Save to keep them across reloads.';
       kind = 'draft';
     } else {
       message = !snapshot.hasContent
-        ? 'No sprite layers yet. Add a PNG image above.'
-        : 'Sprites saved on this device.';
+        ? 'No sprite layers yet. Add a PNG above, or load the complete example in Character.'
+        : 'Character / sprite profile saved on this device.';
       kind = 'ready';
     }
     if (status.textContent !== message) status.textContent = message;
@@ -307,6 +326,10 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   }
 
   options.mount.append(root);
+  const characterEditor = createCharacterEditor({
+    mount: options.characterMount, state, actions: documentActions,
+    onNotice: options.onNotice, signal: events.signal,
+  });
   const skeletonEditor = createSkeletonEditor({
     mount: element<HTMLDivElement>(root, '.sprite-skeleton-mount'),
     state, anchors: options.anchors, targetIds: options.targetIds, signal: events.signal,
@@ -328,6 +351,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     dispose: () => {
       events.abort();
       unsubscribe();
+      characterEditor.dispose();
       skeletonEditor.dispose();
       directionalEditor.dispose();
       state.dispose();

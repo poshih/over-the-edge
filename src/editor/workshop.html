@@ -12,6 +12,7 @@
 
       <div class="workshop-tabs" role="tablist" aria-label="Workshop section">
         <button id="physics-tab" type="button" role="tab" aria-selected="true" aria-controls="physics-pane">Physics</button>
+        <button id="character-tab" type="button" role="tab" aria-selected="false" aria-controls="character-pane" tabindex="-1">Character</button>
         <button id="appearance-tab" type="button" role="tab" aria-selected="false" aria-controls="appearance-pane" tabindex="-1">Appearance</button>
         <button id="sprites-tab" type="button" role="tab" aria-selected="false" aria-controls="sprites-pane" tabindex="-1">Sprites</button>
         <button id="level-tab" type="button" role="tab" aria-selected="false" aria-controls="level-pane" tabindex="-1">Level</button>
@@ -47,6 +48,7 @@
         </section>
       </div>
 
+      <section id="character-pane" class="character-pane workshop-pane" role="tabpanel" aria-labelledby="character-tab" hidden></section>
       <section id="appearance-pane" class="appearance-pane workshop-pane" role="tabpanel" aria-labelledby="appearance-tab" hidden></section>
       <section id="sprites-pane" class="sprites-pane workshop-pane" role="tabpanel" aria-labelledby="sprites-tab" hidden></section>
       <section id="level-pane" class="level-pane workshop-pane" role="tabpanel" aria-labelledby="level-tab" hidden></section>

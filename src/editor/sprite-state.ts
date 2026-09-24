@@ -2,6 +2,7 @@ import type { SpriteRig } from '../sprite-rig';
 import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
+  DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteLayer, SpriteOffset } from '../sprite-data';
 import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
@@ -90,6 +91,7 @@ function sameLayer(left: SpriteLayer, right: SpriteLayer): boolean {
 
 function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (left === right) return true;
+  if (left.characterRiggingType !== right.characterRiggingType) return false;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
   return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
     samePresentation(left.presentation, right.presentation) &&
@@ -210,7 +212,8 @@ export class SpriteEditorState {
       busy: this.busy,
       error: this.error,
       dirty: this.saved === null || !sameDocument(this.draft, this.saved),
-      hasContent: this.draft.layers.length > 0 || this.draft.images.length > 0 ||
+      hasContent: this.draft.characterRiggingType !== DEFAULT_CHARACTER_RIGGING_TYPE ||
+        this.draft.layers.length > 0 || this.draft.images.length > 0 ||
         this.draft.skeleton !== null || this.draft.presentation !== null,
       anchors: this.anchors,
       document: this.draft,
@@ -350,6 +353,33 @@ export class SpriteEditorState {
       this.saved = document;
       this.draft = document;
     });
+  }
+
+  setCharacterRiggingType(value: unknown): boolean {
+    if (!this.canEdit()) return false;
+    try {
+      const characterRiggingType = validateCharacterRiggingType(value, this.draft.layers.length);
+      if (characterRiggingType === this.draft.characterRiggingType) {
+        if (this.error !== null) {
+          this.error = null;
+          this.changed();
+        }
+        return true;
+      }
+      const document = Object.freeze({ ...this.draft, characterRiggingType });
+      this.validateDraft(document);
+      this.rig.setCharacterRiggingType(characterRiggingType);
+      this.draft = document;
+      this.preview = null;
+      this.directionalPreview = false;
+      this.error = null;
+      this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message);
+      return false;
+    }
   }
 
   setSkeleton(value: SkeletonDefinition | null, options: { preview?: SkeletonPreview | null } = {}): void {

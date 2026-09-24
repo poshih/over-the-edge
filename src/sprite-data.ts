@@ -6,6 +6,10 @@ import type { DirectionalPresentation } from './directional-data.ts';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, validateSkeleton, validateSkin } from './skeleton-data.ts';
 import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
 
+export const CHARACTER_RIGGING_TYPES = ['model-3d', 'sprite-2d', 'hybrid'] as const;
+export type CharacterRiggingType = (typeof CHARACTER_RIGGING_TYPES)[number];
+export const DEFAULT_CHARACTER_RIGGING_TYPE: CharacterRiggingType = 'model-3d';
+
 export interface SpriteOffset {
   readonly x: number;
   readonly y: number;
@@ -35,7 +39,8 @@ export interface SpriteLayer {
 }
 
 export interface SpriteDocument {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
+  readonly characterRiggingType: CharacterRiggingType;
   readonly images: readonly SpriteImage[];
   readonly layers: readonly SpriteLayer[];
   readonly skeleton: SkeletonDefinition | null;
@@ -76,10 +81,22 @@ export const SPRITE_FIELDS = [
 ] as const;
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
-  schemaVersion: 3, images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
+  schemaVersion: 4, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
+  images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
 
 export class SpriteError extends Error {}
+
+export function validateCharacterRiggingType(value: unknown, layerCount: number): CharacterRiggingType {
+  for (const type of CHARACTER_RIGGING_TYPES) {
+    if (value !== type) continue;
+    if (type === 'sprite-2d' && layerCount === 0) {
+      throw new SpriteError('A 2D sprite character needs artwork. Load the complete example or import a profile first; switch to 3D or Hybrid before deleting its last layer.');
+    }
+    return type;
+  }
+  throw new SpriteError('Choose a character type: model-3d, sprite-2d, or hybrid.');
+}
 
 const PNG_PREFIX = 'data:image/png;base64,';
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
@@ -230,13 +247,15 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
 // The loader validates image bytes as it acquires them, without decoding cached sources again.
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
-  if (version !== 1 && version !== 2 && version !== 3) {
-    throw new SpriteError('Sprite documents require schema version 1, 2 or 3.');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+    throw new SpriteError('Sprite documents require schema version 1, 2, 3 or 4.');
   }
   const legacy = version === 1;
-  const document = record(value, legacy ? ['schemaVersion', 'images', 'layers'] : version === 2 ?
-    ['schemaVersion', 'images', 'layers', 'skeleton'] :
-    ['schemaVersion', 'images', 'layers', 'skeleton', 'presentation'], 'A sprite document');
+  const fields = ['schemaVersion', 'images', 'layers'];
+  if (version >= 2) fields.push('skeleton');
+  if (version >= 3) fields.push('presentation');
+  if (version >= 4) fields.push('characterRiggingType');
+  const document = record(value, fields, 'A sprite document');
   if (!Array.isArray(document.images) || !Array.isArray(document.layers) ||
     document.images.length > SPRITE_LIMITS.images || document.layers.length > SPRITE_LIMITS.layers) {
     throw new SpriteError(`Sprite documents allow at most ${SPRITE_LIMITS.images} images and ${SPRITE_LIMITS.layers} layers.`);
@@ -273,15 +292,18 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   let presentation: DirectionalPresentation | null;
   try {
     skeleton = legacy || document.skeleton === null ? null : validateSkeleton(document.skeleton);
-    presentation = version !== 3 || document.presentation === null ? null : validateDirectionalPresentation(document.presentation);
+    presentation = version < 3 || document.presentation === null ? null : validateDirectionalPresentation(document.presentation);
   } catch (error) {
     if (error instanceof SkeletonError || error instanceof DirectionalError) throw new SpriteError(error.message, { cause: error });
     throw error;
   }
   validateSpriteRigging(layers, skeleton);
   validateDirectionalReferences(presentation, layers, skeleton);
+  const characterRiggingType = version === 4
+    ? validateCharacterRiggingType(document.characterRiggingType, layers.length) : 'hybrid';
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: 3, images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation,
+    schemaVersion: 4, characterRiggingType,
+    images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation,
   });
   validateSpriteBudget(result);
   return result;
@@ -334,6 +356,7 @@ export function validateDirectionalReferences(
 }
 
 export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>, targets?: Iterable<string>): void {
+  validateCharacterRiggingType(document.characterRiggingType, document.layers.length);
   const available = new Set(anchors);
   for (const layer of document.layers) {
     if (!available.has(layer.anchor)) throw new SpriteError(`Sprite ${layer.id} references unknown anchor "${layer.anchor}".`);

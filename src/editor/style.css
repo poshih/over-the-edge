@@ -117,16 +117,18 @@ body.touch-controls {
 }
 
 .workshop-tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(max-content, 1fr));
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 4px;
+  overflow-x: auto;
   padding: 10px 23px;
   border-bottom: 1px solid var(--line);
+  overscroll-behavior-x: contain;
 }
 
 .workshop-tabs [role="tab"] {
-  flex: 1;
-  padding: 9px;
+  padding: 9px 6px;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: transparent;

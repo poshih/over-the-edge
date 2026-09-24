@@ -24,9 +24,13 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
   root.innerHTML = `
     <div class="workshop-scroll appearance-scroll">
       <section class="appearance-intro">
-        <h3>Your own character.</h3>
-        <p>Import a GLB for any visible part. The existing physics and arm IK keep driving it.</p>
+        <h3>3D meshes and part imports.</h3>
+        <p>The default character is procedurally built Three.js geometry, not an imported 3D skeleton.
+          Choose the global visual type in Character; 2D mode hides these meshes without deleting them.</p>
+        <p>Import a GLB to replace an individual rigid part. The existing visual 3D arm IK and Planck 2D
+          physics keep driving it. Whole-body 3D rig retargeting and imported animation are not supported.</p>
         <p><strong>Cosmetic only:</strong> models do not change collision shapes, mass or grip.</p>
+        <p>GLB imports stay separately browser-local. They are not bundled into exported character / sprite profiles.</p>
       </section>
       <div class="arm-ik-profiles"></div>
       <p class="appearance-format">The last saved or loaded IK profile restores on reload.

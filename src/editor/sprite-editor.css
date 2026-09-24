@@ -44,6 +44,24 @@
   margin-top: 20px;
 }
 
+.sprite-mode-banner {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #e9eedf;
+}
+
+.game-ui .sprite-mode-status {
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.sprite-preview-hybrid {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .sprite-external-warning {
   color: #7a4c18;
 }
@@ -73,6 +91,7 @@
 
 .touch-controls .sprite-footer .button,
 .touch-controls .sprite-action-row .button,
+.touch-controls .sprite-preview-hybrid,
 .touch-controls .sprite-delete-layer {
   font-size: 16px;
 }

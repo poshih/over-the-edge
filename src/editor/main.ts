@@ -67,7 +67,7 @@ const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
 }));
 const spriteEditor = createSpriteEditor({
-  mount: ui.spriteMount, rig: game.view.sprites, onNotice: ui.notice,
+  mount: ui.spriteMount, characterMount: ui.characterMount, rig: game.view.sprites, onNotice: ui.notice,
   viewport: { canvas, project: (point) => game.view.project(point) },
   targetIds: SPRITE_TARGET_IDS,
   anchors: VISUAL_PARTS.map(({ id, label }) => {
