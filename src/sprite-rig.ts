@@ -21,6 +21,8 @@ import { FACING_DIRECTIONS, SkeletonError, validateSkeleton, validateSkeletonPre
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview } from './skeleton-data';
 import { SkeletonPose, restPose } from './skeleton-pose';
 import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as RuntimeBoneWorld, SkeletonRotation } from './skeleton-pose';
+import { compileSpriteHeadTracking } from './sprite-head-aim';
+import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-aim';
 
 export interface SpriteAnchor {
   readonly node: THREE.Object3D;
@@ -40,7 +42,6 @@ interface Attachment {
   readonly group: THREE.Group;
   count: number;
   legacyCount: number;
-  readonly coverageCounts: number[];
 }
 
 interface TileRuntime {
@@ -103,6 +104,7 @@ interface BuildState {
   readonly attachments: Map<string, Attachment>;
   readonly skeleton: SkeletonRuntime | null;
   readonly presentation: DirectionalPresentation | null;
+  readonly headTracking: SpriteHeadTrackingPlan;
   readonly characterRiggingType: CharacterRiggingType;
   readonly mode: 'replace' | 'edit';
 }
@@ -260,6 +262,9 @@ export class SpriteRig {
   private readonly anchors: ReadonlyMap<string, SpriteAnchor>;
   private readonly root: THREE.Object3D;
   private readonly targetIds: ReadonlySet<string>;
+  private readonly onCharacterRiggingTypeChange: ((type: CharacterRiggingType) => void) | undefined;
+  private readonly headTracking: SpriteHeadTracking | null;
+  private headTrackingPlan: SpriteHeadTrackingPlan;
   private readonly geometry = new THREE.PlaneGeometry(1, 1);
   private readonly coverage = new Map<string, boolean>();
   private characterRiggingType: CharacterRiggingType = DEFAULT_CHARACTER_RIGGING_TYPE;
@@ -300,11 +305,29 @@ export class SpriteRig {
   private readonly presentationPivot = new THREE.Vector3();
   private readonly presentationMatrix = new THREE.Matrix4();
 
-  constructor(anchors: ReadonlyMap<string, SpriteAnchor>, options: { root: THREE.Object3D; targetIds: readonly string[] }) {
+  constructor(anchors: ReadonlyMap<string, SpriteAnchor>, options: {
+    root: THREE.Object3D;
+    targetIds: readonly string[];
+    onCharacterRiggingTypeChange?: (type: CharacterRiggingType) => void;
+    headTracking?: SpriteHeadTracking;
+  }) {
     this.anchors = new Map(anchors);
     for (const name of this.anchors.keys()) this.coverage.set(name, false);
     this.root = options.root;
     this.targetIds = new Set(options.targetIds);
+    this.onCharacterRiggingTypeChange = options.onCharacterRiggingTypeChange;
+    this.headTracking = options.headTracking === undefined ? null : {
+      anchor: options.headTracking.anchor,
+      pivot: { ...options.headTracking.pivot },
+    };
+    if (this.headTracking !== null) {
+      this.anchor(this.headTracking.anchor);
+      this.anchor(this.headTracking.pivot.anchor);
+      if (!Number.isFinite(this.headTracking.pivot.x) || !Number.isFinite(this.headTracking.pivot.y)) {
+        throw new SpriteError('The sprite head pivot must have finite coordinates.');
+      }
+    }
+    this.headTrackingPlan = compileSpriteHeadTracking(this.headTracking, [], null, null);
   }
 
   async replace(document: SpriteDocument, options: { signal: AbortSignal } = { signal: new AbortController().signal }): Promise<void> {
@@ -312,6 +335,7 @@ export class SpriteRig {
     if (options.signal.aborted) throw cancellation(options.signal);
     document = validateSpriteMetadata(document);
     validateSpriteAnchors(document, this.anchors.keys(), this.targetIds);
+    this.assertCharacterRenderer(document.characterRiggingType);
     const operation: Replacement = { controller: new AbortController(), staged: new Map() };
     const signal = operation.controller.signal;
     const abort = () => operation.controller.abort(cancellation(options.signal));
@@ -393,7 +417,7 @@ export class SpriteRig {
       const layers = this.layerData();
       validateSpriteRigging(layers, skeleton);
       validateDirectionalReferences(this.presentation, layers, skeleton);
-      validateSpriteAnchors({ schemaVersion: 4, characterRiggingType: this.characterRiggingType,
+      validateSpriteAnchors({ schemaVersion: 5, characterRiggingType: this.characterRiggingType,
         images: [], layers, skeleton, presentation: this.presentation },
         this.anchors.keys(), this.targetIds);
       const preview = options.preview === null ? null : (() => {
@@ -434,7 +458,7 @@ export class SpriteRig {
       const layers = this.layerData();
       const skeleton = this.skeleton?.definition ?? null;
       validateDirectionalReferences(settings, layers, skeleton);
-      validateSpriteAnchors({ schemaVersion: 4, characterRiggingType: this.characterRiggingType,
+      validateSpriteAnchors({ schemaVersion: 5, characterRiggingType: this.characterRiggingType,
         images: [], layers, skeleton, presentation: settings },
         this.anchors.keys(), this.targetIds);
       const next = this.buildState(layers, skeleton, new Map(this.images), new Map(this.resources),
@@ -462,7 +486,7 @@ export class SpriteRig {
     } else {
       if (this.directionalPreview === null) {
         this.previewTime = this.lastFrame.time;
-        this.previewDirectionPose = new DirectionalPose(this.presentation);
+        this.previewDirectionPose = new DirectionalPose(this.runtimePresentation());
         this.previewDirectionPose.update({ time: this.previewTime, aim: preview.aim });
         if (this.skeleton !== null) this.skeleton.previewPose = null;
       }
@@ -480,17 +504,21 @@ export class SpriteRig {
     this.previewDirectionPose = null;
     if (this.skeleton !== null) {
       this.skeleton.pose = new SkeletonPose(this.skeleton.definition);
-      this.skeleton.pose.configureRotation(this.presentation === null ? EMPTY_BONES : this.presentation.bones);
+      this.skeleton.pose.configureRotation(this.runtimePresentation()?.bones ?? EMPTY_BONES);
       this.skeleton.previewPose = null;
     }
   }
 
   presentationState() {
-    const active = this.characterRiggingType !== 'model-3d';
+    const active = this.characterRiggingType === 'sprite-2d';
     const runtime = active ? this.skeleton : null;
     return {
       ...this.displayedPresentation,
+      // Automatic tilt is runtime-only, separate from the editor's authored rotation readouts.
+      targetRotation: this.presentation === null ? 0 : this.displayedPresentation.targetRotation,
+      displayedRotation: this.presentation === null ? 0 : this.displayedPresentation.displayedRotation,
       enabled: active && this.presentation !== null,
+      headTracking: this.headTrackingState(),
       preview: this.directionalPreview !== null,
       posePreview: this.preview !== null,
       pivot: !active || this.presentation === null ? null : {
@@ -505,6 +533,21 @@ export class SpriteRig {
     };
   }
 
+  headTrackingState() {
+    const active = !this.disposed && this.characterRiggingType === 'sprite-2d';
+    const plan = this.headTrackingPlan;
+    const automatic = active && plan.presentation !== null;
+    return {
+      status: active ? plan.status : 'inactive',
+      reason: active ? plan.reason : 'Sprite head tracking is inactive while sprite rendering is off.',
+      layers: plan.layers,
+      bones: plan.bones,
+      issues: plan.issues,
+      targetRotation: automatic ? this.displayedPresentation.targetRotation : 0,
+      displayedRotation: automatic ? this.displayedPresentation.displayedRotation : 0,
+    };
+  }
+
   update(frame: {
     time: number;
     dt?: number;
@@ -514,11 +557,17 @@ export class SpriteRig {
     this.assertLive();
     const dt = frame.dt === undefined ? Math.max(0, frame.time - this.lastFrame.time) : frame.dt;
     if (!Number.isFinite(dt) || dt < 0) throw new SpriteError('Sprite frame duration must be finite and nonnegative.');
-    const active = this.characterRiggingType !== 'model-3d';
+    const active = this.characterRiggingType === 'sprite-2d';
     if (active) {
       this.directionPose.update(frame);
       if (this.directionalPreview !== null && this.previewDirectionPose !== null) {
-        this.previewTime += dt;
+        if (frame.time < this.lastFrame.time) {
+          this.previewTime = frame.time;
+          this.previewDirectionPose.reset();
+          if (this.skeleton !== null) this.skeleton.previewPose = null;
+        } else {
+          this.previewTime += dt;
+        }
         this.previewDirectionPose.update({ time: this.previewTime, aim: this.directionalPreview.aim });
       }
     } else if (!Number.isFinite(frame.time) || !Number.isFinite(frame.aim.x) || !Number.isFinite(frame.aim.y)) {
@@ -632,7 +681,8 @@ export class SpriteRig {
       texturesDisposed: this.texturesDisposed,
       direction: this.currentDirection,
       presentation: this.presentationState(),
-      animation: this.characterRiggingType === 'model-3d' ? null :
+      headTracking: this.headTrackingState(),
+      animation: this.characterRiggingType !== 'sprite-2d' ? null :
         this.preview !== null ? this.preview.clip : this.hasFrame ? this.skeleton?.definition.animation ?? null : null,
       preview: this.preview === null ? null : {
         ...this.preview,
@@ -650,9 +700,9 @@ export class SpriteRig {
       skeleton: this.skeleton === null ? null : {
         anchor: this.skeleton.definition.anchor,
         originWorld: point(this.skeleton.originWorld),
-        clip: this.characterRiggingType === 'model-3d' ? null :
+        clip: this.characterRiggingType !== 'sprite-2d' ? null :
           this.preview !== null ? this.preview.clip : this.hasFrame ? this.skeleton.definition.animation : null,
-        constraints: this.characterRiggingType === 'model-3d' ? 'disabled' :
+        constraints: this.characterRiggingType !== 'sprite-2d' ? 'disabled' :
           this.preview !== null ? this.preview.constraints : this.hasFrame ? 'enabled' : 'disabled',
         bones: this.skeleton.evaluated.map(bone => ({ ...bone })),
         skinnedLayers,
@@ -682,6 +732,7 @@ export class SpriteRig {
     this.attachments.clear();
     this.coverage.clear();
     for (const [name, covered] of previousCoverage) if (covered) this.anchor(name).setCovered({ covered: false });
+    this.onCharacterRiggingTypeChange?.(DEFAULT_CHARACTER_RIGGING_TYPE);
   }
 
   private assertLive(): void {
@@ -696,8 +747,14 @@ export class SpriteRig {
   }
 
   private assertSpritePreview(): void {
-    if (this.characterRiggingType === 'model-3d') {
-      throw new SpriteError('Sprite rendering is off. Choose 2D sprites or Hybrid in Character before previewing a sprite rig.');
+    if (this.characterRiggingType !== 'sprite-2d') {
+      throw new SpriteError('Sprite rendering is off. Choose 2D sprites in Character before previewing a sprite rig.');
+    }
+  }
+
+  private assertCharacterRenderer(type: CharacterRiggingType): void {
+    if (type === 'avatar-3d' && this.onCharacterRiggingTypeChange === undefined) {
+      throw new SpriteError('This host has no connected avatar renderer.');
     }
   }
 
@@ -756,6 +813,7 @@ export class SpriteRig {
     options: { mode: 'replace' | 'edit'; presentation: DirectionalPresentation | null; characterRiggingType: CharacterRiggingType },
   ): BuildState {
     validateCharacterRiggingType(options.characterRiggingType, layers.length);
+    this.assertCharacterRenderer(options.characterRiggingType);
     const attachments = new Map<string, Attachment>();
     const instances = new Map<string, LayerInstance>();
     let skeleton: SkeletonRuntime | null = null;
@@ -774,16 +832,12 @@ export class SpriteRig {
           if (skeleton !== null && instance.mesh.parent !== skeleton.group) skeleton.group.add(instance.mesh);
         }
         attachment.count++;
-        if (data.underlay === 'replace') {
-          for (const direction of data.directions) {
-            const index = directionIndex(direction);
-            attachment.coverageCounts[index]++;
-          }
-        }
         instances.set(data.id, instance);
       }
       return { resources, images, layers: instances, attachments, skeleton,
-        presentation: options.presentation, characterRiggingType: options.characterRiggingType, mode: options.mode };
+        presentation: options.presentation,
+        headTracking: compileSpriteHeadTracking(this.headTracking, layers, definition, options.presentation),
+        characterRiggingType: options.characterRiggingType, mode: options.mode };
     } catch (error) {
       for (const instance of instances.values()) if (this.layers.get(instance.data.id) !== instance) this.disposeLayer(instance);
       if (skeleton !== this.skeleton) this.disposeSkeleton(skeleton);
@@ -1019,7 +1073,6 @@ export class SpriteRig {
         group,
         count: 0,
         legacyCount: 0,
-        coverageCounts: FACING_DIRECTIONS.map(() => 0),
       };
       attachments.set(name, attachment);
     }
@@ -1031,7 +1084,8 @@ export class SpriteRig {
     const oldLayers = this.layers;
     const oldSkeleton = this.skeleton;
     const changedType = next.characterRiggingType !== this.characterRiggingType;
-    const resetDirection = changedType || next.mode === 'replace' || next.presentation !== this.presentation;
+    const presentation = next.presentation ?? next.headTracking.presentation;
+    const resetDirection = changedType || next.mode === 'replace' || presentation !== this.runtimePresentation();
     const previousCoverage = new Map(this.coverage);
     const retained = new Set(next.layers.values());
     for (const instance of this.rotatedLayers) {
@@ -1046,6 +1100,7 @@ export class SpriteRig {
     this.attachments = next.attachments;
     this.skeleton = next.skeleton;
     this.presentation = next.presentation;
+    this.headTrackingPlan = next.headTracking;
     this.characterRiggingType = next.characterRiggingType;
     if (changedType && next.mode === 'edit') this.resetPresentation();
     this.preview = options.preview;
@@ -1054,17 +1109,17 @@ export class SpriteRig {
       this.previewDirectionPose = null;
     }
     if (resetDirection) {
-      this.directionPose = new DirectionalPose(this.presentation);
+      this.directionPose = new DirectionalPose(presentation);
       if (this.hasFrame) this.directionPose.update(this.lastFrame);
       if (this.directionalPreview !== null) {
-        this.previewDirectionPose = new DirectionalPose(this.presentation);
+        this.previewDirectionPose = new DirectionalPose(presentation);
         this.previewDirectionPose.update({ time: this.previewTime, aim: this.directionalPreview.aim });
       }
     }
-    const rotationBones = this.presentation === null ? EMPTY_BONES : this.presentation.bones;
+    const rotationBones = presentation === null ? EMPTY_BONES : presentation.bones;
     this.skeleton?.pose.configureRotation(rotationBones);
     this.skeleton?.previewPose?.configureRotation(rotationBones);
-    this.rotatedLayers = this.presentation === null ? [] : this.presentation.layers.map(id => {
+    this.rotatedLayers = presentation === null ? [] : presentation.layers.map(id => {
       const instance = this.layers.get(id);
       if (instance === undefined || instance.kind !== 'legacy') {
         throw new SpriteError(`Directional layer "${id}" must be an unbound rigid layer.`);
@@ -1082,6 +1137,7 @@ export class SpriteRig {
     for (const [name, covered] of this.coverage) {
       if (previousCoverage.get(name) !== covered) this.anchor(name).setCovered({ covered });
     }
+    if (changedType) this.onCharacterRiggingTypeChange?.(this.characterRiggingType);
     for (const layer of oldLayers.values()) if (!retained.has(layer)) this.disposeLayer(layer);
     if (oldSkeleton !== this.skeleton) this.disposeSkeleton(oldSkeleton);
     for (const [source, resource] of oldResources) {
@@ -1095,7 +1151,7 @@ export class SpriteRig {
   }
 
   private attachScene(): void {
-    if (this.characterRiggingType === 'model-3d') return;
+    if (this.characterRiggingType !== 'sprite-2d') return;
     for (const [name, attachment] of this.attachments) {
       if (attachment.legacyCount > 0) this.anchor(name).node.add(attachment.group);
       else attachment.group.removeFromParent();
@@ -1109,9 +1165,10 @@ export class SpriteRig {
     const changedDirection = direction !== this.currentDirection;
     if (changedDirection) this.currentDirection = direction;
     if (options.forceVisibility || changedDirection) this.applyDirection(direction, options.notifyCoverage !== false);
-    if (this.characterRiggingType === 'model-3d') return;
-    if (this.presentation !== null) {
-      const { pivot } = this.presentation;
+    if (this.characterRiggingType !== 'sprite-2d') return;
+    const presentation = this.runtimePresentation();
+    if (presentation !== null && (this.presentation !== null || this.rotatedLayers.length > 0)) {
+      const { pivot } = presentation;
       const anchor = this.anchor(pivot.anchor).node;
       anchor.updateWorldMatrix(true, false);
       this.presentationPivot.set(pivot.x, pivot.y, 0).applyMatrix4(anchor.matrixWorld);
@@ -1150,6 +1207,10 @@ export class SpriteRig {
     return this.directionPose.snapshot();
   }
 
+  private runtimePresentation(): DirectionalPresentation | null {
+    return this.presentation ?? this.headTrackingPlan.presentation;
+  }
+
   private rotateLayers(): void {
     if (this.rotatedLayers.length === 0) return;
     const angle = THREE.MathUtils.degToRad(this.displayedPresentation.displayedRotation);
@@ -1182,15 +1243,13 @@ export class SpriteRig {
   private applyDirection(direction: FacingDirection, notifyCoverage: boolean): void {
     const index = directionIndex(direction);
     for (const instance of this.layers.values()) {
-      const visible = this.characterRiggingType !== 'model-3d' && (instance.directionMask & (1 << index)) !== 0;
+      const visible = this.characterRiggingType === 'sprite-2d' && (instance.directionMask & (1 << index)) !== 0;
       if (visible === instance.visible) continue;
       instance.visible = visible;
       instance.mesh.visible = visible;
     }
     for (const [name, anchor] of this.anchors) {
-      const attachment = this.attachments.get(name);
-      const covered = this.characterRiggingType === 'sprite-2d' ||
-        this.characterRiggingType === 'hybrid' && attachment !== undefined && attachment.coverageCounts[index] > 0;
+      const covered = this.characterRiggingType === 'sprite-2d';
       if (this.coverage.get(name) === covered) continue;
       this.coverage.set(name, covered);
       if (notifyCoverage) anchor.setCovered({ covered });
@@ -1211,9 +1270,12 @@ export class SpriteRig {
   }
 
   private skeletonRotation(runtime: SkeletonRuntime, frame: Readonly<DirectionalFrame>): SkeletonRotation | null {
-    if (this.presentation === null || !this.presentation.rotation || this.presentation.bones.length === 0) return null;
+    const presentation = this.runtimePresentation();
+    if (presentation === null || !presentation.rotation || presentation.bones.length === 0) return null;
     return {
-      pivot: { x: this.presentationPivot.x - runtime.originWorld.x, y: this.presentationPivot.y - runtime.originWorld.y },
+      pivot: this.presentation === null ? 'bone-origin' : {
+        x: this.presentationPivot.x - runtime.originWorld.x, y: this.presentationPivot.y - runtime.originWorld.y,
+      },
       angle: THREE.MathUtils.degToRad(frame.displayedRotation),
     };
   }

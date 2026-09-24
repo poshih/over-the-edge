@@ -7,10 +7,12 @@ import {
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D } from 'three';
-import { ARM_SIDES, SPRITE_TARGET_IDS } from './character';
+import { ARM_SIDES, HEAD_GEOMETRY, SPRITE_TARGET_IDS } from './character';
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
 import { ARM_GEOMETRY, PLAYER_DEPTH, solveArmPose } from './arm-ik';
 import type { ArmPose } from './arm-ik';
+import { AvatarView } from './avatar-view';
+import { HeadAim } from './head-aim';
 import { PHYSICS, RIG } from './config';
 import type { InputMode, Point } from './config';
 import type { LevelChange, LevelDefinition, LevelLabel } from './level';
@@ -22,6 +24,7 @@ import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import { SpriteRig } from './sprite-rig';
 import type { SpriteAnchor } from './sprite-rig';
+import type { CharacterRiggingType } from './sprite-data';
 import { VisualVisibility } from './visual-visibility';
 import type { RigTarget } from './skeleton-pose';
 
@@ -110,6 +113,11 @@ export class GameView {
   private readonly layers = new Set<ViewLayer>();
   private readonly playerMeshes = new Map<string, Group>();
   private readonly torso = new Group();
+  private readonly meshHead = new Group();
+  private readonly headAim = new HeadAim();
+  private readonly headPivot = new Vector3(...HEAD_GEOMETRY.neck);
+  private readonly headOffset = new Vector3();
+  private avatar: AvatarView | null = null;
   private readonly customShaft = new Group();
   private readonly arms = new Map<ArmSide, Arm>();
   private readonly limbDirection = new Vector3();
@@ -168,7 +176,14 @@ export class GameView {
         setCovered: (state) => binding.visibility.setCovered(state),
       });
     }
-    this.sprites = new SpriteRig(spriteAnchors, { root: this.scene, targetIds: SPRITE_TARGET_IDS });
+    this.sprites = new SpriteRig(spriteAnchors, {
+      root: this.scene, targetIds: SPRITE_TARGET_IDS,
+      onCharacterRiggingTypeChange: (type) => this.setCharacterRiggingType(type),
+      headTracking: {
+        anchor: 'character-head',
+        pivot: { anchor: 'torso', x: HEAD_GEOMETRY.neck[0], y: HEAD_GEOMETRY.neck[1] },
+      },
+    });
 
     const cursorMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });
     this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
@@ -198,6 +213,22 @@ export class GameView {
     this.scene.add(layer.root);
   }
 
+  private setCharacterRiggingType(type: CharacterRiggingType): void {
+    const avatar = type === 'avatar-3d';
+    if (avatar && this.avatar === null) {
+      this.avatar = new AvatarView();
+    }
+    if (this.avatar !== null) {
+      this.avatar.root.visible = avatar;
+      if (avatar) this.scene.add(this.avatar.root);
+      else this.avatar.root.removeFromParent();
+    }
+    for (const [id, binding] of this.bindings) {
+      const separateProp = id === 'pot' || id === 'hammer-shaft' || id === 'hammer-head';
+      binding.visibility.setEnabled({ enabled: !avatar || separateProp });
+    }
+  }
+
   render(frame: PhysicsFrame, options: CharacterState & { dt: number }): void {
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
@@ -221,7 +252,12 @@ export class GameView {
     this.torso.position.set(root.x, root.y, PLAYER_DEPTH.torso);
     this.torso.updateWorldMatrix(true, false);
     const shaftBase = this.part(frame, 'slider');
-    const aim = { x: frame.cursor.x - root.x, y: frame.cursor.y - root.y };
+    const aimOrigin = this.part(frame, 'carrier');
+    const aim = { x: frame.cursor.x - aimOrigin.x, y: frame.cursor.y - aimOrigin.y };
+    this.headAim.update(aim, frame.time);
+    this.headOffset.copy(this.headPivot).applyQuaternion(this.headAim.rotation).negate().add(this.headPivot);
+    this.meshHead.matrix.makeRotationFromQuaternion(this.headAim.rotation).setPosition(this.headOffset);
+    this.meshHead.matrixWorldNeedsUpdate = true;
     const shaftLength = Math.hypot(tip.x - shaftBase.x, tip.y - shaftBase.y);
     const shaftCenter = { x: (shaftBase.x + tip.x) / 2, y: (shaftBase.y + tip.y) / 2 };
     const shaftAngle = shaftLength <= PHYSICS.aimEpsilon ? shaftBase.angle : Math.atan2(tip.y - shaftBase.y, tip.x - shaftBase.x);
@@ -232,6 +268,7 @@ export class GameView {
     // Unscaled physical coordinates keep grip offsets independent of artwork and tiling.
     this.gripFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, PLAYER_DEPTH.tool);
     const armPoses = this.updateArms(this.torso.matrixWorld, this.gripFrame, shaftLength, { ...options, shaftAngle });
+    if (this.avatar?.root.visible) this.avatar.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
     for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {
       x: pose.hand.x, y: pose.hand.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
     });
@@ -258,6 +295,11 @@ export class GameView {
     this.hammer = { x: tip.x, y: tip.y };
     this.updateFrustum();
     this.snapCamera();
+  }
+
+  resetPresentation(): void {
+    this.headAim.reset();
+    this.sprites.resetPresentation();
   }
 
   private snapCamera(): void {
@@ -310,6 +352,8 @@ export class GameView {
       updrafts: this.updrafts.inspect(),
       enemies: this.enemies.inspect(),
       sprites: this.sprites.inspect(),
+      headAim: { rotation: this.headAim.rotation.toArray() },
+      avatar: this.avatar === null ? null : { ...this.avatar.inspect(), visible: this.avatar.root.visible },
     };
   }
 
@@ -323,6 +367,9 @@ export class GameView {
   dispose(): void {
     this.observer.disconnect();
     this.sprites.dispose();
+    this.avatar?.root.removeFromParent();
+    this.avatar?.dispose();
+    this.avatar = null;
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
     this.flags.dispose();
@@ -504,6 +551,7 @@ export class GameView {
     }
     this.bindings.set('hammer-shaft', {
       anchor: this.customShaft,
+      modelAnchor: this.customShaft,
       defaults: shaftSegments,
       bounds: new Box3(
         new Vector3(-RIG.handleLength / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
@@ -528,11 +576,16 @@ export class GameView {
 
   private visualSlot(slot: VisualPartId, model: Object3D): Group {
     const anchor = new Group();
-    anchor.add(model);
+    const modelAnchor = slot === 'character-head' ? this.meshHead : anchor;
+    if (modelAnchor !== anchor) {
+      modelAnchor.matrixAutoUpdate = false;
+      anchor.add(modelAnchor);
+    }
+    modelAnchor.add(model);
     if (this.bindings.has(slot)) throw new Error(`Duplicate visual slot: ${slot}`);
     const defaults = [model];
     this.bindings.set(slot, {
-      anchor, defaults, bounds: new Box3().setFromObject(model, true),
+      anchor, modelAnchor, defaults, bounds: new Box3().setFromObject(model, true),
       visibility: new VisualVisibility(defaults),
     });
     return anchor;

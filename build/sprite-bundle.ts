@@ -20,7 +20,7 @@ export function spriteBundle(options: { path: string | null; anchors: readonly s
       if (options.path !== null) {
         if (statSync(options.path).size > SPRITE_LIMITS.documentBytes) throw new Error('GAME_SPRITES exceeds the sprite document size limit.');
         this.addWatchFile(options.path);
-        document = parseSpriteDocument(readFileSync(options.path, 'utf8'));
+        document = parseSpriteDocument(readFileSync(options.path, 'utf8'), { onMigration: message => this.warn(message) });
         validateSpriteAnchors(document, options.anchors, options.targets);
       }
       if (!building) return `export default ${JSON.stringify(document)};`;

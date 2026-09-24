@@ -3,6 +3,7 @@ import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
   DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType,
+  spriteMigrationNotice,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteLayer, SpriteOffset } from '../sprite-data';
 import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
@@ -23,7 +24,6 @@ export interface SpriteAnchorInput {
 export interface SpriteLayerEdit {
   readonly name?: string;
   readonly anchor?: string;
-  readonly underlay?: 'replace' | 'overlay';
   readonly width?: number;
   readonly height?: number;
   readonly x?: number;
@@ -82,7 +82,7 @@ function sameLayer(left: SpriteLayer, right: SpriteLayer): boolean {
   return left === right || left.id === right.id && left.name === right.name &&
     left.anchor === right.anchor && left.image === right.image &&
     left.width === right.width && left.height === right.height &&
-    left.rotation === right.rotation && left.underlay === right.underlay &&
+    left.rotation === right.rotation &&
     left.offset.x === right.offset.x && left.offset.y === right.offset.y && left.offset.z === right.offset.z &&
     left.bone === right.bone && left.tileLength === right.tileLength &&
     left.directions.length === right.directions.length && left.directions.every((value, index) => value === right.directions[index]) &&
@@ -183,7 +183,7 @@ export class SpriteEditorState {
       }
       let document: SpriteDocument;
       try {
-        document = this.validateRecord(record.value);
+        document = validateSpriteDocument(this.recordDocument(record.value));
         validateSpriteAnchors(document, this.anchorIds, this.targetIds);
       } catch (error) {
         if (!isDocumentError(error)) throw error;
@@ -195,6 +195,8 @@ export class SpriteEditorState {
       this.draft = document;
       this.saved = document;
       this.selectedLayerId = document.layers[0]?.id ?? null;
+      const migration = spriteMigrationNotice(this.recordDocument(record.value));
+      if (migration !== null) this.notice(migration, 'info');
       this.warnExternalSources(document);
     } catch (error) {
       if (this.disposed && isAbort(error)) return;
@@ -273,7 +275,7 @@ export class SpriteEditorState {
         ...DEFAULT_SPRITE_RIGGING,
         id: nextId('layer', new Set(this.draft.layers.map((candidate) => candidate.id))),
         name: image.name, anchor: anchor.id, image: image.id,
-        width: fit.width, height: fit.height, offset: { ...anchor.offset }, rotation: 0, underlay: 'replace',
+        width: fit.width, height: fit.height, offset: { ...anchor.offset }, rotation: 0,
       });
       const document = validateSpriteDocument({ ...this.draft, images, layers: [...this.draft.layers, layer] });
       await this.replaceRig(document);
@@ -296,7 +298,6 @@ export class SpriteEditorState {
         height: edit.height ?? current.height,
         offset: { x: edit.x ?? current.offset.x, y: edit.y ?? current.offset.y, z: edit.z ?? current.offset.z },
         rotation: edit.rotation ?? current.rotation,
-        underlay: edit.underlay ?? current.underlay,
         bone: edit.bone === undefined ? current.bone : edit.bone,
         directions: edit.directions === undefined ? current.directions : edit.directions,
         skin: edit.skin === undefined ? current.skin : edit.skin,
@@ -567,12 +568,14 @@ export class SpriteEditorState {
       }
       const text = await file.text();
       if (this.disposed) return;
-      const document = parseSpriteDocument(text);
+      let migration: string | null = null;
+      const document = parseSpriteDocument(text, { onMigration: message => { migration = message; } });
       validateSpriteAnchors(document, this.anchorIds, this.targetIds);
       await this.replaceRig(document);
       if (this.disposed) return;
       this.draft = document;
       this.selectedLayerId = document.layers[0]?.id ?? null;
+      if (migration !== null) this.notice(migration, 'info');
       this.warnExternalSources(document);
     });
   }
@@ -599,12 +602,12 @@ export class SpriteEditorState {
     this.store.close();
   }
 
-  private validateRecord(value: unknown): SpriteDocument {
+  private recordDocument(value: unknown): unknown {
     if (typeof value !== 'object' || value === null || Array.isArray(value) ||
       Object.keys(value).length !== 2 || Reflect.get(value, 'id') !== 'active') {
       throw new SpriteError('The saved sprite record is malformed.');
     }
-    return validateSpriteDocument(Reflect.get(value, 'document'));
+    return Reflect.get(value, 'document');
   }
 
   private warnExternalSources(document: SpriteDocument): void {

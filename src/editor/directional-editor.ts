@@ -143,7 +143,8 @@ export function createDirectionalEditor(options: {
     <label class="directional-check">
       <input class="directional-enabled" type="checkbox" /> Use directional presentation
     </label>
-    <p class="appearance-format">Off preserves legacy facing with no extra aim rotation.
+    <p class="appearance-format">Off keeps normal facing selection and safe automatic head tilt.
+      Enabling replaces that default, including when authored rotation is disabled.
       Edits are draft-only. Static sprite placement rotation stays separate.</p>
     <p id="directional-error" class="directional-error" role="alert" aria-atomic="true" hidden></p>
     <p class="appearance-format directional-status" role="status" aria-live="polite"></p>
@@ -164,6 +165,8 @@ export function createDirectionalEditor(options: {
       <div><dt>Target extra rotation</dt><dd><output class="directional-current-target">-</output></dd></div>
       <div><dt>Displayed extra rotation</dt><dd><output class="directional-current-displayed">-</output></dd></div>
     </dl>
+    <p class="appearance-format">Extra-rotation readouts and arcs describe the authored presentation,
+      not automatic head tilt. Single images can tilt; new face views require direction-tagged artwork.</p>
     <p class="appearance-format directional-preview-mode"></p>
     <div class="directional-aim-controls">
       <label for="directional-aim-angle">Preview aim (degrees)</label>
@@ -193,10 +196,12 @@ export function createDirectionalEditor(options: {
         <div class="directional-bone-choices"></div>
         <p class="appearance-format directional-no-bones">Create a skeleton to select attachment bones.</p>
       </fieldset>
-      <p class="appearance-format">Nothing rotates automatically: explicitly select head, face and crown
-        layers together, or their shared owning bone for bound/weighted layers. Attach a simulated braid
-        under a controlled head/attachment bone; do not select hair particles or IK upper/lower/hand nodes.
-        Do not select both an ancestor and its descendant.</p>
+      <p class="appearance-format">In this authored mode, explicitly select head, face and crown layers
+        together, or their dedicated owning bone for bound/weighted layers. Without an authored presentation,
+        safe head subtrees tilt around their bone attachment; unbound head cutouts use the host neck pivot.
+        Shared torso or IK bindings need a dedicated head owner, not a whole-body rotation.
+        Attach a simulated braid under the head; do not select hair particles, IK nodes, or both an
+        ancestor and its descendant.</p>
       <div class="directional-table-scroll" tabindex="0" role="region" aria-label="Eight direction settings">
         <table class="directional-table">
           <caption>Eight directions: angles in degrees, response time in seconds. Start and adjacent end share one boundary.</caption>
@@ -417,7 +422,7 @@ export function createDirectionalEditor(options: {
 
   function canDrag(handle: Handle): boolean {
     return active && !snapshot.busy && !snapshot.restoring &&
-      (handle.kind === 'aim' ? snapshot.document.characterRiggingType !== 'model-3d' : snapshot.document.presentation !== null);
+      (handle.kind === 'aim' ? snapshot.document.characterRiggingType === 'sprite-2d' : snapshot.document.presentation !== null);
   }
 
   function handleAngle(handle: Handle): number {
@@ -557,7 +562,7 @@ export function createDirectionalEditor(options: {
   function render(): void {
     if (disposed) return;
     const busy = snapshot.busy || snapshot.restoring;
-    const spritesEnabled = snapshot.document.characterRiggingType !== 'model-3d';
+    const spritesEnabled = snapshot.document.characterRiggingType === 'sprite-2d';
     if (busy) {
       cancelDrag();
       clearLocalError();
@@ -566,7 +571,7 @@ export function createDirectionalEditor(options: {
       cancelDrag();
       overlay.hidden = true;
       for (const readout of [currentAim, currentDirection, currentTarget, currentDisplayed]) setText(readout, '—');
-      setText(previewMode, '3D mode: sprite previews are inactive. Select 2D or Hybrid in Character to preview the retained artwork.');
+      setText(previewMode, 'Sprite previews are inactive in Mesh parts and Avatar modes. Select 2D sprites in Character to preview the retained artwork.');
     }
     const configured = snapshot.document.presentation !== null;
     settings = snapshot.document.presentation ?? createDirectionalPresentation(defaultAnchor());
@@ -612,7 +617,7 @@ export function createDirectionalEditor(options: {
     setText(status, snapshot.restoring ? 'Restoring the saved sprite document...' :
       snapshot.busy ? 'Working on the sprite document...' :
       !spritesEnabled ? 'Sprite rendering and directional preview are disabled in 3D. Authored settings remain editable.' :
-      !configured ? 'Legacy presentation. Enable above to author shared sectors and explicit rotation targets.' :
+      !configured ? options.presentationState().headTracking.reason :
       snapshot.dirty ? 'Directional settings are part of the unsaved sprite draft.' : 'Directional settings are saved on this device.');
     renderError();
     diagramSettings = null;
@@ -709,7 +714,7 @@ export function createDirectionalEditor(options: {
   }
 
   function updatePreview(): void {
-    if (disposed || !active || snapshot.document.characterRiggingType === 'model-3d') return;
+    if (disposed || !active || snapshot.document.characterRiggingType !== 'sprite-2d') return;
     const live = options.presentationState();
     setText(currentAim, degrees(live.aimAngle));
     setText(currentDirection, live.direction);

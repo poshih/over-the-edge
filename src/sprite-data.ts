@@ -6,7 +6,7 @@ import type { DirectionalPresentation } from './directional-data.ts';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, validateSkeleton, validateSkin } from './skeleton-data.ts';
 import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
 
-export const CHARACTER_RIGGING_TYPES = ['model-3d', 'sprite-2d', 'hybrid'] as const;
+export const CHARACTER_RIGGING_TYPES = ['sprite-2d', 'model-3d', 'avatar-3d'] as const;
 export type CharacterRiggingType = (typeof CHARACTER_RIGGING_TYPES)[number];
 export const DEFAULT_CHARACTER_RIGGING_TYPE: CharacterRiggingType = 'model-3d';
 
@@ -31,7 +31,6 @@ export interface SpriteLayer {
   readonly height: number;
   readonly offset: SpriteOffset;
   readonly rotation: number;
-  readonly underlay: 'replace' | 'overlay';
   readonly bone: string | null;
   readonly directions: readonly FacingDirection[];
   readonly skin: SpriteSkin | null;
@@ -39,7 +38,7 @@ export interface SpriteLayer {
 }
 
 export interface SpriteDocument {
-  readonly schemaVersion: 4;
+  readonly schemaVersion: 5;
   readonly characterRiggingType: CharacterRiggingType;
   readonly images: readonly SpriteImage[];
   readonly layers: readonly SpriteLayer[];
@@ -81,7 +80,7 @@ export const SPRITE_FIELDS = [
 ] as const;
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
-  schemaVersion: 4, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
+  schemaVersion: 5, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
   images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
 
@@ -91,11 +90,11 @@ export function validateCharacterRiggingType(value: unknown, layerCount: number)
   for (const type of CHARACTER_RIGGING_TYPES) {
     if (value !== type) continue;
     if (type === 'sprite-2d' && layerCount === 0) {
-      throw new SpriteError('A 2D sprite character needs artwork. Load the complete example or import a profile first; switch to 3D or Hybrid before deleting its last layer.');
+      throw new SpriteError('A 2D sprite character needs artwork. Load the complete example or import a profile first; switch to Mesh parts or Avatar before deleting its last layer.');
     }
     return type;
   }
-  throw new SpriteError('Choose a character type: model-3d, sprite-2d, or hybrid.');
+  throw new SpriteError('Choose a character type: sprite-2d, model-3d, or avatar-3d.');
 }
 
 const PNG_PREFIX = 'data:image/png;base64,';
@@ -201,12 +200,9 @@ function imageSource(value: unknown): string {
 }
 
 export function validateSpriteLayer(value: unknown): SpriteLayer {
-  const layer = record(value, ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay',
+  const layer = record(value, ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation',
     'bone', 'directions', 'skin', 'tileLength'], 'A sprite layer');
   const offset = record(layer.offset, ['x', 'y', 'z'], 'A sprite offset');
-  if (layer.underlay !== 'replace' && layer.underlay !== 'overlay') {
-    throw new SpriteError('Sprite underlay must be replace or overlay.');
-  }
   let skin: SpriteSkin | null;
   let directions: FacingDirection[];
   try {
@@ -239,16 +235,47 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
       z: number(offset.z, -SPRITE_LIMITS.offset, SPRITE_LIMITS.offset, 'Sprite depth'),
     }),
     rotation: number(layer.rotation, -SPRITE_LIMITS.rotation, SPRITE_LIMITS.rotation, 'Sprite rotation'),
-    underlay: layer.underlay,
     bone, directions: Object.freeze(directions), skin, tileLength,
   });
+}
+
+function migrateSpriteLayer(value: unknown, version: number): unknown {
+  if (version === 5) return value;
+  const keys = ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay'];
+  if (version >= 2) keys.push('bone', 'directions', 'skin', 'tileLength');
+  const old = record(value, keys, 'A legacy sprite layer');
+  if (old.underlay !== 'replace' && old.underlay !== 'overlay') {
+    throw new SpriteError('A legacy sprite underlay must be replace or overlay.');
+  }
+  delete old.underlay;
+  return version === 1 ? { ...old, ...DEFAULT_SPRITE_RIGGING } : old;
+}
+
+function migrateCharacterType(value: unknown, version: number, layerCount: number): CharacterRiggingType {
+  if (version < 4 || version === 4 && value === 'hybrid') {
+    return layerCount > 0 ? 'sprite-2d' : 'model-3d';
+  }
+  if (version === 4 && value !== 'sprite-2d' && value !== 'model-3d') {
+    throw new SpriteError('Schema-4 character type must be model-3d, sprite-2d, or hybrid.');
+  }
+  return validateCharacterRiggingType(value, layerCount);
+}
+
+export function spriteMigrationNotice(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const version: unknown = Reflect.get(value, 'schemaVersion');
+  const removedHybrid = version === 1 || version === 2 || version === 3 ||
+    version === 4 && Reflect.get(value, 'characterRiggingType') === 'hybrid';
+  if (!removedHybrid) return null;
+  return 'This older profile used Hybrid rendering. It now uses pure 2D when sprite layers exist, otherwise Mesh parts. ' +
+    'Missing sprite artwork no longer reveals 3D parts. The original save or file is unchanged; Save writes the new format.';
 }
 
 // The loader validates image bytes as it acquires them, without decoding cached sources again.
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
-    throw new SpriteError('Sprite documents require schema version 1, 2, 3 or 4.');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
+    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4 or 5.');
   }
   const legacy = version === 1;
   const fields = ['schemaVersion', 'images', 'layers'];
@@ -277,10 +304,7 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const layerIds = new Set<string>();
   const usedImages = new Set<string>();
   const layers = document.layers.map((value: unknown) => {
-    const input = legacy ? { ...record(value,
-      ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay'], 'A legacy sprite layer'),
-    ...DEFAULT_SPRITE_RIGGING } : value;
-    const layer = validateSpriteLayer(input);
+    const layer = validateSpriteLayer(migrateSpriteLayer(value, version));
     if (layerIds.has(layer.id)) throw new SpriteError(`Duplicate sprite layer ID: ${layer.id}.`);
     if (!imageIds.has(layer.image)) throw new SpriteError(`Sprite ${layer.id} references a missing image.`);
     layerIds.add(layer.id);
@@ -299,10 +323,9 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   }
   validateSpriteRigging(layers, skeleton);
   validateDirectionalReferences(presentation, layers, skeleton);
-  const characterRiggingType = version === 4
-    ? validateCharacterRiggingType(document.characterRiggingType, layers.length) : 'hybrid';
+  const characterRiggingType = migrateCharacterType(document.characterRiggingType, version, layers.length);
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: 4, characterRiggingType,
+    schemaVersion: 5, characterRiggingType,
     images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation,
   });
   validateSpriteBudget(result);
@@ -374,7 +397,10 @@ export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterabl
   validateDirectionalReferences(document.presentation, document.layers, document.skeleton);
 }
 
-export function parseSpriteDocument(serialized: string): SpriteDocument {
+export function parseSpriteDocument(
+  serialized: string,
+  options: { onMigration?: (message: string) => void } = {},
+): SpriteDocument {
   if (serialized.length > SPRITE_LIMITS.documentBytes ||
     new TextEncoder().encode(serialized).byteLength > SPRITE_LIMITS.documentBytes) {
     throw new SpriteError('The sprite document exceeds its file-size budget.');
@@ -386,5 +412,8 @@ export function parseSpriteDocument(serialized: string): SpriteDocument {
     if (!(error instanceof SyntaxError)) throw error;
     throw new SpriteError('The sprite document is not valid JSON.');
   }
-  return validateSpriteDocument(value);
+  const document = validateSpriteDocument(value);
+  const migration = spriteMigrationNotice(value);
+  if (migration !== null) options.onMigration?.(migration);
+  return document;
 }

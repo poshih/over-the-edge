@@ -174,7 +174,7 @@ export class Game {
   reset(spawn?: Readonly<PlayerSpawn>): void {
     this.triggers.reset();
     this.simulation.reset(spawn);
-    this.view.sprites.resetPresentation();
+    this.view.resetPresentation();
     this.resetClock();
     this.accumulator = 0;
     this.input.clear();
@@ -186,7 +186,7 @@ export class Game {
     this.simulation.applyLevel(change);
     this.view.applyLevel(change);
     if (change.kind === 'replace') {
-      this.view.sprites.resetPresentation();
+      this.view.resetPresentation();
       this.resetClock();
       this.accumulator = 0;
       this.input.clear();

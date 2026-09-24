@@ -67,7 +67,8 @@
   font-size: 11px;
 }
 
-.character-load-example {
+.character-load-example,
+.character-use-avatar {
   width: 100%;
   margin-top: 12px;
 }

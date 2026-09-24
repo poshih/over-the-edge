@@ -11,8 +11,8 @@ if (!anchor || extra.length > 0) {
 // Original 32x32 geometric swatch, generated without external artwork.
 const TILE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR4AeyWMQrAIAxFg1PP0zt06lk69WyderFudf8Bw0eDIF/IEBL08SRo2a/7nxnFJi8BOAPv+Vlm4I07AGzIzgUgAzJAGziezVrBji0NwB4Q9QtABmSANhD9FaKxwzoNgBv05gKQARlwBlpv/Ygajq0DwIbsfH2AyGAFAAD//4tzEOYAAAAGSURBVAMABWeiYWqgyVwAAAAASUVORK5CYII=';
 const document = validateSpriteDocument({
-  schemaVersion: 4,
-  characterRiggingType: 'hybrid',
+  schemaVersion: 5,
+  characterRiggingType: 'sprite-2d',
   skeleton: null,
   presentation: null,
   images: [{ id: 'tile', name: 'Geometric tile', source: TILE_PNG }],
@@ -20,12 +20,12 @@ const document = validateSpriteDocument({
     {
       ...DEFAULT_SPRITE_RIGGING,
       id: 'panel', name: 'Main panel', anchor, image: 'tile', width: 1, height: 1,
-      offset: { x: 0, y: 0, z: 0 }, rotation: 0, underlay: 'replace',
+      offset: { x: 0, y: 0, z: 0 }, rotation: 0,
     },
     {
       ...DEFAULT_SPRITE_RIGGING,
       id: 'accent', name: 'Offset accent', anchor, image: 'tile', width: 0.35, height: 0.35,
-      offset: { x: 0.45, y: 0.35, z: 0.05 }, rotation: 30, underlay: 'overlay',
+      offset: { x: 0.45, y: 0.35, z: 0.05 }, rotation: 30,
     },
   ],
 });

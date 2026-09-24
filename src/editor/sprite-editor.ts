@@ -66,7 +66,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       </section>
       <section class="sprite-mode-banner" aria-label="Sprite rendering mode">
         <p class="sprite-mode-status" role="status" aria-live="polite"></p>
-        <button type="button" class="button sprite-preview-hybrid" hidden>Preview as Hybrid</button>
+        <button type="button" class="button sprite-preview-2d" hidden>Use 2D sprite character</button>
       </section>
       <label class="appearance-label" for="sprite-new-anchor">New layer anchor</label>
       <select id="sprite-new-anchor"></select>
@@ -88,11 +88,6 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
         <input id="sprite-layer-name" type="text" maxlength="${SPRITE_LIMITS.name}" />
         <label class="appearance-label" for="sprite-layer-anchor">Anchor</label>
         <select id="sprite-layer-anchor"></select>
-        <label class="appearance-label" for="sprite-layer-underlay">Underlay</label>
-        <select id="sprite-layer-underlay">
-          <option value="overlay">Overlay (keep the underlying visual)</option>
-          <option value="replace">Replace (hide the anchor's default look)</option>
-        </select>
       </fieldset>
       <fieldset class="tuning-group sprite-layer-transform" disabled><legend>Placement</legend></fieldset>
       <button type="button" class="button sprite-delete-layer" disabled>Delete selected layer</button>
@@ -129,7 +124,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
 
   const newAnchorSelect = element<HTMLSelectElement>(root, '#sprite-new-anchor');
   const modeStatus = element<HTMLParagraphElement>(root, '.sprite-mode-status');
-  const hybridButton = element<HTMLButtonElement>(root, '.sprite-preview-hybrid');
+  const spriteButton = element<HTMLButtonElement>(root, '.sprite-preview-2d');
   const newFileInput = element<HTMLInputElement>(root, '#sprite-new-file');
   const layerSelect = element<HTMLSelectElement>(root, '#sprite-layer');
   const statusBox = element<HTMLDivElement>(root, '.sprite-state');
@@ -137,7 +132,6 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   const layerFields = element<HTMLFieldSetElement>(root, '.sprite-layer-fields');
   const nameInput = element<HTMLInputElement>(root, '#sprite-layer-name');
   const anchorSelect = element<HTMLSelectElement>(root, '#sprite-layer-anchor');
-  const underlaySelect = element<HTMLSelectElement>(root, '#sprite-layer-underlay');
   const transformGroup = element<HTMLFieldSetElement>(root, '.sprite-layer-transform');
   const deleteButton = element<HTMLButtonElement>(root, '.sprite-delete-layer');
   const externalWarning = element<HTMLParagraphElement>(root, '.sprite-external-warning');
@@ -183,7 +177,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     controls.set(field.key, control);
   }
 
-  hybridButton.addEventListener('click', () => { state.setCharacterRiggingType('hybrid'); }, listen);
+  spriteButton.addEventListener('click', () => { state.setCharacterRiggingType('sprite-2d'); }, listen);
   newAnchorSelect.addEventListener('change', () => { newLayerAnchor = newAnchorSelect.value; }, listen);
   newFileInput.addEventListener('change', () => {
     const file = newFileInput.files?.[0];
@@ -198,12 +192,6 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   }, listen);
   anchorSelect.addEventListener('change', () => {
     if (selectedId !== null) state.updateLayer(selectedId, { anchor: anchorSelect.value });
-  }, listen);
-  underlaySelect.addEventListener('change', () => {
-    if (selectedId === null) return;
-    const value = underlaySelect.value;
-    if (value !== 'replace' && value !== 'overlay') throw new Error(`Unknown sprite underlay: ${value}.`);
-    state.updateLayer(selectedId, { underlay: value });
   }, listen);
   deleteButton.addEventListener('click', () => {
     if (selectedId !== null) state.deleteLayer(selectedId);
@@ -259,13 +247,13 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     const disabledAll = snapshot.restoring || snapshot.busy;
     const hasContent = snapshot.hasContent;
     const type = snapshot.document.characterRiggingType;
-    hybridButton.hidden = type !== 'model-3d';
-    hybridButton.disabled = disabledAll;
-    const modeMessage = type === 'model-3d' ?
-      '3D mode: sprite rendering and sprite previews are disabled. Artwork stays editable. Preview as Hybrid changes the profile draft; Save to keep it or Revert to your last save.' :
-      type === 'sprite-2d' ?
-        '2D mode: only the sprites in this profile are rendered; every 3D part is hidden. Underlay choices are retained for Hybrid mode.' :
-        'Hybrid mode: Replace hides a part under a visible sprite; Overlay keeps it. Use depth to place sprites in front of or behind 3D meshes.';
+    spriteButton.hidden = type === 'sprite-2d';
+    spriteButton.disabled = disabledAll || snapshot.document.layers.length === 0;
+    const modeMessage = type === 'sprite-2d' ?
+      'Pure 2D mode: only the sprites in this profile are rendered. All 3D character and tool visuals are hidden; use depth to layer your artwork.' :
+      'Sprite rendering and preview are inactive in Mesh parts and Avatar modes. Artwork stays editable. ' +
+      (snapshot.document.layers.length === 0 ? 'Load the complete 2D example in Character to get started.' :
+        'Use 2D sprite character to preview this artwork; Save to keep the type or Revert to your last save.');
     if (modeStatus.textContent !== modeMessage) modeStatus.textContent = modeMessage;
 
     newAnchorSelect.disabled = disabledAll;
@@ -288,7 +276,6 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     if (layer !== null) {
       if (nameInput.value !== layer.name) nameInput.value = layer.name;
       if (anchorSelect.value !== layer.anchor) anchorSelect.value = layer.anchor;
-      if (underlaySelect.value !== layer.underlay) underlaySelect.value = layer.underlay;
       for (const field of SPRITE_FIELDS) {
         const control = controls.get(field.key);
         if (control === undefined) throw new Error(`Missing sprite range control: ${field.key}`);

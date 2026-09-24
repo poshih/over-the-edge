@@ -492,7 +492,7 @@ export function createSkeletonEditor(options: {
       <div class="skeleton-subsection skeleton-preview-subsection">
         <h4>Preview</h4>
         <p class="appearance-format skeleton-preview-unavailable" id="skeleton-preview-help" hidden>
-          Sprite previews are disabled in 3D mode. Select 2D or Hybrid in Character to preview this rig.
+          Sprite previews are disabled in Mesh parts and Avatar modes. Select 2D sprites in Character to preview this rig.
           Bones, bindings and poses remain editable.
         </p>
         <label class="appearance-label" for="skeleton-preview-mode">Preview mode</label>
@@ -1049,7 +1049,7 @@ export function createSkeletonEditor(options: {
     const skeleton = snapshot.document.skeleton;
     const layer = selectedLayer(snapshot);
     const disabledAll = snapshot.restoring || snapshot.busy;
-    const spritesEnabled = snapshot.document.characterRiggingType !== 'model-3d';
+    const spritesEnabled = snapshot.document.characterRiggingType === 'sprite-2d';
     const previewDisabled = disabledAll || !spritesEnabled;
     previewUnavailable.hidden = spritesEnabled;
     const clip = currentClip(skeleton);
@@ -1077,7 +1077,7 @@ export function createSkeletonEditor(options: {
       message = snapshot.error;
       kind = 'error';
     } else if (!spritesEnabled) {
-      message = 'Sprite rendering and pose preview are disabled in 3D. Edit the retained 2D rig here; select 2D or Hybrid in Character to preview it.';
+      message = 'Sprite rendering and pose preview are inactive in Mesh parts and Avatar modes. Select 2D sprites in Character to preview this retained 2D rig.';
       kind = snapshot.dirty ? 'draft' : 'ready';
     } else if (skeleton === null) {
       message = 'No skeleton yet. Create one to enable bone binding, animation and constraints.';

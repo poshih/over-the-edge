@@ -2,7 +2,7 @@ import { MathUtils, Quaternion, Vector3 } from 'three';
 import type { ArmSide } from './character';
 import { clamp } from './math';
 
-const ARM_LENGTH = { upper: 0.82, forearm: 0.82 } as const;
+export const ARM_LENGTH = { upper: 0.82, forearm: 0.82 } as const;
 const DIRECTION_EPSILON = 1e-8;
 const POLE_SINGULARITY_SINE = 0.15;
 const MAX_BEND_SPEED = 8;

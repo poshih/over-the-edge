@@ -7,16 +7,16 @@ import './character-editor.css';
 
 const CHARACTER_TYPES: Readonly<Record<CharacterRiggingType, { label: string; description: string }>> = {
   'model-3d': {
-    label: '3D meshes (built-in / GLB parts)',
-    description: 'Show the built-in 3D meshes or your cosmetic GLB part replacements. Sprite artwork and its 2D rig are retained, but not rendered.',
+    label: 'Mesh parts (3D)',
+    description: 'Separate torso, head, upper-arm, forearm and hand meshes follow the articulated rig. Individual parts can be replaced with GLBs in Appearance. Sprites and the unified avatar are hidden.',
   },
   'sprite-2d': {
     label: '2D sprite character',
-    description: 'Draw only the PNG sprites in this profile. All built-in and imported 3D parts are hidden, including slots with no sprite. A custom 2D skeleton is optional.',
+    description: 'Draw only this profile’s PNGs; all 3D parts are hidden. Head cutouts and dedicated head bones follow aim with bounded neck tilt by default. Authored Directional Presentation replaces that default. A custom 2D skeleton is optional.',
   },
-  hybrid: {
-    label: 'Hybrid (3D + sprites)',
-    description: 'Combine 3D parts with PNG sprites. Each visible Replace layer hides its underlying part; Overlay keeps it. Sprites can use anchors, custom 2D bones or weighted skins.',
+  'avatar-3d': {
+    label: 'Avatar (3D, connected body)',
+    description: 'One connected GPU-skinned upper-body mesh contains the torso, neck, head, arms and hands. Its bones follow the existing arm IK. The pot and hammer stay separate; sprite artwork and separate body-part meshes are hidden.',
   },
 };
 
@@ -42,8 +42,8 @@ export function createCharacterEditor(options: {
     <div class="workshop-scroll character-scroll">
       <section class="character-intro">
         <h3>Choose your character's look.</h3>
-        <p>The default is procedurally built <strong>Three.js geometry</strong>, with visual 3D arm IK.
-          It is not an imported 3D skeleton.</p>
+        <p>Choose <strong>2D sprites</strong>, <strong>separate 3D mesh parts</strong>, or a
+          <strong>connected, skinned 3D avatar</strong>. The default remains the separate mesh-part character.</p>
         <p>Every type keeps <strong>Planck 2D physics</strong>, hammer motion, grip positions and IK targets unchanged.</p>
       </section>
 
@@ -53,21 +53,38 @@ export function createCharacterEditor(options: {
       <p id="character-type-help" class="appearance-format">Type changes are draft-only. Switching types keeps
         all images, layers, bones, directional settings and imported GLB parts; it ends temporary sprite previews.
         Choose Save to keep the profile across reloads.</p>
+      <p class="appearance-format">Hybrid has been removed. Older Hybrid profiles with sprites become pure 2D;
+        those without sprites become Mesh parts. Incomplete sprite profiles no longer reveal missing 3D parts.</p>
+
+      <section class="character-example" aria-labelledby="character-avatar-heading">
+        <h4 id="character-avatar-heading">Connected upper-body avatar</h4>
+        <p class="appearance-format">An original, built-in skinned model with joined shoulders, arms, neck and
+          head, rather than separate rigid body parts. Bone weights bend the skin at shoulders, elbows and wrists.
+          The existing grip targets drive its hands; the pot is not part of the avatar.</p>
+        <button type="button" class="button character-use-avatar">Use built-in Avatar</button>
+        <p class="appearance-format">No download or third-party model license is needed. The avatar ships with
+          the game and is selected by exported profiles. Whole-avatar GLB import and animation retargeting are
+          not part of this built-in rig.</p>
+      </section>
 
       <section class="character-rig-summary" aria-labelledby="character-rig-heading">
         <h4 id="character-rig-heading">Authored sprite rig</h4>
         <p class="character-rig-counts"></p>
         <p class="appearance-format character-rig-detail"></p>
         <p class="appearance-format">Use Sprites for anchor-bound PNG cutouts, custom 2D bones, weighted skins,
-          poses, animation, IK and optional hair. Appearance imports rigid GLB parts only:
-          whole-body 3D rig retargeting and imported animation are not supported.</p>
+          poses, animation, IK and optional hair. This authored 2D rig is separate from the built-in avatar's
+          3D skeleton. Appearance imports individual rigid GLB parts, not whole avatar rigs.</p>
+        <p class="appearance-format">A single head image can tilt, not invent new face views. Direction-tagged
+          head images use the same facing choice as the rest of the sprites. Shared torso/IK bindings are
+          never rotated automatically; Directional Presentation reports heads needing a dedicated binding.</p>
       </section>
 
       <section class="character-example" aria-labelledby="character-example-heading">
         <h4 id="character-example-heading">Meet Paper Climber</h4>
         <p class="appearance-format">An original, complete cutout character: pot, jacket, helmet, both arms,
-          gloves and hammer. Nine shared PNGs cover all 13 visual slots; eight custom 2D bones and two
-          grip-target IK chains drive the arms. The symmetric helmet uses the same art in every direction.</p>
+          gloves and hammer. Shared PNGs cover all 13 visual slots; eight custom 2D bones and two
+          grip-target IK chains drive the arms. Eight original helmet views follow aim with automatic neck tilt.
+          Previously saved single-helmet examples keep their artwork and gain tilt without reloading.</p>
         <button type="button" class="button character-load-example">Load complete 2D example</button>
         <p class="appearance-format">Loads a new 2D draft, not a save. Revert restores your last saved profile
           until you choose Save. Artwork is generated only when you load this example.</p>
@@ -90,7 +107,8 @@ export function createCharacterEditor(options: {
       <p class="appearance-format character-external-warning" hidden>This profile references external images.
         Export preserves their URLs. Never use links containing credentials or private/internal addresses.</p>
       <p class="appearance-format">GLB imports and their alignment stay separately browser-local in Appearance;
-        they are not bundled with profile JSON. Exported PNG artwork can be used as normal game sprite data.</p>
+        they are not bundled with profile JSON. The built-in avatar needs no embedded model file.
+        Exported PNG artwork can be used as normal game sprite data.</p>
     </div>
     <footer class="workshop-footer character-footer">
       <div class="character-action-row">
@@ -107,6 +125,7 @@ export function createCharacterEditor(options: {
   const counts = element<HTMLParagraphElement>(root, '.character-rig-counts');
   const detail = element<HTMLParagraphElement>(root, '.character-rig-detail');
   const exampleButton = element<HTMLButtonElement>(root, '.character-load-example');
+  const avatarButton = element<HTMLButtonElement>(root, '.character-use-avatar');
   const exampleError = element<HTMLParagraphElement>(root, '.character-example-error');
   const statusBox = element<HTMLDivElement>(root, '.character-state');
   const status = element<HTMLParagraphElement>(root, '.character-status');
@@ -125,6 +144,7 @@ export function createCharacterEditor(options: {
   typeSelect.addEventListener('change', () => {
     if (!options.state.setCharacterRiggingType(typeSelect.value)) render();
   }, listen);
+  avatarButton.addEventListener('click', () => { options.state.setCharacterRiggingType('avatar-3d'); }, listen);
   saveButton.addEventListener('click', options.actions.save, listen);
   revertButton.addEventListener('click', options.actions.revert, listen);
   importButton.addEventListener('click', options.actions.importDocument, listen);
@@ -162,6 +182,7 @@ export function createCharacterEditor(options: {
     typeSelect.disabled = disabled;
     typeSelect.value = profile.characterRiggingType;
     exampleButton.disabled = disabled;
+    avatarButton.disabled = disabled || profile.characterRiggingType === 'avatar-3d';
     importButton.disabled = disabled;
     exportButton.disabled = disabled || !snapshot.hasContent;
     saveButton.disabled = disabled || !snapshot.dirty;

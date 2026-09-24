@@ -518,22 +518,38 @@ These performance and editor-free release requirements are recorded in
 ## Custom visuals
 
 Open **Workshop / Character** to choose the character's presentation. The
-default is **3D meshes**: Three.js builds the character from procedural
-geometry, with visual arm IK. It is not an imported, animated 3D skeleton.
+default is **Mesh parts (3D)**: separate Three.js objects for the torso, head,
+and arm segments, driven by visual arm IK.
 All character types use the same Planck.js 2D physics and physical grip targets.
 
 | Character type | What is rendered |
 | --- | --- |
-| 3D meshes (built-in / GLB parts) | Procedural Three.js meshes, with optional per-part GLB replacements from Appearance |
+| Mesh parts (3D) | Separate articulated meshes, with optional per-part GLB replacements from Appearance |
 | 2D sprite character | PNG cutouts or a custom 2D bone/weighted rig; all 3D character underlays are hidden |
-| Hybrid (3D + sprites) | 3D parts plus per-layer sprite Replace/Overlay behavior |
+| Avatar (3D, connected body) | One connected, GPU-skinned upper body containing the torso, head, arms and hands; pot and hammer remain separate |
 
 The choice is stored as `characterRiggingType` in the character/sprite profile.
 Changing it retains the other artwork, but does not silently save it. Use the
-profile's **Save**, **Revert**, and JSON controls. Older layouts migrate to
-Hybrid to preserve their appearance. GLB replacements remain separate,
-browser-local Appearance assets; whole-body 3D animation retargeting is not
-supported.
+profile's **Save**, **Revert**, and JSON controls. Hybrid is no longer a
+character type. Older Hybrid layouts with sprite artwork migrate to pure 2D;
+those without artwork use Mesh parts. Incomplete sprite layouts no longer
+reveal 3D parts behind missing artwork. Original saved records are retained
+until Save.
+
+Choose **Use built-in Avatar** for an original skinned character, included
+under this project's MIT license. Its shoulder, elbow and wrist weights bend
+the connected surface instead of moving disconnected rigid pieces. The same
+physical grip targets drive its hands; the pot is not part of the skin.
+The avatar is constructed once and reused, with bone updates only while active.
+GLB replacements remain separate, browser-local Appearance assets; arbitrary
+whole-avatar GLB import and animation retargeting are not supported.
+
+Character heads follow the direction from the hammer hinge toward the aim
+cursor, without turning the torso or moving the grips. Mesh parts and Avatar share smooth, neck-pivoted 3D gaze;
+imported head-part GLBs inherit the same motion. The 3D gaze keeps a slight
+camera-facing bias and limits yaw/pitch to avoid unnatural neck turns.
+Pausing freezes head motion, and resetting initializes it from the current aim.
+Sprite heads use their own 2D artwork and authored directional limits.
 
 For a complete starting point, choose **Load complete 2D example** in Character.
 **Paper Climber** supplies original PNG artwork for the body, pot, arms, hands,
@@ -542,14 +558,14 @@ Loading it changes the draft only. Save it or export its embedded-PNG profile
 for an editor-free release; the example generator itself stays out of the game.
 
 The **Sprites** tab adds named PNG layers with anchor selection, size, local
-offsets/depth, rotation, and replace/overlay behavior. Save or exchange complete
+offsets/depth and rotation. Save or exchange complete
 layouts as JSON, and select one with `GAME_SPRITES=skins/my-sprites.json` for
 an editor-free release. The renderer is game-agnostic, with a self-contained
 geometric example in `examples/sprites.mjs`. See [sprite authoring, runtime API,
 limits, and release instructions](docs/sprites.md). No external artwork is
 required or included in default builds.
 
-The same tab supports [hybrid 2D skeletons](docs/sprites.md#hybrid-2d-rigging):
+The same tab supports [2D skeletons](docs/sprites.md#2d-skeletal-rigging):
 bone-bound cutouts, weighted sprite meshes, eight-way artwork and poses,
 keyframed animation, hand IK, a tiled fixed-length shaft, and cosmetic spring-bone
 hair with body circles. Save/export includes the complete rig; `GAME_SPRITES`
@@ -567,8 +583,9 @@ Older sprite layouts keep their fixed-sector behavior until opted in.
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
 Parts can be replaced independently: pot, torso/neck, character head, each upper
 arm, forearm, elbow and hand, the full hammer shaft, and the hammer head. Parts
-without an import keep their procedural visual. Invisible physics guide bodies
-do not need models.
+without an import keep their procedural visual in Mesh parts mode. In Avatar
+mode, body-part imports remain stored but hidden; pot and hammer imports still
+apply. Invisible physics guide bodies do not need models.
 
 Imports are **cosmetic only**. They attach to the existing physics and visual-IK
 anchors; they do not replace colliders, change mass, or create new rigid bodies.

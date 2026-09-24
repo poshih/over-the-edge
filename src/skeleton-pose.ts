@@ -27,7 +27,8 @@ export interface BoneWorld extends RigPoint {
 }
 
 export interface SkeletonRotation {
-  readonly pivot: RigPoint;
+  // Automatic head owners keep their authored neck attachment instead of orbiting a shared pivot.
+  readonly pivot: RigPoint | 'bone-origin';
   readonly angle: number;
 }
 
@@ -570,22 +571,24 @@ export class SkeletonPose {
 
   private applyRotation(rotation: SkeletonRotation): void {
     requireFinite(rotation.angle, 'Directional rotation');
-    requirePoint(rotation.pivot, 'Directional pivot');
+    if (rotation.pivot !== 'bone-origin') requirePoint(rotation.pivot, 'Directional pivot');
     if (rotation.angle === 0 || this.rotationRoots.length === 0) return;
     for (const bone of this.rotationRoots) {
-      const x = this.worldX[bone] - rotation.pivot.x;
-      const y = this.worldY[bone] - rotation.pivot.y;
-      const rotatedX = rotation.pivot.x + rotateX(x, y, rotation.angle);
-      const rotatedY = rotation.pivot.y + rotateY(x, y, rotation.angle);
-      const parent = this.parentIndex[bone];
-      if (parent < 0) {
-        this.localX[bone] = rotatedX;
-        this.localY[bone] = rotatedY;
-      } else {
-        const dx = rotatedX - this.worldX[parent];
-        const dy = rotatedY - this.worldY[parent];
-        this.localX[bone] = rotateX(dx, dy, -this.worldAngle[parent]);
-        this.localY[bone] = rotateY(dx, dy, -this.worldAngle[parent]);
+      if (rotation.pivot !== 'bone-origin') {
+        const x = this.worldX[bone] - rotation.pivot.x;
+        const y = this.worldY[bone] - rotation.pivot.y;
+        const rotatedX = rotation.pivot.x + rotateX(x, y, rotation.angle);
+        const rotatedY = rotation.pivot.y + rotateY(x, y, rotation.angle);
+        const parent = this.parentIndex[bone];
+        if (parent < 0) {
+          this.localX[bone] = rotatedX;
+          this.localY[bone] = rotatedY;
+        } else {
+          const dx = rotatedX - this.worldX[parent];
+          const dy = rotatedY - this.worldY[parent];
+          this.localX[bone] = rotateX(dx, dy, -this.worldAngle[parent]);
+          this.localY[bone] = rotateY(dx, dy, -this.worldAngle[parent]);
+        }
       }
       this.localAngle[bone] += rotation.angle;
     }

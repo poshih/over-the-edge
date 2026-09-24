@@ -9,6 +9,7 @@ export type VisualPartId = (typeof VISUAL_PART_IDS)[number];
 export const SPRITE_TARGET_IDS = [...VISUAL_PART_IDS, 'left-grip', 'right-grip', 'hammer-base', 'aim'] as const;
 export const ARM_SIDES = ['left', 'right'] as const;
 export type ArmSide = (typeof ARM_SIDES)[number];
+export const HEAD_GEOMETRY = { neck: [0, 0.89, 0] } as const;
 
 export interface ArmIkSettings {
   leftHintX: number;
@@ -30,6 +31,7 @@ export interface CharacterState {
 
 export interface VisualBinding {
   readonly anchor: Group;
+  readonly modelAnchor: Group;
   readonly defaults: readonly Object3D[];
   readonly bounds: Readonly<Box3>;
   readonly visibility: VisualVisibility;

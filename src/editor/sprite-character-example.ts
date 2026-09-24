@@ -4,7 +4,8 @@ import type { ArmSide, VisualPartId } from '../character';
 import { RIG } from '../config';
 import { DEFAULT_SPRITE_RIGGING, SpriteError, validateSpriteDocument } from '../sprite-data';
 import type { SpriteDocument, SpriteImage, SpriteLayer } from '../sprite-data';
-import type { BoneDefinition, SkeletonIk } from '../skeleton-data';
+import { FACING_DIRECTIONS } from '../skeleton-data';
+import type { BoneDefinition, FacingDirection, SkeletonIk } from '../skeleton-data';
 
 const PAPER = {
   ink: '#263f4a',
@@ -152,7 +153,7 @@ function drawTorso(context: CanvasRenderingContext2D): void {
   roundedBox(context, PAPER.tealDark, 30, 165, 100, 19, 5);
 }
 
-function drawHead(context: CanvasRenderingContext2D): void {
+function drawHead(context: CanvasRenderingContext2D, gaze: ArtPoint): void {
   roundedBox(context, PAPER.tealDark, 58, 128, 44, 29, 7);
   context.beginPath();
   context.moveTo(21, 86);
@@ -163,11 +164,19 @@ function drawHead(context: CanvasRenderingContext2D): void {
   context.closePath();
   fillPath(context, PAPER.gold);
   polygon(context, PAPER.cream, [[70, 15], [90, 15], [94, 59], [66, 59]]);
-  roundedBox(context, PAPER.cream, 30, 63, 100, 68, 24);
-  roundedBox(context, PAPER.ink, 38, 69, 84, 34, 14);
-  line(context, [[49, 81], [61, 81]], PAPER.light);
-  line(context, [[99, 81], [111, 81]], PAPER.light);
-  polygon(context, PAPER.orange, [[73, 107], [87, 107], [92, 122], [68, 122]]);
+  const faceX = 80 + gaze[0] * 18;
+  const faceY = -gaze[1] * 12;
+  const halfWidth = 50 - Math.abs(gaze[0]) * 12;
+  roundedBox(context, PAPER.cream, faceX - halfWidth, 63 + faceY, halfWidth * 2, 68, 24);
+  roundedBox(context, PAPER.ink, faceX - halfWidth + 8, 69 + faceY, halfWidth * 2 - 16, 34, 14);
+  const eyeGap = 25 * (1 - Math.abs(gaze[0]) * 0.7);
+  const eyeX = faceX + gaze[0] * 7;
+  line(context, [[eyeX - eyeGap - 6, 81 + faceY], [eyeX - eyeGap + 6, 81 + faceY]], PAPER.light);
+  line(context, [[eyeX + eyeGap - 6, 81 + faceY], [eyeX + eyeGap + 6, 81 + faceY]], PAPER.light);
+  polygon(context, PAPER.orange, [
+    [faceX - 7, 107 + faceY], [faceX + 7, 107 + faceY],
+    [faceX + 12 + gaze[0] * 6, 122 + faceY], [faceX - 12 + gaze[0] * 6, 122 + faceY],
+  ]);
   roundedBox(context, PAPER.tealDark, 14, 67, 18, 38, 6);
   roundedBox(context, PAPER.tealDark, 128, 67, 18, 38, 6);
   oval(context, PAPER.cream, 23, 84, 4, 4);
@@ -250,7 +259,6 @@ function drawHammer(context: CanvasRenderingContext2D): void {
 const ARTWORK = {
   pot: { id: 'paper-pot', name: 'Paper Climber / copper pot', width: 224, height: 192, paint: drawPot },
   torso: { id: 'paper-torso', name: 'Paper Climber / jacket', width: 160, height: 200, paint: drawTorso },
-  head: { id: 'paper-head', name: 'Paper Climber / symmetric helmet', width: 160, height: 160, paint: drawHead },
   upper: { id: 'paper-upper-arm', name: 'Paper Climber / upper sleeve', width: 256, height: 64, paint: drawUpperArm },
   forearm: { id: 'paper-forearm', name: 'Paper Climber / forearm', width: 256, height: 64, paint: drawForearm },
   elbow: { id: 'paper-elbow', name: 'Paper Climber / elbow rivet', width: 96, height: 96, paint: drawElbow },
@@ -258,6 +266,16 @@ const ARTWORK = {
   shaft: { id: 'paper-shaft', name: 'Paper Climber / wooden shaft', width: 512, height: 32, paint: drawShaft },
   hammer: { id: 'paper-hammer', name: 'Paper Climber / hammer head', width: 80, height: 192, paint: drawHammer },
 } as const satisfies Readonly<Record<string, Artwork>>;
+
+const HEAD_ARTWORK: readonly (Artwork & { readonly direction: FacingDirection })[] =
+  FACING_DIRECTIONS.map((direction, index) => {
+    const angle = index * Math.PI * 2 / FACING_DIRECTIONS.length;
+    return {
+      id: `paper-head-${direction}`, name: `Paper Climber / ${direction} helmet`,
+      width: 160, height: 160, direction,
+      paint: (context: CanvasRenderingContext2D) => drawHead(context, [Math.cos(angle), Math.sin(angle)]),
+    };
+  });
 
 function createImage(artwork: Artwork): SpriteImage {
   const canvas = document.createElement('canvas');
@@ -291,14 +309,13 @@ function layer(artwork: ExampleLayer): SpriteLayer {
     ...DEFAULT_SPRITE_RIGGING,
     id: `paper-${artwork.anchor}`,
     rotation: 0,
-    underlay: 'replace',
     ...artwork,
   };
 }
 
 export function createSpriteCharacterExample(): SpriteDocument {
   if (typeof document === 'undefined') throw new SpriteError('The complete example requires a browser with Canvas 2D.');
-  const images = Object.values(ARTWORK).map(createImage);
+  const images = [...Object.values(ARTWORK), ...HEAD_ARTWORK].map(createImage);
   const bones: BoneDefinition[] = [
     { id: 'body', name: 'Body', parent: null, x: 0, y: BODY_BASE_Y, rotation: 90, length: BODY_LENGTH },
     { id: 'head', name: 'Helmet', parent: 'body', x: BODY_LENGTH, y: 0, rotation: 0, length: HEAD_LENGTH },
@@ -314,12 +331,18 @@ export function createSpriteCharacterExample(): SpriteDocument {
       bone: 'body', width: 0.62, height: 0.7, rotation: -90,
       offset: { x: TORSO_CENTER_Y - BODY_BASE_Y, y: 0, z: DEPTH.torso - PLAYER_DEPTH.torso },
     }),
-    layer({
-      anchor: 'character-head', name: 'Paper Climber / helmet', image: ARTWORK.head.id,
-      bone: 'head', width: 0.5, height: 0.5, rotation: -90,
-      offset: { x: HEAD_LENGTH / 2, y: 0, z: DEPTH.head - PLAYER_DEPTH.torso },
-    }),
   ];
+  for (const artwork of HEAD_ARTWORK) {
+    layers.push({
+      ...layer({
+        anchor: 'character-head', name: artwork.name, image: artwork.id,
+        bone: 'head', width: 0.5, height: 0.5, rotation: -90,
+        offset: { x: HEAD_LENGTH / 2, y: 0, z: DEPTH.head - PLAYER_DEPTH.torso },
+      }),
+      id: `paper-character-head-${artwork.direction}`,
+      directions: [artwork.direction],
+    });
+  }
   for (const side of ARM_SIDES) {
     const label = side === 'left' ? 'Left' : 'Right';
     const shoulder = ARM_GEOMETRY[side].shoulder;
@@ -373,7 +396,7 @@ export function createSpriteCharacterExample(): SpriteDocument {
     }),
   );
   return validateSpriteDocument({
-    schemaVersion: 4, characterRiggingType: 'sprite-2d', images, layers, presentation: null,
+    schemaVersion: 5, characterRiggingType: 'sprite-2d', images, layers, presentation: null,
     skeleton: { anchor: 'torso', bones, poses: [], clips: [], animation: null, ik, hair: [], colliders: [] },
   });
 }

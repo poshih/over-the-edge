@@ -20,9 +20,10 @@ export class AppearanceRig {
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
 
   constructor(slots: ReadonlyMap<VisualPartId, RuntimeBinding>) {
-    for (const [slot, { anchor, defaults, bounds, visibility }] of slots) {
+    for (const [slot, { modelAnchor, defaults, bounds, visibility }] of slots) {
       if (bounds.isEmpty()) throw new Error(`The visual slot ${slot} has no fitting bounds.`);
-      this.bindings.set(slot, { anchor, defaults, bounds: bounds.clone(), visibility, model: null, replacement: null, orientation: null });
+      this.bindings.set(slot, { anchor: modelAnchor, defaults, bounds: bounds.clone(), visibility,
+        model: null, replacement: null, orientation: null });
     }
   }
 
