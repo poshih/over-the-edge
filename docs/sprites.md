@@ -79,6 +79,10 @@ skeleton described below. Artwork stays in its local XY plane; it is not an
 automatically camera-facing billboard.
 
 Several layers can share an anchor; use their depths for front/back ordering.
+Hammer-shaft and hammer-head layers always render in the foreground, above
+character artwork, regardless of character-layer depth. Their depth values
+still order hammer artwork within that foreground pass. This also applies
+to tiled, bone-bound and weighted hammer sprites.
 2D mode always hides all 3D character and tool visuals, and both 3D modes hide
 all sprites. A pure 2D profile must supply all artwork it intends to show,
 including the tool. There is no Hybrid mode or Replace/Overlay control.
@@ -294,6 +298,13 @@ Use tileable left/right image edges.
 Keep the head and grip artwork on separate anchors/bones so their size stays
 fixed. Tiling changes artwork density, not the physics reach limit.
 
+The hammer's visual grip plane is 0.75 world units toward the camera, ahead
+of the torso at 0.27 and about 0.25 beyond its configured chest front. The
+existing mesh/avatar IK follows that same plane. The pot stays at its separate
+0.22 depth. No Z depth is added to the Planck physics or authored level data.
+A depth-isolated foreground pass keeps the hammer above opaque and transparent
+character art without disabling depth testing or altering shared materials.
+
 ### Spring-bone hair
 
 Choose a continuous chain of bones and adjust stiffness, damping, gravity, and
@@ -357,6 +368,11 @@ Visuals do not create bodies or change colliders, masses, reach, or simulation.
 Coverage callbacks only update the host's underlay visibility; they must not
 re-enter the rig. Replacements snapshot validated metadata before awaiting
 image loading, so later caller edits cannot change an in-flight import.
+An optional anchor `renderRoot` sends its bone-bound and weighted sprites to
+a different render mount. This game's hammer anchors use the foreground
+scene; unbound layers already follow those foreground anchors directly.
+The secondary mounts share the same evaluated skeleton and world origin,
+so changing render pass does not change pose, skin weights or authored offsets.
 
 The portable JSON shape is:
 
@@ -496,6 +512,10 @@ Directional selection examines at most eight sectors. Additional layer
 rotation touches only explicitly controlled rigid layers; bone rotation uses
 compiled affected subtrees. Rotation reuses existing meshes, textures,
 materials, and geometry, and does not add draw calls.
+The hammer pass visits only its tool objects and foreground sprite mounts,
+not the full level. Lighting is configured once for both passes, renderer
+statistics accumulate both passes, and shared disposal avoids duplicating
+material or texture ownership.
 
 ## Editor-free releases
 

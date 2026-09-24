@@ -134,6 +134,7 @@ export async function inspectArmGeometry(page) {
   const torso = new Matrix4().fromArray(visuals.parts.find((part) => part.id === 'torso').transform);
   const shaftBase = state.parts.find((part) => part.id === 'slider');
   const shaftHead = state.parts.find((part) => part.id === 'head');
+  const shaftDepth = visuals.parts.find((part) => part.id === 'hammer-shaft').anchor.z;
   const shaftLength = Math.hypot(shaftHead.x - shaftBase.x, shaftHead.y - shaftBase.y);
   const shaftAngle = shaftLength <= SHAFT_AXIS_EPSILON
     ? shaftBase.angle : Math.atan2(shaftHead.y - shaftBase.y, shaftHead.x - shaftBase.x);
@@ -155,7 +156,7 @@ export async function inspectArmGeometry(page) {
     assert.ok(Math.abs(shoulder.distanceTo(elbow) - 0.82) < 1e-8);
     const distance = shoulder.distanceTo(hand);
     if (distance <= 1.64) assert.ok(Math.abs(elbow.distanceTo(hand) - 0.82) < 1e-8, 'Reachable arms must keep both bone lengths.');
-    const expectedHand = new Vector3(shaftBase.x, shaftBase.y, 0.22)
+    const expectedHand = new Vector3(shaftBase.x, shaftBase.y, shaftDepth)
       .addScaledVector(shaftDirection, Math.min(gripX, shaftLength));
     assert.ok(hand.distanceTo(expectedHand) < 1e-8, `${side} hand must grip the physical shaft independently of artwork.`);
     const handDirection = new Vector3(handPart.transform[0], handPart.transform[1], handPart.transform[2]).normalize();

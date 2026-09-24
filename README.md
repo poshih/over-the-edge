@@ -551,6 +551,13 @@ camera-facing bias and limits yaw/pitch to avoid unnatural neck turns.
 Pausing freezes head motion, and resetting initializes it from the current aim.
 Sprite heads use their own 2D artwork and authored directional limits.
 
+The hammer always renders in the foreground in every character type.
+Its shared 3D grip plane sits in front of the chest, so mesh-part and avatar
+arms reach forward to hold it instead of intersecting a behind-the-body tool.
+The pot keeps its own depth. This affects only presentation, not hammer length,
+aim, contacts, or physics. Imported models and all hammer sprite bindings use
+the same foreground pass.
+
 For a complete starting point, choose **Load complete 2D example** in Character.
 **Paper Climber** supplies original PNG artwork for the body, pot, arms, hands,
 and hammer, plus a custom 2D arm rig that follows the actual grip targets.

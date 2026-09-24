@@ -1,6 +1,6 @@
 import {
   ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry,
-  CanvasTexture, CircleGeometry, Color, CylinderGeometry, DirectionalLight, ExtrudeGeometry,
+  CanvasTexture, CircleGeometry, CylinderGeometry, DirectionalLight, ExtrudeGeometry,
   Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial,
   Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
   RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
@@ -79,11 +79,11 @@ export interface ViewLayer {
   dispose: () => void;
 }
 
-function disposeResources(root: Object3D): void {
+function disposeResources(...roots: Object3D[]): void {
   const geometries = new Set<BufferGeometry>();
   const materials = new Set<Material>();
   const textures = new Set<CanvasTexture>();
-  root.traverse((object) => {
+  for (const root of roots) root.traverse((object) => {
     if (object instanceof Mesh || object instanceof Line || object instanceof Sprite) {
       if ('geometry' in object) geometries.add(object.geometry);
       for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
@@ -106,6 +106,7 @@ export class GameView {
   private readonly updrafts = new UpdraftView();
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
+  private readonly foreground = new Scene();
   private readonly camera = new OrthographicCamera();
   private readonly scenery = new Group();
   private readonly decorations = new Group();
@@ -150,16 +151,22 @@ export class GameView {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.35;
-    this.scene.background = new Color(0xd8e3d6);
+    this.renderer.autoClear = false;
+    this.renderer.info.autoReset = false;
+    this.renderer.setClearColor(0xd8e3d6);
     this.scene.fog = new Fog(0xd8e3d6, 35, 85);
-    this.scene.add(new HemisphereLight(0xfff6db, 0x4b6866, 2.4));
-    this.scene.add(new AmbientLight(0xf4e4ca, 0.5));
+    this.foreground.fog = this.scene.fog;
     const sunlight = new DirectionalLight(0xfff0d4, 3);
     sunlight.position.set(-5, 12, 10);
-    this.scene.add(sunlight);
     const rimLight = new DirectionalLight(0x9ce7d5, 1.5);
     rimLight.position.set(8, 3, -4);
-    this.scene.add(rimLight);
+    for (const light of [
+      new HemisphereLight(0xfff6db, 0x4b6866, 2.4),
+      new AmbientLight(0xf4e4ca, 0.5), sunlight, rimLight,
+    ]) {
+      this.scene.add(light);
+      this.foreground.add(light.clone());
+    }
     this.camera.position.z = VISUAL.depth;
     this.camera.near = 0.1;
     this.camera.far = 100;
@@ -173,6 +180,7 @@ export class GameView {
     for (const [id, binding] of this.bindings) {
       spriteAnchors.set(id, {
         node: binding.anchor,
+        renderRoot: id === 'hammer-shaft' || id === 'hammer-head' ? this.foreground : this.scene,
         setCovered: (state) => binding.visibility.setCovered(state),
       });
     }
@@ -246,7 +254,7 @@ export class GameView {
     for (const part of frame.parts) {
       const mesh = this.playerMeshes.get(part.id);
       if (!mesh) continue;
-      mesh.position.set(part.x, part.y, PLAYER_DEPTH.tool);
+      mesh.position.set(part.x, part.y, part.kind === 'pot' ? PLAYER_DEPTH.pot : PLAYER_DEPTH.tool);
       mesh.rotation.z = part.angle;
     }
     this.torso.position.set(root.x, root.y, PLAYER_DEPTH.torso);
@@ -285,7 +293,12 @@ export class GameView {
     this.updrafts.update(frame.time);
     this.enemies.update(frame.enemies, frame.time);
     for (const layer of this.layers) layer.update(frame, armPoses);
+    this.renderer.info.reset();
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    // Isolate tool depth from character artwork, including transparent GLBs and skinned sprites.
+    this.renderer.clearDepth();
+    this.renderer.render(this.foreground, this.camera);
   }
 
   recenter(frame: PhysicsFrame): void {
@@ -377,7 +390,7 @@ export class GameView {
     this.enemies.dispose();
     for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
     this.layers.clear();
-    disposeResources(this.scene);
+    disposeResources(this.scene, this.foreground);
     this.bindings.clear();
     this.renderer.dispose();
   }
@@ -546,7 +559,7 @@ export class GameView {
       sleeve.rotation.z = Math.PI / 2;
       segment.add(sleeve);
       this.playerMeshes.set(`handle-${index}`, segment);
-      this.scene.add(segment);
+      this.foreground.add(segment);
       shaftSegments.push(segment);
     }
     this.bindings.set('hammer-shaft', {
@@ -559,7 +572,7 @@ export class GameView {
       ),
       visibility: new VisualVisibility(shaftSegments),
     });
-    this.scene.add(this.customShaft);
+    this.foreground.add(this.customShaft);
     const head = new Group();
     const headMesh = new Mesh(new ExtrudeGeometry(polygonShape(RIG.headVertices), {
       depth: 0.22, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 1,
@@ -571,7 +584,7 @@ export class GameView {
     head.add(bolt);
     const headAnchor = this.visualSlot('hammer-head', head);
     this.playerMeshes.set('head', headAnchor);
-    this.scene.add(headAnchor);
+    this.foreground.add(headAnchor);
   }
 
   private visualSlot(slot: VisualPartId, model: Object3D): Group {

@@ -26,6 +26,7 @@ import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-a
 
 export interface SpriteAnchor {
   readonly node: THREE.Object3D;
+  readonly renderRoot?: THREE.Object3D;
   readonly setCovered: (options: { covered: boolean }) => void;
 }
 
@@ -102,6 +103,7 @@ interface BuildState {
   readonly images: Map<string, ImageResource>;
   readonly layers: Map<string, LayerInstance>;
   readonly attachments: Map<string, Attachment>;
+  readonly skeletonMounts: Map<THREE.Object3D, THREE.Group>;
   readonly skeleton: SkeletonRuntime | null;
   readonly presentation: DirectionalPresentation | null;
   readonly headTracking: SpriteHeadTrackingPlan;
@@ -272,6 +274,7 @@ export class SpriteRig {
   private resources = new Map<string, ImageResource>();
   private layers = new Map<string, LayerInstance>();
   private attachments = new Map<string, Attachment>();
+  private skeletonMounts = new Map<THREE.Object3D, THREE.Group>();
   private skeleton: SkeletonRuntime | null = null;
   private preview: SkeletonPreview | null = null;
   private presentation: DirectionalPresentation | null = null;
@@ -730,6 +733,7 @@ export class SpriteRig {
     this.images.clear();
     this.geometry.dispose();
     this.attachments.clear();
+    this.skeletonMounts.clear();
     this.coverage.clear();
     for (const [name, covered] of previousCoverage) if (covered) this.anchor(name).setCovered({ covered: false });
     this.onCharacterRiggingTypeChange?.(DEFAULT_CHARACTER_RIGGING_TYPE);
@@ -815,6 +819,7 @@ export class SpriteRig {
     validateCharacterRiggingType(options.characterRiggingType, layers.length);
     this.assertCharacterRenderer(options.characterRiggingType);
     const attachments = new Map<string, Attachment>();
+    const skeletonMounts = new Map<THREE.Object3D, THREE.Group>();
     const instances = new Map<string, LayerInstance>();
     let skeleton: SkeletonRuntime | null = null;
     try {
@@ -829,12 +834,16 @@ export class SpriteRig {
           if (instance.mesh.parent !== attachment.group) attachment.group.add(instance.mesh);
           attachment.legacyCount++;
         } else {
-          if (skeleton !== null && instance.mesh.parent !== skeleton.group) skeleton.group.add(instance.mesh);
+          if (skeleton !== null) {
+            const mount = this.anchor(data.anchor).renderRoot ?? this.root;
+            const group = mount === this.root ? skeleton.group : this.skeletonMount(mount, skeletonMounts, options.mode);
+            if (instance.mesh.parent !== group) group.add(instance.mesh);
+          }
         }
         attachment.count++;
         instances.set(data.id, instance);
       }
-      return { resources, images, layers: instances, attachments, skeleton,
+      return { resources, images, layers: instances, attachments, skeletonMounts, skeleton,
         presentation: options.presentation,
         headTracking: compileSpriteHeadTracking(this.headTracking, layers, definition, options.presentation),
         characterRiggingType: options.characterRiggingType, mode: options.mode };
@@ -1079,6 +1088,21 @@ export class SpriteRig {
     return attachment;
   }
 
+  private skeletonMount(
+    root: THREE.Object3D,
+    mounts: Map<THREE.Object3D, THREE.Group>,
+    mode: 'replace' | 'edit',
+  ): THREE.Group {
+    let group = mounts.get(root);
+    if (group === undefined) {
+      group = mode === 'edit' ? this.skeletonMounts.get(root) ?? new THREE.Group() : new THREE.Group();
+      group.name = 'sprites:skeleton-render-mount';
+      group.matrixAutoUpdate = false;
+      mounts.set(root, group);
+    }
+    return group;
+  }
+
   private commit(next: BuildState, options: { preview: SkeletonPreview | null }): void {
     const oldResources = this.resources;
     const oldLayers = this.layers;
@@ -1098,6 +1122,7 @@ export class SpriteRig {
     this.images = next.images;
     this.layers = next.layers;
     this.attachments = next.attachments;
+    this.skeletonMounts = next.skeletonMounts;
     this.skeleton = next.skeleton;
     this.presentation = next.presentation;
     this.headTrackingPlan = next.headTracking;
@@ -1148,6 +1173,7 @@ export class SpriteRig {
   private detachScene(): void {
     for (const attachment of this.attachments.values()) attachment.group.removeFromParent();
     this.skeleton?.group.removeFromParent();
+    for (const group of this.skeletonMounts.values()) group.removeFromParent();
   }
 
   private attachScene(): void {
@@ -1157,6 +1183,7 @@ export class SpriteRig {
       else attachment.group.removeFromParent();
     }
     if (this.skeleton !== null) this.root.add(this.skeleton.group);
+    for (const [root, group] of this.skeletonMounts) root.add(group);
   }
 
   private refreshScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = {}): void {
@@ -1178,6 +1205,7 @@ export class SpriteRig {
       this.evaluateSkeleton(this.skeleton);
       this.updateBoneAttachments(this.skeleton);
       this.skeleton.group.updateWorldMatrix(true, true);
+      for (const group of this.skeletonMounts.values()) group.updateWorldMatrix(true, true);
     }
     this.rotateLayers();
     for (const attachment of this.attachments.values()) {
@@ -1257,16 +1285,21 @@ export class SpriteRig {
   }
 
   private updateSkeletonRoot(runtime: SkeletonRuntime): void {
-    this.root.updateWorldMatrix(true, false);
-    const determinant = this.root.matrixWorld.determinant();
-    if (!Number.isFinite(determinant) || determinant === 0) throw new SpriteError('The sprite render mount needs an invertible world transform.');
     const host = this.anchor(runtime.definition.anchor).node;
     host.getWorldPosition(this.tempWorld);
     runtime.originWorld = { x: this.tempWorld.x, y: this.tempWorld.y };
-    this.tempMatrixA.copy(this.root.matrixWorld).invert();
-    this.tempMatrixB.makeTranslation(this.tempWorld.x, this.tempWorld.y, this.tempWorld.z);
-    runtime.group.matrix.multiplyMatrices(this.tempMatrixA, this.tempMatrixB);
-    runtime.group.matrixWorldNeedsUpdate = true;
+    this.positionSkeletonMount(runtime.group, this.root, this.tempWorld);
+    for (const [root, group] of this.skeletonMounts) this.positionSkeletonMount(group, root, this.tempWorld);
+  }
+
+  private positionSkeletonMount(group: THREE.Group, root: THREE.Object3D, origin: THREE.Vector3): void {
+    root.updateWorldMatrix(true, false);
+    const determinant = root.matrixWorld.determinant();
+    if (!Number.isFinite(determinant) || determinant === 0) throw new SpriteError('The sprite render mount needs an invertible world transform.');
+    this.tempMatrixA.copy(root.matrixWorld).invert();
+    this.tempMatrixB.makeTranslation(origin.x, origin.y, origin.z);
+    group.matrix.multiplyMatrices(this.tempMatrixA, this.tempMatrixB);
+    group.matrixWorldNeedsUpdate = true;
   }
 
   private skeletonRotation(runtime: SkeletonRuntime, frame: Readonly<DirectionalFrame>): SkeletonRotation | null {

@@ -250,7 +250,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     spriteButton.hidden = type === 'sprite-2d';
     spriteButton.disabled = disabledAll || snapshot.document.layers.length === 0;
     const modeMessage = type === 'sprite-2d' ?
-      'Pure 2D mode: only the sprites in this profile are rendered. All 3D character and tool visuals are hidden; use depth to layer your artwork.' :
+      'Pure 2D mode: only the sprites in this profile are rendered. All 3D visuals are hidden. Hammer artwork stays on top; depth orders artwork within each render pass.' :
       'Sprite rendering and preview are inactive in Mesh parts and Avatar modes. Artwork stays editable. ' +
       (snapshot.document.layers.length === 0 ? 'Load the complete 2D example in Character to get started.' :
         'Use 2D sprite character to preview this artwork; Save to keep the type or Revert to your last save.');

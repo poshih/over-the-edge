@@ -38,8 +38,8 @@ const DEPTH = {
   head: 0.4,
   rightArm: 0.46,
   rightElbow: 0.48,
-  shaft: 0.52,
-  hammer: 0.54,
+  shaft: PLAYER_DEPTH.tool,
+  hammer: PLAYER_DEPTH.tool + 0.02,
   leftHand: 0.57,
   rightHand: 0.59,
   pot: 0.62,
@@ -324,7 +324,7 @@ export function createSpriteCharacterExample(): SpriteDocument {
   const layers: SpriteLayer[] = [
     layer({
       anchor: 'pot', name: 'Paper Climber / pot', image: ARTWORK.pot.id,
-      width: 1.1, height: 0.9, offset: { x: 0, y: -0.065, z: DEPTH.pot - PLAYER_DEPTH.tool },
+      width: 1.1, height: 0.9, offset: { x: 0, y: -0.065, z: DEPTH.pot - PLAYER_DEPTH.pot },
     }),
     layer({
       anchor: 'torso', name: 'Paper Climber / jacket', image: ARTWORK.torso.id,
