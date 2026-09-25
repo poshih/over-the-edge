@@ -1,8 +1,22 @@
-import { Chain, Circle, Vec2, WorldManifold } from 'planck';
+import { Chain, Circle, Settings, Vec2, WorldManifold } from 'planck';
 import type { Body, Contact, ContactImpulse, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
-import { geometryKey, ILLUSION, isTerrainObject, objectContains, shapeVertices } from './level';
+import { geometryKey, ILLUSION, isSimplePolygon, isTerrainObject, objectContains, polygonArea, shapeVertices } from './level';
 import type { LevelChange, TerrainObject, TerrainEvent } from './level';
+
+// Planck needs chain vertices farther apart than linearSlop, so near-duplicate authored points are welded.
+// Degenerate slivers that cannot form a valid loop keep their authored vertices.
+function chainLoop(points: Vec2[]): Vec2[] {
+  const slop = Settings.linearSlop;
+  const kept: Vec2[] = [];
+  for (const point of points) {
+    if (kept.length === 0 || Vec2.distance(point, kept[kept.length - 1]) > slop) kept.push(point);
+  }
+  while (kept.length > 3 && Vec2.distance(kept[0], kept[kept.length - 1]) <= slop) kept.pop();
+  const valid = kept.length >= 3 && Vec2.distance(kept[0], kept[kept.length - 1]) > slop &&
+    polygonArea(kept) > slop * slop && isSimplePolygon(kept);
+  return valid ? kept : points;
+}
 
 export class TerrainWorld {
   private readonly world: World;
@@ -207,8 +221,8 @@ export class TerrainWorld {
   private createFixture(body: Body, object: TerrainObject): void {
     const shape = object.shape.type === 'circle'
       ? new Circle(object.width / 2)
-      : new Chain(shapeVertices(object.shape).map((vertex) =>
-        new Vec2(vertex.x * object.width, vertex.y * object.height)), true);
+      : new Chain(chainLoop(shapeVertices(object.shape).map((vertex) =>
+        new Vec2(vertex.x * object.width, vertex.y * object.height))), true);
     body.createFixture(shape, {
       friction: PHYSICS.terrainFriction,
       restitution: 0,

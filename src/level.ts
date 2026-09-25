@@ -140,7 +140,13 @@ function onSegment(a: Readonly<Point>, b: Readonly<Point>, p: Readonly<Point>): 
     p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y);
 }
 
-function polygonArea(vertices: readonly Readonly<Point>[]): number {
+// True when segment ab crosses or overlaps segment cd.
+function segmentsTouch(a: Readonly<Point>, b: Readonly<Point>, c: Readonly<Point>, d: Readonly<Point>): boolean {
+  return (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) ||
+    onSegment(a, b, c) || onSegment(a, b, d) || onSegment(c, d, a) || onSegment(c, d, b);
+}
+
+export function polygonArea(vertices: readonly Readonly<Point>[]): number {
   let area = 0;
   for (let index = 0; index < vertices.length; index++) {
     const a = vertices[index];
@@ -163,14 +169,24 @@ function polygon(value: unknown): readonly Readonly<Point>[] {
       if (j === i + 1 || (i === 0 && j === vertices.length - 1)) continue;
       const c = vertices[j];
       const d = vertices[(j + 1) % vertices.length];
-      if ((cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) ||
-        onSegment(a, b, c) || onSegment(a, b, d) || onSegment(c, d, a) || onSegment(c, d, b)) {
+      if (segmentsTouch(a, b, c, d)) {
         throw new LevelError('Polygon edges cannot cross or overlap.');
       }
     }
   }
   if (polygonArea(vertices) <= MIN_POLYGON_AREA) throw new LevelError('Polygon vertices must enclose an area in counterclockwise order.');
   return Object.freeze(vertices);
+}
+
+// A closed outline is simple when no two non-adjacent edges cross or overlap.
+export function isSimplePolygon(vertices: readonly Readonly<Point>[]): boolean {
+  for (let i = 0; i < vertices.length; i++) {
+    for (let j = i + 1; j < vertices.length; j++) {
+      if (j === i + 1 || (i === 0 && j === vertices.length - 1)) continue;
+      if (segmentsTouch(vertices[i], vertices[(i + 1) % vertices.length], vertices[j], vertices[(j + 1) % vertices.length])) return false;
+    }
+  }
+  return true;
 }
 
 export function terrainFromOutline(
