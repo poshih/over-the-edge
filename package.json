@@ -26,7 +26,7 @@
     "planck": "1.4.2",
     "three": "0.185.1"
   },
-  "description": "An original browser-based physics climbing playground built with Three.js and Planck.js.",
+  "description": "A browser-based physics climbing playground inspired by Getting Over It, built with Three.js and Planck.js.",
   "license": "MIT",
   "repository": {
     "type": "git",

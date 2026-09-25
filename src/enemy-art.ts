@@ -4,7 +4,7 @@ import type { EnemySpecies } from './enemy-types';
 
 type Frames = readonly [readonly string[], readonly string[]];
 
-// Original hand-authored pixel art. Both frames face right; '.' is transparent.
+// Hand-authored pixel art. Both frames face right; '.' is transparent.
 const ART: Readonly<Record<EnemySpecies, Frames>> = {
   bird: [
     [

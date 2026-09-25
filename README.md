@@ -1,9 +1,9 @@
 # Over the Edge
 
-An original browser-based physics climbing playground, inspired by the
+An independent browser-based physics climbing playground, inspired by the
 two-motor mechanism described by Getting Over It's creator. The first version
 has a small climb, dedicated practice positions, procedural 3D artwork, and a
-live tuning workshop. It is not a port of the original game's assets or code.
+live tuning workshop. It is not a port of Getting Over It's assets or code.
 
 ## Run
 
@@ -142,7 +142,7 @@ development entry, and editor-dependency rejection in isolation.
 
 ### Included full-length course
 
-**Skyward Ruins** is an original 600 m climb through eight districts, with
+**Skyward Ruins** is a custom 600 m climb through eight districts, with
 384 placed objects: permanent and illusion terrain, updrafts, birds, hollow
 soldiers, an opening video, chapter events, and a timer-stopping summit.
 The 600 m height is a design target, not a verified measurement of another game.
@@ -327,8 +327,8 @@ all built-in physics and cursor settings without changing saved profiles.
 
 The practice positions make the important behaviors easy to revisit: resting
 on a ledge, smooth ground pushes, launches, and vaulting a low block. The
-controller and artwork are a prototype, not a claim of matching the original
-game's exact tuning.
+controller and artwork are a prototype, not a claim of matching Getting Over
+It's exact tuning.
 
 ## Level editing
 
@@ -495,8 +495,8 @@ damage and deaths are runtime state: editor gizmos, saves and exports retain
 authored homes. Entering Level mode restores both authored enemy poses and terrain
 state, including dead enemies and disappeared illusions.
 
-Up to **64 enemies** share one sprite draw batch with original sprite artwork;
-the palette and editor guides use original SVG glyphs. Only nearby enemies allocate
+Up to **64 enemies** share one sprite draw batch with custom sprite artwork;
+the palette and editor guides use custom SVG glyphs. Only nearby enemies allocate
 physics bodies: they wake within **18 m** and sleep beyond **26 m** once settled.
 Distant enemies keep their authored/current sprites, with no physics bodies or AI work.
 A soldier knocked off a ledge stays simulated while it falls, so it lands or is
@@ -594,7 +594,7 @@ those without artwork use Mesh parts. Incomplete sprite layouts no longer
 reveal 3D parts behind missing artwork. Original saved records are retained
 until Save.
 
-Choose **Use built-in Avatar** for an original skinned character, included
+Choose **Use built-in Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend
 the connected surface instead of moving disconnected rigid pieces. The same
 physical grip targets drive its hands; the pot is not part of the skin.
@@ -622,7 +622,7 @@ aim, contacts, or physics. Imported models and all hammer sprite bindings use
 the same foreground pass.
 
 For a complete starting point, choose **Load complete 2D example** in Character.
-**Paper Climber** supplies original PNG artwork for the body, pot, arms, hands,
+**Paper Climber** supplies custom PNG artwork for the body, pot, arms, hands,
 and hammer, plus a custom 2D arm rig that follows the actual grip targets.
 Loading it changes the draft only. Save it or export its embedded-PNG profile
 for an editor-free release; the example generator itself stays out of the game.

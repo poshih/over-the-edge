@@ -72,7 +72,7 @@ export function createCharacterEditor(options: {
 
       <section class="character-example" aria-labelledby="character-avatar-heading">
         <h4 id="character-avatar-heading">Connected upper-body avatar</h4>
-        <p class="appearance-format">An original, built-in skinned model with joined shoulders, arms, neck and
+        <p class="appearance-format">A built-in skinned model with joined shoulders, arms, neck and
           head, rather than separate rigid body parts. Bone weights bend the skin at shoulders, elbows and wrists.
           The existing grip targets drive its hands; the pot is not part of the avatar.</p>
         <button type="button" class="button character-use-avatar">Use built-in Avatar</button>
@@ -95,9 +95,9 @@ export function createCharacterEditor(options: {
 
       <section class="character-example" aria-labelledby="character-example-heading">
         <h4 id="character-example-heading">Meet Paper Climber</h4>
-        <p class="appearance-format">An original, complete cutout character: pot, jacket, helmet, both arms,
+        <p class="appearance-format">A complete custom cutout character: pot, jacket, helmet, both arms,
           gloves and hammer. Shared PNGs cover all 13 visual slots; eight custom 2D bones and two
-          grip-target IK chains drive the arms. Eight original helmet views follow aim with automatic neck tilt.
+          grip-target IK chains drive the arms. Eight custom helmet views follow aim with automatic neck tilt.
           Previously saved single-helmet examples keep their artwork and gain tilt without reloading.</p>
         <button type="button" class="button character-load-example">Load complete 2D example</button>
         <p class="appearance-format">Loads a new 2D draft, not a save. Revert restores your last saved profile

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="3440" viewBox="0 0 900 3440" role="img" aria-labelledby="title description">
-<title id="title">Skyward Ruins: an original 600 metre climbing course</title>
+<title id="title">Skyward Ruins: a custom 600 metre climbing course</title>
 <desc id="description">Eight districts with a permanent route, optional illusion footholds, launch shafts, birds, hollow soldiers, and a summit finish.</desc>
 <rect width="900" height="3440" fill="#edf0e5"/>
 <g font-family="system-ui,sans-serif" fill="#243e43">
@@ -417,5 +417,5 @@
 <circle cx="385.60" cy="937.05" r="3.5" fill="#d09c47" stroke="#745421" stroke-width=".6"/>
 <circle cx="432.77" cy="137.17" r="3.5" fill="#d09c47" stroke="#745421" stroke-width=".6"/>
 <text x="40" y="3382" font-size="13">Recovery landings are not checkpoints. Runtime movement and deaths do not rewrite the level.</text>
-<text x="40" y="3410" font-size="12">Original layout and artwork. Height is a design target, not a verified measurement of another game.</text>
+<text x="40" y="3410" font-size="12">Custom layout and artwork. Height is a design target, not a verified measurement of another game.</text>
 </g></svg>

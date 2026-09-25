@@ -1,12 +1,12 @@
 # Skyward Ruins
 
-An original, full-length first-pass course for Over the Edge. Climb from
+A custom, full-length first-pass course for Over the Edge. Climb from
 ground level to a **600 m summit** through eight districts. The ground spans
 **128 m**, with terrain bounds X -64 to 64 and Y -2 to 600.
 
 The height is a chosen engine-space design target, **not a verified
 metre-for-metre measurement of Getting Over It with Bennett Foddy**. The layout,
-title movie, and enemy artwork are original. Difficulty tuning is an initial
+title movie, and enemy artwork are custom. Difficulty tuning is an initial
 baseline, not a final balance claim.
 
 ## Load or release

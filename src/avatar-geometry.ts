@@ -53,7 +53,7 @@ type BodyRing = readonly [
   y: number, width: number, depth: number, surface: BodySurface, nose: number, ears: number,
 ];
 
-// Original workwear silhouette, sculpted as one loft rather than assembled primitive meshes.
+// Workwear silhouette, sculpted as one loft rather than assembled primitive meshes.
 const LOWER_BODY: readonly BodyRing[] = [
   [0.28, 0.19, 0.135, 'shirt', 0, 0],
   [0.35, 0.217, 0.15, 'shirt', 0, 0],

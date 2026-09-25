@@ -9,7 +9,7 @@ if (!anchor || extra.length > 0) {
   throw new Error('Usage: node --experimental-strip-types examples/sprites.mjs <anchor>');
 }
 
-// Original 32x32 geometric swatch, generated without external artwork.
+// Self-contained 32x32 geometric swatch, generated without external artwork.
 const TILE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR4AeyWMQrAIAxFg1PP0zt06lk69WyderFudf8Bw0eDIF/IEBL08SRo2a/7nxnFJi8BOAPv+Vlm4I07AGzIzgUgAzJAGziezVrBji0NwB4Q9QtABmSANhD9FaKxwzoNgBv05gKQARlwBlpv/Ygajq0DwIbsfH2AyGAFAAD//4tzEOYAAAAGSURBVAMABWeiYWqgyVwAAAAASUVORK5CYII=';
 const document = validateSpriteDocument({
   schemaVersion: 6,
