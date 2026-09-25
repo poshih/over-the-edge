@@ -31,11 +31,9 @@ The built-in course needs no backend, player account, external asset download,
 or runtime network service. Authored video events fetch the media URLs included
 in their level.
 
-The Workshop's **gettingover** Cloudflare Worker serves `dist/` and its protected
-shared-artwork API; this is not a Cloudflare Pages project. Before the first
-deployment of this integration, configure Access, D1, R2, and the encryption
-secret using the [shared artwork setup guide](docs/course-artwork.md#hosted-setup).
-Deploying requires your own Cloudflare account:
+To deploy the Workshop, upload `dist/` to the **gettingover** Cloudflare Worker
+defined in `wrangler.toml`. It is a static-assets Worker, not a Cloudflare Pages
+project. Deploying requires your own Cloudflare account:
 
 ```sh
 npm run build
@@ -113,11 +111,11 @@ GAME_LEVEL=levels/my-level.json npm run build:game
 Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
 validated and bundled at build time; the game needs no editor or external level
 service. Level exports do not contain gameplay settings, sprite layouts,
-private character GLBs, or IK profiles. For terrain artwork, **Export course +
-artwork** creates a self-contained course package accepted by `GAME_LEVEL`.
-It embeds referenced shared GLBs and the selected shape/mesh look. Override that
-choice with `GAME_ART_MODE=shapes` or `GAME_ART_MODE=meshes`; shape-only releases
-omit the GLBs and mesh loader. See [course artwork](docs/course-artwork.md).
+private character GLBs, or IK profiles. To dress terrain with meshes from your
+own art pipeline, combine the level JSON and your GLBs into a course package with
+`npm run pack:course`, then pass the package as `GAME_LEVEL`. `GAME_ART_MODE=shapes`
+or `GAME_ART_MODE=meshes` overrides the package's look; shape-only releases omit
+the GLBs and mesh loader. See [course artwork](docs/course-artwork.md).
 
 To bundle your physics and cursor behavior into the game-only release, export a
 game-settings profile from **Workshop / Physics**, put it inside the project,
@@ -144,7 +142,8 @@ that graph. Hiding editor controls with a runtime flag is not the release
 boundary.
 
 `npm run verify:game` exercises the release, custom-course/sprite/settings builds,
-development entry, and editor-dependency rejection in isolation.
+development entry, and editor-dependency rejection in isolation. `npm run verify:art`
+does the same for course packages and terrain meshes.
 
 ### Included full-length course
 
@@ -557,25 +556,20 @@ new terrain instances. The catalog, thumbnails, and ghost are editor modules and
 excluded from game-only builds. Tropes that need moving props, such as swinging or
 sliding platforms, are not included because terrain does not move.
 
-### Shared course artwork and Tripo
+### Course artwork from your own pipeline
 
-**Workshop / Level / Shared course artwork** connects to the Access-protected
-shared asset library. Generate one selected terrain object or prefab terrain
-part with Tripo, or share an existing GLB. Each user connects their own encrypted
-API key and explicitly approves each paid generation; Studio subscription credits
-are separate from API credits. Completed GLBs are retained in R2 for reuse.
+Terrain collision is always the authored 2D polygon outline. By default the game
+draws each terrain object as a 2.5D extrusion of that outline at the object's
+depth, so what you see matches what the hammer grips. For bespoke artwork, make
+static GLB meshes with any pipeline you like and assign them to terrain objects
+when packing a course. Each mesh is fitted to its object's width, height, and
+depth, rotates with it, and replaces its extruded shape. Collision never comes
+from a mesh, and illusion fades, disappearance, and resets remain per object.
 
-Each ready-made obstacle has a **Ready-made artwork** sub-selection. Publish
-named variants mapping saved assets to individual parts, then place/reuse them
-without regenerating. Individual terrain objects can also choose a saved mesh
-or revert to their editor shape. Mirroring, illusion fades, and reset remain
-per-part; authored collision outlines never change.
-
-**Editor preview** and **Built game artwork** independently choose editor
-shapes or saved meshes for the 2.5D look. **Export course + artwork** bundles the
-level and referenced GLBs for an editor-free release. The playable game contains
-no Tripo connection, credentials, or backend dependency. See the
-[workflow, deployment, limits, and recovery guide](docs/course-artwork.md).
+The editor designs collision only: it has no asset-generation, upload, or hosted
+services. Levels that already reference meshes keep those references while you
+edit them. See the [course artwork guide](docs/course-artwork.md) for the fitting
+rules, packing command, package format, and limits.
 
 ### Performance boundaries
 
@@ -770,7 +764,8 @@ never modified.
 npm run verify
 ```
 
-This builds both entries and exercises browser gameplay with Playwright. If Chromium
+This builds both entries and exercises browser gameplay with Playwright, including
+the course-artwork checks from `npm run verify:art`. If Chromium
 is not installed for Playwright, install it with `npx playwright install chromium`
 and rerun. Runtime artifacts are written to the ignored `artifacts/` directory.
 There is no unit-test suite.

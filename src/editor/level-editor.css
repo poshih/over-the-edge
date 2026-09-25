@@ -173,50 +173,6 @@
   margin-top: 12px;
 }
 
-.course-art .level-field,
-.level-prefab-art .level-field,
-.level-object-art .level-field {
-  margin: 12px 0;
-}
-
-.course-art details,
-.art-prefab-edit {
-  margin: 12px 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-}
-
-.course-art summary,
-.art-prefab-edit summary {
-  min-height: 32px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.art-preview-canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  margin-top: 12px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-}
-
-.art-job {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-
-.art-request-prompt {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
 .level-camera-controls {
   display: grid;
   grid-template-columns: 48px 48px minmax(0, 1fr);

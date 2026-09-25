@@ -9,7 +9,6 @@ import { verifyMobile } from './verify-mobile.mjs';
 import { verifyLevel } from './verify-level.mjs';
 import { verifySetPieces } from './verify-set-pieces.mjs';
 import { verifyTriggers } from './verify-triggers.mjs';
-import { verifyCourseArt } from './verify-course-art.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = new URL('../artifacts/', import.meta.url);
@@ -641,7 +640,6 @@ try {
   report.scenarios.mobile = await verifyMobile(browser, address, artifacts);
   report.scenarios.level = await verifyLevel(browser, address, artifacts);
   report.scenarios.setPieces = await verifySetPieces(browser, address, artifacts);
-  report.scenarios.courseArt = await verifyCourseArt(browser, address, artifacts);
   report.scenarios.triggers = await verifyTriggers(browser, address, artifacts);
   await page.setViewportSize({ width: 760, height: 600 });
   await page.waitForTimeout(300);

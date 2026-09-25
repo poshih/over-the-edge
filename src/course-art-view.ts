@@ -214,7 +214,7 @@ export class CourseArtView {
       if (entry) this.remove(entry);
       if (this.mode === 'meshes' && art && !available && !this.reported.has(art.assetId)) {
         this.reported.add(art.assetId);
-        this.missing(`Artwork for "${object.id}" is not loaded. Its editor shape remains visible until you load the shared asset.`);
+        this.missing(`Artwork for "${object.id}" is not loaded. Its editor shape remains visible until its GLB is loaded.`);
       }
       return;
     }

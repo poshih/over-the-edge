@@ -7,7 +7,6 @@ import { SPRITE_TARGET_IDS } from '../character';
 import type { Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import { Game } from '../game';
-import { CourseArtView } from '../course-art-view';
 import { levelSpawn } from '../level';
 import { Appearance } from './appearance';
 import { AppearanceRig } from './appearance-rig';
@@ -82,11 +81,6 @@ const spriteEditor = createSpriteEditor({
 const collisionOverlay = new CollisionOverlay();
 game.view.addLayer(collisionOverlay);
 const unsubscribeOverlay = game.simulation.subscribeTerrain((event) => collisionOverlay.apply(event));
-const courseArtwork = new CourseArtView({
-  terrain: game.view.terrain, subscribe: (listener) => game.simulation.subscribeTerrain(listener),
-  onMissing: (message) => ui.notice(message, 'error'),
-});
-game.view.addLayer(courseArtwork);
 const levelEditor = createLevelEditor({
   mount: ui.levelMount, canvas, level,
   camera: {
@@ -97,7 +91,6 @@ const levelEditor = createLevelEditor({
   },
   onPlay: () => perform('play'),
   onNotice: ui.notice,
-  artwork: { view: courseArtwork, onDebug: () => perform('debug') },
 });
 
 function resetPractice(id: PracticeId): void {

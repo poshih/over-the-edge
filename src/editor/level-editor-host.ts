@@ -1,6 +1,5 @@
 import type { Point } from '../config';
 import type { LevelState } from './level-state';
-import type { CourseArtView } from '../course-art-view';
 
 export interface EditorCamera {
   x: number;
@@ -20,5 +19,4 @@ export interface LevelEditorOptions {
   };
   onPlay: () => void;
   onNotice: (message: string, kind: 'info' | 'error') => void;
-  artwork: { view: CourseArtView; onDebug: () => void };
 }

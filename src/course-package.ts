@@ -1,5 +1,5 @@
-import { ART_LIMITS, ArtError, artId, artName, artRecord, validateArtVariant } from './art-types';
-import type { ArtMode, ArtResource, ArtVariant } from './art-types';
+import { ART_LIMITS, ArtError, artId, artName, artRecord } from './art-types';
+import type { ArtMode, ArtResource } from './art-types';
 import { validateLevel } from './level';
 import type { LevelDefinition } from './level';
 
@@ -9,7 +9,6 @@ export interface CoursePackage {
   readonly mode: ArtMode;
   readonly level: LevelDefinition;
   readonly assets: readonly ArtResource[];
-  readonly variants: readonly ArtVariant[];
 }
 
 export function isCoursePackage(value: unknown): boolean {
@@ -32,8 +31,7 @@ export function validateCoursePackage(value: unknown): CoursePackage {
   const data = artRecord(value, 'Course package');
   if (data.format !== 'over-the-edge-course' || data.schemaVersion !== 1 ||
     (data.mode !== 'shapes' && data.mode !== 'meshes') ||
-    !Array.isArray(data.assets) || data.assets.length > ART_LIMITS.assets ||
-    !Array.isArray(data.variants) || data.variants.length > ART_LIMITS.catalog) throw new ArtError('Unsupported course package.');
+    !Array.isArray(data.assets) || data.assets.length > ART_LIMITS.assets) throw new ArtError('Unsupported course package.');
   let bytes = 0;
   const assets = data.assets.map((entry): ArtResource => {
     const asset = artRecord(entry, 'Packaged asset');
@@ -50,12 +48,8 @@ export function validateCoursePackage(value: unknown): CoursePackage {
       throw new ArtError(`Artwork for terrain "${object.id}" is missing from this package.`);
     }
   }
-  const variants = data.variants.map(validateArtVariant);
-  if (variants.some((variant) => variant.parts.some((part) => !ids.has(part.assetId)))) {
-    throw new ArtError('A packaged prefab variant references missing artwork.');
-  }
   return Object.freeze({
     format: 'over-the-edge-course', schemaVersion: 1, mode: data.mode, level,
-    assets: Object.freeze(assets), variants: Object.freeze(variants),
+    assets: Object.freeze(assets),
   });
 }
