@@ -9,6 +9,8 @@ import { markInstanceSlot } from './instancing';
 const CHUNK_SIZE = 32;
 const INITIAL_CAPACITY = 8;
 const SIDE_SHADE = 0.62;
+// Three.js samples a full arc at twice this, so circles render with 64 sides.
+const CIRCLE_CURVE_SEGMENTS = 32;
 type MaterialPair = [MeshStandardMaterial, MeshStandardMaterial];
 type TerrainMesh = InstancedMesh<ExtrudeGeometry, MaterialPair>;
 
@@ -196,12 +198,19 @@ export class TerrainView {
       }
       if (this.templates.size >= LEVEL_LIMITS.geometryKinds) throw new Error('Terrain geometry limit exceeded.');
     }
-    const vertices = shapeVertices(shape);
     const outline = new Shape();
-    outline.moveTo(vertices[0].x, vertices[0].y);
-    for (let index = 1; index < vertices.length; index++) outline.lineTo(vertices[index].x, vertices[index].y);
-    outline.closePath();
-    const geometry = new ExtrudeGeometry(outline, { depth: 1, steps: 1, bevelEnabled: false });
+    if (shape.type === 'circle') {
+      // Circle terrain collides as a true circle; a finer arc keeps its drawn edge within 0.12% of it.
+      outline.absarc(0, 0, 0.5, 0, Math.PI * 2, false);
+    } else {
+      const vertices = shapeVertices(shape);
+      outline.moveTo(vertices[0].x, vertices[0].y);
+      for (let index = 1; index < vertices.length; index++) outline.lineTo(vertices[index].x, vertices[index].y);
+      outline.closePath();
+    }
+    const geometry = new ExtrudeGeometry(outline, {
+      depth: 1, steps: 1, bevelEnabled: false, curveSegments: CIRCLE_CURVE_SEGMENTS,
+    });
     geometry.translate(0, 0, -1);
     geometry.computeBoundingBox();
     geometry.computeBoundingSphere();
