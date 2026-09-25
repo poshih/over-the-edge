@@ -11,7 +11,7 @@ ACCESS_AUD = ""
 [[d1_databases]]
 binding = "ART_DB"
 database_name = "over-the-edge-art"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "54564bf2-9eb3-4d1b-828a-95fbd87faa63"
 migrations_dir = "worker/migrations"
 
 [[r2_buckets]]

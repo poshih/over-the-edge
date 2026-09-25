@@ -147,8 +147,8 @@ must be upgraded before the shared controls can connect.
    npx wrangler r2 bucket create over-the-edge-art
    ```
 
-3. Put the returned D1 database ID in `wrangler.toml`, replacing
-   `REPLACE_WITH_D1_DATABASE_ID`. Set `ACCESS_TEAM_DOMAIN` to your
+3. Put the returned D1 database ID in `wrangler.toml` as `database_id` (a
+   fork replaces this deployment's ID with its own). Set `ACCESS_TEAM_DOMAIN` to your
    `your-team.cloudflareaccess.com` hostname (no scheme), and `ACCESS_AUD` to the
    Access application's audience. These are configuration, not Tripo API keys.
    Do **not** set `ART_LOCAL` in the hosted Worker.
