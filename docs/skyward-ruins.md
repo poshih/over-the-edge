@@ -22,22 +22,26 @@ For the editor-free game:
 GAME_LEVEL=levels/skyward-ruins.json npm run dev:game
 ```
 
-For a static release:
+To build the release into `dist-game/` and preview it locally:
 
 ```sh
 GAME_LEVEL=levels/skyward-ruins.json npm run build:game
 npm run preview:game
 ```
 
-Publish `dist-game/`. The game HUD remains limited to current height and elapsed
-time; Workshop controls are not part of that release.
+Then deploy `dist-game/` with `wrangler.game.toml`, as described in the README's
+[game-only release](../README.md#game-only-release) section. The game HUD
+remains limited to current height and elapsed time; Workshop controls are not
+part of that release.
 
-The opening event references **`/media/skyward-ruins-intro.webm`**. The original
-silent, approximately 3.4-second VP8 title movie is included at
+The opening event references **`/media/skyward-ruins-intro.webm`**. The silent,
+approximately 3.4-second VP8 title movie is stored at
 [`public/media/skyward-ruins-intro.webm`](../public/media/skyward-ruins-intro.webm)
-and copied into builds. If moving the level to another host, copy that asset
-too, or deliberately update the event URL. Importing the JSON does not embed
-the video. Browsers that block autoplay present a **Play video** button.
+and copied into both `dist/` and `dist-game/`, so every deployment of this
+project serves it, whatever domain is attached. Importing the JSON does not embed
+the video: a different project that loads this level must serve the file at the
+same path, or deliberately update the event URL. Browsers that block autoplay
+present a **Play video** button.
 
 ## Recommended object allocation
 

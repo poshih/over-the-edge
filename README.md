@@ -25,13 +25,23 @@ npm run build
 npm run preview
 ```
 
-The preview uses **http://localhost:4174**. Deploy `dist/` to any static host,
-including Cloudflare Pages. There is no backend, account, external asset
-download, or runtime network service needed by the built-in course. Authored
-video events fetch the media URLs included in their level.
+`npm run build` writes the Workshop to `dist/`. `npm run preview` serves that
+build locally at **http://localhost:4174**; previewing does not deploy it.
+The built-in course needs no backend, player account, external asset download,
+or runtime network service. Authored video events fetch the media URLs included
+in their level.
 
-The included `wrangler.toml` is an optional Cloudflare Workers configuration.
-Use your own Cloudflare account and configure any custom domains there.
+To deploy the Workshop, upload `dist/` to the **gettingover** Cloudflare Worker
+defined in `wrangler.toml`. It is a static-assets Worker, not a Cloudflare Pages
+project. Deploying requires your own Cloudflare account:
+
+```sh
+npm run build
+npx wrangler deploy --config wrangler.toml --keep-vars
+```
+
+A custom domain is optional. Attach it to the Worker in your Cloudflare account
+after deploying; domains are not stored in this repository.
 
 ### Game-only release
 
@@ -46,12 +56,14 @@ npm run build:game
 npm run preview:game
 ```
 
-Publish **`dist-game/`** for a game-only release; preview it at
-**http://localhost:4175**. `npm run dev:game` uses **http://localhost:5182**.
+`npm run build:game` writes the game-only release to **`dist-game/`**, and
+`npm run preview:game` serves it locally at **http://localhost:4175**.
+`npm run dev:game` uses **http://localhost:5182**. Neither local server deploys
+anything; deploy `dist-game/` with `wrangler.game.toml` as described below.
 The existing `npm run build` and `wrangler.toml` continue to target the
 editor/workshop in `dist/`, not this separate release.
 
-Set **`GAME_TITLE`** to publish under your own game name:
+Set **`GAME_TITLE`** to use your own game name:
 
 ```sh
 GAME_TITLE="My Climbing Game" npm run build:game
@@ -76,19 +88,21 @@ A command-line `GAME_TITLE` overrides the file. It can be combined with
 `GAME_LEVEL`, `GAME_SETTINGS`, and `GAME_SPRITES`. The setting changes display
 titles, not repository names, browser storage keys, or deployment identifiers.
 
-For Cloudflare Workers, `wrangler.game.toml` deploys only `dist-game/` to a
-separate **gettingover-play** Worker:
+To deploy the game-only release, `wrangler.game.toml` uploads only `dist-game/`
+to a separate **gettingover-play** Worker:
 
 ```sh
 npm run build:game
 npx wrangler deploy --config wrangler.game.toml --keep-vars
 ```
 
-Configure a separate custom domain for that Worker in your Cloudflare account.
-This leaves the existing Workshop Worker and its domain unchanged.
+This leaves the Workshop Worker and its domain unchanged. A custom domain is
+optional; attach a separate one to **gettingover-play** in your Cloudflare
+account after deploying.
 
-To release an authored course, export its JSON from the Level tab, place that
-file inside the project (for example `levels/my-level.json`), then build:
+To include an authored course in the game-only release, export its JSON from the
+Level tab, place that file inside the project (for example
+`levels/my-level.json`), then build:
 
 ```sh
 GAME_LEVEL=levels/my-level.json npm run build:game
@@ -99,9 +113,9 @@ validated and bundled at build time; the game needs no editor or external level
 service. Level exports do not contain gameplay settings, sprite layouts,
 private imported GLBs, or IK profiles.
 
-To publish your physics and cursor behavior, export a game-settings profile
-from **Workshop / Physics**, put it inside the project, and select it with
-`GAME_SETTINGS`:
+To bundle your physics and cursor behavior into the game-only release, export a
+game-settings profile from **Workshop / Physics**, put it inside the project,
+and select it with `GAME_SETTINGS`:
 
 ```sh
 GAME_SETTINGS=profiles/my-game.json npm run dev:game
@@ -138,7 +152,7 @@ Import [`levels/skyward-ruins.json`](levels/skyward-ruins.json) in
 
 ```sh
 GAME_LEVEL=levels/skyward-ruins.json npm run dev:game
-# Or build the same course for hosting:
+# Or build it into dist-game/, then deploy that as described in Game-only release:
 GAME_LEVEL=levels/skyward-ruins.json npm run build:game
 ```
 
