@@ -204,7 +204,9 @@ the shaft fixtures supply mass and
 inertia but never generate contacts. Normal locomotion does not teleport bodies,
 apply assistance forces, or turn off the head's collisions. Authored updrafts
 and enemy contact knockback apply explicit, mass-aware impulses without changing
-the rig or disabling collisions.
+the rig or disabling collisions. Terrain collides only from the outside: a body
+whose centre ends up inside a terrain outline, for example after an edit or a
+restored illusion, passes out of it instead of being trapped or shoved.
 
 The simulation runs at a fixed **240 Hz**, with continuous collision handling,
 64 velocity iterations and 20 position iterations. Time steps and solver
@@ -492,7 +494,8 @@ upward-facing contact beneath the **player's pot** starts its fade. A hammer
 strike, side contact, underside contact, or merely being nearby does not.
 The obstacle fades over **0.8 seconds of simulation time**, remains solid during
 that fade, then loses both its collision and visible surface. Pausing freezes
-the effect. Restarting restores it.
+the effect. Restarting restores it; a player caught inside the restored rock
+drops out of it rather than being trapped.
 
 The physics callback records landings; body removal happens only after the
 physics step unlocks. Authored data and transient disappearance state have

@@ -1,5 +1,5 @@
 import { Box, Circle, DynamicTree, Vec2, WorldManifold } from 'planck';
-import type { Body, Contact, World } from 'planck';
+import type { Body, Contact, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
 import type { Point } from './config';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
@@ -29,6 +29,7 @@ interface EnemyCallbacks {
   readonly getPot: () => Body;
   readonly getHead: () => Body;
   readonly isTransientTerrain: (body: Body) => boolean;
+  readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
   readonly onBump: (velocityChange: Readonly<Point>) => void;
 }
 
@@ -258,7 +259,9 @@ export class EnemyWorld {
     } else if (other === this.callbacks.getPot()) this.bumps.add(record);
     else if (record.object.species === 'bird') {
       const fixture = a === record.body ? contact.getFixtureB() : contact.getFixtureA();
-      if ((fixture.getFilterCategoryBits() & PHYSICS.terrainCategory) !== 0) this.obstacles.add(record);
+      // Begin-contact fires before TerrainWorld's pre-solve can disable interior contacts.
+      if ((fixture.getFilterCategoryBits() & PHYSICS.terrainCategory) !== 0 &&
+        !this.callbacks.insideTerrain(other, this.body(record).getWorldCenter())) this.obstacles.add(record);
     }
   };
 
@@ -269,6 +272,8 @@ export class EnemyWorld {
     if (!record || !contact.isTouching()) return;
     const other = a.getBody() === record.body ? b : a;
     if ((other.getFilterCategoryBits() & PHYSICS.terrainCategory) === 0) return;
+    // Interior contacts are disabled by TerrainWorld and must not steer enemies.
+    if (this.callbacks.insideTerrain(other.getBody(), this.body(record).getWorldCenter())) return;
     if (record.object.species === 'bird') {
       if (record.phase === 'dive') this.obstacles.add(record);
     } else if (record.phase === 'patrol' && record.desiredX !== 0) {
@@ -315,7 +320,8 @@ export class EnemyWorld {
     if (body.isAwake()) return false;
     for (let edge = body.getContactList(); edge; edge = edge.next) {
       // Keep the sleeping body on vanishing terrain: removing that support wakes it to fall.
-      if (edge.other !== null && edge.contact.isTouching() && this.callbacks.isTransientTerrain(edge.other)) return false;
+      if (edge.other !== null && edge.contact.isTouching() && edge.contact.isEnabled() &&
+        this.callbacks.isTransientTerrain(edge.other)) return false;
     }
     return true;
   }

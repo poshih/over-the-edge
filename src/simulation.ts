@@ -58,6 +58,7 @@ export class Simulation {
       getPot: () => this.rig.pot,
       getHead: () => this.rig.head,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
+      insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       onBump: (delta) => changePlayerVelocity(this.rig, delta),
     });
     this.cursorOffset = this.initialCursorOffset();
@@ -192,7 +193,7 @@ export class Simulation {
     const root = this.rig.root.getPosition();
     let contacts = 0;
     for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
-      if (contact.isTouching()) contacts++;
+      if (contact.isTouching() && contact.isEnabled()) contacts++;
     }
     const hingeTorque = this.rig.hinge.getMotorTorque(1 / PHYSICS.dt);
     const sliderForce = this.rig.slider.getMotorForce(1 / PHYSICS.dt);
@@ -281,7 +282,7 @@ export class Simulation {
   private headContactCount(): number {
     let count = 0;
     for (let edge = this.rig.head.getContactList(); edge; edge = edge.next) {
-      if (edge.contact.isTouching()) count++;
+      if (edge.contact.isTouching() && edge.contact.isEnabled()) count++;
     }
     return count;
   }

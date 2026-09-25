@@ -1,7 +1,7 @@
 import { Chain, Circle, Vec2, WorldManifold } from 'planck';
-import type { Body, Contact, ContactImpulse, World } from 'planck';
+import type { Body, Contact, ContactImpulse, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
-import { geometryKey, ILLUSION, isTerrainObject, shapeVertices } from './level';
+import { geometryKey, ILLUSION, isTerrainObject, objectContains, shapeVertices } from './level';
 import type { LevelChange, TerrainObject, TerrainEvent } from './level';
 
 export class TerrainWorld {
@@ -25,6 +25,7 @@ export class TerrainWorld {
       if (this.objects.has(object.id)) throw new Error(`Duplicate terrain ID: ${object.id}.`);
       this.upsert(object);
     }
+    this.world.on('pre-solve', this.onPreSolve);
     this.world.on('post-solve', this.onPostSolve);
   }
 
@@ -109,9 +110,16 @@ export class TerrainWorld {
     return id !== undefined && this.object(id).illusion;
   }
 
+  // Terrain only collides from outside: a body whose centre is inside an outline passes out of it.
+  isInside(body: Body, point: Vec2Value): boolean {
+    const id = this.ids.get(body);
+    return id !== undefined && objectContains(this.object(id), point);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.ensureMutable();
+    this.world.off('pre-solve', this.onPreSolve);
     this.world.off('post-solve', this.onPostSolve);
     this.listeners.clear();
     for (const id of this.bodies.keys()) this.destroyBody(id);
@@ -121,6 +129,15 @@ export class TerrainWorld {
     this.disappeared.clear();
     this.disposed = true;
   }
+
+  private readonly onPreSolve = (contact: Contact): void => {
+    const a = contact.getFixtureA().getBody();
+    const b = contact.getFixtureB().getBody();
+    const terrain = this.ids.has(a) ? a : this.ids.has(b) ? b : null;
+    if (terrain === null) return;
+    const other = terrain === a ? b : a;
+    if (this.isInside(terrain, other.getWorldCenter())) contact.setEnabled(false);
+  };
 
   private readonly onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {
     const a = contact.getFixtureA().getBody();
