@@ -284,6 +284,10 @@ export async function verifyLevel(browser, address, artifacts) {
         await page.keyboard.press('Escape');
         await page.waitForFunction(() => !window.gettingOver.snapshot().pointerLocked);
       }
+      // Acquiring pointer lock can inject a large mouse movement that swings the hammer away (and the
+      // recoil can carry the player out of reach); restart so every encounter aims from the hammer head.
+      await page.keyboard.press('r');
+      await frames();
     };
     const aimHammer = async point => {
       const canvas = await page.locator('#game').boundingBox();
