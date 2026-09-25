@@ -31,9 +31,11 @@ The built-in course needs no backend, player account, external asset download,
 or runtime network service. Authored video events fetch the media URLs included
 in their level.
 
-To deploy the Workshop, upload `dist/` to the **gettingover** Cloudflare Worker
-defined in `wrangler.toml`. It is a static-assets Worker, not a Cloudflare Pages
-project. Deploying requires your own Cloudflare account:
+The Workshop's **gettingover** Cloudflare Worker serves `dist/` and its protected
+shared-artwork API; this is not a Cloudflare Pages project. Before the first
+deployment of this integration, configure Access, D1, R2, and the encryption
+secret using the [shared artwork setup guide](docs/course-artwork.md#hosted-setup).
+Deploying requires your own Cloudflare account:
 
 ```sh
 npm run build
@@ -111,7 +113,11 @@ GAME_LEVEL=levels/my-level.json npm run build:game
 Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
 validated and bundled at build time; the game needs no editor or external level
 service. Level exports do not contain gameplay settings, sprite layouts,
-private imported GLBs, or IK profiles.
+private character GLBs, or IK profiles. For terrain artwork, **Export course +
+artwork** creates a self-contained course package accepted by `GAME_LEVEL`.
+It embeds referenced shared GLBs and the selected shape/mesh look. Override that
+choice with `GAME_ART_MODE=shapes` or `GAME_ART_MODE=meshes`; shape-only releases
+omit the GLBs and mesh loader. See [course artwork](docs/course-artwork.md).
 
 To bundle your physics and cursor behavior into the game-only release, export a
 game-settings profile from **Workshop / Physics**, put it inside the project,
@@ -550,6 +556,26 @@ a column index built lazily at most once per level change. A drop uploads only i
 new terrain instances. The catalog, thumbnails, and ghost are editor modules and are
 excluded from game-only builds. Tropes that need moving props, such as swinging or
 sliding platforms, are not included because terrain does not move.
+
+### Shared course artwork and Tripo
+
+**Workshop / Level / Shared course artwork** connects to the Access-protected
+shared asset library. Generate one selected terrain object or prefab terrain
+part with Tripo, or share an existing GLB. Each user connects their own encrypted
+API key and explicitly approves each paid generation; Studio subscription credits
+are separate from API credits. Completed GLBs are retained in R2 for reuse.
+
+Each ready-made obstacle has a **Ready-made artwork** sub-selection. Publish
+named variants mapping saved assets to individual parts, then place/reuse them
+without regenerating. Individual terrain objects can also choose a saved mesh
+or revert to their editor shape. Mirroring, illusion fades, and reset remain
+per-part; authored collision outlines never change.
+
+**Editor preview** and **Built game artwork** independently choose editor
+shapes or saved meshes for the 2.5D look. **Export course + artwork** bundles the
+level and referenced GLBs for an editor-free release. The playable game contains
+no Tripo connection, credentials, or backend dependency. See the
+[workflow, deployment, limits, and recovery guide](docs/course-artwork.md).
 
 ### Performance boundaries
 

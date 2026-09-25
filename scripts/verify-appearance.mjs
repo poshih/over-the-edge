@@ -34,8 +34,8 @@ export function texturePng() {
   ]);
 }
 
-export function modelFixture({ size = [1, 1, 1], externalTexture = false, textured = false } = {}) {
-  const geometry = new BoxGeometry(...size);
+export function modelFixture({ size = [1, 1, 1], externalTexture = false, textured = false, imageUri, segments = 1 } = {}) {
+  const geometry = new BoxGeometry(...size, segments, segments, segments);
   const buffers = [];
   const bufferViews = [];
   const accessors = [];
@@ -70,10 +70,10 @@ export function modelFixture({ size = [1, 1, 1], externalTexture = false, textur
     meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] }],
     materials: [material], bufferViews, accessors,
   };
-  if (textured || externalTexture) {
+  if (textured || externalTexture || imageUri) {
     json.images = externalTexture
       ? [{ uri: 'https://example.invalid/private-model-texture.png' }]
-      : [{ bufferView: append(texturePng()), mimeType: 'image/png' }];
+      : imageUri ? [{ uri: imageUri }] : [{ bufferView: append(texturePng()), mimeType: 'image/png' }];
     json.textures = [{ source: 0 }];
     material.pbrMetallicRoughness.baseColorFactor = [1, 1, 1, 1];
     material.pbrMetallicRoughness.baseColorTexture = { index: 0 };

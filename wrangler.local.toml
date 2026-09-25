@@ -1,24 +1,19 @@
-name = "gettingover"
-compatibility_date = "2025-09-01"
+name = "over-the-edge-art-local"
 main = "worker/index.ts"
-
+compatibility_date = "2025-09-01"
 assets = { directory = "./dist", binding = "ASSETS", not_found_handling = "single-page-application", run_worker_first = true }
 
 [vars]
+ART_LOCAL = "true"
 ACCESS_TEAM_DOMAIN = ""
 ACCESS_AUD = ""
 
 [[d1_databases]]
 binding = "ART_DB"
 database_name = "over-the-edge-art"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "00000000-0000-0000-0000-000000000001"
 migrations_dir = "worker/migrations"
 
 [[r2_buckets]]
 binding = "ART_FILES"
 bucket_name = "over-the-edge-art"
-
-[triggers]
-crons = ["* * * * *"]
-
-# Custom domains are account-specific; configure your own in Cloudflare.

@@ -24,6 +24,7 @@ import { NamedSnapshots, SnapshotError } from './named-snapshots';
 import { createSnapshotPicker } from './snapshot-picker';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import { DRAWING, PolygonDraft } from './polygon-draft';
+import { createCourseArtEditor } from './course-art-editor';
 import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
@@ -226,6 +227,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         ${selectField('set-piece-category', 'Category', SET_PIECE_CATEGORIES.map(({ id, label }) => ({ value: id, label })))}
         <div class="level-set-piece-grid" aria-label="Set pieces"></div>
         <p class="level-help level-set-piece-detail"></p>
+        <div class="level-prefab-art"></div>
         <label class="level-checkbox" for="level-set-piece-mirror">
           <input id="level-set-piece-mirror" type="checkbox" /> Mirror left / right (M)
         </label>
@@ -255,6 +257,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <p id="level-illusion-help" class="level-help">Only the player pot landing on top starts a
             ${ILLUSION.fadeSeconds}s fade. Then collision and visuals disappear. Hammer, side and underside
             contacts do not trigger it. Playtest resets disappeared objects; saved level data is unchanged.</p>
+          <div class="level-object-art"></div>
         </div>
         <div class="level-fields-start">
           <div class="level-field-grid">
@@ -306,6 +309,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         </div>
         <button type="button" class="button level-delete">Delete selected object</button>
       </fieldset>
+      <div class="level-course-art"></div>
       <fieldset class="tuning-group level-labels">
         <legend>Course labels</legend>
         <p class="level-help level-label-count"></p>
@@ -320,7 +324,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
         </div>
         <input class="level-file" type="file" accept=".json,application/json" aria-label="Import level JSON" hidden />
         <p class="level-help">Exports level.json: terrain, start, triggers, enemies and labels only.
-          Models, appearance, tuning and browser settings are never included. Import limit:
+          Artwork IDs are included, but GLB files, appearance, tuning and browser settings are not.
+          Use Export course + artwork for a self-contained mesh release. Import limit:
           ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Enemy motion/deaths are not saved.
           New enemy kinds and trigger actions need an updated game runtime.
           Saved history loads only when you choose Load level.</p>
@@ -328,6 +333,16 @@ export function createLevelEditor(options: LevelEditorOptions) {
     </div>
   `;
   options.mount.append(root);
+  const artEditor = createCourseArtEditor({
+    mount: element(root, '.level-course-art'), prefabMount: element(root, '.level-prefab-art'),
+    objectMount: element(root, '.level-object-art'), level, view: options.artwork.view,
+    onNotice, onDebug: options.artwork.onDebug, prepareExport: () => prepareLevel(),
+    onImport: (definition) => {
+      if (!active || !confirmReplacement('Importing this course package')) return false;
+      resetSelection(); level.replace(definition); markSaved(); fitCourse();
+      return true;
+    },
+  });
   const overlay = document.createElement('div');
   overlay.className = 'level-overlay';
   overlay.hidden = true;
@@ -563,6 +578,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       if (placing) triggerEvents.hide();
       else triggerEvents.show(trigger.id, trigger.events);
     }
+    artEditor.setSelection(tool === 'select' ? terrain : null);
     if (trigger === null) triggerEvents.hide();
 
     const selected = selectedObject();
@@ -648,6 +664,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       button.disabled = !fits(setPieceById(id).counts);
     }
     const shown = setPieceId === null ? null : setPieceById(setPieceId);
+    artEditor.setPrefab(shown);
     const { terrain, triggers, enemies, labels } = shown?.counts ?? { terrain: 0, triggers: 0, enemies: 0, labels: 0 };
     const extras = [
       triggers > 0 ? `${triggers} trigger${triggers === 1 ? '' : 's'}` : '',
@@ -878,10 +895,11 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function dropSetPiece(): void {
     const piece = armedSetPiece();
     if (piece === null) return;
+    if (!artEditor.readyForPlacement()) return;
     const stamp = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
     const placed = placeSetPiece(piece, setPieceAnchor, { mirror: setPieceMirror, stamp });
     level.edit({
-      add: placed.objects,
+      add: artEditor.decorate(placed.objects, piece, setPieceMirror),
       labels: placed.labels.length === 0 ? undefined : [...level.definition().labels, ...placed.labels],
     });
     setPieceHistory.push({ name: piece.name, ids: placed.objects.map((object) => object.id), labels: placed.labels });
@@ -1522,6 +1540,7 @@ This restores the default ground and start location, removes all other objects a
     preparePlay: prepareLevel,
     setMode(mode: 'edit' | 'inactive'): void {
       if (disposed) return;
+      artEditor.setActive(mode === 'edit');
       if (mode === 'edit') {
         if (!active) {
           active = true;
@@ -1561,6 +1580,7 @@ This restores the default ground and start location, removes all other objects a
         camera: Object.freeze({ ...camera.state() }),
         overlay: Object.freeze({ visible: active && !overlay.hidden, x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
         commits: commitCount, hitTests: hitTestCount, draws: drawCount,
+        art: artEditor.snapshot(),
         setPieces: Object.freeze({
           armed: armedSetPiece()?.id ?? null, chosen: setPieceId, mirror: setPieceMirror, category: setPieceCategory,
           anchor: Object.freeze({ ...setPieceAnchor }), snapped: setPieceSnapped,
@@ -1577,6 +1597,7 @@ This restores the default ground and start location, removes all other objects a
       drawing.clear();
       active = false; disposed = true; importGeneration++;
       events.abort(); resize.disconnect(); unsubscribe();
+      artEditor.dispose();
       camera.set(null);
       bounds.clear();
       entityGizmos.destroy();

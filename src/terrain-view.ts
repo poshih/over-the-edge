@@ -1,16 +1,15 @@
 import {
   Box3, Color, DynamicDrawUsage, ExtrudeGeometry, Group, InstancedBufferAttribute,
-  InstancedMesh, Matrix4, MeshStandardMaterial, Shape, Sphere,
+  InstancedMesh, Matrix4, MeshStandardMaterial, Sphere,
 } from 'three';
-import { geometryKey, ILLUSION, LEVEL_LIMITS, shapeVertices } from './level';
+import { geometryKey, ILLUSION, LEVEL_LIMITS } from './level';
 import type { TerrainObject, LevelShape, TerrainEvent } from './level';
 import { markInstanceSlot } from './instancing';
+import { terrainGeometry } from './terrain-geometry';
 
 const CHUNK_SIZE = 32;
 const INITIAL_CAPACITY = 8;
 const SIDE_SHADE = 0.62;
-// Three.js samples a full arc at twice this, so circles render with 64 sides.
-const CIRCLE_CURVE_SEGMENTS = 32;
 type MaterialPair = [MeshStandardMaterial, MeshStandardMaterial];
 type TerrainMesh = InstancedMesh<ExtrudeGeometry, MaterialPair>;
 
@@ -57,6 +56,8 @@ function batchKey(object: TerrainObject, shapeKey: string): string {
 export class TerrainView {
   readonly root = new Group();
   private readonly instances = new Map<string, Instance>();
+  private readonly states = new Map<string, { object: TerrainObject; fade: number | null }>();
+  private readonly hidden = new Set<string>();
   private readonly templates = new Map<string, Template>();
   private readonly opaque = new Map<string, Batch>();
   private readonly phases = new Map<number, Phase>();
@@ -81,18 +82,26 @@ export class TerrainView {
     switch (event.type) {
       case 'reset':
         this.clearInstances();
-        for (const object of event.objects) this.upsert(object);
+        this.states.clear();
+        for (const object of event.objects) {
+          this.states.set(object.id, { object, fade: null });
+          if (!this.hidden.has(object.id)) this.upsert(object);
+        }
         break;
       case 'upsert':
-        this.upsert(event.object);
+        this.states.set(event.object.id, { object: event.object, fade: null });
+        if (!this.hidden.has(event.object.id)) this.upsert(event.object);
         break;
       case 'remove':
       case 'disappear': {
+        this.states.delete(event.id);
         const instance = this.instances.get(event.id);
         if (instance) this.remove(instance);
         break;
       }
       case 'fade': {
+        const state = this.states.get(event.id);
+        if (state?.object.illusion) state.fade = event.startedAt;
         const instance = this.instances.get(event.id);
         if (!instance || !instance.object.illusion || instance.batch.phase?.startedAt === event.startedAt) break;
         const object = instance.object;
@@ -105,6 +114,22 @@ export class TerrainView {
         const key = geometryKey(object.shape);
         this.insert(object, this.getBatch(object, key, phase));
         break;
+      }
+    }
+  }
+
+  setHidden(id: string, hidden: boolean): void {
+    if (this.disposed || this.hidden.has(id) === hidden) return;
+    if (hidden) {
+      this.hidden.add(id);
+      const instance = this.instances.get(id);
+      if (instance) this.remove(instance);
+    } else {
+      this.hidden.delete(id);
+      const state = this.states.get(id);
+      if (state) {
+        this.upsert(state.object);
+        if (state.fade !== null) this.apply({ type: 'fade', id, startedAt: state.fade });
       }
     }
   }
@@ -154,6 +179,8 @@ export class TerrainView {
   dispose(): void {
     if (this.disposed) return;
     this.clearInstances();
+    this.states.clear();
+    this.hidden.clear();
     for (const template of this.templates.values()) template.geometry.dispose();
     this.templates.clear();
     for (const material of this.opaqueMaterials) material.dispose();
@@ -198,22 +225,7 @@ export class TerrainView {
       }
       if (this.templates.size >= LEVEL_LIMITS.geometryKinds) throw new Error('Terrain geometry limit exceeded.');
     }
-    const outline = new Shape();
-    if (shape.type === 'circle') {
-      // Circle terrain collides as a true circle; a finer arc keeps its drawn edge within 0.12% of it.
-      outline.absarc(0, 0, 0.5, 0, Math.PI * 2, false);
-    } else {
-      const vertices = shapeVertices(shape);
-      outline.moveTo(vertices[0].x, vertices[0].y);
-      for (let index = 1; index < vertices.length; index++) outline.lineTo(vertices[index].x, vertices[index].y);
-      outline.closePath();
-    }
-    const geometry = new ExtrudeGeometry(outline, {
-      depth: 1, steps: 1, bevelEnabled: false, curveSegments: CIRCLE_CURVE_SEGMENTS,
-    });
-    geometry.translate(0, 0, -1);
-    geometry.computeBoundingBox();
-    geometry.computeBoundingSphere();
+    const geometry = terrainGeometry(shape);
     const template = { geometry, references: 0 };
     this.templates.set(key, template);
     this.counters.geometriesBuilt++;

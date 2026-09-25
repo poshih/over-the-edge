@@ -1,5 +1,7 @@
 import { DEFAULT_ARM_IK } from '../character';
 import type { ArmIkSettings, VisualPartId } from '../character';
+import { ModelError as AppearanceError, MODEL_LIMITS } from '../model-data';
+export { ModelError as AppearanceError, MODEL_LIMITS } from '../model-data';
 export { DEFAULT_ARM_IK, ARM_SIDES } from '../character';
 export type { ArmIkSettings, ArmSide, VisualPartId } from '../character';
 
@@ -54,18 +56,6 @@ export const ALIGNMENT_FIELDS: readonly {
   { key: 'offsetY', label: 'Offset Y', min: -1, max: 1, step: 0.01, unit: 'local' },
   { key: 'offsetZ', label: 'Offset Z', min: -1, max: 1, step: 0.01, unit: 'local' },
 ];
-
-export const MODEL_LIMITS = {
-  bytes: 20 * 1024 * 1024,
-  triangles: 250_000,
-  meshes: 128,
-  nodes: 2048,
-  textureEdge: 4096,
-  minimumSpan: 0.000001,
-  maximumSpan: 1_000_000,
-} as const;
-
-export class AppearanceError extends Error {}
 
 export function validateArmIk(value: unknown): ArmIkSettings {
   if (typeof value !== 'object' || value === null || Array.isArray(value) ||

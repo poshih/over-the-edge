@@ -6,23 +6,29 @@
   "scripts": {
     "dev": "vite",
     "dev:game": "vite --config vite.game.config.ts",
-    "build": "tsc --noEmit && vite build",
+    "dev:art": "wrangler dev --config wrangler.local.toml --ip 127.0.0.1 --port 8787",
+    "check:worker": "tsc --noEmit -p tsconfig.worker.json",
+    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.worker.json && vite build",
     "build:game": "tsc --noEmit -p tsconfig.game.json && vite build --config vite.game.config.ts",
     "preview": "vite preview",
     "preview:game": "vite preview --config vite.game.config.ts",
     "verify": "npm run build && node scripts/verify-runtime.mjs && npm run verify:game",
-    "verify:game": "npm run build:game && node scripts/verify-game.mjs"
+    "verify:game": "npm run build:game && node scripts/verify-game.mjs",
+    "verify:art": "npm run build && node scripts/verify-art.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260925.1",
     "@types/three": "0.185.4",
     "playwright": "1.63.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "wrangler": "4.140.0"
   },
   "dependencies": {
+    "jose": "6.2.12",
     "planck": "1.4.2",
     "three": "0.185.1"
   },

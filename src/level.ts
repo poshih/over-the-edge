@@ -7,6 +7,8 @@ import type { TriggerAction } from './trigger-events';
 import { LAUNCH_FIELDS } from './trigger-events';
 import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
 import type { EnemyFacing, EnemySpecies } from './enemy-types';
+import { ArtError, validateTerrainArt } from './art-types';
+import type { TerrainArt } from './art-types';
 
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
@@ -57,6 +59,7 @@ export interface TerrainObject {
   readonly depth: number;
   readonly color: number;
   readonly illusion: boolean;
+  readonly art?: TerrainArt;
 }
 
 export interface StartObject extends Readonly<Point> {
@@ -286,7 +289,17 @@ function validateEnemy(value: unknown): EnemyObject {
 }
 
 function validateTerrain(value: unknown): TerrainObject {
-  fields(value, ['kind', 'id', 'shape', 'x', 'y', 'width', 'height', 'angle', 'depth', 'color', 'illusion'], 'Terrain object');
+  const hasArt = typeof value === 'object' && value !== null && Object.hasOwn(value, 'art');
+  fields(value, ['kind', 'id', 'shape', 'x', 'y', 'width', 'height', 'angle', 'depth', 'color', 'illusion',
+    ...(hasArt ? ['art'] : [])], 'Terrain object');
+  let art: TerrainArt | undefined;
+  if (hasArt) {
+    try { art = validateTerrainArt(value.art); }
+    catch (error) {
+      if (!(error instanceof ArtError)) throw error;
+      throw new LevelError(error.message);
+    }
+  }
   const id = objectId(value.id);
   const raw = value.shape;
   if (typeof raw !== 'object' || raw === null || !Object.hasOwn(raw, 'type')) throw new LevelError('Choose a supported shape.');
@@ -313,7 +326,7 @@ function validateTerrain(value: unknown): TerrainObject {
     y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Position Y'),
     width, height, angle: number(value.angle, -Math.PI, Math.PI, 'Rotation'),
     depth: number(value.depth, LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth, 'Depth'),
-    color, illusion: value.illusion,
+    color, illusion: value.illusion, ...(art === undefined ? {} : { art }),
   });
 }
 

@@ -3,12 +3,11 @@ import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
-import { DEFAULT_LEVEL } from './src/default-level';
-import { LEVEL_LIMITS, validateLevel } from './src/level';
 import { DEFAULT_GAME_SETTINGS, GAME_SETTINGS_LIMITS, validateGameSettings } from './src/game-settings';
 import { SPRITE_TARGET_IDS, VISUAL_PART_IDS } from './src/character';
 import { spriteBundle } from './build/sprite-bundle';
 import { gameTitle } from './build/game-title.ts';
+import { courseBundle } from './build/course-bundle';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 
@@ -83,10 +82,7 @@ export default defineConfig(({ mode }) => ({
   resolve: { alias: { '/src': resolve(project, 'src') } },
   plugins: [
     gameTitle({ mode, envDir: project }),
-    gameJson({
-      variable: 'GAME_LEVEL', moduleId: 'virtual:game-level', defaults: DEFAULT_LEVEL,
-      fileBytes: LEVEL_LIMITS.fileBytes, validate: validateLevel,
-    }),
+    courseBundle(projectJson('GAME_LEVEL'), process.env.GAME_ART_MODE),
     gameJson({
       variable: 'GAME_SETTINGS', moduleId: 'virtual:game-settings', defaults: DEFAULT_GAME_SETTINGS,
       fileBytes: GAME_SETTINGS_LIMITS.fileBytes, validate: validateGameSettings,

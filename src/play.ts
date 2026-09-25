@@ -3,6 +3,7 @@ import './play.css';
 import level from 'virtual:game-level';
 import settings from 'virtual:game-settings';
 import sprites from 'virtual:game-sprites';
+import loadArtwork from 'virtual:game-art';
 import { Game } from './game';
 import { createPlayUI } from './play-ui';
 
@@ -25,7 +26,7 @@ if (import.meta.hot) {
 }
 
 try {
-  await game.loadSprites(sprites);
+  await Promise.all([game.loadSprites(sprites), loadArtwork(game)]);
   if (!game.halted) {
     game.setInputBlock({ reason: 'sprite-loading', blocked: false });
     game.start(ui.update);
