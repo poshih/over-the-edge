@@ -104,6 +104,11 @@ export class TerrainWorld {
     };
   }
 
+  isIllusion(body: Body): boolean {
+    const id = this.ids.get(body);
+    return id !== undefined && this.object(id).illusion;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.ensureMutable();

@@ -474,8 +474,11 @@ state, including dead enemies and disappeared illusions.
 
 Up to **64 enemies** share one sprite draw batch with original sprite artwork;
 the palette and editor guides use original SVG glyphs. Only nearby enemies allocate
-physics bodies: they wake within **18 m** and sleep beyond **26 m**. Distant enemies
-keep their authored/current sprites, with no physics bodies or AI work.
+physics bodies: they wake within **18 m** and sleep beyond **26 m** once settled.
+Distant enemies keep their authored/current sprites, with no physics bodies or AI work.
+A soldier knocked off a ledge stays simulated while it falls, so it lands or is
+defeated **30 m** below its home instead of freezing in mid-air; one resting on an
+illusion keeps a sleeping body so it drops if the illusion vanishes.
 Contact effects are deferred until the physics world unlocks. Exported enemies
 also work in editor-free releases using the updated runtime. No enemies are
 added to the built-in course.

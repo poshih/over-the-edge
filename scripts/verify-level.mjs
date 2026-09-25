@@ -336,6 +336,15 @@ export async function verifyLevel(browser, address, artifacts) {
       assert.equal((await state()).rendering.enemies.instances, 1);
       report.enemies.kills.push({ species, hammerHead: true, resetRestored: true, authoredPreserved: true });
     }
+    // A soldier pushed off a high ledge must keep falling until its fall defeat, not sleep in mid-air.
+    const perch = { ...creatureFloor, id: 'fall-perch', x: -3, y: 49.5, width: 3, height: 1 };
+    const faller = {
+      ...creatures.find(object => object.species === 'hollow-soldier'), id: 'fall-soldier', x: 2, y: 50.7,
+    };
+    await playCreatures({ ...emptyCreatureCourse, objects: [perch, { ...creatureStart, y: 50.53, x: -3 }, faller] });
+    await page.waitForFunction(id => window.gettingOver.level().enemies.enemies.find(enemy => enemy.id === id)?.defeatedBy === 'fall', faller.id);
+    assert.equal((await state()).enemies.bodyCount, 0, 'A fallen soldier must release its collider.');
+    report.enemies.fallDefeat = true;
     await edit();
     const crowd = Array.from({ length: 64 }, (_, index) => ({
       ...creatures[index % creatures.length], id: `creature-${index}`,

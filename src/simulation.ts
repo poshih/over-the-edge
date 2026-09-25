@@ -57,6 +57,7 @@ export class Simulation {
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
       getHead: () => this.rig.head,
+      isTransientTerrain: (body) => this.terrain.isIllusion(body),
       onBump: (delta) => changePlayerVelocity(this.rig, delta),
     });
     this.cursorOffset = this.initialCursorOffset();

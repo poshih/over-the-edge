@@ -28,6 +28,7 @@ interface EnemyRecord {
 interface EnemyCallbacks {
   readonly getPot: () => Body;
   readonly getHead: () => Body;
+  readonly isTransientTerrain: (body: Body) => boolean;
   readonly onBump: (velocityChange: Readonly<Point>) => void;
 }
 
@@ -138,7 +139,8 @@ export class EnemyWorld {
       record.previous.x = record.current.x;
       record.previous.y = record.current.y;
       if (distanceSquared(record.current, player) > ENEMY_BEHAVIOR.sleepDistance ** 2) {
-        this.sleep(record);
+        // Distant enemies get no AI; gravity-bound ones sleep only after they settle.
+        if (this.canSleep(record)) this.sleep(record);
         continue;
       }
       this.activeUpdates++;
@@ -303,6 +305,19 @@ export class EnemyWorld {
     if (record.proxy === null) throw new Error('A living enemy must have an activation proxy.');
     this.index.moveProxy(record.proxy, wakeBounds(record.current), this.zero);
     this.emit({ type: 'upsert', pose: this.pose(record) });
+  }
+
+  private canSleep(record: EnemyRecord): boolean {
+    if (record.object.species === 'bird') return true;
+    const body = this.body(record);
+    // Planck only sleeps settled bodies, so a falling or sliding soldier stays simulated
+    // until it lands or falls far enough below home to be defeated.
+    if (body.isAwake()) return false;
+    for (let edge = body.getContactList(); edge; edge = edge.next) {
+      // Keep the sleeping body on vanishing terrain: removing that support wakes it to fall.
+      if (edge.other !== null && edge.contact.isTouching() && this.callbacks.isTransientTerrain(edge.other)) return false;
+    }
+    return true;
   }
 
   private fly(record: EnemyRecord, player: Readonly<Point>): void {
