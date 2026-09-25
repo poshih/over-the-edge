@@ -357,6 +357,18 @@ export async function verifyLevel(browser, address, artifacts) {
     assert.equal((await state()).enemies.bodyCount, 1, 'A fallen soldier must release its collider.');
     report.enemies.fallDefeat = true;
     report.enemies.stationaryFacing = true;
+    // Falling below everything in a level must restart the attempt like Reset.
+    const voidLedge = { ...creatureFloor, id: 'void-ledge', x: 0, y: -0.25, width: 3, height: 0.5, illusion: true };
+    await playCreatures({ ...emptyCreatureCourse, objects: [voidLedge, creatureStart] });
+    await page.waitForFunction(() => window.gettingOver.level().terrain.disappeared.includes('void-ledge'));
+    const falling = await physics();
+    await page.waitForFunction(time => window.gettingOver.snapshot().time < time, falling.time);
+    const restarted = await physics();
+    assert.ok(Math.abs(restarted.root.x - creatureStart.x) < 0.5 && restarted.root.y > -0.5,
+      'Falling out of the level must restart at the start.');
+    assert.ok(restarted.timer.elapsed < falling.timer.elapsed, 'The automatic restart must reset the run timer.');
+    assert.ok(!(await state()).terrain.disappeared.includes('void-ledge'), 'The restart must restore the vanished ledge.');
+    report.outOfBounds = { restarted: true, timerReset: true, terrainRestored: true };
     await edit();
     const crowd = Array.from({ length: 64 }, (_, index) => ({
       ...creatures[index % creatures.length], id: `creature-${index}`,

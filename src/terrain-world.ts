@@ -110,6 +110,10 @@ export class TerrainWorld {
     return id !== undefined && this.object(id).illusion;
   }
 
+  isTerrain(body: Body): boolean {
+    return this.ids.has(body);
+  }
+
   // Terrain only collides from outside: a body whose centre is inside an outline passes out of it.
   isInside(body: Body, point: Vec2Value): boolean {
     const id = this.ids.get(body);

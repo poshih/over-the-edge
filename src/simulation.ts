@@ -1,9 +1,9 @@
-import { Vec2, World } from 'planck';
+import { Vec2, World, WorldManifold } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
 import { TUNING_FIELDS, validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
-import { isEnemyObject, isTerrainObject, levelSpawn } from './level';
+import { isEnemyObject, isTerrainObject, levelFloor, levelSpawn } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
@@ -31,6 +31,10 @@ export interface PhysicsFrame {
 type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'cursor'> & { cursorOffset: Point };
 
 const IDLE_COMMAND: MotorCommand = { angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0 };
+// Falling this far below the lowest terrain or launch zone restarts the attempt.
+const OUT_OF_BOUNDS_DEPTH = 20;
+// A contact counts as standing on terrain when it pushes the player at least this steeply upward.
+const SUPPORT_NORMAL = 0.5;
 
 export class Simulation {
   readonly world: World;
@@ -46,10 +50,14 @@ export class Simulation {
   private elapsed = 0;
   private bestHeight = 0;
   private disposed = false;
+  private voidY: number | null;
+  private supported = false;
+  private readonly manifold = new WorldManifold();
 
   constructor(settings: Readonly<GameSettings>, level: LevelDefinition) {
     this.settings = validateGameSettings(settings);
     this.level = level;
+    this.voidY = this.outOfBoundsY(level);
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot);
@@ -95,6 +103,7 @@ export class Simulation {
   applyLevel(change: LevelChange): void {
     this.ensureLive();
     this.level = change.level;
+    this.voidY = this.outOfBoundsY(change.level);
     if (change.kind === 'replace') this.resetPlayer(levelSpawn(change.level));
     this.terrain.apply(change);
     this.enemies.apply(change, this.elapsed);
@@ -133,6 +142,10 @@ export class Simulation {
     return { x: root.x, y: root.y + RIG.potBottom };
   }
 
+  fellOutOfLevel(): boolean {
+    return this.supported && this.voidY !== null && this.rig.root.getPosition().y + RIG.potBottom < this.voidY;
+  }
+
   launch(settings: LaunchSettings) {
     this.ensureLive();
     if (this.world.isLocked()) throw new Error('Player launches must execute after the physics step.');
@@ -158,6 +171,7 @@ export class Simulation {
     this.command = drivePlayer(this.rig, this.worldCursor(this.cursorOrigin(this.rig.root.getPosition()), this.cursorOffset), this.settings.physics);
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
+    if (!this.supported) this.detectSupport();
     this.elapsed += PHYSICS.dt;
     this.terrain.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
@@ -271,12 +285,37 @@ export class Simulation {
   private resetPlayer(spawn: PlayerSpawn): void {
     destroyPlayer(this.world, this.rig);
     this.rig = createPlayer(this.world, spawn, this.settings.physics);
+    this.supported = false;
     this.cursorOffset = this.initialCursorOffset();
     this.elapsed = 0;
     this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
     this.command = { ...IDLE_COMMAND };
     this.current = this.capture();
     this.previous = this.current;
+  }
+
+  private outOfBoundsY(level: LevelDefinition): number | null {
+    const floor = levelFloor(level);
+    return floor === null ? null : floor - OUT_OF_BOUNDS_DEPTH;
+  }
+
+  // Auto-restart only arms once the pot or head stood on terrain, so a start with nothing beneath it
+  // (or one inside rock that it drops out of) keeps falling instead of restarting in a loop.
+  private detectSupport(): void {
+    for (const body of [this.rig.pot, this.rig.head]) {
+      for (let edge = body.getContactList(); edge; edge = edge.next) {
+        const contact = edge.contact;
+        if (edge.other === null || !contact.isTouching() || !contact.isEnabled() || !this.terrain.isTerrain(edge.other)) continue;
+        const manifold = contact.getWorldManifold(this.manifold);
+        if (!manifold || manifold.pointCount === 0) continue;
+        // The manifold normal points from fixture A to fixture B; support pushes the player upward.
+        const up = contact.getFixtureA().getBody() === body ? -manifold.normal.y : manifold.normal.y;
+        if (up >= SUPPORT_NORMAL) {
+          this.supported = true;
+          return;
+        }
+      }
+    }
   }
 
   private headContactCount(): number {

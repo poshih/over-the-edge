@@ -183,6 +183,11 @@ edge to hook it; the contact and the two motors do the lifting. Practice buttons
 explicitly reposition the mechanism and restart the attempt, rather than
 introducing hidden checkpoints into the climb.
 
+Falling **20 m** below everything in a level (its lowest terrain or launch zone)
+restarts the attempt exactly like Reset. It only arms once the pot or hammer head
+has stood on terrain during that attempt, so a start with nothing beneath it keeps
+falling instead of restarting in a loop.
+
 ## Physics architecture
 
 Runtime dependencies are **Planck.js** and **Three.js**. Development uses

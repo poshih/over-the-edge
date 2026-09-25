@@ -428,6 +428,24 @@ export function levelSpawn(level: LevelDefinition): Readonly<PlayerSpawn> {
   return { position: { x: start.x, y: start.y }, angle: start.angle, extension: start.extension };
 }
 
+// Lowest authored point that could still catch the player: terrain, or a zone that launches upward.
+export function levelFloor(level: LevelDefinition): number | null {
+  let floor = Infinity;
+  for (const object of level.objects) {
+    if (object.kind !== 'terrain') continue;
+    floor = Math.min(floor, object.shape.type === 'circle'
+      ? object.y - object.width / 2
+      : Math.min(...objectVertices(object).map((vertex) => vertex.y)));
+  }
+  if (floor === Infinity) return null;
+  for (const object of level.objects) {
+    if (object.kind === 'trigger' && object.events.some((event) => event.type === 'launch-player')) {
+      floor = Math.min(floor, triggerBounds(object).minY);
+    }
+  }
+  return floor;
+}
+
 export function triggerBounds(object: TriggerObject) {
   const halfWidth = object.region.type === 'circle' ? object.region.radius : object.region.width / 2;
   const halfHeight = object.region.type === 'circle' ? object.region.radius : object.region.height / 2;

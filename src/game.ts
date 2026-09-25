@@ -28,6 +28,7 @@ export class Game {
   private readonly inputBlocks = new Set<string>();
   private readonly unsubscribeTerrain: () => void;
   private readonly unsubscribeEnemies: () => void;
+  private readonly onAction: (action: UiAction, options?: UiActionOptions) => void;
   private character: CharacterState = { armIk: DEFAULT_ARM_IK };
   private stopped = false;
   private started = false;
@@ -49,6 +50,7 @@ export class Game {
   }) {
     this.canvas = options.canvas;
     this.fatal = options.fatal;
+    this.onAction = options.onAction;
     const listen = { signal: this.lifecycle.signal };
     window.addEventListener('error', (event) => this.stop(event.message), listen);
     window.addEventListener('unhandledrejection', (event) =>
@@ -95,15 +97,22 @@ export class Game {
           const movement = this.view.pointerDelta(this.input.takeMovement(), this.settings().physics.mouseSensitivity, this.input.mode);
           const perStep = { x: movement.x / steps, y: movement.y / steps };
           let completed = 0;
+          let restarted = false;
           for (; completed < steps;) {
             this.simulation.step(perStep);
             if (this.timerRunning) this.timerElapsed += PHYSICS.dt;
             completed++;
             this.triggers.update(this.simulation.playerPosition(), this.simulation.time);
             if (this.stopped) return;
+            if (this.simulation.fellOutOfLevel()) {
+              // Falling below everything in the level restarts the attempt exactly like Reset.
+              restarted = true;
+              this.onAction('reset');
+              break;
+            }
             if (this.pauseReasons.size > 0) break;
           }
-          if (this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
+          if (!restarted && this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
         }
       } else {
         this.accumulator = 0;
