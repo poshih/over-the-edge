@@ -341,10 +341,18 @@ export async function verifyLevel(browser, address, artifacts) {
     const faller = {
       ...creatures.find(object => object.species === 'hollow-soldier'), id: 'fall-soldier', x: 2, y: 50.7,
     };
-    await playCreatures({ ...emptyCreatureCourse, objects: [perch, { ...creatureStart, y: 50.53, x: -3 }, faller] });
+    // Out of dive range but awake: a stationary bird must keep its authored right-facing pose.
+    const hoverer = {
+      ...creatures.find(object => object.species === 'bird'), id: 'perch-bird', x: -3, y: 60, facing: 'right',
+    };
+    await playCreatures({ ...emptyCreatureCourse, objects: [perch, { ...creatureStart, y: 50.53, x: -3 }, faller, hoverer] });
     await page.waitForFunction(id => window.gettingOver.level().enemies.enemies.find(enemy => enemy.id === id)?.defeatedBy === 'fall', faller.id);
-    assert.equal((await state()).enemies.bodyCount, 0, 'A fallen soldier must release its collider.');
+    const perched = await enemyState(hoverer.id);
+    assert.ok(perched.active, 'The hovering bird must stay awake near the player.');
+    assert.equal(perched.facing, 'right', 'A stationary bird must keep its authored facing.');
+    assert.equal((await state()).enemies.bodyCount, 1, 'A fallen soldier must release its collider.');
     report.enemies.fallDefeat = true;
+    report.enemies.stationaryFacing = true;
     await edit();
     const crowd = Array.from({ length: 64 }, (_, index) => ({
       ...creatures[index % creatures.length], id: `creature-${index}`,

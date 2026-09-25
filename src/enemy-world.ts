@@ -307,6 +307,7 @@ export class EnemyWorld {
     this.destroyBody(record);
     this.active.delete(record);
     this.transition(record, 'patrol');
+    this.faceAuthored(record);
     if (record.proxy === null) throw new Error('A living enemy must have an activation proxy.');
     this.index.moveProxy(record.proxy, wakeBounds(record.current), this.zero);
     this.emit({ type: 'upsert', pose: this.pose(record) });
@@ -365,7 +366,8 @@ export class EnemyWorld {
       this.drive(record, 0, 0);
       return;
     }
-    this.turnAtPatrolEdge(record);
+    if (object.patrolDistance === 0) this.faceAuthored(record);
+    else this.turnAtPatrolEdge(record);
     const horizontal = object.patrolDistance === 0
       ? clamp((object.x - record.current.x) * ENEMY_BEHAVIOR.birdHeightGain, -object.speed, object.speed)
       : ENEMY_DIRECTION[record.facing] * object.speed;
@@ -415,6 +417,11 @@ export class EnemyWorld {
     const offset = record.current.x - record.object.x;
     if (offset >= record.object.patrolDistance - ENEMY_BEHAVIOR.patrolTolerance) record.facing = 'left';
     else if (offset <= -record.object.patrolDistance + ENEMY_BEHAVIOR.patrolTolerance) record.facing = 'right';
+  }
+
+  // Zero-patrol birds hover facing their authored direction whenever they patrol.
+  private faceAuthored(record: EnemyRecord): void {
+    if (record.object.species === 'bird' && record.object.patrolDistance === 0) record.facing = record.object.facing;
   }
 
   private face(record: EnemyRecord, dx: number): void {
