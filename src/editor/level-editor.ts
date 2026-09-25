@@ -7,13 +7,19 @@ import {
   ILLUSION, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
   objectContains, objectVertices, shapeVertices, terrainFromOutline, TRIGGER_LIMITS, TRIGGER_MARKERS, validateLevel, validateLevelObject,
 } from '../level';
-import type { EnemyObject, LevelDefinition, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion } from '../level';
+import type {
+  EnemyObject, LevelDefinition, LevelLabel, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion,
+} from '../level';
 import { ENDING_EVENTS, UPDRAFT_EVENTS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 import { element } from '../dom';
 import { createJsonDownload } from './json-download';
 import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
 import { EntityGizmos, enemyGlyph, objectGizmoBounds, updraftGlyph } from './object-gizmos';
+import { createSetPieceGhost, createSetPieceThumbnail } from './set-piece-view';
+import { placeSetPiece, SET_PIECE_CATALOG, SET_PIECE_CATEGORIES, SET_PIECES, setPieceById } from './set-pieces';
+import type { SetPiece, SetPieceCategory, SetPieceCounts } from './set-pieces';
+import { SurfaceIndex } from './surface-snap';
 import { NamedSnapshots, SnapshotError } from './named-snapshots';
 import { createSnapshotPicker } from './snapshot-picker';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
@@ -22,7 +28,7 @@ import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
 
-type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'start';
+type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piece' | 'start';
 type Tool = 'select' | 'pan' | 'draw' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
 interface TerrainPreset { id: string; label: string; shape: LevelShape; width: number; height: number }
@@ -49,6 +55,9 @@ const WHEEL_ZOOM_RATE = 0.0015;
 const GRID_TARGET_PIXELS = 48;
 const DEFAULT_OBJECT_DEPTH = 1.5;
 const WHEEL_LINE_PIXELS = 16;
+/** Vertical pointer distance within which a set piece rests on the terrain top below or above it. */
+const SNAP_PIXELS = 28;
+const SET_PIECE_HISTORY = 64;
 const PRESET_SETTINGS: Record<ShapeKind, { label: string; width: number; height: number }> = {
   box: { label: 'Block', width: 2.5, height: 2 },
   ramp: { label: 'Ramp', width: 3, height: 2 },
@@ -99,7 +108,7 @@ function asEnemy(object: LevelObject | null): EnemyObject | null {
 }
 
 function isPlacementTool(tool: Tool): tool is PlacementTool {
-  return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'start';
+  return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'place-set-piece' || tool === 'start';
 }
 
 function objectBounds(object: LevelObject): Bounds {
@@ -209,6 +218,19 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button level-zoom-in" aria-label="Zoom in">+</button>
           <button type="button" class="button level-fit">Fit course</button>
         </div>
+      </fieldset>
+      <fieldset class="tuning-group level-set-pieces">
+        <legend>Set piece library</legend>
+        <p class="level-help">Ready-made obstacles built from the basic shapes. Pick one, then click / tap the
+          canvas to drop it. It rests on the terrain top nearest the pointer, and every part stays editable.</p>
+        ${selectField('set-piece-category', 'Category', SET_PIECE_CATEGORIES.map(({ id, label }) => ({ value: id, label })))}
+        <div class="level-set-piece-grid" aria-label="Set pieces"></div>
+        <p class="level-help level-set-piece-detail"></p>
+        <label class="level-checkbox" for="level-set-piece-mirror">
+          <input id="level-set-piece-mirror" type="checkbox" /> Mirror left / right (M)
+        </label>
+        <button type="button" class="button level-set-piece-undo">Remove last placed set piece</button>
+        <p class="level-help level-set-piece-status" role="status" aria-live="polite"></p>
       </fieldset>
       <fieldset class="tuning-group level-inspector">
         <legend>Object properties</legend>
@@ -381,10 +403,25 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let drawCount = 0;
   let commitCount = 0;
   let hitTestCount = 0;
+  let setPieceId: string | null = null;
+  let setPieceMirror = false;
+  let setPieceAnchor: Point = { x: 0, y: 0 };
+  let setPieceSnapped = false;
+  let setPieceCategory: SetPieceCategory = SET_PIECE_CATEGORIES[0].id;
+  let setPieceGridCategory: SetPieceCategory | null = null;
+  let setPieceGhost: SVGGElement | null = null;
+  let setPieceGhostKey: string | null = null;
+  let setPieceStatus = '';
+  // Most recent drops first to be removed; stale entries (parts already deleted) are skipped.
+  const setPieceHistory: { readonly name: string; readonly ids: readonly string[]; readonly labels: readonly LevelLabel[] }[] = [];
+  const setPieceButtons = new Map<string, HTMLButtonElement>();
+  const surfaces = new SurfaceIndex(() => level.definition());
 
   const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts() ||
     drawing.vertices.length > 0 || gesture?.kind === 'draw';
   const selectedObject = () => selectedId === null ? null : level.object(selectedId);
+  const armedSetPiece = (): SetPiece | null =>
+    tool === 'place-set-piece' && setPieceId !== null ? setPieceById(setPieceId) : null;
   const inspectorObject = (): LevelObject | null =>
     isPlacementTool(tool) ? placement : selectedObject();
   const pointFromEvent = (event: PointerEvent): Point => ({ x: event.clientX, y: event.clientY });
@@ -458,7 +495,9 @@ Save a named snapshot or export first if you want to keep them. Continue without
     element(root, '.level-fields-trigger').hidden = trigger === null;
     element(root, '.level-fields-enemy').hidden = enemy === null;
 
+    const armedPiece = armedSetPiece();
     element(root, '.level-selection-name').textContent =
+      armedPiece !== null ? `${armedPiece.name}${setPieceMirror ? ' (mirrored)' : ''} — click / tap the canvas to drop it` :
       object === null ? 'Select an object, or place terrain, a start, a trigger or an enemy.' :
       tool === 'place' && terrain !== null ? `New ${terrain.shape.type} — click / tap the canvas to place` :
       tool === 'place-trigger' ? `New ${presetId === 'ending-trigger' ? 'ending trigger' : 'trigger'} — click / tap the canvas to place` :
@@ -561,6 +600,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
       place: 'Click / tap to place this shape. Adjust its properties first if needed. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
+      'place-set-piece': 'Click / tap to drop the set piece. Its base rests on the terrain top nearest the pointer; move ' +
+        'away from surfaces to place it freely. M mirrors it. Escape cancels.',
       start: 'Click / tap the new pot-center position. Escape cancels.',
     };
     element(root, '.level-tool-help').textContent = help[tool];
@@ -568,7 +609,58 @@ Save a named snapshot or export first if you want to keep them. Continue without
     const { labels } = level.definition();
     element(root, '.level-label-count').textContent = `${labels.length} course labels. Edits, saves and exports preserve them unless you remove them.`;
     element<HTMLButtonElement>(root, '.level-clear-labels').disabled = labels.length === 0;
+    renderSetPieces();
     renderStatus();
+  }
+
+  function setPieceButton(piece: SetPiece): HTMLButtonElement {
+    const cached = setPieceButtons.get(piece.id);
+    if (cached !== undefined) return cached;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button level-set-piece';
+    button.dataset.setPiece = piece.id;
+    button.title = piece.skill;
+    button.setAttribute('aria-pressed', 'false');
+    button.append(createSetPieceThumbnail(piece), document.createTextNode(piece.name));
+    button.addEventListener('click', () => { if (active) armSetPiece(piece); }, listen);
+    setPieceButtons.set(piece.id, button);
+    return button;
+  }
+
+  function renderSetPieces(): void {
+    // Thumbnails are built on first view of their category, then reused.
+    if (active && setPieceGridCategory !== setPieceCategory) {
+      setPieceGridCategory = setPieceCategory;
+      element(root, '.level-set-piece-grid').replaceChildren(
+        ...SET_PIECES.filter((piece) => piece.category === setPieceCategory).map(setPieceButton));
+    }
+    const armed = armedSetPiece();
+    const current = level.counts();
+    const labelCount = level.definition().labels.length;
+    const fits = (counts: SetPieceCounts): boolean =>
+      current.terrain + counts.terrain <= LEVEL_LIMITS.objects &&
+      current.triggers + counts.triggers <= TRIGGER_LIMITS.objects &&
+      current.enemies + counts.enemies <= ENEMY_LIMITS.objects &&
+      labelCount + counts.labels <= LEVEL_LIMITS.labels;
+    for (const [id, button] of setPieceButtons) {
+      button.setAttribute('aria-pressed', String(armed?.id === id));
+      button.disabled = !fits(setPieceById(id).counts);
+    }
+    const shown = setPieceId === null ? null : setPieceById(setPieceId);
+    const { terrain, triggers, enemies, labels } = shown?.counts ?? { terrain: 0, triggers: 0, enemies: 0, labels: 0 };
+    const extras = [
+      triggers > 0 ? `${triggers} trigger${triggers === 1 ? '' : 's'}` : '',
+      enemies > 0 ? `${enemies} ${enemies === 1 ? 'enemy' : 'enemies'}` : '',
+      labels > 0 ? `${labels} course label${labels === 1 ? '' : 's'}` : '',
+    ].filter((text) => text !== '');
+    element(root, '.level-set-piece-detail').textContent = shown === null
+      ? 'Choose a piece to see the skill it tests and what it adds.'
+      : `${shown.name}: ${shown.skill} Adds ${terrain} terrain object${terrain === 1 ? '' : 's'}${
+        extras.length === 0 ? '' : ` and ${extras.join(', ')}`}.`;
+    input('set-piece-mirror').checked = setPieceMirror;
+    element<HTMLButtonElement>(root, '.level-set-piece-undo').disabled = setPieceHistory.length === 0;
+    element(root, '.level-set-piece-status').textContent = setPieceStatus;
   }
 
   function drawPolygon(polygon: SVGPolygonElement, object: TerrainObject | null): void {
@@ -600,6 +692,20 @@ Save a named snapshot or export first if you want to keep them. Continue without
       Math.hypot(cursor.x - first.x, cursor.y - first.y) <= DRAWING.closePixels * unitsPerPixel);
   }
 
+  function drawSetPieceGhost(): void {
+    const piece = armedSetPiece();
+    const key = piece === null ? null : `${piece.id}:${setPieceMirror}`;
+    if (key !== setPieceGhostKey) {
+      setPieceGhost?.remove();
+      setPieceGhost = piece === null ? null : createSetPieceGhost(piece, setPieceMirror);
+      if (setPieceGhost !== null) cameraGroup.append(setPieceGhost);
+      setPieceGhostKey = key;
+    }
+    if (setPieceGhost === null) return;
+    setPieceGhost.setAttribute('transform', `translate(${setPieceAnchor.x} ${setPieceAnchor.y})`);
+    setPieceGhost.classList.toggle('level-set-piece-snapped', setPieceSnapped);
+  }
+
   function draw(): void {
     if (!active || disposed || rect.width <= 0 || rect.height <= 0) return;
     drawCount++;
@@ -609,6 +715,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     drawPolygon(ghostPolygon, ghost !== null ? asTerrain(ghost) : null);
     entityGizmos.setSelection(selected !== null && !isTerrainObject(selected) ? selected : null);
     entityGizmos.setGhost(ghost !== null && !isTerrainObject(ghost) ? ghost : null);
+    drawSetPieceGhost();
     drawOutline();
   }
 
@@ -744,6 +851,66 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function cancelDrawing(): void {
     drawing.clear();
     chooseTool('select');
+  }
+
+  function moveSetPiece(world: Point): void {
+    const reach = SNAP_PIXELS * camera.state().worldHeight / Math.max(1, rect.height);
+    const top = surfaces.nearestTop(world.x, world.y, reach);
+    setPieceSnapped = top !== null;
+    setPieceAnchor = { x: world.x, y: top ?? world.y };
+  }
+
+  function armSetPiece(piece: SetPiece): void {
+    cancelGesture();
+    tool = 'place-set-piece'; setPieceId = piece.id;
+    presetId = null; placement = null; selectedId = null; drawingCursor = null;
+    moveSetPiece(camera.state());
+    renderControls();
+    draw();
+  }
+
+  function toggleSetPieceMirror(): void {
+    setPieceMirror = !setPieceMirror;
+    renderControls();
+    draw();
+  }
+
+  function dropSetPiece(): void {
+    const piece = armedSetPiece();
+    if (piece === null) return;
+    const stamp = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    const placed = placeSetPiece(piece, setPieceAnchor, { mirror: setPieceMirror, stamp });
+    level.edit({
+      add: placed.objects,
+      labels: placed.labels.length === 0 ? undefined : [...level.definition().labels, ...placed.labels],
+    });
+    setPieceHistory.push({ name: piece.name, ids: placed.objects.map((object) => object.id), labels: placed.labels });
+    if (setPieceHistory.length > SET_PIECE_HISTORY) setPieceHistory.shift();
+    setPieceStatus = `Placed ${piece.name}${setPieceMirror ? ' (mirrored)' : ''}. Select any part to fine-tune it.`;
+    selectedId = null;
+    chooseTool('select');
+  }
+
+  function removeLastSetPiece(): void {
+    cancelGesture();
+    while (setPieceHistory.length > 0) {
+      const entry = setPieceHistory.pop();
+      if (entry === undefined) break;
+      const ids = entry.ids.filter((id) => bounds.has(id));
+      const current = level.definition().labels;
+      const remaining = [...current];
+      for (const label of entry.labels) {
+        const index = remaining.findIndex((candidate) =>
+          candidate.x === label.x && candidate.y === label.y && candidate.text === label.text);
+        if (index >= 0) remaining.splice(index, 1);
+      }
+      if (ids.length === 0 && remaining.length === current.length) continue;
+      setPieceStatus = `Removed ${entry.name}.`;
+      level.edit({ remove: ids, labels: remaining.length === current.length ? undefined : remaining });
+      return;
+    }
+    setPieceStatus = 'Placed set pieces have already been deleted.';
+    renderControls();
   }
 
   const picker = createSnapshotPicker({
@@ -1018,6 +1185,17 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function action(selector: string, callback: () => void): void {
     element(root, selector).addEventListener('click', () => { if (active) callback(); }, listen);
   }
+  select('set-piece-category').addEventListener('change', () => {
+    const category = SET_PIECE_CATEGORIES.find((candidate) => candidate.id === select('set-piece-category').value);
+    if (!active || category === undefined) return;
+    setPieceCategory = category.id;
+    renderControls();
+  }, listen);
+  input('set-piece-mirror').addEventListener('change', () => {
+    if (!active || input('set-piece-mirror').checked === setPieceMirror) return;
+    toggleSetPieceMirror();
+  }, listen);
+  action('.level-set-piece-undo', removeLastSetPiece);
   function deleteSelected(): void {
     if (selectedId === null || tool !== 'select') return;
     const object = selectedObject();
@@ -1167,6 +1345,8 @@ This restores the default ground and start location, removes all other objects a
       placement = preset === null ? moved : anchorTrigger(moved, preset);
     } else if (tool === 'place-enemy' && placement !== null && placement.kind === 'enemy') {
       placement = anchorEnemy({ ...placement, x: world.x, y: world.y });
+    } else if (tool === 'place-set-piece' && setPieceId !== null) {
+      moveSetPiece(world);
     } else if (tool === 'start' && placement !== null && placement.kind === 'start') {
       placement = { ...placement, x: world.x, y: world.y };
     }
@@ -1242,6 +1422,8 @@ This restores the default ground and start location, removes all other objects a
         level.upsert(object);
         selectedId = object.id;
         chooseTool('select');
+      } else if (finished.kind === 'place-set-piece' && inside) {
+        dropSetPiece();
       } else if (finished.kind === 'start' && inside && placement !== null) {
         level.upsert(placement);
         selectedId = placement.id;
@@ -1280,6 +1462,10 @@ This restores the default ground and start location, removes all other objects a
       case 'escape': selectedId = null; cancelDrawing(); break;
       case 'v': chooseTool('select'); break;
       case 'h': chooseTool('pan'); break;
+      case 'm':
+        if (tool !== 'place-set-piece') return;
+        toggleSetPieceMirror();
+        break;
       case 'enter':
         if (target instanceof Element && target.closest('button, a[href], [role="button"], [role="tab"]')) return;
         if (tool !== 'draw' && drawing.vertices.length === 0) return;
@@ -1312,13 +1498,18 @@ This restores the default ground and start location, removes all other objects a
   resize.observe(options.canvas);
   const unsubscribe = level.subscribe((change) => {
     commitCount++;
+    surfaces.invalidate();
     for (const id of change.remove) { bounds.delete(id); triggerEvents.forget(id); }
     for (const object of change.upsert) {
       bounds.set(object.id, objectBounds(object));
       if (object.kind !== 'trigger') triggerEvents.forget(object.id);
     }
     entityGizmos.sync(change.upsert, change.remove);
-    if (change.kind === 'replace') triggerEvents.clear();
+    if (change.kind === 'replace') {
+      triggerEvents.clear();
+      setPieceHistory.length = 0;
+      setPieceStatus = '';
+    }
     if (selectedId !== null && !bounds.has(selectedId)) selectedId = null;
     if (gesture !== null) cancelGesture();
     renderControls();
@@ -1370,6 +1561,14 @@ This restores the default ground and start location, removes all other objects a
         camera: Object.freeze({ ...camera.state() }),
         overlay: Object.freeze({ visible: active && !overlay.hidden, x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
         commits: commitCount, hitTests: hitTestCount, draws: drawCount,
+        setPieces: Object.freeze({
+          armed: armedSetPiece()?.id ?? null, chosen: setPieceId, mirror: setPieceMirror, category: setPieceCategory,
+          anchor: Object.freeze({ ...setPieceAnchor }), snapped: setPieceSnapped,
+          history: Object.freeze(setPieceHistory.map((entry) => Object.freeze({
+            name: entry.name, ids: Object.freeze([...entry.ids]), labels: Object.freeze([...entry.labels]),
+          }))),
+          surfaceIndexBuilds: surfaces.builds, catalog: SET_PIECE_CATALOG,
+        }),
       });
     },
     dispose(): void {

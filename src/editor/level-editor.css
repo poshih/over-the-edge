@@ -126,6 +126,53 @@
   fill: currentColor;
 }
 
+/* Set piece library: lazily built thumbnails of multi-object pieces made from the basic shapes. */
+.level-set-piece-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.level-editor .level-set-piece {
+  display: flex;
+  min-height: 84px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+.level-set-piece-thumb {
+  width: 100%;
+  height: 44px;
+  flex: 0 0 auto;
+}
+
+.level-set-piece-terrain {
+  stroke: rgb(23 63 53 / 45%);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.level-set-piece-illusion {
+  fill-opacity: 0.45;
+  stroke-dasharray: 2 2;
+}
+
+.level-set-piece-label {
+  fill: rgb(248 243 228 / 85%);
+  stroke: #173f35;
+  stroke-width: 1;
+}
+
+.level-set-piece-undo {
+  width: 100%;
+  margin-top: 12px;
+}
+
 .level-camera-controls {
   display: grid;
   grid-template-columns: 48px 48px minmax(0, 1fr);
@@ -410,6 +457,39 @@
   font: bold 11px "Segoe UI", sans-serif;
 }
 
+/* Set piece placement ghost: part colours under the dashed preview outline, plus the base line the
+   piece rests on. The base turns solid teal while it is resting on a terrain top. */
+.level-set-piece-ghost .level-set-piece-terrain {
+  fill-opacity: 0.5;
+  stroke: #9a5c08;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.level-set-piece-ghost .level-set-piece-label {
+  fill: rgb(248 243 228 / 60%);
+  stroke: #9a5c08;
+  stroke-dasharray: 4 3;
+}
+
+.level-guides .level-set-piece-ghost text {
+  fill: #173f35;
+  stroke: none;
+  font: 600 16px ui-monospace, monospace;
+}
+
+.level-set-piece-base {
+  stroke: #9a5c08;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.level-set-piece-snapped .level-set-piece-base {
+  stroke: #075a50;
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+
 /* Trigger event list authoring (add/edit/reorder/remove + explicit Apply/Revert). */
 .level-event-list {
   display: flex;
@@ -473,6 +553,7 @@
   .level-palette,
   .level-entity-palette,
   .level-enemy-palette,
+  .level-set-piece-grid,
   .level-action-row,
   .level-field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

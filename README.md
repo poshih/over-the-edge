@@ -506,6 +506,37 @@ The physics callback records landings; body removal happens only after the
 physics step unlocks. Authored data and transient disappearance state have
 separate owners, so saving/exporting after playtesting still includes illusions.
 
+### Set piece library
+
+**Workshop / Level / Set piece library** holds **59 prefabricated obstacles** based on
+classic hammer-climber tropes. They are grouped into 11 categories: onboarding,
+vertical climbs, gaps & leaps, balance, hammer technique, descents, surfaces,
+updrafts, enemies, route tricks, and stakes & finish. Examples include the snake
+slide and its **DO NOT RIDE SNAKE** sign, orange hell, the chimney, pole vaults,
+crumbling illusion bridges, updraft ambushes, and a summit. Each thumbnail's tooltip
+and the detail line describe the skill the piece tests. Choose a piece and a ghost
+preview follows the pointer; click/tap the game preview to drop it. Press **M** or
+tick **Mirror left / right** while placing to flip it, or press Escape to cancel.
+
+The ghost rests on the nearest exposed terrain top within **28 screen pixels** of
+the pointer, and its base line turns solid when it snaps. Elsewhere, it floats at
+the pointer. Each drop is **one atomic level edit** that adds ordinary terrain,
+trigger, enemy, and label objects, then returns to Select. Parts are not grouped:
+select, move, resize, retune, or delete any of them as usual. Object IDs follow
+`<piece>-<stamp>-<part>`. **Remove last placed set piece** removes whatever remains
+of the most recent drop, remembering up to **64** drops. Importing, loading, or
+starting a new level clears that history.
+
+Pieces use only the built-in block, ramp, triangle, circle, and hexagon shapes, so
+they share existing geometry templates and never add custom polygons. A piece whose
+objects would exceed the terrain, trigger, enemy, or label limit is disabled. A drop
+that would exceed the geometry template limit is rejected with a notice and leaves
+the level unchanged. Previews never modify the authored level. Surface snapping uses
+a column index built lazily at most once per level change. A drop uploads only its
+new terrain instances. The catalog, thumbnails, and ghost are editor modules and are
+excluded from game-only builds. Tropes that need moving props, such as swinging or
+sliding platforms, are not included because terrain does not move.
+
 ### Performance boundaries
 
 The level format supports **1,000 terrain objects**, **128 triggers**, **64 enemies**, one start,
@@ -712,7 +743,8 @@ commands that bypass the game's input or motor mechanism.
 loading errors, current rendering anchors and world transforms, and the arm IK
 settings, selected profile, and save state.
 `window.gettingOver.level()` reports the immutable authored definition, current
-illusion/collider state, editor selection/mode, and render/cache counts.
+illusion/collider state, editor selection/mode, set piece placement state, and
+render/cache counts.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state, and the independent run timer. Restart resets the attempt; physics time
 continues to be available separately as `snapshot().time`.

@@ -371,7 +371,7 @@ try {
 
   for (const target of [
     'game-settings-ui.ts', 'game-settings-store.ts', 'style.css', 'workshop.html?raw', 'game-ui.ts', 'game-ui.css',
-    'sprite-editor.ts', 'sprite-editor.css', 'visual-store.ts',
+    'sprite-editor.ts', 'sprite-editor.css', 'visual-store.ts', 'set-pieces.ts', 'set-piece-view.ts',
   ]) {
     await assert.rejects(build({
       configFile, logLevel: 'silent', build: { write: false },

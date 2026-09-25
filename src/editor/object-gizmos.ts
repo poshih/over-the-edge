@@ -8,7 +8,7 @@ import { triggerBounds } from '../level';
 import type { EnemyObject, LevelObject, StartObject, TriggerObject } from '../level';
 
 export interface Bounds { left: number; right: number; bottom: number; top: number }
-type GizmoObject = Exclude<LevelObject, { kind: 'terrain' }>;
+export type GizmoObject = Exclude<LevelObject, { kind: 'terrain' }>;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const START_MARKER_RADIUS = 0.6;
@@ -170,6 +170,13 @@ function applyGizmo(node: SVGGElement, object: GizmoObject, mode: GizmoMode): vo
   node.replaceChildren(...children);
   node.setAttribute('transform', `translate(${object.x} ${object.y})`);
   node.setAttribute('class', `level-gizmo level-gizmo-${object.kind} level-gizmo-${mode}`);
+}
+
+/** A standalone gizmo node, e.g. for multi-object previews that manage their own container. */
+export function createGizmo(object: GizmoObject, mode: GizmoMode): SVGGElement {
+  const node = svg('g');
+  applyGizmo(node, object, mode);
+  return node;
 }
 
 /**

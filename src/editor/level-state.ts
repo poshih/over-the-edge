@@ -2,6 +2,13 @@ import { geometryKey, LEVEL_LIMITS, LevelError, levelStart, TRIGGER_LIMITS, vali
 import type { LevelChange, LevelDefinition, LevelObject, StartObject } from '../level';
 import { ENEMY_LIMITS } from '../enemy-types';
 
+export interface LevelBatchEdit {
+  readonly add?: readonly unknown[];
+  readonly remove?: readonly string[];
+  /** Replacement label list; omit to keep the current labels untouched. */
+  readonly labels?: readonly unknown[];
+}
+
 export class LevelState {
   private current: LevelDefinition;
   private objects: Map<string, LevelObject>;
@@ -75,6 +82,58 @@ export class LevelState {
     else if (object.kind === 'enemy') this.enemyCount--;
     this.objects.delete(id);
     this.publish({ ...this.current, objects: Object.freeze([...this.objects.values()]) }, [], [id]);
+  }
+
+  /**
+   * Adds new objects, removes existing ones and optionally replaces labels as one atomic change.
+   * Everything is validated before the level changes, and listeners receive a single edit.
+   */
+  edit(batch: LevelBatchEdit): readonly LevelObject[] {
+    const added = (batch.add ?? []).map(validateLevelObject);
+    const metadata = batch.labels === undefined ? null : validateLevelMetadata({ labels: batch.labels });
+    const removed = new Map<string, LevelObject>();
+    for (const id of batch.remove ?? []) {
+      const object = this.object(id);
+      if (object.kind === 'start') throw new LevelError('A level needs its start location. Move it instead of deleting it.');
+      removed.set(id, object);
+    }
+    const ids = new Set<string>();
+    for (const object of added) {
+      if (object.kind === 'start') throw new LevelError('A level needs one start location. Move the existing start instead of adding another.');
+      if (this.objects.has(object.id) || ids.has(object.id)) throw new LevelError('Every object needs a unique ID.');
+      ids.add(object.id);
+    }
+    const geometry = new Map(this.geometryUse);
+    const counts = { terrain: this.terrainCount, trigger: this.triggerCount, enemy: this.enemyCount };
+    const tally = (object: LevelObject, change: 1 | -1): void => {
+      if (object.kind === 'start') return;
+      counts[object.kind] += change;
+      if (object.kind !== 'terrain') return;
+      const key = geometryKey(object.shape);
+      const next = (geometry.get(key) ?? 0) + change;
+      if (next === 0) geometry.delete(key);
+      else geometry.set(key, next);
+    };
+    for (const object of removed.values()) tally(object, -1);
+    for (const object of added) tally(object, 1);
+    if (counts.terrain > LEVEL_LIMITS.objects) throw new LevelError(`A level supports up to ${LEVEL_LIMITS.objects} terrain objects.`);
+    if (counts.trigger > TRIGGER_LIMITS.objects) throw new LevelError(`A level supports up to ${TRIGGER_LIMITS.objects} triggers.`);
+    if (counts.enemy > ENEMY_LIMITS.objects) throw new LevelError(`A level supports up to ${ENEMY_LIMITS.objects} enemies.`);
+    if (geometry.size > LEVEL_LIMITS.geometryKinds) {
+      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
+    }
+    const labels = metadata !== null && JSON.stringify(metadata.labels) !== JSON.stringify(this.current.labels)
+      ? metadata.labels : this.current.labels;
+    if (added.length === 0 && removed.size === 0 && labels === this.current.labels) return [];
+    for (const id of removed.keys()) this.objects.delete(id);
+    for (const object of added) this.objects.set(object.id, object);
+    this.terrainCount = counts.terrain;
+    this.triggerCount = counts.trigger;
+    this.enemyCount = counts.enemy;
+    this.geometryUse.clear();
+    for (const [key, count] of geometry) this.geometryUse.set(key, count);
+    this.publish({ ...this.current, labels, objects: Object.freeze([...this.objects.values()]) }, added, [...removed.keys()]);
+    return added;
   }
 
   metadata(value: Pick<LevelDefinition, 'labels'>): void {
