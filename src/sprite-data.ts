@@ -23,6 +23,14 @@ export interface SpriteImage {
   readonly source: string;
 }
 
+// Frame i faces startAngle + i * 360 / images.length degrees (right 0, up 90, counterclockwise).
+// Hysteresis widens the shown frame's sector by that many degrees on each side; 0 disables it.
+export interface SpriteFlipbook {
+  readonly images: readonly string[];
+  readonly startAngle: number;
+  readonly hysteresis: number;
+}
+
 export interface SpriteLayer {
   readonly id: string;
   readonly name: string;
@@ -36,6 +44,8 @@ export interface SpriteLayer {
   readonly directions: readonly FacingDirection[];
   readonly skin: SpriteSkin | null;
   readonly tileLength: number | null;
+  // Absent for single-image layers, so their saved form is unchanged.
+  readonly flipbook?: SpriteFlipbook;
 }
 
 export interface CharacterPresentation {
@@ -43,8 +53,11 @@ export interface CharacterPresentation {
   readonly armForwardDistance: number;
 }
 
+// Schema 7 is written only when a layer has a flipbook; other documents stay schema 6.
+export type SpriteSchemaVersion = 6 | 7;
+
 export interface SpriteDocument extends CharacterPresentation {
-  readonly schemaVersion: 6;
+  readonly schemaVersion: SpriteSchemaVersion;
   readonly images: readonly SpriteImage[];
   readonly layers: readonly SpriteLayer[];
   readonly skeleton: SkeletonDefinition | null;
@@ -67,6 +80,14 @@ export const SPRITE_LIMITS = {
   rotation: 180,
   fetchMilliseconds: 30_000,
 } as const;
+
+export const FLIPBOOK_LIMITS = {
+  minimumFrames: 2,
+  maximumFrames: SPRITE_LIMITS.images,
+  angle: 360,
+} as const;
+
+const FLIPBOOK_SCHEMA_VERSION = 7;
 
 export const DEFAULT_SPRITE_RIGGING = Object.freeze({
   bone: null,
@@ -91,6 +112,15 @@ export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
 });
 
 export class SpriteError extends Error {}
+
+export function spriteSchemaVersion(layers: readonly SpriteLayer[]): SpriteSchemaVersion {
+  return layers.some(layer => layer.flipbook !== undefined) ? FLIPBOOK_SCHEMA_VERSION : 6;
+}
+
+// Every image a layer can display: its flipbook frames, otherwise its single image.
+export function spriteLayerImages(layer: SpriteLayer): readonly string[] {
+  return layer.flipbook?.images ?? [layer.image];
+}
 
 export function validateArmForwardDistance(value: unknown): number {
   return number(value, ARM_FORWARD_DISTANCE_LIMITS.min, ARM_FORWARD_DISTANCE_LIMITS.max, 'Arm forward distance');
@@ -209,9 +239,49 @@ function imageSource(value: unknown): string {
   return value;
 }
 
+const LAYER_FIELDS = ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation',
+  'bone', 'directions', 'skin', 'tileLength'] as const;
+
+function validateFlipbook(
+  value: unknown,
+  layer: { image: string; directions: readonly FacingDirection[]; skin: SpriteSkin | null; tileLength: number | null },
+): SpriteFlipbook {
+  const flipbook = record(value, ['images', 'startAngle', 'hysteresis'], 'A sprite flipbook');
+  if (!Array.isArray(flipbook.images) || flipbook.images.length < FLIPBOOK_LIMITS.minimumFrames ||
+    flipbook.images.length > FLIPBOOK_LIMITS.maximumFrames) {
+    throw new SpriteError(`A flipbook needs ${FLIPBOOK_LIMITS.minimumFrames}-${FLIPBOOK_LIMITS.maximumFrames} frame image IDs.`);
+  }
+  const images = flipbook.images.map((id: unknown, index) => text(id, SPRITE_LIMITS.id, `Flipbook frame ${index} image ID`));
+  const seen = new Set<string>();
+  for (const id of images) {
+    if (seen.has(id)) throw new SpriteError(`Flipbook frame image "${id}" is repeated; each frame needs its own image ID.`);
+    seen.add(id);
+  }
+  if (images[0] !== layer.image) {
+    throw new SpriteError(`A flipbook layer's image must be its first frame ("${images[0]}").`);
+  }
+  const startAngle = flipbook.startAngle;
+  if (typeof startAngle !== 'number' || !Number.isFinite(startAngle) || startAngle < 0 || startAngle >= FLIPBOOK_LIMITS.angle) {
+    throw new SpriteError(`Flipbook start angle must be at least 0 and less than ${FLIPBOOK_LIMITS.angle} degrees.`);
+  }
+  // Below half the spacing, aiming exactly at a frame's angle always shows that frame.
+  const halfSpacing = FLIPBOOK_LIMITS.angle / images.length / 2;
+  const hysteresis = flipbook.hysteresis;
+  if (typeof hysteresis !== 'number' || !Number.isFinite(hysteresis) || hysteresis < 0 || hysteresis >= halfSpacing) {
+    throw new SpriteError(`Flipbook hysteresis must be at least 0 and less than ${halfSpacing} degrees, half of its frame spacing.`);
+  }
+  if (layer.directions.length !== FACING_DIRECTIONS.length) {
+    throw new SpriteError('A flipbook layer must be visible in all eight directions; its frames already follow aim.');
+  }
+  if (layer.skin !== null || layer.tileLength !== null) {
+    throw new SpriteError('A flipbook layer cannot also be a weighted mesh or tiled shaft.');
+  }
+  return Object.freeze({ images: Object.freeze(images), startAngle, hysteresis });
+}
+
 export function validateSpriteLayer(value: unknown): SpriteLayer {
-  const layer = record(value, ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation',
-    'bone', 'directions', 'skin', 'tileLength'], 'A sprite layer');
+  const hasFlipbook = typeof value === 'object' && value !== null && Object.hasOwn(value, 'flipbook');
+  const layer = record(value, hasFlipbook ? [...LAYER_FIELDS, 'flipbook'] : LAYER_FIELDS, 'A sprite layer');
   const offset = record(layer.offset, ['x', 'y', 'z'], 'A sprite offset');
   let skin: SpriteSkin | null;
   let directions: FacingDirection[];
@@ -232,7 +302,7 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
   if (skin !== null && (bone !== null || tileLength !== null)) {
     throw new SpriteError('A weighted mesh binds in skeleton space, not to a single bone or tiled shaft.');
   }
-  return Object.freeze({
+  const result: SpriteLayer = {
     id: text(layer.id, SPRITE_LIMITS.id, 'Sprite ID'),
     name: text(layer.name, SPRITE_LIMITS.name, 'Sprite name'),
     anchor: text(layer.anchor, SPRITE_LIMITS.id, 'Sprite anchor'),
@@ -246,10 +316,16 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
     }),
     rotation: number(layer.rotation, -SPRITE_LIMITS.rotation, SPRITE_LIMITS.rotation, 'Sprite rotation'),
     bone, directions: Object.freeze(directions), skin, tileLength,
-  });
+  };
+  // In-memory callers may pass flipbook: undefined; it normalizes to the absent single-image form.
+  if (layer.flipbook === undefined) return Object.freeze(result);
+  return Object.freeze({ ...result, flipbook: validateFlipbook(layer.flipbook, result) });
 }
 
 function migrateSpriteLayer(value: unknown, version: number): unknown {
+  if (version < FLIPBOOK_SCHEMA_VERSION && typeof value === 'object' && value !== null && Object.hasOwn(value, 'flipbook')) {
+    throw new SpriteError(`Flipbook layers require sprite schema version ${FLIPBOOK_SCHEMA_VERSION}.`);
+  }
   if (version >= 5) return value;
   const keys = ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay'];
   if (version >= 2) keys.push('bone', 'directions', 'skin', 'tileLength');
@@ -284,8 +360,9 @@ export function spriteMigrationNotice(value: unknown): string | null {
 // The loader validates image bytes as it acquires them, without decoding cached sources again.
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) {
-    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5 or 6.');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 &&
+    version !== FLIPBOOK_SCHEMA_VERSION) {
+    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5, 6 or 7.');
   }
   const legacy = version === 1;
   const fields = ['schemaVersion', 'images', 'layers'];
@@ -318,8 +395,11 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
     const layer = validateSpriteLayer(migrateSpriteLayer(value, version));
     if (layerIds.has(layer.id)) throw new SpriteError(`Duplicate sprite layer ID: ${layer.id}.`);
     if (!imageIds.has(layer.image)) throw new SpriteError(`Sprite ${layer.id} references a missing image.`);
+    for (const frame of layer.flipbook?.images ?? []) {
+      if (!imageIds.has(frame)) throw new SpriteError(`Sprite ${layer.id} flipbook references missing image "${frame}".`);
+    }
     layerIds.add(layer.id);
-    usedImages.add(layer.image);
+    for (const image of spriteLayerImages(layer)) usedImages.add(image);
     return layer;
   });
   if (usedImages.size !== imageIds.size) throw new SpriteError('Remove images that are not used by any sprite layer.');
@@ -338,7 +418,7 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const armForwardDistance = version >= 6
     ? validateArmForwardDistance(document.armForwardDistance) : DEFAULT_ARM_FORWARD_DISTANCE;
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: 6, characterRiggingType, armForwardDistance,
+    schemaVersion: spriteSchemaVersion(layers), characterRiggingType, armForwardDistance,
     images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation,
   });
   validateSpriteBudget(result);
@@ -347,20 +427,45 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
 
 export function validateSpriteDocument(value: unknown): SpriteDocument {
   const document = validateSpriteMetadata(value);
-  const sources = new Set<string>();
+  const sizes = new Map<string, { width: number; height: number } | null>();
   let pixels = 0;
   for (const image of document.images) {
-    if (sources.has(image.source)) continue;
-    sources.add(image.source);
+    if (sizes.has(image.source)) continue;
     const png = embeddedPng(image.source);
-    if (png === null) continue;
-    const size = inspectPng(png);
+    const size = png === null ? null : inspectPng(png);
+    sizes.set(image.source, size);
+    if (size === null) continue;
     pixels += size.width * size.height;
     if (pixels > SPRITE_LIMITS.decodedPixels) {
       throw new SpriteError('The sprite document exceeds its image-memory budget.');
     }
   }
+  if (document.schemaVersion === FLIPBOOK_SCHEMA_VERSION) {
+    // URL frames are compared after download, by the loader.
+    const sources = new Map(document.images.map(image => [image.id, image.source]));
+    for (const layer of document.layers) {
+      if (layer.flipbook === undefined) continue;
+      let first: { id: string; width: number; height: number } | null = null;
+      for (const id of layer.flipbook.images) {
+        const size = sizes.get(sources.get(id)!) ?? null;
+        if (size === null) continue;
+        if (first === null) first = { id, ...size };
+        else if (size.width !== first.width || size.height !== first.height) {
+          throw new SpriteError(flipbookSizeMessage(layer.name, { id, ...size }, first));
+        }
+      }
+    }
+  }
   return document;
+}
+
+export function flipbookSizeMessage(
+  layer: string,
+  frame: { id: string; width: number; height: number },
+  reference: { id: string; width: number; height: number },
+): string {
+  return `Flipbook "${layer}" frames must share identical pixel dimensions: "${frame.id}" is ` +
+    `${frame.width}x${frame.height}, but "${reference.id}" is ${reference.width}x${reference.height}.`;
 }
 
 export function validateSpriteRigging(layers: readonly SpriteLayer[], skeleton: SkeletonDefinition | null): void {

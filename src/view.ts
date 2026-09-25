@@ -193,6 +193,7 @@ export class GameView {
         anchor: 'character-head',
         pivot: { anchor: 'torso', x: HEAD_GEOMETRY.neck[0], y: HEAD_GEOMETRY.neck[1] },
       },
+      prepareTexture: (texture) => this.renderer.initTexture(texture),
     });
 
     const cursorMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });

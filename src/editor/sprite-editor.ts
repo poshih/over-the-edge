@@ -1,6 +1,6 @@
-import { element } from '../dom';
+import { element, setText } from '../dom';
 import type { SpriteRig } from '../sprite-rig';
-import { SPRITE_FIELDS, SPRITE_LIMITS } from '../sprite-data';
+import { FLIPBOOK_LIMITS, SPRITE_FIELDS, SPRITE_LIMITS } from '../sprite-data';
 import type { SpriteLayer } from '../sprite-data';
 import { createRangeControl } from './range-control';
 import { createJsonDownload } from './json-download';
@@ -53,6 +53,11 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   const listen = { signal: events.signal };
   let selectedId: string | null = null;
   let newLayerAnchor = options.anchors[0].id;
+  let active = false;
+  // Cached by render() so the per-frame readout does no document work.
+  let flipbookReadout: {
+    layer: string; names: ReadonlyMap<string, string>; startAngle: number; spacing: number; frame: number;
+  } | null = null;
 
   const root = document.createElement('div');
   const downloadJson = createJsonDownload({ mount: root, signal: events.signal });
@@ -90,6 +95,29 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
         <select id="sprite-layer-anchor"></select>
       </fieldset>
       <fieldset class="tuning-group sprite-layer-transform" disabled><legend>Placement</legend></fieldset>
+      <fieldset class="tuning-group sprite-flipbook" disabled>
+        <legend>Aim flipbook</legend>
+        <p class="appearance-format sprite-flipbook-summary"></p>
+        <label class="appearance-label" for="sprite-flipbook-files">Frame PNGs</label>
+        <input id="sprite-flipbook-files" type="file" accept="image/png,.png" multiple />
+        <p class="appearance-format">Choose ${FLIPBOOK_LIMITS.minimumFrames}-${FLIPBOOK_LIMITS.maximumFrames} PNGs with
+          identical pixel sizes. File names set the order (numbers sort naturally). Frame 0 faces the start angle and
+          each later frame turns counterclockwise by 360 / frames degrees: right 0, up 90, left 180, down 270.</p>
+        <div class="sprite-flipbook-fields">
+          <div>
+            <label class="appearance-label" for="sprite-flipbook-start">Start angle (deg)</label>
+            <input id="sprite-flipbook-start" type="number" min="0" max="${FLIPBOOK_LIMITS.angle}" step="any" />
+          </div>
+          <div>
+            <label class="appearance-label" for="sprite-flipbook-hysteresis">Hysteresis (deg)</label>
+            <input id="sprite-flipbook-hysteresis" type="number" min="0" step="any" />
+          </div>
+        </div>
+        <p class="appearance-format">Hysteresis keeps the shown frame this far past each sector edge; 0 turns it off.
+          It must stay below half the frame spacing.</p>
+        <output class="sprite-flipbook-frame" for="sprite-flipbook-start sprite-flipbook-hysteresis"></output>
+        <button type="button" class="button sprite-flipbook-single">Use single image</button>
+      </fieldset>
       <button type="button" class="button sprite-delete-layer" disabled>Delete selected layer</button>
       <div class="sprite-directional-mount"></div>
       <div class="sprite-skeleton-mount"></div>
@@ -134,6 +162,13 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   const anchorSelect = element<HTMLSelectElement>(root, '#sprite-layer-anchor');
   const transformGroup = element<HTMLFieldSetElement>(root, '.sprite-layer-transform');
   const deleteButton = element<HTMLButtonElement>(root, '.sprite-delete-layer');
+  const flipbookGroup = element<HTMLFieldSetElement>(root, '.sprite-flipbook');
+  const flipbookSummary = element<HTMLParagraphElement>(root, '.sprite-flipbook-summary');
+  const flipbookFiles = element<HTMLInputElement>(root, '#sprite-flipbook-files');
+  const flipbookStart = element<HTMLInputElement>(root, '#sprite-flipbook-start');
+  const flipbookHysteresis = element<HTMLInputElement>(root, '#sprite-flipbook-hysteresis');
+  const flipbookFrame = element<HTMLOutputElement>(root, '.sprite-flipbook-frame');
+  const flipbookSingle = element<HTMLButtonElement>(root, '.sprite-flipbook-single');
   const externalWarning = element<HTMLParagraphElement>(root, '.sprite-external-warning');
   const exportButton = element<HTMLButtonElement>(root, '.sprite-export');
   const importButton = element<HTMLButtonElement>(root, '.sprite-import');
@@ -196,6 +231,22 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   deleteButton.addEventListener('click', () => {
     if (selectedId !== null) state.deleteLayer(selectedId);
   }, listen);
+  flipbookFiles.addEventListener('change', () => {
+    const files = Array.from(flipbookFiles.files ?? []);
+    flipbookFiles.value = '';
+    if (selectedId !== null && files.length > 0) void state.setLayerFlipbookFrames(selectedId, files);
+  }, listen);
+  for (const [input, key] of [[flipbookStart, 'startAngle'], [flipbookHysteresis, 'hysteresis']] as const) {
+    input.addEventListener('change', () => {
+      const flipbook = state.snapshot().document.layers.find((layer) => layer.id === selectedId)?.flipbook;
+      if (selectedId === null || flipbook === undefined) return;
+      state.updateLayer(selectedId, { flipbook: { ...flipbook, [key]: input.valueAsNumber } });
+      input.setAttribute('aria-invalid', String(state.snapshot().error !== null));
+    }, listen);
+  }
+  flipbookSingle.addEventListener('click', () => {
+    if (selectedId !== null) state.updateLayer(selectedId, { flipbook: null });
+  }, listen);
   saveButton.addEventListener('click', documentActions.save, listen);
   revertButton.addEventListener('click', documentActions.revert, listen);
   newButton.addEventListener('click', () => {
@@ -234,10 +285,60 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     if (layers.length > 0) {
       for (const [index, layer] of layers.entries()) {
         const option = layerSelect.options[index];
-        const label = `${layer.name} (${layer.anchor})`;
+        const label = layer.flipbook === undefined ? `${layer.name} (${layer.anchor})` :
+          `${layer.name} (${layer.anchor}, ${layer.flipbook.images.length}-frame flipbook)`;
         if (option.textContent !== label) option.textContent = label;
       }
     }
+  }
+
+  function degreesText(value: number): string {
+    return `${Math.round(value * 1000) / 1000} deg`;
+  }
+
+  function setNumberValue(input: HTMLInputElement, value: number | null): void {
+    // Keep an in-progress entry; the last valid draft value returns after focus leaves.
+    if (document.activeElement === input) return;
+    const text = value === null ? '' : String(value);
+    if (input.value !== text) input.value = text;
+    input.removeAttribute('aria-invalid');
+  }
+
+  function renderFlipbook(layer: SpriteLayer | null, snapshot: SpriteEditorSnapshot, disabledAll: boolean): void {
+    const flipbook = layer?.flipbook;
+    const incompatible = layer !== null && (layer.skin !== null || layer.tileLength !== null);
+    flipbookGroup.disabled = disabledAll || layer === null;
+    flipbookFiles.disabled = disabledAll || layer === null || incompatible;
+    flipbookStart.disabled = disabledAll || flipbook === undefined;
+    flipbookHysteresis.disabled = disabledAll || flipbook === undefined;
+    flipbookSingle.disabled = disabledAll || flipbook === undefined;
+    setNumberValue(flipbookStart, flipbook?.startAngle ?? null);
+    setNumberValue(flipbookHysteresis, flipbook?.hysteresis ?? null);
+    const names = new Map(snapshot.document.images.map((image) => [image.id, image.name]));
+    const spacing = flipbook === undefined ? 0 : FLIPBOOK_LIMITS.angle / flipbook.images.length;
+    setText(flipbookSummary, layer === null ? 'Select a layer to give it aim frames.' :
+      incompatible ? 'Weighted meshes and tiled shafts keep a single image. Use a rigid binding to add aim frames.' :
+      flipbook === undefined ? 'Single image. Choose frame PNGs to show one frame per aim angle instead.' :
+      `${flipbook.images.length} frames, one every ${degreesText(spacing)}; frame 0 is "${names.get(flipbook.images[0]) ?? flipbook.images[0]}". ` +
+      'Visible in every direction. Head tilt still applies to its head bone or unbound head artwork.');
+    const spriteMode = snapshot.document.characterRiggingType === 'sprite-2d';
+    flipbookReadout = layer === null || flipbook === undefined || !spriteMode ? null :
+      { layer: layer.id, names, startAngle: flipbook.startAngle, spacing, frame: -1 };
+    if (flipbook === undefined) setText(flipbookFrame, '');
+    else if (!spriteMode) setText(flipbookFrame, 'Frames preview in 2D sprite mode.');
+    updateFlipbookFrame();
+  }
+
+  function updateFlipbookFrame(): void {
+    const readout = flipbookReadout;
+    if (!active || readout === null) return;
+    const current = options.rig.flipbookState(readout.layer);
+    if (current === null || current.frame === readout.frame) return;
+    readout.frame = current.frame;
+    const angle = (readout.startAngle + current.frame * readout.spacing) % FLIPBOOK_LIMITS.angle;
+    setText(flipbookFrame, `Showing frame ${current.frame} (frames 0-${current.frameCount - 1}): ` +
+      `"${readout.names.get(current.image) ?? current.image}", drawn for ${degreesText(angle)} aim. ` +
+      'Drag the Directional Presentation preview aim below to scrub frames.');
   }
 
   function render(): void {
@@ -272,6 +373,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     layerFields.disabled = disabledAll || !hasLayer;
     transformGroup.disabled = disabledAll || !hasLayer;
     deleteButton.disabled = disabledAll || !hasLayer;
+    renderFlipbook(layer, snapshot, disabledAll);
 
     if (layer !== null) {
       if (nameInput.value !== layer.name) nameInput.value = layer.name;
@@ -332,8 +434,15 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   return {
     ready,
     snapshot: () => state.snapshot(),
-    setActive: directionalEditor.setActive,
-    updatePreview: directionalEditor.updatePreview,
+    setActive: (value) => {
+      active = value;
+      directionalEditor.setActive(value);
+      updateFlipbookFrame();
+    },
+    updatePreview: () => {
+      directionalEditor.updatePreview();
+      updateFlipbookFrame();
+    },
     leavePreview: directionalEditor.leavePreview,
     dispose: () => {
       events.abort();

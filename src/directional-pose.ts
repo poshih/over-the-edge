@@ -58,9 +58,15 @@ export class DirectionalPose {
   private readonly presentation: DirectionalPresentation | null;
   private frame: Readonly<DirectionalFrame> = INITIAL_FRAME;
   private previousTime: number | null = null;
+  private initializations = 0;
 
   constructor(presentation: DirectionalPresentation | null) {
     this.presentation = presentation === null ? null : validateDirectionalPresentation(presentation);
+  }
+
+  // Counts direct initializations: the first update, the first update after reset(), and clock rewinds.
+  get epoch(): number {
+    return this.initializations;
   }
 
   update(input: { readonly time: number; readonly aim: { readonly x: number; readonly y: number } }): Readonly<DirectionalFrame> {
@@ -70,6 +76,7 @@ export class DirectionalPose {
     const elapsed = this.previousTime === null ? 0 : input.time - this.previousTime;
     if (this.presentation !== null && this.previousTime !== null && elapsed === 0) return this.frame;
     const initialize = this.previousTime === null || elapsed < 0;
+    if (initialize) this.initializations += 1;
     const zeroAim = Math.hypot(input.aim.x, input.aim.y) <= AIM_EPSILON;
     const radians = zeroAim ? 0 : Math.atan2(input.aim.y, input.aim.x);
     const aimAngle = zeroAim ? (initialize ? 0 : this.frame.aimAngle) : normalizeDegrees(radians * RAD_TO_DEG);

@@ -7,10 +7,14 @@ import { chromium } from 'playwright';
 import { observeBrowserPage } from './verify-level.mjs';
 import { dragTouch } from './verify-mobile.mjs';
 import { texturePng } from './verify-appearance.mjs';
+import { solidPng } from './verify-flipbook.mjs';
 
 const TOUCH_DRAG_PIXELS = 40;
 const TOUCH_PIXELS_PER_REACH = 100;
 const SETTINGS_MODULE = '\0virtual:game-settings';
+const SPRITES_MODULE = '\0virtual:game-sprites';
+const FLIPBOOK_FRAMES = 3;
+const DIRECTIONS = ['right', 'up-right', 'up', 'up-left', 'left', 'down-left', 'down', 'down-right'];
 const SETTINGS_SAMPLE_TIMEOUT = 5000;
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = join(root, 'artifacts');
@@ -19,6 +23,7 @@ await mkdir(artifacts, { recursive: true });
 const temporary = await mkdtemp(join(artifacts, 'release-proof-'));
 const levelPath = join(temporary, 'level.json');
 const spritePath = join(temporary, 'sprites.json');
+const flipbookPath = join(temporary, 'flipbook.json');
 const settingsPath = join(temporary, 'settings.json');
 const customOutput = join(temporary, 'game');
 const previousLevel = process.env.GAME_LEVEL;
@@ -388,12 +393,18 @@ try {
   browser = await chromium.launch({ headless: true, args: ['--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await observeBrowserPage(page, report.errors);
+  let spriteRequests = null;
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (spriteRequests !== null && /\/sprite-[^/]+\.png$/.test(path)) spriteRequests.add(path);
+  });
+  let flipbookRelease = null;
   const ready = () => page.waitForFunction(() => {
     const elapsed = document.querySelector('.elapsed-value');
     return elapsed !== null && elapsed.textContent !== '00:00';
   });
 
-  for (const mode of ['preview', 'development', 'custom', 'sprites', 'updraft', 'enemies']) {
+  for (const mode of ['preview', 'development', 'custom', 'sprites', 'updraft', 'enemies', 'flipbook']) {
     if (mode === 'custom') {
       await writeFile(levelPath, JSON.stringify(customLevel(0)));
       process.env.GAME_LEVEL = levelPath;
@@ -425,6 +436,41 @@ try {
         'Uploaded PNG bytes must not be in executable JavaScript.');
       assert.ok(!bundleModules(skin).some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
     }
+    if (mode === 'flipbook') {
+      const frames = Array.from({ length: FLIPBOOK_FRAMES }, (_, index) => ({
+        id: `frame-${index}`, name: `Frame ${index}`, source: `data:image/png;base64,${solidPng(12, 16, index * 90).toString('base64')}`,
+      }));
+      const flipbook = {
+        schemaVersion: 7, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25,
+        images: frames,
+        layers: [{
+          id: 'aim-head', name: 'Aim head', anchor: 'character-head', image: frames[0].id, width: 0.4, height: 0.4,
+          offset: { x: 0, y: 1.1, z: 0.6 }, rotation: 0, bone: null, directions: DIRECTIONS, skin: null, tileLength: null,
+          flipbook: { images: frames.map(frame => frame.id), startAngle: 15, hysteresis: 10 },
+        }],
+        skeleton: null, presentation: null,
+      };
+      await writeFile(levelPath, JSON.stringify(customLevel(0)));
+      await writeFile(flipbookPath, JSON.stringify(flipbook));
+      process.env.GAME_SPRITES = flipbookPath;
+      let virtualModule = null;
+      const release = await build({
+        configFile, logLevel: 'silent', build: { outDir: customOutput },
+        plugins: [{
+          name: 'release-flipbook-proof', enforce: 'pre',
+          transform(code, id) { if (id === SPRITES_MODULE) virtualModule = code; },
+        }],
+      });
+      const outputs = (Array.isArray(release) ? release : [release]).flatMap(result => result.output);
+      assert.equal(outputs.filter(file => file.type === 'asset' && /sprite-[^/]+\.png$/.test(file.fileName)).length, FLIPBOOK_FRAMES,
+        'Every flipbook frame must become its own hashed release asset.');
+      assert.ok(virtualModule?.includes('schemaVersion:7,'), 'The release must embed the schema-7 flipbook document.');
+      assert.deepEqual(JSON.parse(virtualModule.match(/layers:(\[.*\]),skeleton:/s)[1]), flipbook.layers,
+        'GAME_SPRITES must carry the flipbook layer without loss.');
+      assert.equal(virtualModule.match(/import\.meta\.ROLLUP_FILE_URL_/g).length, FLIPBOOK_FRAMES);
+      assert.ok(!bundleModules(release).some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
+      spriteRequests = new Set();
+    }
     if (mode === 'updraft') {
       await writeFile(levelPath, JSON.stringify(updraftLevel()));
       const launch = await build({ configFile, logLevel: 'silent', build: { outDir: customOutput } });
@@ -441,7 +487,7 @@ try {
       ? await createServer({ configFile, logLevel: 'silent', server: { host: '127.0.0.1', port: 0, strictPort: true } })
       : await preview({
         configFile, logLevel: 'silent',
-        ...(['custom', 'sprites', 'updraft', 'enemies'].includes(mode) ? { build: { outDir: customOutput } } : {}),
+        ...(['custom', 'sprites', 'updraft', 'enemies', 'flipbook'].includes(mode) ? { build: { outDir: customOutput } } : {}),
         preview: { host: '127.0.0.1', port: 0, strictPort: true },
       });
     try {
@@ -460,6 +506,11 @@ try {
         await page.screenshot({ path: join(artifacts, 'game-release-enemies.png') });
       }
       await ready();
+      if (mode === 'flipbook') {
+        assert.equal(spriteRequests.size, FLIPBOOK_FRAMES, 'All flipbook frames must load before gameplay starts.');
+        flipbookRelease = { frames: FLIPBOOK_FRAMES, schemaVersion: 7, assets: [...spriteRequests] };
+        spriteRequests = null;
+      }
       const canvas = await minimalHud(page, 1440);
       if (mode === 'custom' || mode === 'sprites') {
         const height = Number(await page.locator('.height-value').textContent());
@@ -536,9 +587,10 @@ try {
     await development.close();
   }
   await verifySettings(page);
+  report.flipbook = flipbookRelease;
   assert.deepEqual(report.errors, [], 'Release browser errors are not allowed.');
   report.status = 'passed';
-  console.log('Game-only release, sprites, updrafts, enemies, dependency boundary, custom level, settings profiles, and development scenarios passed.');
+  console.log('Game-only release, sprites, aim flipbooks, updrafts, enemies, dependency boundary, custom level, settings profiles, and development scenarios passed.');
 } finally {
   if (previousLevel === undefined) delete process.env.GAME_LEVEL;
   else process.env.GAME_LEVEL = previousLevel;

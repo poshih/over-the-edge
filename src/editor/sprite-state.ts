@@ -4,12 +4,13 @@ import {
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
   DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType,
   spriteMigrationNotice, validateArmForwardDistance,
+  FLIPBOOK_LIMITS, flipbookSizeMessage, spriteLayerImages, spriteSchemaVersion,
 } from '../sprite-data';
-import type { SpriteDocument, SpriteLayer, SpriteOffset } from '../sprite-data';
+import type { SpriteDocument, SpriteFlipbook, SpriteImage, SpriteLayer, SpriteOffset } from '../sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
 import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
 import type { DirectionalPresentation } from '../directional-data';
-import { SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
+import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin } from '../skeleton-data';
 import { autoWeights, restPose } from '../skeleton-pose';
 import { VisualStore, VisualStoreError } from './visual-store';
@@ -35,6 +36,8 @@ export interface SpriteLayerEdit {
   readonly directions?: readonly FacingDirection[];
   readonly skin?: SpriteSkin | null;
   readonly tileLength?: number | null;
+  // null returns the layer to its first frame as a single image.
+  readonly flipbook?: SpriteFlipbook | null;
 }
 
 export interface SpriteEditorSnapshot {
@@ -79,6 +82,17 @@ function nextId(prefix: string, taken: ReadonlySet<string>): string {
   return candidate;
 }
 
+const DEFAULT_FLIPBOOK_HYSTERESIS = 1;
+// Numeric collation orders frame-2 before frame-10, independent of the browser locale.
+const FRAME_ORDER = new Intl.Collator('en', { numeric: true });
+
+function sameFlipbook(left: SpriteFlipbook | undefined, right: SpriteFlipbook | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return left.startAngle === right.startAngle && left.hysteresis === right.hysteresis &&
+    left.images.length === right.images.length && left.images.every((id, index) => id === right.images[index]);
+}
+
 function sameLayer(left: SpriteLayer, right: SpriteLayer): boolean {
   return left === right || left.id === right.id && left.name === right.name &&
     left.anchor === right.anchor && left.image === right.image &&
@@ -87,7 +101,14 @@ function sameLayer(left: SpriteLayer, right: SpriteLayer): boolean {
     left.offset.x === right.offset.x && left.offset.y === right.offset.y && left.offset.z === right.offset.z &&
     left.bone === right.bone && left.tileLength === right.tileLength &&
     left.directions.length === right.directions.length && left.directions.every((value, index) => value === right.directions[index]) &&
-    (left.skin === right.skin || JSON.stringify(left.skin) === JSON.stringify(right.skin));
+    (left.skin === right.skin || JSON.stringify(left.skin) === JSON.stringify(right.skin)) &&
+    sameFlipbook(left.flipbook, right.flipbook);
+}
+
+// Drops images no layer displays any more, as the document format requires.
+function usedImages(images: readonly SpriteImage[], layers: readonly SpriteLayer[]): readonly SpriteImage[] {
+  const used = new Set(layers.flatMap(spriteLayerImages));
+  return images.every(image => used.has(image.id)) ? images : Object.freeze(images.filter(image => used.has(image.id)));
 }
 
 function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
@@ -292,8 +313,9 @@ export class SpriteEditorState {
     const current = this.draft.layers.find((layer) => layer.id === id);
     if (current === undefined) throw new Error(`Unknown sprite layer "${id}".`);
     try {
+      const flipbook = edit.flipbook === undefined ? current.flipbook : edit.flipbook ?? undefined;
       const layer = validateSpriteLayer({
-        id: current.id, image: current.image,
+        id: current.id, image: flipbook?.images[0] ?? current.image,
         name: edit.name ?? current.name,
         anchor: edit.anchor ?? current.anchor,
         width: edit.width ?? current.width,
@@ -304,14 +326,16 @@ export class SpriteEditorState {
         directions: edit.directions === undefined ? current.directions : edit.directions,
         skin: edit.skin === undefined ? current.skin : edit.skin,
         tileLength: edit.tileLength === undefined ? current.tileLength : edit.tileLength,
+        ...(flipbook === undefined ? {} : { flipbook }),
       });
       if (sameLayer(current, layer)) {
         this.error = null;
         this.changed();
         return;
       }
+      const layers = Object.freeze(this.draft.layers.map(candidate => candidate.id === id ? layer : candidate));
       const document = Object.freeze({
-        ...this.draft, layers: Object.freeze(this.draft.layers.map(candidate => candidate.id === id ? layer : candidate)),
+        ...this.draft, schemaVersion: spriteSchemaVersion(layers), images: usedImages(this.draft.images, layers), layers,
       });
       this.validateDraft(document);
       this.rig.upsert(layer);
@@ -325,13 +349,76 @@ export class SpriteEditorState {
     this.changed();
   }
 
+  // Frames are ordered by file name; identical PNGs already in the document are reused.
+  async setLayerFlipbookFrames(id: string, files: readonly File[]): Promise<void> {
+    if (!this.canEdit()) return;
+    const current = this.draft.layers.find((layer) => layer.id === id);
+    if (current === undefined) throw new Error(`Unknown sprite layer "${id}".`);
+    await this.run(async () => {
+      if (files.length < FLIPBOOK_LIMITS.minimumFrames || files.length > FLIPBOOK_LIMITS.maximumFrames) {
+        throw new SpriteError(`Choose ${FLIPBOOK_LIMITS.minimumFrames}-${FLIPBOOK_LIMITS.maximumFrames} PNG frames for a flipbook.`);
+      }
+      const ordered = [...files].sort((left, right) => FRAME_ORDER.compare(left.name, right.name));
+      const frames: { name: string; source: string }[] = [];
+      let reference: { id: string; width: number; height: number } | null = null;
+      for (const file of ordered) {
+        if (file.type !== 'image/png' && !/\.png$/i.test(file.name)) {
+          throw new SpriteError(`Flipbook frame "${file.name}" is not a PNG (.png) image.`);
+        }
+        if (file.size === 0 || file.size > SPRITE_LIMITS.imageBytes) {
+          throw new SpriteError(`Flipbook frame "${file.name}" must be a PNG no larger than ${Math.floor(SPRITE_LIMITS.imageBytes / 1024 ** 2)} MiB.`);
+        }
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        if (this.disposed) return;
+        const size = { id: file.name, ...inspectPng(bytes) };
+        if (reference === null) reference = size;
+        else if (size.width !== reference.width || size.height !== reference.height) {
+          throw new SpriteError(flipbookSizeMessage(current.name, size, reference));
+        }
+        frames.push({ name: file.name.replace(/\.png$/i, ''), source: encodePng(bytes) });
+      }
+      const images = [...this.draft.images];
+      const taken = new Set(images.map((image) => image.id));
+      const ids = frames.map((frame) => {
+        const existing = images.find((image) => image.source === frame.source);
+        if (existing !== undefined) return existing.id;
+        const image = { id: nextId('image', taken), name: frame.name, source: frame.source };
+        taken.add(image.id);
+        images.push(image);
+        return image.id;
+      });
+      if (new Set(ids).size !== ids.length) {
+        throw new SpriteError('Two chosen flipbook frames are identical PNGs. Choose a distinct image for every frame.');
+      }
+      const previous = current.flipbook;
+      const halfSpacing = FLIPBOOK_LIMITS.angle / ids.length / 2;
+      const layer = validateSpriteLayer({
+        ...current, image: ids[0], directions: [...FACING_DIRECTIONS],
+        flipbook: {
+          images: ids,
+          startAngle: previous?.startAngle ?? 0,
+          hysteresis: previous !== undefined && previous.hysteresis < halfSpacing
+            ? previous.hysteresis : Math.min(DEFAULT_FLIPBOOK_HYSTERESIS, halfSpacing / 2),
+        },
+      });
+      const layers = this.draft.layers.map((candidate) => candidate.id === id ? layer : candidate);
+      const document = validateSpriteDocument({
+        ...this.draft, schemaVersion: spriteSchemaVersion(layers), images: usedImages(images, layers), layers,
+      });
+      await this.replaceRig(document);
+      if (this.disposed) return;
+      this.draft = document;
+      this.selectedLayerId = id;
+    });
+  }
+
   deleteLayer(id: string): void {
     if (!this.canEdit()) return;
     if (!this.draft.layers.some((layer) => layer.id === id)) throw new Error(`Unknown sprite layer "${id}".`);
-    const layers = this.draft.layers.filter((layer) => layer.id !== id);
-    const used = new Set(layers.map((layer) => layer.image));
-    const images = this.draft.images.filter((image) => used.has(image.id));
-    const document = Object.freeze({ ...this.draft, images: Object.freeze(images), layers: Object.freeze(layers) });
+    const layers = Object.freeze(this.draft.layers.filter((layer) => layer.id !== id));
+    const document = Object.freeze({
+      ...this.draft, schemaVersion: spriteSchemaVersion(layers), images: usedImages(this.draft.images, layers), layers,
+    });
     try {
       this.validateDraft(document);
       this.rig.remove(id);

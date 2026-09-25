@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   embeddedPng,
+  flipbookSizeMessage,
   inspectPng,
   DEFAULT_CHARACTER_RIGGING_TYPE,
   SPRITE_LIMITS,
@@ -13,7 +14,7 @@ import {
   validateSpriteMetadata,
   validateSpriteRigging,
 } from './sprite-data';
-import type { CharacterPresentation, CharacterRiggingType, SpriteDocument, SpriteLayer } from './sprite-data';
+import type { CharacterPresentation, CharacterRiggingType, SpriteDocument, SpriteFlipbook, SpriteLayer } from './sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
 import { DirectionalError, validateDirectionalPresentation } from './directional-data';
 import type { DirectionalPresentation } from './directional-data';
@@ -25,6 +26,7 @@ import { SkeletonPose, restPose } from './skeleton-pose';
 import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as RuntimeBoneWorld, SkeletonRotation } from './skeleton-pose';
 import { compileSpriteHeadTracking } from './sprite-head-aim';
 import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-aim';
+import { selectFlipbookFrame } from './sprite-flipbook';
 
 export interface SpriteAnchor {
   readonly node: THREE.Object3D;
@@ -39,6 +41,23 @@ interface ImageResource {
   readonly bytes: number;
   readonly pixels: number;
   disposed: boolean;
+  prepared: boolean;
+}
+
+// One timeline's hysteresis memory; it restarts whenever its DirectionalPose initializes directly.
+interface FlipbookTrack {
+  frame: number | null;
+  pose: DirectionalPose | null;
+  epoch: number;
+}
+
+interface FlipbookRuntime {
+  readonly definition: SpriteFlipbook;
+  readonly frames: readonly ImageResource[];
+  readonly live: FlipbookTrack;
+  readonly preview: FlipbookTrack;
+  shown: number;
+  changes: number;
 }
 
 interface Attachment {
@@ -62,6 +81,7 @@ interface BaseLayerInstance<TMesh extends THREE.Object3D> {
   directionMask: number;
   visible: boolean;
   tile: TileRuntime | null;
+  flipbook: FlipbookRuntime | null;
 }
 
 interface LegacyLayerInstance extends BaseLayerInstance<THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>> {
@@ -82,6 +102,7 @@ interface SkinLayerInstance extends BaseLayerInstance<THREE.SkinnedMesh<THREE.Pl
 
 type LayerInstance = LegacyLayerInstance | BoneLayerInstance | SkinLayerInstance;
 type TiledLayerInstance = LegacyLayerInstance | BoneLayerInstance;
+type FlipbookLayerInstance = LayerInstance & { flipbook: FlipbookRuntime };
 
 interface Replacement {
   readonly controller: AbortController;
@@ -266,6 +287,7 @@ export class SpriteRig {
   private readonly root: THREE.Object3D;
   private readonly targetIds: ReadonlySet<string>;
   private readonly onCharacterPresentationChange: ((settings: CharacterPresentation) => void) | undefined;
+  private readonly prepareTexture: ((texture: THREE.Texture) => void) | undefined;
   private readonly headTracking: SpriteHeadTracking | null;
   private headTrackingPlan: SpriteHeadTrackingPlan;
   private readonly geometry = new THREE.PlaneGeometry(1, 1);
@@ -285,6 +307,7 @@ export class SpriteRig {
   private directionalPreview: { readonly aim: RuntimePoint } | null = null;
   private previewTime = 0;
   private rotatedLayers: readonly LegacyLayerInstance[] = [];
+  private flipbooks: readonly FlipbookLayerInstance[] = [];
   private displayedPresentation: Readonly<DirectionalFrame> = this.directionPose.snapshot();
   private replacement: Replacement | null = null;
   private disposed = false;
@@ -315,12 +338,15 @@ export class SpriteRig {
     targetIds: readonly string[];
     onCharacterPresentationChange?: (settings: CharacterPresentation) => void;
     headTracking?: SpriteHeadTracking;
+    // Uploads a texture ahead of first use, so flipbook frame changes never upload during play.
+    prepareTexture?: (texture: THREE.Texture) => void;
   }) {
     this.anchors = new Map(anchors);
     for (const name of this.anchors.keys()) this.coverage.set(name, false);
     this.root = options.root;
     this.targetIds = new Set(options.targetIds);
     this.onCharacterPresentationChange = options.onCharacterPresentationChange;
+    this.prepareTexture = options.prepareTexture;
     this.headTracking = options.headTracking === undefined ? null : {
       anchor: options.headTracking.anchor,
       pivot: { ...options.headTracking.pivot },
@@ -675,6 +701,9 @@ export class SpriteRig {
         geometryId: instance.mesh.geometry.uuid,
         vertexCount: instance.mesh.geometry.getAttribute('position').count,
         tileRepeat: instance.tile?.lastRepeat ?? null,
+        flipbookFrame: instance.flipbook?.shown ?? null,
+        flipbookImage: instance.flipbook === null ? null : instance.flipbook.definition.images[instance.flipbook.shown]!,
+        flipbookFrameChanges: instance.flipbook?.changes ?? null,
       };
     });
     return {
@@ -725,6 +754,20 @@ export class SpriteRig {
     };
   }
 
+  // Cheap per-frame readout of the displayed flipbook frame; null for single-image layers.
+  flipbookState(id: string): { frame: number; image: string; frameCount: number; frameChanges: number } | null {
+    this.assertLive();
+    const instance = this.layers.get(id);
+    if (instance === undefined) throw new SpriteError(`Unknown sprite layer "${id}".`);
+    const flipbook = instance.flipbook;
+    return flipbook === null ? null : {
+      frame: flipbook.shown,
+      image: flipbook.definition.images[flipbook.shown]!,
+      frameCount: flipbook.frames.length,
+      frameChanges: flipbook.changes,
+    };
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -736,6 +779,7 @@ export class SpriteRig {
     this.disposeLayers(this.layers.values());
     this.layers.clear();
     this.rotatedLayers = [];
+    this.flipbooks = [];
     this.directionalPreview = null;
     this.previewDirectionPose = null;
     this.disposeSkeleton(this.skeleton);
@@ -802,7 +846,7 @@ export class SpriteRig {
         map: texture, side: THREE.DoubleSide, alphaTest: ALPHA_CUTOFF, depthWrite: true, toneMapped: false,
       });
       this.texturesCreated++;
-      return { bitmap, texture, material, bytes, pixels: bitmap.width * bitmap.height, disposed: false };
+      return { bitmap, texture, material, bytes, pixels: bitmap.width * bitmap.height, disposed: false, prepared: false };
     } catch (error) {
       texture?.dispose();
       bitmap.close();
@@ -847,8 +891,10 @@ export class SpriteRig {
       for (const data of layers) {
         const image = images.get(data.image);
         if (image === undefined) throw new SpriteError(`Sprite ${data.id} references missing image "${data.image}".`);
+        const frames = this.flipbookFrames(data, images);
         const attachment = this.attachment(data.anchor, attachments, options.mode);
-        const instance = options.mode === 'edit' ? this.createOrReuseLayer(data, image, skeleton) : this.createLayer(data, image, skeleton);
+        const instance = options.mode === 'edit'
+          ? this.createOrReuseLayer(data, image, frames, skeleton) : this.createLayer(data, image, frames, skeleton);
         if (instance.kind === 'legacy') {
           if (instance.mesh.parent !== attachment.group) attachment.group.add(instance.mesh);
           attachment.legacyCount++;
@@ -911,9 +957,15 @@ export class SpriteRig {
     }
   }
 
-  private createOrReuseLayer(data: SpriteLayer, image: ImageResource, skeleton: SkeletonRuntime | null): LayerInstance {
+  private createOrReuseLayer(
+    data: SpriteLayer,
+    image: ImageResource,
+    frames: readonly ImageResource[] | null,
+    skeleton: SkeletonRuntime | null,
+  ): LayerInstance {
     const previous = this.layers.get(data.id);
     if (previous !== undefined && previous.data === data && previous.resource === image &&
+      this.sameFlipbook(previous.flipbook, data, frames) &&
       (previous.kind !== 'skin' || skeleton === this.skeleton)) return previous;
     if (previous?.kind === 'skin' && data.skin !== null && previous.data.skin !== null &&
       this.sameSkinGrid(previous.data, data) && skeleton !== null) {
@@ -940,8 +992,10 @@ export class SpriteRig {
       previous.data = data;
       previous.resource = image;
       previous.directionMask = directionMask(data.directions);
+      previous.flipbook = this.reuseFlipbook(previous.flipbook, data, frames);
       previous.mesh.name = data.name;
-      previous.mesh.material = image.material;
+      // An unchanged flipbook keeps its displayed frame and hysteresis memory across layer edits.
+      previous.mesh.material = previous.flipbook === null ? image.material : previous.flipbook.frames[previous.flipbook.shown]!.material;
       previous.localMatrix.copy(this.layerMatrix(data));
       if (previous.kind === 'legacy') previous.mesh.matrix.copy(previous.localMatrix);
       previous.mesh.matrixWorldNeedsUpdate = true;
@@ -951,13 +1005,19 @@ export class SpriteRig {
       }
       return previous;
     }
-    return this.createLayer(data, image, skeleton);
+    return this.createLayer(data, image, frames, skeleton);
   }
 
-  private createLayer(data: SpriteLayer, image: ImageResource, skeleton: SkeletonRuntime | null): LayerInstance {
+  private createLayer(
+    data: SpriteLayer,
+    image: ImageResource,
+    frames: readonly ImageResource[] | null,
+    skeleton: SkeletonRuntime | null,
+  ): LayerInstance {
     const mask = directionMask(data.directions);
     if (data.skin !== null) {
       if (skeleton === null) throw new SpriteError(`Sprite "${data.name}" requires a skeleton.`);
+      if (frames !== null) throw new SpriteError(`Flipbook "${data.name}" cannot be a weighted mesh.`);
       const geometry = this.createSkinnedGeometry(data, skeleton);
       const mesh = new THREE.SkinnedMesh(geometry, image.material);
       mesh.name = data.name;
@@ -977,10 +1037,12 @@ export class SpriteRig {
         directionMask: mask,
         visible: false,
         tile: null,
+        flipbook: null,
         bindMatrix,
       };
     }
     const tile = data.tileLength === null ? null : this.createTileRuntime(data.tileLength);
+    const flipbook = this.reuseFlipbook(null, data, frames);
     const geometry = tile?.geometry ?? this.geometry;
     const mesh = new THREE.Mesh(geometry, image.material);
     mesh.name = data.name;
@@ -996,6 +1058,7 @@ export class SpriteRig {
         directionMask: mask,
         visible: false,
         tile,
+        flipbook,
         boneId: data.bone,
         localMatrix: this.layerMatrix(data),
       };
@@ -1011,8 +1074,52 @@ export class SpriteRig {
       directionMask: mask,
       visible: false,
       tile,
+      flipbook,
       localMatrix,
     };
+  }
+
+  // Frame 0 is the layer image, so a new flipbook starts on the image material the mesh already uses.
+  private flipbookFrames(data: SpriteLayer, images: ReadonlyMap<string, ImageResource>): readonly ImageResource[] | null {
+    if (data.flipbook === undefined) return null;
+    const frames = data.flipbook.images.map(id => {
+      const frame = images.get(id);
+      if (frame === undefined) throw new SpriteError(`Sprite ${data.id} flipbook references unloaded image "${id}".`);
+      return frame;
+    });
+    const first = frames[0]!.bitmap;
+    for (const [index, frame] of frames.entries()) {
+      if (frame.bitmap.width === first.width && frame.bitmap.height === first.height) continue;
+      throw new SpriteError(flipbookSizeMessage(data.name,
+        { id: data.flipbook.images[index]!, width: frame.bitmap.width, height: frame.bitmap.height },
+        { id: data.flipbook.images[0]!, width: first.width, height: first.height }));
+    }
+    return frames;
+  }
+
+  // Returns the existing runtime when the definition and frame resources are unchanged, otherwise a fresh one.
+  private reuseFlipbook(
+    previous: FlipbookRuntime | null,
+    data: SpriteLayer,
+    frames: readonly ImageResource[] | null,
+  ): FlipbookRuntime | null {
+    const definition = data.flipbook;
+    if (definition === undefined || frames === null) return null;
+    if (this.sameFlipbook(previous, data, frames)) return previous;
+    const track = (): FlipbookTrack => ({ frame: null, pose: null, epoch: 0 });
+    return { definition, frames, live: track(), preview: track(), shown: 0, changes: 0 };
+  }
+
+  private sameFlipbook(previous: FlipbookRuntime | null, data: SpriteLayer, frames: readonly ImageResource[] | null): boolean {
+    const definition = data.flipbook;
+    if (previous === null || definition === undefined || frames === null) {
+      return previous === null && (definition === undefined || frames === null);
+    }
+    return previous.definition.startAngle === definition.startAngle &&
+      previous.definition.hysteresis === definition.hysteresis &&
+      previous.frames.length === frames.length &&
+      previous.frames.every((frame, index) => frame === frames[index] &&
+        previous.definition.images[index] === definition.images[index]);
   }
 
   private sameSkinGrid(left: SpriteLayer, right: SpriteLayer): boolean {
@@ -1172,6 +1279,7 @@ export class SpriteRig {
       }
       return instance;
     });
+    this.flipbooks = [...this.layers.values()].filter((instance): instance is FlipbookLayerInstance => instance.flipbook !== null);
     for (const instance of this.layers.values()) {
       if (instance.tile !== null && instance.resource.texture.wrapS !== THREE.RepeatWrapping) {
         instance.resource.texture.wrapS = THREE.RepeatWrapping;
@@ -1189,6 +1297,7 @@ export class SpriteRig {
     for (const [source, resource] of oldResources) {
       if (!this.resources.has(source)) this.releaseResource(resource);
     }
+    this.prepareFlipbookTextures();
   }
 
   private detachScene(): void {
@@ -1214,6 +1323,7 @@ export class SpriteRig {
     if (changedDirection) this.currentDirection = direction;
     if (options.forceVisibility || changedDirection) this.applyDirection(direction, options.notifyCoverage !== false);
     if (this.characterRiggingType !== 'sprite-2d') return;
+    this.updateFlipbooks();
     const presentation = this.runtimePresentation();
     if (presentation !== null && (this.presentation !== null || this.rotatedLayers.length > 0)) {
       const { pivot } = presentation;
@@ -1258,6 +1368,56 @@ export class SpriteRig {
 
   private runtimePresentation(): DirectionalPresentation | null {
     return this.presentation ?? this.headTrackingPlan.presentation;
+  }
+
+  // Per-frame cost is constant per flipbook layer, independent of its frame count. The live
+  // timeline keeps running under previews, so leaving a preview shows its current frame.
+  private updateFlipbooks(): void {
+    if (this.flipbooks.length === 0) return;
+    const live = this.directionPose;
+    const liveAngle = live.snapshot().aimAngle;
+    const previewing = this.preview !== null || this.directionalPreview !== null;
+    // A pose preview has no preview clock; its fixed aim always selects directly.
+    const previewPose = this.preview === null ? this.previewDirectionPose : null;
+    for (const instance of this.flipbooks) {
+      const flipbook = instance.flipbook;
+      const liveFrame = this.selectFlipbookTrack(flipbook, flipbook.live, live, liveAngle);
+      const frame = previewing
+        ? this.selectFlipbookTrack(flipbook, flipbook.preview, previewPose, this.displayedPresentation.aimAngle)
+        : liveFrame;
+      if (!previewing && flipbook.preview.pose !== null) {
+        flipbook.preview.frame = null;
+        flipbook.preview.pose = null;
+      }
+      if (frame === flipbook.shown) continue;
+      flipbook.shown = frame;
+      flipbook.changes += 1;
+      instance.mesh.material = flipbook.frames[frame]!.material;
+    }
+  }
+
+  private selectFlipbookTrack(
+    flipbook: FlipbookRuntime,
+    track: FlipbookTrack,
+    pose: DirectionalPose | null,
+    aimAngle: number,
+  ): number {
+    const continuing = track.frame !== null && pose !== null && track.pose === pose && track.epoch === pose.epoch;
+    track.frame = selectFlipbookFrame(flipbook.definition, aimAngle, continuing ? track.frame : null);
+    track.pose = pose;
+    track.epoch = pose === null ? 0 : pose.epoch;
+    return track.frame;
+  }
+
+  private prepareFlipbookTextures(): void {
+    if (this.prepareTexture === undefined || this.characterRiggingType !== 'sprite-2d') return;
+    for (const instance of this.flipbooks) {
+      for (const frame of instance.flipbook.frames) {
+        if (frame.prepared) continue;
+        frame.prepared = true;
+        this.prepareTexture(frame.texture);
+      }
+    }
   }
 
   private rotateLayers(): void {

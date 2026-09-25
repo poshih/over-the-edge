@@ -141,7 +141,7 @@ The editor depends on the shared game runtime, never the reverse.
 that graph. Hiding editor controls with a runtime flag is not the release
 boundary.
 
-`npm run verify:game` exercises the release, custom-course/sprite/settings builds,
+`npm run verify:game` exercises the release, custom-course/sprite/aim-flipbook/settings builds,
 development entry, and editor-dependency rejection in isolation. `npm run verify:art`
 does the same for course packages and terrain meshes.
 
@@ -670,6 +670,14 @@ The editor's visual-only aim preview is separate from live gameplay state.
 See [directional controls and lifecycle](docs/sprites.md#directional-presentation).
 Older sprite layouts keep their fixed-sector behavior until opted in.
 
+An **aim flipbook** gives one layer 2-128 evenly spaced images, for example a
+72-frame head turnaround with a new image every 5 degrees. The hammer aim picks
+the nearest frame, with optional hysteresis against flicker. Frames are decoded
+and uploaded at load, so changing frames allocates nothing. Choose the frame PNGs
+in Sprites; Save, JSON and `GAME_SPRITES` carry them. See
+[aim flipbooks](docs/sprites.md#aim-flipbooks). Profiles without flipbooks keep
+saving in the previous format.
+
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
 Parts can be replaced independently: pot, torso/neck, character head, each upper
 arm, forearm, elbow and hand, the full hammer shaft, and the hammer head. Parts
@@ -783,6 +791,9 @@ render/cache counts.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state, and the independent run timer. Restart resets the attempt; physics time
 continues to be available separately as `snapshot().time`.
+`window.gettingOver.sprites()` reports the character/sprite draft and save state
+with the sprite renderer's `inspect()` result, including each aim flipbook
+layer's shown frame.
 These globals are absent from the game-only release.
 
 ## Contributing

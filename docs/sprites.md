@@ -180,7 +180,8 @@ to use actual aiming, the default clip, and secondary motion. Preview controls a
 clips, directional poses, and the default clip travel with the layout.
 
 Direction masks cannot invent unseen artwork. Supply the front/back/side images
-you need; a single PNG is not converted into a rotating 3D character.
+you need; a single PNG is not converted into a rotating 3D character. For more
+than eight aim images on one layer, use an [aim flipbook](#aim-flipbooks).
 
 ### Directional presentation
 
@@ -234,7 +235,8 @@ inside the permitted interval without overshoot.
 
 Eight images still depict eight authored poses. Hysteresis and bounded
 rotation reduce switching and snapping; they cannot synthesize missing facial
-poses. No crossfade is applied.
+poses. No crossfade is applied. Denser aim art, such as a 72-frame turnaround,
+belongs in an [aim flipbook](#aim-flipbooks) layer.
 
 #### Neck pivot and attachments
 
@@ -279,6 +281,69 @@ The existing hair solver's bounded catch-up and backward-scrub reset rules
 still apply. The preview clock can advance while physics is paused. Live
 directional and hair state are maintained separately, so preview rotations
 and particle motion are not copied back into gameplay.
+
+### Aim flipbooks
+
+A rigid layer can hold an **aim flipbook**: 2-128 images spaced evenly around
+the full turn. Exactly one is shown, chosen from the same hammer-aim angle that
+selects facing. This gives a head, helmet, turret or eyes a new image every
+`360 / N` degrees, for example every 5 degrees with 72 frames, instead of one of
+eight directional images.
+
+Angles use the Directional Presentation convention: degrees, **right = 0,
+up = 90, left = 180, down = 270**, increasing counterclockwise. Frame `i`
+represents `startAngle + i * 360 / N`. The shown frame is the nearest one,
+`round(((aim - startAngle) mod 360) / (360 / N)) mod N`, including across the
+355 to 0 degree wrap. At an exact midpoint the counterclockwise frame wins.
+
+**Hysteresis** keeps the shown frame while aim stays inside its sector widened
+by that many degrees on each side, including the band edges. Beyond the band,
+the nearest frame is selected directly, so a large aim jump never steps through
+intermediate frames. Use 0 to disable it. It must stay below half the frame
+spacing (2.5 degrees for 72 frames), so aiming exactly at a frame's angle always
+shows that frame. No crossfade is applied.
+
+| Event | Flipbook behavior |
+| --- | --- |
+| First frame / reset / document replacement | Select directly from the current aim; an initial zero-length aim uses 0 degrees |
+| Later zero-length or negligible aim | Keep the last frame |
+| Paused simulation | Selection freezes with simulation time, like facing |
+| Clock rewind or any other facing reinitialization | Select directly again |
+| Changing frames, start angle or hysteresis | Select directly using the new settings |
+| Other layer edits | Keep the frame and its hysteresis memory unless facing is reinitialized |
+| Directional preview | Independent frame memory that follows the preview aim |
+| Preview exit / leaving Sprites / Play | Show the independently maintained live frame |
+
+All frames share the layer's size, offset, rotation, anchor and bone binding.
+The layer's `image` must be frame 0, so existing layer consumers stay valid. Frames must
+be distinct image IDs with identical pixel dimensions; embedded PNGs are
+checked on import and every source again after decoding. A flipbook layer is
+visible in all eight directions and cannot also be a weighted mesh or tiled
+shaft. It can be unbound or bone-bound. Head tilt, automatic or authored, still
+applies to its head bone or unbound head artwork; rotation limits near zero
+suit dense frames, but are not required. Directional poses, masks, sockets and
+Directional Presentation keep using the eight facing sectors.
+
+Each flipbook layer is one mesh. A frame change points that mesh at the frame's
+texture and material, which were created with the same configuration (alpha
+cutoff, no tone mapping, foreground pass for hammer anchors) when the document
+loaded. Changing aim creates no geometry, materials or textures; an unchanged
+frame changes nothing in the scene, and per-frame cost does not depend on the frame count.
+All frames are decoded at load and count against the image and decoded-pixel
+budgets. In 2D, this game also uploads every frame texture to the GPU when the
+document is committed, so the first display of a frame never uploads during play.
+
+In **Sprites**, select a layer, then choose its frame PNGs under **Aim
+flipbook**. File names set the order, with numbers sorted naturally
+(`head-5` before `head-10`); PNGs identical to existing images reuse them.
+A new flipbook starts at 0 degrees with 1 degree of hysteresis (half the
+allowed maximum above 90 frames); choosing new frames keeps valid settings.
+Set the start angle and hysteresis, and read the shown frame live. The
+Directional Presentation preview aim scrubs frames; live gameplay uses real aim.
+**Use single image** returns the layer to frame 0 and removes unused frames.
+Direction masks, shaft tiling and mesh binding are disabled for flipbook layers.
+Save, Revert, JSON import/export and `GAME_SPRITES` releases carry the flipbook.
+Slicing a turnaround sheet into frames stays in your own content pipeline.
 
 ### Hands and hammer reach
 
@@ -340,7 +405,8 @@ bodies, or collision fixtures to the game.
 
 `src/sprite-data.ts`, `src/skeleton-data.ts`, and `src/directional-data.ts` own the
 immutable, validated document format. `src/directional-pose.ts` owns each
-character's direction and bounded rotation state. `src/skeleton-pose.ts` evaluates poses, IK, and hair independently
+character's direction and bounded rotation state, and `src/sprite-flipbook.ts`
+selects aim flipbook frames. `src/skeleton-pose.ts` evaluates poses, IK, and hair independently
 of Three.js. `src/sprite-rig.ts` knows only named scene anchors and sprite rigs; it does not
 import this game's body-part IDs, physics, editor, or game-specific assets.
 
@@ -417,13 +483,34 @@ The portable JSON shape is:
 
 This example's arbitrary `accessory` anchor demonstrates the generic contract;
 use a registered body/tool anchor when importing into this game's Workshop.
+A layer can add an optional `flipbook` after `tileLength`. It requires schema 7:
+
+```json
+{
+  "id": "head-layer",
+  "image": "head-000",
+  "directions": ["right", "up-right", "up", "up-left", "left", "down-left", "down", "down-right"],
+  "skin": null,
+  "tileLength": null,
+  "flipbook": { "images": ["head-000", "head-005", "head-010"], "startAngle": 0, "hysteresis": 1 }
+}
+```
+
+The other layer fields are unchanged and omitted here. `images` lists the
+frames in order, beginning with the layer's `image`; `startAngle` and
+`hysteresis` are degrees.
 Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
 Schema-1 layouts remain importable as unbound layers visible in all directions.
 Schema 6 exposes exactly pure sprites, Mesh parts and Avatar, and stores the
-3D arm clearance. Profiles from schemas 1-5 receive the unchanged 0.25 m default;
+3D arm clearance. Schema 7 adds optional aim flipbook layers. It is written only
+while at least one layer has a flipbook; every other document keeps saving and
+exporting as schema 6, byte for byte, and a `flipbook` field in a schema 1-6
+document is rejected. Releases before schema 7 reject flipbook documents; use a
+single image for each flipbook layer to export for them.
+Profiles from schemas 1-5 receive the unchanged 0.25 m default;
 invalid or missing schema-6 clearance values are rejected, not clamped.
 Schemas 1-3 and
 schema-4 Hybrid profiles explicitly migrate to pure 2D when they contain any
@@ -435,7 +522,7 @@ receive `presentation: null`, retaining fixed-sector selection while enabling
 automatic tilt for safe head owners; schema-3
 directional settings are retained unchanged.
 Reading or previewing an old save does not rewrite its stored record; an
-explicit Save/export writes schema 6. Keep an original export for rollback to
+explicit Save/export writes schema 6, or 7 with flipbooks. Keep an original export for rollback to
 an older release: old readers cannot understand the new authored type.
 There is no destructive storage migration.
 
@@ -479,6 +566,13 @@ character-local controllers once per rendered frame, and visibility, coverage,
 and directional skeleton poses consume the same selected direction. Optional
 `dt` is wall-clock frame duration for editor preview; callers that omit it use
 simulation-time elapsed duration for that preview clock.
+Aim flipbooks advance in the same `update()`. `inspect()` reports each layer's
+shown `flipbookFrame`, its `flipbookImage` and a `flipbookFrameChanges` counter,
+all `null` for single-image layers; `flipbookState(layerId)` is a cheap per-frame
+readout of the same values. The optional `prepareTexture(texture)` constructor
+setting lets a host upload flipbook frame textures when a 2D document is
+committed; this game passes Three.js `renderer.initTexture`. Without it,
+textures upload on first display as usual.
 
 URLs remain references on export, not downloaded archives. Cross-origin images
 must permit CORS; fetches omit credentials. Do not publish private URLs, signed
@@ -502,6 +596,7 @@ original bytes, including any metadata; review that content before publishing.
 | Total weighted vertices / influences per vertex | 16,384 / 4 |
 | Directional sectors / maximum hold margin per edge | 8 / 180 degrees |
 | Directional response time / pivot coordinates | 0-10 seconds / -16 to 16 anchor-local units |
+| Flipbook frames / hysteresis | 2-128 image IDs / 0 to below half the frame spacing in degrees |
 
 The renderer shares one plane geometry for rigid cards and caches textures/materials by source.
 It uses unlit sRGB materials with tone mapping disabled for artwork, a 0.5 alpha
@@ -525,8 +620,10 @@ secondary motion update only the active rig, not the level or editor. There is
 no per-frame image decoding or geometry allocation. Each visible rigid card
 has two triangles; a weighted grid has two triangles per cell. Each visible
 layer has one draw call; shared materials do not imply instanced batching.
-Directional selection examines at most eight sectors. Additional layer
-rotation touches only explicitly controlled rigid layers; bone rotation uses
+Directional selection examines at most eight sectors. Flipbook selection is a
+constant-time angle calculation per flipbook layer, independent of frame count;
+a frame change only points the existing mesh at an already loaded material.
+Additional layer rotation touches only explicitly controlled rigid layers; bone rotation uses
 compiled affected subtrees. Rotation reuses existing meshes, textures,
 materials, and geometry, and does not add draw calls.
 The hammer pass visits only its tool objects and foreground sprite mounts,
@@ -544,8 +641,9 @@ GAME_LEVEL=levels/my-level.json GAME_SPRITES=skins/my-sprites.json npm run build
 ```
 
 The build validates the document, anchors, bones, weights, and IK targets.
-Character type, skeletons, clips, directional presentation, layers, hair, and tile settings use this same
-`GAME_SPRITES` input; there is no separate rig profile. Embedded PNGs become separate
+Character type, skeletons, clips, directional presentation, layers, aim flipbooks, hair, and tile settings use this same
+`GAME_SPRITES` input; there is no separate rig profile. Embedded PNGs, including
+every flipbook frame, become separate
 hashed assets, deduplicated by content rather than embedded in executable
 JavaScript. Development uses the same document with embedded sources through
 the virtual module; changes to the selected file reload the page.

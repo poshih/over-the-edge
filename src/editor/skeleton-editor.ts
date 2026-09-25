@@ -375,6 +375,8 @@ export function createSkeletonEditor(options: {
       <div class="skeleton-subsection">
         <p class="appearance-label" id="skeleton-directions-label">Visible directions</p>
         <div class="skeleton-direction-grid" role="group" aria-labelledby="skeleton-directions-label"></div>
+        <p class="appearance-format skeleton-flipbook-note" hidden>This aim flipbook stays visible in every
+          direction and cannot tile or bind a mesh. Choose Use single image in Sprites first to change that.</p>
       </div>
       <div class="skeleton-subsection">
         <h4>Mesh binding</h4>
@@ -688,6 +690,7 @@ export function createSkeletonEditor(options: {
   const tileLengthInput = get<HTMLInputElement>('#skeleton-layer-tile-length');
   const applyTileButton = get<HTMLButtonElement>('.skeleton-apply-tile');
   const directionsGrid = get<HTMLDivElement>('.skeleton-direction-grid');
+  const flipbookNote = get<HTMLParagraphElement>('.skeleton-flipbook-note');
   const meshColumnsInput = get<HTMLInputElement>('#skeleton-mesh-columns');
   const meshRowsInput = get<HTMLInputElement>('#skeleton-mesh-rows');
   const meshBonesSelect = get<HTMLSelectElement>('#skeleton-mesh-bones');
@@ -1139,15 +1142,17 @@ export function createSkeletonEditor(options: {
     syncSelectOptions(layerBoneSelect, buildBoneOptions(skeleton, 'Legacy anchor space'));
     if (layerBoneSelect.value !== (layer?.bone ?? '')) layerBoneSelect.value = layer?.bone ?? '';
     applyRigidButton.disabled = disabledAll || layer === null || skeleton === null;
+    const flipbook = layer?.flipbook !== undefined;
+    flipbookNote.hidden = !flipbook;
     setChecked(tileToggle, layer !== null && layer.tileLength !== null);
-    tileToggle.disabled = disabledAll || layer === null || layer.skin !== null;
-    tileLengthInput.disabled = disabledAll || layer === null || layer.skin !== null || !tileToggle.checked;
+    tileToggle.disabled = disabledAll || layer === null || layer.skin !== null || flipbook;
+    tileLengthInput.disabled = disabledAll || layer === null || layer.skin !== null || flipbook || !tileToggle.checked;
     setNumberInputValue(tileLengthInput, layer?.tileLength ?? 1, force);
-    applyTileButton.disabled = disabledAll || layer === null || layer.skin !== null;
+    applyTileButton.disabled = disabledAll || layer === null || layer.skin !== null || flipbook;
     for (const direction of FACING_DIRECTIONS) {
       const input = directionInputs.get(direction)!;
       setChecked(input, layer?.directions.includes(direction) ?? false);
-      input.disabled = disabledAll || layer === null;
+      input.disabled = disabledAll || layer === null || flipbook;
     }
     if (skeleton !== null) {
       syncSelectOptions(meshBonesSelect, skeleton.bones.map(item => ({ value: item.id, label: `${item.name} (${item.id})` })));
@@ -1162,7 +1167,7 @@ export function createSkeletonEditor(options: {
     }
     meshColumnsInput.disabled = disabledAll || skeleton === null || layer === null;
     meshRowsInput.disabled = disabledAll || skeleton === null || layer === null;
-    bindMeshButton.disabled = disabledAll || skeleton === null || layer === null;
+    bindMeshButton.disabled = disabledAll || skeleton === null || layer === null || flipbook;
     switchRigidButton.disabled = disabledAll || skeleton === null || layer?.skin === null;
     const skin = layer?.skin ?? null;
     weightsSection.classList.toggle('is-disabled', skin === null);
