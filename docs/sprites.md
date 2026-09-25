@@ -27,7 +27,7 @@ or import a profile before selecting it. Switch to Mesh parts or Avatar before d
 the last 2D layer.
 
 **Arm forward distance** controls the shared hand/hammer plane in Mesh parts
-and Avatar: 0-1 world metres from the configured chest front, in 0.01 m steps.
+and Avatar: 0-2 world metres from the configured chest front, in 0.01 m steps.
 The default is 0.25 m. It previews live, including while paused, and the reset
 button restores that default without saving. Save/Revert and profile
 import/export include `armForwardDistance`; `GAME_SPRITES` carries it into a

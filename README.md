@@ -598,7 +598,7 @@ Sprite heads use their own 2D artwork and authored directional limits.
 The hammer always renders in the foreground in every character type.
 Its shared 3D grip plane sits in front of the chest, so mesh-part and avatar
 arms reach forward to hold it instead of intersecting a behind-the-body tool.
-Tune **Workshop / Character / Arm forward distance** from **0-1 m** in
+Tune **Workshop / Character / Arm forward distance** from **0-2 m** in
 **0.01 m** steps; the default remains **0.25 m**. It moves both hands and the
 hammer together in the two 3D modes. The value is part of the character profile:
 Save, Revert and JSON export/import preserve it, including game-only releases.
