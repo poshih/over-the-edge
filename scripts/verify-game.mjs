@@ -346,7 +346,8 @@ async function observeEnemySprites(page) {
     const clear = prototype.clear;
     const draw = prototype.drawElementsInstanced;
     prototype.clear = function (...args) {
-      if (this.canvas.id === 'game') window.enemySpriteDraw.instances = 0;
+      // Count per frame: the view also clears depth alone between its scene and foreground passes.
+      if (this.canvas.id === 'game' && (args[0] & this.COLOR_BUFFER_BIT) !== 0) window.enemySpriteDraw.instances = 0;
       return clear.apply(this, args);
     };
     prototype.drawElementsInstanced = function (mode, count, type, offset, instances) {
