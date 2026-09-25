@@ -111,7 +111,7 @@ GAME_LEVEL=levels/my-level.json GAME_SETTINGS=profiles/my-game.json npm run buil
 ```
 
 Omitting `GAME_SETTINGS` uses the built-in game settings, with a **2.65 m**
-character-centered target radius. A supplied profile is validated and embedded in the game; an invalid,
+target radius around the shoulder hinge (the hammer's full reach). A supplied profile is validated and embedded in the game; an invalid,
 missing, oversized, or outside-project file fails rather than reverting to
 defaults. Development reloads when the selected file changes. Browser-local
 saves do not change a release unless you export and select one.
@@ -212,21 +212,22 @@ iterations are distinct. Rendering interpolates the previous and current
 physics poses. Catch-up is bounded under overload; switching tabs discards
 elapsed wall-clock time rather than advancing a huge physics step.
 
-Mouse or touch movement updates the white circle's offset from the character
-center, limited to a configurable radius. Without input, that offset stays
-unchanged: walking, falling, or being launched carries the target with the
-character. It does not rotate with the pot, follow the hammer, or drift back
-to the center. Camera movement does not modify the offset.
+Mouse or touch movement updates the white circle's offset from the shoulder
+hinge the hammer pivots on, limited to a configurable radius. Without input,
+that offset stays unchanged: walking, falling, or being launched carries the
+target with the character. It does not rotate with the pot, follow the hammer,
+or drift back to the hinge. Camera movement does not modify the offset.
 
 Motion beyond the circle is discarded, so reversing input responds immediately
 without unwinding accumulated movement. Starting or resetting an attempt aims
 toward the initial hammer position, clamped inside the chosen radius.
 
-The input radius and the head's **2.65 m** mechanical reach are separate.
-Mechanical reach is measured from the shoulder; input radius is measured from
-the character center. A larger radius does not lengthen the tool. The head
-still cannot pass through solid terrain, and contact can transfer motor effort
-to the player. There is no return-to-hammer behavior.
+As in Getting Over It, the target and the head's **2.65 m** mechanical reach
+share the hinge as their origin, and the default radius is that full reach, so
+every reachable point can be targeted in every direction. A smaller radius
+limits how far input can extend the hammer; it never lengthens the tool. The
+head still cannot pass through solid terrain, and contact can transfer motor
+effort to the player. There is no return-to-hammer behavior.
 
 The slider can retract the head all the way to the hinge, so there is no
 unreachable inner ring. The hinge's own orientation defines aim even at zero
@@ -259,10 +260,11 @@ friction, not a sticky constraint: the head must still press against a surface
 to hold. The pot's own friction coefficient remains **0.45**.
 
 The **Cursor target** section has a **Maximum target radius** slider:
-**0.25-10 m**, default **2.65 m**. Reducing the radius immediately clamps an
-out-of-range target, including while paused; increasing it preserves the
-current offset. Changing it does not restart the attempt, alter body masses,
-or change the rig's forces, mechanical reach, or collision rules.
+**0.25-2.65 m** around the shoulder hinge, default **2.65 m** (the full reach).
+Profiles saved with a larger radius load capped at 2.65 m. Reducing the radius
+immediately clamps an out-of-range target, including while paused; increasing
+it preserves the current offset. Changing it does not restart the attempt, alter
+body masses, or change the rig's forces, mechanical reach, or collision rules.
 
 In **Workshop / Physics**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped

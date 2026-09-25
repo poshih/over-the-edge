@@ -489,7 +489,7 @@ export async function verifyAppearance(page, artifacts) {
     await page.mouse.up();
     const motion = await snapshot();
     assert.ok(Math.hypot(motion.cursorOffset.x - nextAim.x, motion.cursorOffset.y - nextAim.y) < 2 / pixelsPerMeter,
-      'The arm animation scenario must first reach its character-relative aiming pose.');
+      'The arm animation scenario must first reach its hinge-relative aiming pose.');
     const motionTime = motion.time;
     await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, motionTime + 1.5);
     await page.locator('#game').focus();

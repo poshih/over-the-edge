@@ -149,8 +149,8 @@ export function createUI(options: UiOptions): GameUi {
   cursorLegend.textContent = 'Cursor target';
   const cursorHelp = document.createElement('p');
   cursorHelp.className = 'cursor-target-help';
-  cursorHelp.textContent = 'Aim inside a circle around the character center. The target moves with the character and keeps your chosen offset until you aim again. ' +
-    'There is no return to the hammer or center. The radius does not change the hammer\'s physical reach.';
+  cursorHelp.textContent = 'Aim inside a circle around the hammer\'s shoulder hinge. The target moves with the character and keeps your chosen offset until you aim again. ' +
+    'There is no return to the hammer or hinge. The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it.';
   cursorGroup.append(cursorLegend, cursorHelp);
   for (const field of CURSOR_FIELDS) {
     const control = createRangeControl(field, {

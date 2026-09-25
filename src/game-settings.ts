@@ -12,6 +12,8 @@ export interface GameSettings {
 }
 
 export const GAME_SETTINGS_LIMITS = { fileBytes: 64 * 1024 } as const;
+// Profiles saved before aiming was measured from the hinge allowed radii up to 10 m.
+const LEGACY_MAX_RADIUS = 10;
 export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   maxRadius: RIG.maxReach,
 });
@@ -36,7 +38,7 @@ interface TuningField extends NumericSetting {
 type CursorField = NumericSetting & { key: keyof CursorSettings };
 
 export const CURSOR_FIELDS: readonly CursorField[] = [
-  { key: 'maxRadius', label: 'Maximum target radius', min: 0.25, max: 10, step: 0.05, unit: 'm', description: 'Maximum distance from the character center. Aiming moves this offset; character movement carries it along. The hammer keeps its separate physical reach limit.' },
+  { key: 'maxRadius', label: 'Maximum target radius', min: 0.25, max: RIG.maxReach, step: 0.05, unit: 'm', description: 'Maximum distance from the shoulder hinge the hammer pivots on, up to its 2.65 m reach. Aiming moves this offset; character movement carries it along. Motion beyond the radius is discarded.' },
 ];
 
 export const TUNING_FIELDS: readonly TuningField[] = [
@@ -100,6 +102,10 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (value.schemaVersion !== 2) throw new GameSettingsError('This game-settings profile version is not supported.');
   settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
   const cursor = { ...DEFAULT_CURSOR_SETTINGS };
-  for (const field of CURSOR_FIELDS) cursor[field.key] = settingNumber(value.cursor[field.key], field);
+  for (const field of CURSOR_FIELDS) {
+    // Older radii beyond the hammer's reach load capped at the reach instead of failing.
+    const accepted = field.key === 'maxRadius' ? { ...field, max: LEGACY_MAX_RADIUS } : field;
+    cursor[field.key] = Math.min(settingNumber(value.cursor[field.key], accepted), field.max);
+  }
   return Object.freeze({ schemaVersion: 2, physics: validateTuning(value.physics), cursor: Object.freeze(cursor) });
 }

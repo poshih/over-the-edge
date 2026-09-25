@@ -294,7 +294,7 @@ export async function verifyLevel(browser, address, artifacts) {
       let current = await physics();
       const started = current.time;
       const deadline = Date.now() + 10_000;
-      // Keep aiming at the opponent as recoil carries the character-relative target.
+      // Keep aiming at the opponent as recoil carries the hinge-relative target.
       while (current.time - started < 0.3) {
         assert.ok(Date.now() < deadline && !current.paused && !current.stopped, 'Combat aiming must advance through live physics.');
         const scale = current.camera.height / current.camera.worldHeight / current.tuning.mouseSensitivity;

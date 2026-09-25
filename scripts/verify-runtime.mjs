@@ -62,8 +62,8 @@ try {
   const focusGame = () => page.locator('#game').focus();
   const radius = (point) => Math.hypot(point.x, point.y);
   const assertCursorMatchesOffset = (state, message) => {
-    assert.ok(Math.abs((state.cursor.x - state.root.x) - state.cursorOffset.x) < 1e-9 &&
-      Math.abs((state.cursor.y - state.root.y) - state.cursorOffset.y) < 1e-9, message);
+    assert.ok(Math.abs((state.cursor.x - state.cursorOrigin.x) - state.cursorOffset.x) < 1e-9 &&
+      Math.abs((state.cursor.y - state.cursorOrigin.y) - state.cursorOffset.y) < 1e-9, message);
   };
   const assertCursorFollowsRoot = (before, after, message) => {
     const drift = Math.hypot(
@@ -159,6 +159,8 @@ try {
     { name: 'outer-right', offset: { x: outerRadius, y: 0 } },
     { name: 'outer-left', offset: { x: -outerRadius, y: 0 } },
     { name: 'outer-up', offset: { x: 0, y: outerRadius } },
+    { name: 'full-right', offset: { x: maxReach, y: 0 } },
+    { name: 'full-up', offset: { x: 0, y: maxReach } },
   ];
   for (const goal of goals) {
     await dragInput(1.2, (state) => ({ x: goal.offset.x - state.cursorOffset.x, y: goal.offset.y - state.cursorOffset.y }));
@@ -171,7 +173,13 @@ try {
     assert.equal(aimed.headContacts, 0, `${goal.name} must be a free-space aiming scenario.`);
     assert.ok(offsetError < 0.03, `${goal.name} stored offset missed by ${offsetError} m.`);
     assert.ok(error < 0.03, `${goal.name} missed the drag target by ${error} m.`);
-    assertCursorMatchesOffset(aimed, `${goal.name} world target must equal root plus the stored offset.`);
+    if (goal.name.startsWith('full-')) {
+      const pivot = aimed.parts.find((part) => part.id === 'carrier');
+      assert.ok(pivot);
+      assert.ok(Math.abs(Math.hypot(aimed.tip.x - pivot.x, aimed.tip.y - pivot.y) - maxReach) < 0.03,
+        `${goal.name} must extend the head to its full reach from the hinge.`);
+    }
+    assertCursorMatchesOffset(aimed, `${goal.name} world target must equal the hinge plus the stored offset.`);
     await focusGame();
     await page.keyboard.press('p');
     const arms = await inspectArmGeometry(page);

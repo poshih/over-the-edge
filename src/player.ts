@@ -256,7 +256,7 @@ export function drivePlayer(rig: PlayerRig, cursor: Readonly<Point>, tuning: Rea
   const axisAngle = rig.carrier.getAngle();
   const angularError = distance <= PHYSICS.aimEpsilon
     ? 0 : angleDifference(Math.atan2(targetY, targetX), axisAngle);
-  // The cursor radius and the hammer's physical workspace are independent.
+  // Targets are hinge-relative and the radius is capped at the reach; clamp so any target maps into the workspace.
   const reachable = clampLength({ x: targetX, y: targetY }, RIG.maxReach);
   const projectedReach = clamp(
     reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), 0, RIG.maxReach,

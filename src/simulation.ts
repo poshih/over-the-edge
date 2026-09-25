@@ -154,7 +154,7 @@ export class Simulation {
       if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Pointer target must remain finite.');
       this.cursorOffset = clampLength({ x, y }, this.settings.cursor.maxRadius);
     }
-    this.command = drivePlayer(this.rig, this.worldCursor(this.rig.root.getPosition(), this.cursorOffset), this.settings.physics);
+    this.command = drivePlayer(this.rig, this.worldCursor(this.cursorOrigin(this.rig.root.getPosition()), this.cursorOffset), this.settings.physics);
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
     this.elapsed += PHYSICS.dt;
@@ -179,7 +179,7 @@ export class Simulation {
     return {
       time: this.previous.time + (this.current.time - this.previous.time) * alpha,
       parts,
-      cursor: this.worldCursor(root, {
+      cursor: this.worldCursor(this.cursorOrigin(root), {
         x: this.previous.cursorOffset.x + (this.current.cursorOffset.x - this.previous.cursorOffset.x) * alpha,
         y: this.previous.cursorOffset.y + (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha,
       }),
@@ -209,11 +209,13 @@ export class Simulation {
   snapshot() {
     const status = this.status();
     const root = this.rig.root.getPosition();
+    const origin = this.cursorOrigin(root);
     return {
       ...status,
       root: { x: root.x, y: root.y, angle: this.rig.root.getAngle() },
       tip: { ...this.rig.head.getPosition() },
-      cursor: this.worldCursor(root, this.cursorOffset),
+      cursor: this.worldCursor(origin, this.cursorOffset),
+      cursorOrigin: origin,
       cursorOffset: { ...this.cursorOffset },
       rootVelocity: { ...this.rig.root.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
@@ -285,13 +287,18 @@ export class Simulation {
   }
 
   private initialCursorOffset(): Point {
-    const center = this.rig.root.getPosition();
+    const origin = this.cursorOrigin(this.rig.root.getPosition());
     const tip = this.rig.head.getPosition();
-    return clampLength({ x: tip.x - center.x, y: tip.y - center.y }, this.settings.cursor.maxRadius);
+    return clampLength({ x: tip.x - origin.x, y: tip.y - origin.y }, this.settings.cursor.maxRadius);
   }
 
-  private worldCursor(center: Readonly<Point>, offset: Readonly<Point>): Point {
-    return { x: center.x + offset.x, y: center.y + offset.y };
+  // Aim is hinge-relative like the hammer's reach; the root never rotates, so the hinge is a fixed offset.
+  private cursorOrigin(root: Readonly<Point>): Point {
+    return { x: root.x + RIG.shoulder.x, y: root.y + RIG.shoulder.y };
+  }
+
+  private worldCursor(origin: Readonly<Point>, offset: Readonly<Point>): Point {
+    return { x: origin.x + offset.x, y: origin.y + offset.y };
   }
 
   private ensureLive(): void {

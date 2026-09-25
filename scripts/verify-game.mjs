@@ -174,7 +174,7 @@ async function verifySettings(page) {
   const selected = {
     ...defaults,
     physics: { ...defaults.physics, playerMass: 14, mouseSensitivity: 1.75 },
-    cursor: { maxRadius: 3.4 },
+    cursor: { maxRadius: 2.1 },
   };
   await writeFile(settingsPath, JSON.stringify(selected));
   process.env.GAME_SETTINGS = relative(root, settingsPath);
