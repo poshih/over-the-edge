@@ -395,17 +395,17 @@ body[data-input-mode="touch"] .workshop-search-key {
 
 .workshop-tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(max-content, 1fr));
+  grid-template-columns: repeat(6, minmax(max-content, 1fr));
   flex: 0 0 auto;
   gap: 4px;
   overflow-x: auto;
-  padding: 8px 18px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   overscroll-behavior-x: contain;
 }
 
 .workshop-tabs [role="tab"] {
-  padding: 9px 6px;
+  padding: 9px 4px;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: transparent;

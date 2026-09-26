@@ -9,7 +9,8 @@ To give a course bespoke artwork, make static GLB meshes with whatever tools you
 prefer, such as a modelling package, a procedural generator, or an image-to-3D
 service. Then package them with the level. The game fits each mesh onto its
 terrain object. Collision is never derived from a mesh, and the editor never
-generates, uploads, or hosts artwork.
+generates artwork. A [game project](projects.md) can carry a packed course's GLBs;
+your own project server stores them with the rest of the game.
 
 ## How a mesh matches its collision
 

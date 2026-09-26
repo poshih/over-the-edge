@@ -3,6 +3,8 @@ import {
   PlaneGeometry, ShaderMaterial, Vector2, Vector4,
 } from 'three';
 import { createEnemyAtlas } from './enemy-art';
+import { DEFAULT_ENEMY_ART } from './enemy-art-data';
+import type { EnemyArtSettings } from './enemy-art-data';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
 import type { EnemyEvent, EnemyPhase, EnemyPose, EnemySpecies } from './enemy-types';
 import { InstanceSlots, markInstanceSlot } from './instancing';
@@ -33,7 +35,8 @@ function writeVector(attribute: InstancedBufferAttribute, slot: number, value: V
 export class EnemyView {
   readonly root = new Group();
   private readonly instances = new InstanceSlots<EnemyPose>({ capacity: ENEMY_LIMITS.objects, label: 'Enemy sprite' });
-  private readonly atlas = createEnemyAtlas();
+  private art: EnemyArtSettings;
+  private atlas: ReturnType<typeof createEnemyAtlas>;
   private readonly geometry = new PlaneGeometry(1, 1);
   private readonly frames = dynamicAttribute(new InstancedBufferAttribute(new Float32Array(ENEMY_LIMITS.objects * 4), 4));
   private readonly states = dynamicAttribute(new InstancedBufferAttribute(new Float32Array(ENEMY_LIMITS.objects * 4), 4));
@@ -48,8 +51,11 @@ export class EnemyView {
   private atlasWrites = 0;
   private poseUpdates = 0;
   private clockWrites = 0;
+  private artChanges = 0;
 
-  constructor() {
+  constructor(art: EnemyArtSettings = DEFAULT_ENEMY_ART) {
+    this.art = art;
+    this.atlas = createEnemyAtlas(art);
     this.root.name = 'enemies';
     this.root.visible = false;
     this.root.matrixAutoUpdate = false;
@@ -151,6 +157,20 @@ export class EnemyView {
     }
   }
 
+  // Swaps in replacement pixel art: one new atlas texture, then each live sprite's frame rectangle.
+  setArt(art: EnemyArtSettings): void {
+    this.ensureLive();
+    if (art === this.art) return;
+    const atlas = createEnemyAtlas(art);
+    this.atlas.texture.dispose();
+    this.art = art;
+    this.atlas = atlas;
+    this.material.uniforms.atlas!.value = atlas.texture;
+    (this.material.uniforms.atlasSize!.value as Vector2).set(atlas.texture.image.width, atlas.texture.image.height);
+    this.instances.values().forEach((pose, slot) => this.writePose(slot, pose));
+    this.artChanges++;
+  }
+
   update(poses: readonly EnemyPose[], time: number): void {
     this.ensureLive();
     for (const pose of poses) this.upsert(pose);
@@ -169,7 +189,8 @@ export class EnemyView {
       atlasWidth: this.atlas.texture.image.width, atlasHeight: this.atlas.texture.image.height,
       atlasBytes: resources * this.atlas.bytes,
       matrixWrites: this.matrixWrites, stateWrites: this.stateWrites, atlasWrites: this.atlasWrites,
-      poseUpdates: this.poseUpdates, clockWrites: this.clockWrites,
+      poseUpdates: this.poseUpdates, clockWrites: this.clockWrites, artChanges: this.artChanges,
+      customArt: Object.entries(this.art).filter(([, value]) => value !== null).map(([species]) => species),
       pendingMatrixRanges: this.mesh.instanceMatrix.updateRanges.length,
       pendingStateRanges: this.states.updateRanges.length, pendingAtlasRanges: this.frames.updateRanges.length,
       time: this.clock.value,

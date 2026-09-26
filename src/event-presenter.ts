@@ -13,6 +13,8 @@ export interface EventPresenterStatus {
 export interface EventPresenterOptions {
   readonly mount: HTMLElement;
   readonly onModalChange: (state: { active: boolean }) => void;
+  // Maps an authored video source to the URL to load, e.g. a bundled /media/ file's asset URL.
+  readonly resolveSource?: (source: string) => string;
 }
 
 let uid = 0;
@@ -63,6 +65,7 @@ class Presentation {
     mount: HTMLElement;
     onModalChange: (state: { active: boolean }) => void;
     onSettle: () => void;
+    resolveSource: (source: string) => string;
   };
 
   constructor(
@@ -71,6 +74,7 @@ class Presentation {
       mount: HTMLElement;
       onModalChange: (state: { active: boolean }) => void;
       onSettle: () => void;
+      resolveSource: (source: string) => string;
     },
   ) {
     this.host = host;
@@ -284,7 +288,7 @@ class Presentation {
     }, { signal: this.controller.signal });
     document.addEventListener('fullscreenchange', () => this.onFullscreenChange(), { signal: this.controller.signal });
 
-    video.src = action.source;
+    video.src = this.host.resolveSource(action.source);
     this.attemptPlay();
   }
 
@@ -342,12 +346,18 @@ class Presentation {
 export class EventPresenter {
   private readonly mount: HTMLElement;
   private readonly onModalChange: (state: { active: boolean }) => void;
+  private resolveSource: (source: string) => string;
   private active: Presentation | null = null;
   private disposed = false;
 
   constructor(options: EventPresenterOptions) {
     this.mount = options.mount;
     this.onModalChange = options.onModalChange;
+    this.resolveSource = options.resolveSource ?? ((source) => source);
+  }
+
+  setSourceResolver(resolve: (source: string) => string): void {
+    this.resolveSource = resolve;
   }
 
   /** True while a full-window video presentation is covering the game view. */
@@ -365,6 +375,7 @@ export class EventPresenter {
       onSettle: () => {
         if (this.active === presentation) this.active = null;
       },
+      resolveSource: this.resolveSource,
     });
     this.active = presentation;
     try {

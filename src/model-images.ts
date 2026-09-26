@@ -46,6 +46,8 @@ export function forEachModelImage(
   document: Record<string, unknown>,
   subject: string,
   visit: (width: number, height: number) => void,
+  // 'skip' ignores images whose size cannot be read without decoding them, such as AVIF.
+  unreadable: 'throw' | 'skip' = 'throw',
 ): void {
   if (document.images === undefined) return;
   if (!Array.isArray(document.images)) throw new ModelError(`Invalid ${subject} texture list.`);
@@ -88,7 +90,14 @@ export function forEachModelImage(
       }
       bytes = buffer.subarray(offset, offset + length);
     }
-    visit(...dimensions(bytes, subject));
+    let size: [number, number];
+    try {
+      size = dimensions(bytes, subject);
+    } catch (error) {
+      if (unreadable === 'skip' && error instanceof ModelError) continue;
+      throw error;
+    }
+    visit(...size);
   }
 }
 

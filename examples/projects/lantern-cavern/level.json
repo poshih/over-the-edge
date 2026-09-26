@@ -1,0 +1,330 @@
+{
+  "schemaVersion": 2,
+  "labels": [
+    {
+      "x": 0,
+      "y": 3,
+      "text": "THE LANTERN WAITS ABOVE"
+    },
+    {
+      "x": 5,
+      "y": 10.5,
+      "text": "MIND THE BATS"
+    },
+    {
+      "x": -4.5,
+      "y": 16,
+      "text": "THE DRAUGHT"
+    }
+  ],
+  "objects": [
+    {
+      "kind": "terrain",
+      "id": "floor",
+      "shape": {
+        "type": "box"
+      },
+      "x": 0,
+      "y": -1,
+      "width": 60,
+      "height": 2,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 2238251,
+      "illusion": false
+    },
+    {
+      "kind": "start",
+      "id": "start",
+      "x": 0,
+      "y": 0.65,
+      "angle": -0.42,
+      "extension": 0.2
+    },
+    {
+      "kind": "terrain",
+      "id": "step-1",
+      "shape": {
+        "type": "box"
+      },
+      "x": 3.2,
+      "y": 1.1,
+      "width": 2.8,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 5204805,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "step-2",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.4,
+      "y": 2.8,
+      "width": 2.6,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 3883078,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "boulder",
+      "shape": {
+        "type": "circle"
+      },
+      "x": 1.6,
+      "y": 4.2,
+      "width": 1.6,
+      "height": 1.6,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 3883078,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "step-3",
+      "shape": {
+        "type": "box"
+      },
+      "x": 4.6,
+      "y": 5.9,
+      "width": 3,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 5204805,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "slab",
+      "shape": {
+        "type": "box"
+      },
+      "x": 7.6,
+      "y": 7.2,
+      "width": 3.2,
+      "height": 0.6,
+      "angle": 0.35,
+      "depth": 1.6,
+      "color": 3883078,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "step-4",
+      "shape": {
+        "type": "box"
+      },
+      "x": 5.2,
+      "y": 9.2,
+      "width": 2.6,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 3883078,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "ledge-5",
+      "shape": {
+        "type": "box"
+      },
+      "x": 1.8,
+      "y": 10.6,
+      "width": 3,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 5204805,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "crumbling",
+      "shape": {
+        "type": "box"
+      },
+      "x": -1.4,
+      "y": 12.2,
+      "width": 2.4,
+      "height": 0.4,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 5918792,
+      "illusion": true
+    },
+    {
+      "kind": "terrain",
+      "id": "ledge-6",
+      "shape": {
+        "type": "box"
+      },
+      "x": -4.4,
+      "y": 13.4,
+      "width": 3.2,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 3883078,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "ramp",
+      "shape": {
+        "type": "ramp"
+      },
+      "x": -1,
+      "y": 15.4,
+      "width": 3,
+      "height": 1.2,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 3883078,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "ledge-7",
+      "shape": {
+        "type": "box"
+      },
+      "x": 2.4,
+      "y": 17.2,
+      "width": 3,
+      "height": 0.6,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 5204805,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "ledge-8",
+      "shape": {
+        "type": "box"
+      },
+      "x": -0.8,
+      "y": 19.6,
+      "width": 2.6,
+      "height": 0.5,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 3883078,
+      "illusion": false
+    },
+    {
+      "kind": "terrain",
+      "id": "summit",
+      "shape": {
+        "type": "box"
+      },
+      "x": 2.2,
+      "y": 21.8,
+      "width": 4,
+      "height": 0.8,
+      "angle": 0,
+      "depth": 1.6,
+      "color": 7035450,
+      "illusion": false
+    },
+    {
+      "kind": "trigger",
+      "id": "intro",
+      "name": "Intro",
+      "x": 0,
+      "y": 1,
+      "region": {
+        "type": "circle",
+        "radius": 1.6
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "play-sound",
+          "source": "/media/bell.wav",
+          "volume": 0.8
+        },
+        {
+          "type": "popup",
+          "title": "Lantern Cavern",
+          "message": "A lantern still burns at the top of the cavern.\n\nClimb to it. Mind the bats and the stone that watches."
+        }
+      ]
+    },
+    {
+      "kind": "trigger",
+      "id": "draught",
+      "name": "Draught",
+      "x": -4.4,
+      "y": 14.4,
+      "region": {
+        "type": "box",
+        "width": 2.4,
+        "height": 1.2
+      },
+      "activation": "on-enter",
+      "marker": "updraft",
+      "events": [
+        {
+          "type": "launch-player",
+          "height": 6,
+          "strength": 1
+        }
+      ]
+    },
+    {
+      "kind": "enemy",
+      "id": "bat-1",
+      "species": "bird",
+      "facing": "left",
+      "x": 6.8,
+      "y": 11,
+      "patrolDistance": 2.5,
+      "speed": 1.2
+    },
+    {
+      "kind": "enemy",
+      "id": "golem-1",
+      "species": "hollow-soldier",
+      "facing": "right",
+      "x": 2.4,
+      "y": 11.6,
+      "patrolDistance": 1,
+      "speed": 0.6
+    },
+    {
+      "kind": "trigger",
+      "id": "lantern",
+      "name": "Lantern",
+      "x": 2.2,
+      "y": 23.6,
+      "region": {
+        "type": "box",
+        "width": 4,
+        "height": 2.6
+      },
+      "activation": "once",
+      "marker": "flag",
+      "events": [
+        {
+          "type": "stop-timer"
+        },
+        {
+          "type": "popup",
+          "title": "The lantern is lit",
+          "message": "The cavern glows. You made it out of the dark."
+        }
+      ]
+    }
+  ]
+}

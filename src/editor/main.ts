@@ -10,7 +10,7 @@ import { Game } from '../game';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { levelSpawn } from '../level';
 import { Appearance } from './appearance';
-import { AppearanceRig } from './appearance-rig';
+import { AppearanceRig } from '../appearance-rig';
 import { createAppearanceUI } from './appearance-ui';
 import { VISUAL_PARTS } from './appearance-types';
 import { CollisionOverlay } from './collision-overlay';
@@ -20,6 +20,11 @@ import { PRACTICES, practiceById } from './practices';
 import { createUI } from './ui';
 import { createSpriteEditor } from './sprite-editor';
 import type { EditorAction, PracticeId, WorkshopState } from './ui-types';
+import { AudioDirector } from '../audio';
+import { DEFAULT_AUDIO } from '../audio-settings';
+import { isDarkSky } from '../theme';
+import { ProjectSession } from './project-session';
+import { createProjectEditor } from './project-editor';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
@@ -30,9 +35,17 @@ const level = new LevelState(DEFAULT_LEVEL);
 let debug = false;
 let practice: PracticeId = 'start';
 let editing = false;
+// Media resolve through the open project, which is created once the editors exist.
+let resolveMedia = (source: string): string => source;
+let mediaVersion = 0;
+const audio = new AudioDirector({
+  settings: DEFAULT_AUDIO, resolve: (source) => resolveMedia(source), onError: (message) => ui.notice(message, 'error'),
+});
 const game = new Game({
   canvas, fatal, eventMount: mount, level: level.definition(),
   characterModels: createCharacterModelLoader(),
+  resolveMedia: (source) => resolveMedia(source),
+  onCue: (cue) => audio.handle(cue),
   onAction: perform,
   onNotice: (message) => ui.notice(message, 'error'),
   onShortcut: (event) => {
@@ -91,6 +104,50 @@ const levelEditor = createLevelEditor({
   },
   onPlay: () => perform('play'),
   onNotice: ui.notice,
+});
+const appearanceRestored = appearance.restore();
+const project = new ProjectSession({
+  workspace: {
+    level: {
+      get: () => level.definition(),
+      load: (definition) => levelEditor.loadLevel(definition),
+      sync: (definition) => levelEditor.syncLevel(definition),
+      prepare: () => levelEditor.preparePlay(),
+      markSaved: (definition) => levelEditor.markSaved(definition),
+    },
+    settings: { get: () => ui.settings(), load: (settings) => ui.applySettings(settings) },
+    character: {
+      draft: () => spriteEditor.snapshot().document,
+      hasContent: () => spriteEditor.snapshot().hasContent,
+      validated: () => spriteEditor.validatedDocument(),
+      load: (document) => spriteEditor.loadDocument(document),
+    },
+    appearance: {
+      armIk: () => appearance.armIkSettings(),
+      loadArmIk: (settings) => appearance.previewArmIk(settings),
+      parts: () => appearance.exportParts(),
+      load: (parts) => appearance.replaceParts(parts),
+    },
+    ready: Promise.all([appearanceRestored, spriteEditor.ready]),
+    onLook: (look) => {
+      resolveMedia = look.resolveMedia;
+      // Replaced or re-added files keep their paths, so drop sounds cached for the old files.
+      if (look.mediaVersion !== mediaVersion) {
+        mediaVersion = look.mediaVersion;
+        audio.setResolver(look.resolveMedia);
+      }
+      game.setTheme(look.theme);
+      ui.setSceneTone(isDarkSky(look.theme));
+      game.setEnemyArt(look.enemies);
+      ui.setHud(look.hud);
+      audio.setSettings(look.audio);
+    },
+    notice: ui.notice,
+  },
+});
+const projectEditor = createProjectEditor({
+  mount: ui.projectMount, session: project, onNotice: ui.notice,
+  onTestCue: (cue) => audio.handle({ type: 'cue', cue, strength: 1 }),
 });
 
 function resetPractice(id: PracticeId): void {
@@ -154,6 +211,7 @@ const diagnostics = Object.freeze({
   appearance: () => appearance.snapshot(),
   sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.sprites.inspect() }),
   events: () => game.eventState(),
+  gameProject: () => ({ ...project.snapshot(), playback: audio.inspect() }),
   level: () => ({
     definition: level.definition(),
     terrain: game.simulation.terrainState(),
@@ -170,15 +228,19 @@ declare global {
 }
 window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
-void appearance.restore();
+void project.start();
 game.start((state) => {
   ui.update({ ...state, debug, practice });
   spriteEditor.updatePreview();
+  audio.setPaused(state.paused);
 });
 
 if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
+    projectEditor.dispose();
+    project.dispose();
+    audio.dispose();
     unsubscribeLevel();
     unsubscribeAppearance();
     unsubscribeOverlay();

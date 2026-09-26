@@ -11,7 +11,10 @@ import { validateCourseModel } from '../src/course-art-model';
 const LEVEL = '\0virtual:game-level';
 const ART = '\0virtual:game-art';
 
-export function courseBundle(path: string | null, selectedMode: string | undefined): Plugin {
+// `source` is a level or course package JSON path, an already-validated project course, or null
+// for the built-in course.
+export function courseBundle(source: string | null | { readonly value: unknown }, selectedMode: string | undefined): Plugin {
+  const path = typeof source === 'string' ? source : null;
   if (selectedMode !== undefined && selectedMode !== 'shapes' && selectedMode !== 'meshes') {
     throw new Error('GAME_ART_MODE must be shapes or meshes.');
   }
@@ -25,7 +28,7 @@ export function courseBundle(path: string | null, selectedMode: string | undefin
     },
     load(id) {
       if (id !== LEVEL && id !== ART) return;
-      let raw: unknown = DEFAULT_LEVEL;
+      let raw: unknown = source !== null && typeof source === 'object' ? source.value : DEFAULT_LEVEL;
       let bytes = 0;
       if (path !== null) {
         bytes = statSync(path).size;
@@ -65,7 +68,7 @@ export function courseBundle(path: string | null, selectedMode: string | undefin
         }`;
     },
     handleHotUpdate(context) {
-      if (context.file !== path) return;
+      if (path === null || context.file !== path) return;
       for (const id of [LEVEL, ART]) {
         const module = context.server.moduleGraph.getModuleById(id);
         if (module) context.server.moduleGraph.invalidateModule(module);

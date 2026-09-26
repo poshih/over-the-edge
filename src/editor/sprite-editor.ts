@@ -1,7 +1,7 @@
 import { element, setText } from '../dom';
 import type { SpriteRig } from '../sprite-rig';
 import { FLIPBOOK_LIMITS, SPRITE_FIELDS, SPRITE_LIMITS } from '../sprite-data';
-import type { SpriteLayer } from '../sprite-data';
+import type { SpriteDocument, SpriteLayer } from '../sprite-data';
 import { createRangeControl } from './range-control';
 import { createJsonDownload } from './json-download';
 import type { RangeControl } from './range-control';
@@ -42,6 +42,10 @@ export interface SpriteEditorOptions {
 export interface SpriteEditorHandle {
   ready: Promise<void>;
   snapshot: () => SpriteEditorSnapshot;
+  // Replaces the draft with a whole profile, for example from a project; false if it was rejected.
+  loadDocument: (document: SpriteDocument) => Promise<boolean>;
+  // The validated draft, or null after reporting why it cannot be saved.
+  validatedDocument: () => SpriteDocument | null;
   setActive: (active: boolean) => void;
   updatePreview: () => void;
   leavePreview: () => void;
@@ -455,6 +459,8 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   return {
     ready,
     snapshot: () => state.snapshot(),
+    loadDocument: (document) => state.loadDocument(document),
+    validatedDocument: () => state.validatedDraft(),
     setActive: (value) => {
       active = value;
       directionalEditor.setActive(value);

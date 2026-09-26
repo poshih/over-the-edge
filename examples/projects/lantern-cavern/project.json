@@ -1,0 +1,246 @@
+{
+  "format": "over-the-edge-project",
+  "schemaVersion": 1,
+  "title": "Lantern Cavern",
+  "level": "level.json",
+  "art": {
+    "mode": "shapes",
+    "assets": []
+  },
+  "settings": {
+    "schemaVersion": 2,
+    "physics": {
+      "hingeTorque": 420,
+      "sliderForce": 850,
+      "angleGain": 14,
+      "angleDamping": 0.12,
+      "extensionGain": 18,
+      "extensionDamping": 0.12,
+      "angularSpeed": 12,
+      "linearSpeed": 7,
+      "playerMass": 12,
+      "hammerMass": 1.8,
+      "shaftMass": 0.66,
+      "hingeCarrierMass": 0.5,
+      "sliderCarriageMass": 0.5,
+      "bodyDamping": 0.12,
+      "gripFriction": 3.2,
+      "handleFrequency": 0,
+      "handleDamping": 0.9,
+      "mouseSensitivity": 1
+    },
+    "cursor": {
+      "maxRadius": 2.65
+    }
+  },
+  "characters": {
+    "primary": null,
+    "alternate": null
+  },
+  "armIk": {
+    "leftHintX": -0.55,
+    "leftHintY": 0.15,
+    "leftHintZ": -0.35,
+    "rightHintX": 0.55,
+    "rightHintY": 0.15,
+    "rightHintZ": 0.45
+  },
+  "appearance": [],
+  "theme": {
+    "sky": "#0e1418",
+    "fog": {
+      "color": "#0e1418",
+      "near": 18,
+      "far": 55
+    },
+    "exposure": 1.2,
+    "hemisphere": {
+      "sky": "#8fb3c9",
+      "ground": "#1b1410",
+      "intensity": 1.6
+    },
+    "ambient": {
+      "color": "#6d5a44",
+      "intensity": 0.6
+    },
+    "sun": {
+      "color": "#ffb86b",
+      "intensity": 2.4
+    },
+    "rim": {
+      "color": "#58d1c9",
+      "intensity": 1.8
+    },
+    "sunDisc": {
+      "visible": true,
+      "color": "#ffcf7a"
+    },
+    "backdrop": {
+      "visible": true,
+      "far": "#1c2a31",
+      "middle": "#16222a",
+      "near": "#111b21"
+    },
+    "aim": {
+      "cursor": "#ffd27f",
+      "line": "#ffd27f"
+    },
+    "character": {
+      "pot": "#8a5a2b",
+      "trim": "#d9a441",
+      "dark": "#1d2a2f",
+      "suit": "#3f6f6a",
+      "ceramic": "#e7d8b5",
+      "wood": "#5b3a22"
+    }
+  },
+  "hud": {
+    "height": {
+      "visible": true,
+      "label": "DEPTH CLIMBED",
+      "unit": "ft",
+      "scale": 3.28084,
+      "decimals": 0
+    },
+    "timer": {
+      "visible": true,
+      "label": "LANTERN TIME"
+    }
+  },
+  "audio": {
+    "volume": 0.9,
+    "music": {
+      "source": "/media/cavern-loop.wav",
+      "volume": 0.35
+    },
+    "cues": {
+      "impact": {
+        "source": "/media/clink.wav",
+        "volume": 0.7
+      },
+      "enemy-hit": {
+        "source": "/media/thud.wav",
+        "volume": 0.8
+      },
+      "enemy-defeat": {
+        "source": "/media/chime.wav",
+        "volume": 0.8
+      },
+      "launch": {
+        "source": "/media/whoosh.wav",
+        "volume": 0.7
+      },
+      "finish": {
+        "source": "/media/chime.wav",
+        "volume": 1
+      },
+      "fall": {
+        "source": "/media/thud.wav",
+        "volume": 0.6
+      }
+    }
+  },
+  "enemies": {
+    "bird": {
+      "frames": [
+        [
+          "W..............W",
+          "WW............WW",
+          "WWW..........WWW",
+          ".WWW...##...WWW.",
+          "..WWW#BBBB#WWW..",
+          "...WWBBBEBBWW...",
+          "....#BBBBBB#....",
+          ".....#BBBB#.....",
+          "......#..#......",
+          "................"
+        ],
+        [
+          "................",
+          "................",
+          "......#..#......",
+          ".....#BBBB#.....",
+          "....#BBBEBB#....",
+          "..WWWBBBBBBWWW..",
+          ".WWW.#BBBB#.WWW.",
+          "WWW....##....WWW",
+          "WW............WW",
+          "W..............W"
+        ]
+      ],
+      "palette": {
+        "#": "#0b0d10",
+        "B": "#4a3f5c",
+        "W": "#6b5b7f",
+        "E": "#ffd27f"
+      }
+    },
+    "hollow-soldier": {
+      "frames": [
+        [
+          "...######...",
+          "..#SSSSSS#..",
+          "..#SSSSES#..",
+          "..#SSSSSS#..",
+          "...#MSSM#...",
+          ".##SSSSSS##.",
+          "#SSsSSSSsSS#",
+          "#SS#SSSS#SS#",
+          "#MS#SsSS#SM#",
+          ".##.SSSS.##.",
+          "....#SS#....",
+          "...#SSSS#...",
+          "...#S##S#...",
+          "...#S#.#S#..",
+          "..##S#.#S##.",
+          "..####.####."
+        ],
+        [
+          "............",
+          "...######...",
+          "..#SSSSSS#..",
+          "..#SSSSES#..",
+          "..#SSSSSS#..",
+          "...#MSSM#...",
+          ".##SSSSSS##.",
+          "#SSsSSSSsSS#",
+          "#SS#SSSS#SS#",
+          "#MS#SsSS#SM#",
+          ".##.SSSS.##.",
+          "....#SS#....",
+          "...#SSSS#...",
+          "..#S#..#S#..",
+          ".##S#..#S##.",
+          ".####..####."
+        ]
+      ],
+      "palette": {
+        "#": "#1a1d20",
+        "S": "#6e7378",
+        "s": "#4b5055",
+        "M": "#5f8a4e",
+        "E": "#ff9f43"
+      }
+    }
+  },
+  "media": [
+    {
+      "path": "/media/bell.wav"
+    },
+    {
+      "path": "/media/cavern-loop.wav"
+    },
+    {
+      "path": "/media/chime.wav"
+    },
+    {
+      "path": "/media/clink.wav"
+    },
+    {
+      "path": "/media/thud.wav"
+    },
+    {
+      "path": "/media/whoosh.wav"
+    }
+  ]
+}

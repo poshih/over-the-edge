@@ -7,9 +7,14 @@ const TITLE_PLACEHOLDER = '__GAME_TITLE__';
 const TITLE_MODULE = 'virtual:game-title';
 const RESOLVED_TITLE_MODULE = `\0${TITLE_MODULE}`;
 
-export function gameTitle(options: { mode: string; envDir: string }): Plugin {
-  const requested = loadEnv(options.mode, options.envDir, 'GAME_TITLE').GAME_TITLE;
-  const value = requested === undefined ? DEFAULT_TITLE : requested;
+// `projectTitle` is the title of a GAME_PROJECT release, which must not also receive GAME_TITLE.
+export function gameTitle(options: { mode: string; envDir: string; projectTitle?: string }): Plugin {
+  if (options.projectTitle !== undefined && process.env.GAME_TITLE !== undefined) {
+    throw new Error('GAME_TITLE cannot be combined with GAME_PROJECT; set the title in the project.');
+  }
+  // .env files may brand the Workshop; a project release always uses the project's title.
+  const requested = options.projectTitle === undefined ? loadEnv(options.mode, options.envDir, 'GAME_TITLE').GAME_TITLE : undefined;
+  const value = options.projectTitle ?? (requested === undefined ? DEFAULT_TITLE : requested);
   if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value)) {
     throw new Error('GAME_TITLE must be a single line without control characters.');
   }

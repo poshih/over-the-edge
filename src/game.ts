@@ -15,6 +15,11 @@ import type { TriggerAction, EventOutcome } from './trigger-events';
 import { EventPresenter } from './event-presenter';
 import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
+import { impactStrength, IMPACT_SPEED } from './audio-settings';
+import type { AudioCue, GameCue } from './audio-settings';
+import type { GameTheme } from './theme';
+import type { EnemyArtSettings } from './enemy-art-data';
+import type { EnemyEvent, EnemyPhase } from './enemy-types';
 
 export class Game {
   readonly simulation: Simulation;
@@ -30,6 +35,9 @@ export class Game {
   private readonly unsubscribeTerrain: () => void;
   private readonly unsubscribeEnemies: () => void;
   private readonly onAction: (action: UiAction, options?: UiActionOptions) => void;
+  private readonly onCue: ((cue: GameCue) => void) | null;
+  // Last phase of each enemy, so cues fire on hit and defeat transitions only.
+  private readonly enemyPhases = new Map<string, EnemyPhase>();
   private character: CharacterState = { armIk: DEFAULT_ARM_IK };
   private stopped = false;
   private started = false;
@@ -46,6 +54,12 @@ export class Game {
     level: LevelDefinition;
     settings?: Readonly<GameSettings>;
     characterModels?: CharacterModelLoader | null;
+    theme?: GameTheme;
+    enemyArt?: EnemyArtSettings;
+    // Maps authored media sources (video and sound events) to loadable URLs.
+    resolveMedia?: (source: string) => string;
+    // Receives sound cues and play-sound events; without it the game tracks no impacts.
+    onCue?: (cue: GameCue) => void;
     onAction: (action: UiAction, options?: UiActionOptions) => void;
     onNotice: (message: string) => void;
     onShortcut?: (event: KeyboardEvent) => void;
@@ -53,19 +67,27 @@ export class Game {
     this.canvas = options.canvas;
     this.fatal = options.fatal;
     this.onAction = options.onAction;
+    this.onCue = options.onCue ?? null;
     const listen = { signal: this.lifecycle.signal };
     window.addEventListener('error', (event) => this.stop(event.message), listen);
     window.addEventListener('unhandledrejection', (event) =>
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
-    this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, { characterModels: options.characterModels });
+    this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
+      characterModels: options.characterModels, theme: options.theme, enemyArt: options.enemyArt,
+    });
+    if (this.onCue !== null) this.simulation.trackImpacts(true);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
-    this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => this.view.enemies.apply(event));
+    this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => {
+      this.view.enemies.apply(event);
+      if (this.onCue !== null) this.enemyCue(event);
+    });
     this.input = new PointerInput(options.canvas, {
       onAction: options.onAction, onNotice: options.onNotice, onShortcut: options.onShortcut,
     });
     this.presenter = new EventPresenter({
       mount: options.eventMount,
+      resolveSource: options.resolveMedia,
       onModalChange: ({ active }) => {
         this.setPause({ reason: 'event', paused: active });
         this.setInputBlock({ reason: 'event', blocked: active });
@@ -109,12 +131,17 @@ export class Game {
             if (this.simulation.fellOutOfLevel()) {
               // Falling below everything in the level restarts the attempt exactly like Reset.
               restarted = true;
+              this.cue('fall');
               this.onAction('reset');
               break;
             }
             if (this.pauseReasons.size > 0) break;
           }
           if (!restarted && this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
+          if (this.onCue !== null) {
+            const impact = this.simulation.takeImpact();
+            if (impact >= IMPACT_SPEED.minimum) this.onCue({ type: 'cue', cue: 'impact', strength: impactStrength(impact) });
+          }
         }
       } else {
         this.accumulator = 0;
@@ -182,6 +209,12 @@ export class Game {
   setCharacter(state: CharacterState): void {
     this.character = { armIk: { ...state.armIk } };
   }
+
+  setTheme(theme: GameTheme): void { this.view.setTheme(theme); }
+
+  setEnemyArt(art: EnemyArtSettings): void { this.view.enemies.setArt(art); }
+
+  setMediaResolver(resolve: (source: string) => string): void { this.presenter.setSourceResolver(resolve); }
 
   setPause(options: { reason: string; paused: boolean }): void {
     if (options.paused) this.pauseReasons.add(options.reason);
@@ -273,12 +306,37 @@ export class Game {
     if (signal.aborted) return 'cancelled';
     if (action.type === 'stop-timer') {
       this.timerRunning = false;
+      this.cue('finish');
       return 'completed';
     }
     if (action.type === 'launch-player') {
       this.simulation.launch(action);
+      this.cue('launch');
+      return 'completed';
+    }
+    if (action.type === 'play-sound') {
+      this.onCue?.({ type: 'sound', source: action.source, volume: action.volume });
       return 'completed';
     }
     return this.presenter.present(action, signal);
+  }
+
+  private cue(cue: AudioCue): void {
+    this.onCue?.({ type: 'cue', cue, strength: 1 });
+  }
+
+  private enemyCue(event: EnemyEvent): void {
+    if (event.type === 'reset') {
+      this.enemyPhases.clear();
+      for (const pose of event.poses) this.enemyPhases.set(pose.id, pose.phase);
+    } else if (event.type === 'remove') {
+      this.enemyPhases.delete(event.id);
+    } else {
+      const previous = this.enemyPhases.get(event.pose.id);
+      this.enemyPhases.set(event.pose.id, event.pose.phase);
+      if (previous === undefined || previous === event.pose.phase) return;
+      if (event.pose.phase === 'hurt') this.cue('enemy-hit');
+      else if (event.pose.phase === 'dead') this.cue('enemy-defeat');
+    }
   }
 }

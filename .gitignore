@@ -33,3 +33,6 @@ artifacts
 *.njsproj
 *.sln
 *.sw?
+
+/projects/
+/releases/

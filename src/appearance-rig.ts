@@ -1,9 +1,9 @@
 import { Euler, Group, MathUtils, Matrix4, Vector3 } from 'three';
 import type { Box3, Object3D } from 'three';
-import type { VisualBinding as RuntimeBinding } from '../character';
-import type { VisualVisibility } from '../visual-visibility';
-import { VISUAL_PARTS } from './appearance-types';
-import type { VisualAlignment, VisualPartId } from './appearance-types';
+import { VISUAL_PART_IDS } from './character';
+import type { VisualBinding as RuntimeBinding, VisualPartId } from './character';
+import type { VisualVisibility } from './visual-visibility';
+import type { VisualAlignment } from './appearance-profile';
 import type { LoadedVisual } from './visual-model';
 
 interface VisualBinding {
@@ -28,7 +28,7 @@ export class AppearanceRig {
   }
 
   assertComplete(): void {
-    for (const slot of VISUAL_PARTS) this.binding(slot.id);
+    for (const slot of VISUAL_PART_IDS) this.binding(slot);
   }
 
   setModel(slot: VisualPartId, model: LoadedVisual, alignment: Readonly<VisualAlignment>): void {

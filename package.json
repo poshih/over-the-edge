@@ -6,19 +6,22 @@
   "scripts": {
     "dev": "vite",
     "dev:game": "vite --config vite.game.config.ts",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && vite build",
     "build:game": "tsc --noEmit -p tsconfig.game.json && vite build --config vite.game.config.ts",
     "preview": "vite preview",
+    "studio": "npm run build && vite preview",
     "preview:game": "vite preview --config vite.game.config.ts",
-    "verify": "npm run build && node scripts/verify-runtime.mjs && npm run verify:game && npm run verify:art",
+    "verify": "npm run build && node scripts/verify-runtime.mjs && npm run verify:game && npm run verify:art && npm run verify:project",
     "verify:game": "npm run build:game && node scripts/verify-game.mjs",
     "verify:art": "node scripts/verify-art.mjs",
-    "pack:course": "node scripts/pack-course.mjs"
+    "pack:course": "node scripts/pack-course.mjs",
+    "verify:project": "node scripts/verify-project.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.4",
     "@types/three": "0.185.4",
     "playwright": "1.63.0",
     "typescript": "~6.0.2",

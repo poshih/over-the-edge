@@ -53,6 +53,9 @@ export class Simulation {
   private voidY: number | null;
   private supported = false;
   private readonly manifold = new WorldManifold();
+  private impactTracking = false;
+  private headTouching = false;
+  private impactSpeed = 0;
 
   constructor(settings: Readonly<GameSettings>, level: LevelDefinition) {
     this.settings = validateGameSettings(settings);
@@ -146,6 +149,21 @@ export class Simulation {
     return this.supported && this.voidY !== null && this.rig.root.getPosition().y + RIG.potBottom < this.voidY;
   }
 
+  // Impact sounds need the hammer head's approach speed whenever it starts touching something.
+  trackImpacts(enabled: boolean): void {
+    this.ensureLive();
+    this.impactTracking = enabled;
+    this.impactSpeed = 0;
+    this.headTouching = enabled && this.headContactCount() > 0;
+  }
+
+  // The fastest hammer-head impact since the previous call, in m/s; 0 when there was none.
+  takeImpact(): number {
+    const speed = this.impactSpeed;
+    this.impactSpeed = 0;
+    return speed;
+  }
+
   launch(settings: LaunchSettings) {
     this.ensureLive();
     if (this.world.isLocked()) throw new Error('Player launches must execute after the physics step.');
@@ -170,8 +188,16 @@ export class Simulation {
     }
     this.command = drivePlayer(this.rig, this.worldCursor(this.cursorOrigin(this.rig.root.getPosition()), this.cursorOffset), this.settings.physics);
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
+    const velocity = this.impactTracking ? this.rig.head.getLinearVelocity() : null;
+    const approachX = velocity?.x ?? 0;
+    const approachY = velocity?.y ?? 0;
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
     if (!this.supported) this.detectSupport();
+    if (this.impactTracking) {
+      const touching = this.headContactCount() > 0;
+      if (touching && !this.headTouching) this.impactSpeed = Math.max(this.impactSpeed, Math.hypot(approachX, approachY));
+      this.headTouching = touching;
+    }
     this.elapsed += PHYSICS.dt;
     this.terrain.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
@@ -286,6 +312,8 @@ export class Simulation {
     destroyPlayer(this.world, this.rig);
     this.rig = createPlayer(this.world, spawn, this.settings.physics);
     this.supported = false;
+    this.headTouching = false;
+    this.impactSpeed = 0;
     this.cursorOffset = this.initialCursorOffset();
     this.elapsed = 0;
     this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);

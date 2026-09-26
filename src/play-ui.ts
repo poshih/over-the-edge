@@ -1,6 +1,8 @@
 import { element, formatElapsedTime, setText } from './dom';
 import { createNotice } from './notice';
 import type { CharacterRiggingType } from './sprite-data';
+import { DEFAULT_HUD, formatHeight } from './hud';
+import type { HudSettings } from './hud';
 
 const CHARACTER_KEY = 'over-the-edge:play:character';
 const CHARACTER_LABELS: Readonly<Record<CharacterRiggingType, string>> = {
@@ -36,23 +38,32 @@ export function characterLabels(types: readonly CharacterRiggingType[]): string[
   return labels.map((label, index) => labels.indexOf(label) !== labels.lastIndexOf(label) ? `${label} ${index + 1}` : label);
 }
 
-export function createPlayUI(options: { mount: HTMLElement; characters?: PlayCharacterChoice | null }) {
+export function createPlayUI(options: { mount: HTMLElement; characters?: PlayCharacterChoice | null; hud?: HudSettings }) {
+  const hud = options.hud ?? DEFAULT_HUD;
   const root = document.createElement('div');
   root.className = 'game-ui play-ui';
   root.innerHTML = `
     <dl class="play-hud" aria-label="Climb statistics">
-      <div>
-        <dt>CURRENT HEIGHT</dt>
-        <dd><span class="height-value">0.0</span><span class="play-height-unit">m</span></dd>
+      <div class="play-height">
+        <dt></dt>
+        <dd><span class="height-value"></span><span class="play-height-unit"></span></dd>
       </div>
-      <div>
-        <dt>ELAPSED</dt>
+      <div class="play-timer">
+        <dt></dt>
         <dd class="elapsed-value">00:00</dd>
       </div>
     </dl>
   `;
   const height = element<HTMLElement>(root, '.height-value');
   const elapsed = element<HTMLElement>(root, '.elapsed-value');
+  // Labels come from the project's HUD settings as text, never markup.
+  element<HTMLElement>(root, '.play-height dt').textContent = hud.height.label;
+  element<HTMLElement>(root, '.play-height-unit').textContent = hud.height.unit;
+  height.textContent = formatHeight(hud, 0);
+  element<HTMLElement>(root, '.play-timer dt').textContent = hud.timer.label;
+  if (!hud.height.visible) element<HTMLElement>(root, '.play-height').remove();
+  if (!hud.timer.visible) element<HTMLElement>(root, '.play-timer').remove();
+  if (!hud.height.visible && !hud.timer.visible) element<HTMLElement>(root, '.play-hud').remove();
   const events = new AbortController();
   const inputs: HTMLInputElement[] = [];
   let selected = 0;
@@ -96,8 +107,8 @@ export function createPlayUI(options: { mount: HTMLElement; characters?: PlayCha
   options.mount.append(root);
   return {
     update(state: { height: number; elapsed: number }): void {
-      setText(height, state.height.toFixed(1));
-      setText(elapsed, formatElapsedTime(state.elapsed));
+      if (hud.height.visible) setText(height, formatHeight(hud, state.height));
+      if (hud.timer.visible) setText(elapsed, formatElapsedTime(state.elapsed));
     },
     notice: notice.show,
     // Enables the character choice once every profile has loaded; returns the restored choice.

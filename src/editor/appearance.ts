@@ -1,4 +1,4 @@
-import { AppearanceRig } from './appearance-rig';
+import type { AppearanceRig } from '../appearance-rig';
 import { VisualStore, VisualStoreError } from './visual-store';
 import {
   ALIGNMENT_FIELDS, AppearanceError, ARM_IK_FIELDS, DEFAULT_ALIGNMENT, DEFAULT_ARM_IK, isVisualPart, MODEL_LIMITS,
@@ -158,6 +158,65 @@ export class Appearance {
         if (!adopted) model.dispose();
       }
     });
+  }
+
+  // Every imported part with its file and current (draft) alignment, e.g. to save a project.
+  exportParts(): { part: VisualPartId; name: string; blob: Blob; alignment: VisualAlignment }[] {
+    return VISUAL_PARTS.flatMap(({ id }) => {
+      const record = this.records.get(id);
+      return record === undefined ? [] : [{ part: id, name: record.name, blob: record.data, alignment: { ...this.drafts.get(id) ?? record.alignment } }];
+    });
+  }
+
+  // Makes exactly these parts the saved appearance, for example when a project opens. Unchanged
+  // files are not reloaded; parts not listed return to their procedural visuals.
+  async replaceParts(parts: readonly { part: VisualPartId; name: string; blob: Blob; alignment: VisualAlignment }[]): Promise<boolean> {
+    if (!this.canEdit()) return false;
+    const wanted = new Map(parts.map((entry) => [entry.part, entry]));
+    let complete = true;
+    for (const { id } of VISUAL_PARTS) {
+      const entry = wanted.get(id);
+      const record = this.records.get(id);
+      if (entry === undefined) {
+        if (record !== undefined) await this.useDefault(id);
+        continue;
+      }
+      if (record !== undefined && record.data === entry.blob && record.name === entry.name) {
+        const alignment = validateAlignment(entry.alignment);
+        if (ALIGNMENT_FIELDS.some((field) => alignment[field.key] !== record.alignment[field.key])) {
+          await this.run(id, async () => {
+            const next = { ...record, alignment };
+            await this.store.write(next);
+            if (this.disposed) return;
+            this.rig.align(id, alignment);
+            this.records.set(id, next);
+          });
+        }
+        this.drafts.set(id, validateAlignment(entry.alignment));
+        this.rig.align(id, entry.alignment);
+        continue;
+      }
+      await this.run(id, async () => {
+        const alignment = validateAlignment(entry.alignment);
+        const model = await loadVisualModel(entry.blob);
+        let adopted = false;
+        try {
+          if (this.disposed) return;
+          const next: StoredVisual = { schemaVersion: 1, slot: id, name: entry.name, data: entry.blob, alignment };
+          await this.store.write(next);
+          if (this.disposed) return;
+          this.rig.setModel(id, model, alignment);
+          adopted = true;
+          this.records.set(id, next);
+          this.drafts.set(id, { ...alignment });
+        } finally {
+          if (!adopted) model.dispose();
+        }
+      });
+      if (this.errors.has(id)) complete = false;
+    }
+    this.changed();
+    return complete;
   }
 
   preview(slot: VisualPartId, value: unknown): void {

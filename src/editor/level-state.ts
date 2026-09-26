@@ -154,6 +154,23 @@ export class LevelState {
     this.emit({ kind: 'replace', level, upsert, remove });
   }
 
+  /**
+   * Adopts another version of this level as one incremental edit: only objects that differ are
+   * upserted or removed, so an open playtest continues instead of restarting as it does for replace().
+   */
+  merge(value: unknown): void {
+    const level = validateLevel(value);
+    const next = new Map(level.objects.map((object) => [object.id, object]));
+    const remove = [...this.objects.keys()].filter((id) => !next.has(id));
+    const upsert = level.objects.filter((object) => JSON.stringify(this.objects.get(object.id)) !== JSON.stringify(object));
+    if (remove.length === 0 && upsert.length === 0 && JSON.stringify(level.labels) === JSON.stringify(this.current.labels)) return;
+    this.objects = next;
+    this.current = level;
+    this.startObject = levelStart(level);
+    this.indexObjects();
+    this.emit({ kind: 'edit', level, upsert, remove });
+  }
+
   subscribe(listener: (change: LevelChange) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

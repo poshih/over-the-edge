@@ -31,6 +31,12 @@ The built-in course needs no backend, player account, external asset download,
 or runtime network service. Authored video events fetch the media URLs included
 in their level.
 
+`npm run dev` and `npm run studio` (which builds the Workshop, then serves it at
+**http://localhost:4174**) also run a self-hosted **project server**: it stores
+complete games on disk and gives scripts and language models a JSON API for every
+setting. See [game projects](docs/projects.md). A static deployment of `dist/` has
+no project server; its Workshop still opens and saves project files.
+
 To deploy the Workshop, upload `dist/` to the **gettingover** Cloudflare Worker
 defined in `wrangler.toml`. It is a static-assets Worker, not a Cloudflare Pages
 project. Deploying requires your own Cloudflare account:
@@ -112,7 +118,7 @@ GAME_LEVEL=levels/my-level.json npm run build:game
 Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
 validated and bundled at build time; the game needs no editor or external level
 service. Level exports do not contain gameplay settings, sprite layouts,
-private character GLBs, or IK profiles. To dress terrain with meshes from your
+private character GLBs, or IK profiles; a [project](docs/projects.md) holds all of them. To dress terrain with meshes from your
 own art pipeline, combine the level JSON and your GLBs into a course package with
 `npm run pack:course`, then pass the package as `GAME_LEVEL`. `GAME_ART_MODE=shapes`
 or `GAME_ART_MODE=meshes` overrides the package's look; shape-only releases omit
@@ -159,6 +165,26 @@ boundary.
 `npm run verify:game` exercises the release, custom-course/sprite/aim-flipbook/settings/two-character builds,
 development entry, and editor-dependency rejection in isolation. `npm run verify:art`
 does the same for course packages and terrain meshes.
+
+### Complete games from a project
+
+A project holds a whole game in one place: title, level, physics, both character
+profiles, appearance models, arm IK, theme, HUD, audio, enemy art, media and course
+artwork. Build any project into the game-only release instead of combining the
+separate inputs above:
+
+```sh
+GAME_PROJECT=examples/projects/lantern-cavern npm run build:game
+GAME_PROJECT=projects/my-game npm run build:game            # a project directory
+GAME_PROJECT=exports/my-game.project.json npm run build:game # or a single project file
+```
+
+Switching the project switches the entire game; the engine stays the same. Make
+and edit projects in **Workshop / Project**, through the project server's API, or
+as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
+`GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
+`GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
+workflow, publishing from the server and the API.
 
 ### Included full-length course
 
@@ -225,7 +251,8 @@ falling instead of restarting in a loop.
 
 ### Finding Workshop controls
 
-Each Workshop tab opens on the controls used most: practice positions and the
+Each Workshop tab opens on the controls used most: the game title and project
+actions in **Project**, practice positions and the
 mass and motor sliders in **Physics**, the character type and quick-start buttons in
 **Character**, the body part and GLB model in **Appearance**, the layer list in
 **Sprites**, and the build tools in **Level**. Everything else sits in named,
@@ -234,7 +261,7 @@ remembers which sections you opened or closed, only as a layout preference.
 Chromium's find-in-page also opens a closed section that contains a match.
 
 **Find a control** at the top of the Workshop searches every labeled control and
-section in all five tabs. Press **/** anywhere outside a text field (while the mouse
+section in all six tabs. Press **/** anywhere outside a text field (while the mouse
 is not captured), type part of a name, then choose a result with Enter or a click: the Workshop switches to
 its tab, opens its sections, scrolls to it and focuses it. Results show where each
 control lives, for example **Physics › Materials**; controls that are currently
@@ -344,7 +371,7 @@ newer edits. Use this same JSON with the `GAME_SETTINGS` build input above.
 
 Snapshots are stored independently in this browser's localStorage, on this site,
 so saves from different tabs do not overwrite one shared record. Nothing is
-uploaded. New saves use **game-settings v2**, with a cursor document containing
+uploaded unless you save a [project](docs/projects.md) to your own project server. New saves use **game-settings v2**, with a cursor document containing
 only `maxRadius`. Previous game-settings v1 profiles and tuning v1-v4 records
 remain loadable, labeled **(physics only)**. They preserve their physics values
 and use the default target radius; retired return/settling settings are never
@@ -449,6 +476,7 @@ Supported events:
 | Play video | Plays a public video URL or site-relative media path in a full-window overlay |
 | Stop timer | Freezes the run timer without stopping physics or illusion effects |
 | Launch player | Applies a mass-aware upward impulse with configurable lift height and strength |
+| Play sound | Plays a sound (0-1 volume) from a public URL or site-relative media path, without pausing; the next event starts immediately |
 
 Events execute in their authored order. Only one presentation runs at a time;
 simultaneous triggers queue deterministically. Popup/video presentation pauses
@@ -479,7 +507,7 @@ terrain and labels are retained, spawn becomes a start object, and the old summi
 becomes an ending zone above its original arrival line. That zone extends two
 maximum hammer reaches upward and is editable. Original files and snapshots
 are not rewritten. Saving/exporting produces version 2; old game versions
-cannot read new enemy kinds or trigger actions/markers, but their original version 1 saves remain
+cannot read new enemy kinds or trigger actions/markers (such as play-sound), but their original version 1 saves remain
 available for rollback.
 
 ### Updrafts
@@ -602,9 +630,9 @@ when packing a course. Each mesh is fitted to its object's width, height, and
 depth, rotates with it, and replaces its extruded shape. Collision never comes
 from a mesh, and illusion fades, disappearance, and resets remain per object.
 
-The editor designs collision only: it has no asset-generation, upload, or hosted
-services. Levels that already reference meshes keep those references while you
-edit them. See the [course artwork guide](docs/course-artwork.md) for the fitting
+The editor designs collision only and never generates artwork. Levels that already
+reference meshes keep those references while you edit them, and **Workshop / Project /
+Course artwork** can import a packed course into a [project](docs/projects.md). See the [course artwork guide](docs/course-artwork.md) for the fitting
 rules, packing command, package format, and limits.
 
 ### Performance boundaries
@@ -667,8 +695,9 @@ GLB that follows the physical pot body and hides the body inside it, and **PBR o
 cel shading** (stepped bands with an optional outline) that can be flipped live
 to compare. All of these are part of the character profile, so Save, JSON and
 `GAME_SPRITES` carry them. See [imported 3D characters](docs/characters.md).
-Appearance's per-part GLB replacements remain separate, browser-local assets;
-imported animation clips are not played.
+Appearance's per-part GLB replacements are separate, browser-local assets that
+only a [project](docs/projects.md) carries into a release; imported animation clips
+are not played.
 
 Character heads follow the direction from the hammer hinge toward the aim
 cursor, without turning the torso or moving the grips. Mesh parts and Avatar share smooth, neck-pivoted 3D gaze;
@@ -810,9 +839,10 @@ endpoints. The underlying three-segment shaft and its mass/compliance remain in
 the physics simulation.
 
 Files are saved locally in IndexedDB when imported, and saved appearances restore
-on reload. Nothing is uploaded to the server. This storage belongs to the current
-browser and site address; it is separate from physics presets and is not bundled
-into `dist/` or shared with other players. Original files on your computer are
+on reload. Nothing is uploaded unless you save a [project](docs/projects.md) to your
+own project server; projects carry these parts into their standalone releases. This
+storage belongs to the current browser and site address; it is separate from physics
+presets and is not bundled into `dist/` or shared with other players. Original files on your computer are
 never modified.
 
 ## Runtime inspection
@@ -822,7 +852,8 @@ npm run verify
 ```
 
 This builds both entries and exercises browser gameplay with Playwright, including
-the course-artwork checks from `npm run verify:art`. If Chromium
+the course-artwork checks from `npm run verify:art` and the project, project server
+and Project tab checks from `npm run verify:project`. If Chromium
 is not installed for Playwright, install it with `npx playwright install chromium`
 and rerun. Runtime artifacts are written to the ignored `artifacts/` directory.
 There is no unit-test suite.
@@ -844,6 +875,9 @@ continues to be available separately as `snapshot().time`.
 `window.gettingOver.sprites()` reports the character/sprite draft and save state
 with the sprite renderer's `inspect()` result, including each aim flipbook
 layer's shown frame.
+`window.gettingOver.gameProject()` reports the open project: title, server binding
+and revisions, unsaved and conflicting sections, the project sections and audio
+playback.
 These globals are absent from the game-only release.
 
 ## Contributing

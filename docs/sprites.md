@@ -106,7 +106,8 @@ failed imports leave the previous rendering and draft intact.
 
 Sprite storage is a separate IndexedDB database, `over-the-edge:sprites`.
 Existing GLB, level, tuning, and IK records are unchanged. Saves are local to the
-site/origin and are not uploaded. Different tabs do not synchronize live edits;
+site/origin and are not uploaded unless you save a [game project](projects.md) to
+your own project server. Different tabs do not synchronize live edits;
 the last successful explicit Save becomes the next startup layout.
 
 ## 2D skeletal rigging
@@ -663,6 +664,7 @@ The release waits for its selected sprites before starting gameplay. It loads
 no editor UI, import controls, browser saves, GLB importer, or diagnostics.
 Without `GAME_SPRITES`, it uses the procedural character and includes no sprite
 artwork. Sprite JSON is independent of level JSON and browser physics/IK profiles.
+A [game project](projects.md) carries both profiles with the rest of the game.
 `GAME_ALTERNATE_SPRITES` bundles a second profile that players can switch to, for
 example a skinned 3D avatar next to a 2D character; see
 [releases with two characters](characters.md#releases-with-two-characters).

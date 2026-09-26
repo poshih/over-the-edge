@@ -4,7 +4,7 @@ import { transformPoint } from './math';
 import { upgradeLevelV1 } from './level-migration';
 import { fields, LevelError, number, point, text } from './level-validation';
 import type { TriggerAction } from './trigger-events';
-import { LAUNCH_FIELDS } from './trigger-events';
+import { LAUNCH_FIELDS, SOUND_VOLUME } from './trigger-events';
 import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
 import type { EnemyFacing, EnemySpecies } from './enemy-types';
 import { ArtError, validateTerrainArt } from './art-types';
@@ -426,20 +426,34 @@ export function validateTriggerAction(value: unknown): TriggerAction {
   }
   if (type === 'play-video') {
     fields(value, ['type', 'source'], 'Video event');
-    const source = text(value.source, TRIGGER_LIMITS.source, 'Video source').trim();
-    let url: URL;
-    try {
-      url = new URL(source, 'https://level.invalid');
-    } catch (error) {
-      if (!(error instanceof TypeError)) throw error;
-      throw new LevelError('Use an HTTP(S) video URL or a site-relative /media/video path.');
-    }
-    const local = source.startsWith('/') && !source.startsWith('//') && url.origin === 'https://level.invalid';
-    const remote = /^https?:\/\//i.test(source) && (url.protocol === 'https:' || url.protocol === 'http:');
-    if ((!local && !remote) || url.username || url.password) throw new LevelError('Use an HTTP(S) video URL without credentials, or a site-relative /media/video path.');
-    return Object.freeze({ type, source });
+    return Object.freeze({ type, source: mediaSource(value.source, 'video') });
   }
-  throw new LevelError('Choose popup, play video, stop timer, or launch player.');
+  if (type === 'play-sound') {
+    fields(value, ['type', 'source', 'volume'], 'Sound event');
+    return Object.freeze({
+      type, source: mediaSource(value.source, 'sound'),
+      volume: number(value.volume, SOUND_VOLUME.min, SOUND_VOLUME.max, SOUND_VOLUME.label),
+    });
+  }
+  throw new LevelError('Choose popup, play video, play sound, stop timer, or launch player.');
+}
+
+function mediaSource(value: unknown, kind: 'video' | 'sound'): string {
+  const label = kind === 'video' ? 'Video source' : 'Sound source';
+  const source = text(value, TRIGGER_LIMITS.source, label).trim();
+  let url: URL;
+  try {
+    url = new URL(source, 'https://level.invalid');
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw new LevelError(`Use an HTTP(S) ${kind} URL or a site-relative /media/${kind} path.`);
+  }
+  const local = source.startsWith('/') && !source.startsWith('//') && url.origin === 'https://level.invalid';
+  const remote = /^https?:\/\//i.test(source) && (url.protocol === 'https:' || url.protocol === 'http:');
+  if ((!local && !remote) || url.username || url.password) {
+    throw new LevelError(`Use an HTTP(S) ${kind} URL without credentials, or a site-relative /media/${kind} path.`);
+  }
+  return source;
 }
 
 export function isTerrainObject(object: LevelObject): object is TerrainObject { return object.kind === 'terrain'; }

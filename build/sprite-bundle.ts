@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 import { embeddedPng, EMPTY_SPRITES, parseSpriteDocument, SPRITE_FILE_BYTES, validateSpriteAnchors } from '../src/sprite-data';
 import type { SpriteDocument } from '../src/sprite-data';
-import { characterModel, embeddedModel } from '../src/character-profile';
-import { inspectCharacterModel, resolveAvatarJoints } from '../src/character-model-inspect';
+import { checkCharacterModels } from '../src/character-model-check';
+import { embeddedModel } from '../src/character-profile';
 
 const PRIMARY = 'virtual:game-sprites';
 const ALTERNATE = 'virtual:game-alternate-sprites';
@@ -13,34 +13,26 @@ const MODELS = 'virtual:game-character-models';
 const RESOLVED = { primary: `\0${PRIMARY}`, alternate: `\0${ALTERNATE}`, models: `\0${MODELS}` } as const;
 const LOADER = fileURLToPath(new URL('../src/character-model-loader.ts', import.meta.url));
 
-// Validates character GLBs against MODEL_LIMITS, their skins, bone maps and prop conventions, as the loader will.
 function validateModels(document: SpriteDocument, variable: string): void {
-  const profiles = [['avatar', document.avatar], ['hammer', document.hammer], ['pot', document.pot]] as const;
-  for (const [usage, profile] of profiles) {
-    if (profile === undefined) continue;
-    const model = characterModel(document, profile.model);
-    const bytes = embeddedModel(model.source);
-    if (bytes === null) {
-      throw new Error(`${variable}: character model "${model.name}" must be an embedded GLB so the build can validate it.`);
-    }
-    try {
-      const report = inspectCharacterModel(bytes.buffer, usage);
-      if (document.avatar !== undefined && usage === 'avatar') resolveAvatarJoints(report, document.avatar.boneMap);
-    } catch (error) {
-      throw new Error(`${variable}: ${usage} model "${model.name}": ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-    }
+  try {
+    checkCharacterModels(document, variable);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
   }
 }
 
 export function spriteBundle(options: {
   path: string | null;
   alternatePath: string | null;
+  // A project's already-parsed profiles, used instead of the paths.
+  documents?: { readonly primary: SpriteDocument | null; readonly alternate: SpriteDocument | null };
   anchors: readonly string[];
   targets: readonly string[];
 }): Plugin {
   let building = false;
   const emitted = new Map<string, string>();
   const documents = new Map<string, SpriteDocument>();
+  const validated = new WeakSet<SpriteDocument>();
   const watched = new Set<string>([options.path, options.alternatePath].filter((path): path is string => path !== null));
   return {
     name: 'game-sprite-data',
@@ -56,7 +48,18 @@ export function spriteBundle(options: {
     },
     load(id) {
       if (id !== RESOLVED.primary && id !== RESOLVED.alternate && id !== RESOLVED.models) return;
+      const provided = (document: SpriteDocument | null, variable: string): SpriteDocument | null => {
+        if (document === null || validated.has(document)) return document;
+        validateSpriteAnchors(document, options.anchors, options.targets);
+        validateModels(document, variable);
+        validated.add(document);
+        return document;
+      };
       const profile = (path: string | null, variable: string): SpriteDocument | null => {
+        if (options.documents !== undefined) {
+          return provided(variable === 'GAME_SPRITES' ? options.documents.primary : options.documents.alternate, `GAME_PROJECT ${
+            variable === 'GAME_SPRITES' ? 'primary' : 'alternate'} character`);
+        }
         if (path === null) return null;
         this.addWatchFile(path);
         let document = documents.get(path);

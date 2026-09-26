@@ -157,6 +157,13 @@ export class CharacterShadingView {
     for (const entry of this.entries.values()) this.show(entry);
   }
 
+  // Cel twins copy their source colours when created; re-copy them after a palette change.
+  refresh(): void {
+    for (const [source, twin] of this.twins) {
+      if (lit(source) && twin instanceof MeshToonMaterial) twin.color.copy(source.color);
+    }
+  }
+
   inspect() {
     const cel = this.active && this.shading.mode === 'cel';
     let hullsVisible = 0;

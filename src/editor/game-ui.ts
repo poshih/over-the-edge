@@ -3,6 +3,8 @@ import type { InputMode, UiAction, UiActionOptions } from '../config';
 import { element, formatElapsedTime, setText } from '../dom';
 import { inputModeForPointer } from '../input';
 import { createNotice } from '../notice';
+import { DEFAULT_HUD, formatHeight } from '../hud';
+import type { HudSettings } from '../hud';
 
 export const DESKTOP_QUERY = '(min-width: 1040px)';
 
@@ -83,6 +85,12 @@ export function createGameUI(options: {
   const peak = element<HTMLElement>(root, '.peak-value');
   const elapsed = element<HTMLElement>(root, '.elapsed-value');
   const timerLabel = element<HTMLElement>(root, '.timer-label');
+  const heightLabel = element<HTMLElement>(root, '.height-metric .eyebrow');
+  const heightMetric = element<HTMLElement>(root, '.height-metric');
+  const peakMetric = element<HTMLElement>(root, '.secondary-metrics > div:first-child');
+  const timerMetric = element<HTMLElement>(root, '.secondary-metrics > div:last-child');
+  const units = [...root.querySelectorAll<HTMLElement>('.metric-unit, .small-unit')];
+  let hud: HudSettings = DEFAULT_HUD;
   const instructions = element<HTMLElement>(root, '.input-instructions');
   const mouseIcon = element<HTMLElement>(root, '.mouse-icon');
   const guideHeading = element<HTMLElement>(root, '.guide-heading');
@@ -115,12 +123,25 @@ export function createGameUI(options: {
   return {
     root,
     actions,
+    // Keeps the title and readouts legible when a project's sky is dark.
+    setSceneTone: (dark: boolean): void => {
+      root.dataset.scene = dark ? 'dark' : 'light';
+    },
+    // Previews a project's HUD labels, units and visibility on the Workshop readout.
+    setHud: (next: HudSettings): void => {
+      hud = next;
+      setText(heightLabel, hud.height.label);
+      for (const unit of units) setText(unit, hud.height.unit);
+      heightMetric.hidden = !hud.height.visible;
+      peakMetric.hidden = !hud.height.visible;
+      timerMetric.hidden = !hud.timer.visible;
+    },
     update: (state: GameHudState): void => {
       if (inputMode !== state.inputMode) setMode(state.inputMode);
-      setText(height, state.height.toFixed(1));
-      setText(peak, state.bestHeight.toFixed(1));
+      setText(height, formatHeight(hud, state.height));
+      setText(peak, formatHeight(hud, state.bestHeight));
       setText(elapsed, formatElapsedTime(state.elapsed));
-      setText(timerLabel, state.timerRunning ? 'ELAPSED' : 'TIME STOPPED');
+      setText(timerLabel, state.timerRunning ? hud.timer.label : 'TIME STOPPED');
       setText(pauseLabel, state.paused ? 'Resume' : 'Pause');
       pause.classList.toggle('is-active', state.paused);
       play.classList.toggle('is-active', !state.paused && (state.pointerLocked || state.inputMode === 'touch'));

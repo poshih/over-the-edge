@@ -33,6 +33,8 @@
       </header>
 
       <div class="workshop-tabs" role="tablist" aria-label="Workshop section">
+        <button id="project-tab" type="button" role="tab" aria-selected="false" aria-controls="project-pane" tabindex="-1"
+          title="The whole game: title, look, HUD, audio, enemies, media, saving, opening and publishing">Project</button>
         <button id="physics-tab" type="button" role="tab" aria-selected="true" aria-controls="physics-pane"
           title="Practice positions and live physics tuning">Physics</button>
         <button id="character-tab" type="button" role="tab" aria-selected="false" aria-controls="character-pane" tabindex="-1"
@@ -79,6 +81,7 @@
         </footer>
       </div>
 
+      <section id="project-pane" class="project-pane workshop-pane" role="tabpanel" aria-labelledby="project-tab" hidden></section>
       <section id="character-pane" class="character-pane workshop-pane" role="tabpanel" aria-labelledby="character-tab" hidden></section>
       <section id="appearance-pane" class="appearance-pane workshop-pane" role="tabpanel" aria-labelledby="appearance-tab" hidden></section>
       <section id="sprites-pane" class="sprites-pane workshop-pane" role="tabpanel" aria-labelledby="sprites-tab" hidden></section>

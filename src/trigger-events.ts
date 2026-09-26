@@ -8,12 +8,15 @@ export const LAUNCH_FIELDS = {
   strength: { label: 'Launch strength', min: 0.25, max: 2, step: 0.05, unit: 'x' },
 } as const;
 export const DEFAULT_LAUNCH: Readonly<LaunchSettings> = Object.freeze({ height: 8, strength: 1 });
+export const SOUND_VOLUME = { label: 'Sound volume', min: 0, max: 1, step: 0.05, unit: '' } as const;
 
 export type TriggerAction =
   | { readonly type: 'popup'; readonly title: string; readonly message: string }
   | { readonly type: 'play-video'; readonly source: string }
   | ({ readonly type: 'launch-player' } & LaunchSettings)
-  | { readonly type: 'stop-timer' };
+  | { readonly type: 'stop-timer' }
+  // Plays a sound effect without pausing the game; the next event starts immediately.
+  | { readonly type: 'play-sound'; readonly source: string; readonly volume: number };
 
 export type PresentationAction = Extract<TriggerAction, { readonly type: 'popup' | 'play-video' }>;
 export type EventOutcome = 'completed' | 'skipped' | 'cancelled';

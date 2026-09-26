@@ -832,8 +832,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
     chooseTool('select');
   }
 
-  function markSaved(): void {
-    savedDefinition = level.definition();
+  function markSaved(definition: LevelDefinition = level.definition()): void {
+    savedDefinition = definition;
     renderStatus();
   }
 
@@ -1537,6 +1537,22 @@ This restores the default ground and start location, removes all other objects a
 
   return {
     preparePlay: prepareLevel,
+    // Replaces the whole level, for example when a project opens, and treats it as saved.
+    loadLevel(definition: LevelDefinition): void {
+      if (disposed) return;
+      resetSelection();
+      level.replace(definition);
+      markSaved();
+      if (active) fitCourse();
+    },
+    // Applies a newer version of the same level, e.g. from the project server, as one edit.
+    syncLevel(definition: LevelDefinition): void {
+      if (disposed) return;
+      level.merge(definition);
+      markSaved();
+    },
+    markSaved,
+    isDirty: () => dirty(),
     setMode(mode: 'edit' | 'inactive'): void {
       if (disposed) return;
       if (mode === 'edit') {

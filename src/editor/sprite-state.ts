@@ -873,6 +873,34 @@ export class SpriteEditorState {
     });
   }
 
+  async loadDocument(document: SpriteDocument): Promise<boolean> {
+    if (!this.canEdit()) return false;
+    this.pendingAvatar = null;
+    let loaded = false;
+    await this.run(async () => {
+      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
+      await this.replaceRig(document);
+      if (this.disposed) return;
+      this.draft = document;
+      this.selectedLayerId = document.layers[0]?.id ?? null;
+      loaded = true;
+      this.warnExternalSources(document);
+    });
+    return loaded;
+  }
+
+  validatedDraft(): SpriteDocument | null {
+    try {
+      const document = validateSpriteDocument(this.draft);
+      this.validateDraft(document);
+      return document;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message, error);
+      return null;
+    }
+  }
+
   exportDocument(): string | null {
     if (!this.canEdit()) return null;
     try {

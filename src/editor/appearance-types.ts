@@ -1,9 +1,14 @@
-import { DEFAULT_ARM_IK } from '../character';
-import type { ArmIkSettings, VisualPartId } from '../character';
+import type { VisualPartId } from '../character';
 import { ModelError as AppearanceError, MODEL_LIMITS } from '../model-data';
+import { validateAlignment } from '../appearance-profile';
+import type { VisualAlignment } from '../appearance-profile';
 export { ModelError as AppearanceError, MODEL_LIMITS } from '../model-data';
 export { DEFAULT_ARM_IK, ARM_SIDES } from '../character';
 export type { ArmIkSettings, ArmSide, VisualPartId } from '../character';
+export {
+  ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS, DEFAULT_ALIGNMENT, validateAlignment, validateArmIk,
+} from '../appearance-profile';
+export type { VisualAlignment } from '../appearance-profile';
 
 export const VISUAL_PARTS = [
   { id: 'pot', label: 'Pot', hint: 'Appearance only. The existing pot collider and mass stay unchanged. Hidden while the character profile has a pot model.' },
@@ -21,78 +26,8 @@ export const VISUAL_PARTS = [
   { id: 'hammer-head', label: 'Hammer head', hint: 'Fit the model to the collision overlay. Importing does not change grip geometry or mass. Hidden while the character profile has a hammer model.' },
 ] as const;
 
-export interface VisualAlignment {
-  scale: number;
-  rotationX: number;
-  rotationY: number;
-  rotationZ: number;
-  offsetX: number;
-  offsetY: number;
-  offsetZ: number;
-}
-
-export const DEFAULT_ALIGNMENT: Readonly<VisualAlignment> = Object.freeze({
-  scale: 1, rotationX: 0, rotationY: 0, rotationZ: 0, offsetX: 0, offsetY: 0, offsetZ: 0,
-});
-
-export const ARM_IK_LIMITS = { min: -2, max: 2, step: 0.01, unit: 'm' } as const;
-export const ARM_IK_FIELDS = [
-  { side: 'left', key: 'leftHintX', label: 'Left elbow hint X' },
-  { side: 'left', key: 'leftHintY', label: 'Left elbow hint Y' },
-  { side: 'left', key: 'leftHintZ', label: 'Left elbow hint Z' },
-  { side: 'right', key: 'rightHintX', label: 'Right elbow hint X' },
-  { side: 'right', key: 'rightHintY', label: 'Right elbow hint Y' },
-  { side: 'right', key: 'rightHintZ', label: 'Right elbow hint Z' },
-] as const;
-
-export const ALIGNMENT_FIELDS: readonly {
-  key: keyof VisualAlignment; label: string; min: number; max: number; step: number; unit: string;
-}[] = [
-  { key: 'scale', label: 'Visual scale', min: 0.1, max: 4, step: 0.05, unit: 'x' },
-  { key: 'rotationX', label: 'Rotate X', min: -180, max: 180, step: 1, unit: 'deg' },
-  { key: 'rotationY', label: 'Rotate Y', min: -180, max: 180, step: 1, unit: 'deg' },
-  { key: 'rotationZ', label: 'Rotate Z', min: -180, max: 180, step: 1, unit: 'deg' },
-  { key: 'offsetX', label: 'Offset X', min: -1, max: 1, step: 0.01, unit: 'local' },
-  { key: 'offsetY', label: 'Offset Y', min: -1, max: 1, step: 0.01, unit: 'local' },
-  { key: 'offsetZ', label: 'Offset Z', min: -1, max: 1, step: 0.01, unit: 'local' },
-];
-
-export function validateArmIk(value: unknown): ArmIkSettings {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    Object.keys(value).length !== ARM_IK_FIELDS.length) {
-    throw new AppearanceError('Arm IK settings must contain all six body-relative hint coordinates.');
-  }
-  const result = { ...DEFAULT_ARM_IK };
-  for (const field of ARM_IK_FIELDS) {
-    const coordinate: unknown = Reflect.get(value, field.key);
-    if (typeof coordinate !== 'number' || !Number.isFinite(coordinate) ||
-      coordinate < ARM_IK_LIMITS.min || coordinate > ARM_IK_LIMITS.max) {
-      throw new AppearanceError(`${field.label} must be between ${ARM_IK_LIMITS.min} and ${ARM_IK_LIMITS.max} metres.`);
-    }
-    result[field.key] = coordinate;
-  }
-  return result;
-}
-
 export function isVisualPart(value: unknown): value is VisualPartId {
   return typeof value === 'string' && VISUAL_PARTS.some((part) => part.id === value);
-}
-
-export function validateAlignment(value: unknown): VisualAlignment {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    Object.keys(value).length !== ALIGNMENT_FIELDS.length) {
-    throw new AppearanceError('The saved visual alignment has an invalid format.');
-  }
-  const result = { ...DEFAULT_ALIGNMENT };
-  for (const field of ALIGNMENT_FIELDS) {
-    const candidate: unknown = Reflect.get(value, field.key);
-    if (typeof candidate !== 'number' || !Number.isFinite(candidate) ||
-      candidate < field.min || candidate > field.max) {
-      throw new AppearanceError(`${field.label} must be between ${field.min} and ${field.max}.`);
-    }
-    result[field.key] = candidate;
-  }
-  return result;
 }
 
 export interface StoredVisual {

@@ -256,6 +256,10 @@ GAME_LEVEL=levels/my-level.json GAME_SPRITES=skins/paper.json \
   GAME_ALTERNATE_SPRITES=skins/hero.json npm run dev:game
 ```
 
+A [game project](projects.md) stores the same two profiles as
+`characters/primary.json` and `characters/alternate.json`, and `GAME_PROJECT` builds
+them exactly like these variables.
+
 The build validates both profiles and each character GLB with the checks above,
 failing on any error. Each distinct GLB and PNG becomes one hashed asset, outside
 executable JavaScript. A release that uses models includes the GLB loader; one

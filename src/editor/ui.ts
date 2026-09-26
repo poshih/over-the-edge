@@ -19,7 +19,7 @@ import workshopMarkup from './workshop.html?raw';
 const WORKSHOP_CLASS = 'workshop-open';
 const TEXT_ENTRY = 'textarea, [contenteditable]:not([contenteditable="false"]), ' +
   'input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="button"], [type="submit"], [type="reset"])';
-const TABS = ['physics', 'character', 'appearance', 'sprites', 'level'] as const;
+const TABS = ['project', 'physics', 'character', 'appearance', 'sprites', 'level'] as const;
 type TuningGroup = (typeof TUNING_FIELDS)[number]['group'];
 // The groups that shape the feel most start open; the rest stay one click away.
 const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title'>>> = {
@@ -49,6 +49,7 @@ export function createUI(options: UiOptions): GameUi {
   hud.actions.append(workshopToggle);
   const panel = element<HTMLElement>(root, '.workshop');
   const workshopClose = element<HTMLButtonElement>(root, '.workshop-close');
+  const projectMount = element<HTMLElement>(root, '#project-pane');
   const characterMount = element<HTMLElement>(root, '#character-pane');
   const appearanceMount = element<HTMLElement>(root, '#appearance-pane');
   const spriteMount = element<HTMLElement>(root, '#sprites-pane');
@@ -267,9 +268,13 @@ export function createUI(options: UiOptions): GameUi {
   }, listen);
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
-    characterMount, appearanceMount, spriteMount, levelMount, workshopState,
+    projectMount, characterMount, appearanceMount, spriteMount, levelMount, workshopState,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
+    applySettings: commitSettings,
+    settings: () => settings,
+    setHud: hud.setHud,
+    setSceneTone: hud.setSceneTone,
     dispose: () => {
       events.abort();
       document.body.classList.remove(WORKSHOP_CLASS);

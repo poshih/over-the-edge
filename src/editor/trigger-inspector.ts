@@ -4,19 +4,20 @@
 // typed data (e.g. a half-typed video URL) out of LevelState, while still guaranteeing that valid
 // pending edits are never silently dropped when the author moves on to save their level.
 import { TRIGGER_LIMITS } from '../level';
-import { DEFAULT_LAUNCH, LAUNCH_FIELDS } from '../trigger-events';
+import { DEFAULT_LAUNCH, LAUNCH_FIELDS, SOUND_VOLUME } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 
-const EVENT_TYPES = ['popup', 'play-video', 'stop-timer', 'launch-player'] as const;
+const EVENT_TYPES = ['popup', 'play-video', 'play-sound', 'stop-timer', 'launch-player'] as const;
 type EventType = TriggerAction['type'];
 const EVENT_LABELS: Record<EventType, string> = {
-  popup: 'Popup', 'play-video': 'Play video', 'stop-timer': 'Stop timer', 'launch-player': 'Launch player',
+  popup: 'Popup', 'play-video': 'Play video', 'play-sound': 'Play sound', 'stop-timer': 'Stop timer', 'launch-player': 'Launch player',
 };
 
 function defaultEvent(type: EventType): TriggerAction {
   switch (type) {
     case 'popup': return { type, title: 'Event', message: 'Describe what happens here.' };
     case 'play-video': return { type, source: '' };
+    case 'play-sound': return { type, source: '', volume: 1 };
     case 'stop-timer': return { type };
     case 'launch-player': return { type, ...DEFAULT_LAUNCH };
   }
@@ -183,6 +184,33 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
         + 'video URL or a /site-relative path that anyone with the level can reach — not a private upload or a '
         + 'URL that embeds a login/credential.';
       item.append(source, sourceHelp);
+    } else if (action.type === 'play-sound') {
+      const source = document.createElement('label');
+      source.className = 'level-field';
+      source.textContent = 'Sound source (/media path or HTTPS URL)';
+      const sourceInput = document.createElement('input');
+      sourceInput.type = 'text'; sourceInput.maxLength = TRIGGER_LIMITS.source; sourceInput.value = action.source;
+      sourceInput.placeholder = '/media/bell.mp3';
+      const volume = document.createElement('label');
+      volume.className = 'level-field';
+      volume.textContent = `${SOUND_VOLUME.label} (0-1)`;
+      const volumeInput = document.createElement('input');
+      volumeInput.type = 'number'; volumeInput.inputMode = 'decimal';
+      volumeInput.min = String(SOUND_VOLUME.min); volumeInput.max = String(SOUND_VOLUME.max); volumeInput.step = String(SOUND_VOLUME.step);
+      volumeInput.value = String(action.volume);
+      const updateSound = (): void => {
+        entry.draft[index] = { type: 'play-sound', source: sourceInput.value, volume: volumeInput.valueAsNumber };
+        renderStatus();
+      };
+      sourceInput.addEventListener('input', updateSound, listen);
+      volumeInput.addEventListener('input', updateSound, listen);
+      source.append(sourceInput);
+      volume.append(volumeInput);
+      const help = document.createElement('p');
+      help.className = 'level-help';
+      help.textContent = 'Plays once without pausing the game; the next event starts right away. Add the file to ' +
+        'Project / Media library to ship it with a standalone game.';
+      item.append(source, volume, help);
     } else if (action.type === 'launch-player') {
       const fields = document.createElement('div');
       fields.className = 'level-field-grid';

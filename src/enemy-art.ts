@@ -1,114 +1,15 @@
 import { DataTexture, NearestFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector4 } from 'three';
 import { ENEMY_SPECIES } from './enemy-types';
 import type { EnemySpecies } from './enemy-types';
+import { builtInEnemyArt, DEFAULT_ENEMY_ART, ENEMY_ART_LIMITS } from './enemy-art-data';
+import type { EnemyArtSettings } from './enemy-art-data';
 
-type Frames = readonly [readonly string[], readonly string[]];
-
-// Hand-authored pixel art. Both frames face right; '.' is transparent.
-const ART: Readonly<Record<EnemySpecies, Frames>> = {
-  bird: [
-    [
-      '........................',
-      '.......##...............',
-      '......#TT#..............',
-      '.....#TTW#..............',
-      '.....#TWW#....####......',
-      '....#TWWW#...#BBEE#.....',
-      '...#TWWWW####BBEXB#.....',
-      '..##WWWWWBBBTTBBBOOO#...',
-      '.#WWWWBBBBBBBCCC#OO#....',
-      '#WW###BBBBBCCCC#..#.....',
-      '.##...#BBBCCCC#.........',
-      '.......######...........',
-      '.........O..O...........',
-      '........OO.OO...........',
-      '........................',
-      '........................',
-    ],
-    [
-      '........................',
-      '........................',
-      '........................',
-      '........................',
-      '..............####......',
-      '.............#BBEE#.....',
-      '.........####BBEXB#.....',
-      '..#######BBBTTBBBOOO#...',
-      '.#WWWWBBBBBBBCCC#OO#....',
-      '#WW###BBWWWWCCC#..#.....',
-      '.##...#BTWWWWC#.........',
-      '.......#TTWWW#..........',
-      '........#TTWWW#.........',
-      '........O#TWWW#.........',
-      '.......OO.####..........',
-      '........................',
-    ],
-  ],
-  'hollow-soldier': [
-    [
-      '......##........',
-      '.....#AA#.......',
-      '....#AAAA#......',
-      '....#AHHh#......',
-      '....#HG#G#......',
-      '.....#Hh#.......',
-      '.....#h##.......',
-      '...###aa###...S.',
-      '..#AARAAAaH#..S.',
-      '.###AARAAaH#..S.',
-      '#AaA#AAAaaH#..S.',
-      '#aRa#AAAAaH#..S.',
-      '#aRa#Arrrra#..S.',
-      '#aRa#rrrrraHH#R#',
-      '.#a#rrrrrr#..#R#',
-      '..#.#rr#rr#...#.',
-      '....#aa#aa#.....',
-      '....#a#.#a#.....',
-      '....#h#.#h#.....',
-      '....#h#.#h#.....',
-      '....#a#.#a#.....',
-      '...#AA#.#AA#....',
-      '...####.####....',
-    ],
-    [
-      '......##........',
-      '.....#AA#.......',
-      '....#AAAA#......',
-      '....#AHHh#......',
-      '....#HG#G#......',
-      '.....#Hh#.......',
-      '.....#h##.......',
-      '...###aa###...S.',
-      '..#AARAAAaH#..S.',
-      '.###AARAAaH#..S.',
-      '#AaA#AAAaaH#..S.',
-      '#aRa#AAAAaH#..S.',
-      '#aRa#Arrrra#..S.',
-      '#aRa#rrrrraHH#R#',
-      '.#a#rrrrrr#..#R#',
-      '..#.#rr#rr#...#.',
-      '....#aa#aa#.....',
-      '...#aa#..#a#....',
-      '..#hh#...#h#....',
-      '..#h#.....#h#...',
-      '..#a#.....#a#...',
-      '.#AA#.....#AA#..',
-      '.####.....####..',
-    ],
-  ],
-};
-
-const PALETTE: Readonly<Record<string, number>> = {
-  '#': 0x23343d, X: 0x15232b, B: 0x548994, T: 0x95c6c1, W: 0x365361,
-  C: 0xe4d6ae, E: 0xf7efd3, O: 0xefb65c,
-  A: 0x83938e, a: 0x485a5c, R: 0xa67e50, r: 0x615462,
-  H: 0xc9cda5, h: 0x8e9d84, G: 0xf6d777, S: 0xc5d8d5,
-};
-
-export function createEnemyAtlas() {
-  const frameCount = ART[ENEMY_SPECIES[0]].length;
-  const sizes = ENEMY_SPECIES.map((species) => ({
-    species, width: ART[species][0][0].length, height: ART[species][0].length,
+// Packs every species' two frames into one texture, so all enemies share a single draw batch.
+export function createEnemyAtlas(art: EnemyArtSettings = DEFAULT_ENEMY_ART) {
+  const frameCount = ENEMY_ART_LIMITS.frames;
+  const sources = ENEMY_SPECIES.map((species) => ({ species, art: art[species] ?? builtInEnemyArt(species) }));
+  const sizes = sources.map(({ species, art: source }) => ({
+    species, source, width: source.frames[0]![0]!.length, height: source.frames[0]!.length,
   }));
   const width = Math.max(...sizes.map((size) => size.width * frameCount));
   const height = sizes.reduce((sum, size) => sum + size.height, 0);
@@ -116,14 +17,15 @@ export function createEnemyAtlas() {
   const frames = new Map<EnemySpecies, Vector4>();
   let top = 0;
   for (const size of sizes) {
-    for (const [frameIndex, frame] of ART[size.species].entries()) {
+    const palette = new Map(Object.entries(size.source.palette).map(([key, color]) => [key, Number.parseInt(color.slice(1), 16)]));
+    for (const [frameIndex, frame] of size.source.frames.entries()) {
       if (frame.length !== size.height) throw new Error(`Inconsistent ${size.species} frame height.`);
       for (const [y, row] of frame.entries()) {
         if (row.length !== size.width) throw new Error(`Inconsistent ${size.species} frame row ${y}.`);
         for (let x = 0; x < row.length; x++) {
-          const pixel = row[x];
+          const pixel = row[x]!;
           if (pixel === '.') continue;
-          const color = PALETTE[pixel];
+          const color = palette.get(pixel);
           if (color === undefined) throw new Error(`Unknown enemy art pixel "${pixel}".`);
           // DataTexture rows start at the bottom; the authored rows read top to bottom.
           const offset = ((height - top - y - 1) * width + frameIndex * size.width + x) * 4;
@@ -140,7 +42,7 @@ export function createEnemyAtlas() {
     top += size.height;
   }
   const texture = new DataTexture(pixels, width, height, RGBAFormat, UnsignedByteType);
-  texture.name = 'original-enemy-atlas';
+  texture.name = art === DEFAULT_ENEMY_ART ? 'original-enemy-atlas' : 'project-enemy-atlas';
   texture.colorSpace = SRGBColorSpace;
   texture.minFilter = NearestFilter;
   texture.magFilter = NearestFilter;

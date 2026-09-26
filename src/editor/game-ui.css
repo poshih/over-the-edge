@@ -510,3 +510,23 @@ body[data-input-mode="touch"] .climbing-guide .input-instructions {
     outline: 2px solid Highlight;
   }
 }
+
+/* A project with a dark sky: light ink for the title and readouts drawn over the scene. */
+.game-ui[data-scene="dark"] .brand,
+.game-ui[data-scene="dark"] .climb-hud {
+  --ink: #eef0e6;
+  color: var(--ink);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+}
+
+.game-ui[data-scene="dark"] .brand .eyebrow,
+.game-ui[data-scene="dark"] .climb-hud .eyebrow,
+.game-ui[data-scene="dark"] .metric-label,
+.game-ui[data-scene="dark"] .metric-unit,
+.game-ui[data-scene="dark"] .input-state {
+  color: #c9d2c8;
+}
+
+.game-ui[data-scene="dark"] .secondary-metrics {
+  border-left-color: rgb(238 240 230 / 28%);
+}

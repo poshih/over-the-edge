@@ -37,6 +37,9 @@ import { DEFAULT_CHARACTER_RIGGING_TYPE, SpriteError } from './sprite-data';
 import type { CharacterPresentation, CharacterRiggingType, SpriteDocument } from './sprite-data';
 import { VisualVisibility } from './visual-visibility';
 import type { RigTarget } from './skeleton-pose';
+import { DEFAULT_THEME } from './theme';
+import type { GameTheme } from './theme';
+import type { EnemyArtSettings } from './enemy-art-data';
 
 const VISUAL = {
   viewHeight: 8.5,
@@ -137,7 +140,7 @@ function disposeResources(...roots: Object3D[]): void {
 export class GameView {
   readonly canvas: HTMLCanvasElement;
   readonly terrain = new TerrainView();
-  readonly enemies = new EnemyView();
+  readonly enemies: EnemyView;
   readonly sprites: SpriteRig;
   private readonly flags = new FlagView();
   private readonly updrafts = new UpdraftView();
@@ -187,13 +190,31 @@ export class GameView {
   private hammer: Point;
   private readonly projection = new Vector3();
   private readonly spriteTargets = new Map<string, RigTarget>();
+  private theme: GameTheme;
+  private readonly fog: Fog;
+  // Each light exists in both the scene and foreground passes.
+  private readonly lights: {
+    readonly hemisphere: HemisphereLight[]; readonly ambient: AmbientLight[];
+    readonly sun: DirectionalLight[]; readonly rim: DirectionalLight[];
+  } = { hemisphere: [], ambient: [], sun: [], rim: [] };
+  private readonly mountains: Mesh<ExtrudeGeometry, MeshBasicMaterial>[] = [];
+  private readonly sunDisc: Mesh<CircleGeometry, MeshBasicMaterial>;
+  private readonly cursorMaterial: MeshBasicMaterial;
+  private readonly targetMaterial: LineDashedMaterial;
+  private palette: Record<keyof GameTheme['character'], MeshStandardMaterial> | null = null;
+  private themeWrites = 0;
 
   constructor(canvas: HTMLCanvasElement, initial: PhysicsFrame, level: LevelDefinition, options: {
     // Loads imported character GLBs; hosts without one reject profiles that reference models.
     characterModels?: CharacterModelLoader | null;
+    theme?: GameTheme;
+    enemyArt?: EnemyArtSettings;
   } = {}) {
     this.canvas = canvas;
     this.characterModels = options.characterModels ?? null;
+    this.theme = options.theme ?? DEFAULT_THEME;
+    const theme = this.theme;
+    this.enemies = new EnemyView(options.enemyArt);
     const root = this.part(initial, 'root');
     const head = this.part(initial, 'head');
     this.focus = { x: root.x, y: root.y };
@@ -201,26 +222,30 @@ export class GameView {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.35;
+    this.renderer.toneMappingExposure = theme.exposure;
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
-    this.renderer.setClearColor(0xd8e3d6);
-    this.scene.fog = new Fog(0xd8e3d6, 35, 85);
-    this.foreground.fog = this.scene.fog;
-    const sunlight = new DirectionalLight(0xfff0d4, 3);
-    sunlight.position.set(-5, 12, 10);
-    const rimLight = new DirectionalLight(0x9ce7d5, 1.5);
-    rimLight.position.set(8, 3, -4);
-    for (const light of [
-      new HemisphereLight(0xfff6db, 0x4b6866, 2.4),
-      new AmbientLight(0xf4e4ca, 0.5), sunlight, rimLight,
-    ]) {
-      this.scene.add(light);
-      this.foreground.add(light.clone());
+    this.renderer.setClearColor(theme.sky);
+    this.fog = new Fog(theme.fog.color, theme.fog.near, theme.fog.far);
+    this.scene.fog = this.fog;
+    this.foreground.fog = this.fog;
+    for (const pass of [this.scene, this.foreground]) {
+      const hemisphere = new HemisphereLight(theme.hemisphere.sky, theme.hemisphere.ground, theme.hemisphere.intensity);
+      const ambient = new AmbientLight(theme.ambient.color, theme.ambient.intensity);
+      const sunlight = new DirectionalLight(theme.sun.color, theme.sun.intensity);
+      sunlight.position.set(-5, 12, 10);
+      const rimLight = new DirectionalLight(theme.rim.color, theme.rim.intensity);
+      rimLight.position.set(8, 3, -4);
+      pass.add(hemisphere, ambient, sunlight, rimLight);
+      this.lights.hemisphere.push(hemisphere);
+      this.lights.ambient.push(ambient);
+      this.lights.sun.push(sunlight);
+      this.lights.rim.push(rimLight);
     }
     this.camera.position.z = VISUAL.depth;
     this.camera.near = 0.1;
     this.camera.far = 100;
+    this.sunDisc = new Mesh(new CircleGeometry(1.8, 48), new MeshBasicMaterial({ color: theme.sunDisc.color, fog: false }));
     this.buildScenery();
     this.scene.add(this.terrain.root, this.flags.root, this.updrafts.root, this.enemies.root, this.decorations);
     this.setLabels(level.labels);
@@ -229,16 +254,18 @@ export class GameView {
     this.buildPlayer();
     this.sprites = this.createSlot().rig;
 
-    const cursorMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });
+    const cursorMaterial = new MeshBasicMaterial({ color: theme.aim.cursor, transparent: true, opacity: 0.9, depthTest: false });
+    this.cursorMaterial = cursorMaterial;
     this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
     this.cursor.add(new Mesh(new CircleGeometry(0.018, 12), cursorMaterial));
     this.cursor.renderOrder = 20;
     this.scene.add(this.cursor);
     const targetGeometry = new BufferGeometry();
     targetGeometry.setAttribute('position', new BufferAttribute(this.targetPositions, 3));
-    this.targetLine = new Line(targetGeometry, new LineDashedMaterial({
-      color: 0x365650, transparent: true, opacity: 0.45, dashSize: 0.07, gapSize: 0.05, depthTest: false,
-    }));
+    this.targetMaterial = new LineDashedMaterial({
+      color: theme.aim.line, transparent: true, opacity: 0.45, dashSize: 0.07, gapSize: 0.05, depthTest: false,
+    });
+    this.targetLine = new Line(targetGeometry, this.targetMaterial);
     this.targetLine.frustumCulled = false;
     this.scene.add(this.targetLine);
 
@@ -250,6 +277,44 @@ export class GameView {
 
   get visuals(): ReadonlyMap<VisualPartId, VisualBinding> {
     return this.bindings;
+  }
+
+  // Restyles the existing lights, fog, backdrop and materials in place; nothing is rebuilt.
+  setTheme(theme: GameTheme): void {
+    if (theme === this.theme) return;
+    this.theme = theme;
+    this.themeWrites++;
+    this.renderer.setClearColor(theme.sky);
+    this.renderer.toneMappingExposure = theme.exposure;
+    this.fog.color.set(theme.fog.color);
+    this.fog.near = theme.fog.near;
+    this.fog.far = theme.fog.far;
+    for (const light of this.lights.hemisphere) {
+      light.color.set(theme.hemisphere.sky);
+      light.groundColor.set(theme.hemisphere.ground);
+      light.intensity = theme.hemisphere.intensity;
+    }
+    for (const [lights, setting] of [
+      [this.lights.ambient, theme.ambient], [this.lights.sun, theme.sun], [this.lights.rim, theme.rim],
+    ] as const) {
+      for (const light of lights) {
+        light.color.set(setting.color);
+        light.intensity = setting.intensity;
+      }
+    }
+    this.sunDisc.visible = theme.sunDisc.visible;
+    this.sunDisc.material.color.set(theme.sunDisc.color);
+    const backdrop = [theme.backdrop.far, theme.backdrop.middle, theme.backdrop.near];
+    for (const [index, mountains] of this.mountains.entries()) {
+      mountains.visible = theme.backdrop.visible;
+      mountains.material.color.set(backdrop[index]!);
+    }
+    this.cursorMaterial.color.set(theme.aim.cursor);
+    this.targetMaterial.color.set(theme.aim.line);
+    if (this.palette !== null) {
+      for (const key of Object.keys(this.palette) as (keyof GameTheme['character'])[]) this.palette[key].color.set(theme.character[key]);
+      this.shading.refresh();
+    }
   }
 
   addLayer(layer: ViewLayer): void {
@@ -603,6 +668,7 @@ export class GameView {
       hammerModel: this.propModels.hammer === null ? null : this.propModels.hammer.inspect(),
       potModel: this.propModels.pot === null ? null : this.propModels.pot.inspect(),
       shading: this.shading.inspect(),
+      theme: { writes: this.themeWrites, sky: this.theme.sky, fog: { ...this.theme.fog }, backdrop: this.theme.backdrop.visible },
       characters: this.characterSelection(),
       armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },
     };
@@ -717,10 +783,11 @@ export class GameView {
   }
 
   private buildScenery(): void {
+    const { backdrop } = this.theme;
     const layers = [
-      { color: 0xb9cbbc, z: -24, base: -5, height: 14 },
-      { color: 0x9fb7aa, z: -16, base: -6, height: 11 },
-      { color: 0x87a69a, z: -10, base: -8, height: 9 },
+      { color: backdrop.far, z: -24, base: -5, height: 14 },
+      { color: backdrop.middle, z: -16, base: -6, height: 11 },
+      { color: backdrop.near, z: -10, base: -8, height: 9 },
     ];
     for (const [layerIndex, layer] of layers.entries()) {
       const vertices: Point[] = [{ x: -70, y: layer.base }, { x: 70, y: layer.base }];
@@ -733,21 +800,25 @@ export class GameView {
       const mountains = new Mesh(new ExtrudeGeometry(polygonShape(vertices), { depth: 0.1, bevelEnabled: false }),
         new MeshBasicMaterial({ color: layer.color }));
       mountains.position.z = layer.z;
+      mountains.visible = backdrop.visible;
+      this.mountains.push(mountains);
       this.scenery.add(mountains);
     }
-    const sun = new Mesh(new CircleGeometry(1.8, 48), new MeshBasicMaterial({ color: 0xf6e5bd, fog: false }));
-    sun.position.set(-4.2, 8, -35);
-    this.scenery.add(sun);
+    this.sunDisc.position.set(-4.2, 8, -35);
+    this.sunDisc.visible = this.theme.sunDisc.visible;
+    this.scenery.add(this.sunDisc);
     this.scene.add(this.scenery);
   }
 
   private buildPlayer(): void {
-    const brass = new MeshStandardMaterial({ color: 0xb9874e, roughness: 0.34, metalness: 0.65 });
-    const trim = new MeshStandardMaterial({ color: 0xe5c180, roughness: 0.4, metalness: 0.5 });
-    const dark = new MeshStandardMaterial({ color: 0x233f41, roughness: 0.5, metalness: 0.4 });
-    const suit = new MeshStandardMaterial({ color: 0xcd7651, roughness: 0.7 });
-    const ceramic = new MeshStandardMaterial({ color: 0xece1c6, roughness: 0.5, metalness: 0.12 });
-    const wood = new MeshStandardMaterial({ color: 0x815636, roughness: 0.7 });
+    const colors = this.theme.character;
+    const brass = new MeshStandardMaterial({ color: colors.pot, roughness: 0.34, metalness: 0.65 });
+    const trim = new MeshStandardMaterial({ color: colors.trim, roughness: 0.4, metalness: 0.5 });
+    const dark = new MeshStandardMaterial({ color: colors.dark, roughness: 0.5, metalness: 0.4 });
+    const suit = new MeshStandardMaterial({ color: colors.suit, roughness: 0.7 });
+    const ceramic = new MeshStandardMaterial({ color: colors.ceramic, roughness: 0.5, metalness: 0.12 });
+    const wood = new MeshStandardMaterial({ color: colors.wood, roughness: 0.7 });
+    this.palette = { pot: brass, trim, dark, suit, ceramic, wood };
 
     const pot = new Group();
     const profile = [
