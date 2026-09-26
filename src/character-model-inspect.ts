@@ -10,7 +10,7 @@ import {
 } from './character-profile';
 import type { AvatarBoneMap, AvatarJointId, PartialAvatarBoneMap } from './character-profile';
 
-export type CharacterModelUsage = 'avatar' | 'hammer';
+export type CharacterModelUsage = 'avatar' | 'hammer' | 'pot';
 
 export interface CharacterModelJoint {
   readonly node: number;
@@ -48,6 +48,47 @@ export interface ResolvedAvatarJoints {
 
 // Hammers follow the physical tool frame: origin at the butt, handle along +X, in metres.
 export const HAMMER_MODEL_BOUNDS = { minimumLength: 0.1, maximumExtent: 4 } as const;
+// Pots follow the physical pot body: +Y up, origin at the bottom-centre, front facing +Z, in metres.
+export const POT_MODEL_BOUNDS = { baseTolerance: 0.05, minimumHeight: 0.1, maximumExtent: 4 } as const;
+
+const metres = (value: number): string => `${Number(value.toFixed(3))} m`;
+
+function checkHammer(bounds: Box3): void {
+  if (bounds.isEmpty() || bounds.max.x < HAMMER_MODEL_BOUNDS.minimumLength || bounds.max.x <= -bounds.min.x) {
+    throw new CharacterModelError('invalid-model',
+      'Model the hammer with its origin at the butt of the handle and the handle along +X.');
+  }
+  if (Math.max(...bounds.min.toArray().map(Math.abs), ...bounds.max.toArray().map(Math.abs)) > HAMMER_MODEL_BOUNDS.maximumExtent) {
+    throw new CharacterModelError('invalid-model',
+      `Model the hammer in metres: it must stay within ${HAMMER_MODEL_BOUNDS.maximumExtent} m of its origin.`);
+  }
+}
+
+// Unit, axis and origin mistakes all move the base off the origin or the origin off the footprint.
+function checkPot(bounds: Box3): void {
+  if (bounds.isEmpty()) {
+    throw new CharacterModelError('invalid-model', 'Model the pot with +Y up and its origin at the bottom-centre.');
+  }
+  if (Math.max(...bounds.min.toArray().map(Math.abs), ...bounds.max.toArray().map(Math.abs)) > POT_MODEL_BOUNDS.maximumExtent) {
+    throw new CharacterModelError('invalid-model',
+      `Model the pot in metres: it must stay within ${POT_MODEL_BOUNDS.maximumExtent} m of its origin.`);
+  }
+  if (Math.abs(bounds.min.y) > POT_MODEL_BOUNDS.baseTolerance) {
+    throw new CharacterModelError('invalid-model',
+      `Put the pot's origin at its bottom-centre with +Y up: its lowest point is at y = ${metres(bounds.min.y)}, ` +
+      `not within ${metres(POT_MODEL_BOUNDS.baseTolerance)} of the origin.`);
+  }
+  if (bounds.max.y < POT_MODEL_BOUNDS.minimumHeight) {
+    throw new CharacterModelError('invalid-model',
+      `Model the pot with +Y up: it must rise at least ${metres(POT_MODEL_BOUNDS.minimumHeight)} above its origin.`);
+  }
+  const size = bounds.getSize(new Vector3());
+  const centre = bounds.getCenter(new Vector3());
+  if (Math.abs(centre.x) > size.x / 4 || Math.abs(centre.z) > size.z / 4) {
+    throw new CharacterModelError('invalid-model',
+      'Centre the pot on its origin: the origin must lie in the middle of the pot\'s footprint.');
+  }
+}
 
 const JSON_CHUNK = 0x4e4f534a;
 const BIN_CHUNK = 0x004e4942;
@@ -319,20 +360,17 @@ function inspect(data: ArrayBuffer, usage: CharacterModelUsage): CharacterModelR
   }
 
   const skins = list(json.skins, 'skin').map(skin => object(skin, 'skin'));
-  if (usage === 'hammer') {
+  if (usage === 'avatar') {
+    if (skinnedMeshes.length === 0) {
+      throw new CharacterModelError('no-skin', 'This GLB has no skinned mesh. Export the character with its armature and skin weights.');
+    }
+  } else {
+    // Props follow a rigid physical frame, so they must be static.
     if (skins.length > 0 || skinnedMeshes.length > 0) {
-      throw new CharacterModelError('unexpected-skin', 'A hammer model must be a static mesh without skins.');
+      throw new CharacterModelError('unexpected-skin', `A ${usage} model must be a static mesh without skins.`);
     }
-    if (bounds.isEmpty() || bounds.max.x < HAMMER_MODEL_BOUNDS.minimumLength || bounds.max.x <= -bounds.min.x) {
-      throw new CharacterModelError('invalid-model',
-        'Model the hammer with its origin at the butt of the handle and the handle along +X.');
-    }
-    if (Math.max(...bounds.min.toArray().map(Math.abs), ...bounds.max.toArray().map(Math.abs)) > HAMMER_MODEL_BOUNDS.maximumExtent) {
-      throw new CharacterModelError('invalid-model',
-        `Model the hammer in metres: it must stay within ${HAMMER_MODEL_BOUNDS.maximumExtent} m of its origin.`);
-    }
-  } else if (skinnedMeshes.length === 0) {
-    throw new CharacterModelError('no-skin', 'This GLB has no skinned mesh. Export the character with its armature and skin weights.');
+    if (usage === 'hammer') checkHammer(bounds);
+    else checkPot(bounds);
   }
 
   const joints = new Map<number, CharacterModelJoint>();

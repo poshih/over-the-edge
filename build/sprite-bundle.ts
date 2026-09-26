@@ -13,9 +13,9 @@ const MODELS = 'virtual:game-character-models';
 const RESOLVED = { primary: `\0${PRIMARY}`, alternate: `\0${ALTERNATE}`, models: `\0${MODELS}` } as const;
 const LOADER = fileURLToPath(new URL('../src/character-model-loader.ts', import.meta.url));
 
-// Validates character GLBs against MODEL_LIMITS, their skins and bone maps, as the loader will.
+// Validates character GLBs against MODEL_LIMITS, their skins, bone maps and prop conventions, as the loader will.
 function validateModels(document: SpriteDocument, variable: string): void {
-  const profiles = [['avatar', document.avatar], ['hammer', document.hammer]] as const;
+  const profiles = [['avatar', document.avatar], ['hammer', document.hammer], ['pot', document.pot]] as const;
   for (const [usage, profile] of profiles) {
     if (profile === undefined) continue;
     const model = characterModel(document, profile.model);
@@ -101,7 +101,7 @@ export function spriteBundle(options: {
         });
         code += `,models:[${models.join(',')}]`;
       }
-      for (const key of ['avatar', 'hammer', 'shading'] as const) {
+      for (const key of ['avatar', 'hammer', 'pot', 'shading'] as const) {
         if (document[key] !== undefined) code += `,${key}:${JSON.stringify(document[key])}`;
       }
       return `${code}};`;

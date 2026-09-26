@@ -21,6 +21,15 @@ const HEAD_HALF_LENGTH = Math.max(...RIG.headVertices.map(point => point.x));
 const HEAD_HALF_HEIGHT = Math.max(...RIG.headVertices.map(point => point.y));
 const metres = (value: number): string => `${Number(value.toFixed(2))} m`;
 
+// The physical pot outline, measured from its bottom-centre (the pot model's origin).
+const POT_OUTLINE = (() => {
+  const points = RIG.potVertices.map(point => ({ radius: Math.abs(point.x), height: point.y - RIG.potBottom }));
+  const top = Math.max(...points.map(point => point.height));
+  const radius = (height: number) => Math.max(...points.filter(point => point.height === height).map(point => point.radius));
+  const widest = points.reduce((best, point) => point.radius > best.radius ? point : best);
+  return { base: radius(0), widest, rim: { radius: radius(top), height: top } };
+})();
+
 const CHARACTER_TYPES: Readonly<Record<CharacterRiggingType, { label: string; description: string }>> = {
   'model-3d': {
     label: 'Mesh parts (3D)',
@@ -136,6 +145,20 @@ export function createCharacterEditor(options: {
         <button type="button" class="button character-hammer-remove">Use two-part hammer</button>
       </section>
 
+      <section class="character-example character-pot" aria-labelledby="character-pot-heading">
+        <h4 id="character-pot-heading">Pot model (GLB)</h4>
+        <p class="appearance-format">Replace the pot with one rigid model, in every character type. It follows the
+          physical pot body at the pot's own depth, so its walls hide a body inside it. Model it in metres with
+          +Y up, its origin at the bottom-centre of the pot and its front facing +Z. The physical pot is
+          ${metres(POT_OUTLINE.rim.height)} tall: base radius ${metres(POT_OUTLINE.base)}, widest radius
+          ${metres(POT_OUTLINE.widest.radius)} at ${metres(POT_OUTLINE.widest.height)}, rim radius
+          ${metres(POT_OUTLINE.rim.radius)}. Collision stays physical.</p>
+        <label class="appearance-label" for="character-pot-file">Pot GLB</label>
+        <input id="character-pot-file" type="file" accept=".glb,model/gltf-binary" />
+        <p class="appearance-format character-pot-status" role="status" aria-live="polite"></p>
+        <button type="button" class="button character-pot-remove">Use default pot</button>
+      </section>
+
       <fieldset class="tuning-group character-shading">
         <legend>Avatar shading</legend>
         <div class="character-shading-modes" role="radiogroup" aria-label="Shading mode">
@@ -188,7 +211,7 @@ export function createCharacterEditor(options: {
           <button type="button" class="button character-export">Export profile JSON</button>
         </div>
         <p class="appearance-format">Includes the character type, 3D arm forward distance, sprite layout, 2D skeleton, directional settings,
-          embedded PNGs, the imported avatar and hammer GLBs, bone map and shading. Public image URLs remain
+          embedded PNGs, the imported avatar, hammer and pot GLBs, bone map and shading. Public image URLs remain
           references. Import limit: ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB.</p>
       </fieldset>
       <p class="appearance-format character-external-warning" hidden>This profile references external images.
@@ -245,6 +268,9 @@ export function createCharacterEditor(options: {
   const hammerFile = element<HTMLInputElement>(root, '#character-hammer-file');
   const hammerStatus = element<HTMLParagraphElement>(root, '.character-hammer-status');
   const hammerRemove = element<HTMLButtonElement>(root, '.character-hammer-remove');
+  const potFile = element<HTMLInputElement>(root, '#character-pot-file');
+  const potStatus = element<HTMLParagraphElement>(root, '.character-pot-status');
+  const potRemove = element<HTMLButtonElement>(root, '.character-pot-remove');
   const shadingModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-shading-mode"]'));
   const outlineEnabled = element<HTMLInputElement>(root, '#character-outline-enabled');
   const outlineColor = element<HTMLInputElement>(root, '#character-outline-color');
@@ -300,9 +326,15 @@ export function createCharacterEditor(options: {
   hammerFile.addEventListener('change', () => {
     const file = hammerFile.files?.[0];
     hammerFile.value = '';
-    if (file !== undefined) void options.state.importHammerModel(file);
+    if (file !== undefined) void options.state.importPropModel('hammer', file);
   }, listen);
-  hammerRemove.addEventListener('click', () => { void options.state.removeHammerModel(); }, listen);
+  hammerRemove.addEventListener('click', () => { void options.state.removePropModel('hammer'); }, listen);
+  potFile.addEventListener('change', () => {
+    const file = potFile.files?.[0];
+    potFile.value = '';
+    if (file !== undefined) void options.state.importPropModel('pot', file);
+  }, listen);
+  potRemove.addEventListener('click', () => { void options.state.removePropModel('pot'); }, listen);
 
   for (const type of CHARACTER_RIGGING_TYPES) {
     const option = document.createElement('option');
@@ -449,6 +481,10 @@ export function createCharacterEditor(options: {
     setText(hammerStatus, snapshot.hammerModel === null ? 'Using the two-part hammer (default).' :
       `Using "${snapshot.hammerModel.name}" as a one-model hammer.`);
     hammerRemove.disabled = disabled || snapshot.hammerModel === null;
+    potFile.disabled = disabled;
+    setText(potStatus, snapshot.potModel === null ? 'Using the default pot.' :
+      `Using "${snapshot.potModel.name}" as the pot model.`);
+    potRemove.disabled = disabled || snapshot.potModel === null;
     const shading = snapshot.shading;
     if (shading.outline !== null) lastOutline = shading.outline;
     for (const input of shadingModes) {

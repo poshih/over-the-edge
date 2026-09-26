@@ -746,6 +746,7 @@ export class SpriteRig {
       models: (this.assets.models ?? []).map(model => ({ id: model.id, name: model.name })),
       avatarModel: this.assets.avatar === undefined ? null : { model: this.assets.avatar.model, boneMap: { ...this.assets.avatar.boneMap } },
       hammerModel: this.assets.hammer?.model ?? null,
+      potModel: this.assets.pot?.model ?? null,
       busy: !this.disposed && (this.replacement !== null || this.pendingDecodes > 0),
       pendingDecodeCount: this.pendingDecodes,
       layerCount: this.layers.size,

@@ -1,6 +1,6 @@
 # Feature request: pot model in the character profile and releases
 
-**Date:** 2026-09-26 · **Baseline:** `088e9c9` · **Status:** requested, not started.
+**Date:** 2026-09-26 · **Baseline:** `088e9c9` · **Status:** implemented; see [pot model](docs/characters.md#pot-model).
 
 Follow-up to [imported skinned characters](FEATURE-REQUEST-skinned-character.md). A game's 3D
 character is typically three pieces: a skinned body, the pot and the hammer. Schema 8 carries the

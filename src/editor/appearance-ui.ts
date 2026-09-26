@@ -29,8 +29,8 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
           connected, skinned upper body instead; its pot and hammer remain separate. Choose the type in Character.</p>
         <p>Import a GLB to replace an individual rigid part. The existing visual 3D arm IK and Planck 2D
           physics keep driving it. Body-part imports are shown in Mesh parts mode; pot and hammer imports
-          also work with Avatar mode. Import a whole skinned avatar or a one-model hammer in Character;
-          imported animation is not played.</p>
+          also work with Avatar mode. Import a whole skinned avatar, a one-model hammer or a pot model in
+          Character; a profile hammer or pot model hides the matching imports here. Imported animation is not played.</p>
         <p><strong>Cosmetic only:</strong> models do not change collision shapes, mass or grip.</p>
         <p>GLB imports stay separately browser-local. They are not bundled into exported character / sprite profiles.</p>
       </section>

@@ -61,9 +61,9 @@ export interface CharacterPresentation extends CharacterAssets {
   readonly armForwardDistance: number;
 }
 
-// Schema 8 is written only when character models or shading are present, schema 7 only when a
-// layer has a flipbook; other documents stay schema 6.
-export type SpriteSchemaVersion = 6 | 7 | 8;
+// Schema 9 is written only when a pot model is present, schema 8 only when other character models
+// or shading are, schema 7 only when a layer has a flipbook; other documents stay schema 6.
+export type SpriteSchemaVersion = 6 | 7 | 8 | 9;
 
 export interface SpriteDocument extends CharacterPresentation {
   readonly schemaVersion: SpriteSchemaVersion;
@@ -98,6 +98,7 @@ export const FLIPBOOK_LIMITS = {
 
 const FLIPBOOK_SCHEMA_VERSION = 7;
 const CHARACTER_SCHEMA_VERSION = 8;
+const POT_SCHEMA_VERSION = 9;
 
 // Largest accepted profile file: the sprite budget plus two embedded character models.
 export const SPRITE_FILE_BYTES = SPRITE_LIMITS.documentBytes + CHARACTER_MODEL_LIMITS.encodedBytes;
@@ -125,6 +126,7 @@ export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
 });
 
 export function spriteSchemaVersion(layers: readonly SpriteLayer[], character: CharacterAssets = {}): SpriteSchemaVersion {
+  if (character.pot !== undefined) return POT_SCHEMA_VERSION;
   if (hasCharacterAssets(character)) return CHARACTER_SCHEMA_VERSION;
   return layers.some(layer => layer.flipbook !== undefined) ? FLIPBOOK_SCHEMA_VERSION : 6;
 }
@@ -355,8 +357,8 @@ export function spriteMigrationNotice(value: unknown): string | null {
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
   if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 &&
-    version !== FLIPBOOK_SCHEMA_VERSION && version !== CHARACTER_SCHEMA_VERSION) {
-    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5, 6, 7 or 8.');
+    version !== FLIPBOOK_SCHEMA_VERSION && version !== CHARACTER_SCHEMA_VERSION && version !== POT_SCHEMA_VERSION) {
+    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5, 6, 7, 8 or 9.');
   }
   const legacy = version === 1;
   const fields = ['schemaVersion', 'images', 'layers'];
@@ -367,6 +369,9 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const assetFields = CHARACTER_ASSET_FIELDS.filter(key => Object.hasOwn(value as object, key));
   if (assetFields.length > 0 && version < CHARACTER_SCHEMA_VERSION) {
     throw new SpriteError(`Character models and shading require sprite schema version ${CHARACTER_SCHEMA_VERSION}.`);
+  }
+  if (assetFields.includes('pot') && version < POT_SCHEMA_VERSION) {
+    throw new SpriteError(`A pot model requires sprite schema version ${POT_SCHEMA_VERSION}.`);
   }
   fields.push(...assetFields);
   const document = record(value, fields, 'A sprite document');

@@ -6,7 +6,7 @@ export { DEFAULT_ARM_IK, ARM_SIDES } from '../character';
 export type { ArmIkSettings, ArmSide, VisualPartId } from '../character';
 
 export const VISUAL_PARTS = [
-  { id: 'pot', label: 'Pot', hint: 'Appearance only. The existing pot collider and mass stay unchanged.' },
+  { id: 'pot', label: 'Pot', hint: 'Appearance only. The existing pot collider and mass stay unchanged. Hidden while the character profile has a pot model.' },
   { id: 'torso', label: 'Torso and neck', hint: 'Follows the non-rotating player root.' },
   { id: 'character-head', label: 'Character head', hint: 'Head, helmet or face model. This is not the hammer head.' },
   { id: 'left-upper-arm', label: 'Left upper arm', hint: 'Length along local Y. Follows visual-only arm IK.' },
@@ -17,8 +17,8 @@ export const VISUAL_PARTS = [
   { id: 'right-elbow', label: 'Right elbow', hint: 'Optional visual joint cover; no physics body is added.' },
   { id: 'left-hand', label: 'Left hand', hint: 'Follows the left grip point on the handle.' },
   { id: 'right-hand', label: 'Right hand', hint: 'Follows the right grip point on the handle.' },
-  { id: 'hammer-shaft', label: 'Hammer shaft', hint: 'One full shaft along local X, stretched between its physical endpoints. It does not collide.' },
-  { id: 'hammer-head', label: 'Hammer head', hint: 'Fit the model to the collision overlay. Importing does not change grip geometry or mass.' },
+  { id: 'hammer-shaft', label: 'Hammer shaft', hint: 'One full shaft along local X, stretched between its physical endpoints. It does not collide. Hidden while the character profile has a hammer model.' },
+  { id: 'hammer-head', label: 'Hammer head', hint: 'Fit the model to the collision overlay. Importing does not change grip geometry or mass. Hidden while the character profile has a hammer model.' },
 ] as const;
 
 export interface VisualAlignment {

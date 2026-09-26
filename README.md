@@ -641,9 +641,10 @@ forearm and hand joints. The existing arm IK, grips, head gaze and arm forward
 distance then drive them, with arm lengths from the GLB's bind pose; unmapped
 joints follow their nearest mapped ancestor. Mixamo names map automatically,
 and invalid models or maps fail with typed error codes. The same tab adds a
-**one-model hammer** GLB bound rigidly to the physical tool frame, and **PBR or
+**one-model hammer** GLB bound rigidly to the physical tool frame, a **pot model**
+GLB that follows the physical pot body and hides the body inside it, and **PBR or
 cel shading** (stepped bands with an optional outline) that can be flipped live
-to compare. All three are part of the character profile, so Save, JSON and
+to compare. All of these are part of the character profile, so Save, JSON and
 `GAME_SPRITES` carry them. See [imported 3D characters](docs/characters.md).
 Appearance's per-part GLB replacements remain separate, browser-local assets;
 imported animation clips are not played.
@@ -709,7 +710,8 @@ Parts can be replaced independently: pot, torso/neck, character head, each upper
 arm, forearm, elbow and hand, the full hammer shaft, and the hammer head. Parts
 without an import keep their procedural visual in Mesh parts mode. In Avatar
 mode, body-part imports remain stored but hidden; pot and hammer imports still
-apply. Invisible physics guide bodies do not need models.
+apply. A character profile's hammer or pot model hides the matching imports.
+Invisible physics guide bodies do not need models.
 
 Imports are **cosmetic only**. They attach to the existing physics and visual-IK
 anchors; they do not replace colliders, change mass, or create new rigid bodies.

@@ -1,6 +1,6 @@
-// Generated GLB fixtures for character verification: a Mixamo-named, GPU-skinned humanoid and a
-// static one-model hammer. Everything is procedural, so no third-party artwork is involved.
-import { BoxGeometry, CylinderGeometry, Euler, Matrix4, Quaternion, Vector3 } from 'three';
+// Generated GLB fixtures for character verification: a Mixamo-named, GPU-skinned humanoid and
+// static hammer and pot models. Everything is procedural, so no third-party artwork is involved.
+import { BoxGeometry, CylinderGeometry, Euler, LatheGeometry, Matrix4, Quaternion, Vector2, Vector3 } from 'three';
 
 const DEGREES = Math.PI / 180;
 const ARM_LENGTHS = { upper: 0.82, forearm: 0.82 };
@@ -288,6 +288,50 @@ export function hammerGlb(options = {}) {
     materials: [
       { name: 'Wood', pbrMetallicRoughness: { baseColorFactor: [0.5, 0.3, 0.16, 1], metallicFactor: 0, roughnessFactor: 0.8 } },
       { name: 'Iron', pbrMetallicRoughness: { baseColorFactor: [0.3, 0.32, 0.36, 1], metallicFactor: 0.8, roughnessFactor: 0.35 } },
+    ],
+  });
+}
+
+// The physical pot's outline from its bottom-centre: base, lower wall, widest point and rim.
+export const POT_OUTLINE = Object.freeze([[0.2, 0], [0.44, 0.19], [0.5, 0.6], [0.43, 0.8]]);
+
+// A static pot: +Y up, origin at the bottom-centre, front badge facing +Z, walls on the physical
+// outline. `origin: 'centre'` or 'edge', `axis: 'z'` and `scale` produce convention violations.
+export function potGlb(options = {}) {
+  const inner = [[0.39, 0.8], [0.45, 0.6], [0.4, 0.22], [0.17, 0.05], [0, 0.05]];
+  const profile = [[0, 0], ...POT_OUTLINE, ...inner].map(([x, y]) => new Vector2(x, y));
+  const body = new LatheGeometry(profile, 32);
+  const badge = new BoxGeometry(0.16, 0.12, 0.04);
+  badge.translate(0, 0.42, 0.49);
+  const transform = new Matrix4();
+  if (options.origin === 'centre') transform.makeTranslation(0, -0.4, 0);
+  if (options.origin === 'edge') transform.makeTranslation(0.5, 0, 0);
+  if (options.axis === 'z') transform.makeRotationX(Math.PI / 2);
+  if (options.scale !== undefined) transform.makeScale(options.scale, options.scale, options.scale);
+  const builder = new GlbBuilder();
+  const primitives = [body, badge].map((geometry, material) => {
+    geometry.applyMatrix4(transform);
+    const positions = Array.from(geometry.getAttribute('position').array);
+    const primitive = {
+      attributes: {
+        POSITION: builder.accessor(new Float32Array(positions), 'VEC3', 5126, positionBounds(positions)),
+        NORMAL: builder.accessor(new Float32Array(geometry.getAttribute('normal').array), 'VEC3', 5126),
+      },
+      indices: builder.accessor(new Uint16Array(geometry.index.array), 'SCALAR', 5123),
+      material,
+    };
+    geometry.dispose();
+    return primitive;
+  });
+  return builder.write({
+    asset: { version: '2.0', generator: 'Over the Edge pot fixture' },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ name: 'Pot', mesh: 0 }],
+    meshes: [{ name: 'Pot', primitives }],
+    materials: [
+      { name: 'Glaze', doubleSided: true, pbrMetallicRoughness: { baseColorFactor: [0.2, 0.46, 0.4, 1], metallicFactor: 0.1, roughnessFactor: 0.35 } },
+      { name: 'Badge', pbrMetallicRoughness: { baseColorFactor: [0.92, 0.86, 0.72, 1], metallicFactor: 0, roughnessFactor: 0.6 } },
     ],
   });
 }

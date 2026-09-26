@@ -16,10 +16,10 @@ import { AvatarView } from './avatar-view';
 import { resolveAvatarJoints } from './character-model-inspect';
 import type { CharacterModelUsage } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
-import { characterModel, DEFAULT_CHARACTER_SHADING, sameBoneMap } from './character-profile';
-import type { AvatarBoneMap } from './character-profile';
+import { characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameBoneMap } from './character-profile';
+import type { AvatarBoneMap, PropModelRole } from './character-profile';
 import { CharacterShadingView } from './character-shading';
-import { HammerModelView } from './hammer-model-view';
+import { PropModelView } from './prop-model-view';
 import { SkinnedAvatarView } from './skinned-avatar-view';
 import { HeadAim } from './head-aim';
 import { PHYSICS, RIG } from './config';
@@ -105,12 +105,13 @@ interface CharacterSlot {
   presentation: CharacterPresentation;
   readonly models: Map<CharacterModelUsage, Map<string, LoadedCharacterModel>>;
   avatar: { readonly model: LoadedCharacterModel; readonly boneMap: AvatarBoneMap; readonly view: SkinnedAvatarView } | null;
-  hammer: { readonly model: LoadedCharacterModel; readonly view: HammerModelView } | null;
+  readonly props: Record<PropModelRole, { readonly model: LoadedCharacterModel; readonly view: PropModelView } | null>;
 }
 
 export const MAX_CHARACTER_PROFILES = 2;
 const PROP_PARTS: ReadonlySet<VisualPartId> = new Set(['pot', 'hammer-shaft', 'hammer-head']);
 const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer-head']);
+const PROP_VIEW_NAMES: Readonly<Record<PropModelRole, string>> = { hammer: 'one-model-hammer', pot: 'profile-pot-model' };
 const DEFAULT_PRESENTATION: CharacterPresentation = Object.freeze({
   characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
 });
@@ -161,7 +162,8 @@ export class GameView {
   private readonly shading = new CharacterShadingView();
   private armChains: ArmChains = DEFAULT_ARM_CHAINS;
   private avatarRenderer: AvatarRenderer | null = null;
-  private hammerModel: HammerModelView | null = null;
+  private readonly propModels: Record<PropModelRole, PropModelView | null> = { hammer: null, pot: null };
+  private readonly potFrame = new Matrix4();
   private renders = 0;
   private readonly customShaft = new Group();
   private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
@@ -327,7 +329,8 @@ export class GameView {
     });
     slot = {
       index, rig, mounts, coverage, presentation: DEFAULT_PRESENTATION,
-      models: new Map([['avatar', new Map()], ['hammer', new Map()]]), avatar: null, hammer: null,
+      models: new Map([['avatar', new Map()], ['hammer', new Map()], ['pot', new Map()]]),
+      avatar: null, props: { hammer: null, pot: null },
     };
     for (const mount of mounts) this.attach(mount.node, mount.parent, index === this.activeSlot);
     this.slots.push(slot);
@@ -339,7 +342,10 @@ export class GameView {
       const loaded = await this.loadModel(slot, document, 'avatar', document.avatar.model, signal);
       resolveAvatarJoints(loaded.report, document.avatar.boneMap);
     }
-    if (document.hammer !== undefined) await this.loadModel(slot, document, 'hammer', document.hammer.model, signal);
+    for (const role of PROP_MODEL_ROLES) {
+      const prop = document[role];
+      if (prop !== undefined) await this.loadModel(slot, document, role, prop.model, signal);
+    }
   }
 
   private async loadModel(
@@ -363,7 +369,7 @@ export class GameView {
 
   // Builds views for newly referenced models once, then releases models the profile dropped.
   private syncModelViews(slot: CharacterSlot): void {
-    const { avatar, hammer } = slot.presentation;
+    const { avatar } = slot.presentation;
     const loaded = (usage: CharacterModelUsage, id: string): LoadedCharacterModel => {
       const model = characterModel(slot.presentation, id);
       const result = slot.models.get(usage)!.get(model.source);
@@ -382,20 +388,27 @@ export class GameView {
       this.shading.register(view.root);
       slot.avatar = { model: avatarModel!, boneMap: avatar.boneMap, view };
     }
-    const hammerModel = hammer === undefined ? null : loaded('hammer', hammer.model);
-    if (slot.hammer !== null && slot.hammer.model !== hammerModel) {
-      this.shading.unregister(slot.hammer.view.root);
-      slot.hammer.view.dispose();
-      slot.hammer = null;
+    for (const role of PROP_MODEL_ROLES) {
+      const profile = slot.presentation[role];
+      const model = profile === undefined ? null : loaded(role, profile.model);
+      const current = slot.props[role];
+      if (current !== null && current.model !== model) {
+        this.shading.unregister(current.view.root);
+        current.view.dispose();
+        slot.props[role] = null;
+      }
+      if (model !== null && slot.props[role] === null) {
+        const view = new PropModelView(model, PROP_VIEW_NAMES[role]);
+        this.shading.register(view.root);
+        slot.props[role] = { model, view };
+      }
     }
-    if (hammerModel !== null && slot.hammer === null) {
-      const view = new HammerModelView(hammerModel);
-      this.shading.register(view.root);
-      slot.hammer = { model: hammerModel, view };
-    }
+    const inUse: Readonly<Record<CharacterModelUsage, LoadedCharacterModel | undefined>> = {
+      avatar: slot.avatar?.model, hammer: slot.props.hammer?.model, pot: slot.props.pot?.model,
+    };
     for (const [usage, cache] of slot.models) {
       for (const [source, model] of cache) {
-        if (model === (usage === 'avatar' ? slot.avatar?.model : slot.hammer?.model)) continue;
+        if (model === inUse[usage]) continue;
         model.dispose();
         cache.delete(source);
       }
@@ -417,13 +430,17 @@ export class GameView {
     if (this.avatar !== null) this.attach(this.avatar.root, this.scene, this.avatarRenderer === this.avatar);
     for (const other of this.slots) {
       if (other.avatar !== null) this.attach(other.avatar.view.root, this.scene, other.avatar.view === imported);
-      // The one-model hammer is available in every character type, in the tool's foreground pass.
-      if (other.hammer !== null) this.attach(other.hammer.view.root, this.foreground, other === slot);
+      // Prop models show in every character type. The hammer draws in the tool's foreground pass;
+      // the pot draws in the main pass, so its walls hide a body inside it through the depth buffer.
+      for (const role of PROP_MODEL_ROLES) {
+        const prop = other.props[role];
+        if (prop !== null) this.attach(prop.view.root, role === 'hammer' ? this.foreground : this.scene, other === slot);
+      }
     }
-    this.hammerModel = slot?.hammer?.view ?? null;
+    for (const role of PROP_MODEL_ROLES) this.propModels[role] = slot?.props[role]?.view ?? null;
     for (const [id, binding] of this.bindings) {
-      const enabled = (!avatarMode || PROP_PARTS.has(id)) && !(this.hammerModel !== null && HAMMER_PARTS.has(id));
-      binding.visibility.setEnabled({ enabled });
+      const replaced = this.propModels.hammer !== null && HAMMER_PARTS.has(id) || this.propModels.pot !== null && id === 'pot';
+      binding.visibility.setEnabled({ enabled: (!avatarMode || PROP_PARTS.has(id)) && !replaced });
     }
     this.armChains = imported?.chains ?? DEFAULT_ARM_CHAINS;
     // Shading styles Avatar mode: the connected character and its separate pot and hammer.
@@ -461,6 +478,13 @@ export class GameView {
       if (!mesh) continue;
       mesh.position.set(part.x, part.y, part.kind === 'pot' ? PLAYER_DEPTH.pot : this.toolDepth);
       mesh.rotation.z = part.angle;
+      if (part.kind === 'pot' && this.propModels.pot !== null) {
+        // The pot model's origin is the physical pot's bottom-centre, at the pot's own depth.
+        const cos = Math.cos(part.angle), sin = Math.sin(part.angle);
+        this.potFrame.makeRotationZ(part.angle)
+          .setPosition(part.x - RIG.potBottom * sin, part.y + RIG.potBottom * cos, PLAYER_DEPTH.pot);
+        this.propModels.pot.update(this.potFrame);
+      }
     }
     this.torso.position.set(root.x, root.y, PLAYER_DEPTH.torso);
     this.torso.updateWorldMatrix(true, false);
@@ -483,7 +507,7 @@ export class GameView {
     const armPoses = this.updateArms(this.torso.matrixWorld, this.gripFrame, shaftLength, { ...options, shaftAngle });
     this.avatarRenderer?.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
     // The one-model hammer follows the same unscaled physical frame as the grips, without stretching.
-    this.hammerModel?.update(this.gripFrame);
+    this.propModels.hammer?.update(this.gripFrame);
     for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {
       x: pose.hand.x, y: pose.hand.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
     });
@@ -576,7 +600,8 @@ export class GameView {
       headAim: { rotation: this.headAim.rotation.toArray() },
       avatar: this.avatar === null ? null : { ...this.avatar.inspect(), visible: this.avatar.root.visible },
       importedAvatar: this.activeImportedAvatar(),
-      hammerModel: this.hammerModel === null ? null : this.hammerModel.inspect(),
+      hammerModel: this.propModels.hammer === null ? null : this.propModels.hammer.inspect(),
+      potModel: this.propModels.pot === null ? null : this.propModels.pot.inspect(),
       shading: this.shading.inspect(),
       characters: this.characterSelection(),
       armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },

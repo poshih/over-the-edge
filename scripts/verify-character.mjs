@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { Matrix4, Vector3 } from 'three';
 import { createServer } from 'vite';
 import { observeBrowserPage } from './verify-level.mjs';
-import { modelFixture } from './verify-appearance.mjs';
-import { hammerGlb, humanoidBoneMap, patchGlbJson, skinnedAvatarGlb } from './character-fixtures.mjs';
+import { modelFixture, texturePng } from './verify-appearance.mjs';
+import { hammerGlb, HUMANOID_BONE_MAP, humanoidBoneMap, patchGlbJson, potGlb, skinnedAvatarGlb } from './character-fixtures.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const PREFIX = 'mixamorig:';
@@ -13,9 +13,45 @@ const BONE_MAP = humanoidBoneMap(PREFIX);
 const GRIP_X = { left: 0.04, right: 0.22 };
 const TOOL_DEPTH = 0.5 + 0.25;
 const HEAD_DISTANCE = 1.5;
+const POT = { depth: 0.22, bottom: -0.48 };
 const EPSILON = 1e-6;
+const DIRECTIONS = ['right', 'up-right', 'up', 'up-left', 'left', 'down-left', 'down', 'down-right'];
 const glbFile = (name, buffer) => ({ name, mimeType: 'model/gltf-binary', buffer });
+const glbSource = buffer => `data:model/gltf-binary;base64,${buffer.toString('base64')}`;
 const bytes = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+
+// Schema rules for profile data: schema 8 stays a byte-identical fixed point, and a pot needs schema 9.
+function verifySchemas(data) {
+  const base = {
+    characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, images: [], layers: [], skeleton: null, presentation: null,
+  };
+  const models = [
+    { id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb()) },
+    { id: 'hammer', name: 'Mallet', source: glbSource(hammerGlb()) },
+    { id: 'pot', name: 'Urn', source: glbSource(potGlb()) },
+  ];
+  const roles = { avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP }, hammer: { model: 'hammer' } };
+  const shading = { mode: 'cel', bands: 4, outline: null };
+  const canonical = value => JSON.stringify(data.validateSpriteDocument(JSON.parse(JSON.stringify(value))));
+  const eight = { schemaVersion: 8, ...base, models: models.slice(0, 2), ...roles, shading };
+  assert.equal(canonical(eight), JSON.stringify(eight), 'A schema-8 profile without a pot stays byte-identical.');
+  const nine = { schemaVersion: 9, ...base, models, ...roles, pot: { model: 'pot' }, shading };
+  assert.equal(canonical(nine), JSON.stringify(nine), 'Schema 9 lists the pot after the hammer.');
+  const potOnly = { schemaVersion: 9, ...base, characterRiggingType: 'model-3d', models: [models[2]], pot: { model: 'pot' } };
+  assert.equal(canonical(potOnly), JSON.stringify(potOnly), 'A pot model alone is schema 9.');
+  assert.equal(JSON.parse(canonical({ ...nine, models: models.slice(0, 2), pot: undefined })).schemaVersion, 8,
+    'Removing the pot model saves schema 8 again.');
+  const rejected = {
+    'pot in schema 8': [{ ...nine, schemaVersion: 8 }, /pot model requires sprite schema version 9/],
+    'shared pot model': [{ ...nine, models: models.slice(0, 2), pot: { model: 'hammer' } }, /separate character models/],
+    'four models': [{ ...nine, models: [...models, { ...models[2], id: 'spare' }] }, /1-3 models/],
+    'unused pot model': [{ ...nine, pot: undefined }, /no avatar, hammer or pot uses/],
+  };
+  for (const [name, [value, error]] of Object.entries(rejected)) {
+    assert.throws(() => canonical(value), error, `${name} must be rejected.`);
+  }
+  return { schema8FixedPoint: true, schema9FixedPoint: true, rejected: Object.keys(rejected) };
+}
 
 // Typed codes from the shared validator, exactly as release builds and the browser loader see them.
 async function verifyTypedErrors() {
@@ -23,6 +59,7 @@ async function verifyTypedErrors() {
   try {
     const inspect = await server.ssrLoadModule('/src/character-model-inspect.ts');
     const profile = await server.ssrLoadModule('/src/character-profile.ts');
+    const schemas = verifySchemas(await server.ssrLoadModule('/src/sprite-data.ts'));
     const code = (action) => {
       try {
         action();
@@ -78,7 +115,22 @@ async function verifyTypedErrors() {
       'Every typed code must have a failing fixture.');
     assert.deepEqual({ ...inspect.suggestAvatarBoneMap(avatar) }, { ...BONE_MAP },
       'Mixamo names, including the mixamorig: prefix, must map automatically by screen side.');
-    return { codes: Object.keys(results), mixamoAutoMap: true };
+    // Pots are static and follow their convention: +Y up, origin at the bottom-centre, metres.
+    const pot = inspect.inspectCharacterModel(bytes(potGlb()), 'pot');
+    assert.deepEqual([pot.bounds.min[1], pot.meshes], [0, 2], 'The pot fixture stands on its origin.');
+    const potCodes = {};
+    for (const [label, expected, glb] of [
+      ['skinned pot', 'unexpected-skin', skinnedAvatarGlb()],
+      ['origin at the centre', 'invalid-model', potGlb({ origin: 'centre' })],
+      ['origin at an edge', 'invalid-model', potGlb({ origin: 'edge' })],
+      ['Z-up axes', 'invalid-model', potGlb({ axis: 'z' })],
+      ['centimetres', 'invalid-model', potGlb({ scale: 100 })],
+      ['a hammer', 'invalid-model', hammerGlb()],
+    ]) {
+      potCodes[label] = code(() => inspect.inspectCharacterModel(bytes(glb), 'pot'));
+      assert.equal(potCodes[label], expected, `A pot with ${label} must fail as ${expected}.`);
+    }
+    return { codes: Object.keys(results), mixamoAutoMap: true, potCodes, schemas };
   } finally {
     await server.close();
   }
@@ -116,7 +168,8 @@ export async function verifyCharacter(browser, address, artifacts) {
     const state = window.gettingOver.sprites();
     return {
       busy: state.busy, restoring: state.restoring, error: state.error, modelIssue: state.modelIssue,
-      avatarModel: state.avatarModel, hammerModel: state.hammerModel, shading: state.shading, dirty: state.dirty,
+      avatarModel: state.avatarModel, hammerModel: state.hammerModel, potModel: state.potModel,
+      shading: state.shading, dirty: state.dirty,
       schemaVersion: state.document.schemaVersion, boneMap: state.document.avatar?.boneMap ?? null,
     };
   });
@@ -230,7 +283,11 @@ export async function verifyCharacter(browser, address, artifacts) {
       const before = await rendering();
       await frames(20);
       const after = await rendering();
-      return { writes: after.importedAvatar.boneWrites - before.importedAvatar.boneWrites, frames: after.renders - before.renders };
+      const props = key => after[key] === null ? null : after[key].matrixWrites - before[key].matrixWrites;
+      return {
+        writes: after.importedAvatar.boneWrites - before.importedAvatar.boneWrites, frames: after.renders - before.renders,
+        hammer: props('hammerModel'), pot: props('potModel'),
+      };
     };
     const small = await counted();
     assert.equal(small.writes, small.frames * 7, 'Each rendered frame writes exactly the seven driven bones.');
@@ -335,6 +392,73 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal((await sprites()).hammerModel.name, 'mallet', 'A rejected hammer keeps the current one.');
     await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
 
+    // A pot model follows the physical pot body rigidly, at the pot's depth, in every character type.
+    await pause();
+    const schema8 = await exportProfile();
+    assert.equal(JSON.parse(schema8).schemaVersion, 8);
+    const beforePot = await physics();
+    await page.getByLabel('Pot GLB', { exact: true }).setInputFiles(glbFile('urn.glb', potGlb()));
+    await idle();
+    await frames();
+    const checkPot = async (label) => {
+      const [paused, drawn, parts] = [await snapshot(), await rendering(),
+        await page.evaluate(() => window.gettingOver.appearance().parts)];
+      assert.equal(drawn.potModel.visible, true, `${label}: the pot model must be visible.`);
+      assert.equal(parts.find(part => part.id === 'pot').defaultsVisible, false, `${label}: the default pot is replaced.`);
+      const body = paused.parts.find(part => part.id === 'pot');
+      const frame = new Matrix4().fromArray(drawn.potModel.transform);
+      const columns = [0, 1, 2].map(column => new Vector3().setFromMatrixColumn(frame, column));
+      assert.ok(columns.every(axis => Math.abs(axis.length() - 1) < EPSILON), `${label}: the pot is not stretched.`);
+      assert.ok(columns[0].distanceTo(new Vector3(Math.cos(body.angle), Math.sin(body.angle), 0)) < EPSILON,
+        `${label}: the pot model turns with the physical pot.`);
+      // The collision outline's bottom edge, midway between its two base vertices.
+      const [baseLeft, baseRight] = body.vertices.filter(vertex => Math.abs(vertex.y - POT.bottom) < EPSILON)
+        .map(vertex => new Vector3(vertex.x, vertex.y, 0).applyAxisAngle(new Vector3(0, 0, 1), body.angle).add(new Vector3(body.x, body.y, 0)));
+      const bottom = baseLeft.clone().add(baseRight).multiplyScalar(0.5).setZ(POT.depth);
+      const origin = new Vector3().setFromMatrixPosition(frame);
+      assert.ok(origin.distanceTo(bottom) < EPSILON, `${label}: the model's base sits on the pot's physical bottom.`);
+      return { origin: origin.toArray(), angle: body.angle };
+    };
+    report.pot = { avatar: await checkPot('avatar mode') };
+    assert.deepEqual(await physics(), beforePot, 'The pot model must not change colliders, contacts or physics.');
+    const notice = page.getByRole('button', { name: 'Dismiss notification', exact: true });
+    if (await notice.isVisible()) await notice.click();
+    await page.locator('#game').focus();
+    await page.keyboard.press('d');
+    await frames();
+    await clip('character-pot-overlay.png');
+    await page.keyboard.press('d');
+    await page.locator('#character-rigging-type').selectOption('model-3d');
+    await frames();
+    report.pot.meshParts = await checkPot('mesh parts mode');
+    await page.locator('#character-rigging-type').selectOption('avatar-3d');
+    await frames();
+    for (const [name, expected, buffer] of [
+      ['skinned-pot.glb', 'unexpected-skin', skinnedAvatarGlb()],
+      ['centred-pot.glb', 'invalid-model', potGlb({ origin: 'centre' })],
+      ['centimetre-pot.glb', 'invalid-model', potGlb({ scale: 100 })],
+    ]) {
+      await page.getByLabel('Pot GLB', { exact: true }).setInputFiles(glbFile(name, buffer));
+      await idle();
+      assert.equal((await sprites()).modelIssue?.code, expected, `${name} must fail with ${expected}.`);
+      assert.equal((await sprites()).potModel.name, 'urn', 'A rejected pot keeps the current one.');
+    }
+    await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
+    const withPot = JSON.parse(await exportProfile());
+    assert.equal(withPot.schemaVersion, 9, 'A pot model saves as schema 9.');
+    assert.deepEqual(withPot.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
+    assert.deepEqual(withPot.pot, { model: 'pot' });
+    await page.getByRole('button', { name: 'Use default pot', exact: true }).click();
+    await idle();
+    await frames();
+    assert.equal((await rendering()).potModel, null);
+    assert.equal((await page.evaluate(() => window.gettingOver.appearance().parts))
+      .find(part => part.id === 'pot').defaultsVisible, true, 'The default pot returns.');
+    assert.equal(await exportProfile(), schema8, 'Removing the pot model restores the schema-8 profile byte for byte.');
+    await page.getByLabel('Pot GLB', { exact: true }).setInputFiles(glbFile('urn.glb', potGlb()));
+    await idle();
+    await frames();
+
     // S3: flip PBR and cel live on the same models; materials are built once.
     const shadingState = async () => (await rendering()).shading;
     const pbr = await shadingState();
@@ -346,12 +470,15 @@ export async function verifyCharacter(browser, address, artifacts) {
     const cel = await shadingState();
     assert.equal(cel.mode, 'cel');
     assert.ok(cel.materialsCreated > 0 && cel.hullsVisible > 0 && cel.skinnedHulls >= 2 && cel.sharedSkeletons);
+    const potTypes = async () => (await rendering()).potModel.materialTypes;
+    assert.deepEqual(await potTypes(), ['MeshToonMaterial'], 'Cel shading restyles the pot model.');
     await clip('character-imported-cel.png');
     await page.getByRole('radio', { name: 'PBR', exact: true }).check();
     await frames();
     const flippedBack = await shadingState();
     assert.equal(flippedBack.mode, 'pbr');
     assert.equal(flippedBack.hullsVisible, 0);
+    assert.deepEqual(await potTypes(), ['MeshStandardMaterial'], 'PBR restores the pot model\'s own materials.');
     await page.getByRole('radio', { name: 'Cel', exact: true }).check();
     await page.locator('#character-cel-bands').evaluate(input => {
       input.value = '5';
@@ -382,7 +509,10 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal(moving.hullsVisible, tuned.hullsVisible, 'The outline stays attached during IK.');
     report.shading = { pbr, cel, tuned, moving };
 
-    // Large level: avatar cost stays seven bone writes per frame.
+    // Large level: the avatar writes seven bones and each prop model one matrix per frame.
+    const withProps = await counted();
+    assert.deepEqual([withProps.writes, withProps.hammer, withProps.pot], [withProps.frames * 7, withProps.frames, withProps.frames],
+      'Per frame: seven avatar bones, one hammer matrix and one pot matrix.');
     await pause();
     const levelToggle = page.getByRole('tab', { name: 'Level', exact: true });
     await levelToggle.click();
@@ -404,13 +534,16 @@ export async function verifyCharacter(browser, address, artifacts) {
     const objects = (await page.evaluate(() => window.gettingOver.level().definition.objects.length));
     assert.ok(objects >= 300, 'The large-level check must use the full course.');
     assert.equal(large.writes, large.frames * 7, 'Avatar work is independent of level size.');
-    report.largeLevel = { objects, small, large };
+    assert.equal(large.pot, large.frames, 'The pot model copies one matrix per frame on any level.');
+    assert.equal(large.hammer, large.frames, 'The hammer model copies one matrix per frame on any level.');
+    report.largeLevel = { objects, small, withProps, large };
 
-    // Versioned data: schema 8 only while models or shading are present; round trips are exact.
+    // Versioned data: schema 9 only while a pot model is present, 8 with other models or shading.
     const exported = await exportProfile();
     const profile = JSON.parse(exported);
-    assert.equal(profile.schemaVersion, 8);
-    assert.deepEqual(profile.models.map(model => model.id), ['avatar', 'hammer']);
+    assert.equal(profile.schemaVersion, 9);
+    assert.deepEqual(profile.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
+    assert.deepEqual(profile.pot, { model: 'pot' });
     assert.ok(profile.models.every(model => model.source.startsWith('data:model/gltf-binary;base64,')));
     assert.deepEqual(profile.avatar, { model: 'avatar', boneMap: { ...BONE_MAP } });
     assert.deepEqual(profile.hammer, { model: 'hammer' });
@@ -424,12 +557,15 @@ export async function verifyCharacter(browser, address, artifacts) {
     view = await rendering();
     assert.equal(view.importedAvatar.visible, true, 'Saved profiles restore the imported avatar.');
     assert.equal(view.hammerModel.visible, true);
+    assert.equal(view.potModel.visible, true, 'Saved profiles restore the pot model.');
     assert.equal(view.shading.mode, 'cel');
     await openCharacter();
     assert.equal(await exportProfile(), exported, 'Save and restore keep the profile byte-identical.');
     await page.getByRole('button', { name: 'Use built-in avatar mesh', exact: true }).click();
     await idle();
     await page.getByRole('button', { name: 'Use two-part hammer', exact: true }).click();
+    await idle();
+    await page.getByRole('button', { name: 'Use default pot', exact: true }).click();
     await idle();
     await page.getByRole('radio', { name: 'PBR', exact: true }).check();
     await page.locator('#character-cel-bands').evaluate(input => {
@@ -445,7 +581,29 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal(plain.schemaVersion, 6, 'Without models or shading the profile saves as schema 6 again.');
     assert.deepEqual(Object.keys(plain), ['schemaVersion', 'characterRiggingType', 'armForwardDistance', 'images', 'layers', 'skeleton', 'presentation']);
     assert.equal((await rendering()).avatar.visible, true, 'Removing the import restores the built-in avatar.');
-    report.schema = { withAssets: 8, withoutAssets: 6, restored: true, bytes: exported.length };
+    report.schema = { withPot: 9, withoutPot: 8, withoutAssets: 6, restored: true, bytes: exported.length };
+
+    // A 2D profile imported from JSON shows its pot model too, beside its pot sprite layer.
+    await pause();
+    const flat = {
+      schemaVersion: 9, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25,
+      images: [{ id: 'card', name: 'Card', source: `data:image/png;base64,${texturePng().toString('base64')}` }],
+      layers: [{
+        id: 'pot-card', name: 'Pot card', anchor: 'pot', image: 'card', width: 0.6, height: 0.4, offset: { x: 0, y: 0, z: 0.6 },
+        rotation: 0, bone: null, directions: DIRECTIONS, skin: null, tileLength: null,
+      }],
+      skeleton: null, presentation: null,
+      models: [{ id: 'pot', name: 'Urn', source: glbSource(potGlb()) }], pot: { model: 'pot' },
+    };
+    await page.locator('.sprite-file').setInputFiles({
+      name: 'flat-pot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(flat)),
+    });
+    await idle();
+    await frames();
+    assert.equal((await sprites()).error, null);
+    assert.equal((await sprites()).schemaVersion, 9);
+    report.pot.sprite2d = await checkPot('2D mode');
+    assert.equal(await exportProfile(), JSON.stringify(flat), 'A schema-9 profile JSON round-trips byte for byte.');
     assert.deepEqual(report.errors, [], 'Character scenario browser errors are not allowed.');
     return report;
   } finally {

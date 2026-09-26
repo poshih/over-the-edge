@@ -8,7 +8,7 @@ import { observeBrowserPage } from './verify-level.mjs';
 import { dragTouch } from './verify-mobile.mjs';
 import { modelFixture, texturePng } from './verify-appearance.mjs';
 import { solidPng } from './verify-flipbook.mjs';
-import { hammerGlb, HUMANOID_BONE_MAP, skinnedAvatarGlb } from './character-fixtures.mjs';
+import { hammerGlb, HUMANOID_BONE_MAP, potGlb, skinnedAvatarGlb } from './character-fixtures.mjs';
 
 const TOUCH_DRAG_PIXELS = 40;
 const TOUCH_PIXELS_PER_REACH = 100;
@@ -326,18 +326,24 @@ function paperProfile() {
   };
 }
 
+// Avatar, hammer and pot models; `only` keeps just the avatar, for single-model failure cases.
 function heroProfile(changes = {}) {
   return {
-    schemaVersion: 8, characterRiggingType: 'avatar-3d', armForwardDistance: 0.3,
+    schemaVersion: 9, characterRiggingType: 'avatar-3d', armForwardDistance: 0.3,
     images: [], layers: [], skeleton: null, presentation: null,
     models: [
       { id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb()) },
       { id: 'hammer', name: 'Mallet', source: glbSource(hammerGlb()) },
+      { id: 'pot', name: 'Urn', source: glbSource(potGlb()) },
     ],
-    avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP }, hammer: { model: 'hammer' },
+    avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP }, hammer: { model: 'hammer' }, pot: { model: 'pot' },
     shading: { mode: 'cel', bands: 3, outline: { color: '#1f2428', width: 0.02 } },
     ...changes,
   };
+}
+
+function avatarOnly(source) {
+  return heroProfile({ models: [{ id: 'avatar', name: 'Hero', source }], hammer: undefined, pot: undefined });
 }
 
 // S4: a release with a 2D profile and a skinned 3D profile that players switch between.
@@ -362,12 +368,12 @@ async function verifyCharacterRelease(page) {
   });
   const outputs = (Array.isArray(release) ? release : [release]).flatMap(result => result.output);
   const glbs = outputs.filter(file => file.type === 'asset' && /character-[^/]+\.glb$/.test(file.fileName));
-  assert.equal(glbs.length, 2, 'The avatar and hammer GLBs must be separate hashed assets.');
+  assert.equal(glbs.length, 3, 'The avatar, hammer and pot GLBs must be separate hashed assets.');
   assert.equal(outputs.filter(file => file.type === 'asset' && /sprite-[^/]+\.png$/.test(file.fileName)).length, 2);
   const heroModels = heroProfile().models.map(model => model.source.slice(model.source.indexOf(',') + 1));
   assert.ok(outputs.filter(file => file.type === 'chunk').every(file => heroModels.every(model => !file.code.includes(model.slice(0, 4096)))),
     'Character GLB bytes must not be embedded in executable JavaScript.');
-  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:8,.*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*shading:/s);
+  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:9,.*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*pot:.*shading:/s);
   assert.match(modules.get(MODELS_MODULE), /createCharacterModelLoader/);
   const releaseModules = bundleModules(release);
   assert.ok(!releaseModules.some(id => id.includes('/src/editor/')), 'The character release contains no editor modules.');
@@ -396,8 +402,8 @@ async function verifyCharacterRelease(page) {
     const avatar = group.getByRole('radio', { name: '3D', exact: true });
     assert.equal(await flat.isChecked(), true, 'The first profile is the default choice.');
     const loaded = [...requests].sort();
-    assert.equal(loaded.length, 4, 'Both profiles load every asset before play.');
-    assert.equal(new Set(loaded).size, 4, 'Every asset loads exactly once.');
+    assert.equal(loaded.length, 5, 'Both profiles load every asset before play.');
+    assert.equal(new Set(loaded).size, 5, 'Every asset loads exactly once.');
     await page.screenshot({ path: join(artifacts, 'game-release-character-2d.png') });
     // Switch mid-level while the clock runs: no reload, reset or asset request.
     const elapsedBefore = await page.locator('.elapsed-value').textContent();
@@ -455,6 +461,8 @@ async function verifyCharacterRelease(page) {
         shading: { mode: view.shading.mode, materialsCreated: view.shading.materialsCreated, hullsCreated: view.shading.hullsCreated },
         avatar: view.importedAvatar === null ? null : { visible: view.importedAvatar.visible, bones: view.importedAvatar.bones },
         hammer: view.hammerModel === null ? null : view.hammerModel.visible,
+        pot: view.potModel === null ? null : { visible: view.potModel.visible, transform: view.potModel.transform },
+        potBody: game.simulation.frame(1).parts.find(part => part.id === 'pot'),
         paused: game.state().paused,
       };
     });
@@ -472,7 +480,16 @@ async function verifyCharacterRelease(page) {
     assert.deepEqual([first.selection.active, back.selection.active, again.selection.active], [1, 0, 1]);
     assert.deepEqual(first.selection.types, ['sprite-2d', 'avatar-3d']);
     assert.equal(first.avatar.visible, true);
+    assert.equal(first.hammer, true);
+    assert.equal(first.pot.visible, true, 'The release renders avatar, hammer and pot models together.');
+    // The pot model's origin is the physical pot's bottom-centre, 0.48 m below the body, at the pot depth.
+    const { x, y, angle } = first.potBody;
+    const origin = [first.pot.transform[12], first.pot.transform[13], first.pot.transform[14]];
+    const bottom = [x + 0.48 * Math.sin(angle), y - 0.48 * Math.cos(angle), 0.22];
+    assert.ok(Math.hypot(...origin.map((value, index) => value - bottom[index])) < 1e-9, 'The pot tracks the physical pot body exactly.');
+    assert.ok(Math.abs(Math.atan2(first.pot.transform[1], first.pot.transform[0]) - angle) < 1e-9);
     assert.equal(back.avatar, null, 'The 2D profile shows no imported avatar.');
+    assert.equal(back.pot, null, 'The 2D profile keeps its own pot.');
     assert.equal(first.shading.mode, 'cel');
     assert.deepEqual(again.shading, first.shading, 'Switching back builds no new materials or outlines.');
     assert.equal(again.textures, first.textures, 'Switching back uploads no new textures.');
@@ -488,12 +505,19 @@ async function verifyCharacterRelease(page) {
     ['incomplete bone map', heroProfile({ avatar: { model: 'avatar', boneMap: { ...HUMANOID_BONE_MAP, head: undefined } } }), /no GLB joint for head/],
     ['unknown joint', heroProfile({ avatar: { model: 'avatar', boneMap: { ...HUMANOID_BONE_MAP, head: 'Skull' } } }), /no skin joint named "Skull"/],
     ['broken chain', heroProfile({ avatar: { model: 'avatar', boneMap: { ...HUMANOID_BONE_MAP, 'left-hand': 'Spine' } } }), /ancestor chains/],
-    ['eight influences', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb({ extraInfluences: true })) }], hammer: undefined }), /at most 4 joint influences/],
-    ['unnormalized weights', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb({ unnormalized: true })) }], hammer: undefined }), /must sum to 1/],
-    ['model limits', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb({ extraNodes: 2100 })) }], hammer: undefined }), /at most 2048 nodes/],
-    ['static avatar', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(modelFixture()) }], hammer: undefined }), /no skinned mesh/],
-    ['skinned hammer', heroProfile({ models: [heroProfile().models[0], { id: 'hammer', name: 'Mallet', source: glbSource(skinnedAvatarGlb()) }] }), /static mesh without skins/],
-    ['remote model', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: 'https://example.invalid/hero.glb' }], hammer: undefined }), /must be an embedded GLB/],
+    ['eight influences', avatarOnly(glbSource(skinnedAvatarGlb({ extraInfluences: true }))), /at most 4 joint influences/],
+    ['unnormalized weights', avatarOnly(glbSource(skinnedAvatarGlb({ unnormalized: true }))), /must sum to 1/],
+    ['model limits', avatarOnly(glbSource(skinnedAvatarGlb({ extraNodes: 2100 }))), /at most 2048 nodes/],
+    ['static avatar', avatarOnly(glbSource(modelFixture())), /no skinned mesh/],
+    ['remote model', avatarOnly('https://example.invalid/hero.glb'), /must be an embedded GLB/],
+    ['skinned hammer', heroProfile({ models: heroProfile().models.map(model => model.id === 'hammer'
+      ? { ...model, source: glbSource(skinnedAvatarGlb()) } : model) }), /hammer model "Mallet".*static mesh without skins/],
+    ['skinned pot', heroProfile({ models: heroProfile().models.map(model => model.id === 'pot'
+      ? { ...model, source: glbSource(skinnedAvatarGlb()) } : model) }), /pot model "Urn".*static mesh without skins/],
+    ['pot convention', heroProfile({ models: heroProfile().models.map(model => model.id === 'pot'
+      ? { ...model, source: glbSource(potGlb({ origin: 'centre' })) } : model) }), /pot model "Urn".*bottom-centre/],
+    ['shared pot model', heroProfile({ pot: { model: 'hammer' }, models: heroProfile().models.slice(0, 2) }), /separate character models/],
+    ['pot in schema 8', heroProfile({ schemaVersion: 8 }), /pot model requires sprite schema version 9/],
   ];
   result.invalid = [];
   for (const [name, profile, error] of invalid) {

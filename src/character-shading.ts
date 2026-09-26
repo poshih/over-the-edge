@@ -275,6 +275,7 @@ export class CharacterShadingView {
       hull = new Mesh(mesh.geometry, this.outline);
     }
     hull.name = `${mesh.name || 'mesh'}:outline`;
+    hull.userData.characterOutline = true;
     hull.frustumCulled = mesh.frustumCulled;
     hull.morphTargetInfluences = mesh.morphTargetInfluences;
     hull.morphTargetDictionary = mesh.morphTargetDictionary;

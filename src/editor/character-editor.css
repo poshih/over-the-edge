@@ -91,7 +91,8 @@
 }
 
 .character-model input[type="file"],
-.character-hammer input[type="file"] {
+.character-hammer input[type="file"],
+.character-pot input[type="file"] {
   width: 100%;
   min-width: 0;
   margin-top: 6px;
@@ -139,11 +140,13 @@
 }
 
 .character-model .character-action-row,
-.character-hammer-remove {
+.character-hammer-remove,
+.character-pot-remove {
   margin-top: 12px;
 }
 
-.character-hammer-remove {
+.character-hammer-remove,
+.character-pot-remove {
   width: 100%;
 }
 

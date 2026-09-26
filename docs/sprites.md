@@ -516,7 +516,9 @@ Profiles from schemas 1-5 receive the unchanged 0.25 m default;
 invalid or missing schema-6 clearance values are rejected, not clamped.
 Schema 8 adds optional `models`, `avatar`, `hammer` and `shading` fields for
 [imported 3D characters](characters.md). It is written only while one of them is
-present, and a schema 1-7 document with any of them is rejected.
+present, and a schema 1-7 document with any of them is rejected. Schema 9 adds an
+optional `pot` model, written only while it is present; a schema 1-8 document with
+`pot` is rejected.
 Schemas 1-3 and
 schema-4 Hybrid profiles explicitly migrate to pure 2D when they contain any
 sprite layers, otherwise to Mesh parts. Existing schema-4 2D/Mesh parts choices
@@ -527,7 +529,7 @@ receive `presentation: null`, retaining fixed-sector selection while enabling
 automatic tilt for safe head owners; schema-3
 directional settings are retained unchanged.
 Reading or previewing an old save does not rewrite its stored record; an
-explicit Save/export writes schema 6, 7 with flipbooks, or 8 with character models or shading. Keep an original export for rollback to
+explicit Save/export writes schema 6, 7 with flipbooks, 8 with character models or shading, or 9 with a pot model. Keep an original export for rollback to
 an older release: old readers cannot understand the new authored type.
 There is no destructive storage migration.
 

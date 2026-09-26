@@ -1,12 +1,13 @@
 # Imported 3D characters
 
 A game can ship its own GPU-skinned character, render it with PBR or cel shading,
-replace the hammer with one rigid model, and let players switch between that
-character and a 2D sprite character. The engine owns the machinery; a game supplies
+replace the hammer and the pot with rigid models, and let players switch between
+that character and a 2D sprite character. The engine owns the machinery; a game supplies
 only data: GLBs, a bone map and a profile. Everything below is authored in
 **Workshop / Character** and stored in the character / sprite profile, so Save,
 Revert, JSON export/import and `GAME_SPRITES` carry it.
 
+A typical 3D character is three models: a skinned body, the pot and the hammer.
 Physics never depends on these models. Colliders, masses, hammer length, reach,
 grips, contacts, saves and level state are identical in every character type and
 with every model.
@@ -85,8 +86,10 @@ The mapped joints receive exactly the frames that drive the built-in avatar:
 - **Head.** Gaze rotates the head joint about its own bind position, with the
   same smoothing and yaw/pitch limits as the built-in avatar.
 
-The pot does not hide or clip the model. Its bottom is 1.22 m below the fitted
-shoulders; anything lower, such as long legs, shows beneath it.
+The pot hides the body behind its walls through the depth buffer, but does not
+clip it. The pot's bottom is 1.22 m below the fitted shoulders; anything lower,
+such as long legs, shows beneath it. A [pot model](#pot-model) can be shaped to
+suit the body.
 
 ### Errors
 
@@ -97,10 +100,10 @@ on `code`, never on the message. The editor shows the code in its status
 
 | `code` | Cause |
 | --- | --- |
-| `invalid-model` | Not a valid self-contained GLB, or a hammer that ignores its convention |
+| `invalid-model` | Not a valid self-contained GLB, or a hammer or pot that ignores its convention |
 | `model-limits` | A `MODEL_LIMITS` overrun: bytes, meshes, triangles, nodes or texture edge |
 | `no-skin` | An avatar model without a skinned mesh |
-| `unexpected-skin` | A hammer model with a skin |
+| `unexpected-skin` | A hammer or pot model with a skin |
 | `invalid-skin` | Missing inverse bind matrices, joints outside the scene, or bad skin accessors |
 | `missing-joint` | The bone map leaves an avatar joint unmapped |
 | `unknown-joint` | A mapped name is not a skin joint of the model |
@@ -133,6 +136,38 @@ still draw if the profile has them.
 
 Appearance's shaft and head imports are hidden while a hammer model is present.
 
+## Pot model
+
+Pick a **Pot GLB** to replace the pot. The model follows the physical pot body
+rigidly, without stretching, in every character type, including 2D, at the pot's
+own depth. It draws in the main pass, so its front wall hides the lower part of a
+body inside it through the depth buffer, while the body shows above the rim.
+**Use default pot** restores the procedural pot.
+
+Model it in metres with +Y up, its origin at the bottom-centre of the pot, and its
+front facing +Z (toward the camera). The physical pot is 0.80 m tall. Measured
+from that origin, its collision outline is:
+
+| Height | Radius | Where |
+| --- | --- | --- |
+| 0 m | 0.20 m | base, on the ground |
+| 0.19 m | 0.44 m | lower wall |
+| 0.60 m | 0.50 m | widest point |
+| 0.80 m | 0.43 m | rim |
+
+The outline is the polygon through (±radius, height). Collision is always this 2D
+outline, whatever the model's shape; toggle the collision overlay (**D**) to
+compare. The player root, which the pot pivots about, is 0.48 m above the base.
+The body stands there, 0.05 m in front of the pot's centre (toward the camera).
+
+The pot must be a static mesh. Its lowest point must be within 0.05 m of the
+origin, it must rise at least 0.1 m, the origin must lie in the middle half of its
+footprint along X and Z, and it must stay within 4 m of the origin. Models built
+around their centre, with Z up, or in centimetres fail these checks with
+`invalid-model`. In 2D, pot sprite layers still draw if the profile has them.
+
+Appearance's pot import is hidden while a pot model is present.
+
 ## Shading
 
 **Avatar shading** switches between **PBR**, the models' own materials, and
@@ -141,8 +176,8 @@ band count, outline colour and outline width live; the look updates on the same
 loaded models, so the two can be compared by flipping back and forth.
 
 Shading styles Avatar mode: the connected avatar (built-in or imported) and its
-separate pot and hammer, including a one-model hammer and Appearance's pot and
-hammer imports. Other character types keep their materials, and the setting is
+separate pot and hammer, including the hammer and pot models and Appearance's pot
+and hammer imports. Other character types keep their materials, and the setting is
 stored for the next Avatar selection.
 
 - **Bands.** Each lit material gets one Three.js `MeshToonMaterial` twin, sharing
@@ -160,19 +195,22 @@ and shading does no per-frame work.
 
 ## Profile format
 
-These fields are added by sprite schema 8. They are written only while present:
-profiles without imported models and with default PBR shading keep saving as
-schema 6 (or 7 with aim flipbooks), byte for byte.
+These fields are written only while present. Sprite schema 8 adds `models`,
+`avatar`, `hammer` and `shading`; schema 9 adds `pot`. A profile with a pot model
+saves as schema 9, one with other models or non-default shading as schema 8, and
+any other profile keeps saving as schema 6 (or 7 with aim flipbooks), byte for
+byte.
 
 ```json
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
   "images": [], "layers": [], "skeleton": null, "presentation": null,
   "models": [
     { "id": "avatar", "name": "Hero", "source": "data:model/gltf-binary;base64,..." },
-    { "id": "hammer", "name": "Mallet", "source": "data:model/gltf-binary;base64,..." }
+    { "id": "hammer", "name": "Mallet", "source": "data:model/gltf-binary;base64,..." },
+    { "id": "pot", "name": "Urn", "source": "data:model/gltf-binary;base64,..." }
   ],
   "avatar": {
     "model": "avatar",
@@ -183,25 +221,28 @@ schema 6 (or 7 with aim flipbooks), byte for byte.
     }
   },
   "hammer": { "model": "hammer" },
+  "pot": { "model": "pot" },
   "shading": { "mode": "cel", "bands": 3, "outline": { "color": "#1f2428", "width": 0.02 } }
 }
 ```
 
-- `models` lists 1-2 GLBs, each used by `avatar` or `hammer`; the avatar and
-  hammer need separate models. The editor embeds them as
+- `models` lists 1-3 GLBs, each used by exactly one of `avatar`, `hammer` and
+  `pot`; roles never share a model. The editor embeds them as
   `data:model/gltf-binary;base64,` sources. At runtime a source may also be a
   public HTTP(S) URL or a `/site-relative` path; release builds require embedded
   models so they can validate them.
-- `avatar` is used in `avatar-3d` and dormant in other types; `hammer` is used
-  in every type. `characterRiggingType` still selects the type.
+- `avatar` is used in `avatar-3d` and dormant in other types; `hammer` and `pot`
+  are used in every type. `characterRiggingType` still selects the type.
 - `shading` is absent for the default look (`pbr`, 3 bands, outline `#1f2428` at
   0.02 m). `outline` is `null` for none; colours are lowercase `#rrggbb`; widths
   are 0.002-0.1 m.
 - Models have their own budget, so they do not count against the 24 MiB sprite
-  budget. Each model can be up to 20 MiB, and a profile file up to about 77 MiB.
+  budget. Each model can be up to 20 MiB, and a profile file up to about 104 MiB.
 
-A schema 1-7 document with any of these fields is rejected, and releases from
-before schema 8 reject schema-8 profiles. Keep an older export for rollback.
+A schema 1-7 document with any of these fields is rejected, as is a schema 1-8
+document with `pot`. Releases from before schema 8 reject schema-8 profiles, and
+releases from before schema 9 reject profiles with a pot model. Keep an older
+export for rollback.
 
 ## Releases with two characters
 
@@ -255,18 +296,22 @@ change without reloading anything. Without a host, documents with models are rej
 
 Imported avatars are built once when their profile loads. Each frame writes the
 seven driven bone matrices, with no allocation. Unmapped joints keep static local
-matrices. The one-model hammer copies one matrix. This cost does not depend on
-the level. In the editor, `window.gettingOver.level().rendering` reports
+matrices. The hammer and pot models copy one matrix each. This cost does not
+depend on the level. In the editor, `window.gettingOver.level().rendering` reports
 `importedAvatar` (joints, unmapped joints, chains and cumulative `boneWrites`),
-`hammerModel`, `shading`, `characters` and `renders`.
+`hammerModel` and `potModel` (transform, drawn material types and cumulative
+`matrixWrites`), `shading`, `characters` and `renders`.
 
 ## Verification
 
 `scripts/verify-character.mjs`, part of `npm run verify`, generates a
-Mixamo-named skinned humanoid and a hammer. It checks every typed error code,
-automatic mapping, IK at reachable and unreachable grips, the hammer frame in each
-3D type, live shading flips without new materials, a large course, and schema 8
-save/restore/export. `npm run verify:game` builds a two-profile release. It checks
-the toggle mid-level, single asset loads, persistence, identical physics while
-switching, and failing builds for invalid models and bone maps. All fixtures are
+Mixamo-named skinned humanoid, a hammer and a pot. It checks every typed error
+code and the pot conventions, automatic mapping, IK at reachable and unreachable
+grips, the hammer frame in each 3D type, and the pot's base on its physical
+bottom in 3D and 2D. It also checks live shading flips without new materials,
+per-frame writes on a large course, and schema 8/9 save, restore, export and byte
+identity. `npm run verify:game` builds a two-profile release whose 3D profile has
+all three models. It checks the toggle mid-level, single asset loads, persistence,
+exact pot tracking, identical physics while switching, and failing builds for
+invalid models, bone maps and pot profiles. All fixtures are
 generated procedurally; no third-party artwork is involved.

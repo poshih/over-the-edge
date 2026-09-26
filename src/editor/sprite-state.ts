@@ -15,11 +15,12 @@ import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin }
 import { autoWeights, restPose } from '../skeleton-pose';
 import {
   AVATAR_MODEL_ID, CharacterModelError, characterAssets, CHARACTER_MODEL_LIMITS, DEFAULT_CHARACTER_SHADING, encodeModel,
-  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, sameCharacterAssets, sameShading, validateCharacterShading,
+  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, POT_MODEL_ID, sameCharacterAssets, sameShading,
+  validateCharacterShading,
 } from '../character-profile';
 import type {
   AvatarBoneMap, AvatarJointId, CharacterAssets, CharacterModel, CharacterModelErrorCode, CharacterShading,
-  PartialAvatarBoneMap,
+  PartialAvatarBoneMap, PropModelRole,
 } from '../character-profile';
 import { inspectCharacterModel, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
@@ -84,6 +85,7 @@ export interface SpriteEditorSnapshot {
   readonly modelIssue: CharacterModelIssue | null;
   readonly avatarModel: AvatarModelState | null;
   readonly hammerModel: { readonly name: string } | null;
+  readonly potModel: { readonly name: string } | null;
   readonly shading: CharacterShading;
 }
 
@@ -168,6 +170,8 @@ function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
 function samePresentation(left: DirectionalPresentation | null, right: DirectionalPresentation | null): boolean {
   return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
+
+const PROP_MODEL_IDS: Readonly<Record<PropModelRole, string>> = { hammer: HAMMER_MODEL_ID, pot: POT_MODEL_ID };
 
 function issueOf(error: CharacterModelError): CharacterModelIssue {
   return Object.freeze({ code: error.code, message: error.message, joints: error.joints });
@@ -315,6 +319,7 @@ export class SpriteEditorState {
       modelIssue: this.error === null ? null : this.modelIssue,
       avatarModel: this.avatarModelState(),
       hammerModel: this.draft.hammer === undefined ? null : { name: this.model(this.draft.hammer.model).name },
+      potModel: this.draft.pot === undefined ? null : { name: this.model(this.draft.pot.model).name },
       shading: this.draft.shading ?? DEFAULT_CHARACTER_SHADING,
     };
   }
@@ -364,25 +369,26 @@ export class SpriteEditorState {
     this.changed();
   }
 
-  async importHammerModel(file: File): Promise<void> {
+  // Replaces the hammer or pot with a static GLB that follows its role's convention.
+  async importPropModel(role: PropModelRole, file: File): Promise<void> {
     if (!this.canEdit()) return;
     await this.run(async () => {
       const bytes = await this.readModel(file);
       if (this.disposed) return;
-      inspectCharacterModel(bytes.buffer, 'hammer');
-      const model = Object.freeze({ id: HAMMER_MODEL_ID, name: modelName(file), source: encodeModel(bytes) });
-      const document = this.characterDocument({ hammer: model });
+      inspectCharacterModel(bytes.buffer, role);
+      const model = Object.freeze({ id: PROP_MODEL_IDS[role], name: modelName(file), source: encodeModel(bytes) });
+      const document = this.characterDocument({ [role]: model });
       await this.replaceRig(document);
       if (this.disposed) return;
       this.draft = document;
     });
   }
 
-  async removeHammerModel(): Promise<void> {
+  async removePropModel(role: PropModelRole): Promise<void> {
     if (!this.canEdit()) return;
     await this.run(async () => {
-      if (this.draft.hammer === undefined) return;
-      const document = this.characterDocument({ hammer: null });
+      if (this.draft[role] === undefined) return;
+      const document = this.characterDocument({ [role]: null });
       await this.replaceRig(document);
       if (this.disposed) return;
       this.draft = document;
@@ -964,22 +970,30 @@ export class SpriteEditorState {
     this.pendingAvatar = null;
   }
 
-  // A validated draft with the avatar or hammer replaced (or removed with null), other fields kept.
+  // A validated draft with the avatar, hammer or pot replaced (or removed with null), other fields kept.
   private characterDocument(changes: {
     avatar?: { model: CharacterModel; boneMap: AvatarBoneMap } | null;
     hammer?: CharacterModel | null;
+    pot?: CharacterModel | null;
   }): SpriteDocument {
     const avatar = changes.avatar === undefined
       ? this.draft.avatar === undefined ? null : { model: this.model(this.draft.avatar.model), boneMap: this.draft.avatar.boneMap }
       : changes.avatar;
-    const hammer = changes.hammer === undefined
-      ? this.draft.hammer === undefined ? null : this.model(this.draft.hammer.model)
-      : changes.hammer;
-    const models = [avatar?.model, hammer].filter((model): model is CharacterModel => model !== null && model !== undefined);
+    const prop = (role: PropModelRole): CharacterModel | null => {
+      const change = changes[role];
+      if (change !== undefined) return change;
+      const current = this.draft[role];
+      return current === undefined ? null : this.model(current.model);
+    };
+    const hammer = prop('hammer');
+    const pot = prop('pot');
+    // Role order keeps the saved model list stable: avatar, hammer, pot.
+    const models = [avatar?.model, hammer, pot].filter((model): model is CharacterModel => model !== null && model !== undefined);
     const assets: CharacterAssets = characterAssets({
       models: models.length === 0 ? undefined : models,
       avatar: avatar === null ? undefined : { model: avatar.model.id, boneMap: avatar.boneMap },
       hammer: hammer === null ? undefined : { model: hammer.id },
+      pot: pot === null ? undefined : { model: pot.id },
       shading: this.draft.shading,
     });
     return validateSpriteDocument({

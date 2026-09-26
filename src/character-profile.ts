@@ -35,9 +35,14 @@ export interface AvatarModelProfile {
   readonly boneMap: AvatarBoneMap;
 }
 
-export interface HammerModelProfile {
+// A rigid prop that replaces the hammer or the pot; each role names its own model.
+export interface PropModelProfile {
   readonly model: string;
 }
+export type HammerModelProfile = PropModelProfile;
+export type PotModelProfile = PropModelProfile;
+export const PROP_MODEL_ROLES = ['hammer', 'pot'] as const;
+export type PropModelRole = (typeof PROP_MODEL_ROLES)[number];
 
 export const SHADING_MODES = ['pbr', 'cel'] as const;
 export type ShadingMode = (typeof SHADING_MODES)[number];
@@ -59,10 +64,11 @@ export interface CharacterAssets {
   readonly models?: readonly CharacterModel[];
   readonly avatar?: AvatarModelProfile;
   readonly hammer?: HammerModelProfile;
+  readonly pot?: PotModelProfile;
   readonly shading?: CharacterShading;
 }
 
-export const CHARACTER_ASSET_FIELDS = ['models', 'avatar', 'hammer', 'shading'] as const;
+export const CHARACTER_ASSET_FIELDS = ['models', 'avatar', 'hammer', 'pot', 'shading'] as const;
 
 export const SHADING_LIMITS = {
   bands: { min: 2, max: 8, step: 1 },
@@ -77,10 +83,13 @@ export const DEFAULT_CHARACTER_SHADING: CharacterShading = Object.freeze({
 const MODEL_PREFIX = 'data:model/gltf-binary;base64,';
 const MODEL_ENCODED_BYTES = MODEL_PREFIX.length + Math.ceil(MODEL_LIMITS.bytes / 3) * 4;
 
+// One model per role: avatar, hammer and pot.
+const MODEL_ROLES = 3;
+
 export const CHARACTER_MODEL_LIMITS = {
-  models: 2,
+  models: MODEL_ROLES,
   bytes: MODEL_LIMITS.bytes,
-  encodedBytes: 2 * MODEL_ENCODED_BYTES,
+  encodedBytes: MODEL_ROLES * MODEL_ENCODED_BYTES,
   id: 80,
   name: 120,
   jointName: 120,
@@ -88,6 +97,7 @@ export const CHARACTER_MODEL_LIMITS = {
 
 export const AVATAR_MODEL_ID = 'avatar';
 export const HAMMER_MODEL_ID = 'hammer';
+export const POT_MODEL_ID = 'pot';
 
 export const CHARACTER_MODEL_ERROR_CODES = [
   'invalid-model', 'model-limits', 'no-skin', 'unexpected-skin', 'invalid-skin',
@@ -256,9 +266,9 @@ export function validateAvatarModelProfile(value: unknown): AvatarModelProfile {
   });
 }
 
-export function validateHammerModelProfile(value: unknown): HammerModelProfile {
-  const hammer = record(value, ['model'], 'The hammer model');
-  return Object.freeze({ model: text(hammer.model, CHARACTER_MODEL_LIMITS.id, 'Hammer model ID') });
+export function validatePropModelProfile(value: unknown, role: PropModelRole): PropModelProfile {
+  const prop = record(value, ['model'], `The ${role} model`);
+  return Object.freeze({ model: text(prop.model, CHARACTER_MODEL_LIMITS.id, `${role[0]!.toUpperCase()}${role.slice(1)} model ID`) });
 }
 
 export function validateCelOutline(value: unknown): CelOutline {
@@ -301,8 +311,13 @@ export function characterAssets(value: CharacterAssets): CharacterAssets {
   if (value.models !== undefined) result.models = value.models;
   if (value.avatar !== undefined) result.avatar = value.avatar;
   if (value.hammer !== undefined) result.hammer = value.hammer;
+  if (value.pot !== undefined) result.pot = value.pot;
   if (value.shading !== undefined) result.shading = value.shading;
   return result;
+}
+
+function sameProp(left: PropModelProfile | undefined, right: PropModelProfile | undefined): boolean {
+  return left === right || left !== undefined && right !== undefined && left.model === right.model;
 }
 
 export function sameCharacterAssets(left: CharacterAssets, right: CharacterAssets): boolean {
@@ -314,7 +329,7 @@ export function sameCharacterAssets(left: CharacterAssets, right: CharacterAsset
   return sameModels &&
     (left.avatar === right.avatar || left.avatar !== undefined && right.avatar !== undefined &&
       left.avatar.model === right.avatar.model && sameBoneMap(left.avatar.boneMap, right.avatar.boneMap)) &&
-    (left.hammer === right.hammer || left.hammer?.model !== undefined && left.hammer.model === right.hammer?.model) &&
+    sameProp(left.hammer, right.hammer) && sameProp(left.pot, right.pot) &&
     (left.shading === right.shading || left.shading !== undefined && right.shading !== undefined &&
       sameShading(left.shading, right.shading));
 }
@@ -329,26 +344,27 @@ export function validateCharacterAssets(value: {
   readonly models?: unknown;
   readonly avatar?: unknown;
   readonly hammer?: unknown;
+  readonly pot?: unknown;
   readonly shading?: unknown;
 }): CharacterAssets {
   const models = value.models === undefined ? undefined : validateCharacterModels(value.models);
   const avatar = value.avatar === undefined ? undefined : validateAvatarModelProfile(value.avatar);
-  const hammer = value.hammer === undefined ? undefined : validateHammerModelProfile(value.hammer);
+  const hammer = value.hammer === undefined ? undefined : validatePropModelProfile(value.hammer, 'hammer');
+  const pot = value.pot === undefined ? undefined : validatePropModelProfile(value.pot, 'pot');
   const validated = value.shading === undefined ? undefined : validateCharacterShading(value.shading);
   // The default look is the absent field, as in schema 6 and 7 documents.
   const shading = validated === undefined || sameShading(validated, DEFAULT_CHARACTER_SHADING) ? undefined : validated;
   const ids = new Set(models?.map(model => model.id));
   const used = new Set<string>();
-  for (const [label, profile] of [['avatar', avatar], ['hammer', hammer]] as const) {
+  for (const [label, profile] of [['avatar', avatar], ['hammer', hammer], ['pot', pot]] as const) {
     if (profile === undefined) continue;
     if (!ids.has(profile.model)) throw new SpriteError(`The ${label} references missing character model "${profile.model}".`);
+    // Each role binds and shades its own scene, so roles never share a model.
+    if (used.has(profile.model)) throw new SpriteError('The avatar, hammer and pot need separate character models.');
     used.add(profile.model);
   }
-  if (avatar !== undefined && hammer !== undefined && avatar.model === hammer.model) {
-    throw new SpriteError('The avatar and hammer need separate character models.');
-  }
   if (models !== undefined && models.some(model => !used.has(model.id))) {
-    throw new SpriteError('Remove character models that neither the avatar nor the hammer uses.');
+    throw new SpriteError('Remove character models that no avatar, hammer or pot uses.');
   }
-  return characterAssets({ models, avatar, hammer, shading });
+  return characterAssets({ models, avatar, hammer, pot, shading });
 }
