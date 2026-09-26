@@ -195,6 +195,7 @@ open the [full-height map](docs/skyward-ruins-map.svg).
 | D | Toggle collision outlines and joint anchors (editor only) |
 | C | Recenter the camera |
 | 1 / 2 / 3 / 4 | Ascent / ledge hold / ground push / vault (editor only) |
+| / | Find a Workshop control (editor only) |
 
 Touch gain is independent of camera zoom and orientation: at the default
 **Control sensitivity**, 100 CSS pixels move the world-space target **2.65 m**.
@@ -221,6 +222,25 @@ Falling **20 m** below everything in a level (its lowest terrain or launch zone)
 restarts the attempt exactly like Reset. It only arms once the pot or hammer head
 has stood on terrain during that attempt, so a start with nothing beneath it keeps
 falling instead of restarting in a loop.
+
+### Finding Workshop controls
+
+Each Workshop tab opens on the controls used most: practice positions and the
+mass and motor sliders in **Physics**, the character type and quick-start buttons in
+**Character**, the body part and GLB model in **Appearance**, the layer list in
+**Sprites**, and the build tools in **Level**. Everything else sits in named,
+collapsible sections; select a heading to open or close it. Each browser
+remembers which sections you opened or closed, only as a layout preference.
+Chromium's find-in-page also opens a closed section that contains a match.
+
+**Find a control** at the top of the Workshop searches every labeled control and
+section in all five tabs. Press **/** anywhere outside a text field (while the mouse
+is not captured), type part of a name, then choose a result with Enter or a click: the Workshop switches to
+its tab, opens its sections, scrolls to it and focuses it. Results show where each
+control lives, for example **Physics › Materials**; controls that are currently
+disabled are marked **unavailable now**. Escape clears the search; a second Escape
+closes the Workshop. **Overlay** (D) and **Recenter camera** (C) stay in the
+Workshop header on every tab.
 
 ## Physics architecture
 
@@ -307,7 +327,7 @@ immediately clamps an out-of-range target, including while paused; increasing
 it preserves the current offset. Changing it does not restart the attempt, alter
 body masses, or change the rig's forces, mechanical reach, or collision rules.
 
-In **Workshop / Physics**, enter a **Game settings name** and choose
+In **Workshop / Physics / Saved game settings**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
 profile containing every physics setting and the target radius.
 Reusing a name keeps both versions. Choose an entry in **Past game settings**,
@@ -367,7 +387,8 @@ the editor's authored definition.
 
 Named level saves use the existing snapshot-history mechanism: repeated names
 keep separate versions, choosing an entry does not apply it, and loading is
-explicit. Export/import JSON to move level data between browsers or feed the
+explicit. **Save level** stays at the top of the Level tab; load past saves from
+**Saved levels**. Use **Level JSON** to export/import level data between browsers or feed the
 game-only build. Imports are validated before replacing the current level;
 malformed files and unavailable storage produce visible errors.
 
@@ -743,7 +764,7 @@ straight replacements, GLB models, and tiled sprites share these same targets;
 artwork never changes hammer length or hand placement. The preview
 works with procedural and imported arm parts. Model alignment remains cosmetic;
 it does not redefine skeleton anchors. These controls do not change colliders,
-mass, reach limits, or motor tuning. **D** / **Toggle collision overlay** also
+mass, reach limits, or motor tuning. **D** / the Workshop's **Overlay** toggle also
 shows arm chains and crosses at the body-relative hints.
 
 Enter an **IK profile name**, then **Save IK profile** (or press Enter). Every

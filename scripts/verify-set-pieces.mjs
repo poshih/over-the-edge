@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { observeBrowserPage } from './verify-level.mjs';
+import { openSection } from './workshop-ui.mjs';
 
 const SPACING = 13.5;
 const GALLERY_SIZE = 4;
@@ -101,6 +102,7 @@ export async function verifySetPieces(browser, address, artifacts) {
     if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
     await page.getByRole('tab', { name: 'Level', exact: true }).click();
     await page.waitForFunction(() => window.gettingOver.level().editor.mode === 'edit');
+    await openSection(page, 'level-set-pieces');
     await frames();
   };
   const importLevel = async definition => {

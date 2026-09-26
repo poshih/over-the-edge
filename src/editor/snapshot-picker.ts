@@ -8,6 +8,8 @@ export function createSnapshotPicker(options: {
   noun: string;
   plural: string;
   placeholder: string;
+  /** Omit the "Saved ..." heading when a surrounding Workshop section already names the picker. */
+  heading?: boolean;
   list: () => SnapshotEntry[];
   save: (name: string) => SnapshotEntry | null;
   load: (key: string) => { name: string } | null;
@@ -18,7 +20,7 @@ export function createSnapshotPicker(options: {
   const listen = { signal: options.signal };
   mount.classList.add('snapshot-history');
   mount.innerHTML = `
-    <div class="section-heading"><h3>Saved ${plural}</h3></div>
+    ${options.heading === false ? '' : `<div class="section-heading"><h3>Saved ${plural}</h3></div>`}
     <form class="tuning-save-form">
       <label for="${id}-profile-name">${noun[0].toUpperCase()}${noun.slice(1)} name</label>
       <div class="tuning-profile-row">

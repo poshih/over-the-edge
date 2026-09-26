@@ -12,6 +12,7 @@ import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
 import { createCharacterEditor } from './character-editor';
+import { sectionMarkup } from './workshop-section';
 import './sprite-editor.css';
 
 type SpriteFieldKey = (typeof SPRITE_FIELDS)[number]['key'];
@@ -67,89 +68,106 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   root.className = 'sprite-editor';
   root.innerHTML = `
     <div class="workshop-scroll sprite-scroll">
-      <section class="sprite-intro">
-        <h3>Author your sprite artwork.</h3>
-        <p>Add PNG cutouts or bind them to a custom 2D rig. Choose the global character type
-          and load a complete 2D example in Character. Uploading a PNG never switches the type.</p>
-      </section>
       <section class="sprite-mode-banner" aria-label="Sprite rendering mode">
         <p class="sprite-mode-status" role="status" aria-live="polite"></p>
         <button type="button" class="button sprite-preview-2d" hidden>Use 2D sprite character</button>
       </section>
-      <label class="appearance-label" for="sprite-new-anchor">New layer anchor</label>
-      <select id="sprite-new-anchor"></select>
-      <label class="appearance-label" for="sprite-new-file">PNG image</label>
-      <input id="sprite-new-file" type="file" accept="image/png,.png" />
-      <p class="appearance-format">PNG only, up to ${Math.floor(SPRITE_LIMITS.imageBytes / 1024 ** 2)} MiB.
-        Fits the anchor's bounds, aspect preserved, centered at its default offset.</p>
-
-      <label class="appearance-label" for="sprite-layer">Layer</label>
-      <select id="sprite-layer"></select>
-
-      <div class="appearance-state sprite-state" role="status" aria-live="polite" aria-atomic="true">
-        <p class="sprite-status"></p>
-      </div>
-
-      <fieldset class="tuning-group sprite-layer-fields" disabled>
-        <legend>Layer</legend>
-        <label class="appearance-label" for="sprite-layer-name">Name</label>
-        <input id="sprite-layer-name" type="text" maxlength="${SPRITE_LIMITS.name}" />
-        <label class="appearance-label" for="sprite-layer-anchor">Anchor</label>
-        <select id="sprite-layer-anchor"></select>
-      </fieldset>
-      <fieldset class="tuning-group sprite-layer-transform" disabled><legend>Placement</legend></fieldset>
-      <fieldset class="tuning-group sprite-flipbook" disabled>
-        <legend>Aim flipbook</legend>
-        <p class="appearance-format sprite-flipbook-summary"></p>
-        <label class="appearance-label" for="sprite-flipbook-files">Frame PNGs</label>
-        <input id="sprite-flipbook-files" type="file" accept="image/png,.png" multiple />
-        <p class="appearance-format">Choose ${FLIPBOOK_LIMITS.minimumFrames}-${FLIPBOOK_LIMITS.maximumFrames} PNGs with
-          identical pixel sizes. File names set the order (numbers sort naturally). Frame 0 faces the start angle and
-          each later frame turns counterclockwise by 360 / frames degrees: right 0, up 90, left 180, down 270.</p>
-        <div class="sprite-flipbook-fields">
-          <div>
-            <label class="appearance-label" for="sprite-flipbook-start">Start angle (deg)</label>
-            <input id="sprite-flipbook-start" type="number" min="0" max="${FLIPBOOK_LIMITS.angle}" step="any" />
-          </div>
-          <div>
-            <label class="appearance-label" for="sprite-flipbook-hysteresis">Hysteresis (deg)</label>
-            <input id="sprite-flipbook-hysteresis" type="number" min="0" step="any" />
-          </div>
-        </div>
-        <p class="appearance-format">Hysteresis keeps the shown frame this far past each sector edge; 0 turns it off.
-          It must stay below half the frame spacing.</p>
-        <output class="sprite-flipbook-frame" for="sprite-flipbook-start sprite-flipbook-hysteresis"></output>
-        <button type="button" class="button sprite-flipbook-single">Use single image</button>
-      </fieldset>
-      <button type="button" class="button sprite-delete-layer" disabled>Delete selected layer</button>
-      <div class="sprite-directional-mount"></div>
-      <div class="sprite-skeleton-mount"></div>
-
       <p class="appearance-format sprite-external-warning" hidden>This document references external image URL(s).
         Export preserves these public references. Never use links containing credentials or private
         or internal addresses.</p>
 
-      <fieldset class="tuning-group sprite-files">
-        <legend>Sprite JSON</legend>
-        <div class="sprite-action-row">
-          <button type="button" class="button sprite-export">Export sprites JSON</button>
-          <button type="button" class="button sprite-import">Import sprites JSON</button>
-        </div>
-        <input class="sprite-file" type="file" accept=".json,application/json" aria-label="Import sprites JSON" hidden />
-        <p class="appearance-format">Exports embed uploaded PNGs; public URLs remain references.
-          Import limit: ${Math.floor(SPRITE_LIMITS.documentBytes / 1024 ** 2)} MiB.</p>
-      </fieldset>
-      <p class="appearance-format">Files stay in this browser, on this site. Public HTTP(S) or site-relative
-        image sources from imports are kept as authored; this editor never uploads them elsewhere.</p>
+      <section class="sprite-layers" aria-label="Sprite layers">
+        <label class="appearance-label" for="sprite-layer">Layer</label>
+        <select id="sprite-layer"></select>
+      </section>
+
+      ${sectionMarkup({ id: 'sprites-add', title: 'Add a layer', hint: 'A PNG on a body or tool anchor', open: true }, `
+        <label class="appearance-label" for="sprite-new-anchor">New layer anchor</label>
+        <select id="sprite-new-anchor"></select>
+        <label class="appearance-label" for="sprite-new-file">PNG image</label>
+        <input id="sprite-new-file" type="file" accept="image/png,.png" />
+        <p class="appearance-format">PNG only, up to ${Math.floor(SPRITE_LIMITS.imageBytes / 1024 ** 2)} MiB.
+          Fits the anchor's bounds, aspect preserved, centered at its default offset.</p>
+      `)}
+
+      ${sectionMarkup({ id: 'sprites-layer', title: 'Selected layer', hint: 'Name, anchor and placement', open: true }, `
+        <fieldset class="tuning-group sprite-layer-fields" disabled>
+          <legend class="visually-hidden">Layer</legend>
+          <label class="appearance-label" for="sprite-layer-name">Name</label>
+          <input id="sprite-layer-name" type="text" maxlength="${SPRITE_LIMITS.name}" />
+          <label class="appearance-label" for="sprite-layer-anchor">Anchor</label>
+          <select id="sprite-layer-anchor"></select>
+        </fieldset>
+        <fieldset class="tuning-group sprite-layer-transform" disabled><legend>Placement</legend></fieldset>
+        <button type="button" class="button sprite-delete-layer" disabled>Delete selected layer</button>
+      `)}
+
+      ${sectionMarkup({ id: 'sprites-flipbook', title: 'Aim flipbook', hint: 'One image per aim angle' }, `
+        <fieldset class="tuning-group sprite-flipbook" disabled>
+          <legend class="visually-hidden">Aim flipbook</legend>
+          <p class="appearance-format sprite-flipbook-summary"></p>
+          <label class="appearance-label" for="sprite-flipbook-files">Frame PNGs</label>
+          <input id="sprite-flipbook-files" type="file" accept="image/png,.png" multiple />
+          <p class="appearance-format">Choose ${FLIPBOOK_LIMITS.minimumFrames}-${FLIPBOOK_LIMITS.maximumFrames} PNGs with
+            identical pixel sizes. File names set the order (numbers sort naturally). Frame 0 faces the start angle and
+            each later frame turns counterclockwise by 360 / frames degrees: right 0, up 90, left 180, down 270.</p>
+          <div class="sprite-flipbook-fields">
+            <div>
+              <label class="appearance-label" for="sprite-flipbook-start">Start angle (deg)</label>
+              <input id="sprite-flipbook-start" type="number" min="0" max="${FLIPBOOK_LIMITS.angle}" step="any" />
+            </div>
+            <div>
+              <label class="appearance-label" for="sprite-flipbook-hysteresis">Hysteresis (deg)</label>
+              <input id="sprite-flipbook-hysteresis" type="number" min="0" step="any" />
+            </div>
+          </div>
+          <p class="appearance-format">Hysteresis keeps the shown frame this far past each sector edge; 0 turns it off.
+            It must stay below half the frame spacing.</p>
+          <output class="sprite-flipbook-frame" for="sprite-flipbook-start sprite-flipbook-hysteresis"></output>
+          <button type="button" class="button sprite-flipbook-single">Use single image</button>
+        </fieldset>
+      `)}
+
+      ${sectionMarkup({ id: 'sprites-directional', title: 'Directional Presentation', hint: 'Facing sectors and head rotation' },
+        '<div class="sprite-directional-mount"></div>')}
+
+      ${sectionMarkup({ id: 'sprites-skeleton', title: '2D skeleton', hint: 'Bones, poses, animation, IK and hair' },
+        '<div class="sprite-skeleton-mount"></div>')}
+
+      ${sectionMarkup({ id: 'sprites-file', title: 'Sprite JSON', hint: 'Import or export the whole profile' }, `
+        <fieldset class="tuning-group sprite-files">
+          <legend class="visually-hidden">Sprite JSON</legend>
+          <div class="sprite-action-row">
+            <button type="button" class="button sprite-export">Export sprites JSON</button>
+            <button type="button" class="button sprite-import">Import sprites JSON</button>
+          </div>
+          <input class="sprite-file" type="file" accept=".json,application/json" aria-label="Import sprites JSON" hidden />
+          <p class="appearance-format">Exports embed uploaded PNGs; public URLs remain references.
+            Import limit: ${Math.floor(SPRITE_LIMITS.documentBytes / 1024 ** 2)} MiB.</p>
+          <p class="appearance-format">Files stay in this browser, on this site. Public HTTP(S) or site-relative
+            image sources from imports are kept as authored; this editor never uploads them elsewhere.</p>
+        </fieldset>
+      `)}
+
+      ${sectionMarkup({ id: 'sprites-about', title: 'About sprites', hint: 'Character type and saving' }, `
+        <section class="sprite-intro" aria-label="About sprites">
+          <p>Add PNG cutouts or bind them to a custom 2D rig. Choose the global character type
+            and load a complete 2D example in Character. Uploading a PNG never switches the type.</p>
+          <p>Save keeps the whole character / sprite profile: type, artwork, rig and directional presentation.
+            Revert restores the last save. New starts an empty profile with the built-in 3D character.</p>
+        </section>
+      `)}
     </div>
     <footer class="workshop-footer sprite-footer">
       <div class="persistence-actions">
-        <button type="button" class="button button-primary sprite-save">Save</button>
-        <button type="button" class="button sprite-revert">Revert</button>
-        <button type="button" class="button sprite-new">New</button>
+        <button type="button" class="button button-primary sprite-save"
+          title="Save the whole character / sprite profile in this browser">Save</button>
+        <button type="button" class="button sprite-revert" title="Restore the last saved profile">Revert</button>
+        <button type="button" class="button sprite-new" title="Start an empty profile with the built-in 3D character">New</button>
       </div>
-      <p>Save keeps the whole character / sprite profile: type, artwork, rig and directional presentation.
-        Revert restores the last save.</p>
+      <div class="appearance-state sprite-state" role="status" aria-live="polite" aria-atomic="true">
+        <p class="sprite-status"></p>
+      </div>
     </footer>
   `;
 
@@ -341,7 +359,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     const angle = (readout.startAngle + current.frame * readout.spacing) % FLIPBOOK_LIMITS.angle;
     setText(flipbookFrame, `Showing frame ${current.frame} (frames 0-${current.frameCount - 1}): ` +
       `"${readout.names.get(current.image) ?? current.image}", drawn for ${degreesText(angle)} aim. ` +
-      'Drag the Directional Presentation preview aim below to scrub frames.');
+      'Drag the Directional Presentation preview aim to scrub frames.');
   }
 
   function render(): void {
@@ -409,7 +427,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       kind = 'draft';
     } else {
       message = !snapshot.hasContent
-        ? 'No sprite layers yet. Add a PNG above, or load the complete example in Character.'
+        ? 'No sprite layers yet. Add a PNG layer, or load the complete example in Character.'
         : 'Character / sprite profile saved on this device.';
       kind = 'ready';
     }
@@ -429,7 +447,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   const directionalEditor = createDirectionalEditor({
     mount: element<HTMLDivElement>(root, '.sprite-directional-mount'),
     state, viewport: options.viewport, presentationState: () => options.rig.presentationState(),
-    actions: documentActions, signal: events.signal,
+    signal: events.signal,
   });
   const unsubscribe = state.subscribe(render);
   const ready = state.restore();

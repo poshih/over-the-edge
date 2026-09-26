@@ -89,7 +89,7 @@ export class PointerInput {
       if (event.target instanceof HTMLElement &&
         event.target.closest('input, select, textarea, [contenteditable="true"]')) return;
       const key = event.key.toLowerCase();
-      if (key === ' ' && event.target instanceof HTMLElement && event.target.closest('button')) return;
+      if (key === ' ' && event.target instanceof HTMLElement && event.target.closest('button, summary')) return;
       const actions: Record<string, UiAction> = { r: 'reset', p: 'pause', ' ': 'pause', c: 'recenter' };
       const action = actions[key];
       if (action) {

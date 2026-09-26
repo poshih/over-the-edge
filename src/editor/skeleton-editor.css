@@ -1,7 +1,5 @@
 .skeleton-editor {
-  margin-top: 22px;
-  padding-top: 22px;
-  border-top: 1px solid var(--line);
+  min-width: 0;
 }
 
 .skeleton-editor select,
@@ -30,22 +28,16 @@
 }
 
 .skeleton-intro {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .skeleton-state {
-  margin: 0 0 20px;
+  margin: 0 0 14px;
 }
 
-.skeleton-definition-group,
-.skeleton-bones-group,
-.skeleton-layer-group,
-.skeleton-pose-group,
-.skeleton-animation-group,
-.skeleton-ik-group,
-.skeleton-hair-group,
-.skeleton-collider-group {
-  margin-top: 18px;
+.game-ui .skeleton-status {
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .skeleton-action-row {

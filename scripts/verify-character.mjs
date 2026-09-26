@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Matrix4, Vector3 } from 'three';
 import { createServer } from 'vite';
 import { observeBrowserPage } from './verify-level.mjs';
+import { openSection } from './workshop-ui.mjs';
 import { modelFixture, texturePng } from './verify-appearance.mjs';
 import { hammerGlb, HUMANOID_BONE_MAP, humanoidBoneMap, patchGlbJson, potGlb, skinnedAvatarGlb } from './character-fixtures.mjs';
 
@@ -187,6 +188,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     const toggle = page.getByRole('button', { name: 'Workshop', exact: true });
     if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
     await page.getByRole('tab', { name: 'Character', exact: true }).click();
+    await openSection(page, 'character-avatar', 'character-hammer', 'character-pot', 'character-shading', 'character-file');
   };
   const importAvatar = async (name, buffer) => {
     await page.getByLabel('Skinned avatar GLB', { exact: true }).setInputFiles(glbFile(name, buffer));

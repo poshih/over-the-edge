@@ -21,6 +21,7 @@ import type { SpriteLayer } from '../sprite-data';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
 import type { SpriteAnchorInput, SpriteEditorSnapshot, SpriteEditorState } from './sprite-state';
+import { sectionMarkup } from './workshop-section';
 import './skeleton-editor.css';
 
 const DIAGRAM_WIDTH = 240;
@@ -295,7 +296,6 @@ export function createSkeletonEditor(options: {
   root.className = 'skeleton-editor';
   root.innerHTML = `
     <section class="sprite-intro skeleton-intro">
-      <h3>2D sprite rigging.</h3>
       <p>Create a compact bone rig, layer bindings, additive poses, clip animation and optional constraints.</p>
       <p class="appearance-format">Saved bone rotations use degrees. Meshes bind in skeleton-root space. Legacy layers stay anchor-driven until you bind them.</p>
     </section>
@@ -303,8 +303,9 @@ export function createSkeletonEditor(options: {
       <p class="skeleton-status"></p>
     </div>
 
+    ${sectionMarkup({ id: 'sprites-skeleton-rig', title: 'Skeleton', hint: 'Create, delete and root anchor', open: true }, `
     <fieldset class="tuning-group skeleton-definition-group">
-      <legend>Skeleton</legend>
+      <legend class="visually-hidden">Skeleton</legend>
       <div class="skeleton-action-row">
         <button type="button" class="button skeleton-create">Create skeleton</button>
         <button type="button" class="button skeleton-delete">Delete skeleton</button>
@@ -312,9 +313,11 @@ export function createSkeletonEditor(options: {
       <label class="appearance-label" for="skeleton-anchor">Root anchor</label>
       <select id="skeleton-anchor"></select>
     </fieldset>
+    `)}
 
+    ${sectionMarkup({ id: 'sprites-skeleton-bones', title: 'Bones', hint: 'Hierarchy, diagram and bind pose' }, `
     <fieldset class="tuning-group skeleton-bones-group">
-      <legend>Bones</legend>
+      <legend class="visually-hidden">Bones</legend>
       <label class="appearance-label" for="skeleton-bone">Selected bone</label>
       <select id="skeleton-bone"></select>
       <div class="skeleton-action-row">
@@ -351,9 +354,11 @@ export function createSkeletonEditor(options: {
       </div>
       <p class="appearance-format">Child bones for IK or hair must begin at the parent tip. Length edits keep already tip-attached children on the new tip.</p>
     </fieldset>
+    `)}
 
+    ${sectionMarkup({ id: 'sprites-skeleton-layer', title: 'Selected layer rigging', hint: 'Bone binding, tiling and mesh weights' }, `
     <fieldset class="tuning-group skeleton-layer-group">
-      <legend>Selected layer rigging</legend>
+      <legend class="visually-hidden">Selected layer rigging</legend>
       <p class="skeleton-layer-label"></p>
       <label class="appearance-label" for="skeleton-layer-bone">Rigid bone binding</label>
       <select id="skeleton-layer-bone"></select>
@@ -409,9 +414,11 @@ export function createSkeletonEditor(options: {
         <p class="appearance-format">Each vertex needs 1-4 influences totaling exactly 1.</p>
       </div>
     </fieldset>
+    `)}
 
+    ${sectionMarkup({ id: 'sprites-skeleton-pose', title: 'Directional pose', hint: 'Per-direction bone offsets' }, `
     <fieldset class="tuning-group skeleton-pose-group">
-      <legend>Directional pose</legend>
+      <legend class="visually-hidden">Directional pose</legend>
       <label class="appearance-label" for="skeleton-direction">Direction</label>
       <select id="skeleton-direction"></select>
       <p class="skeleton-selection-note"></p>
@@ -434,9 +441,11 @@ export function createSkeletonEditor(options: {
         <button type="button" class="button skeleton-clear-pose">Clear directional offset</button>
       </div>
     </fieldset>
+    `)}
 
+    ${sectionMarkup({ id: 'sprites-skeleton-animation', title: 'Animation clips', hint: 'Keyframes and preview' }, `
     <fieldset class="tuning-group skeleton-animation-group">
-      <legend>Animation clips</legend>
+      <legend class="visually-hidden">Animation clips</legend>
       <label class="appearance-label" for="skeleton-default-clip">Default live clip</label>
       <select id="skeleton-default-clip"></select>
       <label class="appearance-label" for="skeleton-clip">Selected clip</label>
@@ -515,9 +524,11 @@ export function createSkeletonEditor(options: {
         </div>
       </div>
     </fieldset>
+    `)}
 
+    ${sectionMarkup({ id: 'sprites-skeleton-ik', title: 'Two-bone IK', hint: 'Hands on the grip targets' }, `
     <fieldset class="tuning-group skeleton-ik-group">
-      <legend>Two-bone IK</legend>
+      <legend class="visually-hidden">Two-bone IK</legend>
       <label class="appearance-label" for="skeleton-ik">Constraint</label>
       <select id="skeleton-ik"></select>
       <div class="skeleton-meta-row">
@@ -573,9 +584,11 @@ export function createSkeletonEditor(options: {
         <button type="button" class="button skeleton-delete-ik">Delete IK</button>
       </div>
     </fieldset>
+    `)}
 
+    ${sectionMarkup({ id: 'sprites-skeleton-hair', title: 'Hair chain', hint: 'Spring-bone secondary motion' }, `
     <fieldset class="tuning-group skeleton-hair-group">
-      <legend>Hair chain</legend>
+      <legend class="visually-hidden">Hair chain</legend>
       <label class="appearance-label" for="skeleton-hair">Chain</label>
       <select id="skeleton-hair"></select>
       <div class="skeleton-meta-row">
@@ -619,9 +632,11 @@ export function createSkeletonEditor(options: {
         <button type="button" class="button skeleton-delete-hair">Delete hair</button>
       </div>
     </fieldset>
+    `)}
 
+    ${sectionMarkup({ id: 'sprites-skeleton-colliders', title: 'Hair colliders', hint: 'Circles the hair slides around' }, `
     <fieldset class="tuning-group skeleton-collider-group">
-      <legend>Hair colliders</legend>
+      <legend class="visually-hidden">Hair colliders</legend>
       <label class="appearance-label" for="skeleton-collider">Collider</label>
       <select id="skeleton-collider"></select>
       <div class="skeleton-meta-row">
@@ -654,6 +669,7 @@ export function createSkeletonEditor(options: {
         <button type="button" class="button skeleton-delete-collider">Delete collider</button>
       </div>
     </fieldset>
+    `)}
   `;
 
   const get = <T extends HTMLElement>(selector: string): T => element<T>(root, selector);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { openSection } from './workshop-ui.mjs';
 
 const SHAPES = ['box', 'platform', 'ramp', 'triangle', 'circle', 'hexagon'];
 const terrainObjects = definition => definition.objects.filter(object => object.kind === 'terrain');
@@ -111,6 +112,7 @@ export async function verifyLevel(browser, address, artifacts) {
     await page.locator('#level-illusion').check();
     assert.equal((await state()).editor.selected.illusion, true);
 
+    await openSection(page, 'level-saved', 'level-file');
     const name = page.getByRole('textbox', { name: 'Level name', exact: true });
     const history = page.getByRole('combobox', { name: 'Past levels', exact: true });
     await name.fill('Course <draft>');

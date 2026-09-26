@@ -11,10 +11,24 @@ import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
 import { createGameSettingsUI } from './game-settings-ui';
 import type { GameUi, HudState, PracticeId, UiOptions, WorkshopState, WorkshopTab } from './ui-types';
+import { createSection, rememberSections } from './workshop-section';
+import type { WorkshopSection } from './workshop-section';
+import { createWorkshopSearch } from './workshop-search';
 import workshopMarkup from './workshop.html?raw';
 
 const WORKSHOP_CLASS = 'workshop-open';
+const TEXT_ENTRY = 'textarea, [contenteditable]:not([contenteditable="false"]), ' +
+  'input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="button"], [type="submit"], [type="reset"])';
 const TABS = ['physics', 'character', 'appearance', 'sprites', 'level'] as const;
+type TuningGroup = (typeof TUNING_FIELDS)[number]['group'];
+// The groups that shape the feel most start open; the rest stay one click away.
+const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title'>>> = {
+  'Mass & recoil': { id: 'physics-mass', hint: 'Weights and swing kick', open: true },
+  Motors: { id: 'physics-motors', hint: 'Strength and speed caps', open: true },
+  Response: { id: 'physics-response', hint: 'How closely the hammer follows aim' },
+  Materials: { id: 'physics-materials', hint: 'Friction, damping and handle flex' },
+  Input: { id: 'physics-input', hint: 'Control sensitivity' },
+};
 
 export function createUI(options: UiOptions): GameUi {
   let settings = validateGameSettings(options.initialSettings);
@@ -39,7 +53,6 @@ export function createUI(options: UiOptions): GameUi {
   const appearanceMount = element<HTMLElement>(root, '#appearance-pane');
   const spriteMount = element<HTMLElement>(root, '#sprites-pane');
   const levelMount = element<HTMLElement>(root, '#level-pane');
-  const physicsFooter = element<HTMLElement>(root, '.physics-footer');
   const tabs = TABS.map((id) => ({
     id, button: element<HTMLButtonElement>(root, `#${id}-tab`), pane: element<HTMLElement>(root, `#${id}-pane`),
   }));
@@ -52,7 +65,6 @@ export function createUI(options: UiOptions): GameUi {
       tab.button.tabIndex = selected ? 0 : -1;
       tab.pane.hidden = !selected;
     }
-    physicsFooter.hidden = id !== 'physics';
     options.onWorkshopChange(workshopState());
   };
   for (const [index, tab] of tabs.entries()) {
@@ -117,16 +129,24 @@ export function createUI(options: UiOptions): GameUi {
     practiceButtons.set(practice.id, button);
     practiceGrid.append(button);
   }
+  const tuningSection = (section: WorkshopSection, legendText: string, className = 'tuning-group'): HTMLFieldSetElement => {
+    const { root: details, body } = createSection(section);
+    const group = document.createElement('fieldset');
+    group.className = className;
+    const legend = document.createElement('legend');
+    // The section heading shows the name; the legend still names the group for assistive technology.
+    legend.className = 'visually-hidden';
+    legend.textContent = legendText;
+    group.append(legend);
+    body.append(group);
+    tuningGroups.append(details);
+    return group;
+  };
   for (const field of TUNING_FIELDS) {
     let group = groups.get(field.group);
     if (!group) {
-      group = document.createElement('fieldset');
-      group.className = 'tuning-group';
-      const legend = document.createElement('legend');
-      legend.textContent = field.group;
-      group.append(legend);
+      group = tuningSection({ ...TUNING_SECTIONS[field.group], title: field.group }, field.group);
       groups.set(field.group, group);
-      tuningGroups.append(group);
     }
     const control = createRangeControl(field, {
       id: `tuning-${field.key}`, name: field.key, signal: events.signal,
@@ -143,15 +163,14 @@ export function createUI(options: UiOptions): GameUi {
     controls.set(field.key, control);
     group.append(control.row);
   }
-  const cursorGroup = document.createElement('fieldset');
-  cursorGroup.className = 'tuning-group cursor-settings';
-  const cursorLegend = document.createElement('legend');
-  cursorLegend.textContent = 'Cursor target';
+  const cursorGroup = tuningSection({
+    id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius around the hinge',
+  }, 'Cursor target', 'tuning-group cursor-settings');
   const cursorHelp = document.createElement('p');
   cursorHelp.className = 'cursor-target-help';
   cursorHelp.textContent = 'Aim inside a circle around the hammer\'s shoulder hinge. The target moves with the character and keeps your chosen offset until you aim again. ' +
     'There is no return to the hammer or hinge. The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it.';
-  cursorGroup.append(cursorLegend, cursorHelp);
+  cursorGroup.append(cursorHelp);
   for (const field of CURSOR_FIELDS) {
     const control = createRangeControl(field, {
       id: `cursor-${field.key}`, name: field.key, signal: events.signal,
@@ -160,7 +179,14 @@ export function createUI(options: UiOptions): GameUi {
     cursorControls.set(field.key, control);
     cursorGroup.append(control.row);
   }
-  tuningGroups.append(cursorGroup);
+  const savedSettings = createSection({
+    id: 'physics-saved', title: 'Saved game settings', hint: 'Named profiles and JSON files',
+  });
+  const savedSettingsMount = document.createElement('section');
+  savedSettingsMount.className = 'game-settings-history';
+  savedSettingsMount.setAttribute('aria-label', 'Saved game settings');
+  savedSettings.body.append(savedSettingsMount);
+  tuningGroups.append(savedSettings.root);
   function renderWorkshop(mode: 'open' | 'closed'): void {
     const open = mode === 'open';
     const focusInPanel = panel.contains(document.activeElement);
@@ -218,9 +244,27 @@ export function createUI(options: UiOptions): GameUi {
   }
   renderSettings(settings);
   createGameSettingsUI({
-    mount: element(root, '.game-settings-history'), signal: events.signal,
+    mount: savedSettingsMount, signal: events.signal,
     getSettings: () => settings, onLoad: commitSettings, onNotice: notice,
   });
+  rememberSections(panel, events.signal);
+  const search = createWorkshopSearch({
+    root: element(root, '.workshop-search'), signal: events.signal, selectTab, selectedTab: () => selectedTab,
+    scopes: [
+      { label: 'Workshop', root: element(root, '.workshop-quick'), tab: null },
+      ...tabs.map((tab) => ({ label: tab.button.textContent?.trim() ?? tab.id, root: tab.pane, tab: tab.id })),
+    ],
+  });
+  // "/" finds a control from anywhere except text entry or captured-mouse play.
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.repeat) return;
+    if (document.pointerLockElement !== null) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest(TEXT_ENTRY)) return;
+    event.preventDefault();
+    if (panel.hidden) setWorkshop('open');
+    search.focus();
+  }, listen);
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
     characterMount, appearanceMount, spriteMount, levelMount, workshopState,

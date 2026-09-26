@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { BoxGeometry, Matrix4, Vector3 } from 'three';
+import { openSection } from './workshop-ui.mjs';
 
 const SHAFT_AXIS_EPSILON = 1e-6;
 
@@ -224,6 +225,7 @@ export async function verifyAppearance(page, artifacts) {
     }
     await page.getByRole('tab', { name: 'Appearance', exact: true }).click();
     await page.waitForFunction(() => !window.gettingOver.appearance().restoring);
+    await openSection(page, 'appearance-alignment', 'appearance-arm-ik');
   };
   const upload = async (id, name, buffer) => {
     await page.getByLabel('Body part', { exact: true }).selectOption(id);

@@ -7,11 +7,11 @@ import { armIkProfiles } from './arm-ik-store';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
 import { createSnapshotPicker } from './snapshot-picker';
+import { sectionMarkup } from './workshop-section';
 
 interface AppearanceUiOptions {
   mount: HTMLElement;
   appearance: Appearance;
-  onDebug: () => void;
   onNotice: (message: string, kind: 'info' | 'error') => void;
 }
 
@@ -23,54 +23,58 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
   root.className = 'appearance-editor';
   root.innerHTML = `
     <div class="workshop-scroll appearance-scroll">
-      <section class="appearance-intro">
-        <h3>3D meshes and part imports.</h3>
-        <p>Mesh parts mode uses separate Three.js objects for the body and limbs. Avatar mode uses one
-          connected, skinned upper body instead; its pot and hammer remain separate. Choose the type in Character.</p>
-        <p>Import a GLB to replace an individual rigid part. The existing visual 3D arm IK and Planck 2D
-          physics keep driving it. Body-part imports are shown in Mesh parts mode; pot and hammer imports
-          also work with Avatar mode. Import a whole skinned avatar, a one-model hammer or a pot model in
-          Character; a profile hammer or pot model hides the matching imports here. Imported animation is not played.</p>
-        <p><strong>Cosmetic only:</strong> models do not change collision shapes, mass or grip.</p>
-        <p>GLB imports stay separately browser-local. They are not bundled into exported character / sprite profiles.</p>
+      <section class="appearance-part" aria-label="Replace a part">
+        <label class="appearance-label" for="visual-part">Body part</label>
+        <select id="visual-part"></select>
+        <p class="appearance-hint"></p>
+        <label class="appearance-label" for="visual-file">GLB model</label>
+        <input id="visual-file" type="file" accept=".glb,model/gltf-binary" />
+        <p class="appearance-format">Self-contained GLB 2.0, up to ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.
+          Embed textures; export without Draco, Meshopt or KTX2 compression.</p>
+        <div class="appearance-state model-state" role="status" aria-live="polite" aria-atomic="true">
+          <p class="appearance-source"></p>
+          <p class="appearance-status"></p>
+        </div>
       </section>
-      <div class="arm-ik-profiles"></div>
-      <p class="appearance-format">The last saved or loaded IK profile restores on reload.
-        Reset changes only the preview. Physics presets and model alignment are separate.</p>
-      <p class="appearance-format arm-ik-migration" role="status" hidden>
-        Arm IK now uses body-relative hints. Your previous swivel-angle save is untouched;
-        its angles cannot be converted exactly. Tune the new hints and save a named profile.
-      </p>
-      <fieldset class="tuning-group arm-ik-controls"><legend>Body-relative elbow hints</legend></fieldset>
-      <p class="appearance-format">Hints are preferred elbow positions relative to the torso:
-        X left/right, Y down/up, Z away/toward the camera, in metres.
-        Hands stay on the shaft. The collision overlay also shows hint crosses and arm chains.</p>
-      <div class="arm-ik-actions">
-        <button type="button" class="button reset-arm-ik">Reset arm IK</button>
-      </div>
-      <div class="appearance-state arm-ik-state" role="status" aria-live="polite" aria-atomic="true">
-        <p class="arm-ik-status"></p>
-      </div>
-      <label class="appearance-label" for="visual-part">Body part</label>
-      <select id="visual-part"></select>
-      <p class="appearance-hint"></p>
-      <label class="appearance-label" for="visual-file">GLB model</label>
-      <input id="visual-file" type="file" accept=".glb,model/gltf-binary" />
-      <p class="appearance-format">Self-contained GLB 2.0, up to ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.
-        Embed textures; export without Draco, Meshopt or KTX2 compression.</p>
-      <div class="appearance-state model-state" role="status" aria-live="polite" aria-atomic="true">
-        <p class="appearance-source"></p>
-        <p class="appearance-status"></p>
-      </div>
-      <div class="appearance-fit-heading">
-        <h3>Align the visual</h3>
-        <p>Auto-fit preserves proportions. Rotation is applied before fitting.
+      ${sectionMarkup({ id: 'appearance-alignment', title: 'Model alignment', hint: 'Scale, rotation and offsets', open: true }, `
+        <p class="appearance-format">Auto-fit preserves proportions. Rotation is applied before fitting.
           Adjustments preview live; save alignment to keep them.</p>
-      </div>
-      <fieldset class="tuning-group visual-alignment"><legend>Model alignment</legend></fieldset>
-      <button type="button" class="button appearance-debug">Toggle collision overlay</button>
-      <p class="appearance-format">Files stay in this browser, on this site. No upload to a server.
-        Saved visuals restore automatically. Imported animations, cameras and lights are not used.</p>
+        <fieldset class="tuning-group visual-alignment"><legend class="visually-hidden">Model alignment</legend></fieldset>
+      `)}
+      ${sectionMarkup({ id: 'appearance-arm-ik', title: 'Body-relative elbow hints', hint: 'Arm IK for both 3D types' }, `
+        <p class="appearance-format arm-ik-migration" role="status" hidden>
+          Arm IK now uses body-relative hints. Your previous swivel-angle save is untouched;
+          its angles cannot be converted exactly. Tune the new hints and save a named profile.
+        </p>
+        <fieldset class="tuning-group arm-ik-controls"><legend class="visually-hidden">Body-relative elbow hints</legend></fieldset>
+        <p class="appearance-format">Hints are preferred elbow positions relative to the torso:
+          X left/right, Y down/up, Z away/toward the camera, in metres.
+          Hands stay on the shaft. The Overlay also shows hint crosses and arm chains.</p>
+        <div class="arm-ik-actions">
+          <button type="button" class="button reset-arm-ik">Reset arm IK</button>
+        </div>
+        <div class="appearance-state arm-ik-state" role="status" aria-live="polite" aria-atomic="true">
+          <p class="arm-ik-status"></p>
+        </div>
+        <div class="arm-ik-profiles"></div>
+        <p class="appearance-format">The last saved or loaded IK profile restores on reload.
+          Reset changes only the preview. Physics presets and model alignment are separate.</p>
+      `)}
+      ${sectionMarkup({ id: 'appearance-about', title: 'About 3D parts', hint: 'What imports change' }, `
+        <section class="appearance-intro" aria-label="About 3D parts">
+          <p>Mesh parts mode uses separate Three.js objects for the body and limbs. Avatar mode uses one
+            connected, skinned upper body instead; its pot and hammer remain separate. Choose the type in Character.</p>
+          <p>Import a GLB to replace an individual rigid part. The existing visual 3D arm IK and Planck 2D
+            physics keep driving it. Body-part imports are shown in Mesh parts mode; pot and hammer imports
+            also work with Avatar mode. Import a whole skinned avatar, a one-model hammer or a pot model in
+            Character; a profile hammer or pot model hides the matching imports here. Imported animation is not played.</p>
+          <p><strong>Cosmetic only:</strong> models do not change collision shapes, mass or grip. Use the Overlay
+            to compare a visual with the actual contact shape.</p>
+          <p>GLB imports stay separately browser-local. They are not bundled into exported character / sprite profiles.
+            Files stay in this browser, on this site. No upload to a server. Saved visuals restore automatically.
+            Imported animations, cameras and lights are not used.</p>
+        </section>
+      `)}
     </div>
     <footer class="workshop-footer appearance-footer">
       <div class="persistence-actions">
@@ -179,7 +183,6 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
   save.addEventListener('click', () => void options.appearance.saveAlignment(selected), listen);
   reset.addEventListener('click', () => options.appearance.resetAlignment(selected), listen);
   useDefault.addEventListener('click', () => void options.appearance.useDefault(selected), listen);
-  get<HTMLButtonElement>('.appearance-debug').addEventListener('click', options.onDebug, listen);
 
   function render(): void {
     const snapshot = options.appearance.snapshot();

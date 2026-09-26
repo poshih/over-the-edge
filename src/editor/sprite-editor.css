@@ -26,12 +26,6 @@
   font-size: 16px;
 }
 
-.sprite-intro h3 {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 20px;
-  font-weight: 400;
-}
-
 .game-ui .sprite-intro p,
 .game-ui .sprite-editor .appearance-format {
   margin-top: 10px;
@@ -40,8 +34,12 @@
   line-height: 1.6;
 }
 
-.sprite-editor .appearance-label:first-of-type {
-  margin-top: 20px;
+.sprite-layers {
+  margin: 16px 0;
+}
+
+.sprite-layers .appearance-label {
+  margin-top: 0;
 }
 
 .sprite-mode-banner {

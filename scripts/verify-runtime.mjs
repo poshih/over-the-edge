@@ -11,6 +11,8 @@ import { verifyMobile } from './verify-mobile.mjs';
 import { verifyLevel } from './verify-level.mjs';
 import { verifySetPieces } from './verify-set-pieces.mjs';
 import { verifyTriggers } from './verify-triggers.mjs';
+import { verifyWorkshop } from './verify-workshop.mjs';
+import { openSection } from './workshop-ui.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = new URL('../artifacts/', import.meta.url);
@@ -278,6 +280,7 @@ try {
   assert.equal(await page.locator('.tuning-group legend').first().textContent(), 'Mass & recoil');
   assert.equal(await page.getByRole('checkbox', { name: 'Return target to hammer', exact: true }).count(), 0);
   assert.equal(await page.getByRole('slider', { name: 'Return speed', exact: true }).count(), 0);
+  await openSection(page, 'physics-cursor');
   const radiusControl = page.getByRole('slider', { name: 'Maximum target radius', exact: true });
   const beforeRadiusEdit = await snapshot();
   const configuredRadius = (await settings()).cursor.maxRadius;
@@ -352,6 +355,7 @@ try {
   const savedTorque = (await snapshot()).tuning.hingeTorque;
   const savedTuning = (await snapshot()).tuning;
   assert.ok(savedTorque > initialTorque, 'A live range control must reach the physics motor settings.');
+  await openSection(page, 'physics-saved');
   const nameInput = page.getByRole('textbox', { name: 'Game settings name', exact: true });
   const pastTuning = page.getByRole('combobox', { name: 'Past game settings', exact: true });
   const saveTuning = page.getByRole('button', { name: 'Save game settings', exact: true });
@@ -414,6 +418,7 @@ try {
   const secondSave = await pastTuning.inputValue();
   assert.notEqual(secondSave, firstSave, 'Reusing a name must create a distinct snapshot.');
   assert.equal((await savedRecords())[firstSave], originalRecord);
+  await openSection(page, 'physics-materials');
   await page.getByRole('slider', { name: 'Hammer friction', exact: true }).press('ArrowRight');
   const thirdTuning = (await snapshot()).tuning;
   await nameInput.fill('Rock grip');
@@ -645,6 +650,7 @@ try {
   report.scenarios.triggers = await verifyTriggers(browser, address, artifacts);
   report.scenarios.flipbook = await verifyFlipbook(browser, address, artifacts);
   report.scenarios.character = await verifyCharacter(browser, address, artifacts);
+  report.scenarios.workshop = await verifyWorkshop(browser, address, artifacts);
   await page.setViewportSize({ width: 760, height: 600 });
   await page.waitForTimeout(300);
   const canvasBox = await page.locator('#game').boundingBox();

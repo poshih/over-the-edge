@@ -10,6 +10,7 @@ import type { AvatarJointId, CelOutline, CharacterShading, ShadingMode } from '.
 import { RIG } from '../config';
 import { createRangeControl } from './range-control';
 import { createSpriteCharacterExample } from './sprite-character-example';
+import { sectionMarkup } from './workshop-section';
 import './character-editor.css';
 
 const JOINT_LABELS: Readonly<Record<AvatarJointId, string>> = {
@@ -65,168 +66,177 @@ export function createCharacterEditor(options: {
   root.className = 'character-editor';
   root.innerHTML = `
     <div class="workshop-scroll character-scroll">
-      <section class="character-intro">
-        <h3>Choose your character's look.</h3>
-        <p>Choose <strong>2D sprites</strong>, <strong>separate 3D mesh parts</strong>, or a
-          <strong>connected, skinned 3D avatar</strong>. The default remains the separate mesh-part character.</p>
-        <p>Every type keeps <strong>Planck 2D physics</strong>, hammer motion, grip positions and IK targets unchanged.</p>
-      </section>
-
-      <label class="appearance-label" for="character-rigging-type">Character type</label>
-      <select id="character-rigging-type" name="characterRiggingType" aria-describedby="character-technology character-type-help"></select>
-      <p id="character-technology" class="appearance-format" aria-live="polite"></p>
-      <p id="character-type-help" class="appearance-format">Type changes are draft-only. Switching types keeps
-        all images, layers, bones, directional settings and imported GLB parts; it ends temporary sprite previews.
-        Choose Save to keep the profile across reloads.</p>
-      <p class="appearance-format">Hybrid has been removed. Older Hybrid profiles with sprites become pure 2D;
-        those without sprites become Mesh parts. Incomplete sprite profiles no longer reveal missing 3D parts.</p>
-
-      <fieldset class="tuning-group character-arm-placement">
-        <legend>3D arm placement</legend>
-        <div class="character-arm-forward-control"></div>
-        <button type="button" class="button character-arm-forward-reset">Reset arm forward distance</button>
-        <p class="appearance-format">Moves the hand and hammer plane toward the camera, measured from the
-          configured chest front. The default is ${DEFAULT_ARM_FORWARD_DISTANCE} m.
-          This is visual only: the hammer still draws on top and gameplay physics stay unchanged.
-          Save the character profile to keep it.</p>
-        <p class="appearance-format character-arm-forward-inactive" hidden>Applies to Mesh parts and Avatar.
-          The saved value is retained in 2D mode, which keeps its authored sprite depths.</p>
-      </fieldset>
-
-      <section class="character-example" aria-labelledby="character-avatar-heading">
-        <h4 id="character-avatar-heading">Connected upper-body avatar</h4>
-        <p class="appearance-format">A built-in skinned model with joined shoulders, arms, neck and
-          head, rather than separate rigid body parts. Bone weights bend the skin at shoulders, elbows and wrists.
-          The existing grip targets drive its hands; the pot is not part of the avatar.</p>
-        <button type="button" class="button character-use-avatar">Use Avatar</button>
-        <p class="appearance-format">No download or third-party model license is needed. The avatar ships with
-          the game and is selected by exported profiles. Import your own skinned GLB below to replace its mesh;
-          imported animation clips are not played.</p>
-      </section>
-
-      <section class="character-example character-model" aria-labelledby="character-model-heading">
-        <h4 id="character-model-heading">Your skinned avatar (GLB)</h4>
-        <p class="appearance-format">Replace the built-in avatar mesh with a rigged GLB. Map eight of its skin
-          joints to the avatar's body, head, upper arms, forearms and hands. The existing arm IK, grips, head gaze
-          and arm forward distance drive them; arm lengths come from the GLB bind pose. Unmapped joints, such as
-          spine, neck, fingers and legs, follow their nearest mapped ancestor.</p>
-        <p class="appearance-format">Left and right are screen sides. The character faces the camera, so a rig's
-          anatomical right arm drives the left joints. Mixamo-style names are mapped automatically.</p>
-        <label class="appearance-label" for="character-avatar-file">Skinned avatar GLB</label>
-        <input id="character-avatar-file" type="file" accept=".glb,model/gltf-binary" />
-        <p class="appearance-format">Self-contained GLB 2.0 with one armature, up to
-          ${CHARACTER_MODEL_LIMITS.bytes / 1024 ** 2} MiB, at most 4 weights per vertex, normalized.</p>
-        <p class="appearance-format character-avatar-status" role="status" aria-live="polite"></p>
-        <fieldset class="tuning-group character-bone-map" hidden>
-          <legend>Bone map</legend>
-          <div class="character-bone-grid"></div>
-          <p class="character-bone-issue" role="alert" aria-atomic="true" hidden></p>
-        </fieldset>
-        <details class="character-unmapped" hidden>
-          <summary class="character-unmapped-summary"></summary>
-          <ul class="character-unmapped-list"></ul>
-        </details>
-        <div class="character-action-row">
-          <button type="button" class="button character-avatar-discard" hidden>Discard bone map changes</button>
-          <button type="button" class="button character-avatar-remove">Use built-in avatar mesh</button>
+      <section class="character-primary" aria-label="Character type">
+        <label class="appearance-label" for="character-rigging-type">Character type</label>
+        <select id="character-rigging-type" name="characterRiggingType" aria-describedby="character-technology character-type-help"></select>
+        <p id="character-technology" class="appearance-format" aria-live="polite"></p>
+        <p id="character-type-help" class="appearance-format">Type changes are drafts that keep all other artwork. Save keeps them across reloads.</p>
+        <div class="character-action-row character-quick-start" role="group" aria-label="Quick start">
+          <button type="button" class="button character-use-avatar"
+            title="Switch to the built-in connected, skinned upper-body avatar">Use Avatar</button>
+          <button type="button" class="button character-load-example"
+            title="Load Paper Climber, a complete 2D cutout character, as a new draft">Load complete 2D example</button>
         </div>
-      </section>
-
-      <section class="character-example character-hammer" aria-labelledby="character-hammer-heading">
-        <h4 id="character-hammer-heading">One-model hammer (GLB)</h4>
-        <p class="appearance-format">Replace the stretched shaft and separate head with one rigid model, in every
-          character type. Model it with its origin at the butt of the handle, the handle along +X, in metres.
-          The physical head sits at x = ${metres(RIG.handleLength)}; its collision block spans
-          x ${metres(RIG.handleLength - HEAD_HALF_LENGTH)} to ${metres(RIG.handleLength + HEAD_HALF_LENGTH)} and
-          y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}. Length, reach, grips and contacts stay physical.</p>
-        <label class="appearance-label" for="character-hammer-file">Hammer GLB</label>
-        <input id="character-hammer-file" type="file" accept=".glb,model/gltf-binary" />
-        <p class="appearance-format character-hammer-status" role="status" aria-live="polite"></p>
-        <button type="button" class="button character-hammer-remove">Use two-part hammer</button>
-      </section>
-
-      <section class="character-example character-pot" aria-labelledby="character-pot-heading">
-        <h4 id="character-pot-heading">Pot model (GLB)</h4>
-        <p class="appearance-format">Replace the pot with one rigid model, in every character type. It follows the
-          physical pot body at the pot's own depth, so its walls hide a body inside it. Model it in metres with
-          +Y up, its origin at the bottom-centre of the pot and its front facing +Z. The physical pot is
-          ${metres(POT_OUTLINE.rim.height)} tall: base radius ${metres(POT_OUTLINE.base)}, widest radius
-          ${metres(POT_OUTLINE.widest.radius)} at ${metres(POT_OUTLINE.widest.height)}, rim radius
-          ${metres(POT_OUTLINE.rim.radius)}. Collision stays physical.</p>
-        <label class="appearance-label" for="character-pot-file">Pot GLB</label>
-        <input id="character-pot-file" type="file" accept=".glb,model/gltf-binary" />
-        <p class="appearance-format character-pot-status" role="status" aria-live="polite"></p>
-        <button type="button" class="button character-pot-remove">Use default pot</button>
-      </section>
-
-      <fieldset class="tuning-group character-shading">
-        <legend>Avatar shading</legend>
-        <div class="character-shading-modes" role="radiogroup" aria-label="Shading mode">
-          <label><input type="radio" name="character-shading-mode" value="pbr" /> PBR</label>
-          <label><input type="radio" name="character-shading-mode" value="cel" /> Cel</label>
-        </div>
-        <div class="character-cel-bands"></div>
-        <label class="character-outline-toggle"><input type="checkbox" id="character-outline-enabled" /> Outline</label>
-        <label class="appearance-label" for="character-outline-color">Outline colour</label>
-        <input id="character-outline-color" type="color" />
-        <div class="character-outline-width"></div>
-        <p class="appearance-format">Styles Avatar mode: the connected avatar and its separate pot and hammer.
-          Flip between PBR and cel to compare the same model live; cel materials are built once and reused.
-          Save keeps the choice.</p>
-        <p class="appearance-format character-shading-inactive" hidden>Applies in Avatar mode. Other character
-          types keep their own materials.</p>
-      </fieldset>
-
-      <section class="character-rig-summary" aria-labelledby="character-rig-heading">
-        <h4 id="character-rig-heading">Authored sprite rig</h4>
-        <p class="character-rig-counts"></p>
-        <p class="appearance-format character-rig-detail"></p>
-        <p class="appearance-format">Use Sprites for anchor-bound PNG cutouts, custom 2D bones, weighted skins,
-          poses, animation, IK and optional hair. This authored 2D rig is separate from the avatar's
-          3D skeleton. Appearance imports individual rigid GLB parts; import a whole skinned avatar above.</p>
-        <p class="appearance-format">A single head image can tilt, not invent new face views. Direction-tagged
-          head images use the same facing choice as the rest of the sprites. Shared torso/IK bindings are
-          never rotated automatically; Directional Presentation reports heads needing a dedicated binding.</p>
-      </section>
-
-      <section class="character-example" aria-labelledby="character-example-heading">
-        <h4 id="character-example-heading">Meet Paper Climber</h4>
-        <p class="appearance-format">A complete custom cutout character: pot, jacket, helmet, both arms,
-          gloves and hammer. Shared PNGs cover all 13 visual slots; eight custom 2D bones and two
-          grip-target IK chains drive the arms. Eight custom helmet views follow aim with automatic neck tilt.
-          Previously saved single-helmet examples keep their artwork and gain tilt without reloading.</p>
-        <button type="button" class="button character-load-example">Load complete 2D example</button>
-        <p class="appearance-format">Loads a new 2D draft, not a save. Revert restores your last saved profile
-          until you choose Save. Artwork is generated only when you load this example.</p>
         <p class="character-example-error" role="alert" aria-atomic="true" hidden></p>
+        <p class="appearance-format character-external-warning" hidden>This profile references external images.
+          Export preserves their URLs. Never use links containing credentials or private/internal addresses.</p>
       </section>
 
-      <div class="appearance-state character-state" role="status" aria-live="polite" aria-atomic="true">
-        <p class="character-status"></p>
-      </div>
-      <fieldset class="tuning-group character-files">
-        <legend>Whole character / sprite profile</legend>
-        <div class="character-action-row">
-          <button type="button" class="button character-import">Import profile JSON</button>
-          <button type="button" class="button character-export">Export profile JSON</button>
+      ${sectionMarkup({ id: 'character-arms', title: '3D arm placement', hint: 'Hand and hammer depth', open: true }, `
+        <fieldset class="tuning-group character-arm-placement">
+          <legend class="visually-hidden">3D arm placement</legend>
+          <div class="character-arm-forward-control"></div>
+          <button type="button" class="button character-arm-forward-reset">Reset arm forward distance</button>
+          <p class="appearance-format">Moves the hand and hammer plane toward the camera, measured from the
+            configured chest front. The default is ${DEFAULT_ARM_FORWARD_DISTANCE} m.
+            This is visual only: the hammer still draws on top and gameplay physics stay unchanged.
+            Save the character profile to keep it.</p>
+          <p class="appearance-format character-arm-forward-inactive" hidden>Applies to Mesh parts and Avatar.
+            The saved value is retained in 2D mode, which keeps its authored sprite depths.</p>
+        </fieldset>
+      `)}
+
+      ${sectionMarkup({ id: 'character-avatar', title: 'Skinned avatar (GLB)', hint: 'Replace the built-in avatar mesh' }, `
+        <div class="character-model">
+          <p class="appearance-format">Replace the built-in avatar mesh with a rigged GLB. Map eight of its skin
+            joints to the avatar's body, head, upper arms, forearms and hands. The existing arm IK, grips, head gaze
+            and arm forward distance drive them; arm lengths come from the GLB bind pose. Unmapped joints, such as
+            spine, neck, fingers and legs, follow their nearest mapped ancestor.</p>
+          <p class="appearance-format">Left and right are screen sides. The character faces the camera, so a rig's
+            anatomical right arm drives the left joints. Mixamo-style names are mapped automatically.</p>
+          <label class="appearance-label" for="character-avatar-file">Skinned avatar GLB</label>
+          <input id="character-avatar-file" type="file" accept=".glb,model/gltf-binary" />
+          <p class="appearance-format">Self-contained GLB 2.0 with one armature, up to
+            ${CHARACTER_MODEL_LIMITS.bytes / 1024 ** 2} MiB, at most 4 weights per vertex, normalized.</p>
+          <p class="appearance-format character-avatar-status" role="status" aria-live="polite"></p>
+          <fieldset class="tuning-group character-bone-map" hidden>
+            <legend>Bone map</legend>
+            <div class="character-bone-grid"></div>
+            <p class="character-bone-issue" role="alert" aria-atomic="true" hidden></p>
+          </fieldset>
+          <details class="character-unmapped" hidden>
+            <summary class="character-unmapped-summary"></summary>
+            <ul class="character-unmapped-list"></ul>
+          </details>
+          <div class="character-action-row">
+            <button type="button" class="button character-avatar-discard" hidden>Discard bone map changes</button>
+            <button type="button" class="button character-avatar-remove">Use built-in avatar mesh</button>
+          </div>
         </div>
-        <p class="appearance-format">Includes the character type, 3D arm forward distance, sprite layout, 2D skeleton, directional settings,
-          embedded PNGs, the imported avatar, hammer and pot GLBs, bone map and shading. Public image URLs remain
-          references. Import limit: ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB.</p>
-      </fieldset>
-      <p class="appearance-format character-external-warning" hidden>This profile references external images.
-        Export preserves their URLs. Never use links containing credentials or private/internal addresses.</p>
-      <p class="appearance-format">Appearance's per-part GLB imports and their alignment stay browser-local;
-        they are not bundled with profile JSON. Avatar and hammer GLBs imported here are part of the profile.
-        The built-in avatar needs no embedded model file. Exported profiles can be used as game sprite data.</p>
+      `)}
+
+      ${sectionMarkup({ id: 'character-hammer', title: 'One-model hammer (GLB)', hint: 'Any character type' }, `
+        <div class="character-hammer">
+          <p class="appearance-format">Replace the stretched shaft and separate head with one rigid model, in every
+            character type. Model it with its origin at the butt of the handle, the handle along +X, in metres.
+            The physical head sits at x = ${metres(RIG.handleLength)}; its collision block spans
+            x ${metres(RIG.handleLength - HEAD_HALF_LENGTH)} to ${metres(RIG.handleLength + HEAD_HALF_LENGTH)} and
+            y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}. Length, reach, grips and contacts stay physical.</p>
+          <label class="appearance-label" for="character-hammer-file">Hammer GLB</label>
+          <input id="character-hammer-file" type="file" accept=".glb,model/gltf-binary" />
+          <p class="appearance-format character-hammer-status" role="status" aria-live="polite"></p>
+          <button type="button" class="button character-hammer-remove">Use two-part hammer</button>
+        </div>
+      `)}
+
+      ${sectionMarkup({ id: 'character-pot', title: 'Pot model (GLB)', hint: 'Any character type' }, `
+        <div class="character-pot">
+          <p class="appearance-format">Replace the pot with one rigid model, in every character type. It follows the
+            physical pot body at the pot's own depth, so its walls hide a body inside it. Model it in metres with
+            +Y up, its origin at the bottom-centre of the pot and its front facing +Z. The physical pot is
+            ${metres(POT_OUTLINE.rim.height)} tall: base radius ${metres(POT_OUTLINE.base)}, widest radius
+            ${metres(POT_OUTLINE.widest.radius)} at ${metres(POT_OUTLINE.widest.height)}, rim radius
+            ${metres(POT_OUTLINE.rim.radius)}. Collision stays physical.</p>
+          <label class="appearance-label" for="character-pot-file">Pot GLB</label>
+          <input id="character-pot-file" type="file" accept=".glb,model/gltf-binary" />
+          <p class="appearance-format character-pot-status" role="status" aria-live="polite"></p>
+          <button type="button" class="button character-pot-remove">Use default pot</button>
+        </div>
+      `)}
+
+      ${sectionMarkup({ id: 'character-shading', title: 'Avatar shading', hint: 'PBR or cel bands with outline' }, `
+        <fieldset class="tuning-group character-shading">
+          <legend class="visually-hidden">Avatar shading</legend>
+          <div class="character-shading-modes" role="radiogroup" aria-label="Shading mode">
+            <label><input type="radio" name="character-shading-mode" value="pbr" /> PBR</label>
+            <label><input type="radio" name="character-shading-mode" value="cel" /> Cel</label>
+          </div>
+          <div class="character-cel-bands"></div>
+          <label class="character-outline-toggle"><input type="checkbox" id="character-outline-enabled" /> Outline</label>
+          <label class="appearance-label" for="character-outline-color">Outline colour</label>
+          <input id="character-outline-color" type="color" />
+          <div class="character-outline-width"></div>
+          <p class="appearance-format">Styles Avatar mode: the connected avatar and its separate pot and hammer.
+            Flip between PBR and cel to compare the same model live; cel materials are built once and reused.
+            Save keeps the choice.</p>
+          <p class="appearance-format character-shading-inactive" hidden>Applies in Avatar mode. Other character
+            types keep their own materials.</p>
+        </fieldset>
+      `)}
+
+      ${sectionMarkup({ id: 'character-rig', title: 'Authored sprite rig', hint: 'Summary of the 2D rig in Sprites' }, `
+        <section class="character-rig-summary" aria-label="Authored sprite rig">
+          <p class="character-rig-counts"></p>
+          <p class="appearance-format character-rig-detail"></p>
+          <p class="appearance-format">Use Sprites for anchor-bound PNG cutouts, custom 2D bones, weighted skins,
+            poses, animation, IK and optional hair. This authored 2D rig is separate from the avatar's
+            3D skeleton. Appearance imports individual rigid GLB parts; import a whole skinned avatar above.</p>
+          <p class="appearance-format">A single head image can tilt, not invent new face views. Direction-tagged
+            head images use the same facing choice as the rest of the sprites. Shared torso/IK bindings are
+            never rotated automatically; Directional Presentation reports heads needing a dedicated binding.</p>
+        </section>
+      `)}
+
+      ${sectionMarkup({ id: 'character-file', title: 'Profile JSON', hint: 'Import or export the whole profile' }, `
+        <fieldset class="tuning-group character-files">
+          <legend class="visually-hidden">Whole character / sprite profile</legend>
+          <div class="character-action-row">
+            <button type="button" class="button character-import">Import profile JSON</button>
+            <button type="button" class="button character-export">Export profile JSON</button>
+          </div>
+          <p class="appearance-format">Includes the character type, 3D arm forward distance, sprite layout, 2D skeleton, directional settings,
+            embedded PNGs, the imported avatar, hammer and pot GLBs, bone map and shading. Public image URLs remain
+            references. Import limit: ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB. Exported profiles can be used
+            as game sprite data.</p>
+          <p class="appearance-format">Appearance's per-part GLB imports and their alignment stay browser-local;
+            they are not bundled with profile JSON. The built-in avatar needs no embedded model file.</p>
+        </fieldset>
+      `)}
+
+      ${sectionMarkup({ id: 'character-about', title: 'About character types', hint: 'Avatar, Paper Climber, saving' }, `
+        <section class="character-intro" aria-label="About character types">
+          <p>Choose <strong>2D sprites</strong>, <strong>separate 3D mesh parts</strong>, or a
+            <strong>connected, skinned 3D avatar</strong>. The default remains the separate mesh-part character.
+            Every type keeps <strong>Planck 2D physics</strong>, hammer motion, grip positions and IK targets unchanged.</p>
+          <p>Type changes are draft-only. Switching types keeps all images, layers, bones, directional settings
+            and imported GLB parts; it ends temporary sprite previews. Choose Save to keep the profile across reloads.</p>
+          <p><strong>Use Avatar</strong> selects a built-in skinned model with joined shoulders, arms, neck and head,
+            rather than separate rigid body parts. Bone weights bend the skin at shoulders, elbows and wrists. The
+            existing grip targets drive its hands; the pot is not part of the avatar. No download or third-party model
+            license is needed: the avatar ships with the game and is selected by exported profiles. Import your own
+            skinned GLB to replace its mesh; imported animation clips are not played.</p>
+          <p><strong>Load complete 2D example</strong> loads Paper Climber, a complete custom cutout character: pot,
+            jacket, helmet, both arms, gloves and hammer. Shared PNGs cover all 13 visual slots; eight custom 2D bones
+            and two grip-target IK chains drive the arms. Eight custom helmet views follow aim with automatic neck
+            tilt. It loads a new 2D draft, not a save: Revert restores your last saved profile until you choose Save.
+            Artwork is generated only when you load this example.</p>
+          <p>Hybrid has been removed. Older Hybrid profiles with sprites become pure 2D; those without sprites
+            become Mesh parts. Incomplete sprite profiles no longer reveal missing 3D parts.</p>
+          <p>Save and Revert apply to the whole character / sprite profile, not just the type. Only Save writes this
+            profile to browser storage.</p>
+        </section>
+      `)}
     </div>
     <footer class="workshop-footer character-footer">
       <div class="character-action-row">
-        <button type="button" class="button button-primary character-save">Save character profile</button>
-        <button type="button" class="button character-revert">Revert character profile</button>
+        <button type="button" class="button button-primary character-save"
+          title="Save the whole character / sprite profile in this browser">Save character profile</button>
+        <button type="button" class="button character-revert"
+          title="Restore the last saved character / sprite profile">Revert character profile</button>
       </div>
-      <p>These actions apply to the whole character / sprite profile, not just the type.
-        Only Save writes this profile to browser storage.</p>
+      <div class="appearance-state character-state" role="status" aria-live="polite" aria-atomic="true">
+        <p class="character-status"></p>
+      </div>
     </footer>
   `;
 

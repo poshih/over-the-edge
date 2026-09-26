@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 import { observeBrowserPage } from './verify-level.mjs';
+import { openSection } from './workshop-ui.mjs';
 
 const FULL_TURN = 360;
 const FRAME_COUNT = 72;
@@ -212,6 +213,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
     const toggle = page.getByRole('button', { name: 'Workshop', exact: true });
     if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
     await page.getByRole('tab', { name, exact: true }).click();
+    if (name === 'Sprites') await openSection(page, 'sprites-flipbook', 'sprites-directional', 'sprites-file');
   };
   const exportText = async () => {
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('.sprite-export').click()]);

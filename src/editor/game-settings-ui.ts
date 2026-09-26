@@ -32,7 +32,7 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
 
   const picker = createSnapshotPicker({
     mount: options.mount, signal: options.signal, id: 'game-settings', noun: 'game settings', plural: 'game settings',
-    placeholder: 'e.g. Steady hammer', isStorageKey: isGameSettingsStorageKey, onNotice: options.onNotice,
+    placeholder: 'e.g. Steady hammer', heading: false, isStorageKey: isGameSettingsStorageKey, onNotice: options.onNotice,
     list: () => listGameSettingsProfiles(localStorage),
     save: (name) => {
       try {

@@ -61,10 +61,7 @@ const ui = createUI({
 });
 const rig = new AppearanceRig(game.view.visuals);
 const appearance = new Appearance(rig, ui.notice);
-const appearanceUi = createAppearanceUI({
-  mount: ui.appearanceMount, appearance,
-  onDebug: () => perform('debug'), onNotice: ui.notice,
-});
+const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice });
 const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
 }));

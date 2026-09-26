@@ -8,6 +8,7 @@ import { build, createServer, preview } from 'vite';
 import { chromium } from 'playwright';
 import { modelFixture } from './verify-appearance.mjs';
 import { observeBrowserPage } from './verify-level.mjs';
+import { openSection } from './workshop-ui.mjs';
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -507,6 +508,7 @@ async function verifyEditorRoundTrip(pack) {
     await page.locator('#level-x').press('Tab');
     await page.waitForFunction(() => window.gettingOver.level().editor.selected?.x === 1.25);
     await frames(page);
+    await openSection(page, 'level-file');
     const downloadPromise = page.waitForEvent('download');
     await page.locator('.level-export').click();
     const download = await downloadPromise;

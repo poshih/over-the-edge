@@ -24,6 +24,7 @@ import { NamedSnapshots, SnapshotError } from './named-snapshots';
 import { createSnapshotPicker } from './snapshot-picker';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import { DRAWING, PolygonDraft } from './polygon-draft';
+import { sectionMarkup } from './workshop-section';
 import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
@@ -188,14 +189,24 @@ export function createLevelEditor(options: LevelEditorOptions) {
     </div>
     <div class="workshop-scroll level-scroll">
       <fieldset class="tuning-group level-tools">
-        <legend>Build the course</legend>
+        <legend class="visually-hidden">Build the course</legend>
         <div class="level-action-row">
           <button type="button" class="button" data-level-tool="select" aria-pressed="true">Select / move</button>
           <button type="button" class="button" data-level-tool="pan" aria-pressed="false">Pan view</button>
         </div>
-        <p class="level-help">Terrain shapes</p>
-        <div class="level-palette" aria-label="Shape palette"></div>
-        <button type="button" class="button level-draw-tool" data-level-tool="draw" aria-pressed="false">Draw shape</button>
+        <div class="level-camera-controls" aria-label="Editor camera">
+          <button type="button" class="button level-zoom-out" aria-label="Zoom out">−</button>
+          <button type="button" class="button level-zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" class="button level-fit">Fit course</button>
+          <button type="button" class="button level-go-start">View start</button>
+        </div>
+        <p class="level-help level-palette-label">Terrain</p>
+        <div class="level-palette" aria-label="Shape palette">
+          <button type="button" class="button level-preset level-draw-tool" data-level-tool="draw" aria-pressed="false">
+            <svg viewBox="-0.65 -0.65 1.3 1.3" aria-hidden="true"><polyline points="-0.5,0.4 -0.2,-0.35 0.15,0.15 0.5,-0.45"
+              fill="none" stroke="currentColor" stroke-width="0.09" stroke-linecap="round" stroke-linejoin="round" /></svg>Draw shape
+          </button>
+        </div>
         <div class="level-drawing-controls" hidden>
           <p class="level-help level-drawing-status" role="status" aria-live="polite"></p>
           <div class="level-drawing-actions">
@@ -204,36 +215,20 @@ export function createLevelEditor(options: LevelEditorOptions) {
             <button type="button" class="button level-drawing-cancel">Cancel outline</button>
           </div>
         </div>
-        <p class="level-help">Start &amp; triggers</p>
-        <div class="level-action-row">
-          <button type="button" class="button" data-level-tool="start" aria-pressed="false">Start location</button>
-          <button type="button" class="button level-go-start">View start</button>
+        <p class="level-help level-palette-label">Start, triggers &amp; enemies</p>
+        <div class="level-entity-palette" aria-label="Start and trigger palette">
+          <button type="button" class="button level-preset" data-level-tool="start" aria-pressed="false">
+            <svg viewBox="-0.65 -0.65 1.3 1.3" aria-hidden="true"><circle cx="-0.12" cy="0.18" r="0.3" fill="none"
+              stroke="currentColor" stroke-width="0.08" /><path d="M0.08 -0.02 L0.5 -0.45" fill="none" stroke="currentColor"
+              stroke-width="0.08" stroke-linecap="round" /></svg>Start location
+          </button>
         </div>
-        <div class="level-entity-palette" aria-label="Trigger palette"></div>
-        <p class="level-help">Enemies</p>
         <div class="level-enemy-palette" aria-label="Enemy palette"></div>
         <p class="level-help level-tool-help"></p>
-        <div class="level-camera-controls" aria-label="Editor camera">
-          <button type="button" class="button level-zoom-out" aria-label="Zoom out">−</button>
-          <button type="button" class="button level-zoom-in" aria-label="Zoom in">+</button>
-          <button type="button" class="button level-fit">Fit course</button>
-        </div>
       </fieldset>
-      <fieldset class="tuning-group level-set-pieces">
-        <legend>Set piece library</legend>
-        <p class="level-help">Ready-made obstacles built from the basic shapes. Pick one, then click / tap the
-          canvas to drop it. It rests on the terrain top nearest the pointer, and every part stays editable.</p>
-        ${selectField('set-piece-category', 'Category', SET_PIECE_CATEGORIES.map(({ id, label }) => ({ value: id, label })))}
-        <div class="level-set-piece-grid" aria-label="Set pieces"></div>
-        <p class="level-help level-set-piece-detail"></p>
-        <label class="level-checkbox" for="level-set-piece-mirror">
-          <input id="level-set-piece-mirror" type="checkbox" /> Mirror left / right (M)
-        </label>
-        <button type="button" class="button level-set-piece-undo">Remove last placed set piece</button>
-        <p class="level-help level-set-piece-status" role="status" aria-live="polite"></p>
-      </fieldset>
+      ${sectionMarkup({ id: 'level-inspector', title: 'Object properties', hint: 'The selected or new object', open: true }, `
       <fieldset class="tuning-group level-inspector">
-        <legend>Object properties</legend>
+        <legend class="visually-hidden">Object properties</legend>
         <p class="level-selection-name"></p>
         <div class="level-field-grid level-fields-common">
           ${numericField('x', 'Position X', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
@@ -306,14 +301,28 @@ export function createLevelEditor(options: LevelEditorOptions) {
         </div>
         <button type="button" class="button level-delete">Delete selected object</button>
       </fieldset>
-      <fieldset class="tuning-group level-labels">
-        <legend>Course labels</legend>
-        <p class="level-help level-label-count"></p>
-        <button type="button" class="button level-clear-labels">Remove course labels</button>
+      `)}
+      ${sectionMarkup({ id: 'level-set-pieces', title: 'Set piece library', hint: `${SET_PIECES.length} ready-made obstacles` }, `
+      <fieldset class="tuning-group level-set-pieces">
+        <legend class="visually-hidden">Set piece library</legend>
+        <p class="level-help">Ready-made obstacles built from the basic shapes. Pick one, then click / tap the
+          canvas to drop it. It rests on the terrain top nearest the pointer, and every part stays editable.</p>
+        ${selectField('set-piece-category', 'Category', SET_PIECE_CATEGORIES.map(({ id, label }) => ({ value: id, label })))}
+        <div class="level-set-piece-grid" aria-label="Set pieces"></div>
+        <p class="level-help level-set-piece-detail"></p>
+        <label class="level-checkbox" for="level-set-piece-mirror">
+          <input id="level-set-piece-mirror" type="checkbox" /> Mirror left / right (M)
+        </label>
+        <button type="button" class="button level-set-piece-undo">Remove last placed set piece</button>
+        <p class="level-help level-set-piece-status" role="status" aria-live="polite"></p>
       </fieldset>
+      `)}
+      ${sectionMarkup({ id: 'level-saved', title: 'Saved levels', hint: 'Load a named snapshot' }, `
       <div class="level-history"></div>
+      `)}
+      ${sectionMarkup({ id: 'level-file', title: 'Level JSON', hint: 'Import or export, e.g. for releases' }, `
       <fieldset class="tuning-group level-files">
-        <legend>Level JSON</legend>
+        <legend class="visually-hidden">Level JSON</legend>
         <div class="level-action-row">
           <button type="button" class="button level-export">Export level JSON</button>
           <button type="button" class="button level-import">Import level JSON</button>
@@ -325,6 +334,14 @@ export function createLevelEditor(options: LevelEditorOptions) {
           New enemy kinds and trigger actions need an updated game runtime.
           Saved history loads only when you choose Load level.</p>
       </fieldset>
+      `)}
+      ${sectionMarkup({ id: 'level-labels', title: 'Course labels', hint: 'Signs painted on the course' }, `
+      <fieldset class="tuning-group level-labels">
+        <legend class="visually-hidden">Course labels</legend>
+        <p class="level-help level-label-count"></p>
+        <button type="button" class="button level-clear-labels">Remove course labels</button>
+      </fieldset>
+      `)}
     </div>
   `;
   options.mount.append(root);
@@ -915,7 +932,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
 
   const picker = createSnapshotPicker({
     mount: element(root, '.level-history'), signal: events.signal, id: 'level', noun: 'level', plural: 'levels',
-    placeholder: 'e.g. The quiet ascent', isStorageKey: (key) => history.isStorageKey(key), onNotice,
+    placeholder: 'e.g. The quiet ascent', heading: false, isStorageKey: (key) => history.isStorageKey(key), onNotice,
     list: () => {
       try {
         return history.list(localStorage);
@@ -984,7 +1001,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       renderControls();
       draw();
     }, listen);
-    element(root, '.level-palette').append(button);
+    element(root, '.level-palette').insertBefore(button, element(root, '.level-draw-tool'));
   }
 
   for (const preset of TRIGGER_PRESETS) {
@@ -1467,7 +1484,7 @@ This restores the default ground and start location, removes all other objects a
         toggleSetPieceMirror();
         break;
       case 'enter':
-        if (target instanceof Element && target.closest('button, a[href], [role="button"], [role="tab"]')) return;
+        if (target instanceof Element && target.closest('button, a[href], summary, [role="button"], [role="tab"]')) return;
         if (tool !== 'draw' && drawing.vertices.length === 0) return;
         applyEdit(finishDrawing);
         break;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { modelFixture } from './verify-appearance.mjs';
+import { openSection } from './workshop-ui.mjs';
 
 const TOUCH_DRAG_PIXELS = 40;
 const TOUCH_PIXELS_PER_REACH = 100;
@@ -170,6 +171,7 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal((await snapshot()).tuning.playerMass, mass);
       const stepBox = await increase.boundingBox();
       assert.ok(stepBox && stepBox.width >= 48 && stepBox.height >= 48);
+      await openSection(page, 'physics-saved');
       const tuningName = page.getByRole('textbox', { name: 'Game settings name', exact: true });
       const pastTuning = page.getByRole('combobox', { name: 'Past game settings', exact: true });
       await tuningName.fill(`Touch ${name}`);
@@ -213,6 +215,7 @@ export async function verifyMobile(browser, address, artifacts) {
       await page.getByRole('button', { name: 'Workshop', exact: true }).tap();
       await page.getByRole('tab', { name: 'Appearance', exact: true }).tap();
       await page.waitForFunction(() => !window.gettingOver.appearance().restoring);
+      await openSection(page, 'appearance-arm-ik');
       const beforeArmEdit = await snapshot();
       const originalHints = await page.evaluate(() => window.gettingOver.appearance().armIk.settings);
       await page.getByRole('button', { name: 'Increase Left elbow hint X', exact: true }).tap();

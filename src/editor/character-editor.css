@@ -19,10 +19,16 @@
   font-size: 11px;
 }
 
-.character-intro h3 {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 20px;
-  font-weight: 400;
+.character-primary {
+  margin-bottom: 16px;
+}
+
+.character-primary > .appearance-label:first-child {
+  margin-top: 0;
+}
+
+.character-quick-start {
+  margin-top: 12px;
 }
 
 .game-ui .character-intro p,
@@ -38,17 +44,6 @@
   color: var(--muted);
 }
 
-.character-rig-summary,
-.character-example {
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-}
-
-.character-rig-summary h4,
-.character-example h4 {
-  font-size: 12px;
-}
 
 .character-action-row {
   display: grid;
@@ -70,7 +65,10 @@
 .character-load-example,
 .character-use-avatar {
   width: 100%;
-  margin-top: 12px;
+}
+
+.character-arm-forward-reset {
+  margin-top: 10px;
 }
 
 .character-example-error {

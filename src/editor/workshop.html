@@ -1,59 +1,86 @@
 <aside id="edge-workshop" class="workshop" aria-labelledby="workshop-title" hidden>
       <header class="workshop-header">
-        <div>
-          <p class="eyebrow">A LITTLE ROOM TO EXPERIMENT</p>
-          <h2 id="workshop-title">The workshop<span class="brass-period">.</span></h2>
-          <p class="workshop-pause-note">Game paused while editing</p>
+        <div class="workshop-heading">
+          <h2 id="workshop-title">Workshop<span class="brass-period">.</span></h2>
+        </div>
+        <div class="workshop-quick" role="group" aria-label="View tools">
+          <button type="button" class="debug-button" data-action="debug" aria-pressed="false" aria-keyshortcuts="D"
+            title="Physics overlay: collision outlines, joint anchors and arm IK guides (D)">
+            <span>Overlay</span><span class="toggle-track" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="icon-button recenter-button" data-action="recenter" aria-label="Recenter camera"
+            aria-keyshortcuts="C" title="Recenter the camera on the player (C)">
+            <span class="recenter-icon" aria-hidden="true"></span>
+          </button>
         </div>
         <button type="button" class="icon-button workshop-close" aria-label="Close workshop">
           <span class="close-icon" aria-hidden="true"></span>
         </button>
+        <div class="workshop-search" role="search">
+          <div class="workshop-search-field">
+            <label class="visually-hidden" for="workshop-search">Find a control</label>
+            <input id="workshop-search" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false"
+              aria-controls="workshop-search-results" aria-keyshortcuts="/" placeholder="Find a control…"
+              autocomplete="off" spellcheck="false" enterkeyhint="go" />
+            <kbd class="workshop-search-key" aria-hidden="true">/</kbd>
+          </div>
+          <div class="workshop-search-panel" hidden>
+            <ul id="workshop-search-results" class="workshop-search-results" role="listbox" aria-label="Matching controls"></ul>
+            <p class="workshop-search-note" hidden></p>
+          </div>
+          <p class="visually-hidden" role="status" aria-live="polite"></p>
+        </div>
       </header>
 
       <div class="workshop-tabs" role="tablist" aria-label="Workshop section">
-        <button id="physics-tab" type="button" role="tab" aria-selected="true" aria-controls="physics-pane">Physics</button>
-        <button id="character-tab" type="button" role="tab" aria-selected="false" aria-controls="character-pane" tabindex="-1">Character</button>
-        <button id="appearance-tab" type="button" role="tab" aria-selected="false" aria-controls="appearance-pane" tabindex="-1">Appearance</button>
-        <button id="sprites-tab" type="button" role="tab" aria-selected="false" aria-controls="sprites-pane" tabindex="-1">Sprites</button>
-        <button id="level-tab" type="button" role="tab" aria-selected="false" aria-controls="level-pane" tabindex="-1">Level</button>
+        <button id="physics-tab" type="button" role="tab" aria-selected="true" aria-controls="physics-pane"
+          title="Practice positions and live physics tuning">Physics</button>
+        <button id="character-tab" type="button" role="tab" aria-selected="false" aria-controls="character-pane" tabindex="-1"
+          title="Character type, character models, shading and the character profile">Character</button>
+        <button id="appearance-tab" type="button" role="tab" aria-selected="false" aria-controls="appearance-pane" tabindex="-1"
+          title="Per-part GLB models and arm IK elbow hints">Appearance</button>
+        <button id="sprites-tab" type="button" role="tab" aria-selected="false" aria-controls="sprites-pane" tabindex="-1"
+          title="2D sprite layers, directional presentation and skeleton rigging">Sprites</button>
+        <button id="level-tab" type="button" role="tab" aria-selected="false" aria-controls="level-pane" tabindex="-1"
+          title="Build, save and playtest courses">Level</button>
       </div>
-      <div id="physics-pane" class="workshop-scroll" role="tabpanel" aria-labelledby="physics-tab">
-        <section class="practice-section" aria-labelledby="practice-title">
-          <div class="section-heading"><h3 id="practice-title">Find your footing</h3><span class="practice-count"></span></div>
-          <div class="practice-grid" role="group" aria-label="Practice positions"></div>
-          <p class="practice-description">Choose a starting point. Your game settings stay with you.</p>
-        </section>
 
-        <section class="game-settings-history" aria-label="Saved game settings"></section>
+      <div id="physics-pane" class="workshop-pane physics-pane" role="tabpanel" aria-labelledby="physics-tab">
+        <div class="workshop-scroll physics-scroll">
+          <section class="practice-section" aria-labelledby="practice-title">
+            <div class="section-heading"><h3 id="practice-title">Practice positions</h3><span class="practice-count"></span></div>
+            <div class="practice-grid" role="group" aria-label="Practice positions"></div>
+            <p class="practice-description">Choose a starting point. Your game settings stay with you.</p>
+          </section>
 
-        <section class="telemetry" aria-labelledby="telemetry-title">
-          <div class="section-heading">
-            <h3 id="telemetry-title">In the moment</h3>
-            <span class="contact-reading"><span class="contact-dot" aria-hidden="true"></span><span class="contact-value">0 contacts</span></span>
-          </div>
-          <div class="effort-label"><label id="hinge-effort-label" for="hinge-effort">Hinge effort</label><span class="hinge-effort-value">0%</span></div>
-          <meter id="hinge-effort" min="0" max="1" value="0" aria-labelledby="hinge-effort-label"></meter>
-          <div class="effort-label"><label id="slider-effort-label" for="slider-effort">Slider effort</label><span class="slider-effort-value">0%</span></div>
-          <meter id="slider-effort" min="0" max="1" value="0" aria-labelledby="slider-effort-label"></meter>
-        </section>
+          <section class="telemetry" aria-labelledby="telemetry-title">
+            <div class="section-heading">
+              <h3 id="telemetry-title">Live readout</h3>
+              <span class="contact-reading"><span class="contact-dot" aria-hidden="true"></span><span class="contact-value">0 contacts</span></span>
+            </div>
+            <div class="telemetry-meters">
+              <div>
+                <div class="effort-label"><label id="hinge-effort-label" for="hinge-effort">Hinge effort</label><span class="hinge-effort-value">0%</span></div>
+                <meter id="hinge-effort" min="0" max="1" value="0" aria-labelledby="hinge-effort-label"></meter>
+              </div>
+              <div>
+                <div class="effort-label"><label id="slider-effort-label" for="slider-effort">Slider effort</label><span class="slider-effort-value">0%</span></div>
+                <meter id="slider-effort" min="0" max="1" value="0" aria-labelledby="slider-effort-label"></meter>
+              </div>
+            </div>
+          </section>
 
-        <div class="tuning-heading"><h3>Make it feel like you.</h3><p>Live adjustments. Hover a label for details.</p></div>
-        <div class="tuning-groups"></div>
-
-        <section class="workshop-tools" aria-label="View and input tools">
-          <button type="button" class="debug-button" data-action="debug" aria-pressed="false" title="Show physics geometry (D)">
-            <span>Physics overlay</span><span class="toggle-track" aria-hidden="true"></span>
-          </button>
-          <button type="button" class="button recenter-button" data-action="recenter" title="Recenter the camera on the player (C)">Recenter camera <kbd>C</kbd></button>
-        </section>
+          <div class="tuning-heading"><h3>Make it feel like you.</h3><p>Live adjustments. Hover a label for details.</p></div>
+          <div class="tuning-groups"></div>
+        </div>
+        <footer class="workshop-footer physics-footer">
+          <button type="button" class="button defaults-tuning">Defaults</button>
+          <p>Restores the built-in physics and cursor settings. Saved profiles are kept.</p>
+        </footer>
       </div>
 
       <section id="character-pane" class="character-pane workshop-pane" role="tabpanel" aria-labelledby="character-tab" hidden></section>
       <section id="appearance-pane" class="appearance-pane workshop-pane" role="tabpanel" aria-labelledby="appearance-tab" hidden></section>
       <section id="sprites-pane" class="sprites-pane workshop-pane" role="tabpanel" aria-labelledby="sprites-tab" hidden></section>
       <section id="level-pane" class="level-pane workshop-pane" role="tabpanel" aria-labelledby="level-tab" hidden></section>
-      <footer class="workshop-footer physics-footer">
-        <button type="button" class="button defaults-tuning">Defaults</button>
-        <p>Saved on this device. Loaded only when you choose.</p>
-      </footer>
     </aside>

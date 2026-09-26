@@ -84,24 +84,31 @@
 
 .level-editor .tuning-group {
   min-width: 0;
-  margin: 0 0 20px;
+}
+
+.level-editor .level-tools {
+  margin: 0 0 16px;
+  padding: 0;
+  border-top: 0;
 }
 
 .level-palette,
 .level-entity-palette,
 .level-enemy-palette {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
   gap: 6px;
-  margin-top: 10px;
 }
 
 .level-enemy-palette {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 6px;
 }
 
-.level-draw-tool {
-  width: 100%;
+.level-editor .level-palette-label {
+  margin: 14px 0 6px;
+}
+
+.level-drawing-controls {
   margin-top: 8px;
 }
 
@@ -113,16 +120,18 @@
 
 .level-editor .level-preset {
   display: flex;
-  min-height: 66px;
+  min-height: 60px;
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 6px;
+  padding: 6px 4px;
+  font-size: 11px;
 }
 
 .level-preset svg {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
   fill: currentColor;
 }
 
@@ -175,9 +184,9 @@
 
 .level-camera-controls {
   display: grid;
-  grid-template-columns: 48px 48px minmax(0, 1fr);
+  grid-template-columns: 48px 48px repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .level-editor .level-help {
@@ -227,10 +236,6 @@
 .level-clear-labels {
   width: 100%;
   margin-top: 12px;
-}
-
-.level-editor .level-history {
-  margin: 0 0 22px;
 }
 
 .level-editor .tuning-profile-row {
@@ -550,9 +555,6 @@
 }
 
 @media (max-width: 1039px) and (orientation: landscape) {
-  .level-palette,
-  .level-entity-palette,
-  .level-enemy-palette,
   .level-set-piece-grid,
   .level-action-row,
   .level-field-grid {
@@ -561,9 +563,5 @@
 
   .level-camera-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .level-fit {
-    grid-column: 1 / -1;
   }
 }

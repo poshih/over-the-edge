@@ -16,13 +16,6 @@ export interface DirectionalViewport {
   readonly project: (point: { readonly x: number; readonly y: number; readonly z?: number }) => { x: number; y: number };
 }
 
-interface DocumentActions {
-  save(): void;
-  revert(): void;
-  importDocument(): void;
-  exportDocument(): void;
-}
-
 type RuleField = Exclude<keyof DirectionalRule, 'direction'>;
 type PresentationState = ReturnType<SpriteRig['presentationState']>;
 type Handle = { readonly kind: 'aim' } | { readonly kind: 'boundary'; readonly index: number };
@@ -104,7 +97,6 @@ export function createDirectionalEditor(options: {
   readonly state: SpriteEditorState;
   readonly viewport: DirectionalViewport;
   readonly presentationState: () => PresentationState;
-  readonly actions: DocumentActions;
   readonly signal: AbortSignal;
 }): {
   setActive(active: boolean): void;
@@ -133,10 +125,9 @@ export function createDirectionalEditor(options: {
   let settings = snapshot.document.presentation ?? createDirectionalPresentation(defaultAnchor());
   const root = document.createElement('section');
   root.className = 'directional-editor';
-  root.setAttribute('aria-labelledby', 'directional-heading');
+  root.setAttribute('aria-label', 'Directional Presentation');
   root.innerHTML = `
     <div class="sprite-intro">
-      <h3 id="directional-heading">Directional Presentation</h3>
       <p>The existing game canvas is your live character preview. Drag aim below to preview the
         actual rig, including braid motion; no separate character renderer is used.</p>
     </div>
@@ -218,14 +209,8 @@ export function createDirectionalEditor(options: {
         CW hold extends below the start; CCW hold extends beyond the end. Both holds plus the sector must span less than 360.</p>
     </fieldset>
     <button type="button" class="button directional-reset">Reset directional defaults (draft)</button>
-    <div class="sprite-action-row directional-actions">
-      <button type="button" class="button button-primary directional-save">Save</button>
-      <button type="button" class="button directional-revert">Revert</button>
-      <button type="button" class="button directional-import">Import sprite JSON</button>
-      <button type="button" class="button directional-export">Export sprite JSON</button>
-    </div>
-    <p class="appearance-format">Save/Revert and JSON actions apply to the entire sprite document.
-      Only Save writes browser storage. Aim and displayed runtime values are never saved.</p>
+    <p class="appearance-format">These settings are part of the character / sprite profile: use its Save and
+      Revert below. Aim and displayed runtime values are never saved.</p>
   `;
   const get = <T extends HTMLElement>(selector: string): T => element<T>(root, selector);
   const enabled = get<HTMLInputElement>('.directional-enabled');
@@ -246,10 +231,6 @@ export function createDirectionalEditor(options: {
   const currentTarget = get<HTMLOutputElement>('.directional-current-target');
   const currentDisplayed = get<HTMLOutputElement>('.directional-current-displayed');
   const resetButton = get<HTMLButtonElement>('.directional-reset');
-  const saveButton = get<HTMLButtonElement>('.directional-save');
-  const revertButton = get<HTMLButtonElement>('.directional-revert');
-  const importButton = get<HTMLButtonElement>('.directional-import');
-  const exportButton = get<HTMLButtonElement>('.directional-export');
 
   const diagram = svgElement('svg', {
     viewBox: `0 0 ${DIAGRAM_SIZE} ${DIAGRAM_SIZE}`, class: 'directional-diagram',
@@ -522,10 +503,6 @@ export function createDirectionalEditor(options: {
     options.state.setPresentation(createDirectionalPresentation(defaultAnchor()));
     renderError();
   }, listen);
-  saveButton.addEventListener('click', options.actions.save, listen);
-  revertButton.addEventListener('click', options.actions.revert, listen);
-  importButton.addEventListener('click', options.actions.importDocument, listen);
-  exportButton.addEventListener('click', options.actions.exportDocument, listen);
 
   function syncChoices(
     mount: HTMLElement, choices: Map<string, Choice>, items: readonly { id: string; name: string }[], key: 'layers' | 'bones',
@@ -610,10 +587,6 @@ export function createDirectionalEditor(options: {
     previewStart.disabled = busy || !active || !spritesEnabled;
     previewLive.disabled = !spritesEnabled || snapshot.preview === null && !snapshot.directionalPreview;
     resetButton.disabled = busy || !configured;
-    saveButton.disabled = busy || !snapshot.dirty;
-    revertButton.disabled = busy || !snapshot.dirty || snapshot.saved === null;
-    importButton.disabled = busy;
-    exportButton.disabled = busy || !snapshot.hasContent;
     setText(status, snapshot.restoring ? 'Restoring the saved sprite document...' :
       snapshot.busy ? 'Working on the sprite document...' :
       !spritesEnabled ? 'Sprite rendering and directional preview are disabled in 3D. Authored settings remain editable.' :

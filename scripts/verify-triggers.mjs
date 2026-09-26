@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { observeBrowserPage } from './verify-level.mjs';
+import { openSection } from './workshop-ui.mjs';
 
 const VIDEO_DURATION_MS = 4000;
 const UPDRAFT_TRIANGLES = 76;
@@ -103,6 +104,7 @@ export async function verifyTriggers(browser, address, artifacts) {
     if (await workshop.getAttribute('aria-expanded') === 'false') await workshop.click();
     await page.getByRole('tab', { name: 'Level', exact: true }).click();
     await page.waitForFunction(() => window.gettingOver.level().editor.mode === 'edit');
+    await openSection(page, 'level-saved', 'level-file');
   };
   const load = async definition => {
     await edit();
