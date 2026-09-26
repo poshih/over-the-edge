@@ -116,6 +116,8 @@ export interface LoadedVisual {
   scene: Group;
   bounds: Box3;
   triangles: number;
+  // Scene objects by glTF node index; loader-assigned names are sanitized and deduplicated.
+  nodes: ReadonlyMap<number, Object3D>;
   dispose: () => void;
 }
 
@@ -202,7 +204,12 @@ export async function loadVisualModel(blob: Blob): Promise<LoadedVisual> {
       Math.max(dimensions.x, dimensions.y, dimensions.z) > MODEL_LIMITS.maximumSpan) {
       throw new AppearanceError('The model has no finite, visible mesh bounds.');
     }
-    return { scene: gltf.scene, bounds, triangles, dispose };
+    const nodes = new Map<number, Object3D>();
+    gltf.scene.traverse((object) => {
+      const node = gltf.parser.associations.get(object)?.nodes;
+      if (node !== undefined) nodes.set(node, object);
+    });
+    return { scene: gltf.scene, bounds, triangles, nodes, dispose };
   } catch (error) {
     dispose();
     throw error;

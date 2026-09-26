@@ -8,14 +8,15 @@
 | --- | --- | --- |
 | `model-3d` | Mesh parts (3D) | Separate Three.js meshes with visual arm IK, optionally replaced by GLB parts |
 | `sprite-2d` | 2D sprite character | PNG planes, optionally attached to custom 2D bones or weighted GPU-skinned meshes |
-| `avatar-3d` | Avatar (3D, connected body) | One connected upper-body SkinnedMesh with a bone rig; pot and hammer stay separate |
+| `avatar-3d` | Avatar (3D, connected body) | One connected SkinnedMesh with a bone rig, built in or an imported skinned GLB; pot and hammer stay separate |
 
 The default 3D-looking character is built from geometry such as spheres,
 cylinders, and a lathed pot; it is not a pre-rigged 3D avatar. GLB imports replace
 individual visuals without retargeting a whole-body animation rig. Custom 2D
 skeletons use the project's pose/IK/hair solver and Three.js bones/skin
 rendering, not a separate game engine. Avatar mode instead uses the built-in
-connected 3D character. All modes retain Planck.js 2D physics,
+connected 3D character, or a skinned GLB imported in Character
+([imported 3D characters](characters.md)). All modes retain Planck.js 2D physics,
 the same hammer length and physical grips, and the same input behavior.
 
 The type is authored profile data, not an inferred result of which assets happen
@@ -42,7 +43,7 @@ with fresh visual motion state, rather than replaying elapsed hidden animation.
 
 ### Connected 3D avatar
 
-Choose **Use built-in Avatar** in Character. Unlike Mesh parts mode, the avatar
+Choose **Use Avatar** in Character. Unlike Mesh parts mode, the avatar
 is one connected skin: torso, shoulders, neck, head, both arms and hands share
 the indexed surface. Bone weights blend the shoulders, elbows and wrists.
 The pot and hammer are independent visuals and physical parts, not bones or
@@ -71,9 +72,10 @@ The selected type survives profile Save/export and `GAME_SPRITES` releases.
 
 Appearance's GLB imports still customize independent parts. In Avatar mode
 only its separate pot and hammer use those imported replacements; torso/head/
-arm GLBs remain stored for Mesh parts mode. Whole-avatar GLB import, arbitrary
-rig retargeting, and imported animation clips are not included in this
-built-in avatar.
+arm GLBs remain stored for Mesh parts mode. To replace the whole avatar, import
+a skinned GLB with a bone map in Character. The same section adds a one-model
+hammer and PBR or cel shading; see [imported 3D characters](characters.md).
+Imported animation clips are not played.
 
 ## Authoring
 
@@ -512,6 +514,9 @@ document is rejected. Releases before schema 7 reject flipbook documents; use a
 single image for each flipbook layer to export for them.
 Profiles from schemas 1-5 receive the unchanged 0.25 m default;
 invalid or missing schema-6 clearance values are rejected, not clamped.
+Schema 8 adds optional `models`, `avatar`, `hammer` and `shading` fields for
+[imported 3D characters](characters.md). It is written only while one of them is
+present, and a schema 1-7 document with any of them is rejected.
 Schemas 1-3 and
 schema-4 Hybrid profiles explicitly migrate to pure 2D when they contain any
 sprite layers, otherwise to Mesh parts. Existing schema-4 2D/Mesh parts choices
@@ -522,7 +527,7 @@ receive `presentation: null`, retaining fixed-sector selection while enabling
 automatic tilt for safe head owners; schema-3
 directional settings are retained unchanged.
 Reading or previewing an old save does not rewrite its stored record; an
-explicit Save/export writes schema 6, or 7 with flipbooks. Keep an original export for rollback to
+explicit Save/export writes schema 6, 7 with flipbooks, or 8 with character models or shading. Keep an original export for rollback to
 an older release: old readers cannot understand the new authored type.
 There is no destructive storage migration.
 
@@ -547,7 +552,11 @@ changing the host's physical anchors. It ends previews and reinitializes visual
 motion when the mode changes. `replaces()` reports whether sprites hide the
 host's underlying visuals: all are hidden in pure 2D, none in either 3D mode.
 Hosts that support Avatar must provide `onCharacterPresentationChange` when
-constructing `SpriteRig`. It receives the character type and arm forward distance.
+constructing `SpriteRig`. It receives the character type, arm forward distance and
+any schema-8 character fields. Hosts that load character models also pass
+`characterAssets: { prepare(document, signal) }`, which loads and validates a
+document's models before the rig commits it; without it, documents with models are
+rejected. `setShading()` applies a shading change without reloading anything.
 This game uses that callback to update the shared grip depth, enable the connected
 avatar and disable the separate upper-body meshes; `VisualVisibility` retains
 the imported parts for switching back. Other hosts reject avatar profiles if
@@ -652,6 +661,10 @@ The release waits for its selected sprites before starting gameplay. It loads
 no editor UI, import controls, browser saves, GLB importer, or diagnostics.
 Without `GAME_SPRITES`, it uses the procedural character and includes no sprite
 artwork. Sprite JSON is independent of level JSON and browser physics/IK profiles.
+`GAME_ALTERNATE_SPRITES` bundles a second profile that players can switch to, for
+example a skinned 3D avatar next to a 2D character; see
+[releases with two characters](characters.md#releases-with-two-characters).
+Character GLBs in either profile become hashed assets and are validated at build time.
 
 ## Complete sprite-character example
 

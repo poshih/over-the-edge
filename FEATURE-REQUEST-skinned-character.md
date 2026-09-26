@@ -1,6 +1,6 @@
 # Feature request: imported skinned character, one-model hammer, shading modes and a 2D/3D toggle
 
-**Date:** 2026-09-26 · **Baseline:** `da9bf3e` · **Status:** requested, not started.
+**Date:** 2026-09-26 · **Baseline:** `da9bf3e` · **Status:** implemented; see [imported 3D characters](docs/characters.md).
 
 Downstream games want to ship their **own** GPU-skinned 3D character (generated or hand-made, e.g.
 rigged with Mixamo-style bone names), render it either **PBR** or **cel-shaded**, and offer players

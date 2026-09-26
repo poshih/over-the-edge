@@ -6,13 +6,17 @@ import { build, createServer, preview } from 'vite';
 import { chromium } from 'playwright';
 import { observeBrowserPage } from './verify-level.mjs';
 import { dragTouch } from './verify-mobile.mjs';
-import { texturePng } from './verify-appearance.mjs';
+import { modelFixture, texturePng } from './verify-appearance.mjs';
 import { solidPng } from './verify-flipbook.mjs';
+import { hammerGlb, HUMANOID_BONE_MAP, skinnedAvatarGlb } from './character-fixtures.mjs';
 
 const TOUCH_DRAG_PIXELS = 40;
 const TOUCH_PIXELS_PER_REACH = 100;
 const SETTINGS_MODULE = '\0virtual:game-settings';
 const SPRITES_MODULE = '\0virtual:game-sprites';
+const ALTERNATE_MODULE = '\0virtual:game-alternate-sprites';
+const MODELS_MODULE = '\0virtual:game-character-models';
+const CHARACTER_KEY = 'over-the-edge:play:character';
 const FLIPBOOK_FRAMES = 3;
 const DIRECTIONS = ['right', 'up-right', 'up', 'up-left', 'left', 'down-left', 'down', 'down-right'];
 const SETTINGS_SAMPLE_TIMEOUT = 5000;
@@ -29,17 +33,20 @@ const customOutput = join(temporary, 'game');
 const previousLevel = process.env.GAME_LEVEL;
 const previousSprites = process.env.GAME_SPRITES;
 const previousSettings = process.env.GAME_SETTINGS;
+const previousAlternate = process.env.GAME_ALTERNATE_SPRITES;
 const report = { status: 'incomplete', errors: [], entries: [], blocked: [], settings: { invalid: [] } };
 let browser;
 
 const frames = page => page.evaluate(() => new Promise(resolve =>
   requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
-async function minimalHud(page, width) {
+async function minimalHud(page, width, characters = 0) {
   assert.equal(await page.locator('#fatal-error').isHidden(), true);
   assert.equal(await page.evaluate(() => typeof window.gettingOver), 'undefined');
   assert.equal(await page.getByRole('tab').count(), 0);
   assert.equal(await page.getByRole('button').count(), 0);
+  // Only a release with two character profiles offers the player a character choice.
+  assert.equal(await page.getByRole('radio').count(), characters);
   assert.equal(await page.locator('input[type="file"], .game-actions, .game-help, .brand, .peak-value').count(), 0);
   assert.deepEqual(await page.locator('.play-hud dt').allTextContents(), ['CURRENT HEIGHT', 'ELAPSED']);
   assert.equal(await page.locator('.play-hud dd').count(), 2);
@@ -296,6 +303,208 @@ async function verifySettings(page) {
       `${scenario.name} must fail development instead of selecting defaults.`);
     report.settings.invalid.push({ case: scenario.name, build: true, development: true });
   }
+}
+
+const glbSource = buffer => `data:model/gltf-binary;base64,${buffer.toString('base64')}`;
+
+function paperProfile() {
+  const layer = (id, anchor, image, width, height) => ({
+    id, name: id, anchor, image, width, height, offset: { x: 0, y: 0, z: 0.6 }, rotation: 0,
+    bone: null, directions: DIRECTIONS, skin: null, tileLength: null,
+  });
+  return {
+    schemaVersion: 6, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25,
+    images: [
+      { id: 'body', name: 'Body', source: `data:image/png;base64,${solidPng(16, 16, 20).toString('base64')}` },
+      { id: 'tool', name: 'Tool', source: `data:image/png;base64,${solidPng(16, 16, 200).toString('base64')}` },
+    ],
+    layers: [
+      layer('pot-card', 'pot', 'body', 1, 0.8), layer('shaft-card', 'hammer-shaft', 'tool', 1.5, 0.08),
+      layer('head-card', 'hammer-head', 'tool', 0.2, 0.58),
+    ],
+    skeleton: null, presentation: null,
+  };
+}
+
+function heroProfile(changes = {}) {
+  return {
+    schemaVersion: 8, characterRiggingType: 'avatar-3d', armForwardDistance: 0.3,
+    images: [], layers: [], skeleton: null, presentation: null,
+    models: [
+      { id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb()) },
+      { id: 'hammer', name: 'Mallet', source: glbSource(hammerGlb()) },
+    ],
+    avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP }, hammer: { model: 'hammer' },
+    shading: { mode: 'cel', bands: 3, outline: { color: '#1f2428', width: 0.02 } },
+    ...changes,
+  };
+}
+
+// S4: a release with a 2D profile and a skinned 3D profile that players switch between.
+async function verifyCharacterRelease(page) {
+  const paperPath = join(temporary, 'paper.json');
+  const heroPath = join(temporary, 'hero.json');
+  const output = join(temporary, 'characters-game');
+  await writeFile(levelPath, JSON.stringify(customLevel(0)));
+  await writeFile(paperPath, JSON.stringify(paperProfile()));
+  await writeFile(heroPath, JSON.stringify(heroProfile()));
+  delete process.env.GAME_SETTINGS;
+  process.env.GAME_LEVEL = levelPath;
+  process.env.GAME_SPRITES = paperPath;
+  process.env.GAME_ALTERNATE_SPRITES = heroPath;
+  const modules = new Map();
+  const release = await build({
+    configFile, logLevel: 'silent', build: { outDir: output },
+    plugins: [{
+      name: 'release-character-proof', enforce: 'pre',
+      transform(code, id) { if ([SPRITES_MODULE, ALTERNATE_MODULE, MODELS_MODULE].includes(id)) modules.set(id, code); },
+    }],
+  });
+  const outputs = (Array.isArray(release) ? release : [release]).flatMap(result => result.output);
+  const glbs = outputs.filter(file => file.type === 'asset' && /character-[^/]+\.glb$/.test(file.fileName));
+  assert.equal(glbs.length, 2, 'The avatar and hammer GLBs must be separate hashed assets.');
+  assert.equal(outputs.filter(file => file.type === 'asset' && /sprite-[^/]+\.png$/.test(file.fileName)).length, 2);
+  const heroModels = heroProfile().models.map(model => model.source.slice(model.source.indexOf(',') + 1));
+  assert.ok(outputs.filter(file => file.type === 'chunk').every(file => heroModels.every(model => !file.code.includes(model.slice(0, 4096)))),
+    'Character GLB bytes must not be embedded in executable JavaScript.');
+  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:8,.*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*shading:/s);
+  assert.match(modules.get(MODELS_MODULE), /createCharacterModelLoader/);
+  const releaseModules = bundleModules(release);
+  assert.ok(!releaseModules.some(id => id.includes('/src/editor/')), 'The character release contains no editor modules.');
+  assert.ok(releaseModules.some(id => id.endsWith('/src/character-model-loader.ts')));
+  const result = { assets: glbs.map(file => file.fileName), toggles: 0 };
+
+  const server = await preview({
+    configFile, logLevel: 'silent', build: { outDir: output }, preview: { host: '127.0.0.1', port: 0, strictPort: true },
+  });
+  const requests = [];
+  const record = request => {
+    const path = new URL(request.url()).pathname;
+    if (/\.(glb|png)$/.test(path)) requests.push(path);
+  };
+  page.on('request', record);
+  try {
+    const address = `http://127.0.0.1:${server.httpServer.address().port}/`;
+    await page.goto(address, { waitUntil: 'networkidle' });
+    await page.evaluate(key => localStorage.removeItem(key), CHARACTER_KEY);
+    requests.length = 0;
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction(() => document.querySelector('.elapsed-value')?.textContent !== '00:00');
+    await minimalHud(page, 1440, 2);
+    const group = page.getByRole('radiogroup', { name: 'Character' });
+    const flat = group.getByRole('radio', { name: '2D', exact: true });
+    const avatar = group.getByRole('radio', { name: '3D', exact: true });
+    assert.equal(await flat.isChecked(), true, 'The first profile is the default choice.');
+    const loaded = [...requests].sort();
+    assert.equal(loaded.length, 4, 'Both profiles load every asset before play.');
+    assert.equal(new Set(loaded).size, 4, 'Every asset loads exactly once.');
+    await page.screenshot({ path: join(artifacts, 'game-release-character-2d.png') });
+    // Switch mid-level while the clock runs: no reload, reset or asset request.
+    const elapsedBefore = await page.locator('.elapsed-value').textContent();
+    for (const choice of [avatar, flat, avatar]) {
+      await choice.check();
+      await frames(page);
+      result.toggles++;
+    }
+    assert.deepEqual([...requests].sort(), loaded, 'Toggling reuses both profiles\' loaded assets.');
+    await page.waitForFunction(previous => document.querySelector('.elapsed-value').textContent !== previous, elapsedBefore);
+    assert.notEqual(await page.locator('.elapsed-value').textContent(), '00:00', 'Toggling must not restart the level.');
+    await page.screenshot({ path: join(artifacts, 'game-release-character-3d.png') });
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), CHARACTER_KEY), '1');
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction(() => document.querySelector('.elapsed-value')?.textContent !== '00:00');
+    assert.equal(await avatar.isChecked(), true, 'The choice persists locally.');
+    assert.equal(await page.locator('#fatal-error').isHidden(), true);
+    result.persisted = true;
+  } finally {
+    page.off('request', record);
+    await page.goto('about:blank');
+    await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()));
+  }
+
+  // Development entry: switching leaves physics identical and builds nothing new after the first switch.
+  const development = await createServer({ configFile, logLevel: 'silent', server: { host: '127.0.0.1', port: 0, strictPort: true } });
+  try {
+    await development.listen();
+    await page.goto(`http://127.0.0.1:${development.httpServer.address().port}/`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => document.querySelector('.elapsed-value')?.textContent !== '00:00');
+    const gameModule = development.moduleGraph.getModuleById(join(root, 'src/game.ts'));
+    assert.ok(gameModule);
+    await page.evaluate(async url => {
+      const { Game } = await import(url);
+      const original = Game.prototype.state;
+      await new Promise(resolve => {
+        Game.prototype.state = function () {
+          Game.prototype.state = original;
+          window.releaseGame = this;
+          resolve();
+          return original.call(this);
+        };
+      });
+    }, gameModule.url);
+    await page.locator('#game').focus();
+    await page.keyboard.press('p');
+    await frames(page);
+    const sample = () => page.evaluate(() => {
+      const game = window.releaseGame;
+      const view = game.view.statistics();
+      return {
+        physics: JSON.stringify(game.simulation.snapshot()),
+        selection: view.characters,
+        textures: view.textures, geometries: view.geometries,
+        shading: { mode: view.shading.mode, materialsCreated: view.shading.materialsCreated, hullsCreated: view.shading.hullsCreated },
+        avatar: view.importedAvatar === null ? null : { visible: view.importedAvatar.visible, bones: view.importedAvatar.bones },
+        hammer: view.hammerModel === null ? null : view.hammerModel.visible,
+        paused: game.state().paused,
+      };
+    });
+    const select = async index => {
+      await page.getByRole('radio').nth(index).check();
+      await frames(page);
+      return sample();
+    };
+    const start = await sample();
+    assert.equal(start.paused, true);
+    const first = await select(1);
+    const back = await select(0);
+    const again = await select(1);
+    for (const state of [first, back, again]) assert.equal(state.physics, start.physics, 'Switching characters must not touch physics.');
+    assert.deepEqual([first.selection.active, back.selection.active, again.selection.active], [1, 0, 1]);
+    assert.deepEqual(first.selection.types, ['sprite-2d', 'avatar-3d']);
+    assert.equal(first.avatar.visible, true);
+    assert.equal(back.avatar, null, 'The 2D profile shows no imported avatar.');
+    assert.equal(first.shading.mode, 'cel');
+    assert.deepEqual(again.shading, first.shading, 'Switching back builds no new materials or outlines.');
+    assert.equal(again.textures, first.textures, 'Switching back uploads no new textures.');
+    assert.equal(again.geometries, first.geometries, 'Switching back creates no new geometry.');
+    result.development = { physicsUnchanged: true, textures: again.textures, geometries: again.geometries, shading: again.shading };
+  } finally {
+    await page.goto('about:blank');
+    await development.close();
+  }
+
+  // Release builds validate every character GLB and bone map with the shared typed checks.
+  const invalid = [
+    ['incomplete bone map', heroProfile({ avatar: { model: 'avatar', boneMap: { ...HUMANOID_BONE_MAP, head: undefined } } }), /no GLB joint for head/],
+    ['unknown joint', heroProfile({ avatar: { model: 'avatar', boneMap: { ...HUMANOID_BONE_MAP, head: 'Skull' } } }), /no skin joint named "Skull"/],
+    ['broken chain', heroProfile({ avatar: { model: 'avatar', boneMap: { ...HUMANOID_BONE_MAP, 'left-hand': 'Spine' } } }), /ancestor chains/],
+    ['eight influences', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb({ extraInfluences: true })) }], hammer: undefined }), /at most 4 joint influences/],
+    ['unnormalized weights', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb({ unnormalized: true })) }], hammer: undefined }), /must sum to 1/],
+    ['model limits', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb({ extraNodes: 2100 })) }], hammer: undefined }), /at most 2048 nodes/],
+    ['static avatar', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: glbSource(modelFixture()) }], hammer: undefined }), /no skinned mesh/],
+    ['skinned hammer', heroProfile({ models: [heroProfile().models[0], { id: 'hammer', name: 'Mallet', source: glbSource(skinnedAvatarGlb()) }] }), /static mesh without skins/],
+    ['remote model', heroProfile({ models: [{ id: 'avatar', name: 'Hero', source: 'https://example.invalid/hero.glb' }], hammer: undefined }), /must be an embedded GLB/],
+  ];
+  result.invalid = [];
+  for (const [name, profile, error] of invalid) {
+    await writeFile(heroPath, JSON.stringify(profile));
+    await assert.rejects(build({ configFile, logLevel: 'silent', build: { write: false } }), error,
+      `${name} must fail the release build.`);
+    result.invalid.push(name);
+  }
+  delete process.env.GAME_ALTERNATE_SPRITES;
+  delete process.env.GAME_SPRITES;
+  return result;
 }
 
 function customLevel(lift) {
@@ -587,10 +796,11 @@ try {
     await development.close();
   }
   await verifySettings(page);
+  report.characters = await verifyCharacterRelease(page);
   report.flipbook = flipbookRelease;
   assert.deepEqual(report.errors, [], 'Release browser errors are not allowed.');
   report.status = 'passed';
-  console.log('Game-only release, sprites, aim flipbooks, updrafts, enemies, dependency boundary, custom level, settings profiles, and development scenarios passed.');
+  console.log('Game-only release, sprites, aim flipbooks, two-character profiles, updrafts, enemies, dependency boundary, custom level, settings profiles, and development scenarios passed.');
 } finally {
   if (previousLevel === undefined) delete process.env.GAME_LEVEL;
   else process.env.GAME_LEVEL = previousLevel;
@@ -598,6 +808,8 @@ try {
   else process.env.GAME_SPRITES = previousSprites;
   if (previousSettings === undefined) delete process.env.GAME_SETTINGS;
   else process.env.GAME_SETTINGS = previousSettings;
+  if (previousAlternate === undefined) delete process.env.GAME_ALTERNATE_SPRITES;
+  else process.env.GAME_ALTERNATE_SPRITES = previousAlternate;
   await writeFile(join(artifacts, 'game-release-report.json'), JSON.stringify(report, null, 2));
   if (browser) await browser.close();
   await rm(temporary, { recursive: true });

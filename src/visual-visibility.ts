@@ -5,14 +5,20 @@ export class VisualVisibility {
   private covered = false;
   private enabled = true;
   private readonly defaults: readonly Object3D[];
+  private readonly onReplacement: ((next: Object3D | null, previous: Object3D | null) => void) | undefined;
 
-  constructor(defaults: readonly Object3D[]) {
+  constructor(defaults: readonly Object3D[], options: {
+    onReplacement?: (next: Object3D | null, previous: Object3D | null) => void;
+  } = {}) {
     this.defaults = defaults;
+    this.onReplacement = options.onReplacement;
   }
 
   setReplacement(replacement: Object3D | null): void {
+    const previous = this.replacement;
     this.replacement = replacement;
     this.update();
+    if (previous !== replacement) this.onReplacement?.(replacement, previous);
   }
 
   setCovered(options: { covered: boolean }): void {

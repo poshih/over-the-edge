@@ -22,3 +22,13 @@ declare module 'virtual:game-sprites' {
   const sprites: import('./sprite-data').SpriteDocument;
   export default sprites;
 }
+
+declare module 'virtual:game-alternate-sprites' {
+  const sprites: import('./sprite-data').SpriteDocument | null;
+  export default sprites;
+}
+
+declare module 'virtual:game-character-models' {
+  const loader: import('./character-model-types').CharacterModelLoader | null;
+  export default loader;
+}

@@ -16,6 +16,10 @@ import {
 } from './sprite-data';
 import type { CharacterPresentation, CharacterRiggingType, SpriteDocument, SpriteFlipbook, SpriteLayer } from './sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
+import {
+  characterAssets, DEFAULT_CHARACTER_SHADING, sameShading, validateCharacterShading,
+} from './character-profile';
+import type { CharacterAssets, CharacterShading } from './character-profile';
 import { DirectionalError, validateDirectionalPresentation } from './directional-data';
 import type { DirectionalPresentation } from './directional-data';
 import { DirectionalPose } from './directional-pose';
@@ -32,6 +36,12 @@ export interface SpriteAnchor {
   readonly node: THREE.Object3D;
   readonly renderRoot?: THREE.Object3D;
   readonly setCovered: (options: { covered: boolean }) => void;
+}
+
+// Loads and validates a profile's character models before the rig commits it, so failures
+// leave the previous presentation untouched. Hosts without one reject documents with models.
+export interface CharacterAssetHost {
+  prepare(document: SpriteDocument, signal: AbortSignal): Promise<void>;
 }
 
 interface ImageResource {
@@ -294,6 +304,8 @@ export class SpriteRig {
   private readonly coverage = new Map<string, boolean>();
   private characterRiggingType: CharacterRiggingType = DEFAULT_CHARACTER_RIGGING_TYPE;
   private armForwardDistance: number = DEFAULT_ARM_FORWARD_DISTANCE;
+  private assets: CharacterAssets = {};
+  private readonly assetHost: CharacterAssetHost | undefined;
   private images = new Map<string, ImageResource>();
   private resources = new Map<string, ImageResource>();
   private layers = new Map<string, LayerInstance>();
@@ -340,6 +352,7 @@ export class SpriteRig {
     headTracking?: SpriteHeadTracking;
     // Uploads a texture ahead of first use, so flipbook frame changes never upload during play.
     prepareTexture?: (texture: THREE.Texture) => void;
+    characterAssets?: CharacterAssetHost;
   }) {
     this.anchors = new Map(anchors);
     for (const name of this.anchors.keys()) this.coverage.set(name, false);
@@ -347,6 +360,7 @@ export class SpriteRig {
     this.targetIds = new Set(options.targetIds);
     this.onCharacterPresentationChange = options.onCharacterPresentationChange;
     this.prepareTexture = options.prepareTexture;
+    this.assetHost = options.characterAssets;
     this.headTracking = options.headTracking === undefined ? null : {
       anchor: options.headTracking.anchor,
       pivot: { ...options.headTracking.pivot },
@@ -367,6 +381,9 @@ export class SpriteRig {
     document = validateSpriteMetadata(document);
     validateSpriteAnchors(document, this.anchors.keys(), this.targetIds);
     this.assertCharacterRenderer(document.characterRiggingType);
+    if (document.models !== undefined && this.assetHost === undefined) {
+      throw new SpriteError('This host cannot load character models.');
+    }
     const operation: Replacement = { controller: new AbortController(), staged: new Map() };
     const signal = operation.controller.signal;
     const abort = () => operation.controller.abort(cancellation(options.signal));
@@ -377,6 +394,10 @@ export class SpriteRig {
     let pixels = 0;
     let bytes = 0;
     try {
+      if (document.models !== undefined) {
+        await this.assetHost!.prepare(document, signal);
+        checkSignal(signal);
+      }
       for (const image of document.images) {
         checkSignal(signal);
         let resource = resources.get(image.source);
@@ -418,7 +439,7 @@ export class SpriteRig {
       checkSignal(signal);
       const next = this.buildState(document.layers, document.skeleton, images, resources,
         { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
-          armForwardDistance: document.armForwardDistance });
+          armForwardDistance: document.armForwardDistance, ...characterAssets(document) });
       operation.staged.clear();
       this.commit(next, { preview: null });
     } finally {
@@ -443,6 +464,17 @@ export class SpriteRig {
     const distance = validateArmForwardDistance(value);
     if (distance === this.armForwardDistance) return;
     this.armForwardDistance = distance;
+    this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+  }
+
+  // Applies shading to the loaded models without reloading them; the default look is stored as absent.
+  setShading(value: CharacterShading): void {
+    this.assertMutable();
+    const validated = validateCharacterShading(value);
+    const shading = sameShading(validated, DEFAULT_CHARACTER_SHADING) ? undefined : validated;
+    const current = this.assets.shading;
+    if (current === shading || current !== undefined && shading !== undefined && sameShading(current, shading)) return;
+    this.assets = characterAssets({ ...this.assets, shading });
     this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
   }
 
@@ -710,6 +742,10 @@ export class SpriteRig {
       disposed: this.disposed,
       characterRiggingType: this.characterRiggingType,
       armForwardDistance: this.armForwardDistance,
+      shading: this.assets.shading ?? DEFAULT_CHARACTER_SHADING,
+      models: (this.assets.models ?? []).map(model => ({ id: model.id, name: model.name })),
+      avatarModel: this.assets.avatar === undefined ? null : { model: this.assets.avatar.model, boneMap: { ...this.assets.avatar.boneMap } },
+      hammerModel: this.assets.hammer?.model ?? null,
       busy: !this.disposed && (this.replacement !== null || this.pendingDecodes > 0),
       pendingDecodeCount: this.pendingDecodes,
       layerCount: this.layers.size,
@@ -792,6 +828,7 @@ export class SpriteRig {
     this.skeletonMounts.clear();
     this.coverage.clear();
     for (const [name, covered] of previousCoverage) if (covered) this.anchor(name).setCovered({ covered: false });
+    this.assets = {};
     this.onCharacterPresentationChange?.({
       characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
     });
@@ -868,7 +905,7 @@ export class SpriteRig {
   }
 
   private currentCharacterPresentation(): CharacterPresentation {
-    return { characterRiggingType: this.characterRiggingType, armForwardDistance: this.armForwardDistance };
+    return { characterRiggingType: this.characterRiggingType, armForwardDistance: this.armForwardDistance, ...this.assets };
   }
 
   private buildState(
@@ -911,7 +948,8 @@ export class SpriteRig {
       return { resources, images, layers: instances, attachments, skeletonMounts, skeleton,
         presentation: options.presentation,
         headTracking: compileSpriteHeadTracking(this.headTracking, layers, definition, options.presentation),
-        characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance, mode: options.mode };
+        characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance, mode: options.mode,
+        ...characterAssets(options) };
     } catch (error) {
       for (const instance of instances.values()) if (this.layers.get(instance.data.id) !== instance) this.disposeLayer(instance);
       if (skeleton !== this.skeleton) this.disposeSkeleton(skeleton);
@@ -1234,7 +1272,10 @@ export class SpriteRig {
     const oldLayers = this.layers;
     const oldSkeleton = this.skeleton;
     const changedType = next.characterRiggingType !== this.characterRiggingType;
-    const changedCharacter = changedType || next.armForwardDistance !== this.armForwardDistance;
+    const nextAssets = characterAssets(next);
+    const changedAssets = nextAssets.models !== this.assets.models || nextAssets.avatar !== this.assets.avatar ||
+      nextAssets.hammer !== this.assets.hammer || nextAssets.shading !== this.assets.shading;
+    const changedCharacter = changedType || next.armForwardDistance !== this.armForwardDistance || changedAssets;
     const presentation = next.presentation ?? next.headTracking.presentation;
     const resetDirection = changedType || next.mode === 'replace' || presentation !== this.runtimePresentation();
     const previousCoverage = new Map(this.coverage);
@@ -1255,6 +1296,7 @@ export class SpriteRig {
     this.headTrackingPlan = next.headTracking;
     this.characterRiggingType = next.characterRiggingType;
     this.armForwardDistance = next.armForwardDistance;
+    this.assets = nextAssets;
     if (changedType && next.mode === 'edit') this.resetPresentation();
     this.preview = options.preview;
     if (changedType || next.mode === 'replace' || this.preview !== null) {

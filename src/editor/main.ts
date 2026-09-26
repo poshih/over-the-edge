@@ -7,6 +7,7 @@ import { SPRITE_TARGET_IDS } from '../character';
 import type { Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import { Game } from '../game';
+import { createCharacterModelLoader } from '../character-model-loader';
 import { levelSpawn } from '../level';
 import { Appearance } from './appearance';
 import { AppearanceRig } from './appearance-rig';
@@ -31,6 +32,7 @@ let practice: PracticeId = 'start';
 let editing = false;
 const game = new Game({
   canvas, fatal, eventMount: mount, level: level.definition(),
+  characterModels: createCharacterModelLoader(),
   onAction: perform,
   onNotice: (message) => ui.notice(message, 'error'),
   onShortcut: (event) => {
@@ -68,6 +70,7 @@ const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
 }));
 const spriteEditor = createSpriteEditor({
   mount: ui.spriteMount, characterMount: ui.characterMount, rig: game.view.sprites, onNotice: ui.notice,
+  describeModel: (source, usage) => game.view.characterModelReport(source, usage),
   viewport: { canvas, project: (point) => game.view.project(point) },
   targetIds: SPRITE_TARGET_IDS,
   anchors: VISUAL_PARTS.map(({ id, label }) => {

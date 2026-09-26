@@ -14,6 +14,7 @@ import { TriggerRuntime } from './triggers';
 import type { TriggerAction, EventOutcome } from './trigger-events';
 import { EventPresenter } from './event-presenter';
 import type { SpriteDocument } from './sprite-data';
+import type { CharacterModelLoader } from './character-model-types';
 
 export class Game {
   readonly simulation: Simulation;
@@ -44,6 +45,7 @@ export class Game {
     eventMount: HTMLElement;
     level: LevelDefinition;
     settings?: Readonly<GameSettings>;
+    characterModels?: CharacterModelLoader | null;
     onAction: (action: UiAction, options?: UiActionOptions) => void;
     onNotice: (message: string) => void;
     onShortcut?: (event: KeyboardEvent) => void;
@@ -56,7 +58,7 @@ export class Game {
     window.addEventListener('unhandledrejection', (event) =>
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
-    this.view = new GameView(options.canvas, this.simulation.frame(1), options.level);
+    this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, { characterModels: options.characterModels });
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
     this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => this.view.enemies.apply(event));
     this.input = new PointerInput(options.canvas, {
@@ -159,6 +161,20 @@ export class Game {
     await this.view.sprites.replace(document, { signal: this.lifecycle.signal });
   }
 
+  // Loads a second character profile for players to switch to; it stays loaded while hidden.
+  async loadAlternateSprites(document: SpriteDocument): Promise<void> {
+    if (this.stopped) throw new Error('Cannot load sprites into a stopped game.');
+    await this.view.createAlternateCharacter().replace(document, { signal: this.lifecycle.signal });
+  }
+
+  selectCharacter(index: number): void {
+    this.view.selectCharacter(index);
+  }
+
+  characterSelection() {
+    return this.view.characterSelection();
+  }
+
   settings(): GameSettings { return this.simulation.gameSettings(); }
 
   setSettings(settings: Readonly<GameSettings>): void { this.simulation.setSettings(settings); }
@@ -243,7 +259,7 @@ export class Game {
     this.lifecycle.abort();
     this.triggers?.dispose();
     this.presenter?.dispose();
-    this.view?.sprites?.dispose();
+    this.view?.disposeCharacters();
     this.input?.setInteraction({ enabled: false });
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }

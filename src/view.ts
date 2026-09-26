@@ -6,13 +6,21 @@ import {
   RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
-import type { Material, Object3D } from 'three';
+import type { Material, Object3D, Quaternion } from 'three';
 import { ARM_SIDES, HEAD_GEOMETRY, SPRITE_TARGET_IDS } from './character';
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
-import { ARM_GEOMETRY, solveArmPose } from './arm-ik';
+import { ARM_GEOMETRY, DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
-import type { ArmPose } from './arm-ik';
+import type { ArmChains, ArmPose } from './arm-ik';
 import { AvatarView } from './avatar-view';
+import { resolveAvatarJoints } from './character-model-inspect';
+import type { CharacterModelUsage } from './character-model-inspect';
+import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
+import { characterModel, DEFAULT_CHARACTER_SHADING, sameBoneMap } from './character-profile';
+import type { AvatarBoneMap } from './character-profile';
+import { CharacterShadingView } from './character-shading';
+import { HammerModelView } from './hammer-model-view';
+import { SkinnedAvatarView } from './skinned-avatar-view';
 import { HeadAim } from './head-aim';
 import { PHYSICS, RIG } from './config';
 import type { InputMode, Point } from './config';
@@ -25,7 +33,8 @@ import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import { SpriteRig } from './sprite-rig';
 import type { SpriteAnchor } from './sprite-rig';
-import type { CharacterPresentation } from './sprite-data';
+import { DEFAULT_CHARACTER_RIGGING_TYPE, SpriteError } from './sprite-data';
+import type { CharacterPresentation, CharacterRiggingType, SpriteDocument } from './sprite-data';
 import { VisualVisibility } from './visual-visibility';
 import type { RigTarget } from './skeleton-pose';
 
@@ -80,6 +89,32 @@ export interface ViewLayer {
   dispose: () => void;
 }
 
+interface AvatarRenderer {
+  readonly root: Object3D;
+  update: (body: Matrix4, poses: readonly ArmPose[], headRotation: Quaternion) => void;
+}
+
+// One loaded character profile. Its sprite rig, models and views are built once and kept while
+// another profile is shown, so switching profiles only changes what is attached and visible.
+interface CharacterSlot {
+  readonly index: number;
+  readonly rig: SpriteRig;
+  // Sprite mounts and their parents; an inactive profile is detached, so it costs no frame work.
+  readonly mounts: readonly { readonly node: Group; readonly parent: Object3D }[];
+  readonly coverage: Map<string, boolean>;
+  presentation: CharacterPresentation;
+  readonly models: Map<CharacterModelUsage, Map<string, LoadedCharacterModel>>;
+  avatar: { readonly model: LoadedCharacterModel; readonly boneMap: AvatarBoneMap; readonly view: SkinnedAvatarView } | null;
+  hammer: { readonly model: LoadedCharacterModel; readonly view: HammerModelView } | null;
+}
+
+export const MAX_CHARACTER_PROFILES = 2;
+const PROP_PARTS: ReadonlySet<VisualPartId> = new Set(['pot', 'hammer-shaft', 'hammer-head']);
+const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer-head']);
+const DEFAULT_PRESENTATION: CharacterPresentation = Object.freeze({
+  characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+});
+
 function disposeResources(...roots: Object3D[]): void {
   const geometries = new Set<BufferGeometry>();
   const materials = new Set<Material>();
@@ -120,6 +155,14 @@ export class GameView {
   private readonly headPivot = new Vector3(...HEAD_GEOMETRY.neck);
   private readonly headOffset = new Vector3();
   private avatar: AvatarView | null = null;
+  private readonly characterModels: CharacterModelLoader | null;
+  private readonly slots: CharacterSlot[] = [];
+  private activeSlot = 0;
+  private readonly shading = new CharacterShadingView();
+  private armChains: ArmChains = DEFAULT_ARM_CHAINS;
+  private avatarRenderer: AvatarRenderer | null = null;
+  private hammerModel: HammerModelView | null = null;
+  private renders = 0;
   private readonly customShaft = new Group();
   private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private readonly arms = new Map<ArmSide, Arm>();
@@ -143,8 +186,12 @@ export class GameView {
   private readonly projection = new Vector3();
   private readonly spriteTargets = new Map<string, RigTarget>();
 
-  constructor(canvas: HTMLCanvasElement, initial: PhysicsFrame, level: LevelDefinition) {
+  constructor(canvas: HTMLCanvasElement, initial: PhysicsFrame, level: LevelDefinition, options: {
+    // Loads imported character GLBs; hosts without one reject profiles that reference models.
+    characterModels?: CharacterModelLoader | null;
+  } = {}) {
     this.canvas = canvas;
+    this.characterModels = options.characterModels ?? null;
     const root = this.part(initial, 'root');
     const head = this.part(initial, 'head');
     this.focus = { x: root.x, y: root.y };
@@ -178,23 +225,7 @@ export class GameView {
     this.flags.setObjects(level.objects);
     this.updrafts.setObjects(level.objects);
     this.buildPlayer();
-    const spriteAnchors = new Map<string, SpriteAnchor>();
-    for (const [id, binding] of this.bindings) {
-      spriteAnchors.set(id, {
-        node: binding.anchor,
-        renderRoot: id === 'hammer-shaft' || id === 'hammer-head' ? this.foreground : this.scene,
-        setCovered: (state) => binding.visibility.setCovered(state),
-      });
-    }
-    this.sprites = new SpriteRig(spriteAnchors, {
-      root: this.scene, targetIds: SPRITE_TARGET_IDS,
-      onCharacterPresentationChange: (settings) => this.setCharacterPresentation(settings),
-      headTracking: {
-        anchor: 'character-head',
-        pivot: { anchor: 'torso', x: HEAD_GEOMETRY.neck[0], y: HEAD_GEOMETRY.neck[1] },
-      },
-      prepareTexture: (texture) => this.renderer.initTexture(texture),
-    });
+    this.sprites = this.createSlot().rig;
 
     const cursorMaterial = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });
     this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
@@ -224,26 +255,194 @@ export class GameView {
     this.scene.add(layer.root);
   }
 
-  private setCharacterPresentation(settings: CharacterPresentation): void {
-    const type = settings.characterRiggingType;
-    this.toolDepth = getToolDepth(type === 'sprite-2d' ? DEFAULT_ARM_FORWARD_DISTANCE : settings.armForwardDistance);
-    const avatar = type === 'avatar-3d';
-    if (avatar && this.avatar === null) {
-      this.avatar = new AvatarView();
+  // Adds the release's second character profile; only the active profile renders and updates.
+  createAlternateCharacter(): SpriteRig {
+    if (this.slots.length >= MAX_CHARACTER_PROFILES) {
+      throw new Error(`A game view shows at most ${MAX_CHARACTER_PROFILES} character profiles.`);
     }
-    if (this.avatar !== null) {
-      this.avatar.root.visible = avatar;
-      if (avatar) {
-        if (this.avatar.root.parent !== this.scene) this.scene.add(this.avatar.root);
-      } else this.avatar.root.removeFromParent();
+    return this.createSlot().rig;
+  }
+
+  // Swaps presentation only: physics, grips and level state are untouched and nothing reloads.
+  selectCharacter(index: number): void {
+    const slot = this.slots[index];
+    if (!Number.isInteger(index) || slot === undefined) throw new Error(`Unknown character profile ${index}.`);
+    if (index === this.activeSlot) return;
+    this.activeSlot = index;
+    for (const other of this.slots) {
+      for (const mount of other.mounts) this.attach(mount.node, mount.parent, other === slot);
     }
+    for (const [id, binding] of this.bindings) binding.visibility.setCovered({ covered: slot.coverage.get(id) ?? false });
+    this.applyPresentation();
+    slot.rig.resetPresentation();
+  }
+
+  characterSelection(): { active: number; count: number; types: CharacterRiggingType[] } {
+    return { active: this.activeSlot, count: this.slots.length, types: this.slots.map(slot => slot.presentation.characterRiggingType) };
+  }
+
+  // Validation report of a model loaded for the primary profile, for authoring tools.
+  characterModelReport(source: string, usage: CharacterModelUsage) {
+    return this.slots[0]?.models.get(usage)?.get(source)?.report ?? null;
+  }
+
+  // Cancels and releases every profile, for example when the game stops.
+  disposeCharacters(): void {
+    for (const slot of this.slots) slot.rig.dispose();
+  }
+
+  private createSlot(): CharacterSlot {
+    const index = this.slots.length;
+    const root = new Group();
+    root.name = `character-${index}:sprites`;
+    const foreground = new Group();
+    foreground.name = `character-${index}:foreground-sprites`;
+    const mounts: { node: Group; parent: Object3D }[] = [{ node: root, parent: this.scene }, { node: foreground, parent: this.foreground }];
+    const coverage = new Map<string, boolean>();
+    const anchors = new Map<string, SpriteAnchor>();
+    let slot: CharacterSlot;
     for (const [id, binding] of this.bindings) {
-      const separateProp = id === 'pot' || id === 'hammer-shaft' || id === 'hammer-head';
-      binding.visibility.setEnabled({ enabled: !avatar || separateProp });
+      // Each profile draws under its own mount, so an inactive profile is hidden, not rebuilt.
+      const node = new Group();
+      node.name = `character-${index}:${id}`;
+      mounts.push({ node, parent: binding.anchor });
+      anchors.set(id, {
+        node,
+        renderRoot: HAMMER_PARTS.has(id) ? foreground : root,
+        setCovered: (state) => {
+          coverage.set(id, state.covered);
+          if (this.slots[this.activeSlot] === slot) binding.visibility.setCovered(state);
+        },
+      });
+    }
+    const rig = new SpriteRig(anchors, {
+      root, targetIds: SPRITE_TARGET_IDS,
+      onCharacterPresentationChange: (settings) => this.presentationChanged(slot, settings),
+      headTracking: {
+        anchor: 'character-head',
+        pivot: { anchor: 'torso', x: HEAD_GEOMETRY.neck[0], y: HEAD_GEOMETRY.neck[1] },
+      },
+      prepareTexture: (texture) => this.renderer.initTexture(texture),
+      characterAssets: { prepare: (document, signal) => this.prepareModels(slot, document, signal) },
+    });
+    slot = {
+      index, rig, mounts, coverage, presentation: DEFAULT_PRESENTATION,
+      models: new Map([['avatar', new Map()], ['hammer', new Map()]]), avatar: null, hammer: null,
+    };
+    for (const mount of mounts) this.attach(mount.node, mount.parent, index === this.activeSlot);
+    this.slots.push(slot);
+    return slot;
+  }
+
+  private async prepareModels(slot: CharacterSlot, document: SpriteDocument, signal: AbortSignal): Promise<void> {
+    if (document.avatar !== undefined) {
+      const loaded = await this.loadModel(slot, document, 'avatar', document.avatar.model, signal);
+      resolveAvatarJoints(loaded.report, document.avatar.boneMap);
+    }
+    if (document.hammer !== undefined) await this.loadModel(slot, document, 'hammer', document.hammer.model, signal);
+  }
+
+  private async loadModel(
+    slot: CharacterSlot, document: SpriteDocument, usage: CharacterModelUsage, id: string, signal: AbortSignal,
+  ): Promise<LoadedCharacterModel> {
+    const model = characterModel(document, id);
+    const cache = slot.models.get(usage)!;
+    const cached = cache.get(model.source);
+    if (cached !== undefined) return cached;
+    if (this.characterModels === null) throw new SpriteError('This host cannot load character models.');
+    const loaded = await this.characterModels.load(model, usage, signal);
+    cache.set(model.source, loaded);
+    return loaded;
+  }
+
+  private presentationChanged(slot: CharacterSlot, settings: CharacterPresentation): void {
+    slot.presentation = settings;
+    this.syncModelViews(slot);
+    if (this.slots[this.activeSlot] === slot) this.applyPresentation();
+  }
+
+  // Builds views for newly referenced models once, then releases models the profile dropped.
+  private syncModelViews(slot: CharacterSlot): void {
+    const { avatar, hammer } = slot.presentation;
+    const loaded = (usage: CharacterModelUsage, id: string): LoadedCharacterModel => {
+      const model = characterModel(slot.presentation, id);
+      const result = slot.models.get(usage)!.get(model.source);
+      if (result === undefined) throw new SpriteError(`Character model "${model.name}" was not loaded before use.`);
+      return result;
+    };
+    const avatarModel = avatar === undefined ? null : loaded('avatar', avatar.model);
+    if (slot.avatar !== null && (avatar === undefined || slot.avatar.model !== avatarModel ||
+      !sameBoneMap(slot.avatar.boneMap, avatar.boneMap))) {
+      this.shading.unregister(slot.avatar.view.root);
+      slot.avatar.view.dispose();
+      slot.avatar = null;
+    }
+    if (avatar !== undefined && slot.avatar === null) {
+      const view = new SkinnedAvatarView(avatarModel!, resolveAvatarJoints(avatarModel!.report, avatar.boneMap), avatar.boneMap);
+      this.shading.register(view.root);
+      slot.avatar = { model: avatarModel!, boneMap: avatar.boneMap, view };
+    }
+    const hammerModel = hammer === undefined ? null : loaded('hammer', hammer.model);
+    if (slot.hammer !== null && slot.hammer.model !== hammerModel) {
+      this.shading.unregister(slot.hammer.view.root);
+      slot.hammer.view.dispose();
+      slot.hammer = null;
+    }
+    if (hammerModel !== null && slot.hammer === null) {
+      const view = new HammerModelView(hammerModel);
+      this.shading.register(view.root);
+      slot.hammer = { model: hammerModel, view };
+    }
+    for (const [usage, cache] of slot.models) {
+      for (const [source, model] of cache) {
+        if (model === (usage === 'avatar' ? slot.avatar?.model : slot.hammer?.model)) continue;
+        model.dispose();
+        cache.delete(source);
+      }
     }
   }
 
+  private applyPresentation(): void {
+    const slot = this.slots[this.activeSlot];
+    const presentation = slot?.presentation ?? DEFAULT_PRESENTATION;
+    const type = presentation.characterRiggingType;
+    this.toolDepth = getToolDepth(type === 'sprite-2d' ? DEFAULT_ARM_FORWARD_DISTANCE : presentation.armForwardDistance);
+    const avatarMode = type === 'avatar-3d';
+    const imported = avatarMode ? slot?.avatar?.view ?? null : null;
+    if (avatarMode && imported === null && this.avatar === null) {
+      this.avatar = new AvatarView();
+      this.shading.register(this.avatar.root);
+    }
+    this.avatarRenderer = !avatarMode ? null : imported ?? this.avatar;
+    if (this.avatar !== null) this.attach(this.avatar.root, this.scene, this.avatarRenderer === this.avatar);
+    for (const other of this.slots) {
+      if (other.avatar !== null) this.attach(other.avatar.view.root, this.scene, other.avatar.view === imported);
+      // The one-model hammer is available in every character type, in the tool's foreground pass.
+      if (other.hammer !== null) this.attach(other.hammer.view.root, this.foreground, other === slot);
+    }
+    this.hammerModel = slot?.hammer?.view ?? null;
+    for (const [id, binding] of this.bindings) {
+      const enabled = (!avatarMode || PROP_PARTS.has(id)) && !(this.hammerModel !== null && HAMMER_PARTS.has(id));
+      binding.visibility.setEnabled({ enabled });
+    }
+    this.armChains = imported?.chains ?? DEFAULT_ARM_CHAINS;
+    // Shading styles Avatar mode: the connected character and its separate pot and hammer.
+    this.shading.apply(presentation.shading ?? DEFAULT_CHARACTER_SHADING, avatarMode);
+  }
+
+  private attach(object: Object3D, parent: Object3D, attached: boolean): void {
+    object.visible = attached;
+    if (!attached) object.removeFromParent();
+    else if (object.parent !== parent) parent.add(object);
+  }
+
+  private propReplacementChanged(next: Object3D | null, previous: Object3D | null): void {
+    if (previous !== null) this.shading.unregister(previous);
+    if (next !== null) this.shading.register(next);
+  }
+
   render(frame: PhysicsFrame, options: CharacterState & { dt: number }): void {
+    this.renders++;
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
     this.focus = { x: root.x, y: root.y };
@@ -282,7 +481,9 @@ export class GameView {
     // Unscaled physical coordinates keep grip offsets independent of artwork and tiling.
     this.gripFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, this.toolDepth);
     const armPoses = this.updateArms(this.torso.matrixWorld, this.gripFrame, shaftLength, { ...options, shaftAngle });
-    if (this.avatar?.root.visible) this.avatar.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
+    this.avatarRenderer?.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
+    // The one-model hammer follows the same unscaled physical frame as the grips, without stretching.
+    this.hammerModel?.update(this.gripFrame);
     for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {
       x: pose.hand.x, y: pose.hand.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
     });
@@ -290,7 +491,7 @@ export class GameView {
     this.spriteTargets.set('hammer-shaft', { ...shaftCenter, angle: shaftAngle });
     this.spriteTargets.set('hammer-head', { x: tip.x, y: tip.y, angle: tip.angle });
     this.spriteTargets.set('aim', { ...frame.cursor, angle: Math.atan2(aim.y, aim.x) });
-    this.sprites.update({ time: frame.time, dt: options.dt, aim, targets: this.spriteTargets });
+    this.slots[this.activeSlot]!.rig.update({ time: frame.time, dt: options.dt, aim, targets: this.spriteTargets });
     this.targetPositions.set([tip.x, tip.y, 0.8, frame.cursor.x, frame.cursor.y, 0.8]);
     this.targetLine.geometry.attributes.position.needsUpdate = true;
     this.targetLine.computeLineDistances();
@@ -318,7 +519,7 @@ export class GameView {
 
   resetPresentation(): void {
     this.headAim.reset();
-    this.sprites.resetPresentation();
+    for (const slot of this.slots) slot.rig.resetPresentation();
   }
 
   private snapCamera(): void {
@@ -362,6 +563,7 @@ export class GameView {
   statistics() {
     return {
       frames: this.renderer.info.render.frame,
+      renders: this.renders,
       calls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       geometries: this.renderer.info.memory.geometries,
@@ -373,7 +575,18 @@ export class GameView {
       sprites: this.sprites.inspect(),
       headAim: { rotation: this.headAim.rotation.toArray() },
       avatar: this.avatar === null ? null : { ...this.avatar.inspect(), visible: this.avatar.root.visible },
+      importedAvatar: this.activeImportedAvatar(),
+      hammerModel: this.hammerModel === null ? null : this.hammerModel.inspect(),
+      shading: this.shading.inspect(),
+      characters: this.characterSelection(),
+      armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },
     };
+  }
+
+  private activeImportedAvatar() {
+    const view = this.slots[this.activeSlot]?.avatar?.view;
+    if (view === undefined) return null;
+    return { ...view.inspect(), visible: view.root.visible && view.root.parent !== null };
   }
 
   cameraState() {
@@ -385,10 +598,11 @@ export class GameView {
 
   dispose(): void {
     this.observer.disconnect();
-    this.sprites.dispose();
+    this.disposeCharacters();
     this.avatar?.root.removeFromParent();
     this.avatar?.dispose();
     this.avatar = null;
+    this.shading.dispose();
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
     this.flags.dispose();
@@ -576,8 +790,9 @@ export class GameView {
         new Vector3(-RIG.handleLength / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
         new Vector3(RIG.handleLength / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
       ),
-      visibility: new VisualVisibility(shaftSegments),
+      visibility: this.visibility('hammer-shaft', shaftSegments),
     });
+    for (const segment of shaftSegments) this.shading.register(segment);
     this.foreground.add(this.customShaft);
     const head = new Group();
     const headMesh = new Mesh(new ExtrudeGeometry(polygonShape(RIG.headVertices), {
@@ -605,9 +820,16 @@ export class GameView {
     const defaults = [model];
     this.bindings.set(slot, {
       anchor, modelAnchor, defaults, bounds: new Box3().setFromObject(model, true),
-      visibility: new VisualVisibility(defaults),
+      visibility: this.visibility(slot, defaults),
     });
+    if (PROP_PARTS.has(slot)) this.shading.register(model);
     return anchor;
+  }
+
+  // Pot and hammer replacements from authoring tools follow the Avatar-mode shading too.
+  private visibility(slot: VisualPartId, defaults: readonly Object3D[]): VisualVisibility {
+    return new VisualVisibility(defaults, PROP_PARTS.has(slot)
+      ? { onReplacement: (next, previous) => this.propReplacementChanged(next, previous) } : {});
   }
 
   private updateArms(body: Matrix4, shaft: Matrix4, shaftLength: number,
@@ -618,12 +840,14 @@ export class GameView {
       const arm = this.arms.get(side);
       if (!arm) throw new Error(`Missing visual arm: ${side}`);
       const geometry = ARM_GEOMETRY[side];
+      // An imported avatar supplies its own shoulders and bind-pose bone lengths; grips are shared.
+      const chain = this.armChains[side];
       const pose = solveArmPose(side, {
-        shoulder: new Vector3(...geometry.shoulder).applyMatrix4(body),
+        shoulder: new Vector3(...chain.shoulder).applyMatrix4(body),
         hand: new Vector3(Math.min(geometry.gripX, shaftLength), 0, 0).applyMatrix4(shaft),
         hint: new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(body),
         shaftAxis: new Vector3(Math.cos(options.shaftAngle), Math.sin(options.shaftAngle), 0),
-      }, { previous: arm.pose, dt: options.dt });
+      }, { previous: arm.pose, dt: options.dt, lengths: chain });
       this.positionLimb(arm.upper, pose.shoulder, pose.elbow, pose.normal);
       this.positionLimb(arm.lower, pose.elbow, pose.hand, pose.normal);
       arm.elbow.position.copy(pose.elbow);

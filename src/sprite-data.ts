@@ -6,6 +6,14 @@ import type { DirectionalPresentation } from './directional-data.ts';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, validateSkeleton, validateSkin } from './skeleton-data.ts';
 import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
 import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth.ts';
+import {
+  CHARACTER_ASSET_FIELDS, CHARACTER_MODEL_LIMITS, checkEmbeddedModel, hasCharacterAssets,
+  validateCharacterAssets,
+} from './character-profile.ts';
+import type { CharacterAssets, CharacterModel } from './character-profile.ts';
+import { number, record, SpriteError, text } from './sprite-fields.ts';
+
+export { SpriteError };
 
 export const CHARACTER_RIGGING_TYPES = ['sprite-2d', 'model-3d', 'avatar-3d'] as const;
 export type CharacterRiggingType = (typeof CHARACTER_RIGGING_TYPES)[number];
@@ -48,13 +56,14 @@ export interface SpriteLayer {
   readonly flipbook?: SpriteFlipbook;
 }
 
-export interface CharacterPresentation {
+export interface CharacterPresentation extends CharacterAssets {
   readonly characterRiggingType: CharacterRiggingType;
   readonly armForwardDistance: number;
 }
 
-// Schema 7 is written only when a layer has a flipbook; other documents stay schema 6.
-export type SpriteSchemaVersion = 6 | 7;
+// Schema 8 is written only when character models or shading are present, schema 7 only when a
+// layer has a flipbook; other documents stay schema 6.
+export type SpriteSchemaVersion = 6 | 7 | 8;
 
 export interface SpriteDocument extends CharacterPresentation {
   readonly schemaVersion: SpriteSchemaVersion;
@@ -88,6 +97,10 @@ export const FLIPBOOK_LIMITS = {
 } as const;
 
 const FLIPBOOK_SCHEMA_VERSION = 7;
+const CHARACTER_SCHEMA_VERSION = 8;
+
+// Largest accepted profile file: the sprite budget plus two embedded character models.
+export const SPRITE_FILE_BYTES = SPRITE_LIMITS.documentBytes + CHARACTER_MODEL_LIMITS.encodedBytes;
 
 export const DEFAULT_SPRITE_RIGGING = Object.freeze({
   bone: null,
@@ -111,9 +124,8 @@ export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
   images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
 
-export class SpriteError extends Error {}
-
-export function spriteSchemaVersion(layers: readonly SpriteLayer[]): SpriteSchemaVersion {
+export function spriteSchemaVersion(layers: readonly SpriteLayer[], character: CharacterAssets = {}): SpriteSchemaVersion {
+  if (hasCharacterAssets(character)) return CHARACTER_SCHEMA_VERSION;
   return layers.some(layer => layer.flipbook !== undefined) ? FLIPBOOK_SCHEMA_VERSION : 6;
 }
 
@@ -148,33 +160,15 @@ export function validateSpriteBudget(document: SpriteDocument): void {
     images = encoder.encode(JSON.stringify(document.images)).byteLength;
     if (Object.isFrozen(document.images) && document.images.every(Object.isFrozen)) imageJsonBytes.set(document.images, images);
   }
-  const metadata = encoder.encode(JSON.stringify({ ...document, images: [] })).byteLength;
+  // Embedded character models have their own budget, so they cannot crowd out sprite artwork.
+  const { models, ...sprites } = document;
+  const metadata = encoder.encode(JSON.stringify({ ...sprites, images: [] })).byteLength;
   if (metadata + images - 2 > SPRITE_LIMITS.documentBytes) {
     throw new SpriteError('The sprite document exceeds its file-size budget.');
   }
-}
-
-function record(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) {
-    throw new SpriteError(`${label} must contain exactly ${keys.join(', ')}.`);
+  if ((models ?? []).reduce((total, model) => total + model.source.length, 0) > CHARACTER_MODEL_LIMITS.encodedBytes) {
+    throw new SpriteError('Character models exceed their size budget.');
   }
-  return Object.fromEntries(keys.map(key => [key, Reflect.get(value, key)]));
-}
-
-function text(value: unknown, maximum: number, label: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > maximum ||
-    /[\u0000-\u001f\u007f]/.test(value)) {
-    throw new SpriteError(`${label} must be nonempty text of at most ${maximum} characters.`);
-  }
-  return value.trim();
-}
-
-function number(value: unknown, min: number, max: number, label: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
-    throw new SpriteError(`${label} must be between ${min} and ${max}.`);
-  }
-  return value;
 }
 
 export function inspectPng(bytes: Uint8Array): { width: number; height: number } {
@@ -361,8 +355,8 @@ export function spriteMigrationNotice(value: unknown): string | null {
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
   if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 &&
-    version !== FLIPBOOK_SCHEMA_VERSION) {
-    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5, 6 or 7.');
+    version !== FLIPBOOK_SCHEMA_VERSION && version !== CHARACTER_SCHEMA_VERSION) {
+    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5, 6, 7 or 8.');
   }
   const legacy = version === 1;
   const fields = ['schemaVersion', 'images', 'layers'];
@@ -370,6 +364,11 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   if (version >= 3) fields.push('presentation');
   if (version >= 4) fields.push('characterRiggingType');
   if (version >= 6) fields.push('armForwardDistance');
+  const assetFields = CHARACTER_ASSET_FIELDS.filter(key => Object.hasOwn(value as object, key));
+  if (assetFields.length > 0 && version < CHARACTER_SCHEMA_VERSION) {
+    throw new SpriteError(`Character models and shading require sprite schema version ${CHARACTER_SCHEMA_VERSION}.`);
+  }
+  fields.push(...assetFields);
   const document = record(value, fields, 'A sprite document');
   if (!Array.isArray(document.images) || !Array.isArray(document.layers) ||
     document.images.length > SPRITE_LIMITS.images || document.layers.length > SPRITE_LIMITS.layers) {
@@ -417,16 +416,29 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const characterRiggingType = migrateCharacterType(document.characterRiggingType, version, layers.length);
   const armForwardDistance = version >= 6
     ? validateArmForwardDistance(document.armForwardDistance) : DEFAULT_ARM_FORWARD_DISTANCE;
+  const character = validateCharacterAssets(document);
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: spriteSchemaVersion(layers), characterRiggingType, armForwardDistance,
-    images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation,
+    schemaVersion: spriteSchemaVersion(layers, character), characterRiggingType, armForwardDistance,
+    images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation, ...character,
   });
   validateSpriteBudget(result);
   return result;
 }
 
+const checkedModels = new WeakSet<CharacterModel>();
+
+// Checks embedded GLB headers once per frozen model; skins and bone maps are checked by the loader.
+function validateEmbeddedModels(models: readonly CharacterModel[]): void {
+  for (const model of models) {
+    if (checkedModels.has(model)) continue;
+    checkEmbeddedModel(model);
+    if (Object.isFrozen(model)) checkedModels.add(model);
+  }
+}
+
 export function validateSpriteDocument(value: unknown): SpriteDocument {
   const document = validateSpriteMetadata(value);
+  validateEmbeddedModels(document.models ?? []);
   const sizes = new Map<string, { width: number; height: number } | null>();
   let pixels = 0;
   for (const image of document.images) {
@@ -440,7 +452,7 @@ export function validateSpriteDocument(value: unknown): SpriteDocument {
       throw new SpriteError('The sprite document exceeds its image-memory budget.');
     }
   }
-  if (document.schemaVersion === FLIPBOOK_SCHEMA_VERSION) {
+  if (document.schemaVersion >= FLIPBOOK_SCHEMA_VERSION) {
     // URL frames are compared after download, by the loader.
     const sources = new Map(document.images.map(image => [image.id, image.source]));
     for (const layer of document.layers) {
@@ -516,12 +528,29 @@ export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterabl
   validateDirectionalReferences(document.presentation, document.layers, document.skeleton);
 }
 
+// UTF-8 byte length, counted without allocating an encoded copy of a large profile.
+function utf8Bytes(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code < 0xdc00 && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next < 0xe000) {
+        bytes += 4;
+        index++;
+      } else bytes += 3;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
 export function parseSpriteDocument(
   serialized: string,
   options: { onMigration?: (message: string) => void } = {},
 ): SpriteDocument {
-  if (serialized.length > SPRITE_LIMITS.documentBytes ||
-    new TextEncoder().encode(serialized).byteLength > SPRITE_LIMITS.documentBytes) {
+  if (serialized.length > SPRITE_FILE_BYTES || utf8Bytes(serialized) > SPRITE_FILE_BYTES) {
     throw new SpriteError('The sprite document exceeds its file-size budget.');
   }
   let value: unknown;

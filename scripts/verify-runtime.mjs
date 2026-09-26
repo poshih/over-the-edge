@@ -5,6 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { inspectArmGeometry, verifyAppearance } from './verify-appearance.mjs';
+import { verifyCharacter } from './verify-character.mjs';
 import { verifyFlipbook } from './verify-flipbook.mjs';
 import { verifyMobile } from './verify-mobile.mjs';
 import { verifyLevel } from './verify-level.mjs';
@@ -643,6 +644,7 @@ try {
   report.scenarios.setPieces = await verifySetPieces(browser, address, artifacts);
   report.scenarios.triggers = await verifyTriggers(browser, address, artifacts);
   report.scenarios.flipbook = await verifyFlipbook(browser, address, artifacts);
+  report.scenarios.character = await verifyCharacter(browser, address, artifacts);
   await page.setViewportSize({ width: 760, height: 600 });
   await page.waitForTimeout(300);
   const canvasBox = await page.locator('#game').boundingBox();

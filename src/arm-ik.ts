@@ -11,6 +11,19 @@ export const ARM_GEOMETRY = {
   right: { shoulder: [0.17, 0.74, 0.09], gripX: 0.22, normalSign: 1 },
 } as const;
 
+// A two-bone arm: torso-local shoulder and bind-pose segment lengths.
+export interface ArmChain {
+  readonly shoulder: readonly [number, number, number];
+  readonly upper: number;
+  readonly forearm: number;
+}
+export type ArmChains = Readonly<Record<ArmSide, ArmChain>>;
+
+export const DEFAULT_ARM_CHAINS: ArmChains = Object.freeze({
+  left: Object.freeze({ shoulder: ARM_GEOMETRY.left.shoulder, upper: ARM_LENGTH.upper, forearm: ARM_LENGTH.forearm }),
+  right: Object.freeze({ shoulder: ARM_GEOMETRY.right.shoulder, upper: ARM_LENGTH.upper, forearm: ARM_LENGTH.forearm }),
+});
+
 interface ArmTargets {
   shoulder: Vector3;
   hand: Vector3;
@@ -37,8 +50,13 @@ function initialBend(axis: Vector3, side: ArmSide): Vector3 {
     .multiplyScalar(ARM_GEOMETRY[side].normalSign);
 }
 
-export function solveArmPose(side: ArmSide, targets: ArmTargets, options: { previous: ArmPose | null; dt: number }): ArmPose {
+export function solveArmPose(
+  side: ArmSide,
+  targets: ArmTargets,
+  options: { previous: ArmPose | null; dt: number; lengths?: Pick<ArmChain, 'upper' | 'forearm'> },
+): ArmPose {
   const { previous, dt } = options;
+  const { upper, forearm } = options.lengths ?? ARM_LENGTH;
   const { shoulder, hand, hint, shaftAxis } = targets;
   const axis = new Vector3().subVectors(hand, shoulder);
   const distance = axis.length();
@@ -68,10 +86,10 @@ export function solveArmPose(side: ArmSide, targets: ArmTargets, options: { prev
   }
 
   const along = distance <= DIRECTION_EPSILON ? 0 : clamp(
-    (ARM_LENGTH.upper ** 2 - ARM_LENGTH.forearm ** 2 + distance ** 2) / (2 * distance),
-    -ARM_LENGTH.upper, ARM_LENGTH.upper,
+    (upper ** 2 - forearm ** 2 + distance ** 2) / (2 * distance),
+    -upper, upper,
   );
-  const bend = Math.sqrt(Math.max(0, ARM_LENGTH.upper ** 2 - along ** 2));
+  const bend = Math.sqrt(Math.max(0, upper ** 2 - along ** 2));
   const elbow = shoulder.clone().addScaledVector(axis, along).addScaledVector(bendDirection, bend);
   const normal = new Vector3().crossVectors(axis, bendDirection).normalize()
     .multiplyScalar(ARM_GEOMETRY[side].normalSign);

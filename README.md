@@ -48,7 +48,8 @@ after deploying; domains are not stored in this repository.
 The playable release has a separate HTML/TypeScript entry and stylesheet. It
 does not load the Workshop, level editor, model importer, saved editor profiles,
 practice shortcuts, collision overlay, or editor diagnostic globals.
-Its HUD contains only current height and elapsed time. On-screen Play/Pause/Reset,
+Its HUD contains only current height and elapsed time, plus a character choice when
+the release bundles two character profiles. On-screen Play/Pause/Reset,
 peak height, branding, and help remain in the editor build, not the release.
 
 ```sh
@@ -85,7 +86,7 @@ GAME_TITLE="My Climbing Game"
 ```
 
 A command-line `GAME_TITLE` overrides the file. It can be combined with
-`GAME_LEVEL`, `GAME_SETTINGS`, and `GAME_SPRITES`. The setting changes display
+`GAME_LEVEL`, `GAME_SETTINGS`, `GAME_SPRITES`, and `GAME_ALTERNATE_SPRITES`. The setting changes display
 titles, not repository names, browser storage keys, or deployment identifiers.
 
 To deploy the game-only release, `wrangler.game.toml` uploads only `dist-game/`
@@ -134,6 +135,20 @@ missing, oversized, or outside-project file fails rather than reverting to
 defaults. Development reloads when the selected file changes. Browser-local
 saves do not change a release unless you export and select one.
 
+To let players switch between two characters, for example a 2D sprite character
+and your own skinned 3D avatar, export both profiles from **Workshop / Character**
+and select the second with `GAME_ALTERNATE_SPRITES`:
+
+```sh
+GAME_SPRITES=skins/paper.json GAME_ALTERNATE_SPRITES=skins/hero.json npm run build:game
+```
+
+Players choose **2D** or **3D** in the release's corner control, including
+mid-level; the choice persists in the browser. Both profiles and their GLBs are
+validated at build time and load once. Switching changes only the presentation;
+physics, grips and the level continue unchanged. Without `GAME_ALTERNATE_SPRITES`,
+the release has no such control. See [imported 3D characters](docs/characters.md).
+
 `src/editor/` owns all authoring UI, persistence, imports, and debugging tools.
 The editor depends on the shared game runtime, never the reverse.
 `tsconfig.game.json` checks the playable dependency graph separately, and
@@ -141,7 +156,7 @@ The editor depends on the shared game runtime, never the reverse.
 that graph. Hiding editor controls with a runtime flag is not the release
 boundary.
 
-`npm run verify:game` exercises the release, custom-course/sprite/aim-flipbook/settings builds,
+`npm run verify:game` exercises the release, custom-course/sprite/aim-flipbook/settings/two-character builds,
 development entry, and editor-dependency rejection in isolation. `npm run verify:art`
 does the same for course packages and terrain meshes.
 
@@ -604,7 +619,7 @@ All character types use the same Planck.js 2D physics and physical grip targets.
 | --- | --- |
 | Mesh parts (3D) | Separate articulated meshes, with optional per-part GLB replacements from Appearance |
 | 2D sprite character | PNG cutouts or a custom 2D bone/weighted rig; all 3D character underlays are hidden |
-| Avatar (3D, connected body) | One connected, GPU-skinned upper body containing the torso, head, arms and hands; pot and hammer remain separate |
+| Avatar (3D, connected body) | One connected, GPU-skinned character, built in or an imported skinned GLB, containing the torso, head, arms and hands; pot and hammer remain separate |
 
 The choice is stored as `characterRiggingType` in the character/sprite profile.
 Changing it retains the other artwork, but does not silently save it. Use the
@@ -614,13 +629,24 @@ those without artwork use Mesh parts. Incomplete sprite layouts no longer
 reveal 3D parts behind missing artwork. Original saved records are retained
 until Save.
 
-Choose **Use built-in Avatar** for a built-in skinned character, included
+Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend
 the connected surface instead of moving disconnected rigid pieces. The same
 physical grip targets drive its hands; the pot is not part of the skin.
 The avatar is constructed once and reused, with bone updates only while active.
-GLB replacements remain separate, browser-local Appearance assets; arbitrary
-whole-avatar GLB import and animation retargeting are not supported.
+
+To use your own character, import a **skinned avatar GLB** in Character, for
+example a Mixamo-rigged humanoid. A bone map names its body, head, upper-arm,
+forearm and hand joints. The existing arm IK, grips, head gaze and arm forward
+distance then drive them, with arm lengths from the GLB's bind pose; unmapped
+joints follow their nearest mapped ancestor. Mixamo names map automatically,
+and invalid models or maps fail with typed error codes. The same tab adds a
+**one-model hammer** GLB bound rigidly to the physical tool frame, and **PBR or
+cel shading** (stepped bands with an optional outline) that can be flipped live
+to compare. All three are part of the character profile, so Save, JSON and
+`GAME_SPRITES` carry them. See [imported 3D characters](docs/characters.md).
+Appearance's per-part GLB replacements remain separate, browser-local assets;
+imported animation clips are not played.
 
 Character heads follow the direction from the hammer hinge toward the aim
 cursor, without turning the torso or moving the grips. Mesh parts and Avatar share smooth, neck-pivoted 3D gaze;
@@ -787,7 +813,8 @@ loading errors, current rendering anchors and world transforms, and the arm IK
 settings, selected profile, and save state.
 `window.gettingOver.level()` reports the immutable authored definition, current
 illusion/collider state, editor selection/mode, set piece placement state, and
-render/cache counts.
+render/cache counts, including the imported avatar's joints and bone writes, the
+hammer model, shading and the active character profile.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state, and the independent run timer. Restart resets the attempt; physics time
 continues to be available separately as `snapshot().time`.

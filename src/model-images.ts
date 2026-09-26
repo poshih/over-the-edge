@@ -1,7 +1,7 @@
 import { ART_LIMITS, artRecord } from './art-types';
 import { MODEL_LIMITS, ModelError } from './model-data';
 
-function dimensions(bytes: Uint8Array): [number, number] {
+function dimensions(bytes: Uint8Array, subject: string): [number, number] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const text = (offset: number, length: number) => new TextDecoder().decode(bytes.subarray(offset, offset + length));
   if (bytes.length >= 24 && view.getUint32(0) === 0x89504e47 && text(12, 4) === 'IHDR') {
@@ -37,12 +37,18 @@ function dimensions(bytes: Uint8Array): [number, number] {
       offset += length;
     }
   }
-  throw new ModelError('Course textures must be embedded PNG, JPEG, or WebP images with readable dimensions. Convert AVIF before sharing.');
+  throw new ModelError(`${subject[0].toUpperCase()}${subject.slice(1)} textures must be embedded PNG, JPEG, or WebP images with readable dimensions. Convert AVIF before sharing.`);
 }
 
-export function modelImagePixels(data: ArrayBuffer, document: Record<string, unknown>): number {
-  if (document.images === undefined) return 0;
-  if (!Array.isArray(document.images)) throw new ModelError('Invalid course texture list.');
+// Visits every texture's pixel size in document order; `subject` names the model in messages.
+export function forEachModelImage(
+  data: ArrayBuffer,
+  document: Record<string, unknown>,
+  subject: string,
+  visit: (width: number, height: number) => void,
+): void {
+  if (document.images === undefined) return;
+  if (!Array.isArray(document.images)) throw new ModelError(`Invalid ${subject} texture list.`);
   const header = new DataView(data);
   let binary = new Uint8Array();
   for (let offset = 12; offset < data.byteLength;) {
@@ -52,24 +58,23 @@ export function modelImagePixels(data: ArrayBuffer, document: Record<string, unk
   }
   const decoded = new Map<number, Uint8Array>();
   const decode = (uri: unknown): Uint8Array => {
-    if (typeof uri !== 'string' || !uri.startsWith('data:') || !uri.includes(';base64,')) throw new ModelError('Embed every course texture and buffer.');
+    if (typeof uri !== 'string' || !uri.startsWith('data:') || !uri.includes(';base64,')) throw new ModelError(`Embed every ${subject} texture and buffer.`);
     try { return Uint8Array.from(atob(uri.slice(uri.indexOf(',') + 1)), (character) => character.charCodeAt(0)); }
     catch (error) {
       if (!(error instanceof DOMException)) throw error;
-      throw new ModelError('An embedded course texture or buffer is not valid base64.');
+      throw new ModelError(`An embedded ${subject} texture or buffer is not valid base64.`);
     }
   };
-  let pixels = 0;
   for (const entry of document.images) {
-    const image = artRecord(entry, 'Course texture');
+    const image = artRecord(entry, `${subject[0].toUpperCase()}${subject.slice(1)} texture`);
     let bytes: Uint8Array;
     if (image.uri !== undefined) bytes = decode(image.uri);
     else {
       if (!Array.isArray(document.bufferViews) || typeof image.bufferView !== 'number' || !Number.isInteger(image.bufferView) ||
-        image.bufferView < 0 || image.bufferView >= document.bufferViews.length) throw new ModelError('A course texture has no valid buffer view.');
+        image.bufferView < 0 || image.bufferView >= document.bufferViews.length) throw new ModelError(`A ${subject} texture has no valid buffer view.`);
       const view = artRecord(document.bufferViews[image.bufferView], 'Texture buffer view');
       if (!Array.isArray(document.buffers) || typeof view.buffer !== 'number' || !Number.isInteger(view.buffer) ||
-        view.buffer < 0 || view.buffer >= document.buffers.length) throw new ModelError('A course texture has no valid buffer.');
+        view.buffer < 0 || view.buffer >= document.buffers.length) throw new ModelError(`A ${subject} texture has no valid buffer.`);
       let buffer = decoded.get(view.buffer);
       if (!buffer) {
         const description = artRecord(document.buffers[view.buffer], 'Texture buffer');
@@ -79,16 +84,22 @@ export function modelImagePixels(data: ArrayBuffer, document: Record<string, unk
       const offset = view.byteOffset ?? 0, length = view.byteLength;
       if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0 ||
         typeof length !== 'number' || !Number.isInteger(length) || length < 1 || offset + length > buffer.byteLength) {
-        throw new ModelError('A course texture exceeds its embedded buffer.');
+        throw new ModelError(`A ${subject} texture exceeds its embedded buffer.`);
       }
       bytes = buffer.subarray(offset, offset + length);
     }
-    const [width, height] = dimensions(bytes);
+    visit(...dimensions(bytes, subject));
+  }
+}
+
+export function modelImagePixels(data: ArrayBuffer, document: Record<string, unknown>): number {
+  let pixels = 0;
+  forEachModelImage(data, document, 'course', (width, height) => {
     if (width < 1 || height < 1 || width > MODEL_LIMITS.textureEdge || height > MODEL_LIMITS.textureEdge) {
       throw new ModelError('Course textures must be at most 4096 pixels on either edge.');
     }
     pixels += width * height;
     if (pixels > ART_LIMITS.texturePixels) throw new ModelError('Course textures exceed 32 million decoded pixels.');
-  }
+  });
   return pixels;
 }

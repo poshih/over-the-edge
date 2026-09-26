@@ -89,3 +89,90 @@
 .touch-controls .character-editor .button {
   font-size: 16px;
 }
+
+.character-model input[type="file"],
+.character-hammer input[type="file"] {
+  width: 100%;
+  min-width: 0;
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.character-bone-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.character-bone-grid .appearance-label {
+  margin: 0;
+}
+
+.character-bone-grid select[aria-invalid="true"] {
+  border-color: #cc8f73;
+  background: #fff1e8;
+}
+
+.game-ui .character-bone-issue {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #cc8f73;
+  border-radius: 5px;
+  color: #743925;
+  background: #fff1e8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.character-unmapped {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.character-unmapped ul {
+  max-height: 160px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  overflow: auto;
+}
+
+.character-model .character-action-row,
+.character-hammer-remove {
+  margin-top: 12px;
+}
+
+.character-hammer-remove {
+  width: 100%;
+}
+
+.character-shading-modes {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.character-shading-modes label,
+.character-outline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.character-outline-toggle {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.character-shading input[type="color"] {
+  display: block;
+  width: 64px;
+  height: var(--control-height);
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #faf9f2;
+}

@@ -87,7 +87,10 @@ export default defineConfig(({ mode }) => ({
       variable: 'GAME_SETTINGS', moduleId: 'virtual:game-settings', defaults: DEFAULT_GAME_SETTINGS,
       fileBytes: GAME_SETTINGS_LIMITS.fileBytes, validate: validateGameSettings,
     }),
-    spriteBundle({ path: projectJson('GAME_SPRITES'), anchors: VISUAL_PART_IDS, targets: SPRITE_TARGET_IDS }),
+    spriteBundle({
+      path: projectJson('GAME_SPRITES'), alternatePath: projectJson('GAME_ALTERNATE_SPRITES'),
+      anchors: VISUAL_PART_IDS, targets: SPRITE_TARGET_IDS,
+    }),
     gameOnlyBoundary(),
   ],
   build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },

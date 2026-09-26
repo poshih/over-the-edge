@@ -7,6 +7,7 @@ import { createJsonDownload } from './json-download';
 import type { RangeControl } from './range-control';
 import { SpriteEditorState } from './sprite-state';
 import type { SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
+import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
 import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
@@ -34,6 +35,7 @@ export interface SpriteEditorOptions {
   targetIds: readonly string[];
   viewport: DirectionalViewport;
   onNotice: (message: string, kind: 'info' | 'error') => void;
+  describeModel?: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
 }
 
 export interface SpriteEditorHandle {
@@ -48,6 +50,7 @@ export interface SpriteEditorHandle {
 export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHandle {
   const state = new SpriteEditorState({
     rig: options.rig, anchors: options.anchors, targetIds: options.targetIds, onNotice: options.onNotice,
+    describeModel: options.describeModel,
   });
   const events = new AbortController();
   const listen = { signal: events.signal };
@@ -184,7 +187,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       const text = state.exportDocument();
       if (text === null || events.signal.aborted) return;
       downloadJson('sprites.json', text);
-      options.onNotice('Exported sprites.json with character type, rig, directional settings, PNGs and authored URL references. GLB parts are stored separately.', 'info');
+      options.onNotice('Exported sprites.json with character type, rig, directional settings, PNGs, imported avatar/hammer GLBs, shading and authored URL references. Appearance GLB parts are stored separately.', 'info');
     },
   };
 

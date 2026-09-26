@@ -1,11 +1,25 @@
 import { element, setText } from '../dom';
-import { CHARACTER_RIGGING_TYPES, SpriteError, SPRITE_LIMITS } from '../sprite-data';
+import { CHARACTER_RIGGING_TYPES, SpriteError, SPRITE_FILE_BYTES } from '../sprite-data';
 import type { CharacterRiggingType, SpriteDocument } from '../sprite-data';
 import type { SpriteEditorState } from './sprite-state';
 import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
+import {
+  AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, DEFAULT_CEL_OUTLINE, SHADING_LIMITS,
+} from '../character-profile';
+import type { AvatarJointId, CelOutline, CharacterShading, ShadingMode } from '../character-profile';
+import { RIG } from '../config';
 import { createRangeControl } from './range-control';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import './character-editor.css';
+
+const JOINT_LABELS: Readonly<Record<AvatarJointId, string>> = {
+  body: 'Body', head: 'Head',
+  'left-upper-arm': 'Left upper arm', 'left-forearm': 'Left forearm', 'left-hand': 'Left hand',
+  'right-upper-arm': 'Right upper arm', 'right-forearm': 'Right forearm', 'right-hand': 'Right hand',
+};
+const HEAD_HALF_LENGTH = Math.max(...RIG.headVertices.map(point => point.x));
+const HEAD_HALF_HEIGHT = Math.max(...RIG.headVertices.map(point => point.y));
+const metres = (value: number): string => `${Number(value.toFixed(2))} m`;
 
 const CHARACTER_TYPES: Readonly<Record<CharacterRiggingType, { label: string; description: string }>> = {
   'model-3d': {
@@ -18,7 +32,7 @@ const CHARACTER_TYPES: Readonly<Record<CharacterRiggingType, { label: string; de
   },
   'avatar-3d': {
     label: 'Avatar (3D, connected body)',
-    description: 'One connected GPU-skinned upper-body mesh contains the torso, neck, head, arms and hands. Its bones follow the existing arm IK. The pot and hammer stay separate; sprite artwork and separate body-part meshes are hidden.',
+    description: 'One connected GPU-skinned mesh contains the torso, neck, head, arms and hands: the built-in upper body, or your imported skinned GLB. Its bones follow the existing arm IK. The pot and hammer stay separate; sprite artwork and separate body-part meshes are hidden.',
   },
 };
 
@@ -75,19 +89,78 @@ export function createCharacterEditor(options: {
         <p class="appearance-format">A built-in skinned model with joined shoulders, arms, neck and
           head, rather than separate rigid body parts. Bone weights bend the skin at shoulders, elbows and wrists.
           The existing grip targets drive its hands; the pot is not part of the avatar.</p>
-        <button type="button" class="button character-use-avatar">Use built-in Avatar</button>
+        <button type="button" class="button character-use-avatar">Use Avatar</button>
         <p class="appearance-format">No download or third-party model license is needed. The avatar ships with
-          the game and is selected by exported profiles. Whole-avatar GLB import and animation retargeting are
-          not part of this built-in rig.</p>
+          the game and is selected by exported profiles. Import your own skinned GLB below to replace its mesh;
+          imported animation clips are not played.</p>
       </section>
+
+      <section class="character-example character-model" aria-labelledby="character-model-heading">
+        <h4 id="character-model-heading">Your skinned avatar (GLB)</h4>
+        <p class="appearance-format">Replace the built-in avatar mesh with a rigged GLB. Map eight of its skin
+          joints to the avatar's body, head, upper arms, forearms and hands. The existing arm IK, grips, head gaze
+          and arm forward distance drive them; arm lengths come from the GLB bind pose. Unmapped joints, such as
+          spine, neck, fingers and legs, follow their nearest mapped ancestor.</p>
+        <p class="appearance-format">Left and right are screen sides. The character faces the camera, so a rig's
+          anatomical right arm drives the left joints. Mixamo-style names are mapped automatically.</p>
+        <label class="appearance-label" for="character-avatar-file">Skinned avatar GLB</label>
+        <input id="character-avatar-file" type="file" accept=".glb,model/gltf-binary" />
+        <p class="appearance-format">Self-contained GLB 2.0 with one armature, up to
+          ${CHARACTER_MODEL_LIMITS.bytes / 1024 ** 2} MiB, at most 4 weights per vertex, normalized.</p>
+        <p class="appearance-format character-avatar-status" role="status" aria-live="polite"></p>
+        <fieldset class="tuning-group character-bone-map" hidden>
+          <legend>Bone map</legend>
+          <div class="character-bone-grid"></div>
+          <p class="character-bone-issue" role="alert" aria-atomic="true" hidden></p>
+        </fieldset>
+        <details class="character-unmapped" hidden>
+          <summary class="character-unmapped-summary"></summary>
+          <ul class="character-unmapped-list"></ul>
+        </details>
+        <div class="character-action-row">
+          <button type="button" class="button character-avatar-discard" hidden>Discard bone map changes</button>
+          <button type="button" class="button character-avatar-remove">Use built-in avatar mesh</button>
+        </div>
+      </section>
+
+      <section class="character-example character-hammer" aria-labelledby="character-hammer-heading">
+        <h4 id="character-hammer-heading">One-model hammer (GLB)</h4>
+        <p class="appearance-format">Replace the stretched shaft and separate head with one rigid model, in every
+          character type. Model it with its origin at the butt of the handle, the handle along +X, in metres.
+          The physical head sits at x = ${metres(RIG.handleLength)}; its collision block spans
+          x ${metres(RIG.handleLength - HEAD_HALF_LENGTH)} to ${metres(RIG.handleLength + HEAD_HALF_LENGTH)} and
+          y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}. Length, reach, grips and contacts stay physical.</p>
+        <label class="appearance-label" for="character-hammer-file">Hammer GLB</label>
+        <input id="character-hammer-file" type="file" accept=".glb,model/gltf-binary" />
+        <p class="appearance-format character-hammer-status" role="status" aria-live="polite"></p>
+        <button type="button" class="button character-hammer-remove">Use two-part hammer</button>
+      </section>
+
+      <fieldset class="tuning-group character-shading">
+        <legend>Avatar shading</legend>
+        <div class="character-shading-modes" role="radiogroup" aria-label="Shading mode">
+          <label><input type="radio" name="character-shading-mode" value="pbr" /> PBR</label>
+          <label><input type="radio" name="character-shading-mode" value="cel" /> Cel</label>
+        </div>
+        <div class="character-cel-bands"></div>
+        <label class="character-outline-toggle"><input type="checkbox" id="character-outline-enabled" /> Outline</label>
+        <label class="appearance-label" for="character-outline-color">Outline colour</label>
+        <input id="character-outline-color" type="color" />
+        <div class="character-outline-width"></div>
+        <p class="appearance-format">Styles Avatar mode: the connected avatar and its separate pot and hammer.
+          Flip between PBR and cel to compare the same model live; cel materials are built once and reused.
+          Save keeps the choice.</p>
+        <p class="appearance-format character-shading-inactive" hidden>Applies in Avatar mode. Other character
+          types keep their own materials.</p>
+      </fieldset>
 
       <section class="character-rig-summary" aria-labelledby="character-rig-heading">
         <h4 id="character-rig-heading">Authored sprite rig</h4>
         <p class="character-rig-counts"></p>
         <p class="appearance-format character-rig-detail"></p>
         <p class="appearance-format">Use Sprites for anchor-bound PNG cutouts, custom 2D bones, weighted skins,
-          poses, animation, IK and optional hair. This authored 2D rig is separate from the built-in avatar's
-          3D skeleton. Appearance imports individual rigid GLB parts, not whole avatar rigs.</p>
+          poses, animation, IK and optional hair. This authored 2D rig is separate from the avatar's
+          3D skeleton. Appearance imports individual rigid GLB parts; import a whole skinned avatar above.</p>
         <p class="appearance-format">A single head image can tilt, not invent new face views. Direction-tagged
           head images use the same facing choice as the rest of the sprites. Shared torso/IK bindings are
           never rotated automatically; Directional Presentation reports heads needing a dedicated binding.</p>
@@ -114,15 +187,15 @@ export function createCharacterEditor(options: {
           <button type="button" class="button character-import">Import profile JSON</button>
           <button type="button" class="button character-export">Export profile JSON</button>
         </div>
-        <p class="appearance-format">Includes the character type, 3D arm forward distance, sprite layout, 2D skeleton, directional settings
-          and embedded PNGs. Public image URLs remain references. Import limit:
-          ${Math.floor(SPRITE_LIMITS.documentBytes / 1024 ** 2)} MiB.</p>
+        <p class="appearance-format">Includes the character type, 3D arm forward distance, sprite layout, 2D skeleton, directional settings,
+          embedded PNGs, the imported avatar and hammer GLBs, bone map and shading. Public image URLs remain
+          references. Import limit: ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB.</p>
       </fieldset>
       <p class="appearance-format character-external-warning" hidden>This profile references external images.
         Export preserves their URLs. Never use links containing credentials or private/internal addresses.</p>
-      <p class="appearance-format">GLB imports and their alignment stay separately browser-local in Appearance;
-        they are not bundled with profile JSON. The built-in avatar needs no embedded model file.
-        Exported PNG artwork can be used as normal game sprite data.</p>
+      <p class="appearance-format">Appearance's per-part GLB imports and their alignment stay browser-local;
+        they are not bundled with profile JSON. Avatar and hammer GLBs imported here are part of the profile.
+        The built-in avatar needs no embedded model file. Exported profiles can be used as game sprite data.</p>
     </div>
     <footer class="workshop-footer character-footer">
       <div class="character-action-row">
@@ -159,6 +232,77 @@ export function createCharacterEditor(options: {
   });
   element(root, '.character-arm-forward-control').append(forward.row);
   forwardReset.addEventListener('click', () => { options.state.setArmForwardDistance(DEFAULT_ARM_FORWARD_DISTANCE); }, listen);
+
+  const avatarFile = element<HTMLInputElement>(root, '#character-avatar-file');
+  const avatarStatus = element<HTMLParagraphElement>(root, '.character-avatar-status');
+  const boneMap = element<HTMLFieldSetElement>(root, '.character-bone-map');
+  const boneIssue = element<HTMLParagraphElement>(root, '.character-bone-issue');
+  const unmapped = element<HTMLDetailsElement>(root, '.character-unmapped');
+  const unmappedSummary = element<HTMLElement>(root, '.character-unmapped-summary');
+  const unmappedList = element<HTMLUListElement>(root, '.character-unmapped-list');
+  const avatarDiscard = element<HTMLButtonElement>(root, '.character-avatar-discard');
+  const avatarRemove = element<HTMLButtonElement>(root, '.character-avatar-remove');
+  const hammerFile = element<HTMLInputElement>(root, '#character-hammer-file');
+  const hammerStatus = element<HTMLParagraphElement>(root, '.character-hammer-status');
+  const hammerRemove = element<HTMLButtonElement>(root, '.character-hammer-remove');
+  const shadingModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-shading-mode"]'));
+  const outlineEnabled = element<HTMLInputElement>(root, '#character-outline-enabled');
+  const outlineColor = element<HTMLInputElement>(root, '#character-outline-color');
+  const shadingInactive = element<HTMLParagraphElement>(root, '.character-shading-inactive');
+  const boneSelects = new Map<AvatarJointId, HTMLSelectElement>();
+  let describedJoints: readonly string[] | null = null;
+  let lastOutline: CelOutline = DEFAULT_CEL_OUTLINE;
+  for (const joint of AVATAR_JOINT_IDS) {
+    const label = document.createElement('label');
+    label.className = 'appearance-label';
+    label.htmlFor = `character-bone-${joint}`;
+    label.textContent = JOINT_LABELS[joint];
+    const select = document.createElement('select');
+    select.id = `character-bone-${joint}`;
+    select.name = `bone-${joint}`;
+    select.dataset.joint = joint;
+    select.addEventListener('change', () => { void options.state.setAvatarBone(joint, select.value === '' ? null : select.value); }, listen);
+    element(root, '.character-bone-grid').append(label, select);
+    boneSelects.set(joint, select);
+  }
+  const editShading = (change: Partial<CharacterShading>): void => {
+    const current = options.state.snapshot().shading;
+    if (!options.state.setShading({ ...current, ...change })) render();
+  };
+  const bands = createRangeControl({
+    ...SHADING_LIMITS.bands, label: 'Cel bands', unit: '',
+    description: 'Number of stepped light bands in cel shading.',
+  }, {
+    id: 'character-cel-bands', name: 'celBands', signal: events.signal,
+    onInput: value => editShading({ bands: value }),
+  });
+  element(root, '.character-cel-bands').append(bands.row);
+  const outlineWidth = createRangeControl({
+    ...SHADING_LIMITS.outlineWidth, label: 'Outline width', unit: 'm',
+    description: 'World-space width of the cel outline around the avatar, pot and hammer.',
+  }, {
+    id: 'character-outline-width', name: 'outlineWidth', signal: events.signal,
+    onInput: value => editShading({ outline: { ...lastOutline, width: value } }),
+  });
+  element(root, '.character-outline-width').append(outlineWidth.row);
+  for (const input of shadingModes) {
+    input.addEventListener('change', () => { if (input.checked) editShading({ mode: input.value as ShadingMode }); }, listen);
+  }
+  outlineEnabled.addEventListener('change', () => editShading({ outline: outlineEnabled.checked ? lastOutline : null }), listen);
+  outlineColor.addEventListener('input', () => editShading({ outline: { ...lastOutline, color: outlineColor.value } }), listen);
+  avatarFile.addEventListener('change', () => {
+    const file = avatarFile.files?.[0];
+    avatarFile.value = '';
+    if (file !== undefined) void options.state.importAvatarModel(file);
+  }, listen);
+  avatarDiscard.addEventListener('click', () => options.state.cancelAvatarImport(), listen);
+  avatarRemove.addEventListener('click', () => { void options.state.removeAvatarModel(); }, listen);
+  hammerFile.addEventListener('change', () => {
+    const file = hammerFile.files?.[0];
+    hammerFile.value = '';
+    if (file !== undefined) void options.state.importHammerModel(file);
+  }, listen);
+  hammerRemove.addEventListener('click', () => { void options.state.removeHammerModel(); }, listen);
 
   for (const type of CHARACTER_RIGGING_TYPES) {
     const option = document.createElement('option');
@@ -218,6 +362,7 @@ export function createCharacterEditor(options: {
     revertButton.disabled = disabled || !snapshot.dirty || snapshot.saved === null;
     externalWarning.hidden = !snapshot.externalSources;
     setText(technology, CHARACTER_TYPES[profile.characterRiggingType].description);
+    renderModels(snapshot, disabled);
 
     if (profile !== describedDocument) {
       let rigid = 0;
@@ -246,6 +391,77 @@ export function createCharacterEditor(options: {
       'Built-in 3D character. No sprite artwork authored yet.';
     setText(status, message);
     statusBox.dataset.kind = disabled ? 'busy' : snapshot.error !== null ? 'error' : snapshot.dirty ? 'draft' : 'ready';
+    if (snapshot.modelIssue === null) delete statusBox.dataset.code;
+    else statusBox.dataset.code = snapshot.modelIssue.code;
+  }
+
+  function renderModels(snapshot: ReturnType<SpriteEditorState['snapshot']>, disabled: boolean): void {
+    const avatar = snapshot.avatarModel;
+    avatarFile.disabled = disabled;
+    setText(avatarStatus, avatar === null ? 'Using the built-in avatar mesh.' :
+      avatar.pending ? `"${avatar.name}" is not applied: complete its bone map below.` :
+      `Using "${avatar.name}" as the avatar${avatar.joints === null ? '.' :
+        `: ${avatar.joints.length} skin joints, ${avatar.unmapped.length} unmapped.`}`);
+    boneMap.hidden = avatar === null;
+    const joints = avatar?.joints ?? null;
+    if (joints !== describedJoints) {
+      describedJoints = joints;
+      for (const select of boneSelects.values()) {
+        const choices = ['', ...joints ?? []];
+        select.replaceChildren(...choices.map(name => {
+          const option = document.createElement('option');
+          option.value = name;
+          option.textContent = name === '' ? 'Choose a joint' : name;
+          return option;
+        }));
+      }
+    }
+    for (const [joint, select] of boneSelects) {
+      const value = avatar?.boneMap[joint] ?? '';
+      if (select.value !== value) select.value = value;
+      select.disabled = disabled || joints === null;
+      const issue = avatar?.issue ?? null;
+      select.setAttribute('aria-invalid', String(issue !== null &&
+        (issue.joints.includes(joint) || value !== '' && issue.joints.includes(value))));
+    }
+    const issue = avatar?.issue ?? null;
+    boneIssue.hidden = issue === null;
+    setText(boneIssue, issue?.message ?? '');
+    if (issue === null) delete boneIssue.dataset.code;
+    else boneIssue.dataset.code = issue.code;
+    const followers = avatar?.unmapped ?? [];
+    unmapped.hidden = followers.length === 0;
+    setText(unmappedSummary, `${followers.length} unmapped joints follow their nearest mapped ancestor`);
+    const text = followers.map(joint => `${joint.name || '(unnamed)'} follows ${
+      joint.follows === null ? 'the avatar root' : JOINT_LABELS[joint.follows].toLowerCase()}`);
+    if (unmappedList.childElementCount !== text.length ||
+      Array.from(unmappedList.children).some((item, index) => item.textContent !== text[index])) {
+      unmappedList.replaceChildren(...text.map(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        return item;
+      }));
+    }
+    avatarDiscard.hidden = avatar?.pending !== true;
+    avatarDiscard.disabled = disabled;
+    avatarRemove.disabled = disabled || snapshot.document.avatar === undefined;
+    hammerFile.disabled = disabled;
+    setText(hammerStatus, snapshot.hammerModel === null ? 'Using the two-part hammer (default).' :
+      `Using "${snapshot.hammerModel.name}" as a one-model hammer.`);
+    hammerRemove.disabled = disabled || snapshot.hammerModel === null;
+    const shading = snapshot.shading;
+    if (shading.outline !== null) lastOutline = shading.outline;
+    for (const input of shadingModes) {
+      input.checked = input.value === shading.mode;
+      input.disabled = disabled;
+    }
+    bands.setValue(shading.bands, { disabled });
+    outlineEnabled.checked = shading.outline !== null;
+    outlineEnabled.disabled = disabled;
+    if (outlineColor.value !== lastOutline.color) outlineColor.value = lastOutline.color;
+    outlineColor.disabled = disabled || shading.outline === null;
+    outlineWidth.setValue(lastOutline.width, { disabled: disabled || shading.outline === null });
+    shadingInactive.hidden = snapshot.document.characterRiggingType === 'avatar-3d';
   }
 
   options.mount.append(root);

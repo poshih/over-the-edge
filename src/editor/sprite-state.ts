@@ -4,7 +4,7 @@ import {
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
   DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType,
   spriteMigrationNotice, validateArmForwardDistance,
-  FLIPBOOK_LIMITS, flipbookSizeMessage, spriteLayerImages, spriteSchemaVersion,
+  FLIPBOOK_LIMITS, flipbookSizeMessage, spriteLayerImages, spriteSchemaVersion, SPRITE_FILE_BYTES,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteFlipbook, SpriteImage, SpriteLayer, SpriteOffset } from '../sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
@@ -13,6 +13,16 @@ import type { DirectionalPresentation } from '../directional-data';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin } from '../skeleton-data';
 import { autoWeights, restPose } from '../skeleton-pose';
+import {
+  AVATAR_MODEL_ID, CharacterModelError, characterAssets, CHARACTER_MODEL_LIMITS, DEFAULT_CHARACTER_SHADING, encodeModel,
+  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, sameCharacterAssets, sameShading, validateCharacterShading,
+} from '../character-profile';
+import type {
+  AvatarBoneMap, AvatarJointId, CharacterAssets, CharacterModel, CharacterModelErrorCode, CharacterShading,
+  PartialAvatarBoneMap,
+} from '../character-profile';
+import { inspectCharacterModel, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
+import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
 import { VisualStore, VisualStoreError } from './visual-store';
 
 export interface SpriteAnchorInput {
@@ -40,6 +50,23 @@ export interface SpriteLayerEdit {
   readonly flipbook?: SpriteFlipbook | null;
 }
 
+export interface CharacterModelIssue {
+  readonly code: CharacterModelErrorCode;
+  readonly message: string;
+  readonly joints: readonly string[];
+}
+
+// The imported avatar shown in Character: the draft's model, or an import awaiting a complete bone map.
+export interface AvatarModelState {
+  readonly name: string;
+  readonly pending: boolean;
+  // GLB skin joint names to choose from; null while the model's report is unavailable.
+  readonly joints: readonly string[] | null;
+  readonly boneMap: PartialAvatarBoneMap;
+  readonly issue: CharacterModelIssue | null;
+  readonly unmapped: readonly { readonly name: string; readonly follows: AvatarJointId | null }[];
+}
+
 export interface SpriteEditorSnapshot {
   readonly restoring: boolean;
   readonly busy: boolean;
@@ -53,6 +80,19 @@ export interface SpriteEditorSnapshot {
   readonly externalSources: boolean;
   readonly preview: SkeletonPreview | null;
   readonly directionalPreview: boolean;
+  // The typed failure behind `error`, when a character model or bone map caused it.
+  readonly modelIssue: CharacterModelIssue | null;
+  readonly avatarModel: AvatarModelState | null;
+  readonly hammerModel: { readonly name: string } | null;
+  readonly shading: CharacterShading;
+}
+
+interface PendingAvatar {
+  readonly name: string;
+  readonly source: string;
+  readonly report: CharacterModelReport;
+  readonly boneMap: PartialAvatarBoneMap;
+  readonly issue: CharacterModelIssue;
 }
 
 interface StoredSprites {
@@ -114,6 +154,7 @@ function usedImages(images: readonly SpriteImage[], layers: readonly SpriteLayer
 function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (left === right) return true;
   if (left.characterRiggingType !== right.characterRiggingType || left.armForwardDistance !== right.armForwardDistance) return false;
+  if (!sameCharacterAssets(left, right)) return false;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
   return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
     samePresentation(left.presentation, right.presentation) &&
@@ -126,6 +167,23 @@ function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
 
 function samePresentation(left: DirectionalPresentation | null, right: DirectionalPresentation | null): boolean {
   return left === right || JSON.stringify(left) === JSON.stringify(right);
+}
+
+function issueOf(error: CharacterModelError): CharacterModelIssue {
+  return Object.freeze({ code: error.code, message: error.message, joints: error.joints });
+}
+
+function modelName(file: File): string {
+  const name = file.name.replace(/\.glb$/i, '').trim().slice(0, CHARACTER_MODEL_LIMITS.name);
+  return name.length > 0 ? name : 'Character model';
+}
+
+// The sprite fields of a document, without any character assets.
+function spriteFields(document: SpriteDocument) {
+  return {
+    characterRiggingType: document.characterRiggingType, armForwardDistance: document.armForwardDistance,
+    images: document.images, layers: document.layers, skeleton: document.skeleton, presentation: document.presentation,
+  };
 }
 
 function fitWithinAnchor(anchor: SpriteAnchorInput, size: { width: number; height: number }): { width: number; height: number } {
@@ -147,6 +205,10 @@ export class SpriteEditorState {
   private readonly anchorIds: ReadonlySet<string>;
   private readonly targetIds: ReadonlySet<string>;
   private readonly notice: (message: string, kind: 'info' | 'error') => void;
+  private readonly describeModel: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
+  private pendingAvatar: PendingAvatar | null = null;
+  private modelIssue: CharacterModelIssue | null = null;
+  private avatarState: { key: readonly unknown[]; value: AvatarModelState | null } = { key: [], value: null };
   private readonly store = new VisualStore<StoredSprites>({
     database: 'over-the-edge:sprites', store: 'documents', keyPath: 'id',
   });
@@ -167,6 +229,8 @@ export class SpriteEditorState {
     anchors: readonly SpriteAnchorInput[];
     targetIds: readonly string[];
     onNotice: (message: string, kind: 'info' | 'error') => void;
+    // Reports of models the renderer has loaded, used to list an avatar's joints.
+    describeModel?: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
   }) {
     if (options.anchors.length === 0) throw new Error('The sprite editor requires at least one anchor.');
     const seen = new Set<string>();
@@ -189,6 +253,7 @@ export class SpriteEditorState {
     this.anchorIds = new Set(this.anchors.map((anchor) => anchor.id));
     this.targetIds = new Set(options.targetIds);
     this.notice = options.onNotice;
+    this.describeModel = options.describeModel ?? (() => null);
   }
 
   async restore(): Promise<void> {
@@ -223,7 +288,7 @@ export class SpriteEditorState {
     } catch (error) {
       if (this.disposed && isAbort(error)) return;
       if (!(isDocumentError(error) || error instanceof VisualStoreError)) throw error;
-      if (!this.disposed) this.reportError(error.message);
+      if (!this.disposed) this.reportError(error.message, error);
     } finally {
       this.restoring = false;
       this.changed();
@@ -237,7 +302,7 @@ export class SpriteEditorState {
       error: this.error,
       dirty: this.saved === null || !sameDocument(this.draft, this.saved),
       hasContent: this.draft.characterRiggingType !== DEFAULT_CHARACTER_RIGGING_TYPE ||
-        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE ||
+        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE || hasCharacterAssets(this.draft) ||
         this.draft.layers.length > 0 || this.draft.images.length > 0 ||
         this.draft.skeleton !== null || this.draft.presentation !== null,
       anchors: this.anchors,
@@ -247,7 +312,112 @@ export class SpriteEditorState {
       externalSources: this.draft.images.some((image) => !isEmbedded(image.source)),
       preview: this.preview,
       directionalPreview: this.directionalPreview,
+      modelIssue: this.error === null ? null : this.modelIssue,
+      avatarModel: this.avatarModelState(),
+      hammerModel: this.draft.hammer === undefined ? null : { name: this.model(this.draft.hammer.model).name },
+      shading: this.draft.shading ?? DEFAULT_CHARACTER_SHADING,
     };
+  }
+
+  // Validates an imported skinned GLB, suggests a bone map and applies it when complete and valid.
+  async importAvatarModel(file: File): Promise<void> {
+    if (!this.canEdit()) return;
+    await this.run(async () => {
+      const bytes = await this.readModel(file);
+      if (this.disposed) return;
+      const report = inspectCharacterModel(bytes.buffer, 'avatar');
+      await this.applyAvatar({ name: modelName(file), source: encodeModel(bytes), report, boneMap: suggestAvatarBoneMap(report) });
+    });
+  }
+
+  // Edits the pending or current bone map; a complete, valid map replaces the draft's avatar.
+  async setAvatarBone(joint: AvatarJointId, name: string | null): Promise<void> {
+    if (!this.canEdit()) return;
+    if (!isAvatarJoint(joint)) throw new Error(`Unknown avatar joint "${String(joint)}".`);
+    await this.run(async () => {
+      const base = this.pendingAvatar ?? this.draftAvatar();
+      if (base === null) throw new SpriteError('Import a skinned avatar GLB before editing its bone map.');
+      // Invalid intermediate maps, such as a duplicate while swapping two joints, stay pending.
+      const boneMap: Partial<Record<AvatarJointId, string>> = { ...base.boneMap };
+      if (name === null || name === '') delete boneMap[joint];
+      else boneMap[joint] = name;
+      await this.applyAvatar({ name: base.name, source: base.source, report: base.report, boneMap: Object.freeze(boneMap) });
+    });
+  }
+
+  async removeAvatarModel(): Promise<void> {
+    if (!this.canEdit()) return;
+    await this.run(async () => {
+      this.pendingAvatar = null;
+      if (this.draft.avatar === undefined) return;
+      const document = this.characterDocument({ avatar: null });
+      await this.replaceRig(document);
+      if (this.disposed) return;
+      this.draft = document;
+    });
+  }
+
+  cancelAvatarImport(): void {
+    if (this.disposed || this.pendingAvatar === null) return;
+    this.pendingAvatar = null;
+    if (this.error !== null) this.error = null;
+    this.changed();
+  }
+
+  async importHammerModel(file: File): Promise<void> {
+    if (!this.canEdit()) return;
+    await this.run(async () => {
+      const bytes = await this.readModel(file);
+      if (this.disposed) return;
+      inspectCharacterModel(bytes.buffer, 'hammer');
+      const model = Object.freeze({ id: HAMMER_MODEL_ID, name: modelName(file), source: encodeModel(bytes) });
+      const document = this.characterDocument({ hammer: model });
+      await this.replaceRig(document);
+      if (this.disposed) return;
+      this.draft = document;
+    });
+  }
+
+  async removeHammerModel(): Promise<void> {
+    if (!this.canEdit()) return;
+    await this.run(async () => {
+      if (this.draft.hammer === undefined) return;
+      const document = this.characterDocument({ hammer: null });
+      await this.replaceRig(document);
+      if (this.disposed) return;
+      this.draft = document;
+    });
+  }
+
+  // Live, like arm forward distance: the loaded models switch materials without reloading.
+  setShading(value: unknown): boolean {
+    if (!this.canEdit()) return false;
+    try {
+      const shading = validateCharacterShading(value);
+      if (sameShading(shading, this.draft.shading ?? DEFAULT_CHARACTER_SHADING)) {
+        if (this.error !== null) {
+          this.error = null;
+          this.changed();
+        }
+        return true;
+      }
+      const assets = characterAssets({
+        ...characterAssets(this.draft), shading: sameShading(shading, DEFAULT_CHARACTER_SHADING) ? undefined : shading,
+      });
+      const document: SpriteDocument = Object.freeze({
+        schemaVersion: spriteSchemaVersion(this.draft.layers, assets), ...spriteFields(this.draft), ...assets,
+      });
+      this.validateDraft(document);
+      this.rig.setShading(shading);
+      this.draft = document;
+      this.error = null;
+      this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message, error);
+      return false;
+    }
   }
 
   subscribe(listener: () => void): () => void {
@@ -335,14 +505,14 @@ export class SpriteEditorState {
       }
       const layers = Object.freeze(this.draft.layers.map(candidate => candidate.id === id ? layer : candidate));
       const document = Object.freeze({
-        ...this.draft, schemaVersion: spriteSchemaVersion(layers), images: usedImages(this.draft.images, layers), layers,
+        ...this.draft, schemaVersion: spriteSchemaVersion(layers, this.draft), images: usedImages(this.draft.images, layers), layers,
       });
       this.validateDraft(document);
       this.rig.upsert(layer);
       this.draft = document;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
       return;
     }
     this.error = null;
@@ -403,7 +573,7 @@ export class SpriteEditorState {
       });
       const layers = this.draft.layers.map((candidate) => candidate.id === id ? layer : candidate);
       const document = validateSpriteDocument({
-        ...this.draft, schemaVersion: spriteSchemaVersion(layers), images: usedImages(images, layers), layers,
+        ...this.draft, schemaVersion: spriteSchemaVersion(layers, this.draft), images: usedImages(images, layers), layers,
       });
       await this.replaceRig(document);
       if (this.disposed) return;
@@ -417,14 +587,14 @@ export class SpriteEditorState {
     if (!this.draft.layers.some((layer) => layer.id === id)) throw new Error(`Unknown sprite layer "${id}".`);
     const layers = Object.freeze(this.draft.layers.filter((layer) => layer.id !== id));
     const document = Object.freeze({
-      ...this.draft, schemaVersion: spriteSchemaVersion(layers), images: usedImages(this.draft.images, layers), layers,
+      ...this.draft, schemaVersion: spriteSchemaVersion(layers, this.draft), images: usedImages(this.draft.images, layers), layers,
     });
     try {
       this.validateDraft(document);
       this.rig.remove(id);
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
       return;
     }
     this.error = null;
@@ -467,7 +637,7 @@ export class SpriteEditorState {
       return true;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
       return false;
     }
   }
@@ -492,7 +662,7 @@ export class SpriteEditorState {
       return true;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
       return false;
     }
   }
@@ -522,7 +692,7 @@ export class SpriteEditorState {
       this.changed();
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
     }
   }
 
@@ -543,7 +713,7 @@ export class SpriteEditorState {
       this.changed();
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
     }
   }
 
@@ -567,7 +737,7 @@ export class SpriteEditorState {
       return true;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
       return false;
     }
   }
@@ -597,7 +767,7 @@ export class SpriteEditorState {
       return true;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
       return false;
     }
   }
@@ -643,12 +813,13 @@ export class SpriteEditorState {
       this.updateLayer(id, { skin, bone: null, tileLength: null, x: xOffset, y: yOffset, rotation });
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
     }
   }
 
   async revert(): Promise<void> {
     if (!this.canEdit()) return;
+    this.pendingAvatar = null;
     const saved = this.saved;
     if (saved === null) {
       this.reportError('No saved sprite layout was successfully loaded. Save a valid layout before reverting.');
@@ -666,6 +837,7 @@ export class SpriteEditorState {
 
   async newDocument(): Promise<void> {
     if (!this.canEdit()) return;
+    this.pendingAvatar = null;
     await this.run(async () => {
       await this.replaceRig(EMPTY_SPRITES);
       if (this.disposed) return;
@@ -676,9 +848,10 @@ export class SpriteEditorState {
 
   async importDocument(file: File): Promise<void> {
     if (!this.canEdit()) return;
+    this.pendingAvatar = null;
     await this.run(async () => {
-      if (file.size > SPRITE_LIMITS.documentBytes) {
-        throw new SpriteError(`Sprite JSON must be at most ${Math.floor(SPRITE_LIMITS.documentBytes / 1024 ** 2)} MiB.`);
+      if (file.size > SPRITE_FILE_BYTES) {
+        throw new SpriteError(`Profile JSON must be at most ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB.`);
       }
       const text = await file.text();
       if (this.disposed) return;
@@ -702,7 +875,7 @@ export class SpriteEditorState {
       return JSON.stringify(document);
     } catch (error) {
       if (!isDocumentError(error)) throw error;
-      this.reportError(error.message);
+      this.reportError(error.message, error);
       return null;
     }
   }
@@ -747,6 +920,108 @@ export class SpriteEditorState {
     validateSpriteBudget(document);
   }
 
+  private async readModel(file: File): Promise<Uint8Array<ArrayBuffer>> {
+    if (!/\.glb$/i.test(file.name) || file.name.length > 255) {
+      throw new CharacterModelError('invalid-model', 'Choose one binary glTF (.glb) file.');
+    }
+    if (file.size === 0 || file.size > CHARACTER_MODEL_LIMITS.bytes) {
+      throw new CharacterModelError('model-limits', `Choose a GLB file no larger than ${CHARACTER_MODEL_LIMITS.bytes / 1024 ** 2} MiB.`);
+    }
+    return new Uint8Array(await file.arrayBuffer());
+  }
+
+  private model(id: string): CharacterModel {
+    const model = this.draft.models?.find(candidate => candidate.id === id);
+    if (model === undefined) throw new SpriteError(`The character profile is missing model "${id}".`);
+    return model;
+  }
+
+  private draftAvatar(): Omit<PendingAvatar, 'issue'> | null {
+    const avatar = this.draft.avatar;
+    if (avatar === undefined) return null;
+    const model = this.model(avatar.model);
+    const report = this.describeModel(model.source, 'avatar');
+    if (report === null) throw new SpriteError('The avatar model is still loading; try again once it appears.');
+    return { name: model.name, source: model.source, report, boneMap: avatar.boneMap };
+  }
+
+  // Keeps an import pending, with its typed issue, until its bone map resolves against the model.
+  private async applyAvatar(candidate: Omit<PendingAvatar, 'issue'>): Promise<void> {
+    try {
+      resolveAvatarJoints(candidate.report, candidate.boneMap);
+    } catch (error) {
+      if (!(error instanceof CharacterModelError)) throw error;
+      this.pendingAvatar = Object.freeze({ ...candidate, issue: issueOf(error) });
+      throw error;
+    }
+    const current = this.draft.avatar === undefined ? null : this.model(this.draft.avatar.model);
+    const model = current !== null && current.source === candidate.source && current.name === candidate.name
+      ? current : Object.freeze({ id: AVATAR_MODEL_ID, name: candidate.name, source: candidate.source });
+    const document = this.characterDocument({ avatar: { model, boneMap: candidate.boneMap as AvatarBoneMap } });
+    await this.replaceRig(document);
+    if (this.disposed) return;
+    this.draft = document;
+    this.pendingAvatar = null;
+  }
+
+  // A validated draft with the avatar or hammer replaced (or removed with null), other fields kept.
+  private characterDocument(changes: {
+    avatar?: { model: CharacterModel; boneMap: AvatarBoneMap } | null;
+    hammer?: CharacterModel | null;
+  }): SpriteDocument {
+    const avatar = changes.avatar === undefined
+      ? this.draft.avatar === undefined ? null : { model: this.model(this.draft.avatar.model), boneMap: this.draft.avatar.boneMap }
+      : changes.avatar;
+    const hammer = changes.hammer === undefined
+      ? this.draft.hammer === undefined ? null : this.model(this.draft.hammer.model)
+      : changes.hammer;
+    const models = [avatar?.model, hammer].filter((model): model is CharacterModel => model !== null && model !== undefined);
+    const assets: CharacterAssets = characterAssets({
+      models: models.length === 0 ? undefined : models,
+      avatar: avatar === null ? undefined : { model: avatar.model.id, boneMap: avatar.boneMap },
+      hammer: hammer === null ? undefined : { model: hammer.id },
+      shading: this.draft.shading,
+    });
+    return validateSpriteDocument({
+      schemaVersion: spriteSchemaVersion(this.draft.layers, assets), ...spriteFields(this.draft), ...assets,
+    });
+  }
+
+  private avatarModelState(): AvatarModelState | null {
+    const pending = this.pendingAvatar;
+    const avatar = this.draft.avatar;
+    const source = pending?.source ?? (avatar === undefined ? null : this.model(avatar.model).source);
+    const report = pending?.report ?? (source === null ? null : this.describeModel(source, 'avatar'));
+    const key = [pending, avatar, this.draft.models, report];
+    if (key.length === this.avatarState.key.length && key.every((value, index) => value === this.avatarState.key[index])) {
+      return this.avatarState.value;
+    }
+    let value: AvatarModelState | null = null;
+    if (pending !== null) {
+      value = {
+        name: pending.name, pending: true, joints: pending.report.joints.map(joint => joint.name),
+        boneMap: pending.boneMap, issue: pending.issue, unmapped: [],
+      };
+    } else if (avatar !== undefined) {
+      let unmapped: AvatarModelState['unmapped'] = [];
+      let issue: CharacterModelIssue | null = null;
+      if (report !== null) {
+        try {
+          unmapped = resolveAvatarJoints(report, avatar.boneMap).unmapped.map(joint => ({ name: joint.name, follows: joint.follows }));
+        } catch (error) {
+          if (!(error instanceof CharacterModelError)) throw error;
+          issue = issueOf(error);
+        }
+      }
+      value = {
+        name: this.model(avatar.model).name, pending: false, joints: report?.joints.map(joint => joint.name) ?? null,
+        boneMap: avatar.boneMap, issue, unmapped,
+      };
+    }
+    this.avatarState = { key, value };
+    return value;
+  }
+
   private canEdit(): boolean {
     if (this.disposed) return false;
     if (this.restoring || this.busy) {
@@ -756,7 +1031,9 @@ export class SpriteEditorState {
     return true;
   }
 
-  private reportError(message: string): void {
+  // Keeps the typed code of character-model failures next to the message.
+  private reportError(message: string, error?: unknown): void {
+    this.modelIssue = error instanceof CharacterModelError ? issueOf(error) : null;
     const repeated = this.error === message;
     this.error = message;
     if (!this.disposed) {
@@ -774,7 +1051,7 @@ export class SpriteEditorState {
     } catch (error) {
       if (this.disposed && isAbort(error)) return;
       if (!(isDocumentError(error) || error instanceof VisualStoreError)) throw error;
-      if (!this.disposed) this.reportError(error.message);
+      if (!this.disposed) this.reportError(error.message, error);
     } finally {
       this.busy = false;
       this.changed();
