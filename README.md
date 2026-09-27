@@ -361,11 +361,11 @@ retracts the head to the shoulder hinge, so the butt can travel that far behind
 it. **Maximum extension** (0-2 m, default **1.15 m**) is how far the butt can slide
 past the hinge. The reach is their sum. The three welded handle segments share the
 handle length, and everything else follows the rig: the two-part hammer, the
-one-model hammer's documented measurements, touch gain, compact framing and the
-target radius limit. A rig is never changed in place: a new one rebuilds the player
-and restarts the run from its start, like **Reset**. A longer handle with a shorter
-extension keeps the reach while letting characters with sliding grips (see
-[hand grips](#hand-grips)) use shorter arms.
+one-model hammer's handle, touch gain, compact framing and the target radius limit.
+A rig is never changed in place: a new one rebuilds the player and restarts the run
+from its start, like **Reset**. A longer handle with a shorter extension keeps the
+reach while letting characters with sliding grips (see [hand grips](#hand-grips))
+use shorter arms.
 
 The **Cursor target** section has a **Maximum target radius** slider, from
 **0.25 m** up to the hammer's reach, default the full reach. A saved radius beyond
@@ -695,10 +695,10 @@ forearm and hand joints. The existing arm IK, grips, head gaze and arm forward
 distance then drive them, with arm lengths from the GLB's bind pose; unmapped
 joints follow their nearest mapped ancestor. Mixamo names map automatically,
 and invalid models or maps fail with typed error codes. The same tab adds a
-**one-model hammer** GLB bound rigidly to the physical tool frame, a **pot model**
-GLB that follows the physical pot body and hides the body inside it, and **PBR or
-cel shading** (stepped bands with an optional outline) that can be flipped live
-to compare. All of these are part of the character profile, so Save, JSON and
+**one-model hammer** GLB on the physical tool frame, with its handle fitted to the
+game's, a **pot model** GLB that follows the physical pot body and hides the body
+inside it, and **PBR or cel shading** (stepped bands with an optional outline) that
+can be flipped live to compare. All of these are part of the character profile, so Save, JSON and
 `GAME_SPRITES` carry them. See [imported 3D characters](docs/characters.md).
 Appearance's per-part GLB replacements are separate, browser-local assets that
 only a [project](docs/projects.md) carries into a release; imported animation clips

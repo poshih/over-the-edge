@@ -3,9 +3,9 @@ import type { Material, Matrix4 } from 'three';
 import type { LoadedCharacterModel } from './character-model-types';
 
 /**
- * A rigid prop model, such as the one-model hammer or the pot, bound to a physical frame without
- * stretching. The model's own origin and axes follow the documented convention for its role; the
- * physical rig is unchanged. Per frame it copies one matrix.
+ * A prop model, such as the one-model hammer or the pot, bound rigidly to a physical frame. The model's
+ * own origin and axes follow the documented convention for its role; a hammer's handle is fitted to the
+ * rig separately (see HammerHandleFit). The physical rig is unchanged. Per frame it copies one matrix.
  */
 export class PropModelView {
   readonly root = new Group();

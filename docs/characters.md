@@ -1,7 +1,7 @@
 # Imported 3D characters
 
 A game can ship its own GPU-skinned character, render it with PBR or cel shading,
-replace the hammer and the pot with rigid models, and let players switch between
+replace the hammer and the pot with their own models, and let players switch between
 that character and a 2D sprite character. The engine owns the machinery; a game supplies
 only data: GLBs, a bone map and a profile. Everything below is authored in
 **Workshop / Character** and stored in the character / sprite profile, so Save,
@@ -127,19 +127,21 @@ They are implemented without a DOM in `src/character-model-inspect.ts`.
 
 Pick a **Hammer GLB** to replace the two-part hammer, which stretches a shaft
 between the physical endpoints and places a separate head. The model follows the
-physical tool frame rigidly, without stretching, in every character type,
-including 2D, and in the hammer's foreground pass. **Use two-part hammer**
-restores the default.
+physical tool frame in every character type, including 2D, and in the hammer's
+foreground pass. **Use two-part hammer** restores the default.
 
-Model it in metres, with its origin at the butt of the handle and the handle
-along +X. The physical head sits at x = the game's handle length (1.5 m by default;
-the Character tab shows the open game's value). Its collision block spans 0.1 m
-either side of that along x, and y = -0.29 to 0.29 m; toggle the collision overlay
-(**D**) to compare. A model fits one handle length, so rebuild it when a game changes
-its handle. The grips never move the model. The hammer must be a
-static mesh; its bounds must reach at least 0.1 m along +X, extend further along
-+X than along -X, and stay within 4 m of the origin. In 2D, hammer sprite layers
-still draw if the profile has them.
+Model it in metres on the 1.5 m reference handle that all shaft artwork uses: origin
+at the butt, handle along +X and the head centred at x = 1.5 m, where its collision
+block spans x = 1.4 to 1.6 m and y = -0.29 to 0.29 m; toggle the collision overlay
+(**D**) to compare. The model then fits any handle length the game sets. The handle
+from the butt to x = 1.3 m, which hands can hold, stretches along the handle to 0.2 m
+short of the physical head. Its head end, the head and the last 0.2 m of handle, keeps
+its size and centres on the physical head. Anything behind the butt stays with the
+butt. Each mesh draws its own copy of the model's geometry, rewritten only when the
+handle length changes; the Character tab shows the open game's fit. The grips never
+move the model. The hammer must be a static mesh; its bounds must reach at least 0.1 m
+along +X, extend further along +X than along -X, and stay within 4 m of the origin.
+In 2D, hammer sprite layers still draw if the profile has them.
 
 Appearance's shaft and head imports are hidden while a hammer model is present.
 
@@ -306,11 +308,13 @@ change without reloading anything. Without a host, documents with models are rej
 
 Imported avatars are built once when their profile loads. Each frame writes the
 seven driven bone matrices, with no allocation. Unmapped joints keep static local
-matrices. The hammer and pot models copy one matrix each. This cost does not
-depend on the level. In the editor, `window.gettingOver.level().rendering` reports
-`importedAvatar` (joints, unmapped joints, chains and cumulative `boneWrites`),
-`hammerModel` and `potModel` (transform, drawn material types and cumulative
-`matrixWrites`), `shading`, `characters` and `renders`.
+matrices. The hammer and pot models copy one matrix each; a new handle length
+rewrites the hammer model's vertices once. This cost does not depend on the level.
+In the editor, `window.gettingOver.level().rendering` reports `importedAvatar`
+(joints, unmapped joints, chains and cumulative `boneWrites`), `hammerModel` and
+`potModel` (transform, drawn material types and cumulative `matrixWrites`; the
+hammer's `fit` gives its handle length and fitted bounds), `shading`, `characters`
+and `renders`.
 
 ## Verification
 
@@ -331,7 +335,9 @@ It then sets each hand's grip, the slide point and the handle length from the Ch
 tab and resizes the mesh-part arms per side. Retracted past the body, it checks that a 2D
 character without arm chains reaches like the built-in arms and one with chains reaches in
 its drawing plane at their lengths, then stretches those chains while its elbow caps and
-gloves keep their size. `npm run verify:game` builds a two-profile release whose 3D profile has
+gloves keep their size. Last, it fits a cel-outlined hammer model to four handle lengths:
+each mesh's fitted bounds are the documented map of its authored ones, and the head keeps
+its size on the physical head. `npm run verify:game` builds a two-profile release whose 3D profile has
 all three models. It checks the toggle mid-level, single asset loads, persistence,
 exact pot tracking, identical physics and each profile's own grip placement while
 switching, and failing builds for

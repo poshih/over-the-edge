@@ -26,9 +26,22 @@ function lit(material: Material): material is LitMaterial {
 // Averages normals of coincident vertices once per geometry, so flat-shaded props keep a closed outline.
 function outlineNormals(geometry: BufferGeometry): boolean {
   if (geometry.getAttribute(OUTLINE_NORMAL) !== undefined) return true;
+  if (geometry.getAttribute('position') === undefined || geometry.getAttribute('normal') === undefined) return false;
+  geometry.setAttribute(OUTLINE_NORMAL, new BufferAttribute(weldedNormals(geometry), 3));
+  return true;
+}
+
+// Recomputes an outlined geometry's averaged normals in place, after its vertices or normals were rewritten.
+export function refreshOutlineNormals(geometry: BufferGeometry): void {
+  const outline = geometry.getAttribute(OUTLINE_NORMAL);
+  if (outline === undefined) return;
+  outline.array.set(weldedNormals(geometry));
+  outline.needsUpdate = true;
+}
+
+function weldedNormals(geometry: BufferGeometry): Float32Array {
   const position = geometry.getAttribute('position');
   const normal = geometry.getAttribute('normal');
-  if (position === undefined || normal === undefined) return false;
   const sums = new Map<string, Vector3>();
   const keys: string[] = [];
   const vector = new Vector3();
@@ -52,8 +65,7 @@ function outlineNormals(geometry: BufferGeometry): boolean {
     values[index * 3 + 1] = vector.y;
     values[index * 3 + 2] = vector.z;
   }
-  geometry.setAttribute(OUTLINE_NORMAL, new BufferAttribute(values, 3));
-  return true;
+  return values;
 }
 
 // Alpha-cut and translucent surfaces would outline their whole card, not their silhouette.

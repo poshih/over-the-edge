@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { inspectArmGeometry, texturePng } from './verify-appearance.mjs';
+import { hammerGlb } from './character-fixtures.mjs';
 import { observeBrowserPage } from './verify-level.mjs';
 import { openSection } from './workshop-ui.mjs';
 
@@ -190,6 +191,7 @@ async function loadModules() {
     return {
       grips: await server.ssrLoadModule('/src/grips.ts'), arms: await server.ssrLoadModule('/src/arm-ik.ts'),
       config: await server.ssrLoadModule('/src/config.ts'), depth: await server.ssrLoadModule('/src/character-depth.ts'),
+      fit: await server.ssrLoadModule('/src/hammer-handle-fit.ts'),
     };
   } finally {
     await server.close();
@@ -360,7 +362,7 @@ export async function verifyGrips(browser, address, artifacts) {
     // 4. The Character tab measures the hammer model against this game's handle; grips switch live.
     await workshop('Character');
     await openSection(page, 'character-hammer', 'character-grips');
-    assert.match(await page.locator('.character-hammer-geometry').textContent(), /physical head at x = 2\.1 m; its collision block spans x 2 m to 2\.2 m/);
+    assert.match(await page.locator('.character-hammer-geometry').textContent(), /This game's handle is 2\.1 m: the model's handle up to x = 1\.3 m stretches to 1\.9 m and its head centres at x = 2\.1 m\./);
     await setPaused(true);
     await inspectArmGeometry(page);
     const slidePoint = page.locator('#character-grip-slide-at');
@@ -456,7 +458,7 @@ export async function verifyGrips(browser, address, artifacts) {
     assert.ok((await snapshot()).time < beforeHandle.time, 'The Character tab\'s handle length restarts the run like Physics.');
     assert.equal((await settings()).rig.handleLength, 1.8, 'It sets the game\'s shared setting.');
     assert.equal(await page.locator('#rig-handleLength').inputValue(), '1.8', 'Physics shows the same handle length.');
-    assert.match(await page.locator('.character-hammer-geometry').textContent(), /physical head at x = 1\.8 m/);
+    assert.match(await page.locator('.character-hammer-geometry').textContent(), /This game's handle is 1\.8 m: .* stretches to 1\.6 m and its head centres at x = 1\.8 m\./);
     assert.equal(await page.locator('#character-right-grip').getAttribute('max'), '1.6', 'Grips reach up to the head margin.');
     await page.getByRole('radio', { name: 'Fixed', exact: true }).check();
     await setRange('character-left-grip', 0.3);
@@ -573,6 +575,57 @@ export async function verifyGrips(browser, address, artifacts) {
     assert.equal((await profile()).arms, null);
     close(bone(await sprites(), 'left-upper-arm').length, 0.9, 'Natural lengths return the authored arm', 1e-9);
     report.armLengths.sprite = { upper: 0.6, forearm: 0.5, elbowKeepsSize: true };
+
+    // 11. A hammer model, authored on the reference handle, fits every handle length: its handle up to the head end
+    // stretches, the head end keeps its size on the physical head, and cel outlines follow the fitted geometry.
+    const { HAMMER_MODEL_HANDLE, HAMMER_MODEL_HEAD_END } = modules.fit;
+    const hammerProfile = {
+      schemaVersion: 12, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, grips: DEFAULT_GRIPS, arms: null,
+      images: [], layers: [], skeleton: null, presentation: null,
+      models: [{ id: 'hammer', name: 'Mallet', source: `data:model/gltf-binary;base64,${hammerGlb().toString('base64')}` }],
+      hammer: { model: 'hammer' }, shading: { mode: 'cel', bands: 3, outline: { color: '#1f2428', width: 0.03 } },
+    };
+    await page.locator('.sprite-file').setInputFiles({
+      name: 'mallet.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(hammerProfile)),
+    });
+    await page.waitForFunction(() => {
+      const state = window.gettingOver.sprites();
+      return !state.busy && state.document.characterRiggingType === 'avatar-3d' && window.gettingOver.level().rendering.hammerModel !== null;
+    });
+    await frames();
+    report.hammerFit = [];
+    for (const length of [1.8, 2.6, 0.9, HAMMER_MODEL_HANDLE]) {
+      if ((await snapshot()).rig.handleLength !== length) {
+        await setRange('character-handle-length', length);
+        await page.waitForFunction(value => Math.abs(window.gettingOver.snapshot().rig.handleLength - value) < 1e-9, length);
+      }
+      await frames();
+      const [state, drawn] = [await snapshot(), await page.evaluate(() => window.gettingOver.level().rendering)];
+      const { fit, transform } = drawn.hammerModel;
+      assert.equal(fit.handleLength, length, `The hammer model fits the ${length} m handle.`);
+      assert.ok(drawn.shading.hullsVisible > 0, 'The fitted hammer keeps its cel outline.');
+      // Behind the butt stays, the holdable handle stretches, and the head end moves with the physical head.
+      const map = x => x <= 0 ? x : x < HAMMER_MODEL_HEAD_END ? x * (length - HEAD_MARGIN) / HAMMER_MODEL_HEAD_END : x + length - HAMMER_MODEL_HANDLE;
+      for (const { authored, fitted } of fit.meshes) {
+        close(fitted.min[0], map(authored.min[0]), `${length} m: a mesh's near end`, 1e-6);
+        close(fitted.max[0], map(authored.max[0]), `${length} m: a mesh's far end`, 1e-6);
+        for (const axis of [1, 2]) {
+          close(fitted.min[axis], authored.min[axis], `${length} m: the model keeps its thickness`, 1e-9);
+          close(fitted.max[axis], authored.max[axis], `${length} m: the model keeps its thickness`, 1e-9);
+        }
+      }
+      // The fixture's head is its block beyond the head end: the same size, centred on the physical head.
+      const head = fit.meshes.find(mesh => mesh.authored.min[0] >= HAMMER_MODEL_HEAD_END);
+      close(head.fitted.max[0] - head.fitted.min[0], head.authored.max[0] - head.authored.min[0], `${length} m: the head keeps its size`, 1e-6);
+      const centre = (head.fitted.min[0] + head.fitted.max[0]) / 2;
+      const world = [transform[12] + transform[0] * centre, transform[13] + transform[1] * centre];
+      const physical = state.parts.find(part => part.id === 'head');
+      close(Math.hypot(world[0] - physical.x, world[1] - physical.y), 0, `${length} m: the model's head sits on the physical head`, 0.02);
+      assert.match(await page.locator('.character-hammer-geometry').textContent(), length === HAMMER_MODEL_HANDLE
+        ? /This game's handle is 1\.5 m, so the model draws as authored\./ : new RegExp(`This game's handle is ${length} m:`));
+      report.hammerFit.push({ length, bounds: fit.bounds, head: head.fitted });
+    }
+    await page.screenshot({ path: fileURLToPath(new URL('grips-hammer-model.png', artifacts)) });
     assert.deepEqual(report.errors, [], 'Grip scenario browser errors are not allowed.');
     return report;
   } finally {

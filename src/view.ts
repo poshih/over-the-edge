@@ -23,6 +23,7 @@ import { characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameBoneMa
 import type { AvatarBoneMap, PropModelRole } from './character-profile';
 import { CharacterShadingView } from './character-shading';
 import { PropModelView } from './prop-model-view';
+import { HammerHandleFit } from './hammer-handle-fit';
 import { SkinnedAvatarView } from './skinned-avatar-view';
 import { HeadAim } from './head-aim';
 import { PHYSICS, RIG } from './config';
@@ -114,7 +115,10 @@ interface CharacterSlot {
   presentation: CharacterPresentation;
   readonly models: Map<CharacterModelUsage, Map<string, LoadedCharacterModel>>;
   avatar: { readonly model: LoadedCharacterModel; readonly boneMap: AvatarBoneMap; readonly view: SkinnedAvatarView } | null;
-  readonly props: Record<PropModelRole, { readonly model: LoadedCharacterModel; readonly view: PropModelView } | null>;
+  // A hammer model also fits its handle to the game's.
+  readonly props: Record<PropModelRole, {
+    readonly model: LoadedCharacterModel; readonly view: PropModelView; readonly fit: HammerHandleFit | null;
+  } | null>;
 }
 
 export const MAX_CHARACTER_PROFILES = 2;
@@ -506,12 +510,15 @@ export class GameView {
       if (current !== null && current.model !== model) {
         this.shading.unregister(current.view.root);
         current.view.dispose();
+        current.fit?.dispose();
         slot.props[role] = null;
       }
       if (model !== null && slot.props[role] === null) {
+        // Fitted before shading, whose outline hulls share the fitted geometry.
+        const fit = role === 'hammer' ? new HammerHandleFit(model, this.rig.handleLength) : null;
         const view = new PropModelView(model, PROP_VIEW_NAMES[role]);
         this.shading.register(view.root);
-        slot.props[role] = { model, view };
+        slot.props[role] = { model, view, fit };
       }
     }
     const inUse: Readonly<Record<CharacterModelUsage, LoadedCharacterModel | undefined>> = {
@@ -620,7 +627,7 @@ export class GameView {
     this.toolFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, this.toolDepth);
     const armPoses = this.updateArms(this.torso.matrixWorld, this.toolFrame, shaftLength, { ...options, shaftAngle });
     this.avatarRenderer?.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
-    // The one-model hammer follows the physical tool frame, without stretching.
+    // The one-model hammer follows the physical tool frame; its handle is fitted to the rig, not per frame.
     this.propModels.hammer?.update(this.toolFrame);
     for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {
       x: pose.hand.x, y: pose.hand.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
@@ -715,7 +722,9 @@ export class GameView {
       headAim: { rotation: this.headAim.rotation.toArray() },
       avatar: this.avatar === null ? null : { ...this.avatar.inspect(), visible: this.avatar.root.visible },
       importedAvatar: this.activeImportedAvatar(),
-      hammerModel: this.propModels.hammer === null ? null : this.propModels.hammer.inspect(),
+      hammerModel: this.propModels.hammer === null ? null : {
+        ...this.propModels.hammer.inspect(), fit: this.slots[this.activeSlot]?.props.hammer?.fit?.inspect() ?? null,
+      },
       potModel: this.propModels.pot === null ? null : this.propModels.pot.inspect(),
       shading: this.shading.inspect(),
       theme: { writes: this.themeWrites, sky: this.theme.sky, fog: { ...this.theme.fog }, backdrop: this.theme.backdrop.visible },
@@ -988,11 +997,12 @@ export class GameView {
       ? { onReplacement: (next, previous) => this.propReplacementChanged(next, previous) } : {});
   }
 
-  // Follows a rebuilt rig: the two-part hammer's segment lengths, touch gain and framing.
+  // Follows a rebuilt rig: the two-part hammer's segment lengths, hammer models' handles, touch gain and framing.
   private syncRig(frame: PhysicsFrame): void {
     if (frame.rig === this.rig) return;
     this.rig = frame.rig;
     this.layoutShaft();
+    for (const slot of this.slots) slot.props.hammer?.fit?.setHandleLength(this.rig.handleLength);
     this.updateFrustum();
   }
 

@@ -12,6 +12,7 @@ import { ARM_LENGTH_LIMITS } from '../character-arms';
 import type { ArmLengths, CharacterArms } from '../character-arms';
 import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, HEAD_GRIP_MARGIN, SLIDE_AT_LIMITS } from '../grips';
 import type { GripPlacement } from '../grips';
+import { HAMMER_MODEL_HANDLE, HAMMER_MODEL_HEAD_END } from '../hammer-handle-fit';
 import { clamp } from '../math';
 import { RIG_LIMITS } from '../rig';
 import type { RigGeometry } from '../rig';
@@ -189,8 +190,12 @@ export function createCharacterEditor(options: {
 
       ${sectionMarkup({ id: 'character-hammer', title: 'One-model hammer (GLB)', hint: 'Any character type' }, `
         <div class="character-hammer">
-          <p class="appearance-format">Replace the stretched shaft and separate head with one rigid model, in every
-            character type. Model it with its origin at the butt of the handle, the handle along +X, in metres.
+          <p class="appearance-format">Replace the stretched shaft and separate head with one model, in every
+            character type. Model it on a ${metres(HAMMER_MODEL_HANDLE)} handle, in metres: origin at the butt, handle
+            along +X and the head centred at x = ${metres(HAMMER_MODEL_HANDLE)}, where its collision block spans
+            x ${metres(HAMMER_MODEL_HANDLE - HEAD_HALF_LENGTH)} to ${metres(HAMMER_MODEL_HANDLE + HEAD_HALF_LENGTH)} and
+            y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}. It fits any handle length: the handle up to
+            x = ${metres(HAMMER_MODEL_HEAD_END)} stretches, while the head end keeps its size and follows the physical head.
             <span class="character-hammer-geometry"></span> Length, reach, grips and contacts stay physical.</p>
           <label class="appearance-label" for="character-hammer-file">Hammer GLB</label>
           <input id="character-hammer-file" type="file" accept=".glb,model/gltf-binary" />
@@ -664,9 +669,10 @@ export function createCharacterEditor(options: {
       control.input.max = farthest;
       control.setValue(options.state.snapshot().document.grips[side], { disabled: control.input.disabled });
     }
-    setText(hammerGeometry, `This game's handle puts the physical head at x = ${metres(head)}; its collision block spans ` +
-      `x ${metres(head - HEAD_HALF_LENGTH)} to ${metres(head + HEAD_HALF_LENGTH)} and ` +
-      `y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}.`);
+    setText(hammerGeometry, head === HAMMER_MODEL_HANDLE ? `This game's handle is ${metres(head)}, so the model draws as authored.` :
+      `This game's handle is ${metres(head)}: the model's handle up to x = ${metres(HAMMER_MODEL_HEAD_END)} ` +
+      `${head > HAMMER_MODEL_HANDLE ? 'stretches' : 'shortens'} to ${metres(head - HEAD_GRIP_MARGIN)} and its head centres ` +
+      `at x = ${metres(head)}.`);
   }
 
   options.mount.append(root);
