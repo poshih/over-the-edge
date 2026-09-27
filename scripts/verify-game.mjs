@@ -331,7 +331,7 @@ function paperProfile() {
     bone: null, directions: DIRECTIONS, skin: null, tileLength: null,
   });
   return {
-    schemaVersion: 11, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null,
+    schemaVersion: 12, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null,
     images: [
       { id: 'body', name: 'Body', source: `data:image/png;base64,${solidPng(16, 16, 20).toString('base64')}` },
       { id: 'tool', name: 'Tool', source: `data:image/png;base64,${solidPng(16, 16, 200).toString('base64')}` },
@@ -347,8 +347,8 @@ function paperProfile() {
 // Avatar, hammer and pot models; `only` keeps just the avatar, for single-model failure cases.
 function heroProfile(changes = {}) {
   return {
-    schemaVersion: 11, characterRiggingType: 'avatar-3d', armForwardDistance: 0.3,
-    grips: { placement: 'sliding', left: 0.04, right: 0.22 },
+    schemaVersion: 12, characterRiggingType: 'avatar-3d', armForwardDistance: 0.3,
+    grips: { placement: 'sliding', left: 0.04, right: 0.22, slideAt: 0.85 },
     arms: { left: { upper: 0.5, forearm: 0.48 }, right: { upper: 0.52, forearm: 0.46 } },
     images: [], layers: [], skeleton: null, presentation: null,
     models: [
@@ -393,7 +393,7 @@ async function verifyCharacterRelease(page) {
   const heroModels = heroProfile().models.map(model => model.source.slice(model.source.indexOf(',') + 1));
   assert.ok(outputs.filter(file => file.type === 'chunk').every(file => heroModels.every(model => !file.code.includes(model.slice(0, 4096)))),
     'Character GLB bytes must not be embedded in executable JavaScript.');
-  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:11,.*grips:\{"placement":"sliding".*arms:\{"left":\{"upper":0\.5,.*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*pot:.*shading:/s);
+  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:12,.*grips:\{"placement":"sliding".*arms:\{"left":\{"upper":0\.5,.*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*pot:.*shading:/s);
   assert.match(modules.get(MODELS_MODULE), /createCharacterModelLoader/);
   const releaseModules = bundleModules(release);
   assert.ok(!releaseModules.some(id => id.includes('/src/editor/')), 'The character release contains no editor modules.');
@@ -541,7 +541,7 @@ async function verifyCharacterRelease(page) {
     ['pot convention', heroProfile({ models: heroProfile().models.map(model => model.id === 'pot'
       ? { ...model, source: glbSource(potGlb({ origin: 'centre' })) } : model) }), /pot model "Urn".*bottom-centre/],
     ['shared pot model', heroProfile({ pot: { model: 'hammer' }, models: heroProfile().models.slice(0, 2) }), /separate character models/],
-    ['earlier schema', heroProfile({ schemaVersion: 10 }), /require schema version 11/],
+    ['earlier schema', heroProfile({ schemaVersion: 11 }), /require schema version 12/],
   ];
   result.invalid = [];
   for (const [name, profile, error] of invalid) {
@@ -674,7 +674,7 @@ try {
       const source = `data:image/png;base64,${texturePng().toString('base64')}`;
       const rigging = { bone: null, directions: DIRECTIONS, skin: null, tileLength: null };
       await writeFile(spritePath, JSON.stringify({
-        schemaVersion: 11, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null,
+        schemaVersion: 12, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null,
         images: [{ id: 'body', name: 'Generated body', source }, { id: 'alias', name: 'Shared source', source }],
         layers: [
           { id: 'body-card', name: 'Body card', anchor: 'pot', image: 'body', width: 1.2, height: 1,
@@ -698,7 +698,7 @@ try {
         id: `frame-${index}`, name: `Frame ${index}`, source: `data:image/png;base64,${solidPng(12, 16, index * 90).toString('base64')}`,
       }));
       const flipbook = {
-        schemaVersion: 11, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null,
+        schemaVersion: 12, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null,
         images: frames,
         layers: [{
           id: 'aim-head', name: 'Aim head', anchor: 'character-head', image: frames[0].id, width: 0.4, height: 0.4,
@@ -721,7 +721,7 @@ try {
       const outputs = (Array.isArray(release) ? release : [release]).flatMap(result => result.output);
       assert.equal(outputs.filter(file => file.type === 'asset' && /sprite-[^/]+\.png$/.test(file.fileName)).length, FLIPBOOK_FRAMES,
         'Every flipbook frame must become its own hashed release asset.');
-      assert.ok(virtualModule?.includes('schemaVersion:11,'), 'The release must embed the flipbook document.');
+      assert.ok(virtualModule?.includes('schemaVersion:12,'), 'The release must embed the flipbook document.');
       assert.deepEqual(JSON.parse(virtualModule.match(/layers:(\[.*\]),skeleton:/s)[1]), flipbook.layers,
         'GAME_SPRITES must carry the flipbook layer without loss.');
       assert.equal(virtualModule.match(/import\.meta\.ROLLUP_FILE_URL_/g).length, FLIPBOOK_FRAMES);
@@ -765,7 +765,7 @@ try {
       await ready();
       if (mode === 'flipbook') {
         assert.equal(spriteRequests.size, FLIPBOOK_FRAMES, 'All flipbook frames must load before gameplay starts.');
-        flipbookRelease = { frames: FLIPBOOK_FRAMES, schemaVersion: 11, assets: [...spriteRequests] };
+        flipbookRelease = { frames: FLIPBOOK_FRAMES, schemaVersion: 12, assets: [...spriteRequests] };
         spriteRequests = null;
       }
       const canvas = await minimalHud(page, 1440);

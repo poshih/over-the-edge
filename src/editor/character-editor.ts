@@ -10,7 +10,7 @@ import type { AvatarJointId, CelOutline, CharacterShading, ShadingMode } from '.
 import { RIG } from '../config';
 import { ARM_LENGTH_LIMITS } from '../character-arms';
 import type { ArmLengths, CharacterArms } from '../character-arms';
-import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, HEAD_GRIP_MARGIN } from '../grips';
+import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, HEAD_GRIP_MARGIN, SLIDE_AT_LIMITS } from '../grips';
 import type { GripPlacement } from '../grips';
 import { clamp } from '../math';
 import { RIG_LIMITS } from '../rig';
@@ -130,7 +130,8 @@ export function createCharacterEditor(options: {
           <p class="appearance-format">Sets the arms of every character type: the built-in and mesh-part arms,
             an imported avatar's bones and the 2D arm chains that target the grips, whose arm artwork stretches
             along each bone while joint caps and hands keep their size. Without them each type keeps its own arm
-            lengths. Visual only: physics, reach and grips are unchanged. Save the character profile to keep them.</p>
+            lengths. Visual only: physics and reach are unchanged, and sliding hands measure their slide point
+            against these lengths. Save the character profile to keep them.</p>
         </fieldset>
       `)}
 
@@ -141,14 +142,16 @@ export function createCharacterEditor(options: {
             ${GRIP_PLACEMENTS.map(placement => `<label><input type="radio" name="character-grips" value="${placement}" />
               ${GRIP_LABELS[placement]}</label>`).join('')}
           </div>
+          <div class="character-grip-slide-control"></div>
           <div class="character-grip-controls"></div>
           <button type="button" class="button character-grip-reset">Reset hand grips</button>
           <p class="appearance-format">Each grip is that hand's distance from the butt, up to
             ${metres(HEAD_GRIP_MARGIN)} short of the head's centre. Fixed hands stay there and travel with the
-            handle, so arms must reach as far as the handle slides. Sliding hands start there, then hold the handle
-            where it passes the body and let it slide through them, together; they are back on their grips once
-            the butt passes the body, so arms only need to reach the maximum extension. Avatars, mesh parts and
-            2D grip targets use the same grips. Physics is unchanged. Save the character profile to keep them.</p>
+            whole slide, so arms must reach that far. Sliding hands hold their grips until one would be farther
+            from its shoulder than the slide point, a share of its arm's length; then the handle slides through
+            both hands just enough to bring them back within it. Lower slide points keep the hands nearer the
+            shoulders; at 100% they slide only when an arm could not otherwise reach. Avatars, mesh parts and 2D
+            grip targets use the same grips. Physics is unchanged. Save the character profile to keep them.</p>
           <div class="character-handle-control"></div>
           <p class="appearance-format">The handle length is the game's, shared by every character: it is physics,
             also in Physics / Hammer rig, and changing it rebuilds the player and restarts the run.</p>
@@ -381,6 +384,17 @@ export function createCharacterEditor(options: {
     element(root, '.character-grip-controls').append(control.row);
     return { side, control };
   });
+  const slidePoint = createRangeControl({
+    min: SLIDE_AT_LIMITS.min * 100, max: SLIDE_AT_LIMITS.max * 100, step: SLIDE_AT_LIMITS.step * 100,
+    label: 'Slide beyond', unit: '%',
+    description: 'Sliding hands keep their grips until one would be farther from its shoulder than this share of its arm\'s length.',
+  }, {
+    id: 'character-grip-slide-at', name: 'gripSlideAt', signal: events.signal,
+    onInput: value => {
+      if (!options.state.setGrips({ ...options.state.snapshot().document.grips, slideAt: value / 100 })) render();
+    },
+  });
+  element(root, '.character-grip-slide-control').append(slidePoint.row);
   const handleLength = createRangeControl({
     ...RIG_LIMITS.handleLength, step: 0.05, label: 'Handle length', unit: 'm',
     description: 'The game\'s handle length, shared by every character. Changing it rebuilds the player and restarts the run.',
@@ -519,7 +533,9 @@ export function createCharacterEditor(options: {
       input.disabled = disabled;
     }
     for (const { side, control } of gripControls) control.setValue(profile.grips[side], { disabled });
-    gripReset.disabled = disabled || profile.grips.left === DEFAULT_GRIPS.left && profile.grips.right === DEFAULT_GRIPS.right;
+    slidePoint.setValue(Math.round(profile.grips.slideAt * 100), { disabled: disabled || profile.grips.placement === 'fixed' });
+    gripReset.disabled = disabled || profile.grips.left === DEFAULT_GRIPS.left && profile.grips.right === DEFAULT_GRIPS.right &&
+      profile.grips.slideAt === DEFAULT_GRIPS.slideAt;
     const arms = shownArms(profile.arms);
     for (const { side, segment, control } of armControls) control.setValue(Number(arms[side][segment].toFixed(3)), { disabled });
     setText(armStatus, profile.arms === null ? 'Using this character type\'s own arm lengths.' :

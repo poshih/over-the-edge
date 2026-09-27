@@ -5,15 +5,19 @@ import { RIG_LIMITS } from './rig.ts';
 export const GRIP_PLACEMENTS = ['fixed', 'sliding'] as const;
 export type GripPlacement = (typeof GRIP_PLACEMENTS)[number];
 
-// Each hand's distance from the butt. Fixed grips hold there; sliding grips start there and slide together.
+// Each hand's distance from the butt, where fixed hands stay and sliding hands return. Sliding hands
+// keep their grips until one would be farther from its shoulder than `slideAt` times its arm's length.
 export interface Grips {
   readonly placement: GripPlacement;
   readonly left: number;
   readonly right: number;
+  readonly slideAt: number;
 }
 
-export const DEFAULT_GRIPS: Grips = Object.freeze({ placement: 'fixed', left: 0.04, right: 0.22 });
+export const DEFAULT_GRIPS: Grips = Object.freeze({ placement: 'sliding', left: 0.04, right: 0.22, slideAt: 0.85 });
 export const GRIP_LIMITS = { min: 0, max: RIG_LIMITS.handleLength.max, step: 0.01 } as const;
+// Below 40% a shoulder is often farther than that from the handle's line, where hands can only hold its nearest point.
+export const SLIDE_AT_LIMITS = { min: 0.4, max: 1, step: 0.05 } as const;
 // Space kept between the leading hand and the head's collision block.
 export const HEAD_GRIP_CLEARANCE = 0.1;
 // No hand holds nearer the head's centre than this, so none enters its collision block.
@@ -24,14 +28,26 @@ export interface GripDistances {
   right: number;
 }
 
+// One hand's shoulder relative to the handle, and the arm between them.
+export interface GripShoulder {
+  // Where the shoulder projects onto the handle's line, measured from the butt.
+  along: number;
+  // The squared distance from the shoulder to that line.
+  aside2: number;
+  // Upper arm plus forearm.
+  arm: number;
+}
+
 /**
- * Places both hands along the handle, as distances from its butt, into `out`. `centre` is where
- * the shoulders' midpoint projects onto the handle; `shaftLength` is the butt-to-head distance.
- * Sliding grips centre there, between their authored grips and the head, so the handle slides
- * through the hands and they return to their grips once the butt passes the body. Both are
- * continuous in aim and extension.
+ * Places both hands along the handle, as distances from its butt, into `out`. Fixed hands hold their
+ * grips. Sliding hands hold them too while each is within `slideAt` of its arm's length from its
+ * shoulder; otherwise the handle slides through both hands, together, by the least amount that
+ * brings them back within reach. Hands stay on the handle and short of the head. The placement is
+ * continuous in aim and extension and costs the same every frame.
  */
-export function placeGrips(grips: Grips, centre: number, shaftLength: number, out: GripDistances): GripDistances {
+export function placeGrips(
+  grips: Grips, shoulders: Readonly<Record<'left' | 'right', GripShoulder>>, shaftLength: number, out: GripDistances,
+): GripDistances {
   const farthest = Math.max(0, shaftLength - HEAD_GRIP_MARGIN);
   const left = Math.min(grips.left, farthest);
   const right = Math.min(grips.right, farthest);
@@ -40,14 +56,26 @@ export function placeGrips(grips: Grips, centre: number, shaftLength: number, ou
     out.right = right;
     return out;
   }
-  // Both hands slide by the same amount, from their grips toward the head.
-  const travel = farthest - Math.max(left, right);
-  const offset = Math.min(Math.max(centre - (left + right) / 2, 0), travel);
+  // Each hand is within reach while its grip lies on the chord its reach cuts from the handle's line.
+  const leftChord = reachChord(shoulders.left, grips.slideAt);
+  const rightChord = reachChord(shoulders.right, grips.slideAt);
+  const low = Math.max(shoulders.left.along - leftChord - left, shoulders.right.along - rightChord - right);
+  const high = Math.min(shoulders.left.along + leftChord - left, shoulders.right.along + rightChord - right);
+  // When no shared slide suits both hands, they split the difference.
+  const wanted = low <= high ? Math.min(Math.max(0, low), high) : (low + high) / 2;
+  const offset = Math.min(Math.max(wanted, -Math.min(left, right)), farthest - Math.max(left, right));
   out.left = left + offset;
   out.right = right + offset;
   return out;
 }
 
+// Half the stretch of the handle's line within this share of the arm's length from the shoulder: none,
+// leaving only the nearest point, when the line is farther than that.
+function reachChord(shoulder: GripShoulder, slideAt: number): number {
+  return Math.sqrt(Math.max(0, (slideAt * shoulder.arm) ** 2 - shoulder.aside2));
+}
+
 export function sameGrips(left: Grips, right: Grips): boolean {
-  return left.placement === right.placement && left.left === right.left && left.right === right.right;
+  return left.placement === right.placement && left.left === right.left && left.right === right.right &&
+    left.slideAt === right.slideAt;
 }

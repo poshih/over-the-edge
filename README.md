@@ -778,19 +778,32 @@ GLB import does not author colliders or retarget whole-character animations.
 Each hand's grip is a distance from the butt, **0.04 m** and **0.22 m** by default, set with
 **Left hand grip** and **Right hand grip**; no grip comes nearer than 0.2 m to the head's centre.
 **Fixed** hands stay on their grips and travel with the butt, so arms must reach as far as
-the handle slides. **Slide along the handle** starts the hands on their grips, then centres
-them on the shoulders' midpoint projected onto the handle and lets the handle slide through
-them together, as in Getting Over It. They stop short of the head and are back on their grips
-once the butt passes the body, so the arm length a character needs is set by the maximum
-extension, not the handle length: with a 2.1 m handle and 0.55 m extension, every default grip
-stays within about 1.03 m of the built-in avatar's shoulders at the default arm forward
-distance. The placement is continuous in aim and extension and costs the same every frame.
-The same section's **Handle length** is the game's [hammer rig](#game-settings) setting, shown
-here too: it is shared by every character, and changing it restarts the run.
+the handle slides. **Slide along the handle**, the default, holds the grips too, until a hand
+would be farther from its shoulder than **Slide beyond**, a share of that arm's length (40-100%,
+default **85%**). Then the handle slides through both hands together, toward the butt or the head,
+by the least amount that brings them back within it, as in Getting Over It: a bent arm keeps its
+grip, and a nearly straight one lets the handle run. A hand that cannot come that close to the
+handle's line holds the point nearest its shoulder, and when no shared slide suits both hands they
+split the difference. The hands never leave the handle or come within 0.2 m of the head's centre,
+so at full extension they may hold the butt beyond the slide point. Lower slide points keep the
+hands nearer the shoulders; at 100% they slide only when an arm could not otherwise reach.
 
-Grips are saved as `grips: { "placement", "left", "right" }` in the character profile, so each
-character keeps its own; Mesh parts, both avatars and the 2D `left-grip` and `right-grip`
-targets share them. Grips are presentation: physics, input and the hammer models never read them.
+Reach is measured from the body's shoulders, the built-in ones or an imported avatar's, with the
+arm lengths the character draws: forward to the handle at the tool's depth, or, for a 2D arm chain
+that targets `left-grip` or `right-grip`, in the drawing plane, from the same shoulders where the
+example's arm bones start; a 2D character's hand without such a chain has the built-in arm. At 85%
+the built-in 0.82 m arms never stretch on the default rig, reaching at most about 95% of their
+length while holding the butt at full extension; with a 2.1 m handle and 0.55 m extension they stay
+within the slide point everywhere, and 0.55 m upper arms and forearms reach at most about 90%. The
+placement is continuous in aim and extension: extending the handle by a millimetre moves no hand
+more than a millimetre along it. It costs the same every frame. The same section's **Handle
+length** is the game's [hammer rig](#game-settings) setting, shown here too: it is shared by every
+character, and changing it restarts the run.
+
+Grips are saved as `grips: { "placement", "left", "right", "slideAt" }` in the character profile,
+with `slideAt` a fraction (0.4-1), so each character keeps its own; Mesh parts, both avatars and
+the 2D `left-grip` and `right-grip` targets share them. Grips are presentation: physics, input and
+the hammer models never read them.
 
 ### Arm lengths
 
@@ -800,8 +813,9 @@ bones, and the 2D arm chains that target `left-grip` and `right-grip`, whose bon
 their length with their arm artwork, while joint caps and hands keep their size. They are saved as `arms` in the
 character profile. **Use natural arm lengths** clears them (`"arms": null`), and each type keeps
 its own: 0.82 m and 0.82 m for the built-in arms, an imported avatar's bind pose, and a 2D
-skeleton's authored bones. Arm lengths are visual only: physics, reach and grips are unchanged,
-and an arm too short for its grip straightens toward it as before.
+skeleton's authored bones. Arm lengths are visual only: physics and reach are unchanged. Sliding
+hands measure their slide point against them, and an arm too short for its grip straightens
+toward it as before.
 
 ### Body-relative arm IK
 
@@ -908,7 +922,7 @@ settings, selected profile, and save state.
 illusion/collider state, editor selection/mode, set piece placement state, and
 render/cache counts, including the imported avatar's joints and bone writes, the
 hammer model, shading, the active character profile, the arm chains it draws, and its
-grip placement with both grips' current distances from the butt.
+grip placement and slide point with both grips' current distances from the butt.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state, and the independent run timer. Restart resets the attempt; physics time
 continues to be available separately as `snapshot().time`.

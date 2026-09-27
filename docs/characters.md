@@ -83,10 +83,11 @@ The mapped joints receive exactly the frames that drive the built-in avatar:
 - **Unreachable grips.** As with the built-in avatar, the arm straightens toward
   the grip, the upper arm keeps its length, the forearm stretches along its
   axis, and the hand stays exactly on the grip. The hammer never moves to suit
-  an arm. Give a realistically proportioned humanoid **sliding** grips: its arms
-  then only need to reach about the game's maximum extension, and a longer handle
-  with a shorter extension keeps the reach. With fixed grips the hands follow the
-  butt through the whole slide, so expect stretching.
+  an arm. Keep a realistically proportioned humanoid's grips **sliding**, the
+  default: its hands then stay within the slide point of its shoulders wherever
+  the handle allows, and a longer handle with a shorter extension keeps the reach.
+  With fixed grips the hands follow the butt through the whole slide, so expect
+  stretching.
 - **Head.** Gaze rotates the head joint about its own bind position, with the
   same smoothing and yaw/pitch limits as the built-in avatar.
 
@@ -201,17 +202,18 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 11**. Every profile has `grips`, the placement and
-each hand's distance from the butt (0-3 m), and `arms`, `null` for each type's own arm
-lengths or each side's `upper` and `forearm` (0.1-2 m). The model and shading fields
-below are present only while used.
+Profiles use **schema version 12**. Every profile has `grips`: the placement, each
+hand's distance from the butt (0-3 m) and the slide point `slideAt`, a share of each
+arm's length (0.4-1). It also has `arms`, `null` for each type's own arm lengths or each
+side's `upper` and `forearm` (0.1-2 m). The model and shading fields below are present
+only while used.
 
 ```json
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
-  "grips": { "placement": "sliding", "left": 0.04, "right": 0.22 },
+  "grips": { "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85 },
   "arms": { "left": { "upper": 0.5, "forearm": 0.48 }, "right": { "upper": 0.5, "forearm": 0.48 } },
   "images": [], "layers": [], "skeleton": null, "presentation": null,
   "models": [
@@ -318,12 +320,18 @@ code and the pot conventions, automatic mapping, IK at reachable and unreachable
 grips, set arm lengths on the imported arm bones, the hammer frame in each 3D type, and the pot's base on its physical
 bottom in 3D and 2D. It also checks live shading flips without new materials,
 per-frame writes on a large course, and that profiles save, restore and export byte
-for byte. `scripts/verify-grips.mjs` sets a 2.1 m handle with a 0.55 m extension
-in Physics, checks the rebuilt rig and start pose, then sweeps aims and extensions
-with sliding grips: every grip stays on the handle, short of the head and within
-about 1.03 m of its shoulder, and the hands never jump. It then sets each hand's grip
-and the handle length from the Character tab, resizes the mesh-part arms per side, and
-stretches a 2D character's arm chains while its elbow caps and gloves keep their size. `npm run verify:game` builds a two-profile release whose 3D profile has
+for byte. `scripts/verify-grips.mjs` first sweeps the placement itself over whole
+slides and full turns with the game's shoulders and tool depth: extending by a millimetre
+moves no hand more than a millimetre, bisection finds no jump, and the hands slide by the
+least amount that keeps both within the slide point. It then sets a 2.1 m handle with a
+0.55 m extension in Physics, checks the rebuilt rig and start pose, and sweeps aims and
+extensions with 0.55 m arm segments: the rendered grips are the placement of what the view
+measures, hands hold their grips, slide both ways and hold the butt, and no arm stretches.
+It then sets each hand's grip, the slide point and the handle length from the Character
+tab and resizes the mesh-part arms per side. Retracted past the body, it checks that a 2D
+character without arm chains reaches like the built-in arms and one with chains reaches in
+its drawing plane at their lengths, then stretches those chains while its elbow caps and
+gloves keep their size. `npm run verify:game` builds a two-profile release whose 3D profile has
 all three models. It checks the toggle mid-level, single asset loads, persistence,
 exact pot tracking, identical physics and each profile's own grip placement while
 switching, and failing builds for

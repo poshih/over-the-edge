@@ -325,6 +325,8 @@ export class SpriteRig {
   private readonly armSlots: Readonly<Record<ArmSide, SpriteArmSlots>> | null;
   // Stretched arm bones and the anchor whose artwork depicts each; other art on them keeps its size.
   private segmentAnchors: ReadonlyMap<string, string> = new Map();
+  // Each hand's authored 2D arm chain lengths, kept current with the skeleton.
+  private naturalArms: Readonly<Record<ArmSide, ArmLengths | null>> = Object.freeze({ left: null, right: null });
   private assets: CharacterAssets = {};
   private readonly assetHost: CharacterAssetHost | undefined;
   private images = new Map<string, ImageResource>();
@@ -516,16 +518,9 @@ export class SpriteRig {
     this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
   }
 
-  // Each hand's authored 2D arm chain lengths, or null for a hand without one.
+  // Each hand's authored 2D arm chain lengths, or null for a hand without one; nothing is allocated.
   naturalArmLengths(): Readonly<Record<ArmSide, ArmLengths | null>> {
-    const definition = this.skeleton?.definition ?? null;
-    const chain = (side: ArmSide): ArmLengths | null => {
-      const ik = definition?.ik.find(candidate => candidate.target === this.armSlots?.[side].target);
-      if (definition === null || ik === undefined) return null;
-      const length = (id: string) => definition.bones.find(bone => bone.id === id)!.length;
-      return { upper: length(ik.upper), forearm: length(ik.lower) };
-    };
-    return { left: chain('left'), right: chain('right') };
+    return this.naturalArms;
   }
 
   // Applies shading to the loaded models without reloading them; the default look is stored as absent.
@@ -1720,6 +1715,14 @@ export class SpriteRig {
     this.segmentAnchors = segments;
     runtime?.pose.setBoneLengths(lengths);
     runtime?.previewPose?.setBoneLengths(lengths);
+    const definition = runtime?.definition ?? null;
+    const chain = (side: ArmSide): ArmLengths | null => {
+      const ik = definition?.ik.find(candidate => candidate.target === this.armSlots?.[side].target);
+      if (definition === null || ik === undefined) return null;
+      const length = (id: string) => definition.bones.find(bone => bone.id === id)!.length;
+      return Object.freeze({ upper: length(ik.upper), forearm: length(ik.lower) });
+    };
+    this.naturalArms = Object.freeze({ left: chain('left'), right: chain('right') });
   }
 
   private updateTileUv(instance: TiledLayerInstance): void {

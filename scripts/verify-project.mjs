@@ -228,11 +228,11 @@ try {
     const hammer = { id: 'hammer', name: 'Mallet', source: glbData(hammerGlb()) };
     const avatar = { id: 'avatar', name: 'Hero', source: glbData(skinnedAvatarGlb()) };
     const primary = {
-      schemaVersion: 11, characterRiggingType: 'model-3d', armForwardDistance: 0.3, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null, images: [], layers: [], skeleton: null, presentation: null,
+      schemaVersion: 12, characterRiggingType: 'model-3d', armForwardDistance: 0.3, grips: { placement: 'fixed', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null, images: [], layers: [], skeleton: null, presentation: null,
       models: [hammer], hammer: { model: 'hammer' },
     };
     const alternate = {
-      schemaVersion: 11, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, grips: { placement: 'sliding', left: 0.04, right: 0.22 }, arms: null, images: [], layers: [], skeleton: null, presentation: null,
+      schemaVersion: 12, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, grips: { placement: 'sliding', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null, images: [], layers: [], skeleton: null, presentation: null,
       models: [avatar], avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP },
     };
     await mkdir(join(directory, 'characters'), { recursive: true });
@@ -331,15 +331,15 @@ try {
     assert.equal(media.headers.get('x-content-type-options'), 'nosniff');
 
     // Characters, appearance and settings.
-    assert.equal((await api('PUT', '/api/projects/blank-test/characters/alternate', { schemaVersion: 11, characterRiggingType: 'model-3d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null, images: [], layers: [], skeleton: null, presentation: null })).status, 409);
+    assert.equal((await api('PUT', '/api/projects/blank-test/characters/alternate', { schemaVersion: 12, characterRiggingType: 'model-3d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null, images: [], layers: [], skeleton: null, presentation: null })).status, 409);
     assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { armForwardDistance: 0.6 })).status, 200);
     assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { shading: { mode: 'cel', bands: 4, outline: null } })).status, 200);
-    assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { grips: { placement: 'sliding', right: 0.3 } })).status, 200);
+    assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { grips: { placement: 'sliding', right: 0.3, slideAt: 0.7 } })).status, 200);
     assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { grips: 'loose' })).status, 400);
     const patchedProfile = (await api('GET', '/api/projects/blank-test/characters/primary')).value;
-    assert.equal(patchedProfile.schemaVersion, 11, 'Profiles always use schema 11.');
-    assert.deepEqual(patchedProfile.grips, { placement: 'sliding', left: 0.04, right: 0.3 }, 'PATCH merges into the grips.');
-    assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { schemaVersion: 10 })).status, 400,
+    assert.equal(patchedProfile.schemaVersion, 12, 'Profiles always use schema 12.');
+    assert.deepEqual(patchedProfile.grips, { placement: 'sliding', left: 0.04, right: 0.3, slideAt: 0.7 }, 'PATCH merges into the grips.');
+    assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { schemaVersion: 11 })).status, 400,
       'Profiles in other schema versions are rejected, not converted.');
     assert.equal((await api('PUT', '/api/projects/blank-test/appearance/torso/model?name=Armour.glb', new Uint8Array(modelFixture()))).status, 200);
     assert.equal((await api('PATCH', '/api/projects/blank-test/appearance/torso', { alignment: { scale: 1.5 } })).status, 200);

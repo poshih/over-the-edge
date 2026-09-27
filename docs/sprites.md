@@ -364,10 +364,12 @@ orientation, so a grip adjustment rotates with the shaft. The hammer base is
 the translating physical slider, not the shoulder-mounted carrier. Every shaft
 rendering mode shares the same physical base and grip targets, placed by the
 profile's `grips`: with `"fixed"` placement, reach slides the fixed-length hammer and
-both grips outward or inward; with `"sliding"`, the grips stay near the body while the
-handle slides through them, and return to their grips only once the butt passes the
-body, so 2D arms can be about as long as the game's maximum extension. See
-[hand grips](../README.md#hand-grips).
+both grips outward or inward; with `"sliding"`, the hands hold their grips until one would
+be farther from its shoulder than the slide point share of its arm, then the handle slides
+through them just enough to bring them back. A chain that targets a grip reaches in the
+drawing plane with its own lengths from the built-in shoulder, so start its upper arm there,
+as the example does; a hand without one has the built-in arm, which reaches forward to the
+tool's depth. See [hand grips](../README.md#hand-grips).
 
 The profile's [arm lengths](../README.md#arm-lengths) stretch the upper and lower bones
 of the IK chains that target `left-grip` and `right-grip` along their length; their children
@@ -471,10 +473,10 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "characterRiggingType": "sprite-2d",
   "armForwardDistance": 0.25,
-  "grips": { "placement": "fixed", "left": 0.04, "right": 0.22 },
+  "grips": { "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85 },
   "arms": null,
   "presentation": null,
   "skeleton": null,
@@ -522,11 +524,12 @@ Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
-Profiles use **schema version 11**; any other version is rejected, not converted.
+Profiles use **schema version 12**; any other version is rejected, not converted.
 `characterRiggingType` is `sprite-2d`, `model-3d` or `avatar-3d`;
-`armForwardDistance` is 0-2 m; `grips` is `{ "placement", "left", "right" }`, the placement
-(`fixed` or `sliding`) and each hand's distance from the butt (0-3 m); `arms` is `null` or
-each side's `upper` and `forearm` length (0.1-2 m). The optional
+`armForwardDistance` is 0-2 m; `grips` is `{ "placement", "left", "right", "slideAt" }`, the
+placement (`fixed` or `sliding`), each hand's distance from the butt (0-3 m) and the share of
+each arm's length a sliding hand may be from its shoulder before the handle slides (0.4-1);
+`arms` is `null` or each side's `upper` and `forearm` length (0.1-2 m). The optional
 `models`, `avatar`, `hammer`, `pot` and `shading` fields for
 [imported 3D characters](characters.md) are present only while used.
 

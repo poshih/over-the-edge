@@ -11,7 +11,6 @@ import { hammerGlb, HUMANOID_BONE_MAP, humanoidBoneMap, patchGlbJson, potGlb, sk
 const root = fileURLToPath(new URL('../', import.meta.url));
 const PREFIX = 'mixamorig:';
 const BONE_MAP = humanoidBoneMap(PREFIX);
-const GRIP_X = { left: 0.04, right: 0.22 };
 const TOOL_DEPTH = 0.5 + 0.25;
 const HEAD_DISTANCE = 1.5;
 const POT = { depth: 0.22, bottom: -0.48 };
@@ -25,7 +24,7 @@ const bytes = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset
 // field present only while it is used.
 function verifySchemas(data) {
   const base = {
-    characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, grips: { placement: 'sliding', left: 0.04, right: 0.22 }, arms: null,
+    characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, grips: { placement: 'sliding', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null,
     images: [], layers: [], skeleton: null, presentation: null,
   };
   const models = [
@@ -36,16 +35,18 @@ function verifySchemas(data) {
   const roles = { avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP }, hammer: { model: 'hammer' } };
   const shading = { mode: 'cel', bands: 4, outline: null };
   const canonical = value => JSON.stringify(data.validateSpriteDocument(JSON.parse(JSON.stringify(value))));
-  const full = { schemaVersion: 11, ...base, models, ...roles, pot: { model: 'pot' }, shading };
+  const full = { schemaVersion: 12, ...base, models, ...roles, pot: { model: 'pot' }, shading };
   assert.equal(canonical(full), JSON.stringify(full), 'A complete profile is a fixed point, with the pot after the hammer.');
-  const potOnly = { schemaVersion: 11, ...base, characterRiggingType: 'model-3d', models: [models[2]], pot: { model: 'pot' } };
+  const potOnly = { schemaVersion: 12, ...base, characterRiggingType: 'model-3d', models: [models[2]], pot: { model: 'pot' } };
   assert.equal(canonical(potOnly), JSON.stringify(potOnly), 'A pot model alone is a fixed point.');
   const rejected = {
-    'earlier schema': [{ ...full, schemaVersion: 10 }, /require schema version 11/],
+    'earlier schema': [{ ...full, schemaVersion: 11 }, /require schema version 12/],
     'missing grips': [{ ...full, grips: undefined }, /must contain exactly/],
-    'grips without positions': [{ ...full, grips: 'sliding' }, /Hand grips must contain exactly placement, left, right/],
-    'unknown placement': [{ ...full, grips: { placement: 'loose', left: 0.04, right: 0.22 } }, /Grip placement must be fixed or sliding/],
-    'grip beyond any handle': [{ ...full, grips: { placement: 'fixed', left: 0.04, right: 3.5 } }, /Right hand grip must be between 0 and 3/],
+    'grips without positions': [{ ...full, grips: 'sliding' }, /Hand grips must contain exactly placement, left, right, slideAt/],
+    'unknown placement': [{ ...full, grips: { ...full.grips, placement: 'loose' } }, /Grip placement must be fixed or sliding/],
+    'grip beyond any handle': [{ ...full, grips: { ...full.grips, placement: 'fixed', right: 3.5 } }, /Right hand grip must be between 0 and 3/],
+    'grips without a slide point': [{ ...full, grips: { placement: 'sliding', left: 0.04, right: 0.22 } }, /Hand grips must contain exactly/],
+    'slide point below reach': [{ ...full, grips: { ...full.grips, slideAt: 0.3 } }, /Grip slide point must be between 0.4 and 1/],
     'missing arms': [{ ...full, arms: undefined }, /must contain exactly/],
     'short arm': [{ ...full, arms: { left: { upper: 0.05, forearm: 0.5 }, right: { upper: 0.5, forearm: 0.5 } } }, /Left upper arm length must be between 0.1 and 2/],
     'shared pot model': [{ ...full, models: models.slice(0, 2), pot: { model: 'hammer' } }, /separate character models/],
@@ -145,14 +146,14 @@ function subtract(a, b) { return a.map((value, index) => value - b[index]); }
 function length(a) { return Math.hypot(...a); }
 function dot(a, b) { return a.reduce((sum, value, index) => sum + value * b[index], 0); }
 
-// Expected IK frame from physics: shoulders from the imported chains, grips on the physical shaft.
-function armExpectation(state, chains, side) {
+// Expected IK frame from physics: shoulders from the imported chains, hands where the placement put them
+// on the physical shaft.
+function armExpectation(state, chains, side, grips) {
   const root = state.parts.find(part => part.id === 'root');
   const slider = state.parts.find(part => part.id === 'slider');
   const head = state.parts.find(part => part.id === 'head');
-  const shaftLength = Math.hypot(head.x - slider.x, head.y - slider.y);
   const angle = Math.atan2(head.y - slider.y, head.x - slider.x);
-  const grip = Math.min(GRIP_X[side], shaftLength);
+  const grip = grips[side];
   const chain = chains[side];
   return {
     shoulder: [root.x + chain.shoulder[0], root.y + chain.shoulder[1], 0.27 + chain.shoulder[2]],
@@ -241,7 +242,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal(state.error, null);
     assert.equal(state.avatarModel.pending, false);
     assert.deepEqual({ ...state.boneMap }, { ...BONE_MAP }, 'The editor must apply the automatic Mixamo bone map.');
-    assert.equal(state.schemaVersion, 11);
+    assert.equal(state.schemaVersion, 12);
     let view = await rendering();
     assert.equal(view.importedAvatar.visible, true);
     assert.equal(view.avatar.visible, false, 'The imported avatar replaces the built-in mesh.');
@@ -257,7 +258,7 @@ export async function verifyCharacter(browser, address, artifacts) {
       const avatar = drawn.importedAvatar;
       const result = {};
       for (const side of ['left', 'right']) {
-        const expected = armExpectation(paused, avatar.chains, side);
+        const expected = armExpectation(paused, avatar.chains, side, drawn.grips);
         const shoulder = avatar.joints[`${side}-upper-arm`];
         const elbow = avatar.joints[`${side}-forearm`];
         const hand = avatar.joints[`${side}-hand`];
@@ -393,7 +394,7 @@ export async function verifyCharacter(browser, address, artifacts) {
         assert.equal(parts.find(part => part.id === id).defaultsVisible, false, `${label}: the two-part ${id} is replaced.`);
       }
       const frame = new Matrix4().fromArray(drawn.hammerModel.transform);
-      const expected = armExpectation(paused, drawn.armChains, 'left');
+      const expected = armExpectation(paused, drawn.armChains, 'left', drawn.grips);
       const columns = [0, 1, 2].map(column => new Vector3().setFromMatrixColumn(frame, column));
       assert.ok(columns.every(axis => Math.abs(axis.length() - 1) < EPSILON), `${label}: the hammer is not stretched.`);
       assert.ok(columns[0].distanceTo(new Vector3(Math.cos(expected.angle), Math.sin(expected.angle), 0)) < EPSILON,
@@ -431,7 +432,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     // A pot model follows the physical pot body rigidly, at the pot's depth, in every character type.
     await pause();
     const withoutPot = await exportProfile();
-    assert.equal(JSON.parse(withoutPot).schemaVersion, 11);
+    assert.equal(JSON.parse(withoutPot).schemaVersion, 12);
     const beforePot = await physics();
     await page.getByLabel('Pot GLB', { exact: true }).setInputFiles(glbFile('urn.glb', potGlb()));
     await idle();
@@ -481,7 +482,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     }
     await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
     const withPot = JSON.parse(await exportProfile());
-    assert.equal(withPot.schemaVersion, 11);
+    assert.equal(withPot.schemaVersion, 12);
     assert.deepEqual(withPot.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
     assert.deepEqual(withPot.pot, { model: 'pot' });
     await page.getByRole('button', { name: 'Use default pot', exact: true }).click();
@@ -577,7 +578,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     // Profile data: every model field is carried and restored byte for byte.
     const exported = await exportProfile();
     const profile = JSON.parse(exported);
-    assert.equal(profile.schemaVersion, 11);
+    assert.equal(profile.schemaVersion, 12);
     assert.deepEqual(profile.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
     assert.deepEqual(profile.pot, { model: 'pot' });
     assert.ok(profile.models.every(model => model.source.startsWith('data:model/gltf-binary;base64,')));
@@ -614,7 +615,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     });
     await idle();
     const plain = JSON.parse(await exportProfile());
-    assert.equal(plain.schemaVersion, 11);
+    assert.equal(plain.schemaVersion, 12);
     assert.deepEqual(Object.keys(plain), [
       'schemaVersion', 'characterRiggingType', 'armForwardDistance', 'grips', 'arms', 'images', 'layers', 'skeleton', 'presentation',
     ], 'Without models or shading the profile has no model fields.');
@@ -624,7 +625,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     // A 2D profile imported from JSON shows its pot model too, beside its pot sprite layer.
     await pause();
     const flat = {
-      schemaVersion: 11, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null,
+      schemaVersion: 12, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22, slideAt: 0.85 }, arms: null,
       images: [{ id: 'card', name: 'Card', source: `data:image/png;base64,${texturePng().toString('base64')}` }],
       layers: [{
         id: 'pot-card', name: 'Pot card', anchor: 'pot', image: 'card', width: 0.6, height: 0.4, offset: { x: 0, y: 0, z: 0.6 },
@@ -639,7 +640,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     await idle();
     await frames();
     assert.equal((await sprites()).error, null);
-    assert.equal((await sprites()).schemaVersion, 11);
+    assert.equal((await sprites()).schemaVersion, 12);
     report.pot.sprite2d = await checkPot('2D mode');
     assert.equal(await exportProfile(), JSON.stringify(flat), 'A profile JSON round-trips byte for byte.');
     assert.deepEqual(report.errors, [], 'Character scenario browser errors are not allowed.');

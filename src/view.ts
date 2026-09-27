@@ -14,7 +14,7 @@ import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './char
 import type { ArmChains, ArmPose } from './arm-ik';
 import type { ArmLengths, CharacterArms } from './character-arms';
 import { DEFAULT_GRIPS, placeGrips } from './grips';
-import type { GripDistances, Grips } from './grips';
+import type { GripDistances, Grips, GripShoulder } from './grips';
 import { AvatarView } from './avatar-view';
 import { resolveAvatarJoints } from './character-model-inspect';
 import type { CharacterModelUsage } from './character-model-inspect';
@@ -196,10 +196,13 @@ export class GameView {
   private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private grips: Grips = DEFAULT_GRIPS;
   private readonly gripDistances: GripDistances = { left: 0, right: 0 };
-  // Where the shoulders' midpoint projects onto the handle, from the butt, and the handle's length, last frame.
-  private gripCentre = 0;
-  private gripShaft = 0;
-  private readonly shoulderMidpoint = new Vector3();
+  // Each shoulder against the handle, refreshed every frame for the grip placement.
+  private readonly gripShoulders: Record<ArmSide, GripShoulder> = {
+    left: { along: 0, aside2: 0, arm: 0 }, right: { along: 0, aside2: 0, arm: 0 },
+  };
+  private readonly gripShoulder = new Vector3();
+  // Whether the active character is 2D, whose arm chains that target the grips reach in the drawing plane.
+  private spriteArms = false;
   private readonly arms = new Map<ArmSide, Arm>();
   private readonly limbDirection = new Vector3();
   private readonly limbSide = new Vector3();
@@ -552,6 +555,7 @@ export class GameView {
     }
     this.armChains = withArmLengths(imported?.chains ?? DEFAULT_ARM_CHAINS, presentation.arms);
     this.grips = presentation.grips;
+    this.spriteArms = type === 'sprite-2d';
     // Shading styles Avatar mode: the connected character and its separate pot and hammer.
     this.shading.apply(presentation.shading ?? DEFAULT_CHARACTER_SHADING, avatarMode);
   }
@@ -719,8 +723,8 @@ export class GameView {
       armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },
       rig: this.rig,
       grips: {
-        placement: this.grips.placement, left: this.gripDistances.left, right: this.gripDistances.right,
-        centre: this.gripCentre, shaft: this.gripShaft,
+        placement: this.grips.placement, slideAt: this.grips.slideAt,
+        left: this.gripDistances.left, right: this.gripDistances.right,
       },
     };
   }
@@ -1007,16 +1011,27 @@ export class GameView {
     const chains = this.armChains;
     const cos = Math.cos(options.shaftAngle);
     const sin = Math.sin(options.shaftAngle);
-    // Where the shoulders' midpoint projects onto the handle, measured from the butt.
-    this.shoulderMidpoint.set(
-      (chains.left.shoulder[0] + chains.right.shoulder[0]) / 2,
-      (chains.left.shoulder[1] + chains.right.shoulder[1]) / 2,
-      (chains.left.shoulder[2] + chains.right.shoulder[2]) / 2,
-    ).applyMatrix4(body);
     const butt = tool.elements;
-    this.gripCentre = (this.shoulderMidpoint.x - butt[12]) * cos + (this.shoulderMidpoint.y - butt[13]) * sin;
-    this.gripShaft = shaftLength;
-    placeGrips(this.grips, this.gripCentre, shaftLength, this.gripDistances);
+    const slot = this.slots[this.activeSlot]!;
+    // Every arm reaches from the body's shoulders with the lengths it is drawn at. A 2D arm chain that targets
+    // a hand's grip reaches in the drawing plane, at its authored lengths unless the profile has its own; every
+    // other arm reaches forward to the tool's depth.
+    const flat = this.spriteArms ? slot.rig.naturalArmLengths() : null;
+    for (const side of ARM_SIDES) {
+      const sprite = flat?.[side] ?? null;
+      const local = chains[side].shoulder;
+      const shoulder = this.gripShoulder.set(local[0], local[1], local[2]).applyMatrix4(body);
+      const dx = shoulder.x - butt[12];
+      const dy = shoulder.y - butt[13];
+      const dz = sprite === null ? butt[14] - shoulder.z : 0;
+      const along = dx * cos + dy * sin;
+      const measured = this.gripShoulders[side];
+      measured.along = along;
+      measured.aside2 = Math.max(0, dx * dx + dy * dy + dz * dz - along * along);
+      const lengths = sprite !== null && slot.presentation.arms === null ? sprite : chains[side];
+      measured.arm = lengths.upper + lengths.forearm;
+    }
+    placeGrips(this.grips, this.gripShoulders, shaftLength, this.gripDistances);
     const poses: ArmPose[] = [];
     for (const side of ARM_SIDES) {
       const arm = this.arms.get(side);
