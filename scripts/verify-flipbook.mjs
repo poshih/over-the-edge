@@ -55,10 +55,9 @@ function frames(prefix, count, size, seed = 0) {
   });
 }
 
-// A schema-6 profile using every pre-flipbook feature, written in canonical field order. It is a fixed
-// point of the pre-flipbook engine (86514b9): its validator exported JSON.stringify of this exact value.
-// Load, save and export must therefore keep producing these bytes.
-export function schema6Reference() {
+// A profile using every sprite feature except flipbooks, written in the validator's canonical field
+// order, so load, save and export must keep producing these exact bytes.
+export function profileReference() {
   const layer = (id, name, anchor, image, fields) => ({
     id, name, anchor, image, width: fields.width, height: fields.height, offset: fields.offset,
     rotation: fields.rotation ?? 0, bone: fields.bone ?? null, directions: fields.directions ?? DIRECTIONS,
@@ -66,9 +65,10 @@ export function schema6Reference() {
   });
   const body = [{ bone: 'body', weight: 1 }];
   return {
-    schemaVersion: 6,
+    schemaVersion: 10,
     characterRiggingType: 'sprite-2d',
     armForwardDistance: 0.4,
+    grips: 'fixed',
     images: [
       { id: 'body', name: 'Body', source: dataUri(solidPng(4, 4, 10)) },
       { id: 'face', name: 'Face', source: dataUri(solidPng(4, 4, 40)) },
@@ -155,7 +155,7 @@ function character(base, { images = null, single, startAngle = 0, hysteresis = 0
   const added = (images ?? [single]).map(({ id, name, bytes }) => ({ id, name, source: dataUri(bytes) }));
   return {
     ...base,
-    schemaVersion: images === null ? 6 : 7,
+    schemaVersion: 10,
     images: [...base.images.filter(image => used.has(image.id)), ...added],
     layers,
     skeleton: {
@@ -256,28 +256,28 @@ export async function verifyFlipbook(browser, address, artifacts) {
     await page.goto(address, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver?.snapshot().time > 0 && !window.gettingOver.sprites().restoring);
 
-    // 1. Documents without flipbooks keep the pre-flipbook bytes through load, save and export.
+    // 1. Profiles keep their exact bytes through load, save and export.
     await openTab('Character');
     await page.locator('.character-load-example').click();
     await idle();
     await openTab('Sprites');
     const example = await exportText();
     const base = JSON.parse(example);
-    assert.equal(base.schemaVersion, 6, 'Documents without flipbooks stay schema 6.');
+    assert.equal(base.schemaVersion, 10, 'Profiles use schema 10.');
     assert.ok(!example.includes('"flipbook"'), 'Single-image layers must not gain a flipbook field.');
-    const reference = JSON.stringify(schema6Reference());
+    const reference = JSON.stringify(profileReference());
     await importText(reference);
     assert.equal(await spriteError(), null);
-    assert.equal(await exportText(), reference, 'Load and export must reproduce the pre-flipbook schema-6 bytes.');
+    assert.equal(await exportText(), reference, 'Load and export must reproduce the profile bytes.');
     await page.locator('.sprite-save').click();
     await idle();
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver?.snapshot().time > 0 && !window.gettingOver.sprites().restoring);
     await openTab('Sprites');
-    assert.equal(await exportText(), reference, 'Save and restore must reproduce the pre-flipbook schema-6 bytes.');
+    assert.equal(await exportText(), reference, 'Save and restore must reproduce the profile bytes.');
     await importText(example);
     assert.equal(await exportText(), example, 'Import and export must preserve the complete example byte for byte.');
-    report.unchangedSchema6 = { referenceBytes: reference.length, exampleBytes: example.length, load: true, save: true, export: true };
+    report.unchangedProfile = { referenceBytes: reference.length, exampleBytes: example.length, load: true, save: true, export: true };
 
     // 2. A 72-frame head flipbook loads with every frame decoded and uploaded before it is shown.
     const headFrames = frames('head', FRAME_COUNT, FRAME_SIZE);
@@ -294,7 +294,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
     assert.equal(loaded.texturesCreated - singleState.texturesCreated, FRAME_COUNT - 1, 'Only the new frames create textures.');
     assert.equal(loaded.uploaded - singleState.uploaded, FRAME_COUNT - 1, 'Every new frame is uploaded at load.');
     const flipbookDocument = await documentState();
-    assert.equal(flipbookDocument.schemaVersion, 7);
+    assert.equal(flipbookDocument.schemaVersion, 10);
     assert.deepEqual(flipbookDocument.layers.find(layer => layer.id === HEAD).flipbook, flipbook.layers.find(layer => layer.id === HEAD).flipbook);
     const exported = await exportText();
     assert.deepEqual(JSON.parse(exported), flipbookDocument, 'Export must carry the flipbook without loss.');
@@ -409,7 +409,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
       'Frames are ordered by file name, numbers in natural order, reusing the identical first image.');
     assert.equal(layer.image, headFrames[0].id);
     assert.deepEqual(layer.directions, DIRECTIONS);
-    assert.equal(authored.schemaVersion, 7);
+    assert.equal(authored.schemaVersion, 10);
     await editNumber('#sprite-flipbook-start', 10);
     await editNumber('#sprite-flipbook-hysteresis', 1.5);
     layer = (await documentState()).layers.find(candidate => candidate.id === HEAD);
@@ -437,7 +437,6 @@ export async function verifyFlipbook(browser, address, artifacts) {
     await page.locator('.sprite-flipbook-single').click();
     await nextFrames();
     const reverted = await documentState();
-    assert.equal(reverted.schemaVersion, 6, 'Removing the last flipbook returns the draft to schema 6.');
     assert.equal(reverted.layers.find(candidate => candidate.id === HEAD).flipbook, undefined);
     assert.equal(reverted.images.length, authored.images.length - (FRAME_COUNT - 1), 'Unused frames are removed.');
     assert.equal((await head()).frame, null);
@@ -455,7 +454,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
       ['size mismatch', value => { value.images.find(image => image.id === headFrames[9].id).source = dataUri(solidPng(120, 128, 9)); }, /identical pixel dimensions/],
       ['tiled flipbook', value => { value.layers.find(entry => entry.id === HEAD).tileLength = 0.5; }, /weighted mesh or tiled shaft/],
       ['masked flipbook', value => { value.layers.find(entry => entry.id === HEAD).directions = ['right']; }, /all eight directions/],
-      ['schema 6 flipbook', value => { value.schemaVersion = 6; }, /require sprite schema version 7/],
+      ['earlier schema', value => { value.schemaVersion = 9; }, /require schema version 10/],
       ['budget', value => {
         const big = frames('big', FRAME_COUNT, { width: 512, height: 512 });
         value.images = [...value.images.filter(image => !image.id.startsWith('head-')), ...big.map(({ id, name, bytes }) => ({ id, name, source: dataUri(bytes) }))];

@@ -10,6 +10,8 @@ export const SPRITE_TARGET_IDS = [...VISUAL_PART_IDS, 'left-grip', 'right-grip',
 export const ARM_SIDES = ['left', 'right'] as const;
 export type ArmSide = (typeof ARM_SIDES)[number];
 export const HEAD_GEOMETRY = { neck: [0, 0.89, 0] } as const;
+// Hammer-shaft artwork spans this length along local X and is stretched to the physical shaft.
+export const SHAFT_ARTWORK_LENGTH = 1.5;
 
 export interface ArmIkSettings {
   leftHintX: number;

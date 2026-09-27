@@ -123,7 +123,7 @@ export async function verifySetPieces(browser, address, artifacts) {
   let catalog;
   // A box floor whose top is y = 0, spanning x = -6 to `right`, with the start on it.
   const level = (right, { objects = [], labels = [] } = {}) => ({
-    schemaVersion: 2, labels,
+    schemaVersion: 3, labels,
     objects: [
       {
         kind: 'terrain', id: 'floor', shape: { type: 'box' }, x: (right - 6) / 2, y: -0.5, width: right + 6, height: 1,

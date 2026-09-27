@@ -1,8 +1,10 @@
 import type { Tuning } from '../config';
 import {
-  CURSOR_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, TUNING_FIELDS, validateGameSettings,
+  CURSOR_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS, TUNING_FIELDS, validateGameSettings, withRig,
 } from '../game-settings';
 import type { CursorSettings, GameSettings } from '../game-settings';
+import { rigGeometry } from '../rig';
+import type { RigSettings } from '../rig';
 import { element, setPressed, setText } from '../dom';
 import { createGameUI, DESKTOP_QUERY } from './game-ui';
 import { inputModeForPointer } from '../input';
@@ -81,6 +83,7 @@ export function createUI(options: UiOptions): GameUi {
   }
   const groups = new Map<string, HTMLFieldSetElement>();
   const controls = new Map<keyof Tuning, RangeControl>();
+  const rigControls = new Map<keyof RigSettings, RangeControl>();
   const cursorControls = new Map<keyof CursorSettings, RangeControl>();
   const practiceButtons = new Map<PracticeId, HTMLButtonElement>();
   const tuningGroups = element<HTMLElement>(root, '.tuning-groups');
@@ -98,9 +101,16 @@ export function createUI(options: UiOptions): GameUi {
       control.setValue(tuning[field.key], { disabled: inactive });
       control.row.classList.toggle('is-inactive', inactive);
     }
+    for (const field of RIG_FIELDS) {
+      const control = rigControls.get(field.key);
+      if (!control) throw new Error(`Missing rig control: ${field.key}`);
+      control.setValue(settings.rig[field.key]);
+    }
+    const reach = rigGeometry(settings.rig).maxReach;
     for (const field of CURSOR_FIELDS) {
       const control = cursorControls.get(field.key);
       if (!control) throw new Error(`Missing cursor control: ${field.key}`);
+      if (field.key === 'maxRadius') control.input.max = String(reach);
       control.setValue(settings.cursor[field.key]);
     }
   }
@@ -163,6 +173,22 @@ export function createUI(options: UiOptions): GameUi {
     }
     controls.set(field.key, control);
     group.append(control.row);
+  }
+  const rigGroup = tuningSection({
+    id: 'physics-rig', title: 'Hammer rig', hint: 'Handle length and reach', open: true,
+  }, 'Hammer rig', 'tuning-group rig-settings');
+  const rigHelp = document.createElement('p');
+  rigHelp.className = 'rig-settings-help';
+  rigHelp.textContent = 'The hammer\'s geometry. Changing it rebuilds the player and restarts the run. ' +
+    'Characters with sliding grips need arms that reach about the maximum extension; fixed grips need arms that reach as far as the handle slides.';
+  rigGroup.append(rigHelp);
+  for (const field of RIG_FIELDS) {
+    const control = createRangeControl(field, {
+      id: `rig-${field.key}`, name: field.key, signal: events.signal,
+      onInput: (value) => editSettings(withRig(settings, { ...settings.rig, [field.key]: value })),
+    });
+    rigControls.set(field.key, control);
+    rigGroup.append(control.row);
   }
   const cursorGroup = tuningSection({
     id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius around the hinge',

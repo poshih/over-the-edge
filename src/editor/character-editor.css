@@ -148,7 +148,8 @@
   width: 100%;
 }
 
-.character-shading-modes {
+.character-shading-modes,
+.character-grip-modes {
   display: flex;
   gap: 18px;
   margin-bottom: 10px;
@@ -156,6 +157,7 @@
 }
 
 .character-shading-modes label,
+.character-grip-modes label,
 .character-outline-toggle {
   display: inline-flex;
   align-items: center;

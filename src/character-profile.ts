@@ -1,5 +1,5 @@
-// Character-profile fields added in sprite schema 8: imported models, the avatar bone map,
-// the one-model hammer and shading. DOM-free, so builds and Node tools share the validator.
+// Character-profile fields for imported models, the avatar bone map, the one-model hammer, the pot
+// model and shading. DOM-free, so builds and Node tools share the validator.
 import { MODEL_LIMITS } from './model-data.ts';
 import { decodeBase64, encodeBase64, number, record, SpriteError, text } from './sprite-fields.ts';
 
@@ -59,7 +59,7 @@ export interface CharacterShading {
   readonly outline: CelOutline | null;
 }
 
-// Every field is absent from documents that do not use it, keeping them byte-identical.
+// Each field is present only when the profile uses it.
 export interface CharacterAssets {
   readonly models?: readonly CharacterModel[];
   readonly avatar?: AvatarModelProfile;
@@ -352,7 +352,7 @@ export function validateCharacterAssets(value: {
   const hammer = value.hammer === undefined ? undefined : validatePropModelProfile(value.hammer, 'hammer');
   const pot = value.pot === undefined ? undefined : validatePropModelProfile(value.pot, 'pot');
   const validated = value.shading === undefined ? undefined : validateCharacterShading(value.shading);
-  // The default look is the absent field, as in schema 6 and 7 documents.
+  // The default look is stored as the absent field.
   const shading = validated === undefined || sameShading(validated, DEFAULT_CHARACTER_SHADING) ? undefined : validated;
   const ids = new Set(models?.map(model => model.id));
   const used = new Set<string>();

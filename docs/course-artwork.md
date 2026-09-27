@@ -114,7 +114,7 @@ Both are static, editor-free builds that need no backend.
   "format": "over-the-edge-course",
   "schemaVersion": 1,
   "mode": "meshes",
-  "level": { "schemaVersion": 2, "labels": [], "objects": [] },
+  "level": { "schemaVersion": 3, "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "stone.glb", "source": "data:model/gltf-binary;base64,..." }
   ]

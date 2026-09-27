@@ -8,7 +8,7 @@
     "assets": []
   },
   "settings": {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -28,6 +28,10 @@
       "handleFrequency": 0,
       "handleDamping": 0.9,
       "mouseSensitivity": 1
+    },
+    "rig": {
+      "handleLength": 1.5,
+      "maxExtension": 1.15
     },
     "cursor": {
       "maxRadius": 2.65

@@ -7,8 +7,8 @@ const DIRECTION_EPSILON = 1e-8;
 const POLE_SINGULARITY_SINE = 0.15;
 const MAX_BEND_SPEED = 8;
 export const ARM_GEOMETRY = {
-  left: { shoulder: [-0.17, 0.74, -0.09], gripX: 0.04, normalSign: -1 },
-  right: { shoulder: [0.17, 0.74, 0.09], gripX: 0.22, normalSign: 1 },
+  left: { shoulder: [-0.17, 0.74, -0.09], normalSign: -1 },
+  right: { shoulder: [0.17, 0.74, 0.09], normalSign: 1 },
 } as const;
 
 // A two-bone arm: torso-local shoulder and bind-pose segment lengths.

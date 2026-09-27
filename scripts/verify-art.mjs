@@ -34,7 +34,7 @@ function baseTerrain(id, shape, x, y, width, height, extra = {}) {
 
 function smallLevel() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     labels: [],
     objects: [
       baseTerrain('floor', { type: 'box' }, 0, -0.5, 20, 1, { depth: 3 }),
@@ -42,7 +42,7 @@ function smallLevel() {
       baseTerrain('ramp', { type: 'ramp' }, 1800, 1200, 4, 1.5, { angle: 0.4, depth: 2 }),
       baseTerrain('circle', { type: 'circle' }, 1830, 1200, 2, 2, { depth: 1.2 }),
       baseTerrain('polygon', { type: 'polygon', vertices: [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.35 }, { x: 0.2, y: 0.5 }, { x: -0.45, y: 0.3 }] }, 1860, 1200, 3, 2, { depth: 1.4 }),
-      { kind: 'start', id: 'start', x: 0, y: 4, angle: 0.5, extension: 0.3 },
+      { kind: 'start', id: 'start', x: 0, y: 4, angle: 0.5, reach: 1.8 },
     ],
   };
 }
@@ -227,13 +227,13 @@ async function verifyLargeCourse(stonePath) {
   const assignmentsPath = join(temporary, 'large-assignments.json');
   const packagePath = join(temporary, 'large-course.json');
   const level = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     labels: [],
     objects: [
       baseTerrain('floor', { type: 'box' }, 0, -0.5, 20, 1, { depth: 1 }),
       ...Array.from({ length: 999 }, (_, index) => baseTerrain(`box-${index}`, { type: 'box' },
         (index % 20 - 10) * 2, (Math.floor(index / 20) + 1) * 12 - 0.45, 0.9, 0.9, { depth: 1 })),
-      { kind: 'start', id: 'start', x: 0, y: 4, angle: 0.5, extension: 0.3 },
+      { kind: 'start', id: 'start', x: 0, y: 4, angle: 0.5, reach: 1.8 },
     ],
   };
   await writeJson(levelPath, level);
@@ -448,11 +448,11 @@ async function verifyTextures() {
 async function verifyTextureBuild(fixtures) {
   const names = Object.keys(fixtures);
   const level = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     labels: [],
     objects: [
       ...names.map((name, index) => baseTerrain(`texture-${name}`, { type: 'box' }, index * 4, -0.5, 2, 1)),
-      { kind: 'start', id: 'start', x: 0, y: 1, angle: 0, extension: 0.2 },
+      { kind: 'start', id: 'start', x: 0, y: 1, angle: 0, reach: 1.7 },
     ],
   };
   const assignments = {};

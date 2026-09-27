@@ -21,10 +21,12 @@ const glbFile = (name, buffer) => ({ name, mimeType: 'model/gltf-binary', buffer
 const glbSource = buffer => `data:model/gltf-binary;base64,${buffer.toString('base64')}`;
 const bytes = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 
-// Schema rules for profile data: schema 8 stays a byte-identical fixed point, and a pot needs schema 9.
+// Schema rules for profile data: one schema version, a fixed point of the validator, with each model
+// field present only while it is used.
 function verifySchemas(data) {
   const base = {
-    characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, images: [], layers: [], skeleton: null, presentation: null,
+    characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, grips: 'sliding',
+    images: [], layers: [], skeleton: null, presentation: null,
   };
   const models = [
     { id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb()) },
@@ -34,24 +36,22 @@ function verifySchemas(data) {
   const roles = { avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP }, hammer: { model: 'hammer' } };
   const shading = { mode: 'cel', bands: 4, outline: null };
   const canonical = value => JSON.stringify(data.validateSpriteDocument(JSON.parse(JSON.stringify(value))));
-  const eight = { schemaVersion: 8, ...base, models: models.slice(0, 2), ...roles, shading };
-  assert.equal(canonical(eight), JSON.stringify(eight), 'A schema-8 profile without a pot stays byte-identical.');
-  const nine = { schemaVersion: 9, ...base, models, ...roles, pot: { model: 'pot' }, shading };
-  assert.equal(canonical(nine), JSON.stringify(nine), 'Schema 9 lists the pot after the hammer.');
-  const potOnly = { schemaVersion: 9, ...base, characterRiggingType: 'model-3d', models: [models[2]], pot: { model: 'pot' } };
-  assert.equal(canonical(potOnly), JSON.stringify(potOnly), 'A pot model alone is schema 9.');
-  assert.equal(JSON.parse(canonical({ ...nine, models: models.slice(0, 2), pot: undefined })).schemaVersion, 8,
-    'Removing the pot model saves schema 8 again.');
+  const full = { schemaVersion: 10, ...base, models, ...roles, pot: { model: 'pot' }, shading };
+  assert.equal(canonical(full), JSON.stringify(full), 'A complete profile is a fixed point, with the pot after the hammer.');
+  const potOnly = { schemaVersion: 10, ...base, characterRiggingType: 'model-3d', models: [models[2]], pot: { model: 'pot' } };
+  assert.equal(canonical(potOnly), JSON.stringify(potOnly), 'A pot model alone is a fixed point.');
   const rejected = {
-    'pot in schema 8': [{ ...nine, schemaVersion: 8 }, /pot model requires sprite schema version 9/],
-    'shared pot model': [{ ...nine, models: models.slice(0, 2), pot: { model: 'hammer' } }, /separate character models/],
-    'four models': [{ ...nine, models: [...models, { ...models[2], id: 'spare' }] }, /1-3 models/],
-    'unused pot model': [{ ...nine, pot: undefined }, /no avatar, hammer or pot uses/],
+    'earlier schema': [{ ...full, schemaVersion: 9 }, /require schema version 10/],
+    'missing grips': [{ ...full, grips: undefined }, /must contain exactly/],
+    'unknown grips': [{ ...full, grips: 'loose' }, /Grip placement must be fixed or sliding/],
+    'shared pot model': [{ ...full, models: models.slice(0, 2), pot: { model: 'hammer' } }, /separate character models/],
+    'four models': [{ ...full, models: [...models, { ...models[2], id: 'spare' }] }, /1-3 models/],
+    'unused pot model': [{ ...full, pot: undefined }, /no avatar, hammer or pot uses/],
   };
   for (const [name, [value, error]] of Object.entries(rejected)) {
     assert.throws(() => canonical(value), error, `${name} must be rejected.`);
   }
-  return { schema8FixedPoint: true, schema9FixedPoint: true, rejected: Object.keys(rejected) };
+  return { fixedPoint: true, rejected: Object.keys(rejected) };
 }
 
 // Typed codes from the shared validator, exactly as release builds and the browser loader see them.
@@ -237,7 +237,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal(state.error, null);
     assert.equal(state.avatarModel.pending, false);
     assert.deepEqual({ ...state.boneMap }, { ...BONE_MAP }, 'The editor must apply the automatic Mixamo bone map.');
-    assert.equal(state.schemaVersion, 8);
+    assert.equal(state.schemaVersion, 10);
     let view = await rendering();
     assert.equal(view.importedAvatar.visible, true);
     assert.equal(view.avatar.visible, false, 'The imported avatar replaces the built-in mesh.');
@@ -396,8 +396,8 @@ export async function verifyCharacter(browser, address, artifacts) {
 
     // A pot model follows the physical pot body rigidly, at the pot's depth, in every character type.
     await pause();
-    const schema8 = await exportProfile();
-    assert.equal(JSON.parse(schema8).schemaVersion, 8);
+    const withoutPot = await exportProfile();
+    assert.equal(JSON.parse(withoutPot).schemaVersion, 10);
     const beforePot = await physics();
     await page.getByLabel('Pot GLB', { exact: true }).setInputFiles(glbFile('urn.glb', potGlb()));
     await idle();
@@ -447,7 +447,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     }
     await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
     const withPot = JSON.parse(await exportProfile());
-    assert.equal(withPot.schemaVersion, 9, 'A pot model saves as schema 9.');
+    assert.equal(withPot.schemaVersion, 10);
     assert.deepEqual(withPot.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
     assert.deepEqual(withPot.pot, { model: 'pot' });
     await page.getByRole('button', { name: 'Use default pot', exact: true }).click();
@@ -456,7 +456,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal((await rendering()).potModel, null);
     assert.equal((await page.evaluate(() => window.gettingOver.appearance().parts))
       .find(part => part.id === 'pot').defaultsVisible, true, 'The default pot returns.');
-    assert.equal(await exportProfile(), schema8, 'Removing the pot model restores the schema-8 profile byte for byte.');
+    assert.equal(await exportProfile(), withoutPot, 'Removing the pot model restores the previous profile byte for byte.');
     await page.getByLabel('Pot GLB', { exact: true }).setInputFiles(glbFile('urn.glb', potGlb()));
     await idle();
     await frames();
@@ -540,10 +540,10 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal(large.hammer, large.frames, 'The hammer model copies one matrix per frame on any level.');
     report.largeLevel = { objects, small, withProps, large };
 
-    // Versioned data: schema 9 only while a pot model is present, 8 with other models or shading.
+    // Profile data: every model field is carried and restored byte for byte.
     const exported = await exportProfile();
     const profile = JSON.parse(exported);
-    assert.equal(profile.schemaVersion, 9);
+    assert.equal(profile.schemaVersion, 10);
     assert.deepEqual(profile.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
     assert.deepEqual(profile.pot, { model: 'pot' });
     assert.ok(profile.models.every(model => model.source.startsWith('data:model/gltf-binary;base64,')));
@@ -580,15 +580,17 @@ export async function verifyCharacter(browser, address, artifacts) {
     });
     await idle();
     const plain = JSON.parse(await exportProfile());
-    assert.equal(plain.schemaVersion, 6, 'Without models or shading the profile saves as schema 6 again.');
-    assert.deepEqual(Object.keys(plain), ['schemaVersion', 'characterRiggingType', 'armForwardDistance', 'images', 'layers', 'skeleton', 'presentation']);
+    assert.equal(plain.schemaVersion, 10);
+    assert.deepEqual(Object.keys(plain), [
+      'schemaVersion', 'characterRiggingType', 'armForwardDistance', 'grips', 'images', 'layers', 'skeleton', 'presentation',
+    ], 'Without models or shading the profile has no model fields.');
     assert.equal((await rendering()).avatar.visible, true, 'Removing the import restores the built-in avatar.');
-    report.schema = { withPot: 9, withoutPot: 8, withoutAssets: 6, restored: true, bytes: exported.length };
+    report.schema = { version: 10, restored: true, bytes: exported.length };
 
     // A 2D profile imported from JSON shows its pot model too, beside its pot sprite layer.
     await pause();
     const flat = {
-      schemaVersion: 9, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25,
+      schemaVersion: 10, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: 'fixed',
       images: [{ id: 'card', name: 'Card', source: `data:image/png;base64,${texturePng().toString('base64')}` }],
       layers: [{
         id: 'pot-card', name: 'Pot card', anchor: 'pot', image: 'card', width: 0.6, height: 0.4, offset: { x: 0, y: 0, z: 0.6 },
@@ -603,9 +605,9 @@ export async function verifyCharacter(browser, address, artifacts) {
     await idle();
     await frames();
     assert.equal((await sprites()).error, null);
-    assert.equal((await sprites()).schemaVersion, 9);
+    assert.equal((await sprites()).schemaVersion, 10);
     report.pot.sprite2d = await checkPot('2D mode');
-    assert.equal(await exportProfile(), JSON.stringify(flat), 'A schema-9 profile JSON round-trips byte for byte.');
+    assert.equal(await exportProfile(), JSON.stringify(flat), 'A profile JSON round-trips byte for byte.');
     assert.deepEqual(report.errors, [], 'Character scenario browser errors are not allowed.');
     return report;
   } finally {

@@ -204,7 +204,10 @@ export class Game {
 
   settings(): GameSettings { return this.simulation.gameSettings(); }
 
-  setSettings(settings: Readonly<GameSettings>): void { this.simulation.setSettings(settings); }
+  // New rig settings rebuild the player, so they restart the run like Reset.
+  setSettings(settings: Readonly<GameSettings>): void {
+    if (this.simulation.setSettings(settings) === 'restarted') this.restartRun();
+  }
 
   setCharacter(state: CharacterState): void {
     this.character = { armIk: { ...state.armIk } };
@@ -230,8 +233,13 @@ export class Game {
   }
 
   reset(spawn?: Readonly<PlayerSpawn>): void {
-    this.triggers.reset();
     this.simulation.reset(spawn);
+    this.restartRun();
+  }
+
+  // Everything a reset restarts besides the player and level objects.
+  private restartRun(): void {
+    this.triggers.reset();
     this.view.resetPresentation();
     this.resetClock();
     this.accumulator = 0;

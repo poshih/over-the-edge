@@ -140,8 +140,9 @@ GAME_SETTINGS=profiles/my-game.json npm run build:game
 GAME_LEVEL=levels/my-level.json GAME_SETTINGS=profiles/my-game.json npm run build:game
 ```
 
-Omitting `GAME_SETTINGS` uses the built-in game settings, with a **2.65 m**
-target radius around the shoulder hinge (the hammer's full reach). A supplied profile is validated and embedded in the game; an invalid,
+Omitting `GAME_SETTINGS` uses the built-in game settings: a **1.5 m** handle
+that slides up to **1.15 m** past the shoulder hinge, and a **2.65 m** target radius
+around the hinge (the hammer's full reach). A supplied profile is validated and embedded in the game; an invalid,
 missing, oversized, or outside-project file fails rather than reverting to
 defaults. Development reloads when the selected file changes. Browser-local
 saves do not change a release unless you export and select one.
@@ -156,8 +157,8 @@ GAME_SPRITES=skins/paper.json GAME_ALTERNATE_SPRITES=skins/hero.json npm run bui
 
 Players choose **2D** or **3D** in the release's corner control, including
 mid-level; the choice persists in the browser. Both profiles and their GLBs are
-validated at build time and load once. Switching changes only the presentation;
-physics, grips and the level continue unchanged. Without `GAME_ALTERNATE_SPRITES`,
+validated at build time and load once. Switching changes only the presentation,
+including each profile's grip placement; physics and the level continue unchanged. Without `GAME_ALTERNATE_SPRITES`,
 the release has no such control. See [imported 3D characters](docs/characters.md).
 
 `src/editor/` owns all authoring UI, persistence, imports, and debugging tools.
@@ -229,7 +230,8 @@ open the [full-height map](docs/skyward-ruins-map.svg).
 | / | Find a Workshop control (editor only) |
 
 Touch gain is independent of camera zoom and orientation: at the default
-**Control sensitivity**, 100 CSS pixels move the world-space target **2.65 m**.
+**Control sensitivity**, 100 CSS pixels move the world-space target one hammer
+reach (**2.65 m** by default).
 Target movement is not limited by hammer reach. The same swipe has the same
 effect in portrait and landscape, in both the game and editor. Mouse input
 continues to follow the displayed scene scale. Touch cancellation, focus loss
@@ -315,8 +317,9 @@ Motion beyond the circle is discarded, so reversing input responds immediately
 without unwinding accumulated movement. Starting or resetting an attempt aims
 toward the initial hammer position, clamped inside the chosen radius.
 
-As in Getting Over It, the target and the head's **2.65 m** mechanical reach
-share the hinge as their origin, and the default radius is that full reach, so
+As in Getting Over It, the target and the head's mechanical reach (the handle
+length plus the maximum extension, **2.65 m** by default) share the hinge as their
+origin, and the default radius is that full reach, so
 every reachable point can be targeted in every direction. A smaller radius
 limits how far input can extend the hammer; it never lengthens the tool. The
 head still cannot pass through solid terrain, and contact can transfer motor
@@ -334,8 +337,8 @@ terrain collider.
 
 ## Game settings
 
-The workshop applies parameters to the existing mechanism without restarting.
-Its first section, **Mass & recoil**, groups head mass, player mass and rotation
+The workshop applies parameters to the existing mechanism without restarting,
+except the hammer rig, which rebuilds the player. Its first section, **Mass & recoil**, groups head mass, player mass and rotation
 speed with sliders for total shaft mass, hinge carrier mass and slider carriage
 mass. Shaft mass is divided equally among the three handle segments; guide-body
 inertia scales with mass. The new defaults preserve the original 0.66 kg shaft
@@ -352,16 +355,29 @@ giving a contact coefficient of about **2.74**. This is ordinary contact
 friction, not a sticky constraint: the head must still press against a surface
 to hold. The pot's own friction coefficient remains **0.45**.
 
-The **Cursor target** section has a **Maximum target radius** slider:
-**0.25-2.65 m** around the shoulder hinge, default **2.65 m** (the full reach).
-Profiles saved with a larger radius load capped at 2.65 m. Reducing the radius
+The **Hammer rig** section sets the tool's geometry. **Handle length** (0.75-3 m,
+default **1.5 m**) runs from the butt to the centre of the head; the slider always
+retracts the head to the shoulder hinge, so the butt can travel that far behind
+it. **Maximum extension** (0-2 m, default **1.15 m**) is how far the butt can slide
+past the hinge. The reach is their sum. The three welded handle segments share the
+handle length, and everything else follows the rig: the two-part hammer, the
+one-model hammer's documented measurements, touch gain, compact framing and the
+target radius limit. A rig is never changed in place: a new one rebuilds the player
+and restarts the run from its start, like **Reset**. A longer handle with a shorter
+extension keeps the reach while letting characters with sliding grips (see
+[hand grips](#hand-grips)) use shorter arms.
+
+The **Cursor target** section has a **Maximum target radius** slider, from
+**0.25 m** up to the hammer's reach, default the full reach. A saved radius beyond
+the reach is rejected. When the rig changes in the Workshop, a full-reach radius
+follows the new reach and a smaller one is capped at it. Reducing the radius
 immediately clamps an out-of-range target, including while paused; increasing
 it preserves the current offset. Changing it does not restart the attempt, alter
 body masses, or change the rig's forces, mechanical reach, or collision rules.
 
 In **Workshop / Physics / Saved game settings**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
-profile containing every physics setting and the target radius.
+profile containing every physics setting, the hammer rig and the target radius.
 Reusing a name keeps both versions. Choose an entry in **Past game settings**,
 then **Load game settings** to apply it. Selecting an entry alone does not
 change the game. History survives reloads; loading remains manual.
@@ -376,26 +392,16 @@ newer edits. Use this same JSON with the `GAME_SETTINGS` build input above.
 
 Snapshots are stored independently in this browser's localStorage, on this site,
 so saves from different tabs do not overwrite one shared record. Nothing is
-uploaded unless you save a [project](docs/projects.md) to your own project server. New saves use **game-settings v2**, with a cursor document containing
-only `maxRadius`. Previous game-settings v1 profiles and tuning v1-v4 records
-remain loadable, labeled **(physics only)**. They preserve their physics values
-and use the default target radius; retired return/settling settings are never
-reactivated. Importing or building with a valid v1 settings document performs
-the same conversion. Invalid older documents are rejected, not silently repaired.
-
-The previous single-slot v2 save appears as **Previous saved tuning (v2)**.
-If v2 is absent, a v1 save is available instead, with its original fixed tool
-masses supplied when loaded. Loading never rewrites legacy records;
-saving loaded settings under a name creates a new game-settings profile. An invalid v2
-record never causes v1 to be loaded instead. Unreadable saves are marked and
-retained, while other valid snapshots remain available. Older releases can
-still read their original records and ignore the separate v2 game-settings keys.
+uploaded unless you save a [project](docs/projects.md) to your own project server. Settings use
+**schema version 3**, with `physics`, `rig` and `cursor` sections; files and saves
+in any other version are rejected, not converted. Unreadable saves are marked and
+retained, while other valid snapshots remain available.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,
 or character artwork. Height and peak readouts describe the current attempt.
 
 Saved profiles preserve their stored hammer friction. **Defaults** restores
-all built-in physics and cursor settings without changing saved profiles.
+all built-in physics, rig and cursor settings without changing saved profiles.
 
 The practice positions make the important behaviors easy to revisit: resting
 on a ledge, smooth ground pushes, launches, and vaulting a low block. The
@@ -413,7 +419,9 @@ Pan and zoom let you work beyond the player's current camera view.
 
 The start location and trigger zones are map objects, not special summit
 settings. Place or drag **Start location** to choose the spawn and adjust its
-initial hammer pose. Each level has one start. Playtest from that position,
+initial hammer pose: its angle and its **reach**, the head's distance from the
+shoulder hinge. Reach keeps the start pose the same for any handle length; a
+hammer that cannot reach that far starts fully extended. Each level has one start. Playtest from that position,
 and use Reset to repeat the course. Runtime effects never delete objects from
 the editor's authored definition.
 
@@ -505,15 +513,9 @@ Autoplay with sound may require a user gesture: the overlay offers **Play video*
 when blocked. It always fills the game window; native browser fullscreen is
 requested through a user-operated fullscreen control.
 
-Level JSON uses **schema version 2**, with typed terrain, start, trigger and enemy
-objects. Existing version 2 levels without enemies remain valid. Version 1
-imports and saved snapshots are normalized at the boundary:
-terrain and labels are retained, spawn becomes a start object, and the old summit
-becomes an ending zone above its original arrival line. That zone extends two
-maximum hammer reaches upward and is editable. Original files and snapshots
-are not rewritten. Saving/exporting produces version 2; old game versions
-cannot read new enemy kinds or trigger actions/markers (such as play-sound), but their original version 1 saves remain
-available for rollback.
+Level JSON uses **schema version 3**, with typed terrain, start, trigger and enemy
+objects. A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
+Files and saved snapshots in any other version are rejected, not converted.
 
 ### Updrafts
 
@@ -667,7 +669,8 @@ These performance and editor-free release requirements are recorded in
 Open **Workshop / Character** to choose the character's presentation. The
 default is **Mesh parts (3D)**: separate Three.js objects for the torso, head,
 and arm segments, driven by visual arm IK.
-All character types use the same Planck.js 2D physics and physical grip targets.
+All character types use the same Planck.js 2D physics, and their hands follow the
+profile's [grip placement](#hand-grips) on the physical tool.
 
 | Character type | What is rendered |
 | --- | --- |
@@ -677,11 +680,8 @@ All character types use the same Planck.js 2D physics and physical grip targets.
 
 The choice is stored as `characterRiggingType` in the character/sprite profile.
 Changing it retains the other artwork, but does not silently save it. Use the
-profile's **Save**, **Revert**, and JSON controls. Hybrid is no longer a
-character type. Older Hybrid layouts with sprite artwork migrate to pure 2D;
-those without artwork use Mesh parts. Incomplete sprite layouts no longer
-reveal 3D parts behind missing artwork. Original saved records are retained
-until Save.
+profile's **Save**, **Revert**, and JSON controls. Profiles use **schema version
+10**; profiles in any other version are rejected, not converted.
 
 Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend
@@ -750,15 +750,14 @@ Explicitly selected face, crown, and head owners move together; braid sockets
 follow before hair constraints run, without resetting the remaining particles.
 The editor's visual-only aim preview is separate from live gameplay state.
 See [directional controls and lifecycle](docs/sprites.md#directional-presentation).
-Older sprite layouts keep their fixed-sector behavior until opted in.
+Layouts without it keep fixed-sector facing.
 
 An **aim flipbook** gives one layer 2-128 evenly spaced images, for example a
 72-frame head turnaround with a new image every 5 degrees. The hammer aim picks
 the nearest frame, with optional hysteresis against flicker. Frames are decoded
 and uploaded at load, so changing frames allocates nothing. Choose the frame PNGs
 in Sprites; Save, JSON and `GAME_SPRITES` carry them. See
-[aim flipbooks](docs/sprites.md#aim-flipbooks). Profiles without flipbooks keep
-saving in the previous format.
+[aim flipbooks](docs/sprites.md#aim-flipbooks).
 
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
 Parts can be replaced independently: pot, torso/neck, character head, each upper
@@ -772,6 +771,22 @@ Imports are **cosmetic only**. They attach to the existing physics and visual-IK
 anchors; they do not replace colliders, change mass, or create new rigid bodies.
 Use the collision overlay to compare the visual with the actual contact shape.
 GLB import does not author colliders or retarget whole-character animations.
+
+### Hand grips
+
+**Workshop / Character / Hand grips** chooses where the hands hold the handle.
+**Fixed at the butt**, the default, holds it 0.04 m and 0.22 m from the butt, so the
+hands travel the whole slide and arms must reach as far as the handle slides.
+**Slide along the handle** centres the hands on the shoulders' midpoint projected
+onto the handle, 0.18 m apart, and lets the handle slide through them, as in
+Getting Over It. They stop short of the head and hold the butt once it passes the
+body, so the arm length a character needs is set by the maximum extension, not the
+handle length: with a 2.1 m handle and 0.55 m extension, every grip stays within
+about 1.03 m of the built-in avatar's shoulders at the default arm forward distance. The placement is continuous in aim
+and extension and costs the same every frame. It is saved as `grips` in the
+character profile, so each character keeps its own; Mesh parts, both avatars and the
+2D `left-grip` and `right-grip` targets share it. Grips are presentation: physics,
+input and the hammer models never read them.
 
 ### Body-relative arm IK
 
@@ -792,8 +807,8 @@ movements cannot cause an instantaneous elbow half-turn. Reachable poses preserv
 both limb lengths. Fully extended arms have no lateral bend; unreachable grips
 retain the existing visual forearm stretching rather than moving the hammer.
 
-Shoulders use the torso's transform. Both hands use fixed-distance grip offsets
-in the physical slider-to-head frame, including its depth. Procedural segments,
+Shoulders use the torso's transform. Both hands hold the physical slider-to-head
+frame, including its depth, where the profile's grip placement puts them. Procedural segments,
 straight replacements, GLB models, and tiled sprites share these same targets;
 artwork never changes hammer length or hand placement. The preview
 works with procedural and imported arm parts. Model alignment remains cosmetic;
@@ -840,8 +855,9 @@ For arm pieces, length should run along local Y; the shaft runs along local X.
 Use the rotation controls if the export uses a different orientation.
 
 A custom shaft is drawn as one straight mesh spanning the physical handle's
-endpoints. The underlying three-segment shaft and its mass/compliance remain in
-the physics simulation.
+endpoints: it is fitted to a 1.5 m artwork length and stretched to the physical
+handle, so it follows any handle length. The underlying three-segment shaft and
+its mass/compliance remain in the physics simulation.
 
 Files are saved locally in IndexedDB when imported, and saved appearances restore
 on reload; a Workshop built with `GAME_PROJECT` keeps them in the project's browser
@@ -866,15 +882,17 @@ There is no unit-test suite.
 
 The editor entry exposes the read-only `window.gettingOver.snapshot()` and
 `window.gettingOver.project({ x, y })` diagnostics for observing actual physics,
-motor effort, camera state, and world-to-screen coordinates. They do not expose
-commands that bypass the game's input or motor mechanism.
+motor effort, camera state, and world-to-screen coordinates. `snapshot().rig` is
+the rig's geometry: handle length, extension range, reach and segment length.
+They do not expose commands that bypass the game's input or motor mechanism.
 `window.gettingOver.appearance()` reports imported parts, saved/draft alignment,
 loading errors, current rendering anchors and world transforms, and the arm IK
 settings, selected profile, and save state.
 `window.gettingOver.level()` reports the immutable authored definition, current
 illusion/collider state, editor selection/mode, set piece placement state, and
 render/cache counts, including the imported avatar's joints and bone writes, the
-hammer model, shading and the active character profile.
+hammer model, shading, the active character profile, and its grip placement with
+both grips' distances from the butt.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state, and the independent run timer. Restart resets the attempt; physics time
 continues to be available separately as `snapshot().time`.

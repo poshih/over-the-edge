@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { inspectArmGeometry, verifyAppearance } from './verify-appearance.mjs';
 import { verifyCharacter } from './verify-character.mjs';
 import { verifyFlipbook } from './verify-flipbook.mjs';
+import { verifyGrips } from './verify-grips.mjs';
 import { verifyMobile } from './verify-mobile.mjs';
 import { verifyLevel } from './verify-level.mjs';
 import { verifySetPieces } from './verify-set-pieces.mjs';
@@ -150,7 +151,7 @@ try {
   await page.screenshot({ path: fileURLToPath(new URL('playground.png', artifacts)) });
 
   await practice('3');
-  const maxReach = (await snapshot()).maxReach;
+  const maxReach = (await snapshot()).rig.maxReach;
   const defaultCursor = (await settings()).cursor;
   const aiming = [];
   report.scenarios.aiming = aiming;
@@ -361,7 +362,7 @@ try {
   const saveTuning = page.getByRole('button', { name: 'Save game settings', exact: true });
   const loadTuning = page.getByRole('button', { name: 'Load game settings', exact: true });
   const savedRecords = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage)
-    .filter((key) => key.startsWith('over-the-edge:game-settings:snapshot:v2:'))
+    .filter((key) => key.startsWith('over-the-edge:game-settings:snapshot:v3:'))
     .map((key) => [key, localStorage.getItem(key)])));
   assert.equal(await loadTuning.isDisabled(), true, 'An empty history must not offer a load action.');
   await nameInput.fill('   ');
@@ -380,8 +381,8 @@ try {
   const firstSave = await pastTuning.inputValue();
   const originalRecord = (await savedRecords())[firstSave];
   assert.deepEqual(JSON.parse(originalRecord).settings.physics, savedTuning);
-  assert.equal(JSON.parse(originalRecord).schemaVersion, 2);
-  assert.equal(JSON.parse(originalRecord).settings.schemaVersion, 2);
+  assert.equal(JSON.parse(originalRecord).schemaVersion, 3);
+  assert.equal(JSON.parse(originalRecord).settings.schemaVersion, 3);
   assert.deepEqual(JSON.parse(originalRecord).settings, await page.evaluate(() => window.gettingOver.settings()));
   assert.equal(Object.hasOwn(JSON.parse(originalRecord).settings.physics, 'cursorRelaxation'), false);
   assert.equal(await page.getByRole('slider', { name: 'Cursor settling', exact: true }).count(), 0);
@@ -398,7 +399,8 @@ try {
   assert.equal(defaults.bodyProperties.slider.mass, 0.5);
   assert.equal(defaults.bodyProperties.slider.inertia, 0.035);
   const defaultSettings = await settings();
-  assert.deepEqual(defaultSettings.cursor, { maxRadius: defaults.maxReach });
+  assert.deepEqual(defaultSettings.cursor, { maxRadius: defaults.rig.maxReach });
+  assert.deepEqual(defaultSettings.rig, { handleLength: 1.5, maxExtension: 1.15 });
   await page.reload({ waitUntil: 'networkidle' });
   await ready();
   await loadTuning.click();
@@ -479,7 +481,7 @@ try {
     const original = Storage.prototype.setItem;
     window.restorePresetStorage = () => { Storage.prototype.setItem = original; delete window.restorePresetStorage; };
     Storage.prototype.setItem = function (key, value) {
-      if (key.startsWith('over-the-edge:game-settings:snapshot:v2:')) throw new DOMException('Storage quota probe', 'QuotaExceededError');
+      if (key.startsWith('over-the-edge:game-settings:snapshot:v3:')) throw new DOMException('Storage quota probe', 'QuotaExceededError');
       return original.call(this, key, value);
     };
   });
@@ -496,116 +498,6 @@ try {
   await saveTuning.click();
   assert.equal(Object.keys(await savedRecords()).length, 6);
 
-  const legacyTuning = { ...savedTuning, hingeTorque: initialTorque + 20 };
-  for (const key of ['shaftMass', 'hingeCarrierMass', 'sliderCarriageMass']) delete legacyTuning[key];
-  const legacyRecord = JSON.stringify({ schemaVersion: 1, tuning: { ...legacyTuning, cursorRelaxation: 8 } });
-  await page.evaluate((record) => {
-    localStorage.setItem('over-the-edge:tuning:v1', record);
-    localStorage.removeItem('over-the-edge:tuning:v2');
-  }, legacyRecord);
-  await page.reload({ waitUntil: 'networkidle' });
-  await ready();
-  await pastTuning.selectOption('over-the-edge:tuning:v1');
-  await loadTuning.click();
-  const migrated = await snapshot();
-  assert.deepEqual(migrated.tuning, {
-    ...legacyTuning, shaftMass: 0.66, hingeCarrierMass: 0.5, sliderCarriageMass: 0.5,
-  });
-  assertMasses(migrated);
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v1')), legacyRecord);
-  await loadTuning.click();
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), null,
-    'Reading a legacy save must not rewrite storage.');
-  await nameInput.fill('Imported v1');
-  await saveTuning.click();
-  const migratedV1Save = JSON.parse((await savedRecords())[await pastTuning.inputValue()]);
-  assert.equal(migratedV1Save.schemaVersion, 2);
-  assert.equal(migratedV1Save.settings.schemaVersion, 2);
-  assert.deepEqual(migratedV1Save.settings.physics, migrated.tuning);
-  assert.deepEqual(migratedV1Save.settings.cursor, defaultSettings.cursor);
-  const v2Tuning = { ...savedTuning, gripFriction: 1.2 };
-  const v2Record = JSON.stringify({ schemaVersion: 2, tuning: { ...v2Tuning, cursorRelaxation: 8 } });
-  await page.evaluate((record) => localStorage.setItem('over-the-edge:tuning:v2', record), v2Record);
-  await page.reload({ waitUntil: 'networkidle' });
-  await ready();
-  assert.equal(await pastTuning.locator('option[value="over-the-edge:tuning:v1"]').count(), 0);
-  await pastTuning.selectOption('over-the-edge:tuning:v2');
-  await loadTuning.click();
-  assert.deepEqual((await snapshot()).tuning, v2Tuning);
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), v2Record);
-  const v3Key = `over-the-edge:tuning:snapshot:v3:${'c'.repeat(32)}`;
-  const v3Tuning = { ...savedTuning, mouseSensitivity: 1.35 };
-  const v3Record = JSON.stringify({
-    schemaVersion: 3, name: 'Earlier named tuning', savedAt: Date.now(),
-    tuning: { ...v3Tuning, cursorRelaxation: 12 },
-  });
-  await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: v3Key, record: v3Record });
-  await page.reload({ waitUntil: 'networkidle' });
-  await ready();
-  await pastTuning.selectOption(v3Key);
-  await loadTuning.click();
-  assert.deepEqual((await snapshot()).tuning, v3Tuning);
-  assert.equal(await page.evaluate(key => localStorage.getItem(key), v3Key), v3Record);
-  await nameInput.fill('Imported v3');
-  await saveTuning.click();
-  const migratedV3 = JSON.parse((await savedRecords())[await pastTuning.inputValue()]);
-  assert.equal(migratedV3.schemaVersion, 2);
-  assert.equal(migratedV3.settings.schemaVersion, 2);
-  assert.deepEqual(migratedV3.settings.physics, v3Tuning);
-  assert.deepEqual(migratedV3.settings.cursor, defaultSettings.cursor);
-  assert.equal(await page.evaluate(key => localStorage.getItem(key), v3Key), v3Record);
-  const v4Key = `over-the-edge:tuning:snapshot:v4:${'d'.repeat(32)}`;
-  const v4Tuning = { ...savedTuning, gripFriction: 1.4 };
-  const v4Record = JSON.stringify({
-    schemaVersion: 4, name: 'Previous fixed target tuning', savedAt: Date.now(), tuning: v4Tuning,
-  });
-  await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: v4Key, record: v4Record });
-  await page.reload({ waitUntil: 'networkidle' });
-  await ready();
-  await pastTuning.selectOption(v4Key);
-  assert.ok((await pastTuning.locator('option:checked').textContent()).includes('(physics only)'));
-  await loadTuning.click();
-  assert.deepEqual((await snapshot()).tuning, v4Tuning);
-  assert.deepEqual((await settings()).cursor, defaultSettings.cursor);
-  assert.equal(await page.evaluate(key => localStorage.getItem(key), v4Key), v4Record);
-  const v1ProfileKey = `over-the-edge:game-settings:snapshot:v1:${'e'.repeat(32)}`;
-  const v1ProfileSettings = {
-    schemaVersion: 1,
-    physics: { ...savedTuning, mouseSensitivity: 1.4 },
-    cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
-  };
-  const v1ProfileRecord = JSON.stringify({
-    schemaVersion: 1, name: 'Earlier full settings', savedAt: Date.now(), settings: v1ProfileSettings,
-  });
-  await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: v1ProfileKey, record: v1ProfileRecord });
-  await page.reload({ waitUntil: 'networkidle' });
-  await ready();
-  await pastTuning.selectOption(v1ProfileKey);
-  assert.ok((await pastTuning.locator('option:checked').textContent()).includes('(physics only)'));
-  await loadTuning.click();
-  const migratedFullProfile = await settings();
-  assert.deepEqual((await snapshot()).tuning, v1ProfileSettings.physics);
-  assert.deepEqual(migratedFullProfile.cursor, defaultSettings.cursor);
-  assert.equal(await page.evaluate(key => localStorage.getItem(key), v1ProfileKey), v1ProfileRecord);
-  await nameInput.fill('Imported v1 full profile');
-  await saveTuning.click();
-  const importedFullProfile = JSON.parse((await savedRecords())[await pastTuning.inputValue()]);
-  assert.equal(importedFullProfile.schemaVersion, 2);
-  assert.equal(importedFullProfile.settings.schemaVersion, 2);
-  assert.deepEqual(importedFullProfile.settings.physics, v1ProfileSettings.physics);
-  assert.deepEqual(importedFullProfile.settings.cursor, defaultSettings.cursor);
-  assert.equal(await page.evaluate(key => localStorage.getItem(key), v1ProfileKey), v1ProfileRecord);
-  await pastTuning.selectOption('over-the-edge:tuning:v2');
-  await loadTuning.click();
-  const beforeInvalidLegacy = (await snapshot()).tuning;
-  await page.evaluate(() => localStorage.setItem('over-the-edge:tuning:v2', '{broken'));
-  await loadTuning.click();
-  assert.deepEqual((await snapshot()).tuning, beforeInvalidLegacy, 'An invalid v2 record must never cause v1 to be loaded.');
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), '{broken');
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v1')), legacyRecord);
-  assert.ok(await page.getByRole('status').filter({ hasText: 'Saved tuning is invalid:' }).isVisible(),
-    'Invalid profiles must produce a visible explanation.');
-  await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
   await pastTuning.selectOption(firstSave);
   const validTuning = (await snapshot()).tuning;
   await page.evaluate((key) => localStorage.setItem(key, '{broken'), firstSave);
@@ -620,15 +512,10 @@ try {
   await nameInput.fill('After corrupt record');
   await saveTuning.click();
   assert.equal((await savedRecords())[firstSave], '{broken', 'Saving must never replace an unreadable record.');
-  assert.equal(await page.evaluate(() => localStorage.getItem('over-the-edge:tuning:v2')), '{broken');
   await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
-  await page.evaluate(() => {
-    localStorage.removeItem('over-the-edge:tuning:v1');
-    localStorage.removeItem('over-the-edge:tuning:v2');
-  });
   report.scenarios.persistence = {
     savedTorque, snapshots: Object.keys(await savedRecords()).length, repeatedNamesPreserved: true,
-    manualLoad: true, crossTabSafe: true, legacyRetained: true, invalidRecordRetained: true, writeFailureSafe: true,
+    manualLoad: true, crossTabSafe: true, invalidRecordRetained: true, writeFailureSafe: true,
   };
 
   await focusGame();
@@ -650,6 +537,7 @@ try {
   report.scenarios.triggers = await verifyTriggers(browser, address, artifacts);
   report.scenarios.flipbook = await verifyFlipbook(browser, address, artifacts);
   report.scenarios.character = await verifyCharacter(browser, address, artifacts);
+  report.scenarios.grips = await verifyGrips(browser, address, artifacts);
   report.scenarios.workshop = await verifyWorkshop(browser, address, artifacts);
   await page.setViewportSize({ width: 760, height: 600 });
   await page.waitForTimeout(300);

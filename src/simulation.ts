@@ -7,6 +7,8 @@ import { isEnemyObject, isTerrainObject, levelFloor, levelSpawn } from './level'
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
+import { rigGeometry, sameRig } from './rig';
+import type { RigGeometry } from './rig';
 import type { LaunchSettings } from './trigger-events';
 import { angleDifference, clampLength } from './math';
 import { TerrainWorld } from './terrain-world';
@@ -26,9 +28,14 @@ export interface PhysicsFrame {
   parts: PartPose[];
   cursor: Point;
   enemies: readonly EnemyPose[];
+  // The geometry of the rig these parts belong to; replaced only when the rig settings change.
+  rig: RigGeometry;
 }
 
-type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'cursor'> & { cursorOffset: Point };
+// Settings apply to the running player, except a new rig, which rebuilds it and restarts the run.
+export type SettingsEffect = 'applied' | 'restarted';
+
+type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'cursor' | 'rig'> & { cursorOffset: Point };
 
 const IDLE_COMMAND: MotorCommand = { angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0 };
 // Falling this far below the lowest terrain or launch zone restarts the attempt.
@@ -43,6 +50,8 @@ export class Simulation {
   private readonly enemies: EnemyWorld;
   private level: LevelDefinition;
   private settings: GameSettings;
+  // Where the current run started; a rebuilt rig restarts from here.
+  private spawn: Readonly<PlayerSpawn>;
   private cursorOffset: Point;
   private previous: PlayerFrame;
   private current: PlayerFrame;
@@ -60,11 +69,12 @@ export class Simulation {
   constructor(settings: Readonly<GameSettings>, level: LevelDefinition) {
     this.settings = validateGameSettings(settings);
     this.level = level;
+    this.spawn = levelSpawn(level);
     this.voidY = this.outOfBoundsY(level);
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot);
-    this.rig = createPlayer(this.world, levelSpawn(level), this.settings.physics);
+    this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig));
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
       getHead: () => this.rig.head,
@@ -79,27 +89,35 @@ export class Simulation {
 
   gameSettings(): GameSettings { return this.settings; }
 
-  setSettings(settings: Readonly<GameSettings>): void {
+  get rigGeometry(): RigGeometry { return this.rig.geometry; }
+
+  // A rig is never changed in place: new rig settings rebuild the player and restart the run.
+  setSettings(settings: Readonly<GameSettings>): SettingsEffect {
     this.ensureLive();
     const next = validateGameSettings(settings);
-    const physicsChanged = TUNING_FIELDS.some((field) => next.physics[field.key] !== this.settings.physics[field.key]);
-    const radiusChanged = next.cursor.maxRadius !== this.settings.cursor.maxRadius;
+    const previous = this.settings;
     this.settings = next;
-    if (radiusChanged) {
+    if (!sameRig(next.rig, previous.rig)) {
+      this.reset(this.spawn);
+      return 'restarted';
+    }
+    if (next.cursor.maxRadius !== previous.cursor.maxRadius) {
       this.cursorOffset = clampLength(this.cursorOffset, next.cursor.maxRadius);
       this.previous = { ...this.previous, cursorOffset: clampLength(this.previous.cursorOffset, next.cursor.maxRadius) };
       this.current = { ...this.current, cursorOffset: { ...this.cursorOffset } };
     }
-    if (physicsChanged) {
+    if (TUNING_FIELDS.some((field) => next.physics[field.key] !== previous.physics[field.key])) {
       tunePlayer(this.rig, next.physics);
       // Existing contacts cache mixed material values independently of fixtures.
       for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) contact.resetFriction();
     }
+    return 'applied';
   }
 
   reset(spawn: Readonly<PlayerSpawn> = levelSpawn(this.level)): void {
     this.ensureLive();
-    this.resetPlayer(spawn);
+    this.spawn = spawn;
+    this.resetPlayer();
     this.restoreLevelObjects();
   }
 
@@ -107,7 +125,10 @@ export class Simulation {
     this.ensureLive();
     this.level = change.level;
     this.voidY = this.outOfBoundsY(change.level);
-    if (change.kind === 'replace') this.resetPlayer(levelSpawn(change.level));
+    if (change.kind === 'replace') {
+      this.spawn = levelSpawn(change.level);
+      this.resetPlayer();
+    }
     this.terrain.apply(change);
     this.enemies.apply(change, this.elapsed);
   }
@@ -225,6 +246,7 @@ export class Simulation {
         y: this.previous.cursorOffset.y + (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha,
       }),
       enemies: this.enemies.frame(alpha),
+      rig: this.rig.geometry,
     };
   }
 
@@ -262,7 +284,7 @@ export class Simulation {
       potAngle: this.rig.pot.getAngle(),
       extension: this.rig.slider.getJointTranslation(),
       headContacts: this.headContactCount(),
-      maxReach: RIG.maxReach,
+      rig: this.rig.geometry,
       hingeTorque: this.rig.hinge.getMotorTorque(1 / PHYSICS.dt),
       sliderForce: this.rig.slider.getMotorForce(1 / PHYSICS.dt),
       command: { ...this.command },
@@ -308,9 +330,10 @@ export class Simulation {
     };
   }
 
-  private resetPlayer(spawn: PlayerSpawn): void {
+  private resetPlayer(): void {
     destroyPlayer(this.world, this.rig);
-    this.rig = createPlayer(this.world, spawn, this.settings.physics);
+    const geometry = sameRig(this.rig.geometry, this.settings.rig) ? this.rig.geometry : rigGeometry(this.settings.rig);
+    this.rig = createPlayer(this.world, this.spawn, this.settings.physics, geometry);
     this.supported = false;
     this.headTouching = false;
     this.impactSpeed = 0;

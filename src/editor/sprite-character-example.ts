@@ -1,9 +1,10 @@
 import { ARM_GEOMETRY } from '../arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, PLAYER_DEPTH } from '../character-depth';
-import { ARM_SIDES } from '../character';
+import { ARM_SIDES, SHAFT_ARTWORK_LENGTH } from '../character';
 import type { ArmSide, VisualPartId } from '../character';
 import { RIG } from '../config';
-import { DEFAULT_SPRITE_RIGGING, SpriteError, validateSpriteDocument } from '../sprite-data';
+import { DEFAULT_GRIP_STRATEGY } from '../grips';
+import { DEFAULT_SPRITE_RIGGING, SPRITE_SCHEMA_VERSION, SpriteError, validateSpriteDocument } from '../sprite-data';
 import type { SpriteDocument, SpriteImage, SpriteLayer } from '../sprite-data';
 import { FACING_DIRECTIONS } from '../skeleton-data';
 import type { BoneDefinition, FacingDirection, SkeletonIk } from '../skeleton-data';
@@ -387,7 +388,7 @@ export function createSpriteCharacterExample(): SpriteDocument {
   layers.push(
     layer({
       anchor: 'hammer-shaft', name: 'Paper Climber / shaft', image: ARTWORK.shaft.id,
-      width: RIG.handleLength, height: RIG.handleHalfWidth * 2,
+      width: SHAFT_ARTWORK_LENGTH, height: RIG.handleHalfWidth * 2,
       offset: { x: 0, y: 0, z: TOOL_DEPTH_OFFSET.shaft },
     }),
     layer({
@@ -396,8 +397,8 @@ export function createSpriteCharacterExample(): SpriteDocument {
     }),
   );
   return validateSpriteDocument({
-    schemaVersion: 6, characterRiggingType: 'sprite-2d', armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-    images, layers, presentation: null,
+    schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType: 'sprite-2d', armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+    grips: DEFAULT_GRIP_STRATEGY, images, layers, presentation: null,
     skeleton: { anchor: 'torso', bones, poses: [], clips: [], animation: null, ik, hair: [], colliders: [] },
   });
 }

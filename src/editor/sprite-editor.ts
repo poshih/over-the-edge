@@ -8,6 +8,7 @@ import type { RangeControl } from './range-control';
 import { SpriteEditorState } from './sprite-state';
 import type { SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
+import type { RigGeometry } from '../rig';
 import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
@@ -37,6 +38,8 @@ export interface SpriteEditorOptions {
   viewport: DirectionalViewport;
   onNotice: (message: string, kind: 'info' | 'error') => void;
   describeModel?: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
+  // The game's current hammer rig; setHammerRig follows later changes.
+  hammerRig: RigGeometry;
   // False when the page opens a project instead: the saved profile is then only the Revert target.
   applySavedProfile?: boolean;
 }
@@ -49,6 +52,7 @@ export interface SpriteEditorHandle {
   // The validated draft, or null after reporting why it cannot be saved.
   validatedDocument: () => SpriteDocument | null;
   setActive: (active: boolean) => void;
+  setHammerRig: (rig: RigGeometry) => void;
   updatePreview: () => void;
   leavePreview: () => void;
   dispose: () => void;
@@ -443,7 +447,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
 
   options.mount.append(root);
   const characterEditor = createCharacterEditor({
-    mount: options.characterMount, state, actions: documentActions,
+    mount: options.characterMount, state, hammerRig: options.hammerRig, actions: documentActions,
     onNotice: options.onNotice, signal: events.signal,
   });
   const skeletonEditor = createSkeletonEditor({
@@ -468,6 +472,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       directionalEditor.setActive(value);
       updateFlipbookFrame();
     },
+    setHammerRig: (rig) => characterEditor.setHammerRig(rig),
     updatePreview: () => {
       directionalEditor.updatePreview();
       updateFlipbookFrame();

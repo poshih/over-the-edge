@@ -26,7 +26,7 @@ import {
 } from '../src/project';
 import type { ProjectContent, ProjectManifest } from '../src/project';
 import { mergePatch } from '../src/project-fields';
-import { EMPTY_SPRITES, SPRITE_FILE_BYTES, spriteSchemaVersion } from '../src/sprite-data';
+import { EMPTY_SPRITES, SPRITE_FILE_BYTES } from '../src/sprite-data';
 import { validateTheme } from '../src/theme';
 import { checkAppearanceModel } from '../src/appearance-model';
 import { apiManual } from './api-manual';
@@ -584,11 +584,7 @@ export function createStudioHandler(config: StudioConfig) {
       route('PATCH', path, async (context) => {
         const patch = await readJson(context.request, spec.limit);
         await change(context, [name], async (manifest) => {
-          let value = mergePatch(await spec.read(context.params.id!, manifest) ?? (name.startsWith('characters/') ? EMPTY_SPRITES : null), patch);
-          if (name.startsWith('characters/') && typeof value === 'object' && value !== null && Array.isArray(Reflect.get(value, 'layers'))) {
-            // Profiles record the schema their content needs; recompute it so a patch cannot leave it stale.
-            value = { ...value, schemaVersion: spriteSchemaVersion(Reflect.get(value, 'layers'), value) };
-          }
+          const value = mergePatch(await spec.read(context.params.id!, manifest) ?? (name.startsWith('characters/') ? EMPTY_SPRITES : null), patch);
           return spec.write(context.params.id!, manifest, value);
         });
       });

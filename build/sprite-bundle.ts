@@ -65,7 +65,7 @@ export function spriteBundle(options: {
         let document = documents.get(path);
         if (document !== undefined) return document;
         if (statSync(path).size > SPRITE_FILE_BYTES) throw new Error(`${variable} exceeds the profile size limit.`);
-        document = parseSpriteDocument(readFileSync(path, 'utf8'), { onMigration: message => this.warn(message) });
+        document = parseSpriteDocument(readFileSync(path, 'utf8'));
         validateSpriteAnchors(document, options.anchors, options.targets);
         validateModels(document, variable);
         documents.set(path, document);
@@ -95,7 +95,7 @@ export function spriteBundle(options: {
         const source = bytes === null ? JSON.stringify(image.source) : asset(bytes, 'sprite.png');
         return `{id:${JSON.stringify(image.id)},name:${JSON.stringify(image.name)},source:${source}}`;
       });
-      let code = `export default {schemaVersion:${document.schemaVersion},characterRiggingType:${JSON.stringify(document.characterRiggingType)},armForwardDistance:${document.armForwardDistance},images:[${images.join(',')}],layers:${JSON.stringify(document.layers)},skeleton:${JSON.stringify(document.skeleton)},presentation:${JSON.stringify(document.presentation)}`;
+      let code = `export default {schemaVersion:${document.schemaVersion},characterRiggingType:${JSON.stringify(document.characterRiggingType)},armForwardDistance:${document.armForwardDistance},grips:${JSON.stringify(document.grips)},images:[${images.join(',')}],layers:${JSON.stringify(document.layers)},skeleton:${JSON.stringify(document.skeleton)},presentation:${JSON.stringify(document.presentation)}`;
       if (document.models !== undefined) {
         // Each distinct GLB becomes one hashed asset rather than base64 inside executable JavaScript.
         const models = document.models.map(model => {

@@ -513,7 +513,8 @@ body[data-input-mode="touch"] .workshop-search-key {
   min-height: 48px;
 }
 
-.game-ui .cursor-target-help {
+.game-ui .cursor-target-help,
+.game-ui .rig-settings-help {
   margin: 8px 0 14px;
   color: var(--muted);
   font-size: 11px;

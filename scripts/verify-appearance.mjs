@@ -126,8 +126,9 @@ export async function inspectArmGeometry(page) {
     }
     return true;
   });
-  const { state, visuals } = await page.evaluate(() => ({
+  const { state, visuals, grips } = await page.evaluate(() => ({
     state: window.gettingOver.snapshot(), visuals: window.gettingOver.appearance(),
+    grips: window.gettingOver.level().rendering.grips,
   }));
   assert.equal(state.paused, true, 'Compare physics and rendered anchors on a paused frame.');
   const point = (value) => new Vector3(value.x, value.y, value.z);
@@ -141,7 +142,7 @@ export async function inspectArmGeometry(page) {
     ? shaftBase.angle : Math.atan2(shaftHead.y - shaftBase.y, shaftHead.x - shaftBase.x);
   const shaftDirection = new Vector3(Math.cos(shaftAngle), Math.sin(shaftAngle), 0);
   const result = {};
-  for (const [side, shoulderX, shoulderZ, gripX] of [['left', -0.17, -0.09, 0.04], ['right', 0.17, 0.09, 0.22]]) {
+  for (const [side, shoulderX, shoulderZ, buttGrip] of [['left', -0.17, -0.09, 0.04], ['right', 0.17, 0.09, 0.22]]) {
     const upper = visuals.parts.find((part) => part.id === `${side}-upper-arm`);
     const lower = visuals.parts.find((part) => part.id === `${side}-forearm`);
     const elbow = point(visuals.parts.find((part) => part.id === `${side}-elbow`).anchor);
@@ -157,8 +158,11 @@ export async function inspectArmGeometry(page) {
     assert.ok(Math.abs(shoulder.distanceTo(elbow) - 0.82) < 1e-8);
     const distance = shoulder.distanceTo(hand);
     if (distance <= 1.64) assert.ok(Math.abs(elbow.distanceTo(hand) - 0.82) < 1e-8, 'Reachable arms must keep both bone lengths.');
+    if (grips.strategy === 'fixed') {
+      assert.equal(grips[side], Math.min(buttGrip, shaftLength), `The fixed ${side} grip must stay at the butt.`);
+    }
     const expectedHand = new Vector3(shaftBase.x, shaftBase.y, shaftDepth)
-      .addScaledVector(shaftDirection, Math.min(gripX, shaftLength));
+      .addScaledVector(shaftDirection, grips[side]);
     assert.ok(hand.distanceTo(expectedHand) < 1e-8, `${side} hand must grip the physical shaft independently of artwork.`);
     const handDirection = new Vector3(handPart.transform[0], handPart.transform[1], handPart.transform[2]).normalize();
     assert.ok(handDirection.distanceTo(shaftDirection) < 1e-8, 'Hand orientation must follow the shaft.');
@@ -481,7 +485,7 @@ export async function verifyAppearance(page, artifacts) {
     await page.keyboard.press('p');
     const canvas = await page.locator('#game').boundingBox();
     assert.ok(canvas);
-    const nextAim = { x: moved.maxReach * 0.5, y: moved.maxReach * 0.4 };
+    const nextAim = { x: moved.rig.maxReach * 0.5, y: moved.rig.maxReach * 0.4 };
     const pixelsPerMeter = moved.camera.height / moved.camera.worldHeight / moved.tuning.mouseSensitivity;
     const pointer = { x: canvas.x + canvas.width * 0.48, y: canvas.y + canvas.height * 0.4 };
     await page.mouse.move(pointer.x, pointer.y);

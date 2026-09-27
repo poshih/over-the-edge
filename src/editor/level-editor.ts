@@ -1,4 +1,3 @@
-import { RIG } from '../config';
 import type { Point } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import { ENEMY_BEHAVIOR, ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
@@ -10,6 +9,7 @@ import {
 import type {
   EnemyObject, LevelDefinition, LevelLabel, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion,
 } from '../level';
+import { MAX_RIG_REACH } from '../rig';
 import { ENDING_EVENTS, UPDRAFT_EVENTS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 import { element } from '../dom';
@@ -253,9 +253,11 @@ export function createLevelEditor(options: LevelEditorOptions) {
         </div>
         <div class="level-fields-start">
           <div class="level-field-grid">
-            ${numericField('extension', 'Hammer extension', RIG.minExtension, RIG.maxExtension, 0.01)}
+            ${numericField('reach', 'Hammer reach', 0, MAX_RIG_REACH, 0.01)}
           </div>
           <p class="level-help">Position is the starting pot center. Rotation is the starting hammer angle.
+            Reach is the head's distance from the shoulder hinge, so the start pose is the same whatever the
+            game's handle length; a hammer that cannot reach that far starts fully extended.
             A level always has exactly one start; moving it here relocates it instead of creating another. Start
             is only the spawn pose — it cannot carry events. For an intro popup or video, place a normal trigger
             around the start position instead.</p>
@@ -545,7 +547,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       element(root, '.level-circle-help').hidden = terrain.shape.type !== 'circle';
     } else if (start !== null) {
       input('angle').value = String(Number((start.angle * DEGREES).toFixed(4)));
-      input('extension').value = String(Number(start.extension.toFixed(4)));
+      input('reach').value = String(Number(start.reach.toFixed(4)));
     } else if (enemy !== null) {
       const spec = ENEMY_SPECS[enemy.species];
       select('enemy-facing').value = enemy.facing;
@@ -1107,12 +1109,12 @@ Save a named snapshot or export first if you want to keep them. Continue without
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, illusion: input('illusion').checked }));
   }, listen);
-  input('extension').addEventListener('change', () => {
+  input('reach').addEventListener('change', () => {
     if (!active) return;
     const object = asStart(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, extension: input('extension').valueAsNumber }));
+    applyEdit(() => commitOrPreview({ ...object, reach: input('reach').valueAsNumber }));
   }, listen);
   for (const name of ['patrolDistance', 'speed'] as const) {
     input(`enemy-${name}`).addEventListener('change', () => {
@@ -1248,7 +1250,7 @@ This restores the default ground and start location, removes all other objects a
     const start = DEFAULT_LEVEL.objects.find((object) => object.kind === 'start');
     if (ground === undefined || start === undefined) throw new Error('The starter level needs its authored ground and start.');
     resetSelection();
-    level.replace({ schemaVersion: 2, labels: [], objects: [ground, start] });
+    level.replace({ schemaVersion: 3, labels: [], objects: [ground, start] });
     fitCourse();
     onNotice('New level started. Add terrain and place an ending trigger, then save or export before leaving.', 'info');
   });

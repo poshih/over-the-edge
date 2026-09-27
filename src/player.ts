@@ -5,6 +5,7 @@ import type { Body, Joint, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point, Tuning } from './config';
 import { angleDifference, clamp, clampLength, transformPoint } from './math';
+import type { RigGeometry } from './rig';
 import type { LaunchSettings } from './trigger-events';
 
 export type PartKind = 'root' | 'pot' | 'carrier' | 'slider' | 'handle' | 'head';
@@ -17,6 +18,7 @@ export interface PlayerPart {
 }
 
 export interface PlayerRig {
+  readonly geometry: RigGeometry;
   parts: PlayerPart[];
   root: Body;
   pot: Body;
@@ -96,7 +98,7 @@ function setMass(body: Body, mass: number): void {
   body.setMassData(data);
 }
 
-export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<Tuning>): PlayerRig {
+export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<Tuning>, geometry: RigGeometry): PlayerRig {
   const parts: PlayerPart[] = [];
   const movingBody = (id: string, kind: PartKind, position: Point, angle: number, vertices: readonly Point[]): Body => {
     const body = world.createDynamicBody({
@@ -145,7 +147,8 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
 
   const alongHandle = (distance: number): Point =>
     transformPoint({ x: distance, y: 0 }, shoulder, spawn.angle);
-  const sliderBody = movingBody('slider', 'slider', alongHandle(spawn.extension), spawn.angle, []);
+  const extension = clamp(spawn.reach, 0, geometry.maxReach) - geometry.handleLength;
+  const sliderBody = movingBody('slider', 'slider', alongHandle(extension), spawn.angle, []);
   const slider = attach(world, new PrismaticJoint({
     bodyA: carrier,
     bodyB: sliderBody,
@@ -154,8 +157,8 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
     localAxisA: new Vec2(1, 0),
     referenceAngle: 0,
     enableLimit: true,
-    lowerTranslation: RIG.minExtension,
-    upperTranslation: RIG.maxExtension,
+    lowerTranslation: geometry.minExtension,
+    upperTranslation: geometry.maxExtension,
     enableMotor: true,
     maxMotorForce: tuning.sliderForce,
     collideConnected: false,
@@ -164,14 +167,14 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
   const welds: WeldJoint[] = [];
   let previous = sliderBody;
   for (let index = 0; index < RIG.handleSegments; index++) {
-    const half = RIG.segmentLength / 2;
+    const half = geometry.segmentLength / 2;
     const vertices = [
       { x: -half, y: -RIG.handleHalfWidth }, { x: half, y: -RIG.handleHalfWidth },
       { x: half, y: RIG.handleHalfWidth }, { x: -half, y: RIG.handleHalfWidth },
     ];
     const segment = movingBody(
       `handle-${index}`, 'handle',
-      alongHandle(spawn.extension + (index + 0.5) * RIG.segmentLength),
+      alongHandle(extension + (index + 0.5) * geometry.segmentLength),
       spawn.angle, vertices,
     );
     segment.createFixture(new Box(half, RIG.handleHalfWidth), {
@@ -193,7 +196,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
     previous = segment;
   }
   const head = movingBody(
-    'head', 'head', alongHandle(spawn.extension + RIG.handleLength),
+    'head', 'head', alongHandle(extension + geometry.handleLength),
     spawn.angle, RIG.headVertices,
   );
   head.createFixture(new Polygon(RIG.headVertices.map((point) => new Vec2(point.x, point.y))), {
@@ -206,14 +209,14 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
   welds.push(attach(world, new WeldJoint({
     bodyA: previous,
     bodyB: head,
-    localAnchorA: new Vec2(RIG.segmentLength / 2, 0),
+    localAnchorA: new Vec2(geometry.segmentLength / 2, 0),
     localAnchorB: new Vec2(),
     referenceAngle: 0,
     frequencyHz: tuning.handleFrequency,
     dampingRatio: tuning.handleDamping,
     collideConnected: false,
   })));
-  const rig: PlayerRig = { parts, root, pot, carrier, sliderBody, head, hinge, slider, welds };
+  const rig: PlayerRig = { geometry, parts, root, pot, carrier, sliderBody, head, hinge, slider, welds };
   tunePlayer(rig, tuning);
   return rig;
 }
@@ -257,11 +260,12 @@ export function drivePlayer(rig: PlayerRig, cursor: Readonly<Point>, tuning: Rea
   const angularError = distance <= PHYSICS.aimEpsilon
     ? 0 : angleDifference(Math.atan2(targetY, targetX), axisAngle);
   // Targets are hinge-relative and the radius is capped at the reach; clamp so any target maps into the workspace.
-  const reachable = clampLength({ x: targetX, y: targetY }, RIG.maxReach);
+  const { maxReach, handleLength } = rig.geometry;
+  const reachable = clampLength({ x: targetX, y: targetY }, maxReach);
   const projectedReach = clamp(
-    reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), 0, RIG.maxReach,
+    reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), 0, maxReach,
   );
-  const extensionError = projectedReach - RIG.handleLength - rig.slider.getJointTranslation();
+  const extensionError = projectedReach - handleLength - rig.slider.getJointTranslation();
   const angularSpeed = clamp(
     tuning.angleGain * angularError - tuning.angleDamping * rig.hinge.getJointSpeed(),
     -tuning.angularSpeed, tuning.angularSpeed,

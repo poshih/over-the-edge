@@ -9,8 +9,9 @@ Revert, JSON export/import and `GAME_SPRITES` carry it.
 
 A typical 3D character is three models: a skinned body, the pot and the hammer.
 Physics never depends on these models. Colliders, masses, hammer length, reach,
-grips, contacts, saves and level state are identical in every character type and
-with every model.
+contacts, saves and level state are identical in every character type and with
+every model. The hands hold the handle where the profile's
+[grip placement](../README.md#hand-grips) puts them.
 
 ## Skinned avatar
 
@@ -73,16 +74,18 @@ unmapped joint and what it follows.
 The mapped joints receive exactly the frames that drive the built-in avatar:
 
 - **Arms.** The shared two-bone IK runs with the model's own shoulders and its
-  bind-pose upper-arm and forearm lengths. It uses the same grip targets on the
-  physical shaft, the same body-relative elbow hints (Workshop / Appearance), the
+  bind-pose upper-arm and forearm lengths. It uses the same grips on the physical
+  shaft, placed by the profile's grip placement, the same body-relative elbow hints (Workshop / Appearance), the
   same bend-rate limit and the same arm forward distance. Hands take the
   built-in avatar's grip orientation: along the shaft, facing the camera. In the
   bind pose the virtual shaft runs along each forearm.
 - **Unreachable grips.** As with the built-in avatar, the arm straightens toward
   the grip, the upper arm keeps its length, the forearm stretches along its
   axis, and the hand stays exactly on the grip. The hammer never moves to suit
-  an arm. A realistically proportioned humanoid reaches the grips less often
-  than the built-in avatar's long arms, so expect more stretching.
+  an arm. Give a realistically proportioned humanoid **sliding** grips: its arms
+  then only need to reach about the game's maximum extension, and a longer handle
+  with a shorter extension keeps the reach. With fixed grips the hands follow the
+  butt through the whole slide, so expect stretching.
 - **Head.** Gaze rotates the head joint about its own bind position, with the
   same smoothing and yaw/pitch limits as the built-in avatar.
 
@@ -127,9 +130,11 @@ including 2D, and in the hammer's foreground pass. **Use two-part hammer**
 restores the default.
 
 Model it in metres, with its origin at the butt of the handle and the handle
-along +X. The physical head sits at x = 1.5 m. Its collision block spans
-x = 1.4 to 1.6 m and y = -0.29 to 0.29 m; toggle the collision overlay (**D**) to
-compare. The grips are 0.04 m and 0.22 m along the handle. The hammer must be a
+along +X. The physical head sits at x = the game's handle length (1.5 m by default;
+the Character tab shows the open game's value). Its collision block spans 0.1 m
+either side of that along x, and y = -0.29 to 0.29 m; toggle the collision overlay
+(**D**) to compare. A model fits one handle length, so rebuild it when a game changes
+its handle. The grips never move the model. The hammer must be a
 static mesh; its bounds must reach at least 0.1 m along +X, extend further along
 +X than along -X, and stay within 4 m of the origin. In 2D, hammer sprite layers
 still draw if the profile has them.
@@ -195,17 +200,15 @@ and shading does no per-frame work.
 
 ## Profile format
 
-These fields are written only while present. Sprite schema 8 adds `models`,
-`avatar`, `hammer` and `shading`; schema 9 adds `pot`. A profile with a pot model
-saves as schema 9, one with other models or non-default shading as schema 8, and
-any other profile keeps saving as schema 6 (or 7 with aim flipbooks), byte for
-byte.
+Profiles use **schema version 10**. Every profile has `grips`, `"fixed"` or
+`"sliding"`; the model and shading fields below are present only while used.
 
 ```json
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
+  "grips": "sliding",
   "images": [], "layers": [], "skeleton": null, "presentation": null,
   "models": [
     { "id": "avatar", "name": "Hero", "source": "data:model/gltf-binary;base64,..." },
@@ -239,10 +242,7 @@ byte.
 - Models have their own budget, so they do not count against the 24 MiB sprite
   budget. Each model can be up to 20 MiB, and a profile file up to about 104 MiB.
 
-A schema 1-7 document with any of these fields is rejected, as is a schema 1-8
-document with `pot`. Releases from before schema 8 reject schema-8 profiles, and
-releases from before schema 9 reject profiles with a pot model. Keep an older
-export for rollback.
+Profiles in any other schema version are rejected, not converted.
 
 ## Releases with two characters
 
@@ -313,9 +313,13 @@ Mixamo-named skinned humanoid, a hammer and a pot. It checks every typed error
 code and the pot conventions, automatic mapping, IK at reachable and unreachable
 grips, the hammer frame in each 3D type, and the pot's base on its physical
 bottom in 3D and 2D. It also checks live shading flips without new materials,
-per-frame writes on a large course, and schema 8/9 save, restore, export and byte
-identity. `npm run verify:game` builds a two-profile release whose 3D profile has
+per-frame writes on a large course, and that profiles save, restore and export byte
+for byte. `scripts/verify-grips.mjs` sets a 2.1 m handle with a 0.55 m extension
+in Physics, checks the rebuilt rig and start pose, then sweeps aims and extensions
+with sliding grips: every grip stays on the handle, short of the head and within
+about 1.03 m of its shoulder, and the hands never jump. `npm run verify:game` builds a two-profile release whose 3D profile has
 all three models. It checks the toggle mid-level, single asset loads, persistence,
-exact pot tracking, identical physics while switching, and failing builds for
+exact pot tracking, identical physics and each profile's own grip placement while
+switching, and failing builds for
 invalid models, bone maps and pot profiles. All fixtures are
 generated procedurally; no third-party artwork is involved.

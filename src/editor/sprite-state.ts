@@ -2,12 +2,12 @@ import type { SpriteRig } from '../sprite-rig';
 import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
-  DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType,
-  spriteMigrationNotice, validateArmForwardDistance,
-  FLIPBOOK_LIMITS, flipbookSizeMessage, spriteLayerImages, spriteSchemaVersion, SPRITE_FILE_BYTES,
+  DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType, validateArmForwardDistance, validateGripStrategy,
+  FLIPBOOK_LIMITS, flipbookSizeMessage, spriteLayerImages, SPRITE_FILE_BYTES, SPRITE_SCHEMA_VERSION,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteFlipbook, SpriteImage, SpriteLayer, SpriteOffset } from '../sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
+import { DEFAULT_GRIP_STRATEGY } from '../grips';
 import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
 import type { DirectionalPresentation } from '../directional-data';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
@@ -155,7 +155,8 @@ function usedImages(images: readonly SpriteImage[], layers: readonly SpriteLayer
 
 function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (left === right) return true;
-  if (left.characterRiggingType !== right.characterRiggingType || left.armForwardDistance !== right.armForwardDistance) return false;
+  if (left.characterRiggingType !== right.characterRiggingType || left.armForwardDistance !== right.armForwardDistance ||
+    left.grips !== right.grips) return false;
   if (!sameCharacterAssets(left, right)) return false;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
   return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
@@ -186,6 +187,7 @@ function modelName(file: File): string {
 function spriteFields(document: SpriteDocument) {
   return {
     characterRiggingType: document.characterRiggingType, armForwardDistance: document.armForwardDistance,
+    grips: document.grips,
     images: document.images, layers: document.layers, skeleton: document.skeleton, presentation: document.presentation,
   };
 }
@@ -292,8 +294,6 @@ export class SpriteEditorState {
       this.draft = document;
       this.saved = document;
       this.selectedLayerId = document.layers[0]?.id ?? null;
-      const migration = spriteMigrationNotice(this.recordDocument(record.value));
-      if (migration !== null) this.notice(migration, 'info');
       this.warnExternalSources(document);
     } catch (error) {
       if (this.disposed && isAbort(error)) return;
@@ -312,7 +312,8 @@ export class SpriteEditorState {
       error: this.error,
       dirty: this.saved === null || !sameDocument(this.draft, this.saved),
       hasContent: this.draft.characterRiggingType !== DEFAULT_CHARACTER_RIGGING_TYPE ||
-        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE || hasCharacterAssets(this.draft) ||
+        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE || this.draft.grips !== DEFAULT_GRIP_STRATEGY ||
+        hasCharacterAssets(this.draft) ||
         this.draft.layers.length > 0 || this.draft.images.length > 0 ||
         this.draft.skeleton !== null || this.draft.presentation !== null,
       anchors: this.anchors,
@@ -417,7 +418,7 @@ export class SpriteEditorState {
         ...characterAssets(this.draft), shading: sameShading(shading, DEFAULT_CHARACTER_SHADING) ? undefined : shading,
       });
       const document: SpriteDocument = Object.freeze({
-        schemaVersion: spriteSchemaVersion(this.draft.layers, assets), ...spriteFields(this.draft), ...assets,
+        schemaVersion: SPRITE_SCHEMA_VERSION, ...spriteFields(this.draft), ...assets,
       });
       this.validateDraft(document);
       this.rig.setShading(shading);
@@ -517,7 +518,7 @@ export class SpriteEditorState {
       }
       const layers = Object.freeze(this.draft.layers.map(candidate => candidate.id === id ? layer : candidate));
       const document = Object.freeze({
-        ...this.draft, schemaVersion: spriteSchemaVersion(layers, this.draft), images: usedImages(this.draft.images, layers), layers,
+        ...this.draft, images: usedImages(this.draft.images, layers), layers,
       });
       this.validateDraft(document);
       this.rig.upsert(layer);
@@ -585,7 +586,7 @@ export class SpriteEditorState {
       });
       const layers = this.draft.layers.map((candidate) => candidate.id === id ? layer : candidate);
       const document = validateSpriteDocument({
-        ...this.draft, schemaVersion: spriteSchemaVersion(layers, this.draft), images: usedImages(images, layers), layers,
+        ...this.draft, images: usedImages(images, layers), layers,
       });
       await this.replaceRig(document);
       if (this.disposed) return;
@@ -599,7 +600,7 @@ export class SpriteEditorState {
     if (!this.draft.layers.some((layer) => layer.id === id)) throw new Error(`Unknown sprite layer "${id}".`);
     const layers = Object.freeze(this.draft.layers.filter((layer) => layer.id !== id));
     const document = Object.freeze({
-      ...this.draft, schemaVersion: spriteSchemaVersion(layers, this.draft), images: usedImages(this.draft.images, layers), layers,
+      ...this.draft, images: usedImages(this.draft.images, layers), layers,
     });
     try {
       this.validateDraft(document);
@@ -668,6 +669,32 @@ export class SpriteEditorState {
       const document = Object.freeze({ ...this.draft, armForwardDistance });
       this.validateDraft(document);
       this.rig.setArmForwardDistance(armForwardDistance);
+      this.draft = document;
+      this.error = null;
+      this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message, error);
+      return false;
+    }
+  }
+
+  // Live, like arm forward distance: only where the hands hold the handle changes.
+  setGrips(value: unknown): boolean {
+    if (!this.canEdit()) return false;
+    try {
+      const grips = validateGripStrategy(value);
+      if (grips === this.draft.grips) {
+        if (this.error !== null) {
+          this.error = null;
+          this.changed();
+        }
+        return true;
+      }
+      const document = Object.freeze({ ...this.draft, grips });
+      this.validateDraft(document);
+      this.rig.setGrips(grips);
       this.draft = document;
       this.error = null;
       this.changed();
@@ -867,14 +894,12 @@ export class SpriteEditorState {
       }
       const text = await file.text();
       if (this.disposed) return;
-      let migration: string | null = null;
-      const document = parseSpriteDocument(text, { onMigration: message => { migration = message; } });
+      const document = parseSpriteDocument(text);
       validateSpriteAnchors(document, this.anchorIds, this.targetIds);
       await this.replaceRig(document);
       if (this.disposed) return;
       this.draft = document;
       this.selectedLayerId = document.layers[0]?.id ?? null;
-      if (migration !== null) this.notice(migration, 'info');
       this.warnExternalSources(document);
     });
   }
@@ -1031,7 +1056,7 @@ export class SpriteEditorState {
       shading: this.draft.shading,
     });
     return validateSpriteDocument({
-      schemaVersion: spriteSchemaVersion(this.draft.layers, assets), ...spriteFields(this.draft), ...assets,
+      schemaVersion: SPRITE_SCHEMA_VERSION, ...spriteFields(this.draft), ...assets,
     });
   }
 

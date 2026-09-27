@@ -7,11 +7,13 @@ import {
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D, Quaternion } from 'three';
-import { ARM_SIDES, HEAD_GEOMETRY, SPRITE_TARGET_IDS } from './character';
+import { ARM_SIDES, HEAD_GEOMETRY, SHAFT_ARTWORK_LENGTH, SPRITE_TARGET_IDS } from './character';
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
-import { ARM_GEOMETRY, DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
+import { DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
 import type { ArmChains, ArmPose } from './arm-ik';
+import { DEFAULT_GRIP_STRATEGY, placeGrips } from './grips';
+import type { GripDistances, GripStrategy } from './grips';
 import { AvatarView } from './avatar-view';
 import { resolveAvatarJoints } from './character-model-inspect';
 import type { CharacterModelUsage } from './character-model-inspect';
@@ -25,6 +27,7 @@ import { HeadAim } from './head-aim';
 import { PHYSICS, RIG } from './config';
 import type { InputMode, Point } from './config';
 import type { LevelChange, LevelDefinition, LevelLabel } from './level';
+import type { RigGeometry } from './rig';
 import { FlagView } from './flag-view';
 import { UpdraftView } from './updraft-view';
 import { EnemyView } from './enemy-view';
@@ -58,6 +61,8 @@ const VISUAL = {
 } as const;
 const POT_HALF_WIDTH = Math.max(...RIG.potVertices.map((point) => Math.abs(point.x)));
 const HAMMER_RADIUS = Math.max(...RIG.headVertices.map((point) => Math.hypot(point.x, point.y)));
+// The brass sleeve near the start of each two-part hammer segment.
+const SLEEVE_INSET = 0.07;
 
 function polygonShape(vertices: readonly Point[]): Shape {
   const shape = new Shape();
@@ -117,6 +122,7 @@ const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer
 const PROP_VIEW_NAMES: Readonly<Record<PropModelRole, string>> = { hammer: 'one-model-hammer', pot: 'profile-pot-model' };
 const DEFAULT_PRESENTATION: CharacterPresentation = Object.freeze({
   characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+  grips: DEFAULT_GRIP_STRATEGY,
 });
 
 function disposeResources(...roots: Object3D[]): void {
@@ -169,13 +175,20 @@ export class GameView {
   private readonly potFrame = new Matrix4();
   private renders = 0;
   private readonly customShaft = new Group();
+  // Two-part hammer segments, rescaled when the rig changes.
+  private readonly shaftSegments: { readonly shaft: Mesh; readonly sleeve: Mesh }[] = [];
+  private rig: RigGeometry;
   private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
+  private gripStrategy: GripStrategy = DEFAULT_GRIP_STRATEGY;
+  private readonly grips: GripDistances = { left: 0, right: 0 };
+  private readonly gripCentre = new Vector3();
   private readonly arms = new Map<ArmSide, Arm>();
   private readonly limbDirection = new Vector3();
   private readonly limbSide = new Vector3();
   private readonly limbNormal = new Vector3();
   private readonly limbRotation = new Matrix4();
-  private readonly gripFrame = new Matrix4();
+  // The physical tool: origin at the butt, +X along the handle, in unscaled metres.
+  private readonly toolFrame = new Matrix4();
   private readonly cursor = new Group();
   private readonly targetLine: Line;
   private readonly targetPositions = new Float32Array(6);
@@ -219,6 +232,7 @@ export class GameView {
     const head = this.part(initial, 'head');
     this.focus = { x: root.x, y: root.y };
     this.hammer = { x: head.x, y: head.y };
+    this.rig = initial.rig;
     this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = ACESFilmicToneMapping;
@@ -330,7 +344,7 @@ export class GameView {
     return this.createSlot().rig;
   }
 
-  // Swaps presentation only: physics, grips and level state are untouched and nothing reloads.
+  // Swaps presentation only, including the grip strategy: physics and level state are untouched and nothing reloads.
   selectCharacter(index: number): void {
     const slot = this.slots[index];
     if (!Number.isInteger(index) || slot === undefined) throw new Error(`Unknown character profile ${index}.`);
@@ -508,6 +522,7 @@ export class GameView {
       binding.visibility.setEnabled({ enabled: (!avatarMode || PROP_PARTS.has(id)) && !replaced });
     }
     this.armChains = imported?.chains ?? DEFAULT_ARM_CHAINS;
+    this.gripStrategy = presentation.grips;
     // Shading styles Avatar mode: the connected character and its separate pot and hammer.
     this.shading.apply(presentation.shading ?? DEFAULT_CHARACTER_SHADING, avatarMode);
   }
@@ -525,6 +540,7 @@ export class GameView {
 
   render(frame: PhysicsFrame, options: CharacterState & { dt: number }): void {
     this.renders++;
+    this.syncRig(frame);
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
     this.focus = { x: root.x, y: root.y };
@@ -566,13 +582,13 @@ export class GameView {
     this.cursor.position.set(frame.cursor.x, frame.cursor.y, 1);
     this.customShaft.position.set(shaftCenter.x, shaftCenter.y, this.toolDepth);
     this.customShaft.rotation.z = shaftAngle;
-    this.customShaft.scale.x = shaftLength / RIG.handleLength;
+    this.customShaft.scale.x = shaftLength / SHAFT_ARTWORK_LENGTH;
     // Unscaled physical coordinates keep grip offsets independent of artwork and tiling.
-    this.gripFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, this.toolDepth);
-    const armPoses = this.updateArms(this.torso.matrixWorld, this.gripFrame, shaftLength, { ...options, shaftAngle });
+    this.toolFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, this.toolDepth);
+    const armPoses = this.updateArms(this.torso.matrixWorld, this.toolFrame, shaftLength, { ...options, shaftAngle });
     this.avatarRenderer?.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
-    // The one-model hammer follows the same unscaled physical frame as the grips, without stretching.
-    this.propModels.hammer?.update(this.gripFrame);
+    // The one-model hammer follows the physical tool frame, without stretching.
+    this.propModels.hammer?.update(this.toolFrame);
     for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {
       x: pose.hand.x, y: pose.hand.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
     });
@@ -598,6 +614,7 @@ export class GameView {
   }
 
   recenter(frame: PhysicsFrame): void {
+    this.syncRig(frame);
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
     this.focus = { x: root.x, y: root.y };
@@ -619,7 +636,7 @@ export class GameView {
   }
 
   pointerDelta(pixels: Point, sensitivity: number, mode: InputMode): Point {
-    const scale = (mode === 'touch' ? RIG.maxReach / VISUAL.touchPixelsPerReach :
+    const scale = (mode === 'touch' ? this.rig.maxReach / VISUAL.touchPixelsPerReach :
       this.worldHeight / this.height) * sensitivity;
     return { x: pixels.x * scale, y: -pixels.y * scale };
   }
@@ -671,6 +688,8 @@ export class GameView {
       theme: { writes: this.themeWrites, sky: this.theme.sky, fog: { ...this.theme.fog }, backdrop: this.theme.backdrop.visible },
       characters: this.characterSelection(),
       armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },
+      rig: this.rig,
+      grips: { strategy: this.gripStrategy, left: this.grips.left, right: this.grips.right },
     };
   }
 
@@ -729,7 +748,7 @@ export class GameView {
     const aspect = this.width / this.height;
     this.compact = this.width < VISUAL.compactWidth || this.height < VISUAL.compactHeight || aspect < 1;
     const bounds = this.framingBounds();
-    const span = 2 * (RIG.maxReach + VISUAL.reachMargin);
+    const span = 2 * (this.rig.maxReach + VISUAL.reachMargin);
     const padding = 2 * VISUAL.framingMargin;
     const worldHeight = this.framing !== null ? this.framing.worldHeight : this.compact ? Math.max(
       span, span / aspect, bounds.maxY - bounds.minY + padding,
@@ -866,25 +885,30 @@ export class GameView {
       this.arms.set(side, arm);
     }
     const shaftSegments: Group[] = [];
+    // Unit-length geometry, shared by the segments and scaled to the rig's segment length.
+    const shaftGeometry = new CylinderGeometry(RIG.handleHalfWidth, RIG.handleHalfWidth, 1, 10);
+    const sleeveGeometry = new CylinderGeometry(0.052, 0.052, 0.04, 10);
     for (let index = 0; index < RIG.handleSegments; index++) {
       const segment = new Group();
-      const shaft = solid(new CylinderGeometry(RIG.handleHalfWidth, RIG.handleHalfWidth, RIG.segmentLength, 10), wood);
+      const shaft = solid(shaftGeometry, wood);
       shaft.rotation.z = Math.PI / 2;
       segment.add(shaft);
-      const sleeve = solid(new CylinderGeometry(0.052, 0.052, 0.04, 10), brass, [-0.18, 0, 0]);
+      const sleeve = solid(sleeveGeometry, brass);
       sleeve.rotation.z = Math.PI / 2;
       segment.add(sleeve);
+      this.shaftSegments.push({ shaft, sleeve });
       this.playerMeshes.set(`handle-${index}`, segment);
       this.foreground.add(segment);
       shaftSegments.push(segment);
     }
+    this.layoutShaft();
     this.bindings.set('hammer-shaft', {
       anchor: this.customShaft,
       modelAnchor: this.customShaft,
       defaults: shaftSegments,
       bounds: new Box3(
-        new Vector3(-RIG.handleLength / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
-        new Vector3(RIG.handleLength / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
+        new Vector3(-SHAFT_ARTWORK_LENGTH / 2, -RIG.handleHalfWidth, -RIG.handleHalfWidth),
+        new Vector3(SHAFT_ARTWORK_LENGTH / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
       ),
       visibility: this.visibility('hammer-shaft', shaftSegments),
     });
@@ -928,21 +952,49 @@ export class GameView {
       ? { onReplacement: (next, previous) => this.propReplacementChanged(next, previous) } : {});
   }
 
-  private updateArms(body: Matrix4, shaft: Matrix4, shaftLength: number,
+  // Follows a rebuilt rig: the two-part hammer's segment lengths, touch gain and framing.
+  private syncRig(frame: PhysicsFrame): void {
+    if (frame.rig === this.rig) return;
+    this.rig = frame.rig;
+    this.layoutShaft();
+    this.updateFrustum();
+  }
+
+  private layoutShaft(): void {
+    const length = this.rig.segmentLength;
+    for (const { shaft, sleeve } of this.shaftSegments) {
+      shaft.scale.y = length;
+      sleeve.position.x = SLEEVE_INSET - length / 2;
+    }
+  }
+
+  // Every character type takes its hands from the same grip placement on the physical tool frame.
+  private updateArms(body: Matrix4, tool: Matrix4, shaftLength: number,
     options: { armIk: Readonly<ArmIkSettings>; dt: number; shaftAngle: number }): ArmPose[] {
     const settings = options.armIk;
+    const chains = this.armChains;
+    const cos = Math.cos(options.shaftAngle);
+    const sin = Math.sin(options.shaftAngle);
+    // Where the shoulders' midpoint projects onto the handle, measured from the butt.
+    this.gripCentre.set(
+      (chains.left.shoulder[0] + chains.right.shoulder[0]) / 2,
+      (chains.left.shoulder[1] + chains.right.shoulder[1]) / 2,
+      (chains.left.shoulder[2] + chains.right.shoulder[2]) / 2,
+    ).applyMatrix4(body);
+    const butt = tool.elements;
+    const centre = (this.gripCentre.x - butt[12]) * cos + (this.gripCentre.y - butt[13]) * sin;
+    placeGrips(this.gripStrategy, centre, shaftLength, this.grips);
     const poses: ArmPose[] = [];
     for (const side of ARM_SIDES) {
       const arm = this.arms.get(side);
       if (!arm) throw new Error(`Missing visual arm: ${side}`);
-      const geometry = ARM_GEOMETRY[side];
       // An imported avatar supplies its own shoulders and bind-pose bone lengths; grips are shared.
-      const chain = this.armChains[side];
+      const chain = chains[side];
       const pose = solveArmPose(side, {
         shoulder: new Vector3(...chain.shoulder).applyMatrix4(body),
-        hand: new Vector3(Math.min(geometry.gripX, shaftLength), 0, 0).applyMatrix4(shaft),
+        hand: new Vector3(this.grips[side], 0, 0).applyMatrix4(tool),
         hint: new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(body),
-        shaftAxis: new Vector3(Math.cos(options.shaftAngle), Math.sin(options.shaftAngle), 0),
+        shaftAxis: new Vector3(cos, sin, 0),
       }, { previous: arm.pose, dt: options.dt, lengths: chain });
       this.positionLimb(arm.upper, pose.shoulder, pose.elbow, pose.normal);
       this.positionLimb(arm.lower, pose.elbow, pose.hand, pose.normal);

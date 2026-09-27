@@ -1,7 +1,6 @@
 // Editor-only rendering helpers for non-terrain objects at their authored positions.
 // Terrain keeps using shapeVertices/objectVertices/objectContains from ../level; these gizmos
 // share lightweight SVG geometry between persistent objects, selection, and placement previews.
-import { RIG } from '../config';
 import { ENEMY_DIRECTION, ENEMY_SPECS, enemyBounds } from '../enemy-types';
 import type { EnemyFacing, EnemySpecies } from '../enemy-types';
 import { triggerBounds } from '../level';
@@ -92,8 +91,7 @@ export function enemyGlyph(species: EnemySpecies, facing: EnemyFacing): SVGGElem
 }
 
 function startGizmo(object: StartObject): SVGElement[] {
-  const reach = RIG.handleLength + object.extension;
-  const direction = line(0, 0, Math.cos(object.angle) * reach * 0.5, Math.sin(object.angle) * reach * 0.5);
+  const direction = line(0, 0, Math.cos(object.angle) * object.reach * 0.5, Math.sin(object.angle) * object.reach * 0.5);
   direction.setAttribute('class', 'level-gizmo-direction');
   return [
     circle(START_MARKER_RADIUS * 0.55),

@@ -1,11 +1,12 @@
 import { AUDIO_CUE_DESCRIPTIONS, AUDIO_CUES, AUDIO_VOLUME } from '../src/audio-settings';
 import { ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS } from '../src/appearance-profile';
 import { ART_LIMITS } from '../src/art-types';
-import { CHARACTER_RIGGING_TYPES } from '../src/sprite-data';
+import { CHARACTER_RIGGING_TYPES, SPRITE_SCHEMA_VERSION } from '../src/sprite-data';
+import { GRIP_STRATEGIES } from '../src/grips';
 import { VISUAL_PART_IDS } from '../src/character';
 import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
-import { CURSOR_FIELDS, TUNING_FIELDS } from '../src/game-settings';
+import { CURSOR_FIELDS, RIG_FIELDS, TUNING_FIELDS } from '../src/game-settings';
 import { HUD_FIELDS } from '../src/hud';
 import { LEVEL_LIMITS, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
@@ -65,12 +66,12 @@ export function apiManual(auth: 'token' | 'loopback') {
     sections: {
       title: { value: 'string, 1-80 characters', description: 'Game title: browser tab and release name.' },
       level: {
-        value: 'level JSON, schemaVersion 2: { schemaVersion, labels, objects }',
+        value: 'level JSON, schemaVersion 3: { schemaVersion, labels, objects }',
         description: 'The course. Prefer the level/objects endpoints for small edits.',
         limits: { ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects },
         objects: {
           terrain: { kind: 'terrain', id: 'ledge-1', shape: { type: `one of ${SHAPE_KINDS.join(', ')}; or { "type": "polygon", "vertices": [{ "x", "y" }] }` }, x: 4, y: 2, width: 3, height: 1, angle: 0, depth: 2, color: 7438714, illusion: false },
-          start: { kind: 'start', id: 'start', x: 0, y: 0.53, angle: 0.4, extension: 0.8 },
+          start: { kind: 'start', id: 'start', x: 0, y: 0.53, angle: 0.4, reach: 2.3 },
           trigger: {
             kind: 'trigger', id: 'summit', name: 'Summit', x: 0, y: 40, region: { type: 'circle', radius: 2 },
             activation: 'once | on-enter', marker: TRIGGER_MARKERS.join(' | '),
@@ -86,13 +87,17 @@ export function apiManual(auth: 'token' | 'loopback') {
           'stop-timer': { type: 'stop-timer' },
           'launch-player': { type: 'launch-player', height: `${LAUNCH_FIELDS.height.min}-${LAUNCH_FIELDS.height.max} m`, strength: `${LAUNCH_FIELDS.strength.min}-${LAUNCH_FIELDS.strength.max}` },
         },
-        notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start.',
+        notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach.',
       },
-      settings: { value: '{ schemaVersion: 2, physics: {...}, cursor: { maxRadius } }', patch: true, fields: { physics: TUNING_FIELDS, cursor: CURSOR_FIELDS } },
+      settings: {
+        value: '{ schemaVersion: 3, physics: {...}, rig: { handleLength, maxExtension }, cursor: { maxRadius } }', patch: true,
+        fields: { physics: TUNING_FIELDS, rig: RIG_FIELDS, cursor: CURSOR_FIELDS },
+        notes: 'The reach is rig.handleLength + rig.maxExtension; cursor.maxRadius may not exceed it. A rig change rebuilds the player and restarts the run.',
+      },
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',
         patch: true,
-        description: `Export one from Workshop / Character. characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}. PATCH recomputes schemaVersion. See docs/characters.md and docs/sprites.md.`,
+        description: `Export one from Workshop / Character. schemaVersion is ${SPRITE_SCHEMA_VERSION}; characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}; grips is one of ${GRIP_STRATEGIES.join(', ')}. See docs/characters.md and docs/sprites.md.`,
       },
       'characters/alternate': { value: 'character profile JSON or null', patch: true, description: 'A second character players can switch to; needs a primary.' },
       'arm-ik': { value: 'body-relative elbow hints', patch: true, fields: ARM_IK_FIELDS.map((field) => ({ ...field, ...ARM_IK_LIMITS })) },

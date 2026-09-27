@@ -61,7 +61,6 @@ export async function verifyLevel(browser, address, artifacts) {
     const initial = await state();
     const start = initial.definition.objects.find(object => object.kind === 'start');
     assert.ok(start);
-    const initialSpawn = { position: { x: start.x, y: start.y }, angle: start.angle, extension: start.extension };
     await edit();
     const paused = await physics();
     assert.ok(paused.pauseReasons.includes('level-editor'));
@@ -146,17 +145,15 @@ export async function verifyLevel(browser, address, artifacts) {
     await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
 
     const floor = {
-      id: 'floor', shape: { type: 'box' }, x: 0, y: -1, width: 100, height: 2,
+      kind: 'terrain', id: 'floor', shape: { type: 'box' }, x: 0, y: -1, width: 100, height: 2,
       angle: 0, depth: 1.5, color: 0x71817a, illusion: false,
     };
     const large = {
-      schemaVersion: 1,
-      spawn: initialSpawn,
-      summit: { xMin: 26, xMax: 29, y: 42, arrivalTolerance: 0.1 }, labels: [],
+      schemaVersion: 3, labels: [],
       objects: [floor, ...Array.from({ length: 999 }, (_, index) => ({
         ...floor, id: `rock-${index}`, shape: { type: ['box', 'ramp', 'triangle', 'circle', 'hexagon'][index % 5] },
         x: (index % 40 - 20) * 1.5, y: 3 + Math.floor(index / 40) * 1.5, width: 0.8, height: 0.8,
-      }))],
+      })), { ...start, id: 'large-start' }],
     };
     await importLevel(large);
     const loaded = await state();
@@ -189,18 +186,17 @@ export async function verifyLevel(browser, address, artifacts) {
     await page.screenshot({ path: fileURLToPath(new URL('level-large.png', artifacts)) });
 
     const illusion = {
-      schemaVersion: 1,
-      spawn: { position: { x: 0, y: 4 }, angle: 0.5, extension: 0.3 },
-      summit: { xMin: 8, xMax: 10, y: 5, arrivalTolerance: 0.1 }, labels: [],
+      schemaVersion: 3, labels: [],
       objects: [
         floor,
         { ...floor, id: 'vanishing-ledge', x: 0, y: 2, width: 6, height: 0.5, illusion: true },
+        { kind: 'start', id: 'illusion-start', x: 0, y: 4, angle: 0.5, reach: 1.8 },
       ],
     };
     await importLevel(illusion);
     const authoredIllusion = (await state()).definition;
-    assert.equal(authoredIllusion.schemaVersion, 2);
-    assert.equal(terrainObjects(authoredIllusion).length, illusion.objects.length);
+    assert.equal(authoredIllusion.schemaVersion, 3);
+    assert.equal(terrainObjects(authoredIllusion).length, terrainObjects(illusion).length);
     await page.locator('.level-play').click();
     await page.waitForFunction(() => !window.gettingOver.snapshot().paused && window.gettingOver.level().editor.mode === 'inactive');
     await page.waitForFunction(() => window.gettingOver.level().terrain.fading.some(item => item.id === 'vanishing-ledge'));
@@ -242,9 +238,9 @@ export async function verifyLevel(browser, address, artifacts) {
     assert.deepEqual(JSON.parse(await readFile(await download.path(), 'utf8')), authoredIllusion);
     report.illusion = { topLanding: true, solidDuringFade: true, paused: true, removedAfterFade: true, restartRestores: true, authoredExportPreserved: true };
 
-    const creatureStart = { kind: 'start', id: 'creature-start', x: 0, y: 0.53, angle: 0, extension: 0.2 };
-    const creatureFloor = { ...floor, kind: 'terrain', width: 30 };
-    const emptyCreatureCourse = { schemaVersion: 2, labels: [], objects: [creatureFloor, creatureStart] };
+    const creatureStart = { kind: 'start', id: 'creature-start', x: 0, y: 0.53, angle: 0, reach: 1.7 };
+    const creatureFloor = { ...floor, width: 30 };
+    const emptyCreatureCourse = { schemaVersion: 3, labels: [], objects: [creatureFloor, creatureStart] };
     await importLevel(emptyCreatureCourse);
     for (const [name, x, base, center] of [['Bird', 2.35, 0.8, 1.2], ['Hollow soldier', -4, 0, 0.7]]) {
       await page.getByRole('button', { name: new RegExp(`^${name}$`, 'i') }).click();

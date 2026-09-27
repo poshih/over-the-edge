@@ -74,7 +74,10 @@ const ui = createUI({
   onAction: perform,
   onWorkshopChange: updateWorkshop,
   onPractice: resetPractice,
-  onSettingsChange: (settings) => game.setSettings(settings),
+  onSettingsChange: (settings) => {
+    game.setSettings(settings);
+    spriteEditor.setHammerRig(game.simulation.rigGeometry);
+  },
 });
 const rig = new AppearanceRig(game.view.visuals);
 const appearance = new Appearance(rig, ui.notice, { browserStore: !opensProject });
@@ -87,6 +90,7 @@ const spriteEditor = createSpriteEditor({
   describeModel: (source, usage) => game.view.characterModelReport(source, usage),
   viewport: { canvas, project: (point) => game.view.project(point) },
   targetIds: SPRITE_TARGET_IDS,
+  hammerRig: game.simulation.rigGeometry,
   applySavedProfile: !opensProject,
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);

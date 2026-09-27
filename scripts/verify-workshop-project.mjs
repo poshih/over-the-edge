@@ -72,11 +72,11 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
   await mkdir(join(v1, 'characters'), { recursive: true });
   await mkdir(join(v1, 'appearance'), { recursive: true });
   await writeFile(join(v1, 'characters/primary.json'), JSON.stringify({
-    schemaVersion: 8, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, images: [], layers: [], skeleton: null, presentation: null,
+    schemaVersion: 10, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, grips: 'sliding', images: [], layers: [], skeleton: null, presentation: null,
     models: [{ id: 'avatar', name: 'Climber', source: glbData(skinnedAvatarGlb()) }], avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP },
   }));
   await writeFile(join(v1, 'characters/alternate.json'), JSON.stringify({
-    schemaVersion: 8, characterRiggingType: 'model-3d', armForwardDistance: 0.3, images: [], layers: [], skeleton: null, presentation: null,
+    schemaVersion: 10, characterRiggingType: 'model-3d', armForwardDistance: 0.3, grips: 'fixed', images: [], layers: [], skeleton: null, presentation: null,
     models: [{ id: 'hammer', name: 'Mallet', source: glbData(hammerGlb()) }], hammer: { model: 'hammer' },
   }));
   await writeFile(join(v1, 'appearance/torso.glb'), modelFixture({ size: [0.6, 0.8, 0.4] }));
@@ -264,9 +264,12 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
         };
         request.onerror = () => fail(request.error);
       });
-      // A schema-4 Hybrid save from an earlier release, which now opens as Mesh parts with a notice.
+      // The editor's own saved profile, which must not replace the project's character.
       await put('over-the-edge:sprites', 'documents', 'id', {
-        id: 'active', document: { schemaVersion: 4, characterRiggingType: 'hybrid', images: [], layers: [], skeleton: null, presentation: null },
+        id: 'active', document: {
+          schemaVersion: 10, characterRiggingType: 'model-3d', armForwardDistance: 0.7, grips: 'fixed',
+          images: [], layers: [], skeleton: null, presentation: null,
+        },
       });
       await put('over-the-edge:appearance', 'parts', 'slot', {
         schemaVersion: 1, slot: 'character-head', name: 'Old head.glb', data: new Blob([new Uint8Array(head)], { type: 'model/gltf-binary' }),
@@ -278,8 +281,8 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
         settings: { leftHintX: -0.4, leftHintY: 0.1, leftHintZ: -0.3, rightHintX: 0.4, rightHintY: 0.1, rightHintZ: 0.4 },
       }));
       localStorage.setItem('over-the-edge:appearance:arm-ik:active:v2', JSON.stringify({ schemaVersion: 2, key: profile }));
-      localStorage.setItem('over-the-edge:game-settings:snapshot:v2:ffeeddccbbaa99887766554433221100', JSON.stringify({
-        schemaVersion: 2, name: 'Old physics', savedAt: 1_700_000_000_000, settings,
+      localStorage.setItem('over-the-edge:game-settings:snapshot:v3:ffeeddccbbaa99887766554433221100', JSON.stringify({
+        schemaVersion: 3, name: 'Old physics', savedAt: 1_700_000_000_000, settings,
       }));
     }, { head, settings: manifest.settings });
     const seeded = await storage(older);
@@ -287,14 +290,18 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
     await ready(older, 'current');
     const booted = await older.evaluate(() => ({
       primary: window.gettingOver.sprites().document.characterRiggingType,
+      armForwardDistance: window.gettingOver.sprites().document.armForwardDistance,
+      grips: window.gettingOver.sprites().document.grips,
       avatar: window.gettingOver.level().rendering.importedAvatar?.visible ?? false,
       head: window.gettingOver.appearance().parts.find((part) => part.id === 'character-head').name,
       torso: window.gettingOver.appearance().parts.find((part) => part.id === 'torso').name,
       leftHintX: window.gettingOver.appearance().armIk.settings.leftHintX,
       profile: window.gettingOver.appearance().armIk.profile?.name ?? null,
     }));
-    assert.deepEqual(booted, { primary: 'avatar-3d', avatar: true, head: null, torso: 'Armour.glb', leftHintX: -0.9, profile: 'Old elbows' });
-    assert.ok(!(await older.evaluate(() => window.__notices)).some((text) => /Hybrid/.test(text)), 'The old save is not opened.');
+    assert.deepEqual(booted, {
+      primary: 'avatar-3d', armForwardDistance: 0.25, grips: 'sliding', avatar: true, head: null, torso: 'Armour.glb',
+      leftHintX: -0.9, profile: 'Old elbows',
+    }, 'The project, not the editor\'s own saves, opens.');
     assert.deepEqual(await storage(older), seeded, 'Opening the project leaves older browser saves unchanged.');
     report.flows.push('older saves untouched');
 

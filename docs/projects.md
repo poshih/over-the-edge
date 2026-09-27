@@ -27,8 +27,8 @@ GAME_PROJECT=examples/projects/lantern-cavern npm run build:game
 | Section | Stored in | Contents |
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
-| `level` | `level.json` | Level JSON, schema 2, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile v2: physics and cursor target |
+| `level` | `level.json` | Level JSON, schema 3, as exported from Workshop / Level |
+| `settings` | `project.json` | Game-settings profile, schema 3: physics, hammer rig and cursor target |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -66,7 +66,10 @@ The paths are fixed, so a manifest only says which files exist:
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [] },
-  "settings": { "schemaVersion": 2, "physics": { "...": "..." }, "cursor": { "maxRadius": 2.65 } },
+  "settings": {
+    "schemaVersion": 3, "physics": { "...": "..." },
+    "rig": { "handleLength": 1.5, "maxExtension": 1.15 }, "cursor": { "maxRadius": 2.65 }
+  },
   "characters": { "primary": null, "alternate": null },
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
   "appearance": [],
@@ -92,7 +95,7 @@ files as base64 data URLs:
   "schemaVersion": 1,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 2, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 3, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }
@@ -265,7 +268,7 @@ Conventions:
   `Content-Type: application/json`; uploads send raw bytes with their media type or
   `application/octet-stream`.
 - `PATCH` applies a JSON merge patch; unlike RFC 7386, `null` sets a field to
-  `null`. Patching a character profile recomputes its schema version.
+  `null`.
 - Every change is validated before anything is written and fails with
   `{ "error": { "code", "message", "section" } }`, leaving the project unchanged.
 - Sections have revisions: `GET` returns `ETag: "<revision>"`, and a change with

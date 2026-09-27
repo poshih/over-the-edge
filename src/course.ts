@@ -39,7 +39,7 @@ export const COURSE: readonly Terrain[] = [
 ];
 
 export const START_SPAWN: Readonly<PlayerSpawn> = {
-  position: { x: 0, y: 0.65 }, angle: -0.42, extension: 0.2,
+  position: { x: 0, y: 0.65 }, angle: -0.42, reach: 1.7,
 };
 
 export const ENDING_ZONE = { xMin: 15.25, xMax: 18.1, y: 12.2, arrivalTolerance: 0.08 } as const;

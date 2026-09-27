@@ -7,10 +7,11 @@ import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, v
 import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
 import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth.ts';
 import {
-  CHARACTER_ASSET_FIELDS, CHARACTER_MODEL_LIMITS, checkEmbeddedModel, hasCharacterAssets,
-  validateCharacterAssets,
+  CHARACTER_ASSET_FIELDS, CHARACTER_MODEL_LIMITS, checkEmbeddedModel, validateCharacterAssets,
 } from './character-profile.ts';
 import type { CharacterAssets, CharacterModel } from './character-profile.ts';
+import { DEFAULT_GRIP_STRATEGY, GRIP_STRATEGIES } from './grips.ts';
+import type { GripStrategy } from './grips.ts';
 import { number, record, SpriteError, text } from './sprite-fields.ts';
 
 export { SpriteError };
@@ -52,21 +53,20 @@ export interface SpriteLayer {
   readonly directions: readonly FacingDirection[];
   readonly skin: SpriteSkin | null;
   readonly tileLength: number | null;
-  // Absent for single-image layers, so their saved form is unchanged.
+  // Absent for single-image layers.
   readonly flipbook?: SpriteFlipbook;
 }
 
 export interface CharacterPresentation extends CharacterAssets {
   readonly characterRiggingType: CharacterRiggingType;
   readonly armForwardDistance: number;
+  readonly grips: GripStrategy;
 }
 
-// Schema 9 is written only when a pot model is present, schema 8 only when other character models
-// or shading are, schema 7 only when a layer has a flipbook; other documents stay schema 6.
-export type SpriteSchemaVersion = 6 | 7 | 8 | 9;
+export const SPRITE_SCHEMA_VERSION = 10;
 
 export interface SpriteDocument extends CharacterPresentation {
-  readonly schemaVersion: SpriteSchemaVersion;
+  readonly schemaVersion: typeof SPRITE_SCHEMA_VERSION;
   readonly images: readonly SpriteImage[];
   readonly layers: readonly SpriteLayer[];
   readonly skeleton: SkeletonDefinition | null;
@@ -96,10 +96,6 @@ export const FLIPBOOK_LIMITS = {
   angle: 360,
 } as const;
 
-const FLIPBOOK_SCHEMA_VERSION = 7;
-const CHARACTER_SCHEMA_VERSION = 8;
-const POT_SCHEMA_VERSION = 9;
-
 // Largest accepted profile file: the sprite budget plus two embedded character models.
 export const SPRITE_FILE_BYTES = SPRITE_LIMITS.documentBytes + CHARACTER_MODEL_LIMITS.encodedBytes;
 
@@ -120,16 +116,10 @@ export const SPRITE_FIELDS = [
 ] as const;
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
-  schemaVersion: 6, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
-  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+  schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
+  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE, grips: DEFAULT_GRIP_STRATEGY,
   images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
-
-export function spriteSchemaVersion(layers: readonly SpriteLayer[], character: CharacterAssets = {}): SpriteSchemaVersion {
-  if (character.pot !== undefined) return POT_SCHEMA_VERSION;
-  if (hasCharacterAssets(character)) return CHARACTER_SCHEMA_VERSION;
-  return layers.some(layer => layer.flipbook !== undefined) ? FLIPBOOK_SCHEMA_VERSION : 6;
-}
 
 // Every image a layer can display: its flipbook frames, otherwise its single image.
 export function spriteLayerImages(layer: SpriteLayer): readonly string[] {
@@ -138,6 +128,12 @@ export function spriteLayerImages(layer: SpriteLayer): readonly string[] {
 
 export function validateArmForwardDistance(value: unknown): number {
   return number(value, ARM_FORWARD_DISTANCE_LIMITS.min, ARM_FORWARD_DISTANCE_LIMITS.max, 'Arm forward distance');
+}
+
+export function validateGripStrategy(value: unknown): GripStrategy {
+  const strategy = GRIP_STRATEGIES.find(candidate => candidate === value);
+  if (strategy === undefined) throw new SpriteError(`Grip placement must be ${GRIP_STRATEGIES.join(' or ')}.`);
+  return strategy;
 }
 
 export function validateCharacterRiggingType(value: unknown, layerCount: number): CharacterRiggingType {
@@ -318,63 +314,17 @@ export function validateSpriteLayer(value: unknown): SpriteLayer {
   return Object.freeze({ ...result, flipbook: validateFlipbook(layer.flipbook, result) });
 }
 
-function migrateSpriteLayer(value: unknown, version: number): unknown {
-  if (version < FLIPBOOK_SCHEMA_VERSION && typeof value === 'object' && value !== null && Object.hasOwn(value, 'flipbook')) {
-    throw new SpriteError(`Flipbook layers require sprite schema version ${FLIPBOOK_SCHEMA_VERSION}.`);
-  }
-  if (version >= 5) return value;
-  const keys = ['id', 'name', 'anchor', 'image', 'width', 'height', 'offset', 'rotation', 'underlay'];
-  if (version >= 2) keys.push('bone', 'directions', 'skin', 'tileLength');
-  const old = record(value, keys, 'A legacy sprite layer');
-  if (old.underlay !== 'replace' && old.underlay !== 'overlay') {
-    throw new SpriteError('A legacy sprite underlay must be replace or overlay.');
-  }
-  delete old.underlay;
-  return version === 1 ? { ...old, ...DEFAULT_SPRITE_RIGGING } : old;
-}
-
-function migrateCharacterType(value: unknown, version: number, layerCount: number): CharacterRiggingType {
-  if (version < 4 || version === 4 && value === 'hybrid') {
-    return layerCount > 0 ? 'sprite-2d' : 'model-3d';
-  }
-  if (version === 4 && value !== 'sprite-2d' && value !== 'model-3d') {
-    throw new SpriteError('Schema-4 character type must be model-3d, sprite-2d, or hybrid.');
-  }
-  return validateCharacterRiggingType(value, layerCount);
-}
-
-export function spriteMigrationNotice(value: unknown): string | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const version: unknown = Reflect.get(value, 'schemaVersion');
-  const removedHybrid = version === 1 || version === 2 || version === 3 ||
-    version === 4 && Reflect.get(value, 'characterRiggingType') === 'hybrid';
-  if (!removedHybrid) return null;
-  return 'This older profile used Hybrid rendering. It now uses pure 2D when sprite layers exist, otherwise Mesh parts. ' +
-    'Missing sprite artwork no longer reveals 3D parts. The original save or file is unchanged; Save writes the new format.';
-}
-
 // The loader validates image bytes as it acquires them, without decoding cached sources again.
 export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const version = typeof value === 'object' && value !== null ? Reflect.get(value, 'schemaVersion') : undefined;
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6 &&
-    version !== FLIPBOOK_SCHEMA_VERSION && version !== CHARACTER_SCHEMA_VERSION && version !== POT_SCHEMA_VERSION) {
-    throw new SpriteError('Sprite documents require schema version 1, 2, 3, 4, 5, 6, 7, 8 or 9.');
+  if (version !== SPRITE_SCHEMA_VERSION) {
+    throw new SpriteError(`Character profiles require schema version ${SPRITE_SCHEMA_VERSION}.`);
   }
-  const legacy = version === 1;
-  const fields = ['schemaVersion', 'images', 'layers'];
-  if (version >= 2) fields.push('skeleton');
-  if (version >= 3) fields.push('presentation');
-  if (version >= 4) fields.push('characterRiggingType');
-  if (version >= 6) fields.push('armForwardDistance');
   const assetFields = CHARACTER_ASSET_FIELDS.filter(key => Object.hasOwn(value as object, key));
-  if (assetFields.length > 0 && version < CHARACTER_SCHEMA_VERSION) {
-    throw new SpriteError(`Character models and shading require sprite schema version ${CHARACTER_SCHEMA_VERSION}.`);
-  }
-  if (assetFields.includes('pot') && version < POT_SCHEMA_VERSION) {
-    throw new SpriteError(`A pot model requires sprite schema version ${POT_SCHEMA_VERSION}.`);
-  }
-  fields.push(...assetFields);
-  const document = record(value, fields, 'A sprite document');
+  const document = record(value, [
+    'schemaVersion', 'images', 'layers', 'skeleton', 'presentation', 'characterRiggingType', 'armForwardDistance', 'grips',
+    ...assetFields,
+  ], 'A sprite document');
   if (!Array.isArray(document.images) || !Array.isArray(document.layers) ||
     document.images.length > SPRITE_LIMITS.images || document.layers.length > SPRITE_LIMITS.layers) {
     throw new SpriteError(`Sprite documents allow at most ${SPRITE_LIMITS.images} images and ${SPRITE_LIMITS.layers} layers.`);
@@ -396,7 +346,7 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   const layerIds = new Set<string>();
   const usedImages = new Set<string>();
   const layers = document.layers.map((value: unknown) => {
-    const layer = validateSpriteLayer(migrateSpriteLayer(value, version));
+    const layer = validateSpriteLayer(value);
     if (layerIds.has(layer.id)) throw new SpriteError(`Duplicate sprite layer ID: ${layer.id}.`);
     if (!imageIds.has(layer.image)) throw new SpriteError(`Sprite ${layer.id} references a missing image.`);
     for (const frame of layer.flipbook?.images ?? []) {
@@ -410,20 +360,20 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   let skeleton: SkeletonDefinition | null;
   let presentation: DirectionalPresentation | null;
   try {
-    skeleton = legacy || document.skeleton === null ? null : validateSkeleton(document.skeleton);
-    presentation = version < 3 || document.presentation === null ? null : validateDirectionalPresentation(document.presentation);
+    skeleton = document.skeleton === null ? null : validateSkeleton(document.skeleton);
+    presentation = document.presentation === null ? null : validateDirectionalPresentation(document.presentation);
   } catch (error) {
     if (error instanceof SkeletonError || error instanceof DirectionalError) throw new SpriteError(error.message, { cause: error });
     throw error;
   }
   validateSpriteRigging(layers, skeleton);
   validateDirectionalReferences(presentation, layers, skeleton);
-  const characterRiggingType = migrateCharacterType(document.characterRiggingType, version, layers.length);
-  const armForwardDistance = version >= 6
-    ? validateArmForwardDistance(document.armForwardDistance) : DEFAULT_ARM_FORWARD_DISTANCE;
+  const characterRiggingType = validateCharacterRiggingType(document.characterRiggingType, layers.length);
+  const armForwardDistance = validateArmForwardDistance(document.armForwardDistance);
+  const grips = validateGripStrategy(document.grips);
   const character = validateCharacterAssets(document);
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: spriteSchemaVersion(layers, character), characterRiggingType, armForwardDistance,
+    schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType, armForwardDistance, grips,
     images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation, ...character,
   });
   validateSpriteBudget(result);
@@ -457,19 +407,17 @@ export function validateSpriteDocument(value: unknown): SpriteDocument {
       throw new SpriteError('The sprite document exceeds its image-memory budget.');
     }
   }
-  if (document.schemaVersion >= FLIPBOOK_SCHEMA_VERSION) {
-    // URL frames are compared after download, by the loader.
-    const sources = new Map(document.images.map(image => [image.id, image.source]));
-    for (const layer of document.layers) {
-      if (layer.flipbook === undefined) continue;
-      let first: { id: string; width: number; height: number } | null = null;
-      for (const id of layer.flipbook.images) {
-        const size = sizes.get(sources.get(id)!) ?? null;
-        if (size === null) continue;
-        if (first === null) first = { id, ...size };
-        else if (size.width !== first.width || size.height !== first.height) {
-          throw new SpriteError(flipbookSizeMessage(layer.name, { id, ...size }, first));
-        }
+  // URL frames are compared after download, by the loader.
+  const sources = new Map(document.images.map(image => [image.id, image.source]));
+  for (const layer of document.layers) {
+    if (layer.flipbook === undefined) continue;
+    let first: { id: string; width: number; height: number } | null = null;
+    for (const id of layer.flipbook.images) {
+      const size = sizes.get(sources.get(id)!) ?? null;
+      if (size === null) continue;
+      if (first === null) first = { id, ...size };
+      else if (size.width !== first.width || size.height !== first.height) {
+        throw new SpriteError(flipbookSizeMessage(layer.name, { id, ...size }, first));
       }
     }
   }
@@ -516,6 +464,7 @@ export function validateDirectionalReferences(
 export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>, targets?: Iterable<string>): void {
   validateCharacterRiggingType(document.characterRiggingType, document.layers.length);
   validateArmForwardDistance(document.armForwardDistance);
+  validateGripStrategy(document.grips);
   const available = new Set(anchors);
   for (const layer of document.layers) {
     if (!available.has(layer.anchor)) throw new SpriteError(`Sprite ${layer.id} references unknown anchor "${layer.anchor}".`);
@@ -551,10 +500,7 @@ function utf8Bytes(value: string): number {
   return bytes;
 }
 
-export function parseSpriteDocument(
-  serialized: string,
-  options: { onMigration?: (message: string) => void } = {},
-): SpriteDocument {
+export function parseSpriteDocument(serialized: string): SpriteDocument {
   if (serialized.length > SPRITE_FILE_BYTES || utf8Bytes(serialized) > SPRITE_FILE_BYTES) {
     throw new SpriteError('The sprite document exceeds its file-size budget.');
   }
@@ -565,8 +511,5 @@ export function parseSpriteDocument(
     if (!(error instanceof SyntaxError)) throw error;
     throw new SpriteError('The sprite document is not valid JSON.');
   }
-  const document = validateSpriteDocument(value);
-  const migration = spriteMigrationNotice(value);
-  if (migration !== null) options.onMigration?.(migration);
-  return document;
+  return validateSpriteDocument(value);
 }

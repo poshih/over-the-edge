@@ -56,19 +56,17 @@ async function minimalHud(page, width, characters = 0) {
 }
 
 async function tracePointerMapping(page, sources) {
-  return page.evaluate(async ({ view, config }) => {
+  return page.evaluate(async ({ view }) => {
     const { GameView } = await import(view);
-    const { RIG } = await import(config);
     const original = GameView.prototype.pointerDelta;
     window.releasePointerSamples = [];
     GameView.prototype.pointerDelta = function (pixels, sensitivity, mode) {
       const world = original.call(this, pixels, sensitivity, mode);
       if (pixels.x !== 0 || pixels.y !== 0) {
-        window.releasePointerSamples.push({ pixels, world, sensitivity, mode, camera: this.cameraState() });
+        window.releasePointerSamples.push({ pixels, world, sensitivity, mode, camera: this.cameraState(), reach: this.rig.maxReach });
       }
       return world;
     };
-    return RIG.maxReach;
   }, sources);
 }
 
@@ -82,7 +80,7 @@ async function touchRelease(browser, address, sources) {
       await page.goto(address, { waitUntil: 'networkidle' });
       await page.waitForFunction(() => document.querySelector('.elapsed-value')?.textContent !== '00:00');
       await minimalHud(page, viewport.width);
-      const reach = await tracePointerMapping(page, sources);
+      await tracePointerMapping(page, sources);
       const metric = await page.locator('.play-hud > div').first().boundingBox();
       const start = { x: metric.x + metric.width / 2, y: metric.y + metric.height / 2 };
       assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).id, start), 'game',
@@ -95,7 +93,7 @@ async function touchRelease(browser, address, sources) {
       const world = samples.reduce((total, sample) => total + sample.world.y, 0);
       assert.ok(Math.abs(Math.abs(pixels) - TOUCH_DRAG_PIXELS) < 1);
       for (const sample of samples) {
-        assert.ok(Math.abs(sample.world.y + sample.pixels.y * reach / TOUCH_PIXELS_PER_REACH * sample.sensitivity) < 1e-9,
+        assert.ok(Math.abs(sample.world.y + sample.pixels.y * sample.reach / TOUCH_PIXELS_PER_REACH * sample.sensitivity) < 1e-9,
           'The release must use the stronger touch mapping, not camera-dependent mouse gain.');
       }
       assert.equal(await page.evaluate(() => document.pointerLockElement), null);
@@ -172,6 +170,37 @@ async function runtimeSettings(page, server) {
   }, { url: module.url, timeout: SETTINGS_SAMPLE_TIMEOUT });
 }
 
+// The live release's rig: its geometry, the physical handle and the view's derived touch gain.
+async function runtimeRig(page, server) {
+  const module = server.moduleGraph.getModuleById(join(root, 'src/game.ts'));
+  assert.ok(module);
+  return page.evaluate(async ({ url, timeout }) => {
+    const { Game } = await import(url);
+    const original = Game.prototype.state;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        Game.prototype.state = original;
+        reject(new Error('The release did not produce a rig sample.'));
+      }, timeout);
+      Game.prototype.state = function () {
+        Game.prototype.state = original;
+        clearTimeout(timer);
+        const parts = this.simulation.frame(1).parts;
+        const slider = parts.find(part => part.id === 'slider');
+        const head = parts.find(part => part.id === 'head');
+        resolve({
+          geometry: { ...this.simulation.rigGeometry },
+          viewSharesRig: this.view.rig === this.simulation.rigGeometry,
+          shaftLength: Math.hypot(head.x - slider.x, head.y - slider.y),
+          touchStep: -this.view.pointerDelta({ x: 0, y: 100 }, 1, 'touch').y,
+          maxRadius: this.settings().cursor.maxRadius,
+        });
+        return original.call(this);
+      };
+    });
+  }, { url: module.url, timeout: SETTINGS_SAMPLE_TIMEOUT });
+}
+
 async function verifySettings(page) {
   delete process.env.GAME_SETTINGS;
   const { defaults, fileBytes } = await withSettingsDevelopment(page, async (server, address) => {
@@ -183,9 +212,11 @@ async function verifySettings(page) {
     report.settings.defaults = { build: true, development: true, profile: defaults };
     return { defaults, fileBytes: shared.GAME_SETTINGS_LIMITS.fileBytes };
   });
+  // A longer handle with a different reach, so every value derived from the rig must follow it.
   const selected = {
     ...defaults,
     physics: { ...defaults.physics, playerMass: 14, mouseSensitivity: 1.75 },
+    rig: { handleLength: 2.1, maxExtension: 0.8 },
     cursor: { maxRadius: 2.1 },
   };
   await writeFile(settingsPath, JSON.stringify(selected));
@@ -218,6 +249,18 @@ async function verifySettings(page) {
     assert.equal((await page.goto(address, { waitUntil: 'networkidle' })).status(), 200);
     assert.deepEqual(await runtimeSettings(page, server), selected);
     report.settings.selected.development = true;
+    const rig = await runtimeRig(page, server);
+    const close = (actual, expected, label) => assert.ok(Math.abs(actual - expected) < 1e-9, `${label}: ${actual} != ${expected}`);
+    close(rig.geometry.handleLength, 2.1, 'handle length');
+    close(rig.geometry.maxExtension, 0.8, 'maximum extension');
+    close(rig.geometry.minExtension, -2.1, 'the head retracts to the hinge');
+    close(rig.geometry.maxReach, 2.9, 'reach');
+    close(rig.geometry.segmentLength, 0.7, 'three segments share the handle');
+    assert.ok(rig.viewSharesRig, 'The view must render the simulation\'s rig.');
+    assert.ok(Math.abs(rig.shaftLength - 2.1) < 0.02, `The physical handle must be 2.1 m (${rig.shaftLength} m).`);
+    close(rig.touchStep, 2.9, '100 touch pixels must move the target one reach');
+    assert.ok(rig.maxRadius <= rig.geometry.maxReach);
+    report.settings.rig = rig;
     const edited = {
       ...selected,
       physics: { ...selected.physics, mouseSensitivity: 0.8 },
@@ -230,25 +273,10 @@ async function verifySettings(page) {
     report.settings.reload = { fullReload: true, profile: edited };
   });
 
-  const legacy = {
-    schemaVersion: 1,
-    physics: { ...defaults.physics, hingeTorque: defaults.physics.hingeTorque + 70, mouseSensitivity: 1.35 },
-    cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
-  };
-  const normalizedLegacy = { schemaVersion: 2, physics: legacy.physics, cursor: defaults.cursor };
-  await writeFile(settingsPath, JSON.stringify(legacy));
-  process.env.GAME_SETTINGS = relative(root, settingsPath);
-  await settingsBuild(normalizedLegacy, { write: false });
-  await withSettingsDevelopment(page, async (server, address) => {
-    assert.equal((await page.goto(address, { waitUntil: 'networkidle' })).status(), 200);
-    assert.deepEqual(await runtimeSettings(page, server), normalizedLegacy);
-    report.settings.legacyNormalized = { build: true, development: true, source: legacy, normalized: normalizedLegacy };
-  });
-
   const invalidPath = join(temporary, 'invalid-settings.json');
   const invalid = [
     { name: 'malformed-json', source: '{broken', error: /JSON|Unexpected/ },
-    { name: 'unsupported-version', value: { ...defaults, schemaVersion: 3 }, error: /version is not supported/ },
+    { name: 'unsupported-version', value: { ...defaults, schemaVersion: 2 }, error: /require schema version 3/ },
     {
       name: 'invalid-physics', value: { ...defaults, physics: { ...defaults.physics, playerMass: 0 } },
       error: /Player mass must be between/,
@@ -258,22 +286,12 @@ async function verifySettings(page) {
       error: /Maximum target radius must be between/,
     },
     {
-      name: 'invalid-legacy-cursor',
-      value: {
-        schemaVersion: 1,
-        physics: defaults.physics,
-        cursor: { returnToHammer: 'yes', returnRate: 12, returnOffsetX: 0.35, returnOffsetY: -0.25 },
-      },
-      error: /retired return setting must be a boolean/i,
+      name: 'radius-beyond-reach', value: { ...defaults, cursor: { maxRadius: 3 } },
+      error: /must not exceed the hammer's 2\.65 m reach/,
     },
     {
-      name: 'invalid-legacy-offset',
-      value: {
-        schemaVersion: 1,
-        physics: defaults.physics,
-        cursor: { returnToHammer: true, returnRate: 12, returnOffsetX: 1000, returnOffsetY: -0.25 },
-      },
-      error: /Retired return offset X must be between/,
+      name: 'invalid-rig', value: { ...defaults, rig: { handleLength: 0.2, maxExtension: 1 } },
+      error: /Handle length must be between/,
     },
     { name: 'missing-fields', value: { ...defaults, physics: {} }, error: /missing or unknown settings/ },
     { name: 'unknown-field', value: { ...defaults, unknown: 1 }, error: /missing or unknown settings/ },
@@ -313,7 +331,7 @@ function paperProfile() {
     bone: null, directions: DIRECTIONS, skin: null, tileLength: null,
   });
   return {
-    schemaVersion: 6, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25,
+    schemaVersion: 10, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: 'fixed',
     images: [
       { id: 'body', name: 'Body', source: `data:image/png;base64,${solidPng(16, 16, 20).toString('base64')}` },
       { id: 'tool', name: 'Tool', source: `data:image/png;base64,${solidPng(16, 16, 200).toString('base64')}` },
@@ -329,7 +347,7 @@ function paperProfile() {
 // Avatar, hammer and pot models; `only` keeps just the avatar, for single-model failure cases.
 function heroProfile(changes = {}) {
   return {
-    schemaVersion: 9, characterRiggingType: 'avatar-3d', armForwardDistance: 0.3,
+    schemaVersion: 10, characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, grips: 'sliding',
     images: [], layers: [], skeleton: null, presentation: null,
     models: [
       { id: 'avatar', name: 'Hero', source: glbSource(skinnedAvatarGlb()) },
@@ -373,7 +391,7 @@ async function verifyCharacterRelease(page) {
   const heroModels = heroProfile().models.map(model => model.source.slice(model.source.indexOf(',') + 1));
   assert.ok(outputs.filter(file => file.type === 'chunk').every(file => heroModels.every(model => !file.code.includes(model.slice(0, 4096)))),
     'Character GLB bytes must not be embedded in executable JavaScript.');
-  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:9,.*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*pot:.*shading:/s);
+  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:10,.*grips:"sliding".*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*pot:.*shading:/s);
   assert.match(modules.get(MODELS_MODULE), /createCharacterModelLoader/);
   const releaseModules = bundleModules(release);
   assert.ok(!releaseModules.some(id => id.includes('/src/editor/')), 'The character release contains no editor modules.');
@@ -457,6 +475,7 @@ async function verifyCharacterRelease(page) {
       return {
         physics: JSON.stringify(game.simulation.snapshot()),
         selection: view.characters,
+        grips: view.grips.strategy,
         textures: view.textures, geometries: view.geometries,
         shading: { mode: view.shading.mode, materialsCreated: view.shading.materialsCreated, hullsCreated: view.shading.hullsCreated },
         avatar: view.importedAvatar === null ? null : { visible: view.importedAvatar.visible, bones: view.importedAvatar.bones },
@@ -477,6 +496,8 @@ async function verifyCharacterRelease(page) {
     const back = await select(0);
     const again = await select(1);
     for (const state of [first, back, again]) assert.equal(state.physics, start.physics, 'Switching characters must not touch physics.');
+    assert.deepEqual([start.grips, first.grips, back.grips, again.grips], ['fixed', 'sliding', 'fixed', 'sliding'],
+      'Each character applies its own grip placement, without a reload.');
     assert.deepEqual([first.selection.active, back.selection.active, again.selection.active], [1, 0, 1]);
     assert.deepEqual(first.selection.types, ['sprite-2d', 'avatar-3d']);
     assert.equal(first.avatar.visible, true);
@@ -517,7 +538,7 @@ async function verifyCharacterRelease(page) {
     ['pot convention', heroProfile({ models: heroProfile().models.map(model => model.id === 'pot'
       ? { ...model, source: glbSource(potGlb({ origin: 'centre' })) } : model) }), /pot model "Urn".*bottom-centre/],
     ['shared pot model', heroProfile({ pot: { model: 'hammer' }, models: heroProfile().models.slice(0, 2) }), /separate character models/],
-    ['pot in schema 8', heroProfile({ schemaVersion: 8 }), /pot model requires sprite schema version 9/],
+    ['earlier schema', heroProfile({ schemaVersion: 9 }), /require schema version 10/],
   ];
   result.invalid = [];
   for (const [name, profile, error] of invalid) {
@@ -533,23 +554,21 @@ async function verifyCharacterRelease(page) {
 
 function customLevel(lift) {
   return {
-    schemaVersion: 1,
-    spawn: { position: { x: 11, y: lift + 6 }, angle: -0.4, extension: 0.3 },
-    summit: { xMin: 8, xMax: 15, y: lift + 8, arrivalTolerance: 0.1 },
+    schemaVersion: 3,
     labels: [{ x: 10, y: lift + 7, text: 'RELEASE_LEVEL_SENTINEL' }],
     objects: [{
-      id: 'release-floor', shape: { type: 'box' }, x: 11, y: lift + 3,
+      kind: 'terrain', id: 'release-floor', shape: { type: 'box' }, x: 11, y: lift + 3,
       width: 20, height: 2, angle: 0, depth: 2, color: 0x71817a, illusion: false,
-    }],
+    }, { kind: 'start', id: 'release-start', x: 11, y: lift + 6, angle: -0.4, reach: 1.8 }],
   };
 }
 
 function updraftLevel() {
   return {
-    schemaVersion: 2, labels: [],
+    schemaVersion: 3, labels: [],
     objects: [
-      { ...customLevel(0).objects[0], kind: 'terrain', x: 0, y: -1 },
-      { kind: 'start', id: 'release-start', x: 0, y: 4, angle: 0, extension: 0.2 },
+      { ...customLevel(0).objects[0], x: 0, y: -1 },
+      { kind: 'start', id: 'release-start', x: 0, y: 4, angle: 0, reach: 1.7 },
       {
         kind: 'trigger', id: 'release-updraft', name: 'Updraft', x: 0, y: 0.7,
         region: { type: 'box', width: 2, height: 1.4 }, activation: 'on-enter', marker: 'updraft',
@@ -561,10 +580,10 @@ function updraftLevel() {
 
 function enemiesLevel() {
   return {
-    schemaVersion: 2, labels: [],
+    schemaVersion: 3, labels: [],
     objects: [
-      { ...customLevel(0).objects[0], kind: 'terrain', x: 0, y: -1 },
-      { kind: 'start', id: 'release-start', x: 0, y: 0.53, angle: 0, extension: 0.2 },
+      { ...customLevel(0).objects[0], x: 0, y: -1 },
+      { kind: 'start', id: 'release-start', x: 0, y: 0.53, angle: 0, reach: 1.7 },
       {
         kind: 'enemy', id: 'release-bird', species: 'bird', x: 2.35, y: 1.2,
         facing: 'left', patrolDistance: 0, speed: 0,
@@ -650,15 +669,17 @@ try {
     }
     if (mode === 'sprites') {
       const source = `data:image/png;base64,${texturePng().toString('base64')}`;
+      const rigging = { bone: null, directions: DIRECTIONS, skin: null, tileLength: null };
       await writeFile(spritePath, JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 10, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: 'fixed',
         images: [{ id: 'body', name: 'Generated body', source }, { id: 'alias', name: 'Shared source', source }],
         layers: [
           { id: 'body-card', name: 'Body card', anchor: 'pot', image: 'body', width: 1.2, height: 1,
-            offset: { x: 0, y: 0, z: 0.6 }, rotation: 0, underlay: 'replace' },
+            offset: { x: 0, y: 0, z: 0.6 }, rotation: 0, ...rigging },
           { id: 'head-card', name: 'Head card', anchor: 'character-head', image: 'alias', width: 0.4, height: 0.4,
-            offset: { x: 0, y: 1.1, z: 0.6 }, rotation: 0, underlay: 'replace' },
+            offset: { x: 0, y: 1.1, z: 0.6 }, rotation: 0, ...rigging },
         ],
+        skeleton: null, presentation: null,
       }));
       process.env.GAME_SPRITES = spritePath;
       const skin = await build({ configFile, logLevel: 'silent', build: { outDir: customOutput } });
@@ -674,7 +695,7 @@ try {
         id: `frame-${index}`, name: `Frame ${index}`, source: `data:image/png;base64,${solidPng(12, 16, index * 90).toString('base64')}`,
       }));
       const flipbook = {
-        schemaVersion: 7, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25,
+        schemaVersion: 10, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: 'fixed',
         images: frames,
         layers: [{
           id: 'aim-head', name: 'Aim head', anchor: 'character-head', image: frames[0].id, width: 0.4, height: 0.4,
@@ -697,7 +718,7 @@ try {
       const outputs = (Array.isArray(release) ? release : [release]).flatMap(result => result.output);
       assert.equal(outputs.filter(file => file.type === 'asset' && /sprite-[^/]+\.png$/.test(file.fileName)).length, FLIPBOOK_FRAMES,
         'Every flipbook frame must become its own hashed release asset.');
-      assert.ok(virtualModule?.includes('schemaVersion:7,'), 'The release must embed the schema-7 flipbook document.');
+      assert.ok(virtualModule?.includes('schemaVersion:10,'), 'The release must embed the flipbook document.');
       assert.deepEqual(JSON.parse(virtualModule.match(/layers:(\[.*\]),skeleton:/s)[1]), flipbook.layers,
         'GAME_SPRITES must carry the flipbook layer without loss.');
       assert.equal(virtualModule.match(/import\.meta\.ROLLUP_FILE_URL_/g).length, FLIPBOOK_FRAMES);
@@ -741,7 +762,7 @@ try {
       await ready();
       if (mode === 'flipbook') {
         assert.equal(spriteRequests.size, FLIPBOOK_FRAMES, 'All flipbook frames must load before gameplay starts.');
-        flipbookRelease = { frames: FLIPBOOK_FRAMES, schemaVersion: 7, assets: [...spriteRequests] };
+        flipbookRelease = { frames: FLIPBOOK_FRAMES, schemaVersion: 10, assets: [...spriteRequests] };
         spriteRequests = null;
       }
       const canvas = await minimalHud(page, 1440);
@@ -776,9 +797,8 @@ try {
         await ready();
         // Import the loaded modules, not aliases that instantiate a second copy.
         const viewModule = server.moduleGraph.getModuleById(join(root, 'src/view.ts'));
-        const configModule = server.moduleGraph.getModuleById(join(root, 'src/config.ts'));
-        assert.ok(viewModule && configModule);
-        const sources = { view: viewModule.url, config: configModule.url };
+        assert.ok(viewModule);
+        const sources = { view: viewModule.url };
         await tracePointerMapping(page, sources);
         const start = { x: canvas.width / 2, y: canvas.height / 2 };
         await page.mouse.move(start.x, start.y);

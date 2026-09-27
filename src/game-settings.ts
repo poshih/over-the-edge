@@ -1,24 +1,25 @@
-import { DEFAULT_TUNING, RIG } from './config';
+import { DEFAULT_TUNING } from './config';
 import type { Tuning } from './config';
+import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, RIG_LIMITS, rigGeometry } from './rig';
+import type { RigSettings } from './rig';
 
 export interface CursorSettings {
   readonly maxRadius: number;
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly physics: Readonly<Tuning>;
+  readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
 }
 
 export const GAME_SETTINGS_LIMITS = { fileBytes: 64 * 1024 } as const;
-// Profiles saved before aiming was measured from the hinge allowed radii up to 10 m.
-const LEGACY_MAX_RADIUS = 10;
 export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
-  maxRadius: RIG.maxReach,
+  maxRadius: rigGeometry(DEFAULT_RIG_SETTINGS).maxReach,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 2, physics: DEFAULT_TUNING, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 3, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -35,10 +36,17 @@ interface TuningField extends NumericSetting {
   group: 'Mass & recoil' | 'Motors' | 'Response' | 'Materials' | 'Input';
 }
 
+type RigField = NumericSetting & { key: keyof RigSettings };
 type CursorField = NumericSetting & { key: keyof CursorSettings };
 
+export const RIG_FIELDS: readonly RigField[] = [
+  { key: 'handleLength', label: 'Handle length', ...RIG_LIMITS.handleLength, step: 0.05, unit: 'm', description: 'From the butt to the centre of the head. Fully retracted, the head reaches the shoulder hinge, so the butt travels this far behind it. Changing it rebuilds the player and restarts the run.' },
+  { key: 'maxExtension', label: 'Maximum extension', ...RIG_LIMITS.maxExtension, step: 0.05, unit: 'm', description: 'How far the butt can slide past the shoulder hinge. The reach is the handle length plus this. Changing it rebuilds the player and restarts the run.' },
+];
+
+// The radius is also capped at the rig's reach, which validateGameSettings checks.
 export const CURSOR_FIELDS: readonly CursorField[] = [
-  { key: 'maxRadius', label: 'Maximum target radius', min: 0.25, max: RIG.maxReach, step: 0.05, unit: 'm', description: 'Maximum distance from the shoulder hinge the hammer pivots on, up to its 2.65 m reach. Aiming moves this offset; character movement carries it along. Motion beyond the radius is discarded.' },
+  { key: 'maxRadius', label: 'Maximum target radius', min: 0.25, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Maximum distance from the shoulder hinge the hammer pivots on, up to the rig\'s reach (handle length plus maximum extension). Aiming moves this offset; character movement carries it along. Motion beyond the radius is discarded.' },
 ];
 
 export const TUNING_FIELDS: readonly TuningField[] = [
@@ -78,7 +86,7 @@ function settingNumber(value: unknown, field: Pick<NumericSetting, 'label' | 'mi
   return value;
 }
 
-export function validateTuning(value: unknown): Tuning {
+function validateTuning(value: unknown): Tuning {
   settingsFields(value, TUNING_FIELDS.map((field) => field.key), 'Physics tuning');
   const result = { ...DEFAULT_TUNING };
   for (const field of TUNING_FIELDS) {
@@ -87,25 +95,36 @@ export function validateTuning(value: unknown): Tuning {
   return Object.freeze(result);
 }
 
-export function validateGameSettings(value: unknown): GameSettings {
-  settingsFields(value, ['schemaVersion', 'physics', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion === 1) {
-    settingsFields(value.cursor, ['returnToHammer', 'returnRate', 'returnOffsetX', 'returnOffsetY'], 'Retired cursor settings');
-    if (typeof value.cursor.returnToHammer !== 'boolean') throw new GameSettingsError('The retired return setting must be a boolean.');
-    for (const field of [
-      { key: 'returnRate', label: 'Retired return speed', min: 0.5, max: 24 },
-      { key: 'returnOffsetX', label: 'Retired return offset X', min: -2.65, max: 2.65 },
-      { key: 'returnOffsetY', label: 'Retired return offset Y', min: -2.65, max: 2.65 },
-    ]) settingNumber(value.cursor[field.key], field);
-    return Object.freeze({ schemaVersion: 2, physics: validateTuning(value.physics), cursor: DEFAULT_CURSOR_SETTINGS });
+function validateRig(value: unknown): RigSettings {
+  settingsFields(value, RIG_FIELDS.map((field) => field.key), 'Hammer rig');
+  const result = { ...DEFAULT_RIG_SETTINGS };
+  for (const field of RIG_FIELDS) {
+    result[field.key] = settingNumber(value[field.key], field);
   }
-  if (value.schemaVersion !== 2) throw new GameSettingsError('This game-settings profile version is not supported.');
+  return Object.freeze(result);
+}
+
+// A new rig keeps a full-reach target radius at the full reach and caps a smaller one at the new reach.
+export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSettings>): GameSettings {
+  const previousReach = rigGeometry(settings.rig).maxReach;
+  const reach = rigGeometry(rig).maxReach;
+  const fullReach = settings.cursor.maxRadius >= previousReach;
+  return {
+    ...settings, rig,
+    cursor: { ...settings.cursor, maxRadius: fullReach ? reach : Math.min(settings.cursor.maxRadius, reach) },
+  };
+}
+
+export function validateGameSettings(value: unknown): GameSettings {
+  settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
+  if (value.schemaVersion !== 3) throw new GameSettingsError('Game settings require schema version 3.');
+  const rig = validateRig(value.rig);
   settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
   const cursor = { ...DEFAULT_CURSOR_SETTINGS };
-  for (const field of CURSOR_FIELDS) {
-    // Older radii beyond the hammer's reach load capped at the reach instead of failing.
-    const accepted = field.key === 'maxRadius' ? { ...field, max: LEGACY_MAX_RADIUS } : field;
-    cursor[field.key] = Math.min(settingNumber(value.cursor[field.key], accepted), field.max);
+  for (const field of CURSOR_FIELDS) cursor[field.key] = settingNumber(value.cursor[field.key], field);
+  const reach = rigGeometry(rig).maxReach;
+  if (cursor.maxRadius > reach) {
+    throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 2, physics: validateTuning(value.physics), cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 3, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

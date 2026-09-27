@@ -3,10 +3,11 @@ export interface Point {
   y: number;
 }
 
+// The hammer starts along `angle` with its head `reach` metres from the shoulder hinge.
 export interface PlayerSpawn {
   position: Point;
   angle: number;
-  extension: number;
+  reach: number;
 }
 
 export interface Tuning {
@@ -69,22 +70,14 @@ export const PHYSICS = {
 } as const;
 
 const POT_BOTTOM = -0.48;
-const HANDLE_SEGMENTS = 3;
-const SEGMENT_LENGTH = 0.5;
-const HANDLE_LENGTH = HANDLE_SEGMENTS * SEGMENT_LENGTH;
-const MAX_EXTENSION = 1.15;
 
+// The fixed player geometry. The handle length and slide range are game settings (see rig.ts).
 export const RIG = {
   shoulder: { x: 0, y: 0.67 },
   potBottom: POT_BOTTOM,
   potAngleLimit: 0.26,
-  handleSegments: HANDLE_SEGMENTS,
-  segmentLength: SEGMENT_LENGTH,
-  handleLength: HANDLE_LENGTH,
+  handleSegments: 3,
   handleHalfWidth: 0.045,
-  minExtension: -HANDLE_LENGTH,
-  maxExtension: MAX_EXTENSION,
-  maxReach: HANDLE_LENGTH + MAX_EXTENSION,
   potVertices: [
     { x: -0.2, y: POT_BOTTOM }, { x: 0.2, y: POT_BOTTOM },
     { x: 0.44, y: -0.29 }, { x: 0.5, y: 0.12 },

@@ -100,7 +100,7 @@ function rawRequest(base, path, headers) {
 function largeLevel(count) {
   const objects = [
     { kind: 'terrain', id: 'floor', shape: { type: 'box' }, x: 0, y: -1, width: 128, height: 2, angle: 0, depth: 3, color: 0x3b4046, illusion: false },
-    { kind: 'start', id: 'start', x: 0, y: 0.65, angle: -0.42, extension: 0.2 },
+    { kind: 'start', id: 'start', x: 0, y: 0.65, angle: -0.42, reach: 1.7 },
   ];
   const shapes = ['box', 'ramp', 'triangle', 'circle', 'hexagon'];
   for (let index = 1; objects.length < count + 1; index++) {
@@ -111,7 +111,7 @@ function largeLevel(count) {
       angle: 0, depth: 1.2, color: 0x4f6b45, illusion: index % 17 === 0,
     });
   }
-  return { schemaVersion: 2, labels: [], objects };
+  return { schemaVersion: 3, labels: [], objects };
 }
 
 // A structurally valid GLB with nothing to draw, which the runtime loader refuses.
@@ -228,11 +228,11 @@ try {
     const hammer = { id: 'hammer', name: 'Mallet', source: glbData(hammerGlb()) };
     const avatar = { id: 'avatar', name: 'Hero', source: glbData(skinnedAvatarGlb()) };
     const primary = {
-      schemaVersion: 8, characterRiggingType: 'model-3d', armForwardDistance: 0.3, images: [], layers: [], skeleton: null, presentation: null,
+      schemaVersion: 10, characterRiggingType: 'model-3d', armForwardDistance: 0.3, grips: 'fixed', images: [], layers: [], skeleton: null, presentation: null,
       models: [hammer], hammer: { model: 'hammer' },
     };
     const alternate = {
-      schemaVersion: 8, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, images: [], layers: [], skeleton: null, presentation: null,
+      schemaVersion: 10, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, grips: 'sliding', images: [], layers: [], skeleton: null, presentation: null,
       models: [avatar], avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP },
     };
     await mkdir(join(directory, 'characters'), { recursive: true });
@@ -331,10 +331,16 @@ try {
     assert.equal(media.headers.get('x-content-type-options'), 'nosniff');
 
     // Characters, appearance and settings.
-    assert.equal((await api('PUT', '/api/projects/blank-test/characters/alternate', { schemaVersion: 6, characterRiggingType: 'model-3d', armForwardDistance: 0.25, images: [], layers: [], skeleton: null, presentation: null })).status, 409);
+    assert.equal((await api('PUT', '/api/projects/blank-test/characters/alternate', { schemaVersion: 10, characterRiggingType: 'model-3d', armForwardDistance: 0.25, grips: 'fixed', images: [], layers: [], skeleton: null, presentation: null })).status, 409);
     assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { armForwardDistance: 0.6 })).status, 200);
     assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { shading: { mode: 'cel', bands: 4, outline: null } })).status, 200);
-    assert.equal((await api('GET', '/api/projects/blank-test/characters/primary')).value.schemaVersion, 8, 'PATCH recomputes the schema version.');
+    assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { grips: 'sliding' })).status, 200);
+    assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { grips: 'loose' })).status, 400);
+    const patchedProfile = (await api('GET', '/api/projects/blank-test/characters/primary')).value;
+    assert.equal(patchedProfile.schemaVersion, 10, 'Profiles always use schema 10.');
+    assert.equal(patchedProfile.grips, 'sliding');
+    assert.equal((await api('PATCH', '/api/projects/blank-test/characters/primary', { schemaVersion: 9 })).status, 400,
+      'Profiles in other schema versions are rejected, not converted.');
     assert.equal((await api('PUT', '/api/projects/blank-test/appearance/torso/model?name=Armour.glb', new Uint8Array(modelFixture()))).status, 200);
     assert.equal((await api('PATCH', '/api/projects/blank-test/appearance/torso', { alignment: { scale: 1.5 } })).status, 200);
     assert.equal((await api('GET', '/api/projects/blank-test/appearance')).value[0].alignment.scale, 1.5);
@@ -344,6 +350,12 @@ try {
     assert.match(empty.value.error.message, /1-128 meshes/);
     assert.equal((await api('PATCH', '/api/projects/blank-test/settings', { physics: { hammerMass: 99 } })).status, 400);
     assert.equal((await api('PATCH', '/api/projects/blank-test/settings', { physics: { hammerMass: 1.4 } })).status, 200);
+    assert.equal((await api('PATCH', '/api/projects/blank-test/settings', { rig: { handleLength: 2.1, maxExtension: 0.55 } })).status, 200);
+    assert.equal((await api('PATCH', '/api/projects/blank-test/settings', { rig: { maxExtension: 0 } })).status, 400,
+      'A rig whose reach is shorter than the target radius is rejected.');
+    const projectSettings = (await api('GET', '/api/projects/blank-test/settings')).value;
+    assert.deepEqual(projectSettings.rig, { handleLength: 2.1, maxExtension: 0.55 });
+    assert.equal(projectSettings.schemaVersion, 3);
     assert.deepEqual((await api('POST', '/api/projects/blank-test/validate')).value, { ok: true, problems: [] });
 
     // Bundles round-trip byte for byte.

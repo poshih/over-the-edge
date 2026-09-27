@@ -8,6 +8,9 @@ import {
 } from '../character-profile';
 import type { AvatarJointId, CelOutline, CharacterShading, ShadingMode } from '../character-profile';
 import { RIG } from '../config';
+import { BUTT_GRIPS, GRIP_STRATEGIES } from '../grips';
+import type { GripStrategy } from '../grips';
+import type { RigGeometry } from '../rig';
 import { createRangeControl } from './range-control';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import { sectionMarkup } from './workshop-section';
@@ -46,9 +49,16 @@ const CHARACTER_TYPES: Readonly<Record<CharacterRiggingType, { label: string; de
   },
 };
 
+const GRIP_LABELS: Readonly<Record<GripStrategy, string>> = {
+  fixed: 'Fixed at the butt',
+  sliding: 'Slide along the handle',
+};
+
 export function createCharacterEditor(options: {
   readonly mount: HTMLElement;
   readonly state: SpriteEditorState;
+  // The game's current hammer rig, for the hammer model's measurements.
+  readonly hammerRig: RigGeometry;
   readonly actions: {
     save(): void;
     revert(): void;
@@ -57,7 +67,7 @@ export function createCharacterEditor(options: {
   };
   readonly onNotice: (message: string, kind: 'info' | 'error') => void;
   readonly signal: AbortSignal;
-}): { dispose(): void } {
+}): { setHammerRig(rig: RigGeometry): void; dispose(): void } {
   const events = new AbortController();
   const listen = { signal: events.signal };
   let disposed = false;
@@ -96,6 +106,22 @@ export function createCharacterEditor(options: {
         </fieldset>
       `)}
 
+      ${sectionMarkup({ id: 'character-grips', title: 'Hand grips', hint: 'Where the hands hold the handle', open: true }, `
+        <fieldset class="tuning-group character-grips">
+          <legend class="visually-hidden">Hand grips</legend>
+          <div class="character-grip-modes" role="radiogroup" aria-label="Grip placement">
+            ${GRIP_STRATEGIES.map(strategy => `<label><input type="radio" name="character-grips" value="${strategy}" />
+              ${GRIP_LABELS[strategy]}</label>`).join('')}
+          </div>
+          <p class="appearance-format">Fixed hands hold the butt, ${metres(BUTT_GRIPS.left)} and
+            ${metres(BUTT_GRIPS.right)} along the handle, and travel with it, so arms must reach as far as the
+            handle slides. Sliding hands hold the handle where it passes the body and let it slide through them,
+            short of the head; once the butt passes the body they hold the butt, so arms only need to reach the
+            maximum extension. Avatars, mesh parts and 2D grip targets use the same placement, in every
+            character type. Physics is unchanged. Save the character profile to keep it.</p>
+        </fieldset>
+      `)}
+
       ${sectionMarkup({ id: 'character-avatar', title: 'Skinned avatar (GLB)', hint: 'Replace the built-in avatar mesh' }, `
         <div class="character-model">
           <p class="appearance-format">Replace the built-in avatar mesh with a rigged GLB. Map eight of its skin
@@ -129,9 +155,7 @@ export function createCharacterEditor(options: {
         <div class="character-hammer">
           <p class="appearance-format">Replace the stretched shaft and separate head with one rigid model, in every
             character type. Model it with its origin at the butt of the handle, the handle along +X, in metres.
-            The physical head sits at x = ${metres(RIG.handleLength)}; its collision block spans
-            x ${metres(RIG.handleLength - HEAD_HALF_LENGTH)} to ${metres(RIG.handleLength + HEAD_HALF_LENGTH)} and
-            y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}. Length, reach, grips and contacts stay physical.</p>
+            <span class="character-hammer-geometry"></span> Length, reach, grips and contacts stay physical.</p>
           <label class="appearance-label" for="character-hammer-file">Hammer GLB</label>
           <input id="character-hammer-file" type="file" accept=".glb,model/gltf-binary" />
           <p class="appearance-format character-hammer-status" role="status" aria-live="polite"></p>
@@ -194,7 +218,7 @@ export function createCharacterEditor(options: {
             <button type="button" class="button character-import">Import profile JSON</button>
             <button type="button" class="button character-export">Export profile JSON</button>
           </div>
-          <p class="appearance-format">Includes the character type, 3D arm forward distance, sprite layout, 2D skeleton, directional settings,
+          <p class="appearance-format">Includes the character type, 3D arm forward distance, grip placement, sprite layout, 2D skeleton, directional settings,
             embedded PNGs, the imported avatar, hammer and pot GLBs, bone map and shading. Public image URLs remain
             references. Import limit: ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB. Exported profiles can be used
             as game sprite data.</p>
@@ -207,7 +231,8 @@ export function createCharacterEditor(options: {
         <section class="character-intro" aria-label="About character types">
           <p>Choose <strong>2D sprites</strong>, <strong>separate 3D mesh parts</strong>, or a
             <strong>connected, skinned 3D avatar</strong>. The default remains the separate mesh-part character.
-            Every type keeps <strong>Planck 2D physics</strong>, hammer motion, grip positions and IK targets unchanged.</p>
+            Every type keeps <strong>Planck 2D physics</strong> and hammer motion; the hands follow the profile's
+            grip placement.</p>
           <p>Type changes are draft-only. Switching types keeps all images, layers, bones, directional settings
             and imported GLB parts; it ends temporary sprite previews. Choose Save to keep the profile across reloads.</p>
           <p><strong>Use Avatar</strong> selects a built-in skinned model with joined shoulders, arms, neck and head,
@@ -220,8 +245,6 @@ export function createCharacterEditor(options: {
             and two grip-target IK chains drive the arms. Eight custom helmet views follow aim with automatic neck
             tilt. It loads a new 2D draft, not a save: Revert restores your last saved profile until you choose Save.
             Artwork is generated only when you load this example.</p>
-          <p>Hybrid has been removed. Older Hybrid profiles with sprites become pure 2D; those without sprites
-            become Mesh parts. Incomplete sprite profiles no longer reveal missing 3D parts.</p>
           <p>Save and Revert apply to the whole character / sprite profile, not just the type. Only Save writes this
             profile to browser storage.</p>
         </section>
@@ -282,6 +305,9 @@ export function createCharacterEditor(options: {
   const potStatus = element<HTMLParagraphElement>(root, '.character-pot-status');
   const potRemove = element<HTMLButtonElement>(root, '.character-pot-remove');
   const shadingModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-shading-mode"]'));
+  const gripModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-grips"]'));
+  const hammerGeometry = element<HTMLSpanElement>(root, '.character-hammer-geometry');
+  let hammerRig = options.hammerRig;
   const outlineEnabled = element<HTMLInputElement>(root, '#character-outline-enabled');
   const outlineColor = element<HTMLInputElement>(root, '#character-outline-color');
   const shadingInactive = element<HTMLParagraphElement>(root, '.character-shading-inactive');
@@ -323,6 +349,11 @@ export function createCharacterEditor(options: {
   element(root, '.character-outline-width').append(outlineWidth.row);
   for (const input of shadingModes) {
     input.addEventListener('change', () => { if (input.checked) editShading({ mode: input.value as ShadingMode }); }, listen);
+  }
+  for (const input of gripModes) {
+    input.addEventListener('change', () => {
+      if (input.checked && !options.state.setGrips(input.value)) render();
+    }, listen);
   }
   outlineEnabled.addEventListener('change', () => editShading({ outline: outlineEnabled.checked ? lastOutline : null }), listen);
   outlineColor.addEventListener('input', () => editShading({ outline: { ...lastOutline, color: outlineColor.value } }), listen);
@@ -396,6 +427,10 @@ export function createCharacterEditor(options: {
     forward.setValue(profile.armForwardDistance, { disabled: forwardDisabled });
     forwardReset.disabled = forwardDisabled || profile.armForwardDistance === DEFAULT_ARM_FORWARD_DISTANCE;
     forwardInactive.hidden = profile.characterRiggingType !== 'sprite-2d';
+    for (const input of gripModes) {
+      input.checked = input.value === profile.grips;
+      input.disabled = disabled;
+    }
     exampleButton.disabled = disabled;
     avatarButton.disabled = disabled || profile.characterRiggingType === 'avatar-3d';
     importButton.disabled = disabled;
@@ -510,7 +545,15 @@ export function createCharacterEditor(options: {
     shadingInactive.hidden = snapshot.document.characterRiggingType === 'avatar-3d';
   }
 
+  function renderRig(): void {
+    const head = hammerRig.handleLength;
+    setText(hammerGeometry, `This game's handle puts the physical head at x = ${metres(head)}; its collision block spans ` +
+      `x ${metres(head - HEAD_HALF_LENGTH)} to ${metres(head + HEAD_HALF_LENGTH)} and ` +
+      `y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}.`);
+  }
+
   options.mount.append(root);
+  renderRig();
   const unsubscribe = options.state.subscribe(render);
   options.signal.addEventListener('abort', dispose, { ...listen, once: true });
 
@@ -522,5 +565,12 @@ export function createCharacterEditor(options: {
     root.remove();
   }
 
-  return { dispose };
+  return {
+    setHammerRig: (next) => {
+      if (disposed || next === hammerRig) return;
+      hammerRig = next;
+      renderRig();
+    },
+    dispose,
+  };
 }

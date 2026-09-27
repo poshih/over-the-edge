@@ -1,6 +1,10 @@
 # Feature request: hands that slide along the handle, and a configurable handle length
 
-**Date:** 2026-09-27 · **Baseline:** `56377bc` · **Status:** requested, not started.
+**Date:** 2026-09-27 · **Baseline:** `56377bc` · **Status:** implemented; see [hand grips](README.md#hand-grips)
+and the [hammer rig](README.md#game-settings). The handle length and maximum extension are the settings' `rig`
+section; the three handle segments share the handle length instead of exposing a layout. Level starts store the
+head's `reach` instead of the slider extension, so a start keeps its pose on any handle, and profiles carry
+`grips`. Settings (schema 3), levels (schema 3) and profiles (schema 10) changed without backward compatibility.
 
 A game wants a **longer hammer so its character can have shorter arms** (the same reach, with more
 of it in the handle). Today that cannot work: the hands are pinned to the butt of the sliding
@@ -74,9 +78,9 @@ The figures come from the source geometry above and the sliding rule below, not 
 
 ## Context
 
-Queen Ascension's 3D Queen has 0.82 m + 0.82 m arms only so her hands can follow the pinned butt,
-and the owner wants her proportions human, with a longer hammer. Her hammer model is now built from
-the physical rig (handle length and width, head collision polygon), so it follows any handle length.
-Once grips slide, the game sets a longer handle in its project and models her arms at about 0.5 m
-per segment. Her 2D painted arms (0.58 m + 0.56 m) would reach the grips too, without the sprite-IK
+A downstream game's 3D character has 0.82 m + 0.82 m arms only so its hands can follow the pinned
+butt, and the owner wants human proportions with a longer hammer. Its hammer model is built from the
+physical rig (handle length and width, head collision polygon), so it follows any handle length.
+Once grips slide, the game sets a longer handle in its project and models the arms at about 0.5 m
+per segment. Its 2D painted arms (0.58 m + 0.56 m) would reach the grips too, without the sprite-IK
 stretch they would otherwise need.

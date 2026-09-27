@@ -4,12 +4,12 @@ import type { LevelDefinition } from './level';
 import { ENDING_EVENTS } from './trigger-events';
 
 export const DEFAULT_LEVEL: LevelDefinition = validateLevel({
-  schemaVersion: 2,
+  schemaVersion: 3,
   labels: COURSE_LABELS,
   objects: [...COURSE.map(terrainFromOutline),
   {
     kind: 'start', id: 'player-start', ...START_SPAWN.position,
-    angle: START_SPAWN.angle, extension: START_SPAWN.extension,
+    angle: START_SPAWN.angle, reach: START_SPAWN.reach,
   },
   {
     kind: 'trigger', id: 'ending-trigger', name: 'Ending',

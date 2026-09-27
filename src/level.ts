@@ -1,8 +1,7 @@
-import { RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
 import { transformPoint } from './math';
-import { upgradeLevelV1 } from './level-migration';
 import { fields, LevelError, number, point, text } from './level-validation';
+import { MAX_RIG_REACH } from './rig';
 import type { TriggerAction } from './trigger-events';
 import { LAUNCH_FIELDS, SOUND_VOLUME } from './trigger-events';
 import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
@@ -37,7 +36,8 @@ export const TRIGGER_LIMITS = {
   coordinate: LEVEL_LIMITS.coordinate + LEVEL_LIMITS.maximumSize,
   maximumSize: LEVEL_LIMITS.coordinate * 2,
   exitMargin: 0.08,
-  endingHeight: RIG.maxReach * 2,
+  // The default height of an ending zone above its summit.
+  endingHeight: 5.3,
 } as const;
 export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + ENEMY_LIMITS.objects + 1;
 export const TRIGGER_MARKERS = ['none', 'flag', 'updraft'] as const;
@@ -62,11 +62,13 @@ export interface TerrainObject {
   readonly art?: TerrainArt;
 }
 
+// The hammer starts along `angle` with its head `reach` metres from the shoulder hinge, so a start
+// means the same pose for every rig; a rig that cannot reach that far starts fully extended.
 export interface StartObject extends Readonly<Point> {
   readonly kind: 'start';
   readonly id: string;
   readonly angle: number;
-  readonly extension: number;
+  readonly reach: number;
 }
 
 export type TriggerRegion =
@@ -99,7 +101,7 @@ export interface LevelLabel extends Readonly<Point> {
 }
 
 export interface LevelDefinition {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly labels: readonly LevelLabel[];
   readonly objects: readonly LevelObject[];
 }
@@ -258,13 +260,13 @@ export function validateLevelObject(value: unknown): LevelObject {
   }
   const kind: unknown = Reflect.get(value, 'kind');
   if (kind === 'start') {
-    fields(value, ['kind', 'id', 'x', 'y', 'angle', 'extension'], 'Start object');
+    fields(value, ['kind', 'id', 'x', 'y', 'angle', 'reach'], 'Start object');
     return Object.freeze({
       kind, id: objectId(value.id),
       x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Start X'),
       y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Start Y'),
       angle: number(value.angle, -Math.PI, Math.PI, 'Starting hammer angle'),
-      extension: number(value.extension, RIG.minExtension, RIG.maxExtension, 'Starting extension'),
+      reach: number(value.reach, 0, MAX_RIG_REACH, 'Starting reach'),
     });
   }
   if (kind === 'trigger') return validateTrigger(value);
@@ -348,11 +350,8 @@ export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'la
 }
 
 export function validateLevel(value: unknown): LevelDefinition {
-  if (typeof value === 'object' && value !== null && Reflect.get(value, 'schemaVersion') === 1) {
-    value = upgradeLevelV1(value, { coordinate: LEVEL_LIMITS.coordinate, objects: LEVEL_LIMITS.objects, endingHeight: TRIGGER_LIMITS.endingHeight });
-  }
   fields(value, ['schemaVersion', 'labels', 'objects'], 'Level');
-  if (value.schemaVersion !== 2) throw new LevelError('This level format is not supported.');
+  if (value.schemaVersion !== 3) throw new LevelError('Levels require schema version 3.');
   const metadata = validateLevelMetadata({ labels: value.labels });
   if (!Array.isArray(value.objects) || value.objects.length > LEVEL_OBJECT_LIMIT) {
     throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, ${ENEMY_LIMITS.objects} enemies, and one start.`);
@@ -367,7 +366,7 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (new Set(terrain.map((object) => geometryKey(object.shape))).size > LEVEL_LIMITS.geometryKinds) {
     throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
   }
-  return Object.freeze({ schemaVersion: 2, ...metadata, objects: Object.freeze(objects) });
+  return Object.freeze({ schemaVersion: 3, ...metadata, objects: Object.freeze(objects) });
 }
 
 function validateTrigger(value: unknown): TriggerObject {
@@ -468,7 +467,7 @@ export function levelStart(level: LevelDefinition): StartObject {
 
 export function levelSpawn(level: LevelDefinition): Readonly<PlayerSpawn> {
   const start = levelStart(level);
-  return { position: { x: start.x, y: start.y }, angle: start.angle, extension: start.extension };
+  return { position: { x: start.x, y: start.y }, angle: start.angle, reach: start.reach };
 }
 
 // Lowest authored point that could still catch the player: terrain, or a zone that launches upward.

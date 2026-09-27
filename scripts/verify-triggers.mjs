@@ -8,16 +8,16 @@ import { openSection } from './workshop-ui.mjs';
 
 const VIDEO_DURATION_MS = 4000;
 const UPDRAFT_TRIANGLES = 76;
-const LEGACY_KEY = `over-the-edge:level:snapshot:v1:${'a'.repeat(32)}`;
+const OUTDATED_KEY = `over-the-edge:level:snapshot:v1:${'a'.repeat(32)}`;
 const FLOOR = {
   kind: 'terrain', id: 'floor', shape: { type: 'box' }, x: 0, y: -1,
   width: 30, height: 2, angle: 0, depth: 2, color: 0x71817a, illusion: false,
 };
-const START = { kind: 'start', id: 'start', x: 0, y: 4, angle: 0.5, extension: 0.3 };
+const START = { kind: 'start', id: 'start', x: 0, y: 4, angle: 0.5, reach: 1.8 };
 
 function scene(id, events) {
   return {
-    schemaVersion: 2, labels: [],
+    schemaVersion: 3, labels: [],
     objects: [
       FLOOR, START,
       {
@@ -132,31 +132,23 @@ export async function verifyTriggers(browser, address, artifacts) {
   try {
     await page.goto(address, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver?.snapshot().time > 0);
-    const { kind, ...legacyFloor } = FLOOR;
-    const legacy = {
-      schemaVersion: 1,
-      spawn: { position: { x: START.x, y: START.y }, angle: START.angle, extension: START.extension },
-      summit: { xMin: 8, xMax: 10, y: 5, arrivalTolerance: 0.1 }, labels: [], objects: [legacyFloor],
+    // A save from an earlier level schema is listed as unreadable and left untouched, never converted.
+    const outdated = {
+      schemaVersion: 2, labels: [],
+      objects: [FLOOR, { kind: 'start', id: 'start', x: START.x, y: START.y, angle: START.angle, extension: 0.3 }],
     };
-    const record = JSON.stringify({ schemaVersion: 1, name: 'Legacy level', savedAt: Date.now(), level: legacy });
-    await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: LEGACY_KEY, record });
+    const record = JSON.stringify({ schemaVersion: 1, name: 'Outdated level', savedAt: Date.now(), level: outdated });
+    await page.evaluate(({ key, record }) => localStorage.setItem(key, record), { key: OUTDATED_KEY, record });
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.gettingOver?.snapshot().time > 0);
     await edit();
-    await page.getByRole('combobox', { name: 'Past levels', exact: true }).selectOption(LEGACY_KEY);
-    await page.locator('.load-level').click();
-    const migrated = (await level()).definition;
-    assert.equal(migrated.schemaVersion, 2);
-    assert.equal(migrated.objects.filter(object => object.kind === 'start').length, 1);
-    assert.equal(migrated.objects.filter(object => object.kind === 'trigger').length, 1);
-    assert.equal(await page.evaluate(key => localStorage.getItem(key), LEGACY_KEY), record);
-    await page.getByRole('textbox', { name: 'Level name', exact: true }).fill('Converted level');
-    await page.getByRole('textbox', { name: 'Level name', exact: true }).press('Enter');
-    const savedKey = await page.getByRole('combobox', { name: 'Past levels', exact: true }).inputValue();
-    const saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), savedKey);
-    assert.equal(saved.level.schemaVersion, 2);
-    assert.equal(await page.evaluate(key => localStorage.getItem(key), LEGACY_KEY), record);
-    report.migration = { namedV1Loaded: true, originalPreserved: true, newSavesV2: true };
+    const before = (await level()).definition;
+    const pastLevels = page.getByRole('combobox', { name: 'Past levels', exact: true });
+    assert.equal(await pastLevels.locator(`option[value="${OUTDATED_KEY}"]`).isDisabled(), true);
+    assert.deepEqual((await level()).definition, before);
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), OUTDATED_KEY), record);
+    await page.evaluate(key => localStorage.removeItem(key), OUTDATED_KEY);
+    report.outdatedSaves = { rejected: true, retained: true };
 
     await load(scene('authoring', [{ type: 'popup', title: 'Original title', message: 'Original message' }]));
     await frames();
@@ -189,7 +181,7 @@ export async function verifyTriggers(browser, address, artifacts) {
     assert.equal(await page.locator('.level-gizmo-layer > .level-gizmo-start').count(), 1);
     assert.equal(await page.locator('.level-gizmo-layer > .level-gizmo-trigger').count(), 1);
     await load({
-      schemaVersion: 2, labels: [],
+      schemaVersion: 3, labels: [],
       objects: [
         FLOOR,
         { ...FLOOR, id: START.id, x: 8, y: 1, width: 1 },
@@ -282,7 +274,7 @@ export async function verifyTriggers(browser, address, artifacts) {
     assert.equal((await triggerState('aborted')).activationCount, 0);
     report.aborted = { resetRemovedMedia: true, lateCompletionIgnored: true, nextActionCancelled: true, launchCancelled: true };
 
-    await load({ schemaVersion: 2, labels: [], objects: [FLOOR, START] });
+    await load({ schemaVersion: 3, labels: [], objects: [FLOOR, START] });
     await page.locator('[data-level-preset="updraft"]').click();
     const base = await page.evaluate(() => window.gettingOver.project({ x: 0, y: 0 }));
     await page.mouse.click(base.x, base.y);
@@ -351,7 +343,7 @@ export async function verifyTriggers(browser, address, artifacts) {
       ...placed, id: 'holding-updraft', x: 0, y: 25,
       region: { type: 'box', width: 30, height: 50 }, events: [{ type: 'launch-player', height: 6, strength: 1 }],
     };
-    await load({ schemaVersion: 2, labels: [], objects: [FLOOR, START, holding] });
+    await load({ schemaVersion: 3, labels: [], objects: [FLOOR, START, holding] });
     await play();
     await page.waitForFunction(() => window.gettingOver.snapshot().time > 4);
     assert.equal((await triggerState(holding.id)).activationCount, 1, 'An occupied updraft must not apply force every tick.');
@@ -372,7 +364,7 @@ export async function verifyTriggers(browser, address, artifacts) {
       ...placed, id: `wind-${index}`, name: `Wind ${index}`,
       x: (index % 16 - 8) * 3, y: Math.floor(index / 16) * 3 + 0.7,
     }));
-    const crowded = { schemaVersion: 2, labels: [], objects: [FLOOR, START, ...markers] };
+    const crowded = { schemaVersion: 3, labels: [], objects: [FLOOR, START, ...markers] };
     await load(crowded);
     await frames();
     const renderBefore = (await level()).rendering;
@@ -406,7 +398,7 @@ export async function verifyTriggers(browser, address, artifacts) {
     assert.equal(withoutMarkers.flags.instances, 0);
     assert.equal(renderBefore.calls - withoutMarkers.calls, 2, 'All updrafts must share two draw calls.');
     assert.equal(renderBefore.triangles - withoutMarkers.triangles, markers.length * UPDRAFT_TRIANGLES);
-    await load({ schemaVersion: 2, labels: [], objects: [FLOOR, START] });
+    await load({ schemaVersion: 3, labels: [], objects: [FLOOR, START] });
     await frames();
     assert.equal((await level()).rendering.updrafts.instances, 0);
     assert.equal((await level()).rendering.flags.instances, 0);
