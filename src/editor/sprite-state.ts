@@ -260,7 +260,9 @@ export class SpriteEditorState {
     this.describeModel = options.describeModel ?? (() => null);
   }
 
-  async restore(): Promise<void> {
+  // `apply: false` keeps the saved profile only as the Revert target and leaves the draft and the
+  // character unchanged, for a page that opens a project instead.
+  async restore(options: { apply?: boolean } = {}): Promise<void> {
     try {
       const entries = await this.store.entries();
       if (this.disposed) return;
@@ -279,6 +281,10 @@ export class SpriteEditorState {
       } catch (error) {
         if (!isDocumentError(error)) throw error;
         this.reportError(`Saved sprites were invalid and were left untouched in storage: ${error.message}`);
+        return;
+      }
+      if (options.apply === false) {
+        this.saved = document;
         return;
       }
       await this.replaceRig(document);

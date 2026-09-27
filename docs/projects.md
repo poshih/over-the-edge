@@ -8,6 +8,8 @@ make different total conversions and switch between them by switching projects.
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
 - `GAME_PROJECT=<project> npm run build:game` builds any project into a
   standalone, editor-free release.
+- `GAME_PROJECT=<project> npm run build` builds a Workshop that opens that game,
+  to deploy as a static site for the people who author it.
 - A self-hosted **project server** stores projects on disk and offers a JSON API,
   so scripts and language models can read and change every setting.
 
@@ -174,6 +176,49 @@ version, and **Open project** takes it instead.
 The editor HUD previews the project's HUD labels and units. Opening a project runs
 its level like any imported level, including intro events.
 
+## Publishing a Workshop with its project
+
+`GAME_PROJECT` also works for the Workshop build, so a deployed Workshop opens the game
+it belongs to instead of whatever an earlier visit left in the browser:
+
+```sh
+GAME_PROJECT=projects/my-game npm run build
+npx wrangler deploy --config wrangler.toml --keep-vars
+```
+
+The project is validated exactly as for `build:game`, and a failure names its section.
+Its files become hashed static assets next to the Workshop, downloaded when the page opens
+the project: the JavaScript does not grow with the game, and files that did not change keep
+their URLs across deployments, so browsers reuse them. Each file must fit your host's
+limit; Cloudflare Workers static assets hold at most 25 MiB per file. The page title comes
+from the project, with the same `GAME_TITLE` rules as releases. Without `GAME_PROJECT` the
+Workshop build is unchanged.
+
+- **Opening.** A page without a project of its own downloads the published project,
+  showing its progress, and opens it as **Import project file** does: every section, the
+  primary character in its own rigging type and the alternate under **Alternate character**.
+- **This browser's copy.** Once the page holds something the published project does not (a
+  change, or an imported or new project), it keeps the whole project with its unsaved
+  changes in this browser (IndexedDB) and reopens it after a reload. Changes are stored about
+  a second after you stop editing; leaving the page before that warns first. **Export project
+  file** takes the work out; **Reopen published project** discards the copy, asking first when
+  there are unsaved changes.
+- **Older browser saves.** Here the editors' own browser saves (the character profile from
+  **Save**, Appearance's models and the selected IK profile) do not open at start, and opening
+  a project never changes them. The saved character profile remains the Revert target, and
+  named IK profiles, game settings profiles and level history stay available. Appearance models
+  are kept in the project's copy instead of Appearance's own storage.
+- **New deployments.** A page without unsaved changes opens the new version. A page with
+  unsaved changes keeps them and says that a newer version is published; **Reopen published
+  project** takes it.
+- **Project server.** Under `npm run dev` or `npm run studio`, a remembered server project
+  still opens first, and opening or saving a server project removes the browser copy.
+
+**Workshop / Project** says what the page holds: the published project, an older version of
+it or another local project, and whether it is kept in this browser. A site has one copy,
+shared by its tabs: the tab that stores last wins, and the copy always holds one tab's whole
+project. `npm run dev` reads the project once, when the server starts.
+
 ## The project server
 
 The project server is part of the Workshop's Vite server, so there is nothing
@@ -204,7 +249,8 @@ project and release folders as plain files, so they are only reachable through t
 checks. Serve it over HTTPS if you expose it beyond a trusted network.
 
 A static Workshop deployment has no project server; its Project tab still opens,
-edits and exports project files.
+edits and exports project files, and a Workshop built with `GAME_PROJECT` opens its own
+game (see above).
 
 ## API for scripts and language models
 
@@ -330,5 +376,8 @@ character profiles, an appearance model and arm IK, exercises the API (validatio
 revisions, token and host checks, cross-site protection, file signatures,
 references, bundles, publishing), drives the Project tab end to end (open, save,
 live sync, conflicts, enemy art, media, alternate character, export, import, save
-as, publish, reopen) and measures a 1,000-object project. It writes
-`artifacts/project-report.json`.
+as, publish, reopen) and measures a 1,000-object project. It then deploys a Workshop
+built with a representative project (about 1,000 objects, a 10 MiB track, a skinned
+avatar and a second character) to a static site and checks that it opens the project,
+keeps changes across reloads, leaves older browser saves unchanged and follows a
+redeployment. It writes `artifacts/project-report.json`.

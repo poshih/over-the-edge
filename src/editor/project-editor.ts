@@ -57,6 +57,8 @@ export function createProjectEditor(options: ProjectEditorOptions) {
           <button type="button" class="button button-primary project-save" title="Save changed sections to the project server">Save project</button>
           <button type="button" class="button project-new" title="Start a new game from the built-in course and defaults">New project</button>
         </div>
+        <button type="button" class="button project-reopen" hidden
+          title="Discard this browser's copy and open the project this Workshop was published with">Reopen published project</button>
       </section>
 
       ${sectionMarkup({ id: 'project-server', title: 'Project server', hint: 'Open, save as and publish', open: true }, `
@@ -152,6 +154,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const title = element<HTMLInputElement>(root, '#project-title');
   const status = element<HTMLParagraphElement>(root, '.project-status');
   const saveButton = element<HTMLButtonElement>(root, '.project-save');
+  const reopenButton = element<HTMLButtonElement>(root, '.project-reopen');
   const serverStatus = element<HTMLParagraphElement>(root, '.project-server-status');
   const signin = element<HTMLDivElement>(root, '.project-signin');
   const token = element<HTMLInputElement>(root, '#project-token');
@@ -373,11 +376,17 @@ export function createProjectEditor(options: ProjectEditorOptions) {
 
   function renderStatus(snapshot: ProjectSnapshot): void {
     const dirty = snapshot.dirty;
-    const where = snapshot.binding === null ? 'Local project, not on the project server'
-      : `Server project "${snapshot.binding.id}", revision ${snapshot.binding.revision}`;
-    status.textContent = `${where} · ${snapshot.busy !== null ? `${snapshot.busy}…` : dirty.length === 0 ? 'no unsaved changes'
+    const published = snapshot.published;
+    const where = snapshot.binding !== null ? `Server project "${snapshot.binding.id}", revision ${snapshot.binding.revision}`
+      : published === null ? 'Local project, not on the project server'
+        : published.origin === 'current' ? 'The published project'
+          : published.origin === 'outdated' ? 'An older version of the published project; a newer one is published'
+            : 'A local project, not the published one';
+    const kept = snapshot.browserCopy?.stored === true ? ' · kept in this browser' : '';
+    status.textContent = `${where}${kept} · ${snapshot.busy !== null ? `${snapshot.busy}…` : dirty.length === 0 ? 'no unsaved changes'
       : `unsaved: ${dirty.join(', ')}`}${snapshot.conflicts.length > 0 ? ` · changed on the server: ${snapshot.conflicts.join(', ')}` : ''}`;
     status.dataset.dirty = String(dirty.length > 0);
+    reopenButton.hidden = published === null;
     idInput.placeholder = snapshot.binding?.id ?? projectIdForTitle(snapshot.title);
     const server = snapshot.server;
     const available = server !== null && server.available;
@@ -433,6 +442,9 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   saveButton.addEventListener('click', () => { void session.save(); }, listen);
   element(root, '.project-new').addEventListener('click', () => {
     if (confirmReplace('A new project')) void session.newProject();
+  }, listen);
+  reopenButton.addEventListener('click', () => {
+    if (confirmReplace('Reopening the published project')) void session.reopenPublished();
   }, listen);
   element(root, '.project-signin-button').addEventListener('click', () => {
     void session.signIn(token.value).then((signedIn) => { if (signedIn) token.value = ''; });

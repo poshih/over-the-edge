@@ -37,6 +37,8 @@ export interface SpriteEditorOptions {
   viewport: DirectionalViewport;
   onNotice: (message: string, kind: 'info' | 'error') => void;
   describeModel?: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
+  // False when the page opens a project instead: the saved profile is then only the Revert target.
+  applySavedProfile?: boolean;
 }
 
 export interface SpriteEditorHandle {
@@ -454,7 +456,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     signal: events.signal,
   });
   const unsubscribe = state.subscribe(render);
-  const ready = state.restore();
+  const ready = state.restore({ apply: options.applySavedProfile !== false });
 
   return {
     ready,

@@ -31,6 +31,5 @@ cannot serve both games.
 
 ## Context
 
-Queen Ascension (a GettingOver-based game, now an `e186181` project) keeps terrain friction 0.8 in a
-local edit of `src/config.ts`; with this capability that value moves into its project and the edit
-goes away.
+A downstream game (now an `e186181` project) keeps terrain friction 0.8 in a local edit of
+`src/config.ts`; with this capability that value moves into its project and the edit goes away.

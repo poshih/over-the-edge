@@ -76,8 +76,16 @@ function readProjectDirectory(directory: string): { content: ProjectContent; fil
   return { content, files };
 }
 
-// Loads GAME_PROJECT: a project directory, its project.json, or a single-file project bundle.
-export function loadReleaseProject(root: string, requested: string): ReleaseProject {
+// A validated GAME_PROJECT, as the release and the Workshop builds receive it.
+export interface ProjectInput {
+  readonly content: ProjectContent;
+  // Files whose changes should reload a development server.
+  readonly files: readonly string[];
+}
+
+// Loads GAME_PROJECT (a project directory, its project.json, or a single-file project bundle) with
+// every release check; failures name the section.
+export function loadProjectInput(root: string, requested: string): ProjectInput {
   let target: string;
   try {
     target = inside(root, join(root, requested), 'GAME_PROJECT');
@@ -101,13 +109,9 @@ export function loadReleaseProject(root: string, requested: string): ReleaseProj
     if (error instanceof ProjectError || error instanceof SyntaxError) throw new Error(`GAME_PROJECT: ${error.message}`, { cause: error });
     throw error;
   }
-  const { content, files } = loaded;
+  const { content } = loaded;
   const { manifest } = content;
-  const binary = (path: string): Uint8Array => {
-    const bytes = content.files.get(path);
-    if (bytes === undefined) throw new Error(`GAME_PROJECT is missing ${path}.`);
-    return bytes;
-  };
+  const binary = projectBinary(content);
   for (const asset of manifest.art.assets) {
     const hash = createHash('sha256').update(binary(artFile(asset.id))).digest('hex');
     if (!artAssetHashMatches(asset.id, hash)) throw new Error(`GAME_PROJECT: course artwork ${asset.id} does not match its content hash.`);
@@ -120,6 +124,21 @@ export function loadReleaseProject(root: string, requested: string): ReleaseProj
       throw new Error(`GAME_PROJECT: appearance model ${part.name} (${part.part}): ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   }
+  return loaded;
+}
+
+function projectBinary(content: ProjectContent): (path: string) => Uint8Array {
+  return (path) => {
+    const bytes = content.files.get(path);
+    if (bytes === undefined) throw new Error(`GAME_PROJECT is missing ${path}.`);
+    return bytes;
+  };
+}
+
+export function loadReleaseProject(root: string, requested: string): ReleaseProject {
+  const { content, files } = loadProjectInput(root, requested);
+  const { manifest } = content;
+  const binary = projectBinary(content);
   const used = new Set(content.level.objects.flatMap(object => object.kind === 'terrain' && object.art ? [object.art.assetId] : []));
   const course = used.size === 0 ? content.level : {
     format: 'over-the-edge-course', schemaVersion: 1, mode: manifest.art.mode, level: content.level,

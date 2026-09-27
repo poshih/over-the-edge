@@ -25,12 +25,16 @@ import { DEFAULT_AUDIO } from '../audio-settings';
 import { isDarkSky } from '../theme';
 import { ProjectSession } from './project-session';
 import { createProjectEditor } from './project-editor';
+import publishedProject from 'virtual:workshop-project';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
 const fatal = document.querySelector<HTMLElement>('#fatal-error');
 if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface mounts are required.');
 
+// A Workshop built with GAME_PROJECT opens that game and keeps it, with its changes, in this
+// browser's copy of the project; the editors' own browser saves do not open at start.
+const opensProject = publishedProject !== null;
 const level = new LevelState(DEFAULT_LEVEL);
 let debug = false;
 let practice: PracticeId = 'start';
@@ -73,7 +77,7 @@ const ui = createUI({
   onSettingsChange: (settings) => game.setSettings(settings),
 });
 const rig = new AppearanceRig(game.view.visuals);
-const appearance = new Appearance(rig, ui.notice);
+const appearance = new Appearance(rig, ui.notice, { browserStore: !opensProject });
 const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice });
 const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
@@ -83,6 +87,7 @@ const spriteEditor = createSpriteEditor({
   describeModel: (source, usage) => game.view.characterModelReport(source, usage),
   viewport: { canvas, project: (point) => game.view.project(point) },
   targetIds: SPRITE_TARGET_IDS,
+  applySavedProfile: !opensProject,
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);
     if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);
@@ -104,6 +109,7 @@ const levelEditor = createLevelEditor({
   },
   onPlay: () => perform('play'),
   onNotice: ui.notice,
+  warnBeforeUnload: !opensProject,
 });
 const appearanceRestored = appearance.restore();
 const project = new ProjectSession({
@@ -144,6 +150,7 @@ const project = new ProjectSession({
     },
     notice: ui.notice,
   },
+  published: publishedProject,
 });
 const projectEditor = createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,

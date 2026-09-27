@@ -72,6 +72,11 @@ export class VisualStore<TRecord extends object> {
     await this.change((store) => store.delete(key));
   }
 
+  // Several changes in one transaction: all of them are stored, or none.
+  async update(action: (store: IDBObjectStore) => void): Promise<void> {
+    await this.change(action);
+  }
+
   private async change(action: (store: IDBObjectStore) => void): Promise<void> {
     const database = await this.connect();
     await new Promise<void>((resolve, reject) => {

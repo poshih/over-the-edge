@@ -412,7 +412,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
   let drawingCursor: Point | null = null;
-  let savedDefinition = level.definition();
+  let savedDefinition: LevelDefinition | null = level.definition();
   let savedCamera: EditorCamera | null = null;
   let importGeneration = 0;
   let importing = false;
@@ -832,7 +832,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
     chooseTool('select');
   }
 
-  function markSaved(definition: LevelDefinition = level.definition()): void {
+  // Null records that the current level has unsaved changes.
+  function markSaved(definition: LevelDefinition | null = level.definition()): void {
     savedDefinition = definition;
     renderStatus();
   }
@@ -1504,11 +1505,13 @@ This restores the default ground and start location, removes all other objects a
     event.stopPropagation();
   }, { ...listen, capture: true });
   window.addEventListener('blur', cancelGesture, listen);
-  window.addEventListener('beforeunload', (event) => {
-    if (!dirty()) return;
-    event.preventDefault();
-    event.returnValue = '';
-  }, listen);
+  if (options.warnBeforeUnload !== false) {
+    window.addEventListener('beforeunload', (event) => {
+      if (!dirty()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    }, listen);
+  }
   window.addEventListener('resize', alignOverlay, listen);
   window.addEventListener('scroll', alignOverlay, { ...listen, capture: true, passive: true });
   const resize = new ResizeObserver(alignOverlay);

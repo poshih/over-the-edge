@@ -19,4 +19,7 @@ export interface LevelEditorOptions {
   };
   onPlay: () => void;
   onNotice: (message: string, kind: 'info' | 'error') => void;
+  // False when the project warns about leaving instead (a Workshop built with GAME_PROJECT, which
+  // keeps its project, level included, in the browser).
+  warnBeforeUnload?: boolean;
 }

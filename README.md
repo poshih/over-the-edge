@@ -46,6 +46,11 @@ npm run build
 npx wrangler deploy --config wrangler.toml --keep-vars
 ```
 
+To deploy a Workshop for one game, build it with `GAME_PROJECT=<project> npm run build`.
+The deployed Workshop then opens that game, keeps each visitor's changes in their browser
+and picks up redeployments; see [publishing a Workshop with its
+project](docs/projects.md#publishing-a-workshop-with-its-project).
+
 A custom domain is optional. Attach it to the Worker in your Cloudflare account
 after deploying; domains are not stored in this repository.
 
@@ -839,7 +844,8 @@ endpoints. The underlying three-segment shaft and its mass/compliance remain in
 the physics simulation.
 
 Files are saved locally in IndexedDB when imported, and saved appearances restore
-on reload. Nothing is uploaded unless you save a [project](docs/projects.md) to your
+on reload; a Workshop built with `GAME_PROJECT` keeps them in the project's browser
+copy instead. Nothing is uploaded unless you save a [project](docs/projects.md) to your
 own project server; projects carry these parts into their standalone releases. This
 storage belongs to the current browser and site address; it is separate from physics
 presets and is not bundled into `dist/` or shared with other players. Original files on your computer are
@@ -877,7 +883,8 @@ with the sprite renderer's `inspect()` result, including each aim flipbook
 layer's shown frame.
 `window.gettingOver.gameProject()` reports the open project: title, server binding
 and revisions, unsaved and conflicting sections, the project sections and audio
-playback.
+playback, and in a Workshop built with `GAME_PROJECT` the published project and this
+browser's copy.
 These globals are absent from the game-only release.
 
 ## Contributing

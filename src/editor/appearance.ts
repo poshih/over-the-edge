@@ -13,9 +13,8 @@ import { loadVisualModel } from './visual-model';
 
 export class Appearance {
   private readonly rig: AppearanceRig;
-  private readonly store = new VisualStore<StoredVisual>({
-    database: 'over-the-edge:appearance', store: 'parts', keyPath: 'slot',
-  });
+  // Null when the open project keeps the models instead (a Workshop built with GAME_PROJECT).
+  private readonly store: VisualStore<StoredVisual> | null;
   private readonly notice: (message: string, kind: 'info' | 'error') => void;
   private readonly records = new Map<VisualPartId, StoredVisual>();
   private readonly drafts = new Map<VisualPartId, VisualAlignment>();
@@ -30,9 +29,12 @@ export class Appearance {
   private previousArmIkSave = false;
   private disposed = false;
 
-  constructor(rig: AppearanceRig, notice: (message: string, kind: 'info' | 'error') => void) {
+  constructor(rig: AppearanceRig, notice: (message: string, kind: 'info' | 'error') => void, options: { browserStore?: boolean } = {}) {
     this.rig = rig;
     this.notice = notice;
+    this.store = options.browserStore === false ? null : new VisualStore<StoredVisual>({
+      database: 'over-the-edge:appearance', store: 'parts', keyPath: 'slot',
+    });
     rig.assertComplete();
   }
 
@@ -45,7 +47,7 @@ export class Appearance {
       this.reportArmIkError(error);
     }
     try {
-      const entries = await this.store.entries();
+      const entries = this.store === null ? [] : await this.store.entries();
       for (const entry of entries) {
         if (this.disposed) return;
         if (!isVisualPart(entry.key)) {
@@ -148,7 +150,7 @@ export class Appearance {
         const record: StoredVisual = {
           schemaVersion: 1, slot, name: file.name, data: file, alignment: { ...DEFAULT_ALIGNMENT },
         };
-        await this.store.write(record);
+        await this.store?.write(record);
         if (this.disposed) return;
         this.rig.setModel(slot, model, record.alignment);
         adopted = true;
@@ -186,7 +188,7 @@ export class Appearance {
         if (ALIGNMENT_FIELDS.some((field) => alignment[field.key] !== record.alignment[field.key])) {
           await this.run(id, async () => {
             const next = { ...record, alignment };
-            await this.store.write(next);
+            await this.store?.write(next);
             if (this.disposed) return;
             this.rig.align(id, alignment);
             this.records.set(id, next);
@@ -203,7 +205,7 @@ export class Appearance {
         try {
           if (this.disposed) return;
           const next: StoredVisual = { schemaVersion: 1, slot: id, name: entry.name, data: entry.blob, alignment };
-          await this.store.write(next);
+          await this.store?.write(next);
           if (this.disposed) return;
           this.rig.setModel(id, model, alignment);
           adopted = true;
@@ -240,7 +242,7 @@ export class Appearance {
     if (!record || !draft) throw new Error(`Cannot save alignment without a model for ${slot}.`);
     await this.run(slot, async () => {
       const next = { ...record, alignment: { ...draft } };
-      await this.store.write(next);
+      await this.store?.write(next);
       if (this.disposed) return;
       this.records.set(slot, next);
     });
@@ -249,7 +251,7 @@ export class Appearance {
   async useDefault(slot: VisualPartId): Promise<void> {
     if (!this.canEdit(slot)) return;
     await this.run(slot, async () => {
-      await this.store.remove(slot);
+      await this.store?.remove(slot);
       if (this.disposed) return;
       this.rig.reset(slot);
       this.records.delete(slot);
@@ -297,7 +299,7 @@ export class Appearance {
   dispose(): void {
     this.disposed = true;
     this.listeners.clear();
-    this.store.close();
+    this.store?.close();
     this.records.clear();
     this.drafts.clear();
   }

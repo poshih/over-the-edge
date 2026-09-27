@@ -1,6 +1,8 @@
 # Feature request: a deployed Workshop opens its game's project
 
-**Date:** 2026-09-26 · **Baseline:** `e186181` · **Status:** requested, not started.
+**Date:** 2026-09-26 · **Baseline:** `e186181` · **Status:** implemented; see [publishing a Workshop with its
+project](docs/projects.md#publishing-a-workshop-with-its-project). The project's files ship as separate hashed
+assets instead of one bundle, so unchanged files stay cached and each fits static hosts' per-file limits.
 
 Game projects (`docs/projects.md`) hold a whole game, and `GAME_PROJECT` builds one into a release.
 The Workshop build cannot carry a project, so a deployed (static) Workshop never shows the game it
@@ -67,7 +69,7 @@ loses the imported project again.
 
 ## Context
 
-Queen Ascension deploys its Workshop as a static Worker for authoring its skinned 3D Queen, and its
-game project (`e186181` format) has that avatar as the primary character. The owner opens the
-editor expecting the project in avatar mode. They see a leftover Hybrid-era 2D save with no body
+A downstream game deploys its Workshop as a static Worker for authoring its skinned 3D character,
+and its game project (`e186181` format) has that avatar as the primary character. The owner opens
+the editor expecting the project in avatar mode. They see a leftover Hybrid-era 2D save with no body
 instead, and importing the project file must be repeated after every reload.

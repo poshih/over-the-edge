@@ -11,6 +11,7 @@ import { hammerGlb, HUMANOID_BONE_MAP, skinnedAvatarGlb } from './character-fixt
 import { observeBrowserPage } from './verify-level.mjs';
 import { openSection } from './workshop-ui.mjs';
 import { wavFixture } from './project-fixtures.mjs';
+import { verifyWorkshopProject } from './verify-workshop-project.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = join(root, 'artifacts');
@@ -21,7 +22,7 @@ await mkdir(artifacts, { recursive: true });
 const temporary = await mkdtemp(join(artifacts, 'project-proof-'));
 const projects = join(temporary, 'projects');
 const releases = join(temporary, 'releases');
-const report = { status: 'incomplete', errors: [], builds: {}, api: {}, editor: {}, performance: {} };
+const report = { status: 'incomplete', errors: [], builds: {}, api: {}, editor: {}, performance: {}, workshop: {} };
 const GAME_VARIABLES = ['GAME_PROJECT', 'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE'];
 const STUDIO_VARIABLES = ['STUDIO_PROJECTS', 'STUDIO_RELEASES', 'STUDIO_TOKEN', 'STUDIO_API'];
 const saved = Object.fromEntries([...GAME_VARIABLES, ...STUDIO_VARIABLES].map((name) => [name, process.env[name]]));
@@ -597,6 +598,11 @@ try {
     }
   }
 
+  // 7. A Workshop built with GAME_PROJECT opens its game from a static deployment ---------------
+  report.workshop = await verifyWorkshopProject(browser, {
+    root, temporary, errors: report.errors, largeLevel, projectFile: join(temporary, 'lantern.project.json'),
+  });
+
   assert.deepEqual(report.errors, [], 'Pages must not log errors.');
   report.status = 'passed';
 } catch (error) {
@@ -612,5 +618,5 @@ try {
   }
   await writeFile(join(artifacts, 'project-report.json'), `${JSON.stringify(report, null, 2)}\n`);
   if (report.status === 'passed') await rm(temporary, { recursive: true, force: true });
-  console.log(JSON.stringify({ status: report.status, builds: report.builds, api: report.api, editor: report.editor, performance: report.performance, failure: report.failure }, null, 2));
+  console.log(JSON.stringify({ status: report.status, builds: report.builds, api: report.api, editor: report.editor, performance: report.performance, workshop: report.workshop, failure: report.failure }, null, 2));
 }

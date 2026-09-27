@@ -30,6 +30,10 @@ import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
 import { ProjectApiError, ProjectClient } from './project-client';
 import type { PublishRecord, ServerHealth, ServerProjectSummary, ServerRevisions } from './project-client';
+import { ProjectCopyStore } from './project-copy';
+import type { ProjectCopy } from './project-copy';
+import { loadPublishedProject } from './published-project';
+import type { PublishedProject } from './published-project';
 
 export const PROJECT_SECTIONS = [
   'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance',
@@ -44,6 +48,9 @@ const SAVE_ORDER: readonly ProjectSectionName[] = [
 ];
 const ACTIVE_KEY = 'over-the-edge:project:active:v1';
 const POLL_MS = 2000;
+const COPY_MS = 1000;
+// A section reopened with unsaved changes: equal to no fingerprint, so it stays unsaved.
+const UNSAVED = Symbol('unsaved');
 
 export interface AppearanceFile {
   readonly part: VisualPartId;
@@ -60,8 +67,8 @@ export interface ProjectWorkspace {
     // Adopts a newer version incrementally, without restarting a playtest.
     sync(level: LevelDefinition): void;
     prepare(): boolean;
-    // Records `level` (default: the current level) as the saved version.
-    markSaved(level?: LevelDefinition): void;
+    // Records `level` (default: the current level) as the saved version; null records unsaved changes.
+    markSaved(level?: LevelDefinition | null): void;
   };
   readonly settings: { get(): GameSettings; load(settings: GameSettings): void };
   readonly character: {
@@ -113,6 +120,18 @@ interface Binding {
   readonly sections: Record<string, number>;
 }
 
+// What this browser's copy holds, or would hold: compared section by section.
+interface CopyState {
+  readonly fingerprints: Record<ProjectSectionName, unknown>;
+  readonly origin: string | null;
+  readonly dirty: readonly ProjectSectionName[];
+}
+
+function sameCopy(a: CopyState | null, b: CopyState | null): boolean {
+  return a !== null && b !== null && a.origin === b.origin && a.dirty.join() === b.dirty.join() &&
+    PROJECT_SECTIONS.every((name) => a.fingerprints[name] === b.fingerprints[name]);
+}
+
 export type ProjectEvent = { readonly kind: 'status' } | { readonly kind: 'content' };
 
 export interface ProjectSnapshot {
@@ -132,6 +151,11 @@ export interface ProjectSnapshot {
   readonly alternate: SpriteDocument | null;
   readonly publish: PublishRecord | null;
   readonly error: string | null;
+  // The project this Workshop was built with (GAME_PROJECT), and whether the page shows a version
+  // of it: the current one, an older one kept with its changes, or another project.
+  readonly published: { readonly title: string; readonly version: string; readonly origin: 'current' | 'outdated' | 'none' } | null;
+  // This browser's copy of the open project, in a Workshop built with a project.
+  readonly browserCopy: { readonly stored: boolean; readonly pending: boolean; readonly writes: number } | null;
 }
 
 function describe(error: unknown): string {
@@ -145,11 +169,15 @@ function isExpected(error: unknown): error is Error {
 /**
  * The open game project: owns the project-only sections (title, look, HUD, audio, enemies, media,
  * alternate character, course artwork) and moves every section between the Workshop's editors,
- * project bundle files and the self-hosted project server.
+ * project bundle files and the self-hosted project server. In a Workshop built with a project it
+ * opens that published project and keeps the open project, with its changes, in this browser.
  */
 export class ProjectSession {
   private readonly workspace: ProjectWorkspace;
   private readonly client: ProjectClient;
+  private readonly published: PublishedProject | null;
+  private readonly copy: ProjectCopyStore | null;
+  private readonly lifecycle = new AbortController();
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
   private readonly blobIds = new WeakMap<Blob, number>();
   private nextBlobId = 1;
@@ -174,13 +202,30 @@ export class ProjectSession {
   private error: string | null = null;
   private poller: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  // The published version the page's project was opened from; null for any other project.
+  private origin: string | null = null;
+  // False until a project opens in this page, so a failed start never replaces a stored copy.
+  private keeping = false;
+  private copyStored = false;
+  private copyWrites = 0;
+  // The state last written to the copy, the state seen by the previous check, and one that failed.
+  private copyWritten: CopyState | null = null;
+  private copySeen: CopyState | null = null;
+  private copyFailed: CopyState | null = null;
+  // Copy writes run one after another.
+  private copyTask: Promise<void> | null = null;
+  private copyTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly checkedCharacters = new WeakSet<SpriteDocument>();
 
-  constructor(options: { workspace: ProjectWorkspace; client?: ProjectClient }) {
+  constructor(options: { workspace: ProjectWorkspace; client?: ProjectClient; published?: PublishedProject | null }) {
     this.workspace = options.workspace;
     this.client = options.client ?? new ProjectClient();
+    this.published = options.published ?? null;
+    this.copy = this.published === null ? null : new ProjectCopyStore();
   }
 
   // After the editors restore their browser-local state: find the server and reopen its project.
+  // Otherwise a Workshop built with a project reopens this browser's copy or the published project.
   async start(): Promise<void> {
     await this.workspace.ready;
     if (this.disposed) return;
@@ -191,7 +236,18 @@ export class ProjectSession {
     if (remembered !== null && this.server?.authenticated === true && this.projects.some((project) => project.id === remembered)) {
       await this.open(remembered, { quiet: true });
     }
+    if (this.binding === null && this.published !== null && !this.disposed) await this.openStartProject();
+    if (this.disposed) return;
     this.poller = setInterval(() => { void this.poll(); }, POLL_MS);
+    if (this.copy !== null) {
+      this.copyTimer = setInterval(() => { void this.keepCopy(); }, COPY_MS);
+      // Leaving the page stores the latest changes at once.
+      const leaving = (): void => { void this.keepCopy({ now: true }); };
+      const signal = this.lifecycle.signal;
+      window.addEventListener('beforeunload', leaving, { signal });
+      window.addEventListener('pagehide', leaving, { signal });
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leaving(); }, { signal });
+    }
   }
 
   snapshot(): ProjectSnapshot {
@@ -204,6 +260,11 @@ export class ProjectSession {
       art: { mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })) },
       media: [...this.media.values()].map((item) => ({ path: item.path, bytes: item.bytes, kind: mediaKind(item.path) })),
       alternate: this.alternate, publish: this.publishRecord, error: this.error,
+      published: this.published === null ? null : {
+        title: this.published.title, version: this.published.version,
+        origin: this.origin === this.published.version ? 'current' : this.origin === null ? 'none' : 'outdated',
+      },
+      browserCopy: this.copy === null ? null : { stored: this.copyStored, pending: this.hasUnsavedProjectChanges(), writes: this.copyWrites },
     };
   }
 
@@ -219,8 +280,15 @@ export class ProjectSession {
     return PROJECT_SECTIONS.filter((name) => current[name] !== this.synced![name]);
   }
 
-  // Unsaved work that exists only in this page (the level editor warns about its own changes).
+  // Unsaved work that exists only in this page (the level editor warns about its own changes). A
+  // Workshop built with a project warns for every section instead, and while this browser's copy
+  // keeps the project only changes not stored there yet count.
   hasUnsavedProjectChanges(): boolean {
+    if (this.copy !== null) {
+      if (!this.keeping || this.binding !== null) return this.dirtySections().length > 0;
+      const state = this.copyState();
+      return this.copyWanted(state) && !sameCopy(state, this.copyWritten);
+    }
     return this.dirtySections().some((name) => name !== 'level' && name !== 'characters/primary' && name !== 'settings');
   }
 
@@ -363,7 +431,11 @@ export class ProjectSession {
   async newProject(): Promise<boolean> {
     return this.run('Starting a new project', async () => {
       await this.applyContent(loadProjectContent(defaultProjectManifest('Untitled game'), () => DEFAULT_LEVEL), null);
-      this.workspace.notice('Started a new project from the built-in course. Save it to keep it.', 'info');
+      await this.storeCopy();
+      // A failed copy keeps its notice.
+      if (this.error !== null) return;
+      this.workspace.notice(`Started a new project from the built-in course. ${this.copy === null ? 'Save it to keep it.'
+        : 'This browser keeps it; export the project file to take it elsewhere.'}`, 'info');
     });
   }
 
@@ -387,8 +459,16 @@ export class ProjectSession {
       if (file.size > PROJECT_LIMITS.bundleBytes) throw new ProjectError(`Project files are limited to ${PROJECT_LIMITS.bundleBytes / 1024 ** 2} MiB.`);
       const content = unpackProjectBundle(JSON.parse(await file.text()));
       await this.applyContent(content, null);
-      this.workspace.notice(`Imported "${content.manifest.title}". Save it to the project server or export it to keep changes.`, 'info');
+      await this.storeCopy();
+      if (this.error !== null) return;
+      this.workspace.notice(`Imported "${content.manifest.title}". ${this.copy === null ? 'Save it to the project server or export it to keep changes.'
+        : 'This browser keeps it with your changes; export the project file to take it elsewhere.'}`, 'info');
     });
+  }
+
+  // Discards this browser's copy and opens the project this Workshop was built with.
+  async reopenPublished(): Promise<boolean> {
+    return this.published !== null && this.openPublished();
   }
 
   async exportBundle(): Promise<{ bundle: ProjectBundle; filename: string } | null> {
@@ -495,6 +575,7 @@ export class ProjectSession {
       this.remember(valid);
       this.workspace.level.markSaved(savedLevel);
       this.applyLook();
+      await this.storeCopy();
       this.projects = await this.client.list();
       this.workspace.notice(`Saved the whole project as "${valid}" on the project server.`, 'info');
     });
@@ -519,10 +600,200 @@ export class ProjectSession {
 
   dispose(): void {
     this.disposed = true;
+    this.lifecycle.abort();
     if (this.poller !== null) clearInterval(this.poller);
+    if (this.copyTimer !== null) clearInterval(this.copyTimer);
+    this.copy?.dispose();
     for (const item of this.media.values()) if (item.blob !== null) URL.revokeObjectURL(item.url);
     this.media.clear();
     this.listeners.clear();
+  }
+
+  // A copy that holds changes, or another project, reopens; otherwise the published project opens.
+  private async openStartProject(): Promise<void> {
+    let copy: ProjectCopy | null = null;
+    let failure: string | null = null;
+    // Busy from the start, so no action can replace the game before the start project opens.
+    this.busy = 'Opening the project';
+    this.changed('status');
+    try {
+      copy = await this.copy!.read();
+    } catch (error) {
+      if (!isExpected(error)) throw error;
+      failure = error.message;
+    } finally {
+      this.busy = null;
+    }
+    if (copy !== null && (copy.origin === null || copy.dirty.length > 0)) {
+      if (await this.openCopy(copy)) return;
+      failure = this.error;
+      copy = null;
+    }
+    // A copy that could not be opened stays stored until the project changes.
+    this.copyStored = copy !== null;
+    if (await this.openPublished() && failure !== null) {
+      this.workspace.notice(`This browser's copy of the project could not be opened: ${failure} Opened the published project instead; ` +
+        'the copy is replaced once you change the project.', 'error');
+    }
+  }
+
+  private async openCopy(copy: ProjectCopy): Promise<boolean> {
+    const published = this.published!;
+    return this.run('Opening this browser\'s copy', async () => {
+      await this.applyContent(copy.content, null);
+      this.origin = copy.origin;
+      const dirty = PROJECT_SECTIONS.filter((name) => copy.dirty.includes(name));
+      for (const name of dirty) this.synced![name] = UNSAVED;
+      if (dirty.includes('level')) this.workspace.level.markSaved(null);
+      // The page now shows exactly what the copy holds.
+      const files = this.copyFiles();
+      if (files !== null) {
+        this.copy!.adopt(files);
+        this.copyWritten = this.copyState();
+      }
+      this.copyStored = true;
+      const title = copy.content.manifest.title;
+      this.workspace.notice(copy.origin !== null && copy.origin !== published.version
+        ? `"${published.title}" has a newer published version. This browser kept your unsaved changes to "${title}"; Reopen published project in Project takes the new version and discards them.`
+        : `Reopened "${title}" from this browser${dirty.length > 0 ? ` with unsaved changes: ${dirty.join(', ')}` : ''}.`, 'info');
+    });
+  }
+
+  // Downloads the published project and opens it as Import project file does, replacing any copy.
+  private async openPublished(): Promise<boolean> {
+    const published = this.published!;
+    const label = 'Opening the published project';
+    return this.run(label, async () => {
+      let percent = -1;
+      const content = await loadPublishedProject(published, {
+        signal: this.lifecycle.signal,
+        onProgress: (fraction) => {
+          const next = Math.floor(fraction * 100);
+          if (next === percent) return;
+          if (Math.floor(next / 10) !== Math.floor(percent / 10)) this.workspace.notice(`Loading "${published.title}": ${next}%`, 'info');
+          percent = next;
+          this.busy = `${label} (${next}%)`;
+          this.changed('status');
+        },
+      });
+      await this.applyContent(content, null);
+      this.origin = published.version;
+      await this.storeCopy();
+      if (this.error !== null) return;
+      this.workspace.notice(`Opened the published project "${content.manifest.title}".`, 'info');
+    });
+  }
+
+  // Whether the page holds what the published project does not: changes, or another project.
+  private copyWanted(state: CopyState = this.copyState()): boolean {
+    return this.binding === null && (state.origin !== this.published?.version || state.dirty.length > 0);
+  }
+
+  private copyState(): CopyState {
+    const fingerprints = this.fingerprints();
+    const synced = this.synced;
+    return { fingerprints, origin: this.origin, dirty: synced === null ? [] : PROJECT_SECTIONS.filter((name) => fingerprints[name] !== synced[name]) };
+  }
+
+  // Runs every second: stores changes once they have held still for one check, or at once when
+  // the page is being left.
+  private async keepCopy(options: { now?: boolean } = {}): Promise<void> {
+    if (this.copy === null || !this.keeping || this.busy !== null || this.copyTask !== null || this.disposed) return;
+    const state = this.copyState();
+    if (!this.copyWanted(state)) {
+      if (this.copyStored) await this.storeCopy();
+      return;
+    }
+    if (sameCopy(state, this.copyWritten) || (!options.now && sameCopy(state, this.copyFailed))) {
+      this.copySeen = null;
+      return;
+    }
+    if (!options.now && !sameCopy(state, this.copySeen)) {
+      this.copySeen = state;
+      return;
+    }
+    await this.storeCopy();
+  }
+
+  // Brings this browser's copy up to date, or removes it while the page shows the published
+  // project unchanged or a server project.
+  private storeCopy(): Promise<void> {
+    const write = (): Promise<void> => this.writeCopy();
+    const task = (this.copyTask ?? Promise.resolve()).then(write, write);
+    const done = (): void => { if (this.copyTask === task) this.copyTask = null; };
+    this.copyTask = task;
+    task.then(done, done);
+    return task;
+  }
+
+  private async writeCopy(): Promise<void> {
+    const copy = this.copy;
+    if (copy === null || !this.keeping || this.disposed) return;
+    const state = this.copyState();
+    this.copySeen = null;
+    if (!this.copyWanted(state)) {
+      if (!this.copyStored) return;
+      try {
+        await copy.clear();
+        this.copyStored = false;
+        this.copyWritten = null;
+      } catch (error) {
+        this.report(error);
+      }
+      this.changed('status');
+      return;
+    }
+    if (sameCopy(state, this.copyWritten)) return;
+    const files = this.copyFiles();
+    // Not a complete project yet, for example while a trigger uses a sound not in the media library.
+    if (files === null) return;
+    try {
+      await copy.write({ origin: state.origin, dirty: state.dirty }, files);
+      this.copyWritten = state;
+      this.copyStored = true;
+      this.copyFailed = null;
+      this.copyWrites++;
+    } catch (error) {
+      this.copyFailed = state;
+      this.report(error);
+    }
+    this.changed('status');
+  }
+
+  // The open project's files for this browser's copy, checked like an export but without notices;
+  // null while the page does not hold a valid project.
+  private copyFiles(): Map<string, unknown> | null {
+    const document = this.workspace.character.draft();
+    const primary = this.workspace.character.hasContent() || this.alternate !== null ? document : null;
+    const level = this.workspace.level.get();
+    let manifest: ProjectManifest;
+    try {
+      manifest = validateProjectManifest({
+        ...this.draftManifest(),
+        characters: { primary: primary === null ? null : PROJECT_FILES.primary, alternate: this.alternate === null ? null : PROJECT_FILES.alternate },
+      });
+      checkProjectReferences(manifest, level);
+      if (primary !== null && !this.checkedCharacters.has(primary)) {
+        validateProjectCharacter(primary);
+        this.checkedCharacters.add(primary);
+      }
+    } catch (error) {
+      if (isProjectDataError(error)) return null;
+      throw error;
+    }
+    const files = new Map<string, unknown>([[PROJECT_FILES.manifest, manifest], [PROJECT_FILES.level, level]]);
+    if (primary !== null) files.set(PROJECT_FILES.primary, primary);
+    if (this.alternate !== null) files.set(PROJECT_FILES.alternate, this.alternate);
+    for (const part of this.workspace.appearance.parts()) files.set(appearanceFile(part.part), part.blob);
+    for (const item of this.media.values()) {
+      if (item.blob === null) return null;
+      files.set(mediaFile(item.path), item.blob);
+    }
+    for (const asset of this.art.assets) {
+      if (asset.blob === null) return null;
+      files.set(artFile(asset.id), asset.blob);
+    }
+    return files;
   }
 
   // Applies server changes to sections this page has not changed; changed ones become conflicts.
@@ -596,6 +867,9 @@ export class ProjectSession {
     this.synced = this.fingerprints();
     this.remember(state.id);
     this.workspace.level.markSaved();
+    this.keeping = true;
+    // The server holds the project now, so this browser's copy goes.
+    await this.storeCopy();
   }
 
   // Validates the incoming sections completely, loads the parts that can fail, then applies the rest.
@@ -680,6 +954,7 @@ export class ProjectSession {
     this.syncedModels.clear();
     this.synced = this.fingerprints();
     this.workspace.level.markSaved();
+    this.keeping = true;
     this.changed('content');
     this.applyLook();
   }
@@ -688,6 +963,7 @@ export class ProjectSession {
   // bound to the previous server project while holding the new project's data.
   private unbind(): void {
     this.binding = null;
+    this.origin = null;
     this.conflicts.clear();
     this.forget();
   }
