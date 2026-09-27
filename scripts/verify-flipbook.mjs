@@ -65,10 +65,11 @@ export function profileReference() {
   });
   const body = [{ bone: 'body', weight: 1 }];
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     characterRiggingType: 'sprite-2d',
     armForwardDistance: 0.4,
-    grips: 'fixed',
+    grips: { placement: 'fixed', left: 0.04, right: 0.22 },
+    arms: null,
     images: [
       { id: 'body', name: 'Body', source: dataUri(solidPng(4, 4, 10)) },
       { id: 'face', name: 'Face', source: dataUri(solidPng(4, 4, 40)) },
@@ -155,7 +156,7 @@ function character(base, { images = null, single, startAngle = 0, hysteresis = 0
   const added = (images ?? [single]).map(({ id, name, bytes }) => ({ id, name, source: dataUri(bytes) }));
   return {
     ...base,
-    schemaVersion: 10,
+    schemaVersion: 11,
     images: [...base.images.filter(image => used.has(image.id)), ...added],
     layers,
     skeleton: {
@@ -263,7 +264,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
     await openTab('Sprites');
     const example = await exportText();
     const base = JSON.parse(example);
-    assert.equal(base.schemaVersion, 10, 'Profiles use schema 10.');
+    assert.equal(base.schemaVersion, 11, 'Profiles use schema 11.');
     assert.ok(!example.includes('"flipbook"'), 'Single-image layers must not gain a flipbook field.');
     const reference = JSON.stringify(profileReference());
     await importText(reference);
@@ -294,7 +295,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
     assert.equal(loaded.texturesCreated - singleState.texturesCreated, FRAME_COUNT - 1, 'Only the new frames create textures.');
     assert.equal(loaded.uploaded - singleState.uploaded, FRAME_COUNT - 1, 'Every new frame is uploaded at load.');
     const flipbookDocument = await documentState();
-    assert.equal(flipbookDocument.schemaVersion, 10);
+    assert.equal(flipbookDocument.schemaVersion, 11);
     assert.deepEqual(flipbookDocument.layers.find(layer => layer.id === HEAD).flipbook, flipbook.layers.find(layer => layer.id === HEAD).flipbook);
     const exported = await exportText();
     assert.deepEqual(JSON.parse(exported), flipbookDocument, 'Export must carry the flipbook without loss.');
@@ -409,7 +410,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
       'Frames are ordered by file name, numbers in natural order, reusing the identical first image.');
     assert.equal(layer.image, headFrames[0].id);
     assert.deepEqual(layer.directions, DIRECTIONS);
-    assert.equal(authored.schemaVersion, 10);
+    assert.equal(authored.schemaVersion, 11);
     await editNumber('#sprite-flipbook-start', 10);
     await editNumber('#sprite-flipbook-hysteresis', 1.5);
     layer = (await documentState()).layers.find(candidate => candidate.id === HEAD);
@@ -454,7 +455,7 @@ export async function verifyFlipbook(browser, address, artifacts) {
       ['size mismatch', value => { value.images.find(image => image.id === headFrames[9].id).source = dataUri(solidPng(120, 128, 9)); }, /identical pixel dimensions/],
       ['tiled flipbook', value => { value.layers.find(entry => entry.id === HEAD).tileLength = 0.5; }, /weighted mesh or tiled shaft/],
       ['masked flipbook', value => { value.layers.find(entry => entry.id === HEAD).directions = ['right']; }, /all eight directions/],
-      ['earlier schema', value => { value.schemaVersion = 9; }, /require schema version 10/],
+      ['earlier schema', value => { value.schemaVersion = 10; }, /require schema version 11/],
       ['budget', value => {
         const big = frames('big', FRAME_COUNT, { width: 512, height: 512 });
         value.images = [...value.images.filter(image => !image.id.startsWith('head-')), ...big.map(({ id, name, bytes }) => ({ id, name, source: dataUri(bytes) }))];

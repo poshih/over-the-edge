@@ -10,8 +10,10 @@ import {
   CHARACTER_ASSET_FIELDS, CHARACTER_MODEL_LIMITS, checkEmbeddedModel, validateCharacterAssets,
 } from './character-profile.ts';
 import type { CharacterAssets, CharacterModel } from './character-profile.ts';
-import { DEFAULT_GRIP_STRATEGY, GRIP_STRATEGIES } from './grips.ts';
-import type { GripStrategy } from './grips.ts';
+import { ARM_LENGTH_LIMITS } from './character-arms.ts';
+import type { ArmLengths, CharacterArms } from './character-arms.ts';
+import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS } from './grips.ts';
+import type { Grips } from './grips.ts';
 import { number, record, SpriteError, text } from './sprite-fields.ts';
 
 export { SpriteError };
@@ -60,10 +62,12 @@ export interface SpriteLayer {
 export interface CharacterPresentation extends CharacterAssets {
   readonly characterRiggingType: CharacterRiggingType;
   readonly armForwardDistance: number;
-  readonly grips: GripStrategy;
+  readonly grips: Grips;
+  // null keeps each character type's natural arm lengths.
+  readonly arms: CharacterArms | null;
 }
 
-export const SPRITE_SCHEMA_VERSION = 10;
+export const SPRITE_SCHEMA_VERSION = 11;
 
 export interface SpriteDocument extends CharacterPresentation {
   readonly schemaVersion: typeof SPRITE_SCHEMA_VERSION;
@@ -117,7 +121,7 @@ export const SPRITE_FIELDS = [
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
   schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
-  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE, grips: DEFAULT_GRIP_STRATEGY,
+  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE, grips: DEFAULT_GRIPS, arms: null,
   images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
 
@@ -130,10 +134,28 @@ export function validateArmForwardDistance(value: unknown): number {
   return number(value, ARM_FORWARD_DISTANCE_LIMITS.min, ARM_FORWARD_DISTANCE_LIMITS.max, 'Arm forward distance');
 }
 
-export function validateGripStrategy(value: unknown): GripStrategy {
-  const strategy = GRIP_STRATEGIES.find(candidate => candidate === value);
-  if (strategy === undefined) throw new SpriteError(`Grip placement must be ${GRIP_STRATEGIES.join(' or ')}.`);
-  return strategy;
+export function validateGrips(value: unknown): Grips {
+  const grips = record(value, ['placement', 'left', 'right'], 'Hand grips');
+  const placement = GRIP_PLACEMENTS.find(candidate => candidate === grips.placement);
+  if (placement === undefined) throw new SpriteError(`Grip placement must be ${GRIP_PLACEMENTS.join(' or ')}.`);
+  return Object.freeze({
+    placement,
+    left: number(grips.left, GRIP_LIMITS.min, GRIP_LIMITS.max, 'Left hand grip'),
+    right: number(grips.right, GRIP_LIMITS.min, GRIP_LIMITS.max, 'Right hand grip'),
+  });
+}
+
+export function validateArms(value: unknown): CharacterArms | null {
+  if (value === null) return null;
+  const arms = record(value, ['left', 'right'], 'Arm lengths');
+  const side = (entry: unknown, label: string): ArmLengths => {
+    const lengths = record(entry, ['upper', 'forearm'], `${label} arm lengths`);
+    return Object.freeze({
+      upper: number(lengths.upper, ARM_LENGTH_LIMITS.min, ARM_LENGTH_LIMITS.max, `${label} upper arm length`),
+      forearm: number(lengths.forearm, ARM_LENGTH_LIMITS.min, ARM_LENGTH_LIMITS.max, `${label} forearm length`),
+    });
+  };
+  return Object.freeze({ left: side(arms.left, 'Left'), right: side(arms.right, 'Right') });
 }
 
 export function validateCharacterRiggingType(value: unknown, layerCount: number): CharacterRiggingType {
@@ -322,7 +344,7 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   }
   const assetFields = CHARACTER_ASSET_FIELDS.filter(key => Object.hasOwn(value as object, key));
   const document = record(value, [
-    'schemaVersion', 'images', 'layers', 'skeleton', 'presentation', 'characterRiggingType', 'armForwardDistance', 'grips',
+    'schemaVersion', 'images', 'layers', 'skeleton', 'presentation', 'characterRiggingType', 'armForwardDistance', 'grips', 'arms',
     ...assetFields,
   ], 'A sprite document');
   if (!Array.isArray(document.images) || !Array.isArray(document.layers) ||
@@ -370,10 +392,11 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   validateDirectionalReferences(presentation, layers, skeleton);
   const characterRiggingType = validateCharacterRiggingType(document.characterRiggingType, layers.length);
   const armForwardDistance = validateArmForwardDistance(document.armForwardDistance);
-  const grips = validateGripStrategy(document.grips);
+  const grips = validateGrips(document.grips);
+  const arms = validateArms(document.arms);
   const character = validateCharacterAssets(document);
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType, armForwardDistance, grips,
+    schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType, armForwardDistance, grips, arms,
     images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation, ...character,
   });
   validateSpriteBudget(result);
@@ -464,7 +487,8 @@ export function validateDirectionalReferences(
 export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>, targets?: Iterable<string>): void {
   validateCharacterRiggingType(document.characterRiggingType, document.layers.length);
   validateArmForwardDistance(document.armForwardDistance);
-  validateGripStrategy(document.grips);
+  validateGrips(document.grips);
+  validateArms(document.arms);
   const available = new Set(anchors);
   for (const layer of document.layers) {
     if (!available.has(layer.anchor)) throw new SpriteError(`Sprite ${layer.id} references unknown anchor "${layer.anchor}".`);

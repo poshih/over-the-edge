@@ -95,7 +95,7 @@ export function spriteBundle(options: {
         const source = bytes === null ? JSON.stringify(image.source) : asset(bytes, 'sprite.png');
         return `{id:${JSON.stringify(image.id)},name:${JSON.stringify(image.name)},source:${source}}`;
       });
-      let code = `export default {schemaVersion:${document.schemaVersion},characterRiggingType:${JSON.stringify(document.characterRiggingType)},armForwardDistance:${document.armForwardDistance},grips:${JSON.stringify(document.grips)},images:[${images.join(',')}],layers:${JSON.stringify(document.layers)},skeleton:${JSON.stringify(document.skeleton)},presentation:${JSON.stringify(document.presentation)}`;
+      let code = `export default {schemaVersion:${document.schemaVersion},characterRiggingType:${JSON.stringify(document.characterRiggingType)},armForwardDistance:${document.armForwardDistance},grips:${JSON.stringify(document.grips)},arms:${JSON.stringify(document.arms)},images:[${images.join(',')}],layers:${JSON.stringify(document.layers)},skeleton:${JSON.stringify(document.skeleton)},presentation:${JSON.stringify(document.presentation)}`;
       if (document.models !== undefined) {
         // Each distinct GLB becomes one hashed asset rather than base64 inside executable JavaScript.
         const models = document.models.map(model => {

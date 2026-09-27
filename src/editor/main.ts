@@ -6,6 +6,7 @@ import { PHYSICS } from '../config';
 import { SPRITE_TARGET_IDS } from '../character';
 import type { Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
+import { GameSettingsError, withRig } from '../game-settings';
 import { Game } from '../game';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { levelSpawn } from '../level';
@@ -91,6 +92,17 @@ const spriteEditor = createSpriteEditor({
   viewport: { canvas, project: (point) => game.view.project(point) },
   targetIds: SPRITE_TARGET_IDS,
   hammerRig: game.simulation.rigGeometry,
+  naturalArms: () => game.view.naturalArmLengths(),
+  // The Character tab's handle length edits the same game setting as Physics.
+  onHandleLength: (handleLength) => {
+    const settings = ui.settings();
+    try {
+      ui.applySettings(withRig(settings, { ...settings.rig, handleLength }));
+    } catch (error) {
+      if (!(error instanceof GameSettingsError)) throw error;
+      ui.notice(error.message, 'error');
+    }
+  },
   applySavedProfile: !opensProject,
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);

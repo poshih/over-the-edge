@@ -8,6 +8,7 @@ import type { RangeControl } from './range-control';
 import { SpriteEditorState } from './sprite-state';
 import type { SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
+import type { CharacterArms } from '../character-arms';
 import type { RigGeometry } from '../rig';
 import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
@@ -40,6 +41,10 @@ export interface SpriteEditorOptions {
   describeModel?: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
   // The game's current hammer rig; setHammerRig follows later changes.
   hammerRig: RigGeometry;
+  // Each arm as the current character type draws it without the profile's own arm lengths.
+  naturalArms: () => CharacterArms;
+  // Sets the game's handle length from the Character tab.
+  onHandleLength: (length: number) => void;
   // False when the page opens a project instead: the saved profile is then only the Revert target.
   applySavedProfile?: boolean;
 }
@@ -447,7 +452,8 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
 
   options.mount.append(root);
   const characterEditor = createCharacterEditor({
-    mount: options.characterMount, state, hammerRig: options.hammerRig, actions: documentActions,
+    mount: options.characterMount, state, hammerRig: options.hammerRig,
+    naturalArms: options.naturalArms, onHandleLength: options.onHandleLength, actions: documentActions,
     onNotice: options.onNotice, signal: events.signal,
   });
   const skeletonEditor = createSkeletonEditor({

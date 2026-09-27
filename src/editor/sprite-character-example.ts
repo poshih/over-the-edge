@@ -3,7 +3,7 @@ import { DEFAULT_ARM_FORWARD_DISTANCE, PLAYER_DEPTH } from '../character-depth';
 import { ARM_SIDES, SHAFT_ARTWORK_LENGTH } from '../character';
 import type { ArmSide, VisualPartId } from '../character';
 import { RIG } from '../config';
-import { DEFAULT_GRIP_STRATEGY } from '../grips';
+import { DEFAULT_GRIPS } from '../grips';
 import { DEFAULT_SPRITE_RIGGING, SPRITE_SCHEMA_VERSION, SpriteError, validateSpriteDocument } from '../sprite-data';
 import type { SpriteDocument, SpriteImage, SpriteLayer } from '../sprite-data';
 import { FACING_DIRECTIONS } from '../skeleton-data';
@@ -398,7 +398,7 @@ export function createSpriteCharacterExample(): SpriteDocument {
   );
   return validateSpriteDocument({
     schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType: 'sprite-2d', armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-    grips: DEFAULT_GRIP_STRATEGY, images, layers, presentation: null,
+    grips: DEFAULT_GRIPS, arms: null, images, layers, presentation: null,
     skeleton: { anchor: 'torso', bones, poses: [], clips: [], animation: null, ik, hair: [], colliders: [] },
   });
 }

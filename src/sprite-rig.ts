@@ -10,7 +10,8 @@ import {
   validateArmForwardDistance,
   validateCharacterRiggingType,
   validateDirectionalReferences,
-  validateGripStrategy,
+  validateArms,
+  validateGrips,
   validateSpriteAnchors,
   validateSpriteLayer,
   validateSpriteMetadata,
@@ -18,8 +19,11 @@ import {
 } from './sprite-data';
 import type { CharacterPresentation, CharacterRiggingType, SpriteDocument, SpriteFlipbook, SpriteLayer } from './sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
-import { DEFAULT_GRIP_STRATEGY } from './grips';
-import type { GripStrategy } from './grips';
+import type { ArmSide } from './character';
+import { sameArms } from './character-arms';
+import type { ArmLengths, CharacterArms } from './character-arms';
+import { DEFAULT_GRIPS, sameGrips } from './grips';
+import type { Grips } from './grips';
 import {
   characterAssets, DEFAULT_CHARACTER_SHADING, sameShading, validateCharacterShading,
 } from './character-profile';
@@ -35,6 +39,13 @@ import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as
 import { compileSpriteHeadTracking } from './sprite-head-aim';
 import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-aim';
 import { selectFlipbookFrame } from './sprite-flipbook';
+
+// How a host names one arm: the IK target its hand follows, and the anchors depicting its two segments.
+export interface SpriteArmSlots {
+  readonly target: string;
+  readonly upper: string;
+  readonly forearm: string;
+}
 
 export interface SpriteAnchor {
   readonly node: THREE.Object3D;
@@ -308,7 +319,12 @@ export class SpriteRig {
   private readonly coverage = new Map<string, boolean>();
   private characterRiggingType: CharacterRiggingType = DEFAULT_CHARACTER_RIGGING_TYPE;
   private armForwardDistance: number = DEFAULT_ARM_FORWARD_DISTANCE;
-  private grips: GripStrategy = DEFAULT_GRIP_STRATEGY;
+  private grips: Grips = DEFAULT_GRIPS;
+  private arms: CharacterArms | null = null;
+  // How this host names each arm, so the character's arm lengths reach its 2D arm chains.
+  private readonly armSlots: Readonly<Record<ArmSide, SpriteArmSlots>> | null;
+  // Stretched arm bones and the anchor whose artwork depicts each; other art on them keeps its size.
+  private segmentAnchors: ReadonlyMap<string, string> = new Map();
   private assets: CharacterAssets = {};
   private readonly assetHost: CharacterAssetHost | undefined;
   private images = new Map<string, ImageResource>();
@@ -344,6 +360,7 @@ export class SpriteRig {
   private readonly tempQuaternion = new THREE.Quaternion();
   private readonly tempPosition = new THREE.Vector3();
   private readonly tempScale = new THREE.Vector3();
+  private readonly boneStretch = new THREE.Vector3(1, 1, 1);
   private readonly tempWorld = new THREE.Vector3();
   private readonly tempWorldB = new THREE.Vector3();
   private readonly tempWorldC = new THREE.Vector3();
@@ -358,12 +375,20 @@ export class SpriteRig {
     // Uploads a texture ahead of first use, so flipbook frame changes never upload during play.
     prepareTexture?: (texture: THREE.Texture) => void;
     characterAssets?: CharacterAssetHost;
+    armSlots?: Readonly<Record<ArmSide, SpriteArmSlots>>;
   }) {
     this.anchors = new Map(anchors);
     for (const name of this.anchors.keys()) this.coverage.set(name, false);
     this.root = options.root;
     this.targetIds = new Set(options.targetIds);
     this.onCharacterPresentationChange = options.onCharacterPresentationChange;
+    this.armSlots = options.armSlots === undefined ? null : Object.freeze({
+      left: Object.freeze({ ...options.armSlots.left }), right: Object.freeze({ ...options.armSlots.right }),
+    });
+    for (const slots of Object.values(this.armSlots ?? {})) {
+      if (!this.targetIds.has(slots.target)) throw new SpriteError(`Unknown arm IK target "${slots.target}".`);
+      for (const anchor of [slots.upper, slots.forearm]) this.anchor(anchor);
+    }
     this.prepareTexture = options.prepareTexture;
     this.assetHost = options.characterAssets;
     this.headTracking = options.headTracking === undefined ? null : {
@@ -444,7 +469,8 @@ export class SpriteRig {
       checkSignal(signal);
       const next = this.buildState(document.layers, document.skeleton, images, resources,
         { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
-          armForwardDistance: document.armForwardDistance, grips: document.grips, ...characterAssets(document) });
+          armForwardDistance: document.armForwardDistance, grips: document.grips, arms: document.arms,
+          ...characterAssets(document) });
       operation.staged.clear();
       this.commit(next, { preview: null });
     } finally {
@@ -472,12 +498,34 @@ export class SpriteRig {
     this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
   }
 
-  setGrips(value: GripStrategy): void {
+  setGrips(value: Grips): void {
     this.assertMutable();
-    const grips = validateGripStrategy(value);
-    if (grips === this.grips) return;
+    const grips = validateGrips(value);
+    if (sameGrips(grips, this.grips)) return;
     this.grips = grips;
     this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+  }
+
+  // Stretches the 2D arm chains and informs the host, which sizes its 3D arms; nothing reloads.
+  setArms(value: CharacterArms | null): void {
+    this.assertMutable();
+    const arms = validateArms(value);
+    if (sameArms(arms, this.arms)) return;
+    this.arms = arms;
+    this.applyArmLengths(this.skeleton);
+    this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+  }
+
+  // Each hand's authored 2D arm chain lengths, or null for a hand without one.
+  naturalArmLengths(): Readonly<Record<ArmSide, ArmLengths | null>> {
+    const definition = this.skeleton?.definition ?? null;
+    const chain = (side: ArmSide): ArmLengths | null => {
+      const ik = definition?.ik.find(candidate => candidate.target === this.armSlots?.[side].target);
+      if (definition === null || ik === undefined) return null;
+      const length = (id: string) => definition.bones.find(bone => bone.id === id)!.length;
+      return { upper: length(ik.upper), forearm: length(ik.lower) };
+    };
+    return { left: chain('left'), right: chain('right') };
   }
 
   // Applies shading to the loaded models without reloading them; the default look is stored as absent.
@@ -591,6 +639,7 @@ export class SpriteRig {
       this.skeleton.pose = new SkeletonPose(this.skeleton.definition);
       this.skeleton.pose.configureRotation(this.runtimePresentation()?.bones ?? EMPTY_BONES);
       this.skeleton.previewPose = null;
+      this.applyArmLengths(this.skeleton);
     }
   }
 
@@ -756,6 +805,7 @@ export class SpriteRig {
       characterRiggingType: this.characterRiggingType,
       armForwardDistance: this.armForwardDistance,
       grips: this.grips,
+      arms: this.arms,
       shading: this.assets.shading ?? DEFAULT_CHARACTER_SHADING,
       models: (this.assets.models ?? []).map(model => ({ id: model.id, name: model.name })),
       avatarModel: this.assets.avatar === undefined ? null : { model: this.assets.avatar.model, boneMap: { ...this.assets.avatar.boneMap } },
@@ -846,7 +896,7 @@ export class SpriteRig {
     this.assets = {};
     this.onCharacterPresentationChange?.({
       characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-      grips: DEFAULT_GRIP_STRATEGY,
+      grips: DEFAULT_GRIPS, arms: null,
     });
   }
 
@@ -923,7 +973,7 @@ export class SpriteRig {
   private currentCharacterPresentation(): CharacterPresentation {
     return {
       characterRiggingType: this.characterRiggingType, armForwardDistance: this.armForwardDistance, grips: this.grips,
-      ...this.assets,
+      arms: this.arms, ...this.assets,
     };
   }
 
@@ -936,7 +986,8 @@ export class SpriteRig {
   ): BuildState {
     validateCharacterRiggingType(options.characterRiggingType, layers.length);
     validateArmForwardDistance(options.armForwardDistance);
-    validateGripStrategy(options.grips);
+    validateGrips(options.grips);
+    validateArms(options.arms);
     this.assertCharacterRenderer(options.characterRiggingType);
     const attachments = new Map<string, Attachment>();
     const skeletonMounts = new Map<THREE.Object3D, THREE.Group>();
@@ -969,7 +1020,7 @@ export class SpriteRig {
         presentation: options.presentation,
         headTracking: compileSpriteHeadTracking(this.headTracking, layers, definition, options.presentation),
         characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance,
-        grips: options.grips, mode: options.mode,
+        grips: options.grips, arms: options.arms, mode: options.mode,
         ...characterAssets(options) };
     } catch (error) {
       for (const instance of instances.values()) if (this.layers.get(instance.data.id) !== instance) this.disposeLayer(instance);
@@ -1297,7 +1348,7 @@ export class SpriteRig {
     const changedAssets = nextAssets.models !== this.assets.models || nextAssets.avatar !== this.assets.avatar ||
       nextAssets.hammer !== this.assets.hammer || nextAssets.shading !== this.assets.shading;
     const changedCharacter = changedType || next.armForwardDistance !== this.armForwardDistance ||
-      next.grips !== this.grips || changedAssets;
+      !sameGrips(next.grips, this.grips) || !sameArms(next.arms, this.arms) || changedAssets;
     const presentation = next.presentation ?? next.headTracking.presentation;
     const resetDirection = changedType || next.mode === 'replace' || presentation !== this.runtimePresentation();
     const previousCoverage = new Map(this.coverage);
@@ -1319,7 +1370,9 @@ export class SpriteRig {
     this.characterRiggingType = next.characterRiggingType;
     this.armForwardDistance = next.armForwardDistance;
     this.grips = next.grips;
+    this.arms = next.arms;
     this.assets = nextAssets;
+    this.applyArmLengths(this.skeleton);
     if (changedType && next.mode === 'edit') this.resetPresentation();
     this.preview = options.preview;
     if (changedType || next.mode === 'replace' || this.preview !== null) {
@@ -1602,7 +1655,16 @@ export class SpriteRig {
       if (instance.kind !== 'bone') continue;
       const index = runtime.boneIndex.get(instance.boneId);
       if (index === undefined) throw new SpriteError(`Sprite "${instance.data.name}" references a missing bone.`);
-      instance.mesh.matrix.multiplyMatrices(runtime.bones[index]!.matrixWorld, instance.localMatrix);
+      const bone = runtime.bones[index]!.matrixWorld;
+      const scale = runtime.evaluated[index]!.scale;
+      if (scale === 1 || this.segmentAnchors.get(instance.boneId) === instance.data.anchor) {
+        instance.mesh.matrix.multiplyMatrices(bone, instance.localMatrix);
+      } else {
+        // Other art on a stretched bone, such as an elbow cap, moves with the stretch but keeps its size.
+        this.tempMatrixA.makeScale(1 / scale, 1, 1);
+        this.tempMatrixA.elements[12] = (scale - 1) * instance.data.offset.x / scale;
+        instance.mesh.matrix.multiplyMatrices(bone, this.tempMatrixA).multiply(instance.localMatrix);
+      }
       instance.mesh.matrixWorldNeedsUpdate = true;
     }
   }
@@ -1628,13 +1690,36 @@ export class SpriteRig {
     return Math.atan2(e[1]!, e[0]!);
   }
 
+  // A stretched bone stretches its weighted artwork, and the art bound to it, along its length.
   private applyBoneMatrices(runtime: SkeletonRuntime, bones: readonly RuntimeBoneWorld[]): void {
     for (let index = 0; index < bones.length; index++) {
       const source = bones[index]!;
       const bone = runtime.bones[index]!;
-      bone.matrix.makeRotationZ(source.angle).setPosition(source.x, source.y, 0);
+      bone.matrix.makeRotationZ(source.angle);
+      if (source.scale !== 1) bone.matrix.scale(this.boneStretch.setX(source.scale));
+      bone.matrix.setPosition(source.x, source.y, 0);
       bone.matrixWorld.copy(bone.matrix);
     }
+  }
+
+  private applyArmLengths(runtime: SkeletonRuntime | null): void {
+    const lengths = new Map<string, number>();
+    const segments = new Map<string, string>();
+    if (runtime !== null && this.arms !== null && this.armSlots !== null) {
+      for (const side of ['left', 'right'] as const) {
+        const slots = this.armSlots[side];
+        for (const chain of runtime.definition.ik) {
+          if (chain.target !== slots.target) continue;
+          lengths.set(chain.upper, this.arms[side].upper);
+          lengths.set(chain.lower, this.arms[side].forearm);
+          segments.set(chain.upper, slots.upper);
+          segments.set(chain.lower, slots.forearm);
+        }
+      }
+    }
+    this.segmentAnchors = segments;
+    runtime?.pose.setBoneLengths(lengths);
+    runtime?.previewPose?.setBoneLengths(lengths);
   }
 
   private updateTileUv(instance: TiledLayerInstance): void {

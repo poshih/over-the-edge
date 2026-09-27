@@ -126,9 +126,10 @@ export async function inspectArmGeometry(page) {
     }
     return true;
   });
-  const { state, visuals, grips } = await page.evaluate(() => ({
+  const { state, visuals, grips, chains, profileGrips } = await page.evaluate(() => ({
     state: window.gettingOver.snapshot(), visuals: window.gettingOver.appearance(),
-    grips: window.gettingOver.level().rendering.grips,
+    grips: window.gettingOver.level().rendering.grips, chains: window.gettingOver.level().rendering.armChains,
+    profileGrips: window.gettingOver.sprites().document.grips,
   }));
   assert.equal(state.paused, true, 'Compare physics and rendered anchors on a paused frame.');
   const point = (value) => new Vector3(value.x, value.y, value.z);
@@ -142,24 +143,28 @@ export async function inspectArmGeometry(page) {
     ? shaftBase.angle : Math.atan2(shaftHead.y - shaftBase.y, shaftHead.x - shaftBase.x);
   const shaftDirection = new Vector3(Math.cos(shaftAngle), Math.sin(shaftAngle), 0);
   const result = {};
-  for (const [side, shoulderX, shoulderZ, buttGrip] of [['left', -0.17, -0.09, 0.04], ['right', 0.17, 0.09, 0.22]]) {
+  for (const side of ['left', 'right']) {
+    const { shoulder: local, upper: upperLength, forearm: forearmLength } = chains[side];
     const upper = visuals.parts.find((part) => part.id === `${side}-upper-arm`);
     const lower = visuals.parts.find((part) => part.id === `${side}-forearm`);
     const elbow = point(visuals.parts.find((part) => part.id === `${side}-elbow`).anchor);
     const handPart = visuals.parts.find((part) => part.id === `${side}-hand`);
     const hand = point(handPart.anchor);
-    const shoulder = new Vector3(shoulderX, 0.74, shoulderZ).applyMatrix4(torso);
+    const shoulder = new Vector3(...local).applyMatrix4(torso);
     const settings = visuals.armIk.settings;
     const hint = new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(torso);
     assert.ok(endpoint(upper, -0.5).distanceTo(shoulder) < 1e-8, `${side} upper arm must start at its torso-local shoulder.`);
     assert.ok(endpoint(upper, 0.5).distanceTo(elbow) < 1e-8, `${side} upper arm must end at the elbow.`);
     assert.ok(endpoint(lower, -0.5).distanceTo(elbow) < 1e-8, `${side} forearm must start at the elbow.`);
     assert.ok(endpoint(lower, 0.5).distanceTo(hand) < 1e-8, `${side} forearm must end at the grip.`);
-    assert.ok(Math.abs(shoulder.distanceTo(elbow) - 0.82) < 1e-8);
+    assert.ok(Math.abs(shoulder.distanceTo(elbow) - upperLength) < 1e-8, `${side} upper arm must keep its length.`);
     const distance = shoulder.distanceTo(hand);
-    if (distance <= 1.64) assert.ok(Math.abs(elbow.distanceTo(hand) - 0.82) < 1e-8, 'Reachable arms must keep both bone lengths.');
-    if (grips.strategy === 'fixed') {
-      assert.equal(grips[side], Math.min(buttGrip, shaftLength), `The fixed ${side} grip must stay at the butt.`);
+    if (distance <= upperLength + forearmLength) {
+      assert.ok(Math.abs(elbow.distanceTo(hand) - forearmLength) < 1e-8, 'Reachable arms must keep both bone lengths.');
+    }
+    if (grips.placement === 'fixed') {
+      // Hands hold their grips, never nearer the head's centre than its block plus the hand clearance.
+      assert.equal(grips[side], Math.min(profileGrips[side], shaftLength - 0.2), `The fixed ${side} hand must hold its grip.`);
     }
     const expectedHand = new Vector3(shaftBase.x, shaftBase.y, shaftDepth)
       .addScaledVector(shaftDirection, grips[side]);

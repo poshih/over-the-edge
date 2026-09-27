@@ -1,4 +1,4 @@
-import { RIG } from './config';
+import { RIG } from './config.ts';
 
 // The configurable part of the hammer rig, set per game in its settings.
 export interface RigSettings {

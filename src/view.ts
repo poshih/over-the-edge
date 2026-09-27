@@ -12,8 +12,9 @@ import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartI
 import { DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
 import type { ArmChains, ArmPose } from './arm-ik';
-import { DEFAULT_GRIP_STRATEGY, placeGrips } from './grips';
-import type { GripDistances, GripStrategy } from './grips';
+import type { ArmLengths, CharacterArms } from './character-arms';
+import { DEFAULT_GRIPS, placeGrips } from './grips';
+import type { GripDistances, Grips } from './grips';
 import { AvatarView } from './avatar-view';
 import { resolveAvatarJoints } from './character-model-inspect';
 import type { CharacterModelUsage } from './character-model-inspect';
@@ -35,7 +36,7 @@ import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import { SpriteRig } from './sprite-rig';
-import type { SpriteAnchor } from './sprite-rig';
+import type { SpriteAnchor, SpriteArmSlots } from './sprite-rig';
 import { DEFAULT_CHARACTER_RIGGING_TYPE, SpriteError } from './sprite-data';
 import type { CharacterPresentation, CharacterRiggingType, SpriteDocument } from './sprite-data';
 import { VisualVisibility } from './visual-visibility';
@@ -122,8 +123,22 @@ const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer
 const PROP_VIEW_NAMES: Readonly<Record<PropModelRole, string>> = { hammer: 'one-model-hammer', pot: 'profile-pot-model' };
 const DEFAULT_PRESENTATION: CharacterPresentation = Object.freeze({
   characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-  grips: DEFAULT_GRIP_STRATEGY,
+  grips: DEFAULT_GRIPS, arms: null,
 });
+// Each arm's grip target and segment slots, so a character's arm lengths also stretch its 2D arms.
+const ARM_SLOTS: Readonly<Record<ArmSide, SpriteArmSlots>> = Object.freeze({
+  left: Object.freeze({ target: 'left-grip', upper: 'left-upper-arm', forearm: 'left-forearm' }),
+  right: Object.freeze({ target: 'right-grip', upper: 'right-upper-arm', forearm: 'right-forearm' }),
+});
+
+// A character's arm lengths replace the natural chains' segment lengths; shoulders stay.
+function withArmLengths(chains: ArmChains, arms: CharacterArms | null): ArmChains {
+  if (arms === null) return chains;
+  return Object.freeze({
+    left: Object.freeze({ ...chains.left, upper: arms.left.upper, forearm: arms.left.forearm }),
+    right: Object.freeze({ ...chains.right, upper: arms.right.upper, forearm: arms.right.forearm }),
+  });
+}
 
 function disposeResources(...roots: Object3D[]): void {
   const geometries = new Set<BufferGeometry>();
@@ -179,9 +194,12 @@ export class GameView {
   private readonly shaftSegments: { readonly shaft: Mesh; readonly sleeve: Mesh }[] = [];
   private rig: RigGeometry;
   private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
-  private gripStrategy: GripStrategy = DEFAULT_GRIP_STRATEGY;
-  private readonly grips: GripDistances = { left: 0, right: 0 };
-  private readonly gripCentre = new Vector3();
+  private grips: Grips = DEFAULT_GRIPS;
+  private readonly gripDistances: GripDistances = { left: 0, right: 0 };
+  // Where the shoulders' midpoint projects onto the handle, from the butt, and the handle's length, last frame.
+  private gripCentre = 0;
+  private gripShaft = 0;
+  private readonly shoulderMidpoint = new Vector3();
   private readonly arms = new Map<ArmSide, Arm>();
   private readonly limbDirection = new Vector3();
   private readonly limbSide = new Vector3();
@@ -344,7 +362,7 @@ export class GameView {
     return this.createSlot().rig;
   }
 
-  // Swaps presentation only, including the grip strategy: physics and level state are untouched and nothing reloads.
+  // Swaps presentation only, including grips and arm lengths: physics and level state are untouched and nothing reloads.
   selectCharacter(index: number): void {
     const slot = this.slots[index];
     if (!Number.isInteger(index) || slot === undefined) throw new Error(`Unknown character profile ${index}.`);
@@ -356,6 +374,16 @@ export class GameView {
     for (const [id, binding] of this.bindings) binding.visibility.setCovered({ covered: slot.coverage.get(id) ?? false });
     this.applyPresentation();
     slot.rig.resetPresentation();
+  }
+
+  // Each arm's lengths as the active character type draws them without its own arm lengths.
+  naturalArmLengths(): CharacterArms {
+    const slot = this.slots[this.activeSlot];
+    const type = (slot?.presentation ?? DEFAULT_PRESENTATION).characterRiggingType;
+    const chains = type === 'avatar-3d' ? slot?.avatar?.view.chains ?? DEFAULT_ARM_CHAINS : DEFAULT_ARM_CHAINS;
+    const sprite = type === 'sprite-2d' ? slot?.rig.naturalArmLengths() ?? null : null;
+    const side = (arm: ArmSide): ArmLengths => sprite?.[arm] ?? { upper: chains[arm].upper, forearm: chains[arm].forearm };
+    return { left: side('left'), right: side('right') };
   }
 
   characterSelection(): { active: number; count: number; types: CharacterRiggingType[] } {
@@ -405,6 +433,7 @@ export class GameView {
       },
       prepareTexture: (texture) => this.renderer.initTexture(texture),
       characterAssets: { prepare: (document, signal) => this.prepareModels(slot, document, signal) },
+      armSlots: ARM_SLOTS,
     });
     slot = {
       index, rig, mounts, coverage, presentation: DEFAULT_PRESENTATION,
@@ -521,8 +550,8 @@ export class GameView {
       const replaced = this.propModels.hammer !== null && HAMMER_PARTS.has(id) || this.propModels.pot !== null && id === 'pot';
       binding.visibility.setEnabled({ enabled: (!avatarMode || PROP_PARTS.has(id)) && !replaced });
     }
-    this.armChains = imported?.chains ?? DEFAULT_ARM_CHAINS;
-    this.gripStrategy = presentation.grips;
+    this.armChains = withArmLengths(imported?.chains ?? DEFAULT_ARM_CHAINS, presentation.arms);
+    this.grips = presentation.grips;
     // Shading styles Avatar mode: the connected character and its separate pot and hammer.
     this.shading.apply(presentation.shading ?? DEFAULT_CHARACTER_SHADING, avatarMode);
   }
@@ -689,7 +718,10 @@ export class GameView {
       characters: this.characterSelection(),
       armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },
       rig: this.rig,
-      grips: { strategy: this.gripStrategy, left: this.grips.left, right: this.grips.right },
+      grips: {
+        placement: this.grips.placement, left: this.gripDistances.left, right: this.gripDistances.right,
+        centre: this.gripCentre, shaft: this.gripShaft,
+      },
     };
   }
 
@@ -976,14 +1008,15 @@ export class GameView {
     const cos = Math.cos(options.shaftAngle);
     const sin = Math.sin(options.shaftAngle);
     // Where the shoulders' midpoint projects onto the handle, measured from the butt.
-    this.gripCentre.set(
+    this.shoulderMidpoint.set(
       (chains.left.shoulder[0] + chains.right.shoulder[0]) / 2,
       (chains.left.shoulder[1] + chains.right.shoulder[1]) / 2,
       (chains.left.shoulder[2] + chains.right.shoulder[2]) / 2,
     ).applyMatrix4(body);
     const butt = tool.elements;
-    const centre = (this.gripCentre.x - butt[12]) * cos + (this.gripCentre.y - butt[13]) * sin;
-    placeGrips(this.gripStrategy, centre, shaftLength, this.grips);
+    this.gripCentre = (this.shoulderMidpoint.x - butt[12]) * cos + (this.shoulderMidpoint.y - butt[13]) * sin;
+    this.gripShaft = shaftLength;
+    placeGrips(this.grips, this.gripCentre, shaftLength, this.gripDistances);
     const poses: ArmPose[] = [];
     for (const side of ARM_SIDES) {
       const arm = this.arms.get(side);
@@ -992,7 +1025,7 @@ export class GameView {
       const chain = chains[side];
       const pose = solveArmPose(side, {
         shoulder: new Vector3(...chain.shoulder).applyMatrix4(body),
-        hand: new Vector3(this.grips[side], 0, 0).applyMatrix4(tool),
+        hand: new Vector3(this.gripDistances[side], 0, 0).applyMatrix4(tool),
         hint: new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(body),
         shaftAxis: new Vector3(cos, sin, 0),
       }, { previous: arm.pose, dt: options.dt, lengths: chain });

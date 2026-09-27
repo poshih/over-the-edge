@@ -72,11 +72,11 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
   await mkdir(join(v1, 'characters'), { recursive: true });
   await mkdir(join(v1, 'appearance'), { recursive: true });
   await writeFile(join(v1, 'characters/primary.json'), JSON.stringify({
-    schemaVersion: 10, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, grips: 'sliding', images: [], layers: [], skeleton: null, presentation: null,
+    schemaVersion: 11, characterRiggingType: 'avatar-3d', armForwardDistance: 0.25, grips: { placement: 'sliding', left: 0.04, right: 0.22 }, arms: null, images: [], layers: [], skeleton: null, presentation: null,
     models: [{ id: 'avatar', name: 'Climber', source: glbData(skinnedAvatarGlb()) }], avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP },
   }));
   await writeFile(join(v1, 'characters/alternate.json'), JSON.stringify({
-    schemaVersion: 10, characterRiggingType: 'model-3d', armForwardDistance: 0.3, grips: 'fixed', images: [], layers: [], skeleton: null, presentation: null,
+    schemaVersion: 11, characterRiggingType: 'model-3d', armForwardDistance: 0.3, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null, images: [], layers: [], skeleton: null, presentation: null,
     models: [{ id: 'hammer', name: 'Mallet', source: glbData(hammerGlb()) }], hammer: { model: 'hammer' },
   }));
   await writeFile(join(v1, 'appearance/torso.glb'), modelFixture({ size: [0.6, 0.8, 0.4] }));
@@ -267,7 +267,7 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
       // The editor's own saved profile, which must not replace the project's character.
       await put('over-the-edge:sprites', 'documents', 'id', {
         id: 'active', document: {
-          schemaVersion: 10, characterRiggingType: 'model-3d', armForwardDistance: 0.7, grips: 'fixed',
+          schemaVersion: 11, characterRiggingType: 'model-3d', armForwardDistance: 0.7, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null,
           images: [], layers: [], skeleton: null, presentation: null,
         },
       });
@@ -291,7 +291,7 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
     const booted = await older.evaluate(() => ({
       primary: window.gettingOver.sprites().document.characterRiggingType,
       armForwardDistance: window.gettingOver.sprites().document.armForwardDistance,
-      grips: window.gettingOver.sprites().document.grips,
+      grips: window.gettingOver.sprites().document.grips.placement,
       avatar: window.gettingOver.level().rendering.importedAvatar?.visible ?? false,
       head: window.gettingOver.appearance().parts.find((part) => part.id === 'character-head').name,
       torso: window.gettingOver.appearance().parts.find((part) => part.id === 'torso').name,

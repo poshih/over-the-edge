@@ -1,17 +1,23 @@
 import { RIG } from './config.ts';
+import { RIG_LIMITS } from './rig.ts';
 
 // Where a character's hands hold the handle. Grips are presentation: physics never reads them.
-export const GRIP_STRATEGIES = ['fixed', 'sliding'] as const;
-export type GripStrategy = (typeof GRIP_STRATEGIES)[number];
-export const DEFAULT_GRIP_STRATEGY: GripStrategy = 'fixed';
+export const GRIP_PLACEMENTS = ['fixed', 'sliding'] as const;
+export type GripPlacement = (typeof GRIP_PLACEMENTS)[number];
 
-// Distances from the butt. Fixed grips stay here; sliding grips keep this order and spacing.
-export const BUTT_GRIPS = Object.freeze({ left: 0.04, right: 0.22 });
+// Each hand's distance from the butt. Fixed grips hold there; sliding grips start there and slide together.
+export interface Grips {
+  readonly placement: GripPlacement;
+  readonly left: number;
+  readonly right: number;
+}
+
+export const DEFAULT_GRIPS: Grips = Object.freeze({ placement: 'fixed', left: 0.04, right: 0.22 });
+export const GRIP_LIMITS = { min: 0, max: RIG_LIMITS.handleLength.max, step: 0.01 } as const;
 // Space kept between the leading hand and the head's collision block.
 export const HEAD_GRIP_CLEARANCE = 0.1;
-
-const BUTT_CENTRE = (BUTT_GRIPS.left + BUTT_GRIPS.right) / 2;
-const HEAD_HALF_LENGTH = Math.max(...RIG.headVertices.map((point) => point.x));
+// No hand holds nearer the head's centre than this, so none enters its collision block.
+export const HEAD_GRIP_MARGIN = Math.max(...RIG.headVertices.map((point) => point.x)) + HEAD_GRIP_CLEARANCE;
 
 export interface GripDistances {
   left: number;
@@ -21,20 +27,27 @@ export interface GripDistances {
 /**
  * Places both hands along the handle, as distances from its butt, into `out`. `centre` is where
  * the shoulders' midpoint projects onto the handle; `shaftLength` is the butt-to-head distance.
- * Sliding grips centre there, clamped between the butt grips and the head, so the handle slides
- * through the hands and they hold the butt once it passes the body. Both are continuous in aim
- * and extension.
+ * Sliding grips centre there, between their authored grips and the head, so the handle slides
+ * through the hands and they return to their grips once the butt passes the body. Both are
+ * continuous in aim and extension.
  */
-export function placeGrips(strategy: GripStrategy, centre: number, shaftLength: number, out: GripDistances): GripDistances {
-  if (strategy === 'fixed') {
-    out.left = Math.min(BUTT_GRIPS.left, shaftLength);
-    out.right = Math.min(BUTT_GRIPS.right, shaftLength);
+export function placeGrips(grips: Grips, centre: number, shaftLength: number, out: GripDistances): GripDistances {
+  const farthest = Math.max(0, shaftLength - HEAD_GRIP_MARGIN);
+  const left = Math.min(grips.left, farthest);
+  const right = Math.min(grips.right, farthest);
+  if (grips.placement === 'fixed') {
+    out.left = left;
+    out.right = right;
     return out;
   }
-  // How far the hands have slid from the butt grips, stopping short of the head.
-  const travel = Math.max(0, shaftLength - HEAD_HALF_LENGTH - HEAD_GRIP_CLEARANCE - BUTT_GRIPS.right);
-  const offset = Math.min(Math.max(centre - BUTT_CENTRE, 0), travel);
-  out.left = BUTT_GRIPS.left + offset;
-  out.right = BUTT_GRIPS.right + offset;
+  // Both hands slide by the same amount, from their grips toward the head.
+  const travel = farthest - Math.max(left, right);
+  const offset = Math.min(Math.max(centre - (left + right) / 2, 0), travel);
+  out.left = left + offset;
+  out.right = right + offset;
   return out;
+}
+
+export function sameGrips(left: Grips, right: Grips): boolean {
+  return left.placement === right.placement && left.left === right.left && left.right === right.right;
 }

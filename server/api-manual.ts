@@ -2,7 +2,8 @@ import { AUDIO_CUE_DESCRIPTIONS, AUDIO_CUES, AUDIO_VOLUME } from '../src/audio-s
 import { ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS } from '../src/appearance-profile';
 import { ART_LIMITS } from '../src/art-types';
 import { CHARACTER_RIGGING_TYPES, SPRITE_SCHEMA_VERSION } from '../src/sprite-data';
-import { GRIP_STRATEGIES } from '../src/grips';
+import { ARM_LENGTH_LIMITS } from '../src/character-arms';
+import { GRIP_LIMITS, GRIP_PLACEMENTS } from '../src/grips';
 import { VISUAL_PART_IDS } from '../src/character';
 import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
@@ -97,7 +98,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',
         patch: true,
-        description: `Export one from Workshop / Character. schemaVersion is ${SPRITE_SCHEMA_VERSION}; characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}; grips is one of ${GRIP_STRATEGIES.join(', ')}. See docs/characters.md and docs/sprites.md.`,
+        description: `Export one from Workshop / Character. schemaVersion is ${SPRITE_SCHEMA_VERSION}; characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}; grips is { placement: ${GRIP_PLACEMENTS.join(' | ')}, left, right }, each hand's distance from the butt (${GRIP_LIMITS.min}-${GRIP_LIMITS.max} m); arms is null for each type's own arm lengths, or { left: { upper, forearm }, right: { upper, forearm } } (${ARM_LENGTH_LIMITS.min}-${ARM_LENGTH_LIMITS.max} m). See docs/characters.md and docs/sprites.md.`,
       },
       'characters/alternate': { value: 'character profile JSON or null', patch: true, description: 'A second character players can switch to; needs a primary.' },
       'arm-ik': { value: 'body-relative elbow hints', patch: true, fields: ARM_IK_FIELDS.map((field) => ({ ...field, ...ARM_IK_LIMITS })) },

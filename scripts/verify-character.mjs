@@ -25,7 +25,7 @@ const bytes = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset
 // field present only while it is used.
 function verifySchemas(data) {
   const base = {
-    characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, grips: 'sliding',
+    characterRiggingType: 'avatar-3d', armForwardDistance: 0.3, grips: { placement: 'sliding', left: 0.04, right: 0.22 }, arms: null,
     images: [], layers: [], skeleton: null, presentation: null,
   };
   const models = [
@@ -36,14 +36,18 @@ function verifySchemas(data) {
   const roles = { avatar: { model: 'avatar', boneMap: HUMANOID_BONE_MAP }, hammer: { model: 'hammer' } };
   const shading = { mode: 'cel', bands: 4, outline: null };
   const canonical = value => JSON.stringify(data.validateSpriteDocument(JSON.parse(JSON.stringify(value))));
-  const full = { schemaVersion: 10, ...base, models, ...roles, pot: { model: 'pot' }, shading };
+  const full = { schemaVersion: 11, ...base, models, ...roles, pot: { model: 'pot' }, shading };
   assert.equal(canonical(full), JSON.stringify(full), 'A complete profile is a fixed point, with the pot after the hammer.');
-  const potOnly = { schemaVersion: 10, ...base, characterRiggingType: 'model-3d', models: [models[2]], pot: { model: 'pot' } };
+  const potOnly = { schemaVersion: 11, ...base, characterRiggingType: 'model-3d', models: [models[2]], pot: { model: 'pot' } };
   assert.equal(canonical(potOnly), JSON.stringify(potOnly), 'A pot model alone is a fixed point.');
   const rejected = {
-    'earlier schema': [{ ...full, schemaVersion: 9 }, /require schema version 10/],
+    'earlier schema': [{ ...full, schemaVersion: 10 }, /require schema version 11/],
     'missing grips': [{ ...full, grips: undefined }, /must contain exactly/],
-    'unknown grips': [{ ...full, grips: 'loose' }, /Grip placement must be fixed or sliding/],
+    'grips without positions': [{ ...full, grips: 'sliding' }, /Hand grips must contain exactly placement, left, right/],
+    'unknown placement': [{ ...full, grips: { placement: 'loose', left: 0.04, right: 0.22 } }, /Grip placement must be fixed or sliding/],
+    'grip beyond any handle': [{ ...full, grips: { placement: 'fixed', left: 0.04, right: 3.5 } }, /Right hand grip must be between 0 and 3/],
+    'missing arms': [{ ...full, arms: undefined }, /must contain exactly/],
+    'short arm': [{ ...full, arms: { left: { upper: 0.05, forearm: 0.5 }, right: { upper: 0.5, forearm: 0.5 } } }, /Left upper arm length must be between 0.1 and 2/],
     'shared pot model': [{ ...full, models: models.slice(0, 2), pot: { model: 'hammer' } }, /separate character models/],
     'four models': [{ ...full, models: [...models, { ...models[2], id: 'spare' }] }, /1-3 models/],
     'unused pot model': [{ ...full, pot: undefined }, /no avatar, hammer or pot uses/],
@@ -237,7 +241,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     assert.equal(state.error, null);
     assert.equal(state.avatarModel.pending, false);
     assert.deepEqual({ ...state.boneMap }, { ...BONE_MAP }, 'The editor must apply the automatic Mixamo bone map.');
-    assert.equal(state.schemaVersion, 10);
+    assert.equal(state.schemaVersion, 11);
     let view = await rendering();
     assert.equal(view.importedAvatar.visible, true);
     assert.equal(view.avatar.visible, false, 'The imported avatar replaces the built-in mesh.');
@@ -278,6 +282,36 @@ export async function verifyCharacter(browser, address, artifacts) {
         'A reachable forearm keeps its bind-pose length.');
     }
     await clip('character-imported-pbr.png');
+
+    // Arm lengths start at the GLB's bind pose; set ones stretch the imported arm bones, per side.
+    await openSection(page, 'character-arm-lengths');
+    const bindChains = view.importedAvatar.chains;
+    const shownLength = async id => Number(await page.locator(`#character-${id}-length`).inputValue());
+    assert.equal(await shownLength('left-upper'), Number(bindChains.left.upper.toFixed(3)), 'The sliders start at the bind-pose arms.');
+    const setLength = (id, value) => page.locator(`#character-${id}-length`).evaluate((input, next) => {
+      input.value = String(next);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, value);
+    const armsBefore = await physics();
+    await setLength('left-upper', 0.7);
+    await setLength('right-forearm', 0.65);
+    await frames();
+    const resized = await rendering();
+    assert.deepEqual([resized.armChains.left.upper, resized.armChains.right.forearm], [0.7, 0.65]);
+    for (const [side, segment, from, to, expected] of [
+      ['left', 'upper', 'left-upper-arm', 'left-forearm', 0.7], ['right', 'forearm', 'right-forearm', 'right-hand', 0.65],
+    ]) {
+      const joints = resized.importedAvatar.joints;
+      const measured = length(subtract(joints[to], joints[from]));
+      const straight = resized.armChains[side].upper + resized.armChains[side].forearm;
+      const reach = length(subtract(joints[`${side}-hand`], joints[`${side}-upper-arm`]));
+      if (reach < straight) assert.ok(Math.abs(measured - expected) < 1e-5, `The ${side} ${segment} takes its set length (${measured}).`);
+    }
+    assert.deepEqual(await physics(), armsBefore, 'Arm lengths must not change physics.');
+    await page.locator('.character-arm-length-reset').click();
+    await frames();
+    assert.deepEqual((await rendering()).armChains.left.upper, bindChains.left.upper, 'Natural arm lengths return the bind pose.');
+    report.armLengths = { bindUpper: bindChains.left.upper, set: { leftUpper: 0.7, rightForearm: 0.65 } };
 
     // Per-frame work is seven bone writes, whatever the level holds.
     await unpause();
@@ -397,7 +431,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     // A pot model follows the physical pot body rigidly, at the pot's depth, in every character type.
     await pause();
     const withoutPot = await exportProfile();
-    assert.equal(JSON.parse(withoutPot).schemaVersion, 10);
+    assert.equal(JSON.parse(withoutPot).schemaVersion, 11);
     const beforePot = await physics();
     await page.getByLabel('Pot GLB', { exact: true }).setInputFiles(glbFile('urn.glb', potGlb()));
     await idle();
@@ -447,7 +481,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     }
     await page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
     const withPot = JSON.parse(await exportProfile());
-    assert.equal(withPot.schemaVersion, 10);
+    assert.equal(withPot.schemaVersion, 11);
     assert.deepEqual(withPot.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
     assert.deepEqual(withPot.pot, { model: 'pot' });
     await page.getByRole('button', { name: 'Use default pot', exact: true }).click();
@@ -543,7 +577,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     // Profile data: every model field is carried and restored byte for byte.
     const exported = await exportProfile();
     const profile = JSON.parse(exported);
-    assert.equal(profile.schemaVersion, 10);
+    assert.equal(profile.schemaVersion, 11);
     assert.deepEqual(profile.models.map(model => model.id), ['avatar', 'hammer', 'pot']);
     assert.deepEqual(profile.pot, { model: 'pot' });
     assert.ok(profile.models.every(model => model.source.startsWith('data:model/gltf-binary;base64,')));
@@ -580,9 +614,9 @@ export async function verifyCharacter(browser, address, artifacts) {
     });
     await idle();
     const plain = JSON.parse(await exportProfile());
-    assert.equal(plain.schemaVersion, 10);
+    assert.equal(plain.schemaVersion, 11);
     assert.deepEqual(Object.keys(plain), [
-      'schemaVersion', 'characterRiggingType', 'armForwardDistance', 'grips', 'images', 'layers', 'skeleton', 'presentation',
+      'schemaVersion', 'characterRiggingType', 'armForwardDistance', 'grips', 'arms', 'images', 'layers', 'skeleton', 'presentation',
     ], 'Without models or shading the profile has no model fields.');
     assert.equal((await rendering()).avatar.visible, true, 'Removing the import restores the built-in avatar.');
     report.schema = { version: 10, restored: true, bytes: exported.length };
@@ -590,7 +624,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     // A 2D profile imported from JSON shows its pot model too, beside its pot sprite layer.
     await pause();
     const flat = {
-      schemaVersion: 10, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: 'fixed',
+      schemaVersion: 11, characterRiggingType: 'sprite-2d', armForwardDistance: 0.25, grips: { placement: 'fixed', left: 0.04, right: 0.22 }, arms: null,
       images: [{ id: 'card', name: 'Card', source: `data:image/png;base64,${texturePng().toString('base64')}` }],
       layers: [{
         id: 'pot-card', name: 'Pot card', anchor: 'pot', image: 'card', width: 0.6, height: 0.4, offset: { x: 0, y: 0, z: 0.6 },
@@ -605,7 +639,7 @@ export async function verifyCharacter(browser, address, artifacts) {
     await idle();
     await frames();
     assert.equal((await sprites()).error, null);
-    assert.equal((await sprites()).schemaVersion, 10);
+    assert.equal((await sprites()).schemaVersion, 11);
     report.pot.sprite2d = await checkPot('2D mode');
     assert.equal(await exportProfile(), JSON.stringify(flat), 'A profile JSON round-trips byte for byte.');
     assert.deepEqual(report.errors, [], 'Character scenario browser errors are not allowed.');

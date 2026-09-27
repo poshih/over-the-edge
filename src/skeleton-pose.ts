@@ -24,6 +24,8 @@ export interface BoneWorld extends RigPoint {
   readonly id: string;
   readonly angle: number;
   readonly length: number;
+  // How far the bone is stretched along its length; 1 as authored.
+  readonly scale: number;
 }
 
 export interface SkeletonRotation {
@@ -214,6 +216,7 @@ function applyDensePose(localX: Float64Array, localY: Float64Array, localAngle: 
   }
 }
 
+// A stretched parent stretches its local space along its length, so its children move with its tip.
 function reflowPose(
   topology: readonly number[],
   parentIndex: Int16Array,
@@ -223,6 +226,7 @@ function reflowPose(
   worldX: Float64Array,
   worldY: Float64Array,
   worldAngle: Float64Array,
+  lengthScale: Float64Array | null,
 ): void {
   for (const index of topology) {
     const parent = parentIndex[index];
@@ -233,7 +237,7 @@ function reflowPose(
       continue;
     }
     const angle = worldAngle[parent];
-    const x = localX[index];
+    const x = lengthScale === null ? localX[index] : localX[index] * lengthScale[parent];
     const y = localY[index];
     worldX[index] = worldX[parent] + rotateX(x, y, angle);
     worldY[index] = worldY[parent] + rotateY(x, y, angle);
@@ -262,6 +266,7 @@ function snapshotPose(
   worldX: Float64Array,
   worldY: Float64Array,
   worldAngle: Float64Array,
+  lengthScale: Float64Array | null,
 ): readonly BoneWorld[] {
   return definition.bones.map((bone, index) => {
     const x = worldX[index];
@@ -270,7 +275,8 @@ function snapshotPose(
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(angle)) {
       throw new SkeletonError(`Pose evaluation produced an invalid transform for bone "${bone.id}".`);
     }
-    return { id: bone.id, x, y, angle, length: bone.length };
+    const scale = lengthScale === null ? 1 : lengthScale[index];
+    return { id: bone.id, x, y, angle, length: bone.length * scale, scale };
   });
 }
 
@@ -344,8 +350,8 @@ export function restPose(definition: SkeletonDefinition): readonly BoneWorld[] {
   const worldX = new Float64Array(definition.bones.length);
   const worldY = new Float64Array(definition.bones.length);
   const worldAngle = new Float64Array(definition.bones.length);
-  reflowPose(hierarchy.topology, hierarchy.parentIndex, rest.x, rest.y, rest.angle, worldX, worldY, worldAngle);
-  return snapshotPose(definition, worldX, worldY, worldAngle);
+  reflowPose(hierarchy.topology, hierarchy.parentIndex, rest.x, rest.y, rest.angle, worldX, worldY, worldAngle, null);
+  return snapshotPose(definition, worldX, worldY, worldAngle, null);
 }
 
 export function facingDirection(angle: number): FacingDirection {
@@ -427,6 +433,8 @@ export class SkeletonPose {
   private readonly worldX: Float64Array;
   private readonly worldY: Float64Array;
   private readonly worldAngle: Float64Array;
+  // Each bone's stretch along its length; 1 as authored.
+  private readonly lengthScale: Float64Array;
   private readonly directionPose = new Map<FacingDirection, DensePose>();
   private readonly clips = new Map<string, CompiledClip>();
   private readonly fixedJoints: Uint8Array;
@@ -461,6 +469,7 @@ export class SkeletonPose {
     this.worldX = new Float64Array(definition.bones.length);
     this.worldY = new Float64Array(definition.bones.length);
     this.worldAngle = new Float64Array(definition.bones.length);
+    this.lengthScale = new Float64Array(definition.bones.length).fill(1);
 
     for (const pose of definition.poses) this.directionPose.set(pose.direction, compilePose(pose.pose, definition.bones.length, this.indexById));
     for (const clip of definition.clips) this.clips.set(clip.id, compileClip(clip, definition.bones.length, this.indexById));
@@ -495,8 +504,19 @@ export class SkeletonPose {
     });
   }
 
+  // Stretches the named bones to these lengths, moving their children with them; others keep theirs.
+  setBoneLengths(lengths: ReadonlyMap<string, number>): void {
+    this.lengthScale.fill(1);
+    for (const [id, length] of lengths) {
+      if (!Number.isFinite(length) || length <= 0) throw new SkeletonError(`Bone "${id}" needs a positive length.`);
+      const index = this.requireBone(id, 'Stretched bone');
+      this.lengthScale[index] = length / this.definition.bones[index].length;
+    }
+  }
+
   fork(): SkeletonPose {
     const copy = new SkeletonPose(this.definition);
+    copy.lengthScale.set(this.lengthScale);
     copy.rotationRoots = this.rotationRoots;
     copy.rotationTopology = this.rotationTopology;
     copy.lastEvaluatedTime = this.lastEvaluatedTime;
@@ -549,7 +569,8 @@ export class SkeletonPose {
       this.localAngle[index] += entry.rotation * DEG_TO_RAD;
     }
 
-    reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle);
+    reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle,
+      this.lengthScale);
 
     if (options.constraints === 'enabled') this.solveIk(options.targets);
     if (options.rotation !== undefined && options.rotation !== null) this.applyRotation(options.rotation);
@@ -557,7 +578,7 @@ export class SkeletonPose {
     if (options.constraints === 'disabled') {
       this.constraintsActive = false;
       this.lastEvaluatedTime = time;
-      return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle);
+      return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle, this.lengthScale);
     }
 
     if (this.hair.length > 0) this.solveHair(time, options.origin);
@@ -566,7 +587,7 @@ export class SkeletonPose {
       this.lastEvaluatedTime = time;
     }
 
-    return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle);
+    return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle, this.lengthScale);
   }
 
   private applyRotation(rotation: SkeletonRotation): void {
@@ -586,7 +607,8 @@ export class SkeletonPose {
         } else {
           const dx = rotatedX - this.worldX[parent];
           const dy = rotatedY - this.worldY[parent];
-          this.localX[bone] = rotateX(dx, dy, -this.worldAngle[parent]);
+          // The reflow stretches local x by the parent's scale, so store it unstretched.
+          this.localX[bone] = rotateX(dx, dy, -this.worldAngle[parent]) / this.lengthScale[parent];
           this.localY[bone] = rotateY(dx, dy, -this.worldAngle[parent]);
         }
       }
@@ -594,7 +616,7 @@ export class SkeletonPose {
     }
     // Move sockets and their collision guides before hair consumes them; particles stay in world space.
     reflowPose(this.rotationTopology, this.parentIndex, this.localX, this.localY, this.localAngle,
-      this.worldX, this.worldY, this.worldAngle);
+      this.worldX, this.worldY, this.worldAngle, this.lengthScale);
   }
 
   private requireBone(id: string, label: string): number {
@@ -691,8 +713,8 @@ export class SkeletonPose {
       const reachY = desiredWrist.y - shoulderY;
       const reach = Math.hypot(reachX, reachY);
 
-      const upperLength = this.definition.bones[chain.upper].length;
-      const lowerLength = this.definition.bones[chain.lower].length;
+      const upperLength = this.definition.bones[chain.upper].length * this.lengthScale[chain.upper];
+      const lowerLength = this.definition.bones[chain.lower].length * this.lengthScale[chain.lower];
       const minimumReach = Math.max(SEGMENT_EPSILON, Math.abs(upperLength - lowerLength));
       const maximumReach = upperLength + lowerLength;
       const clampedReach = clamp(reach, minimumReach, maximumReach);
@@ -718,7 +740,8 @@ export class SkeletonPose {
       this.localAngle[chain.lower] = blendedLower - blendedUpper;
       this.localAngle[chain.hand] = blendedHand - blendedLower;
 
-      reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle);
+      reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle,
+      this.lengthScale);
     }
   }
 
@@ -762,7 +785,8 @@ export class SkeletonPose {
     this.solvedColliderWorldY.set(this.colliderWorldY);
 
     for (const chain of this.hair) this.applyHairPose(chain, origin);
-    reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle);
+    reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle,
+      this.lengthScale);
     this.constraintsActive = true;
     this.lastEvaluatedTime = time;
   }
@@ -776,7 +800,7 @@ export class SkeletonPose {
       }
       const last = chain.bones[chain.bones.length - 1];
       const tip = transformPoint(
-        { x: this.definition.bones[last].length, y: 0 },
+        { x: this.definition.bones[last].length * this.lengthScale[last], y: 0 },
         { x: this.worldX[last] + origin.x, y: this.worldY[last] + origin.y },
         this.worldAngle[last],
       );
@@ -788,7 +812,7 @@ export class SkeletonPose {
   private populateColliderWorld(origin: RigPoint): void {
     for (const [index, collider] of this.colliders.entries()) {
       const position = transformPoint(
-        { x: collider.x, y: collider.y },
+        { x: collider.x * this.lengthScale[collider.bone], y: collider.y },
         { x: this.worldX[collider.bone] + origin.x, y: this.worldY[collider.bone] + origin.y },
         this.worldAngle[collider.bone],
       );
@@ -981,7 +1005,8 @@ export class SkeletonPose {
     const dx = rootWorldX - this.worldX[parent];
     const dy = rootWorldY - this.worldY[parent];
     const rootParentAngle = this.worldAngle[parent];
-    this.localX[root] = rotateX(dx, dy, -rootParentAngle);
+    // The reflow stretches local x by the parent's scale, so store it unstretched.
+    this.localX[root] = rotateX(dx, dy, -rootParentAngle) / this.lengthScale[parent];
     this.localY[root] = rotateY(dx, dy, -rootParentAngle);
   }
 }

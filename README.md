@@ -158,7 +158,7 @@ GAME_SPRITES=skins/paper.json GAME_ALTERNATE_SPRITES=skins/hero.json npm run bui
 Players choose **2D** or **3D** in the release's corner control, including
 mid-level; the choice persists in the browser. Both profiles and their GLBs are
 validated at build time and load once. Switching changes only the presentation,
-including each profile's grip placement; physics and the level continue unchanged. Without `GAME_ALTERNATE_SPRITES`,
+including each profile's grips and arm lengths; physics and the level continue unchanged. Without `GAME_ALTERNATE_SPRITES`,
 the release has no such control. See [imported 3D characters](docs/characters.md).
 
 `src/editor/` owns all authoring UI, persistence, imports, and debugging tools.
@@ -670,7 +670,7 @@ Open **Workshop / Character** to choose the character's presentation. The
 default is **Mesh parts (3D)**: separate Three.js objects for the torso, head,
 and arm segments, driven by visual arm IK.
 All character types use the same Planck.js 2D physics, and their hands follow the
-profile's [grip placement](#hand-grips) on the physical tool.
+profile's [grips](#hand-grips) on the physical tool, with its [arm lengths](#arm-lengths).
 
 | Character type | What is rendered |
 | --- | --- |
@@ -681,7 +681,7 @@ profile's [grip placement](#hand-grips) on the physical tool.
 The choice is stored as `characterRiggingType` in the character/sprite profile.
 Changing it retains the other artwork, but does not silently save it. Use the
 profile's **Save**, **Revert**, and JSON controls. Profiles use **schema version
-10**; profiles in any other version are rejected, not converted.
+11**; profiles in any other version are rejected, not converted.
 
 Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend
@@ -774,19 +774,34 @@ GLB import does not author colliders or retarget whole-character animations.
 
 ### Hand grips
 
-**Workshop / Character / Hand grips** chooses where the hands hold the handle.
-**Fixed at the butt**, the default, holds it 0.04 m and 0.22 m from the butt, so the
-hands travel the whole slide and arms must reach as far as the handle slides.
-**Slide along the handle** centres the hands on the shoulders' midpoint projected
-onto the handle, 0.18 m apart, and lets the handle slide through them, as in
-Getting Over It. They stop short of the head and hold the butt once it passes the
-body, so the arm length a character needs is set by the maximum extension, not the
-handle length: with a 2.1 m handle and 0.55 m extension, every grip stays within
-about 1.03 m of the built-in avatar's shoulders at the default arm forward distance. The placement is continuous in aim
-and extension and costs the same every frame. It is saved as `grips` in the
-character profile, so each character keeps its own; Mesh parts, both avatars and the
-2D `left-grip` and `right-grip` targets share it. Grips are presentation: physics,
-input and the hammer models never read them.
+**Workshop / Character / Hand grips and handle** chooses where the hands hold the handle.
+Each hand's grip is a distance from the butt, **0.04 m** and **0.22 m** by default, set with
+**Left hand grip** and **Right hand grip**; no grip comes nearer than 0.2 m to the head's centre.
+**Fixed** hands stay on their grips and travel with the butt, so arms must reach as far as
+the handle slides. **Slide along the handle** starts the hands on their grips, then centres
+them on the shoulders' midpoint projected onto the handle and lets the handle slide through
+them together, as in Getting Over It. They stop short of the head and are back on their grips
+once the butt passes the body, so the arm length a character needs is set by the maximum
+extension, not the handle length: with a 2.1 m handle and 0.55 m extension, every default grip
+stays within about 1.03 m of the built-in avatar's shoulders at the default arm forward
+distance. The placement is continuous in aim and extension and costs the same every frame.
+The same section's **Handle length** is the game's [hammer rig](#game-settings) setting, shown
+here too: it is shared by every character, and changing it restarts the run.
+
+Grips are saved as `grips: { "placement", "left", "right" }` in the character profile, so each
+character keeps its own; Mesh parts, both avatars and the 2D `left-grip` and `right-grip`
+targets share them. Grips are presentation: physics, input and the hammer models never read them.
+
+### Arm lengths
+
+**Workshop / Character / Arm lengths** sets each arm's **upper arm** and **forearm** in metres,
+for every character type: the built-in avatar's and mesh parts' arms, an imported avatar's arm
+bones, and the 2D arm chains that target `left-grip` and `right-grip`, whose bones stretch along
+their length with their arm artwork, while joint caps and hands keep their size. They are saved as `arms` in the
+character profile. **Use natural arm lengths** clears them (`"arms": null`), and each type keeps
+its own: 0.82 m and 0.82 m for the built-in arms, an imported avatar's bind pose, and a 2D
+skeleton's authored bones. Arm lengths are visual only: physics, reach and grips are unchanged,
+and an arm too short for its grip straightens toward it as before.
 
 ### Body-relative arm IK
 
@@ -808,7 +823,8 @@ both limb lengths. Fully extended arms have no lateral bend; unreachable grips
 retain the existing visual forearm stretching rather than moving the hammer.
 
 Shoulders use the torso's transform. Both hands hold the physical slider-to-head
-frame, including its depth, where the profile's grip placement puts them. Procedural segments,
+frame, including its depth, where the profile's grips put them, and the arms take the
+profile's arm lengths when it has them. Procedural segments,
 straight replacements, GLB models, and tiled sprites share these same targets;
 artwork never changes hammer length or hand placement. The preview
 works with procedural and imported arm parts. Model alignment remains cosmetic;
@@ -891,8 +907,8 @@ settings, selected profile, and save state.
 `window.gettingOver.level()` reports the immutable authored definition, current
 illusion/collider state, editor selection/mode, set piece placement state, and
 render/cache counts, including the imported avatar's joints and bone writes, the
-hammer model, shading, the active character profile, and its grip placement with
-both grips' distances from the butt.
+hammer model, shading, the active character profile, the arm chains it draws, and its
+grip placement with both grips' current distances from the butt.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state, and the independent run timer. Restart resets the attempt; physics time
 continues to be available separately as `snapshot().time`.

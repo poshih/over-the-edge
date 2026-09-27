@@ -8,8 +8,12 @@ import {
 } from '../character-profile';
 import type { AvatarJointId, CelOutline, CharacterShading, ShadingMode } from '../character-profile';
 import { RIG } from '../config';
-import { BUTT_GRIPS, GRIP_STRATEGIES } from '../grips';
-import type { GripStrategy } from '../grips';
+import { ARM_LENGTH_LIMITS } from '../character-arms';
+import type { ArmLengths, CharacterArms } from '../character-arms';
+import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, HEAD_GRIP_MARGIN } from '../grips';
+import type { GripPlacement } from '../grips';
+import { clamp } from '../math';
+import { RIG_LIMITS } from '../rig';
 import type { RigGeometry } from '../rig';
 import { createRangeControl } from './range-control';
 import { createSpriteCharacterExample } from './sprite-character-example';
@@ -49,16 +53,27 @@ const CHARACTER_TYPES: Readonly<Record<CharacterRiggingType, { label: string; de
   },
 };
 
-const GRIP_LABELS: Readonly<Record<GripStrategy, string>> = {
-  fixed: 'Fixed at the butt',
+const GRIP_LABELS: Readonly<Record<GripPlacement, string>> = {
+  fixed: 'Fixed',
   sliding: 'Slide along the handle',
 };
+const ARM_SEGMENTS = [
+  { side: 'left', segment: 'upper', label: 'Left upper arm' },
+  { side: 'left', segment: 'forearm', label: 'Left forearm' },
+  { side: 'right', segment: 'upper', label: 'Right upper arm' },
+  { side: 'right', segment: 'forearm', label: 'Right forearm' },
+] as const;
+const GRIP_SIDES = [{ side: 'left', label: 'Left hand grip' }, { side: 'right', label: 'Right hand grip' }] as const;
 
 export function createCharacterEditor(options: {
   readonly mount: HTMLElement;
   readonly state: SpriteEditorState;
-  // The game's current hammer rig, for the hammer model's measurements.
+  // The game's current hammer rig, for the hammer model's measurements and the handle length control.
   readonly hammerRig: RigGeometry;
+  // Each arm as the current character type draws it without the profile's own arm lengths.
+  readonly naturalArms: () => CharacterArms;
+  // Sets the game's handle length, a physics setting shared by every character.
+  readonly onHandleLength: (length: number) => void;
   readonly actions: {
     save(): void;
     revert(): void;
@@ -106,19 +121,37 @@ export function createCharacterEditor(options: {
         </fieldset>
       `)}
 
-      ${sectionMarkup({ id: 'character-grips', title: 'Hand grips', hint: 'Where the hands hold the handle', open: true }, `
+      ${sectionMarkup({ id: 'character-arm-lengths', title: 'Arm lengths', hint: 'Upper arm and forearm, each side' }, `
+        <fieldset class="tuning-group character-arm-lengths">
+          <legend class="visually-hidden">Arm lengths</legend>
+          <div class="character-arm-length-controls"></div>
+          <p class="appearance-format character-arm-length-status" aria-live="polite"></p>
+          <button type="button" class="button character-arm-length-reset">Use natural arm lengths</button>
+          <p class="appearance-format">Sets the arms of every character type: the built-in and mesh-part arms,
+            an imported avatar's bones and the 2D arm chains that target the grips, whose arm artwork stretches
+            along each bone while joint caps and hands keep their size. Without them each type keeps its own arm
+            lengths. Visual only: physics, reach and grips are unchanged. Save the character profile to keep them.</p>
+        </fieldset>
+      `)}
+
+      ${sectionMarkup({ id: 'character-grips', title: 'Hand grips and handle', hint: 'Where the hands hold the handle', open: true }, `
         <fieldset class="tuning-group character-grips">
-          <legend class="visually-hidden">Hand grips</legend>
+          <legend class="visually-hidden">Hand grips and handle</legend>
           <div class="character-grip-modes" role="radiogroup" aria-label="Grip placement">
-            ${GRIP_STRATEGIES.map(strategy => `<label><input type="radio" name="character-grips" value="${strategy}" />
-              ${GRIP_LABELS[strategy]}</label>`).join('')}
+            ${GRIP_PLACEMENTS.map(placement => `<label><input type="radio" name="character-grips" value="${placement}" />
+              ${GRIP_LABELS[placement]}</label>`).join('')}
           </div>
-          <p class="appearance-format">Fixed hands hold the butt, ${metres(BUTT_GRIPS.left)} and
-            ${metres(BUTT_GRIPS.right)} along the handle, and travel with it, so arms must reach as far as the
-            handle slides. Sliding hands hold the handle where it passes the body and let it slide through them,
-            short of the head; once the butt passes the body they hold the butt, so arms only need to reach the
-            maximum extension. Avatars, mesh parts and 2D grip targets use the same placement, in every
-            character type. Physics is unchanged. Save the character profile to keep it.</p>
+          <div class="character-grip-controls"></div>
+          <button type="button" class="button character-grip-reset">Reset hand grips</button>
+          <p class="appearance-format">Each grip is that hand's distance from the butt, up to
+            ${metres(HEAD_GRIP_MARGIN)} short of the head's centre. Fixed hands stay there and travel with the
+            handle, so arms must reach as far as the handle slides. Sliding hands start there, then hold the handle
+            where it passes the body and let it slide through them, together; they are back on their grips once
+            the butt passes the body, so arms only need to reach the maximum extension. Avatars, mesh parts and
+            2D grip targets use the same grips. Physics is unchanged. Save the character profile to keep them.</p>
+          <div class="character-handle-control"></div>
+          <p class="appearance-format">The handle length is the game's, shared by every character: it is physics,
+            also in Physics / Hammer rig, and changing it rebuilds the player and restarts the run.</p>
         </fieldset>
       `)}
 
@@ -306,8 +339,56 @@ export function createCharacterEditor(options: {
   const potRemove = element<HTMLButtonElement>(root, '.character-pot-remove');
   const shadingModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-shading-mode"]'));
   const gripModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-grips"]'));
+  const gripReset = element<HTMLButtonElement>(root, '.character-grip-reset');
+  const armStatus = element<HTMLParagraphElement>(root, '.character-arm-length-status');
+  const armReset = element<HTMLButtonElement>(root, '.character-arm-length-reset');
   const hammerGeometry = element<HTMLSpanElement>(root, '.character-hammer-geometry');
   let hammerRig = options.hammerRig;
+  // The profile's arm lengths, or each type's own lengths, clamped so an edit starts from a valid profile.
+  const shownArms = (arms: CharacterArms | null): CharacterArms => {
+    if (arms !== null) return arms;
+    const natural = options.naturalArms();
+    const fit = (lengths: ArmLengths): ArmLengths => ({
+      upper: clamp(lengths.upper, ARM_LENGTH_LIMITS.min, ARM_LENGTH_LIMITS.max),
+      forearm: clamp(lengths.forearm, ARM_LENGTH_LIMITS.min, ARM_LENGTH_LIMITS.max),
+    });
+    return { left: fit(natural.left), right: fit(natural.right) };
+  };
+  const armControls = ARM_SEGMENTS.map(({ side, segment, label }) => {
+    const control = createRangeControl({
+      ...ARM_LENGTH_LIMITS, label, unit: 'm',
+      description: `Length of the ${label.toLowerCase()}, from joint to joint, in every character type.`,
+    }, {
+      id: `character-${side}-${segment}-length`, name: `${side}${segment === 'upper' ? 'Upper' : 'Forearm'}Length`, signal: events.signal,
+      onInput: value => {
+        const arms = shownArms(options.state.snapshot().document.arms);
+        if (!options.state.setArms({ ...arms, [side]: { ...arms[side], [segment]: value } })) render();
+      },
+    });
+    element(root, '.character-arm-length-controls').append(control.row);
+    return { side, segment, control };
+  });
+  const gripControls = GRIP_SIDES.map(({ side, label }) => {
+    const control = createRangeControl({
+      ...GRIP_LIMITS, label, unit: 'm',
+      description: `Where the ${side} hand holds the handle, measured from the butt.`,
+    }, {
+      id: `character-${side}-grip`, name: `${side}Grip`, signal: events.signal,
+      onInput: value => {
+        if (!options.state.setGrips({ ...options.state.snapshot().document.grips, [side]: value })) render();
+      },
+    });
+    element(root, '.character-grip-controls').append(control.row);
+    return { side, control };
+  });
+  const handleLength = createRangeControl({
+    ...RIG_LIMITS.handleLength, step: 0.05, label: 'Handle length', unit: 'm',
+    description: 'The game\'s handle length, shared by every character. Changing it rebuilds the player and restarts the run.',
+  }, {
+    id: 'character-handle-length', name: 'characterHandleLength', signal: events.signal,
+    onInput: value => options.onHandleLength(value),
+  });
+  element(root, '.character-handle-control').append(handleLength.row);
   const outlineEnabled = element<HTMLInputElement>(root, '#character-outline-enabled');
   const outlineColor = element<HTMLInputElement>(root, '#character-outline-color');
   const shadingInactive = element<HTMLParagraphElement>(root, '.character-shading-inactive');
@@ -352,9 +433,15 @@ export function createCharacterEditor(options: {
   }
   for (const input of gripModes) {
     input.addEventListener('change', () => {
-      if (input.checked && !options.state.setGrips(input.value)) render();
+      if (!input.checked) return;
+      if (!options.state.setGrips({ ...options.state.snapshot().document.grips, placement: input.value })) render();
     }, listen);
   }
+  gripReset.addEventListener('click', () => {
+    const { placement } = options.state.snapshot().document.grips;
+    options.state.setGrips({ ...DEFAULT_GRIPS, placement });
+  }, listen);
+  armReset.addEventListener('click', () => { options.state.setArms(null); }, listen);
   outlineEnabled.addEventListener('change', () => editShading({ outline: outlineEnabled.checked ? lastOutline : null }), listen);
   outlineColor.addEventListener('input', () => editShading({ outline: { ...lastOutline, color: outlineColor.value } }), listen);
   avatarFile.addEventListener('change', () => {
@@ -428,9 +515,16 @@ export function createCharacterEditor(options: {
     forwardReset.disabled = forwardDisabled || profile.armForwardDistance === DEFAULT_ARM_FORWARD_DISTANCE;
     forwardInactive.hidden = profile.characterRiggingType !== 'sprite-2d';
     for (const input of gripModes) {
-      input.checked = input.value === profile.grips;
+      input.checked = input.value === profile.grips.placement;
       input.disabled = disabled;
     }
+    for (const { side, control } of gripControls) control.setValue(profile.grips[side], { disabled });
+    gripReset.disabled = disabled || profile.grips.left === DEFAULT_GRIPS.left && profile.grips.right === DEFAULT_GRIPS.right;
+    const arms = shownArms(profile.arms);
+    for (const { side, segment, control } of armControls) control.setValue(Number(arms[side][segment].toFixed(3)), { disabled });
+    setText(armStatus, profile.arms === null ? 'Using this character type\'s own arm lengths.' :
+      'This profile\'s arm lengths apply to every character type.');
+    armReset.disabled = disabled || profile.arms === null;
     exampleButton.disabled = disabled;
     avatarButton.disabled = disabled || profile.characterRiggingType === 'avatar-3d';
     importButton.disabled = disabled;
@@ -547,6 +641,13 @@ export function createCharacterEditor(options: {
 
   function renderRig(): void {
     const head = hammerRig.handleLength;
+    handleLength.setValue(head);
+    // Grips can reach up to the head's margin on this game's handle.
+    const farthest = String(Number(Math.max(DEFAULT_GRIPS.right, head - HEAD_GRIP_MARGIN).toFixed(3)));
+    for (const { side, control } of gripControls) {
+      control.input.max = farthest;
+      control.setValue(options.state.snapshot().document.grips[side], { disabled: control.input.disabled });
+    }
     setText(hammerGeometry, `This game's handle puts the physical head at x = ${metres(head)}; its collision block spans ` +
       `x ${metres(head - HEAD_HALF_LENGTH)} to ${metres(head + HEAD_HALF_LENGTH)} and ` +
       `y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}.`);

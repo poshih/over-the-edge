@@ -10,8 +10,8 @@ Revert, JSON export/import and `GAME_SPRITES` carry it.
 A typical 3D character is three models: a skinned body, the pot and the hammer.
 Physics never depends on these models. Colliders, masses, hammer length, reach,
 contacts, saves and level state are identical in every character type and with
-every model. The hands hold the handle where the profile's
-[grip placement](../README.md#hand-grips) puts them.
+every model. The hands hold the handle where the profile's [grips](../README.md#hand-grips)
+put them, and its [arm lengths](../README.md#arm-lengths), when set, size the arms.
 
 ## Skinned avatar
 
@@ -74,8 +74,9 @@ unmapped joint and what it follows.
 The mapped joints receive exactly the frames that drive the built-in avatar:
 
 - **Arms.** The shared two-bone IK runs with the model's own shoulders and its
-  bind-pose upper-arm and forearm lengths. It uses the same grips on the physical
-  shaft, placed by the profile's grip placement, the same body-relative elbow hints (Workshop / Appearance), the
+  bind-pose upper-arm and forearm lengths, or the profile's arm lengths, which stretch
+  the arm bones along their length. It uses the same grips on the physical
+  shaft, placed by the profile's grips, the same body-relative elbow hints (Workshop / Appearance), the
   same bend-rate limit and the same arm forward distance. Hands take the
   built-in avatar's grip orientation: along the shaft, facing the camera. In the
   bind pose the virtual shaft runs along each forearm.
@@ -200,15 +201,18 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 10**. Every profile has `grips`, `"fixed"` or
-`"sliding"`; the model and shading fields below are present only while used.
+Profiles use **schema version 11**. Every profile has `grips`, the placement and
+each hand's distance from the butt (0-3 m), and `arms`, `null` for each type's own arm
+lengths or each side's `upper` and `forearm` (0.1-2 m). The model and shading fields
+below are present only while used.
 
 ```json
 {
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
-  "grips": "sliding",
+  "grips": { "placement": "sliding", "left": 0.04, "right": 0.22 },
+  "arms": { "left": { "upper": 0.5, "forearm": 0.48 }, "right": { "upper": 0.5, "forearm": 0.48 } },
   "images": [], "layers": [], "skeleton": null, "presentation": null,
   "models": [
     { "id": "avatar", "name": "Hero", "source": "data:model/gltf-binary;base64,..." },
@@ -311,13 +315,15 @@ depend on the level. In the editor, `window.gettingOver.level().rendering` repor
 `scripts/verify-character.mjs`, part of `npm run verify`, generates a
 Mixamo-named skinned humanoid, a hammer and a pot. It checks every typed error
 code and the pot conventions, automatic mapping, IK at reachable and unreachable
-grips, the hammer frame in each 3D type, and the pot's base on its physical
+grips, set arm lengths on the imported arm bones, the hammer frame in each 3D type, and the pot's base on its physical
 bottom in 3D and 2D. It also checks live shading flips without new materials,
 per-frame writes on a large course, and that profiles save, restore and export byte
 for byte. `scripts/verify-grips.mjs` sets a 2.1 m handle with a 0.55 m extension
 in Physics, checks the rebuilt rig and start pose, then sweeps aims and extensions
 with sliding grips: every grip stays on the handle, short of the head and within
-about 1.03 m of its shoulder, and the hands never jump. `npm run verify:game` builds a two-profile release whose 3D profile has
+about 1.03 m of its shoulder, and the hands never jump. It then sets each hand's grip
+and the handle length from the Character tab, resizes the mesh-part arms per side, and
+stretches a 2D character's arm chains while its elbow caps and gloves keep their size. `npm run verify:game` builds a two-profile release whose 3D profile has
 all three models. It checks the toggle mid-level, single asset loads, persistence,
 exact pot tracking, identical physics and each profile's own grip placement while
 switching, and failing builds for

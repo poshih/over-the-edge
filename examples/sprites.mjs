@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SPRITE_RIGGING, SPRITE_SCHEMA_VERSION, validateSpriteDocument } from '../src/sprite-data.ts';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from '../src/character-depth.ts';
-import { DEFAULT_GRIP_STRATEGY } from '../src/grips.ts';
+import { DEFAULT_GRIPS } from '../src/grips.ts';
 
 const [anchor, ...extra] = process.argv.slice(2);
 if (!anchor || extra.length > 0) {
@@ -16,7 +16,8 @@ const document = validateSpriteDocument({
   schemaVersion: SPRITE_SCHEMA_VERSION,
   characterRiggingType: 'sprite-2d',
   armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-  grips: DEFAULT_GRIP_STRATEGY,
+  grips: DEFAULT_GRIPS,
+  arms: null,
   skeleton: null,
   presentation: null,
   images: [{ id: 'tile', name: 'Geometric tile', source: TILE_PNG }],
