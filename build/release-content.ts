@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import { audioSources, hasAudio } from '../src/audio-settings';
 import {
   CONTENT_FORMAT, CONTENT_LIMITS, CONTENT_SCHEMA_VERSION, contentFilePath, contentRef, GAME_GROUP, levelMediaSources,
-  levelSoundSources, validateContentManifest,
+  levelSoundSources, libraryGroup, validateContentManifest,
 } from '../src/content';
+import { pathGroup } from '../src/content-ref';
+import { PART_ROLES } from '../src/model-library';
 import type { ContentPins } from '../src/content';
 import type { ContentExtension } from '../src/content-ref';
 import { embeddedModel } from '../src/character-profile';
@@ -29,8 +31,8 @@ const PACKAGED = 'A game build packages every asset';
  */
 export function packReleaseContent(input: ReleaseInput): ReleaseContent {
   const files = new Map<string, Uint8Array>();
-  const add = (bytes: Uint8Array, extension: ContentExtension): string => {
-    const path = contentFilePath(GAME_GROUP, createHash('sha256').update(bytes).digest('hex'), extension);
+  const add = (bytes: Uint8Array, extension: ContentExtension, group = GAME_GROUP): string => {
+    const path = contentFilePath(group, createHash('sha256').update(bytes).digest('hex'), extension);
     files.set(path, bytes);
     return contentRef(path);
   };
@@ -65,8 +67,11 @@ export function packReleaseContent(input: ReleaseInput): ReleaseContent {
     appearance: input.appearance.map(part => ({ part: part.part, name: part.name, alignment: part.alignment, source: add(part.bytes, 'glb') })),
     art: { mode: input.art.mode, assets: input.art.assets.map(asset => ({ id: asset.id, name: asset.name, source: add(asset.bytes, 'glb') })) },
     media,
-    files: Object.fromEntries([...files].map(([path, bytes]) => [path, bytes.byteLength])),
+    library: Object.fromEntries(PART_ROLES.map(role => [role, input.library[role].map(({ bytes, ...entry }) =>
+      ({ ...entry, source: add(bytes, 'glb', libraryGroup(role, entry.id)) }))])),
+    files: {} as Record<string, number>,
   };
+  draft.files = Object.fromEntries([...files].map(([path, bytes]) => [path, bytes.byteLength]));
   // The manifest is written as the release will read it back.
   const manifest = new TextEncoder().encode(JSON.stringify(validateContentManifest(draft)));
   if (manifest.byteLength > CONTENT_LIMITS.manifestBytes) throw new Error('The release content manifest exceeds its size limit.');
@@ -75,9 +80,10 @@ export function packReleaseContent(input: ReleaseInput): ReleaseContent {
   const { primary, alternate } = draft.characters;
   return {
     files,
-    pins: { manifest: manifestPath, manifestBytes: manifest.byteLength, game: [...files.keys()].sort() },
+    pins: { manifest: manifestPath, manifestBytes: manifest.byteLength, game: [...files.keys()].filter(path => pathGroup(path) === GAME_GROUP).sort() },
     uses: {
-      models: primary.models !== undefined || alternate?.models !== undefined,
+      // Library swaps load GLBs too.
+      models: primary.models !== undefined || alternate?.models !== undefined || PART_ROLES.some(role => input.library[role].length > 0),
       art: draft.art.assets.length > 0,
       appearance: draft.appearance.length > 0,
       audio: hasAudio(input.audio) || levelSoundSources(input.level).length > 0,

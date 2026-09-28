@@ -1,7 +1,12 @@
 # Feature request: swap a character's avatar, hammer and pot individually, as the game's backend decides
 
-**Date:** 2026-09-28 · **Baseline:** `95b9551` · **Status:** requested, not started. Builds on
-[authenticated content delivery](FEATURE-REQUEST-authenticated-content-delivery.md).
+**Date:** 2026-09-28 · **Baseline:** `95b9551` · **Status:** implemented; see
+[model library and runtime swaps](docs/characters.md#model-library-and-runtime-swaps). Builds on
+[authenticated content delivery](FEATURE-REQUEST-authenticated-content-delivery.md). Projects are schema version 2
+with a required `models` section. The release keeps the model each part shows and the most recent other one per
+part. A part whose answer it cannot follow keeps its model and fails the swap that asked for it, or reaches the
+module's `modelFailed(error)`. The Workshop edits the library in Project / Model library, where a new avatar takes the
+open character's grips, arm lengths and arm forward distance, and previews through the same view path as releases.
 
 Games want to change what the player's character looks like while playing: a different body, hammer or pot, each
 swapped on its own, without rebuilding the release or reloading the level. Some models are sold separately, and a

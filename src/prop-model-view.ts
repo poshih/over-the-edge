@@ -48,7 +48,7 @@ export class PropModelView {
       triangles: this.model.triangles,
       bounds: { min: this.model.bounds.min.toArray(), max: this.model.bounds.max.toArray() },
       transform: this.root.matrixWorld.toArray(),
-      visible: this.root.visible && this.root.parent !== null,
+      visible: this.root.visible && this.root.parent !== null && this.model.scene.parent === this.root,
       materialTypes: [...drawn].sort(),
       matrixWrites: this.writes,
     };

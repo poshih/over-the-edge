@@ -23,6 +23,8 @@ import { LEVEL_LIMITS, validateLevel } from '../src/level';
 import type { LevelDefinition } from '../src/level';
 import { checkMediaBytes, isMediaLibraryPath, MEDIA_LIMITS, mediaFile, mediaPath } from '../src/media';
 import { appearanceFile, artFile } from '../src/project';
+import { EMPTY_MODEL_LIBRARY, libraryModelFile } from '../src/model-library';
+import type { LibraryAvatarEntry, LibraryEntry, ModelLibrary } from '../src/model-library';
 import { EMPTY_SPRITES, parseSpriteDocument, SPRITE_FILE_BYTES, validateSpriteAnchors } from '../src/sprite-data';
 import type { SpriteDocument } from '../src/sprite-data';
 import { DEFAULT_THEME } from '../src/theme';
@@ -47,6 +49,20 @@ export interface ReleaseInput {
   readonly audio: AudioSettings;
   readonly appearance: readonly (AppearancePart & { readonly bytes: Uint8Array })[];
   readonly media: readonly { readonly path: string; readonly bytes: Uint8Array }[];
+  // The project's model library, each entry with its GLB.
+  readonly library: {
+    readonly avatar: readonly (LibraryAvatarEntry & { readonly bytes: Uint8Array })[];
+    readonly hammer: readonly (LibraryEntry & { readonly bytes: Uint8Array })[];
+    readonly pot: readonly (LibraryEntry & { readonly bytes: Uint8Array })[];
+  };
+}
+
+function withBytes(library: ModelLibrary, bytes: (path: string) => Uint8Array): ReleaseInput['library'] {
+  return {
+    avatar: library.avatar.map(entry => ({ ...entry, bytes: bytes(libraryModelFile('avatar', entry.id)) })),
+    hammer: library.hammer.map(entry => ({ ...entry, bytes: bytes(libraryModelFile('hammer', entry.id)) })),
+    pot: library.pot.map(entry => ({ ...entry, bytes: bytes(libraryModelFile('pot', entry.id)) })),
+  };
 }
 
 // Where GAME_LEVEL, GAME_SETTINGS and the profiles come from, when the build has no GAME_PROJECT.
@@ -144,7 +160,7 @@ export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode:
     primary: profile(files.sprites, 'GAME_SPRITES') ?? EMPTY_SPRITES,
     alternate: profile(files.alternateSprites, 'GAME_ALTERNATE_SPRITES'),
     theme: DEFAULT_THEME, hud: DEFAULT_HUD, enemies: DEFAULT_ENEMY_ART, armIk: DEFAULT_ARM_IK, audio: DEFAULT_AUDIO,
-    appearance: [], media,
+    appearance: [], media, library: withBytes(EMPTY_MODEL_LIBRARY, () => new Uint8Array()),
   };
 }
 
@@ -172,5 +188,6 @@ export function loadProjectRelease(root: string, requested: string, selectedMode
     theme: manifest.theme, hud: manifest.hud, enemies: manifest.enemies, armIk: manifest.armIk, audio: manifest.audio,
     appearance: manifest.appearance.map(part => ({ ...part, bytes: binary(appearanceFile(part.part)) })),
     media: manifest.media.map(entry => ({ path: entry.path, bytes: binary(mediaFile(entry.path)) })),
+    library: withBytes(manifest.models, binary),
   };
 }

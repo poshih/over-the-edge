@@ -528,6 +528,34 @@ body[data-input-mode="touch"] .workshop-search-key {
   font-weight: 600;
 }
 
+/* An avatar bone map: a joint select per avatar joint, and the map's typed issue. */
+.bone-map-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.bone-map-grid .appearance-label {
+  margin: 0;
+}
+
+.bone-map-grid select[aria-invalid="true"] {
+  border-color: #cc8f73;
+  background: #fff1e8;
+}
+
+.game-ui .bone-map-issue {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #cc8f73;
+  border-radius: 5px;
+  color: #743925;
+  background: #fff1e8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .appearance-part > .appearance-label:first-child {
   margin-top: 0;
 }

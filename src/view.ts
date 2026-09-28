@@ -20,7 +20,7 @@ import { resolveAvatarJoints } from './character-model-inspect';
 import type { CharacterModelUsage } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
 import { characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameBoneMap } from './character-profile';
-import type { AvatarBoneMap, PropModelRole } from './character-profile';
+import type { AvatarBoneMap, CharacterAssets, PropModelRole } from './character-profile';
 import { CharacterShadingView } from './character-shading';
 import { PropModelView } from './prop-model-view';
 import { HammerHandleFit } from './hammer-handle-fit';
@@ -46,6 +46,7 @@ import { DEFAULT_THEME } from './theme';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { ContentLoader } from './content-ref';
+import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 const VISUAL = {
   viewHeight: 8.5,
@@ -122,6 +123,20 @@ interface CharacterSlot {
   } | null>;
 }
 
+// A library model shown for one part in place of every character's own model for that part.
+// An avatar brings the settings its proportions need. The caller owns `model`.
+export interface PartModel {
+  readonly id: string;
+  readonly model: LoadedCharacterModel;
+  readonly avatar?: LibraryAvatarSettings;
+}
+
+interface PartViews {
+  avatar: { readonly id: string; readonly model: LoadedCharacterModel; readonly settings: LibraryAvatarSettings; readonly view: SkinnedAvatarView } | null;
+  hammer: { readonly id: string; readonly model: LoadedCharacterModel; readonly view: PropModelView; readonly fit: HammerHandleFit } | null;
+  pot: { readonly id: string; readonly model: LoadedCharacterModel; readonly view: PropModelView } | null;
+}
+
 export const MAX_CHARACTER_PROFILES = 2;
 const PROP_PARTS: ReadonlySet<VisualPartId> = new Set(['pot', 'hammer-shaft', 'hammer-head']);
 const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer-head']);
@@ -193,6 +208,10 @@ export class GameView {
   private armChains: ArmChains = DEFAULT_ARM_CHAINS;
   private avatarRenderer: AvatarRenderer | null = null;
   private readonly propModels: Record<PropModelRole, PropModelView | null> = { hammer: null, pot: null };
+  // Library models chosen for each part, shown for every character.
+  private readonly parts: PartViews = { avatar: null, hammer: null, pot: null };
+  // Parts whose library model is on its way while characters load, so their own is never loaded.
+  private readonly reserved = new Set<PartRole>();
   private readonly potFrame = new Matrix4();
   private renders = 0;
   private readonly customShaft = new Group();
@@ -392,7 +411,7 @@ export class GameView {
   naturalArmLengths(): CharacterArms {
     const slot = this.slots[this.activeSlot];
     const type = (slot?.presentation ?? DEFAULT_PRESENTATION).characterRiggingType;
-    const chains = type === 'avatar-3d' ? slot?.avatar?.view.chains ?? DEFAULT_ARM_CHAINS : DEFAULT_ARM_CHAINS;
+    const chains = type === 'avatar-3d' ? (this.parts.avatar?.view ?? slot?.avatar?.view)?.chains ?? DEFAULT_ARM_CHAINS : DEFAULT_ARM_CHAINS;
     const sprite = type === 'sprite-2d' ? slot?.rig.naturalArmLengths() ?? null : null;
     const side = (arm: ArmSide): ArmLengths => sprite?.[arm] ?? { upper: chains[arm].upper, forearm: chains[arm].forearm };
     return { left: side('left'), right: side('right') };
@@ -410,6 +429,7 @@ export class GameView {
   // Cancels and releases every profile, for example when the game stops.
   disposeCharacters(): void {
     for (const slot of this.slots) slot.rig.dispose();
+    for (const role of ['avatar', 'hammer', 'pot'] as const) this.disposePart(role);
   }
 
   private createSlot(): CharacterSlot {
@@ -459,20 +479,84 @@ export class GameView {
   }
 
   private async prepareModels(slot: CharacterSlot, document: SpriteDocument, signal: AbortSignal): Promise<void> {
-    if (document.avatar !== undefined) {
+    if (document.avatar !== undefined && !this.reserved.has('avatar')) {
       const loaded = await this.loadModel(slot, document, 'avatar', document.avatar.model, signal);
       resolveAvatarJoints(loaded.report, document.avatar.boneMap);
     }
     for (const role of PROP_MODEL_ROLES) {
       const prop = document[role];
-      if (prop !== undefined) await this.loadModel(slot, document, role, prop.model, signal);
+      if (prop !== undefined && !this.reserved.has(role)) await this.loadModel(slot, document, role, prop.model, signal);
     }
   }
 
+  // Before characters load: parts that will show a library model, so no character loads its own
+  // until the part returns to the characters' models.
+  reserveParts(roles: Iterable<PartRole>): void {
+    for (const role of roles) this.reserved.add(role);
+  }
+
+  // Shows a library model for one part in place of every character's own, or returns the part to
+  // the characters' own models, loading any not loaded yet. Resolves once the part is visible; a
+  // failure leaves the part as it was.
+  async setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void> {
+    if (part === null) {
+      for (const slot of this.slots) {
+        const presentation = slot.presentation;
+        const profile = presentation[role];
+        if (profile === undefined) continue;
+        const loaded = await this.loadModel(slot, presentation, role, profile.model, signal);
+        // Checked before anything changes, so a failure leaves the library model showing.
+        if (role === 'avatar') resolveAvatarJoints(loaded.report, presentation.avatar!.boneMap);
+      }
+      signal.throwIfAborted();
+      this.reserved.delete(role);
+      this.disposePart(role);
+      // Views only: models a character replace in flight has loaded stay cached for its commit.
+      for (const slot of this.slots) this.syncModelViews(slot);
+    } else {
+      const previous = this.parts[role];
+      if (previous?.model === part.model && (role !== 'avatar' || part.avatar === (previous as PartViews['avatar'])!.settings)) return;
+      if (role === 'avatar') {
+        if (part.avatar === undefined) throw new SpriteError(`Library avatar "${part.id}" needs its settings.`);
+        // Resolved before anything changes, so a failure leaves the part as it was. The old view goes
+        // first: disposing a view detaches its model's scene, and new settings keep the same model.
+        const joints = resolveAvatarJoints(part.model.report, part.avatar.boneMap);
+        this.disposePart(role);
+        const view = new SkinnedAvatarView(part.model, joints, part.avatar.boneMap);
+        this.shading.register(view.root);
+        this.parts.avatar = { id: part.id, model: part.model, settings: part.avatar, view };
+      } else {
+        // Fitted before shading, whose outline hulls share the fitted geometry.
+        const fit = role === 'hammer' ? new HammerHandleFit(part.model, this.rig.handleLength) : null;
+        const view = new PropModelView(part.model, PROP_VIEW_NAMES[role]);
+        this.disposePart(role);
+        this.shading.register(view.root);
+        if (role === 'hammer') this.parts.hammer = { id: part.id, model: part.model, view, fit: fit! };
+        else this.parts.pot = { id: part.id, model: part.model, view };
+      }
+    }
+    this.applyPresentation();
+  }
+
+  // The library model each part shows, or null where characters show their own.
+  partModels(): Record<PartRole, string | null> {
+    return { avatar: this.parts.avatar?.id ?? null, hammer: this.parts.hammer?.id ?? null, pot: this.parts.pot?.id ?? null };
+  }
+
+  private disposePart(role: PartRole): void {
+    const part = this.parts[role];
+    if (part === null) return;
+    part.view.root.removeFromParent();
+    this.shading.unregister(part.view.root);
+    part.view.dispose();
+    if (role === 'hammer') this.parts.hammer!.fit.dispose();
+    this.parts[role] = null;
+  }
+
   private async loadModel(
-    slot: CharacterSlot, document: SpriteDocument, usage: CharacterModelUsage, id: string, signal: AbortSignal,
+    slot: CharacterSlot, assets: CharacterAssets, usage: CharacterModelUsage, id: string, signal: AbortSignal,
   ): Promise<LoadedCharacterModel> {
-    const model = characterModel(document, id);
+    const model = characterModel(assets, id);
     const cache = slot.models.get(usage)!;
     const cached = cache.get(model.source);
     if (cached !== undefined) return cached;
@@ -485,26 +569,29 @@ export class GameView {
   private presentationChanged(slot: CharacterSlot, settings: CharacterPresentation): void {
     slot.presentation = settings;
     this.syncModelViews(slot);
+    this.releaseUnusedModels(slot);
     if (this.slots[this.activeSlot] === slot) this.applyPresentation();
   }
 
-  // Builds views for newly referenced models once, then releases models the profile dropped.
+  // Builds views for newly referenced models once, and drops views of models the profile dropped.
   private syncModelViews(slot: CharacterSlot): void {
     const { avatar } = slot.presentation;
-    const loaded = (usage: CharacterModelUsage, id: string): LoadedCharacterModel => {
+    const loaded = (usage: CharacterModelUsage, id: string): LoadedCharacterModel | null => {
       const model = characterModel(slot.presentation, id);
       const result = slot.models.get(usage)!.get(model.source);
-      if (result === undefined) throw new SpriteError(`Character model "${model.name}" was not loaded before use.`);
-      return result;
+      if (result !== undefined) return result;
+      // A part reserved for a library model never loaded the character's own.
+      if (this.reserved.has(usage)) return null;
+      throw new SpriteError(`Character model "${model.name}" was not loaded before use.`);
     };
     const avatarModel = avatar === undefined ? null : loaded('avatar', avatar.model);
-    if (slot.avatar !== null && (avatar === undefined || slot.avatar.model !== avatarModel ||
-      !sameBoneMap(slot.avatar.boneMap, avatar.boneMap))) {
+    if (slot.avatar !== null && (avatarModel === null || slot.avatar.model !== avatarModel ||
+      !sameBoneMap(slot.avatar.boneMap, avatar!.boneMap))) {
       this.shading.unregister(slot.avatar.view.root);
       slot.avatar.view.dispose();
       slot.avatar = null;
     }
-    if (avatar !== undefined && slot.avatar === null) {
+    if (avatar !== undefined && avatarModel !== null && slot.avatar === null) {
       const view = new SkinnedAvatarView(avatarModel!, resolveAvatarJoints(avatarModel!.report, avatar.boneMap), avatar.boneMap);
       this.shading.register(view.root);
       slot.avatar = { model: avatarModel!, boneMap: avatar.boneMap, view };
@@ -527,6 +614,11 @@ export class GameView {
         slot.props[role] = { model, view, fit };
       }
     }
+  }
+
+  // Releases cached models the committed profile no longer uses. Only a commit may do this: until
+  // then, the cache also holds the models a replace in flight has loaded for its own profile.
+  private releaseUnusedModels(slot: CharacterSlot): void {
     const inUse: Readonly<Record<CharacterModelUsage, LoadedCharacterModel | undefined>> = {
       avatar: slot.avatar?.model, hammer: slot.props.hammer?.model, pot: slot.props.pot?.model,
     };
@@ -541,11 +633,14 @@ export class GameView {
 
   private applyPresentation(): void {
     const slot = this.slots[this.activeSlot];
-    const presentation = slot?.presentation ?? DEFAULT_PRESENTATION;
-    const type = presentation.characterRiggingType;
-    this.toolDepth = getToolDepth(type === 'sprite-2d' ? DEFAULT_ARM_FORWARD_DISTANCE : presentation.armForwardDistance);
+    const character = slot?.presentation ?? DEFAULT_PRESENTATION;
+    const type = character.characterRiggingType;
     const avatarMode = type === 'avatar-3d';
-    const imported = avatarMode ? slot?.avatar?.view ?? null : null;
+    // A library avatar replaces an Avatar character's own, with the settings its proportions need.
+    const partAvatar = avatarMode ? this.parts.avatar : null;
+    const presentation = partAvatar === null ? character : { ...character, ...partAvatar.settings };
+    this.toolDepth = getToolDepth(type === 'sprite-2d' ? DEFAULT_ARM_FORWARD_DISTANCE : presentation.armForwardDistance);
+    const imported = avatarMode ? partAvatar?.view ?? slot?.avatar?.view ?? null : null;
     if (avatarMode && imported === null && this.avatar === null) {
       this.avatar = new AvatarView();
       this.shading.register(this.avatar.root);
@@ -558,10 +653,16 @@ export class GameView {
       // the pot draws in the main pass, so its walls hide a body inside it through the depth buffer.
       for (const role of PROP_MODEL_ROLES) {
         const prop = other.props[role];
-        if (prop !== null) this.attach(prop.view.root, role === 'hammer' ? this.foreground : this.scene, other === slot);
+        if (prop !== null) this.attach(prop.view.root, role === 'hammer' ? this.foreground : this.scene, other === slot && this.parts[role] === null);
       }
     }
-    for (const role of PROP_MODEL_ROLES) this.propModels[role] = slot?.props[role]?.view ?? null;
+    // Library models show for every character, the hammer and pot in every character type.
+    if (this.parts.avatar !== null) this.attach(this.parts.avatar.view.root, this.scene, this.parts.avatar.view === imported);
+    for (const role of PROP_MODEL_ROLES) {
+      const part = this.parts[role];
+      if (part !== null) this.attach(part.view.root, role === 'hammer' ? this.foreground : this.scene, true);
+      this.propModels[role] = part?.view ?? slot?.props[role]?.view ?? null;
+    }
     for (const [id, binding] of this.bindings) {
       const replaced = this.propModels.hammer !== null && HAMMER_PARTS.has(id) || this.propModels.pot !== null && id === 'pot';
       binding.visibility.setEnabled({ enabled: (!avatarMode || PROP_PARTS.has(id)) && !replaced });
@@ -729,8 +830,10 @@ export class GameView {
       avatar: this.avatar === null ? null : { ...this.avatar.inspect(), visible: this.avatar.root.visible },
       importedAvatar: this.activeImportedAvatar(),
       hammerModel: this.propModels.hammer === null ? null : {
-        ...this.propModels.hammer.inspect(), fit: this.slots[this.activeSlot]?.props.hammer?.fit?.inspect() ?? null,
+        ...this.propModels.hammer.inspect(),
+        fit: (this.parts.hammer?.fit ?? this.slots[this.activeSlot]?.props.hammer?.fit)?.inspect() ?? null,
       },
+      parts: this.partModels(),
       potModel: this.propModels.pot === null ? null : this.propModels.pot.inspect(),
       shading: this.shading.inspect(),
       theme: { writes: this.themeWrites, sky: this.theme.sky, fog: { ...this.theme.fog }, backdrop: this.theme.backdrop.visible },
@@ -745,9 +848,10 @@ export class GameView {
   }
 
   private activeImportedAvatar() {
-    const view = this.slots[this.activeSlot]?.avatar?.view;
+    const view = this.avatarRenderer instanceof SkinnedAvatarView ? this.avatarRenderer : this.slots[this.activeSlot]?.avatar?.view;
     if (view === undefined) return null;
-    return { ...view.inspect(), visible: view.root.visible && view.root.parent !== null };
+    const inspected = view.inspect();
+    return { ...inspected, visible: view.root.visible && view.root.parent !== null && inspected.modelAttached };
   }
 
   cameraState() {
@@ -1009,6 +1113,7 @@ export class GameView {
     this.rig = frame.rig;
     this.layoutShaft();
     for (const slot of this.slots) slot.props.hammer?.fit?.setHandleLength(this.rig.handleLength);
+    this.parts.hammer?.fit.setHandleLength(this.rig.handleLength);
     this.updateFrustum();
   }
 

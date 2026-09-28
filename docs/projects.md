@@ -1,8 +1,8 @@
 # Game projects
 
 A **project** holds every authored input of one complete game: title, level,
-physics, characters, appearance models, arm IK, theme, HUD, audio, enemy art,
-media and course artwork. The engine is the same for every project, so you can
+physics, characters, appearance models, arm IK, a model library, theme, HUD, audio,
+enemy art, media and course artwork. The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
@@ -33,6 +33,7 @@ GAME_PROJECT=examples/projects/lantern-cavern npm run build:game
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
+| `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
 | `theme` | `project.json` | Sky, fog, exposure, lights, sun disc, backdrop, aim marker, procedural character colours |
 | `hud` | `project.json` | Release readout labels, unit, scale, decimals and visibility |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
@@ -52,6 +53,8 @@ my-game/
   characters/primary.json       only when the project has a character profile
   characters/alternate.json
   appearance/torso.glb          one GLB per replaced part
+  models/avatar/knight.glb      model library, one GLB per entry and part
+  models/hammer/club.glb
   art/asset-<sha256>.glb        terrain meshes, named by their content hash
   media/intro.webm
   media/clink.wav
@@ -62,7 +65,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [] },
@@ -73,6 +76,7 @@ The paths are fixed, so a manifest only says which files exist:
   "characters": { "primary": null, "alternate": null },
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
   "appearance": [],
+  "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club" }], "pot": [] },
   "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": 18, "far": 55 }, "...": "..." },
   "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
            "timer": { "visible": true, "label": "LANTERN TIME" } },
@@ -92,7 +96,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 3, "labels": [], "objects": [] },
@@ -114,7 +118,9 @@ release build already use. Additionally:
 - Every terrain `art.assetId` must be a course artwork asset, and each asset's ID
   must match the SHA-256 of its GLB.
 - Character GLBs, appearance GLBs and course GLBs pass the same structure,
-  rig and budget checks as their existing import paths.
+  rig and budget checks as their existing import paths. Each library GLB passes the
+  checks of its part, and each library avatar's bone map must resolve against its
+  skin.
 - Media files must start with the signature of their extension, so a `.wav` path
   can never serve HTML or script.
 
@@ -169,7 +175,9 @@ The remaining sections edit what only a project has, with a live preview:
 **Theme**, **HUD**, **Audio** (music and cue sounds from the media library, with
 test buttons), **Enemy art** (JSON pixel art, starting from the built-in art),
 **Media library**, **Alternate character** (use, swap, import or remove a second
-profile) and **Course artwork** (release look, or import a `pack:course` package).
+profile), **Model library** (add, preview and remove library avatars, hammers and
+pots; see [imported 3D characters](characters.md#model-library-and-runtime-swaps)) and
+**Course artwork** (release look, or import a `pack:course` package).
 
 Everything else keeps its usual tab. Opening or importing a project replaces the
 page's current game, its sprite draft and its browser-saved appearance models; the
@@ -297,6 +305,8 @@ Conventions:
 | POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB; returns its asset ID |
 | GET, PUT, DELETE | `/api/projects/{id}/appearance/{part}/model?name=` | A part's GLB |
 | GET, PATCH, DELETE | `/api/projects/{id}/appearance/{part}` | A part's name and alignment |
+| GET, PUT, DELETE | `/api/projects/{id}/models/{part}/{model}/model?name=&settings=` | A library GLB for `avatar`, `hammer` or `pot`, adding or replacing its entry |
+| GET, PATCH, DELETE | `/api/projects/{id}/models/{part}/{model}` | A library entry: its name and, for an avatar, its settings |
 | GET, PUT, DELETE | `/api/projects/{id}/media/{file}` | Media library files |
 | POST | `/api/projects/{id}/validate` | Every release check, reported as problems |
 | POST, GET | `/api/projects/{id}/publish` | Build the release; latest publish record |
@@ -364,14 +374,27 @@ Appearance tab's body-relative elbow hints. Character profiles are the files
 Workshop / Character exports; see [imported 3D characters](characters.md) and
 [sprites](sprites.md).
 
+**Model library.** `models` lists entries per part: `{ "id", "name" }` for hammers
+and pots, and for avatars also `boneMap`, `armForwardDistance`, `grips` and `arms`, in
+the character profile's formats. IDs are 1-64 lowercase letters, digits and inner
+hyphens, unique per part; each entry's GLB is `models/<part>/<id>.glb`. Uploading a
+model with `PUT .../model` adds its entry: an avatar takes `settings` (JSON with those
+four fields), keeps its existing entry's, or maps its joints automatically with default
+settings. Removing an entry, or leaving it out of a `PUT` of the section, deletes its GLB.
+Releases list the library but load an entry only when the game's backend selects it;
+see [runtime swaps](characters.md#model-library-and-runtime-swaps).
+
 **Course artwork.** `mode` is `shapes` or `meshes`; assets come from
 `npm run pack:course` packages or the API upload. See [course artwork](course-artwork.md).
 
 ## Limits
 
 A project directory has no overall size limit beyond its sections. A project file
-is limited to 384 MiB; export very large games as directories instead. `project.json`
-is limited to 2 MiB, and each section keeps its existing limit.
+is limited to 480 MiB: every file budget (course artwork, appearance models, media and the
+model library) together with the JSON files. Export larger games, such as ones with big
+character profiles, as directories instead. `project.json`
+is limited to 2 MiB, and each section keeps its existing limit. The model library holds
+at most 32 models per part, 20 MiB each and 64 MiB in total.
 
 ## Verification
 

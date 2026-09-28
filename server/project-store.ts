@@ -10,7 +10,7 @@ import { HttpError } from './http';
 
 // API sections; each has its own revision so concurrent editors only conflict on what they share.
 export const SECTION_NAMES = [
-  'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance',
+  'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance', 'models',
   'theme', 'hud', 'audio', 'enemies', 'art', 'media',
 ] as const;
 export type SectionName = (typeof SECTION_NAMES)[number];
@@ -39,7 +39,7 @@ export interface ProjectSummary {
 }
 
 const STATE_FILE = '.studio.json';
-const FILE_PATTERN = /^(?:project\.json|level\.json|characters\/(?:primary|alternate)\.json|art\/asset-[a-f0-9]{64}\.glb|appearance\/[a-z-]+\.glb|media\/[a-z0-9][a-z0-9._-]*)$/;
+const FILE_PATTERN = /^(?:project\.json|level\.json|characters\/(?:primary|alternate)\.json|art\/asset-[a-f0-9]{64}\.glb|appearance\/[a-z-]+\.glb|models\/(?:avatar|hammer|pot)\/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.glb|media\/[a-z0-9][a-z0-9._-]*)$/;
 
 function initialState(): ProjectState {
   return {

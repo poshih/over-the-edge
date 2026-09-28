@@ -5,9 +5,12 @@ import { GAME_GROUP, refPath, validateContentManifest } from './content';
 import type { ContentManifest, ContentPins } from './content';
 import { pathGroup, pathHash } from './content-ref';
 import type { MediaStream } from './media-host';
+import type { ModelSelection, ModelSelectionRequest } from './model-library';
 import { sha256Hex } from './sha256';
 
-export const CONTENT_ERROR_CODES = ['unauthenticated', 'denied', 'unavailable', 'integrity'] as const;
+// superseded: a newer swap of the same part replaced one not yet sent. unknown-model: a swap or a
+// backend's answer names a library model this release does not list for that part.
+export const CONTENT_ERROR_CODES = ['unauthenticated', 'denied', 'unavailable', 'integrity', 'superseded', 'unknown-model'] as const;
 export type ContentErrorCode = (typeof CONTENT_ERROR_CODES)[number];
 
 // Typed content failures; games branch on `code`. Messages name content by path, never by URL.
@@ -44,6 +47,10 @@ export interface ContentGrant {
 // and returns the answer, or refuses with a ContentError coded unauthenticated, denied or unavailable.
 export interface ContentAccess {
   grant(request: ContentGrantRequest, signal: AbortSignal): Promise<ContentGrant>;
+  // The game's backend decides which library model each part uses. select() returns its stored
+  // selection, after asking it to change one part when `request` is not null; without it, parts use
+  // the profile's own models.
+  select?(request: ModelSelectionRequest | null, signal: AbortSignal): Promise<ModelSelection>;
 }
 
 // For a game that needs no authentication: every file is public under the content URL.
@@ -179,11 +186,16 @@ export class ContentSession {
         error instanceof Error ? error.message : String(error)}`, { path: this.pins.manifest });
     }
     const game = new Set(this.pins.game);
-    const listed = Object.keys(manifest.files);
+    const listed = Object.keys(manifest.files).filter(path => pathGroup(path) === GAME_GROUP);
     if (listed.length + 1 !== game.size || !game.has(this.pins.manifest) || listed.some(path => !game.has(path))) {
       throw new ContentError('integrity', 'The content manifest does not match the files this release was built with.', { group: GAME_GROUP });
     }
-    for (const [path, bytes] of Object.entries(manifest.files)) this.sizes.set(path, bytes);
+    for (const [path, bytes] of Object.entries(manifest.files)) {
+      this.sizes.set(path, bytes);
+      // Other groups, such as each library model's, are granted on their own.
+      const group = pathGroup(path);
+      if (group !== GAME_GROUP) this.groups.set(group, [...(this.groups.get(group) ?? []), path]);
+    }
     return manifest;
   }
 

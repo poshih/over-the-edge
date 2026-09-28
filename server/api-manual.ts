@@ -11,6 +11,7 @@ import { CURSOR_FIELDS, RIG_FIELDS, TUNING_FIELDS } from '../src/game-settings';
 import { HUD_FIELDS } from '../src/hud';
 import { LEVEL_LIMITS, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
+import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
 import { THEME_FIELDS } from '../src/theme';
 import { LAUNCH_FIELDS, SOUND_VOLUME } from '../src/trigger-events';
@@ -56,6 +57,8 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|DELETE', '/api/projects/{id}/art/assets/{assetId}', 'Download or remove course artwork (unused only).'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/appearance/{part}', 'A part\'s name and alignment.', '{ "alignment"?: {...}, "name"?: "..." }'),
+      endpoint('GET|PUT|DELETE', '/api/projects/{id}/models/{role}/{model}/model?name=Hooded%20hero', 'A library GLB for the avatar, hammer or pot. A new avatar maps its joints, or takes ?settings={ boneMap, armForwardDistance, grips, arms }.', 'GLB bytes'),
+      endpoint('GET|PATCH|DELETE', '/api/projects/{id}/models/{role}/{model}', 'A library entry: its name, and an avatar\'s bone map and settings.', '{ "name"?: "...", "boneMap"?: {...}, ... }'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/media/{file}', 'Media library files, referenced as /media/{file}.', 'file bytes'),
       endpoint('GET', '/play/{id}/', 'The latest published release of a project; its content is under /play/{id}/content/.'),
     ],
@@ -106,6 +109,13 @@ export function apiManual(auth: 'token' | 'loopback') {
         value: '[{ "part", "name", "alignment" }]',
         description: `Per-part GLB replacements. Parts: ${VISUAL_PART_IDS.join(', ')}. Upload a model first; PUT can rename, realign or remove parts.`,
         alignmentFields: ALIGNMENT_FIELDS,
+      },
+      models: {
+        value: '{ "avatar": [{ "id", "name", "boneMap", "armForwardDistance", "grips", "arms" }], "hammer": [{ "id", "name" }], "pot": [{ "id", "name" }] }',
+        description: 'The model library: extra avatar, hammer and pot models a release can swap to, one part at a time, as the game\'s backend selects. '
+          + 'Upload each GLB with PUT models/{role}/{id}/model first; PUT this section to rename entries, change avatar settings or drop entries.',
+        limits: MODEL_LIBRARY_LIMITS,
+        notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; grips, arms and armForwardDistance follow the character profile format.',
       },
       theme: { value: 'scene look', patch: true, fields: THEME_FIELDS },
       hud: { value: 'release readout', patch: true, fields: HUD_FIELDS },

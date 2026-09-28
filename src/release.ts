@@ -15,6 +15,9 @@ import { Game } from './game';
 import type { MediaHost } from './media-host';
 import { createPlayUI } from './play-ui';
 import type { ReleaseApi, ReleaseHost, ReleaseModule, StartRelease } from './release-module';
+import { readSelection, ReleaseModelLibrary } from './release-library';
+import { EMPTY_SELECTION } from './model-library';
+import type { ModelSelection } from './model-library';
 
 // Code the shell includes only when its content needs it, chosen at build time.
 export interface ReleaseCode {
@@ -32,6 +35,14 @@ interface Loaded {
   readonly manifest: ContentManifest;
   readonly game: Game;
   readonly audio: AudioDirector | null;
+  readonly library: ReleaseModelLibrary;
+}
+
+interface Attempt {
+  readonly session: ContentSession;
+  game: Game | null;
+  audio: AudioDirector | null;
+  library: ReleaseModelLibrary | null;
 }
 
 function message(error: unknown): string {
@@ -50,7 +61,7 @@ export class Release {
   private readonly lifecycle = new AbortController();
   private readonly ui: ReturnType<typeof createPlayUI>;
   private module: ReleaseModule | null = null;
-  private loading: { session: ContentSession; game: Game | null; audio: AudioDirector | null } | null = null;
+  private loading: Attempt | null = null;
   private loaded: Loaded | null = null;
 
   constructor(elements: { canvas: HTMLCanvasElement; mount: HTMLElement; fatal: HTMLElement }, code: ReleaseCode) {
@@ -109,7 +120,9 @@ export class Release {
     this.discardAttempt();
     if (this.loaded !== null) {
       this.loaded.audio?.dispose();
+      // The game's views let go of library models before the library disposes them.
       this.loaded.game.dispose();
+      this.loaded.library.dispose();
       this.loaded.session.dispose();
       this.loaded = null;
     }
@@ -120,6 +133,7 @@ export class Release {
     if (this.loading === null) return;
     this.loading.audio?.dispose();
     this.loading.game?.dispose();
+    this.loading.library?.dispose();
     this.loading.session.dispose();
     this.loading = null;
   }
@@ -130,10 +144,15 @@ export class Release {
     const session = new ContentSession({
       access, pins: this.code.pins, onProgress: module?.progress === undefined ? undefined : (progress) => module.progress!(progress),
     });
-    const attempt: { session: ContentSession; game: Game | null; audio: AudioDirector | null } = { session, game: null, audio: null };
+    const attempt: Attempt = { session, game: null, audio: null, library: null };
     this.loading = attempt;
+    // The backend's selection is read alongside the game group's grant, so it adds no round trip.
+    const selectionRead = readSelection(access, signal).then(
+      (selection): { selection: ModelSelection; error: Error | null } => ({ selection, error: null }),
+      (error: unknown) => ({ selection: EMPTY_SELECTION, error: error instanceof Error ? error : new Error(String(error)) }));
     const manifest = await session.manifest(signal);
-    session.prefetch(bootSources(manifest));
+    const { selection, error: selectionError } = await selectionRead;
+    signal.throwIfAborted();
     const content: ContentLoader = (source, request) => session.bytes(source, request);
     const packaged = (source: string): string => {
       if (!Object.hasOwn(manifest.media, source)) throw new ContentError('integrity', `${source} is not part of this release.`);
@@ -148,15 +167,26 @@ export class Release {
       settings: manifest.audio, sounds: levelSoundSources(manifest.level), media, onError: notice,
     });
     attempt.audio = audio;
+    const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
       canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
-      characterModels: this.code.createCharacterModels?.({ content }) ?? null, content, media,
+      characterModels, content, media,
       theme: manifest.theme, enemyArt: manifest.enemies,
       onCue: audio === null ? undefined : (cue) => audio.handle(cue),
       onAction: (action, options) => game.perform(action, options),
       onNotice: notice,
     });
     attempt.game = game;
+    const library = new ReleaseModelLibrary({
+      library: manifest.library, access, loader: characterModels, view: game.view, signal,
+      onFailure: (error) => this.modelFailed(error),
+    });
+    attempt.library = library;
+    // A part the backend selected shows its library model: its profile model is never fetched.
+    const replaced = library.replaced(selection);
+    session.prefetch(bootSources(manifest, replaced));
+    game.view.reserveParts(replaced);
+    const parts = library.load(selection);
     game.setCharacter({ armIk: manifest.armIk });
     game.setInputBlock({ reason: 'loading', blocked: true });
     const { primary, alternate } = manifest.characters;
@@ -167,14 +197,22 @@ export class Release {
       ...(this.code.loadCourseArt === null ? [] : [this.code.loadCourseArt(game, manifest.art.assets, content, signal)]),
       ...(this.code.loadAppearance === null ? [] : [this.code.loadAppearance(game.view.visuals,
         manifest.appearance, { signal, content })]),
+      parts,
     ]);
+    // A part whose selection failed starts with the profile's own model, and the module hears why.
+    const failures = await library.show(await parts);
+    for (const failure of selectionError === null ? failures : [selectionError, ...failures]) this.modelFailed(failure);
     session.forgetDownloads();
     this.loading = null;
-    return { session, manifest, game, audio };
+    return { session, manifest, game, audio, library };
+  }
+
+  private modelFailed(error: unknown): void {
+    this.module?.modelFailed?.(error instanceof Error ? error : new Error(String(error)));
   }
 
   private play(loaded: Loaded): void {
-    const { game, manifest, audio } = loaded;
+    const { game, manifest, audio, library } = loaded;
     const { primary, alternate } = manifest.characters;
     this.ui.show({
       hud: manifest.hud,
@@ -190,6 +228,7 @@ export class Release {
       setPause: (paused: boolean) => game.setPause({ reason: 'module', paused }),
       setInputBlock: (blocked: boolean) => game.setInputBlock({ reason: 'module', blocked }),
       get halted() { return game.halted; },
+      modelLibrary: library.api,
     });
     this.module?.ready?.(api);
     game.start((state) => {

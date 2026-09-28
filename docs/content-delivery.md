@@ -30,16 +30,19 @@ dist-game-content/
   game/<sha256>.png               sprite images
   game/<sha256>.glb               character, appearance and course models
   game/<sha256>.wav               media, by extension
+  library/<part>/<id>/<sha256>.glb  one model library entry, for runtime swaps
 ```
 
 - **Groups.** Content is split into groups that a CDN grants as a unit. The `game` group holds
-  everything the release uses. A path is `<group>/<sha256>.<extension>`, so one credential
-  scoped to `game/` covers the whole group.
+  everything every player uses. A path is `<group>/<sha256>.<extension>`, so one credential
+  scoped to `game/` covers the whole group. Each [model library](characters.md#model-library-and-runtime-swaps)
+  entry is its own group, `library/<part>/<id>`, fetched only once the game's backend selects it
+  for the player.
 - **Named by content.** Every file is named by its SHA-256. Files are immutable, cacheable
   forever and renamed when they change. Two builds of the same game write identical content,
   wherever it is served.
 - **Pinned.** The shell pins the manifest's path and size, and lists every path of the `game`
-  group, so one grant covers the group before the manifest arrives. The manifest lists every
+  group, so one grant covers the group before the manifest arrives. It lists no library model. The manifest lists every
   other file with its size. Each file's path names its SHA-256, so the shell, the manifest and
   every file form one integrity chain from a single build.
 - **Everything packaged.** A game build loads nothing from outside its content. It fails,
@@ -137,11 +140,14 @@ export async function start(host: ReleaseHost): Promise<ReleaseModule> {
 | `access` | The content access. Without it, content is public under the content URL |
 | `progress({ loaded, total })` | Bytes loaded before play |
 | `failed(error)` | A `ContentError`; resolve to retry the whole load, reject to stop with the rejection shown |
+| `modelFailed(error)` | A part that could not follow the backend's model selection outside a swap; it keeps its model, or starts with the profile's own |
 | `ready(api)` | Called once the game runs |
 | `dispose()` | Called when the release is disposed, for example on a development reload |
 
 **`ReleaseApi`** (what `ready` receives): `setPause(paused)` and `setInputBlock(blocked)`,
-under the module's own reason so they never undo the game's, and `halted`.
+under the module's own reason so they never undo the game's, `halted`, and `modelLibrary`,
+which swaps parts to [library models](characters.md#model-library-and-runtime-swaps) as the
+backend answers `access.select(request, signal)`.
 
 A release built without `GAME_MODULE` contains no downstream code. The module is a build input,
 never project data, so nothing sent to the project server can add code to a release. The
@@ -171,6 +177,8 @@ wraps anything else the adapter throws as `unavailable`.
 | `denied` | The player may not have this content, or the CDN answered 403 after a renewed grant |
 | `unavailable` | The backend, the CDN or the network failed |
 | `integrity` | A file's size or SHA-256 differs from the build's, or the manifest is invalid |
+| `superseded` | A newer swap of the same part replaced this one before it was sent |
+| `unknown-model` | A swap, or the backend's answer, names a library model the release does not list |
 
 The engine:
 
@@ -225,8 +233,8 @@ keep requesting ranges while they play.
 
 - **The backend decides.** The shell, the engine and the module run on the player's machine,
   where the player can change them. So the game's backend makes every decision that matters,
-  such as who may load which group, and enforces it through what it grants and what its CDN
-  serves; the release only carries decisions out.
+  such as who may load which group and which library model each part uses, and enforces it
+  through what it grants and what its CDN serves; the release only carries decisions out.
 - **Protected.** A player the backend refuses (signed out, not entitled, or holding an expired
   grant) cannot get content from the shell, its deployment, the CDN or the engine's API.
 - **Verified.** Whoever controls the CDN cannot make the release use anything but the build's
@@ -241,7 +249,7 @@ keep requesting ranges while they play.
 - The project server's **Publish** writes the shell to `releases/<id>/` and the content to
   `releases/<id>.content/`, and serves both at `/play/<id>/`, behind the studio's own access
   checks. Publishing ignores `GAME_CONTENT_URL` and `GAME_MODULE`: a studio preview uses public
-  access to its own content.
+  access to its own content, and, without a backend that selects, shows no library models.
 - A Workshop built with `GAME_PROJECT` publishes every project file, so a game with protected
   content deploys that Workshop only behind its own access control, or not at all.
 
@@ -267,3 +275,7 @@ cookies, it checks:
   a time, added latency within the grant, manifest and parallel waves, and no requests during
   play;
 - boots on a page without WebCrypto, and the module boundary.
+
+`npm run verify:model-swap` checks the model library's groups: none is in the shell or
+granted before the backend selects it, the backend's refusals and answers decide what shows,
+and swaps stay in order; see [runtime swaps](characters.md#model-library-and-runtime-swaps).

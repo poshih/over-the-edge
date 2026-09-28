@@ -174,6 +174,7 @@ const project = new ProjectSession({
 const projectEditor = createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,
   onTestCue: (cue) => audio.handle({ type: 'cue', cue, strength: 1 }),
+  parts: game.view,
 });
 
 function resetPractice(id: PracticeId): void {
@@ -237,7 +238,7 @@ const diagnostics = Object.freeze({
   appearance: () => appearance.snapshot(),
   sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.sprites.inspect() }),
   events: () => game.eventState(),
-  gameProject: () => ({ ...project.snapshot(), playback: audio.inspect() }),
+  gameProject: () => ({ ...project.snapshot(), playback: audio.inspect(), parts: game.view.partModels() }),
   level: () => ({
     definition: level.definition(),
     terrain: game.simulation.terrainState(),

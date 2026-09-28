@@ -1,3 +1,4 @@
+import type { LibraryAvatarEntry, LibraryEntry, PartRole } from '../model-library';
 import type { ProjectBundle, ProjectManifest } from '../project';
 
 export class ProjectApiError extends Error {
@@ -113,6 +114,21 @@ export class ProjectClient {
 
   putModel(id: string, part: string, blob: Blob, name: string, revision?: number): Promise<ServerRevisions> {
     return this.json('PUT', `/projects/${encodeURIComponent(id)}/appearance/${part}/model?name=${encodeURIComponent(name)}`,
+      { body: blob, type: 'model/gltf-binary', revision });
+  }
+
+  libraryModelUrl(id: string, role: PartRole, modelId: string): string {
+    return `${this.base}/projects/${encodeURIComponent(id)}/models/${role}/${modelId}/model`;
+  }
+
+  // Stores a library GLB with its entry; an avatar's settings travel with it, so its bone map is checked against it.
+  putLibraryModel(id: string, role: PartRole, entry: LibraryEntry | LibraryAvatarEntry, blob: Blob, revision?: number): Promise<ServerRevisions> {
+    const query = new URLSearchParams({ name: entry.name });
+    if (role === 'avatar') {
+      const { boneMap, armForwardDistance, grips, arms } = entry as LibraryAvatarEntry;
+      query.set('settings', JSON.stringify({ boneMap, armForwardDistance, grips, arms }));
+    }
+    return this.json('PUT', `/projects/${encodeURIComponent(id)}/models/${role}/${entry.id}/model?${query}`,
       { body: blob, type: 'model/gltf-binary', revision });
   }
 

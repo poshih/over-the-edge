@@ -1,10 +1,13 @@
 // The contract between a release and the game's own module (GAME_MODULE). A module exports
 // `start(host)`; the release calls it once, before it fetches anything, and awaits it.
 import type { ContentAccess, ContentError, ContentProgress } from './content-session';
+import type { ModelLibraryApi } from './release-library';
 
 // Modules refuse access with ContentError, coded unauthenticated, denied or unavailable.
 export { ContentError } from './content-session';
 export type { ContentAccess, ContentErrorCode, ContentGrant, ContentGrantRequest, ContentProgress } from './content-session';
+export type { ModelSelection, ModelSelectionRequest, PartRole } from './model-library';
+export type { ModelLibraryApi } from './release-library';
 
 // What the release offers before any content loads, so the module can sign the player in first.
 export interface ReleaseHost {
@@ -21,15 +24,20 @@ export interface ReleaseApi {
   setPause(paused: boolean): void;
   setInputBlock(blocked: boolean): void;
   readonly halted: boolean;
+  // Swaps a part's model as the game's backend answers; see ContentAccess.select.
+  readonly modelLibrary: ModelLibraryApi;
 }
 
 // What start() returns; every member is optional. Without `access`, content is public under the
 // content URL. `failed` receives each content failure: resolve to load again (for example after
-// the player signs in or buys the game), or reject to stop with that error shown.
+// the player signs in or buys the game), or reject to stop with that error shown. `modelFailed`
+// receives a part that could not follow the backend's selection outside a swap, at boot or after
+// another part's swap; that part keeps its model, or starts with the profile's own.
 export interface ReleaseModule {
   readonly access?: ContentAccess;
   progress?(progress: ContentProgress): void;
   failed?(error: ContentError): Promise<void>;
+  modelFailed?(error: Error): void;
   ready?(api: ReleaseApi): void;
   dispose?(): void;
 }

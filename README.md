@@ -184,8 +184,10 @@ boundary.
 
 `npm run verify:game` exercises the release, custom-course/sprite/aim-flipbook/settings/two-character builds,
 development entry, and editor-dependency rejection in isolation. `npm run verify:art`
-does the same for course packages and terrain meshes, and `npm run verify:content`
-for the shell and content split, grants, verification and the module boundary.
+does the same for course packages and terrain meshes, `npm run verify:content`
+for the shell and content split, grants, verification and the module boundary, and
+`npm run verify:model-swap` for [runtime model swaps](docs/characters.md#model-library-and-runtime-swaps)
+and the Workshop's model library.
 
 ### Complete games from a project
 

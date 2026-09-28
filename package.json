@@ -11,12 +11,13 @@
     "preview": "vite preview",
     "studio": "npm run build && vite preview",
     "preview:game": "vite preview --config vite.game.config.ts",
-    "verify": "npm run build && node scripts/verify-runtime.mjs && npm run verify:game && npm run verify:art && npm run verify:project && npm run verify:content",
+    "verify": "npm run build && node scripts/verify-runtime.mjs && npm run verify:game && npm run verify:art && npm run verify:project && npm run verify:content && npm run verify:model-swap",
     "verify:game": "npm run build:game && node scripts/verify-game.mjs",
     "verify:art": "node scripts/verify-art.mjs",
     "pack:course": "node scripts/pack-course.mjs",
     "verify:project": "node scripts/verify-project.mjs",
-    "verify:content": "node scripts/verify-content.mjs"
+    "verify:content": "node scripts/verify-content.mjs",
+    "verify:model-swap": "node scripts/verify-model-swap.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

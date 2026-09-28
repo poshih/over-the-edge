@@ -16,16 +16,12 @@ import { HAMMER_MODEL_HANDLE, HAMMER_MODEL_HEAD_END } from '../hammer-handle-fit
 import { clamp } from '../math';
 import { RIG_LIMITS } from '../rig';
 import type { RigGeometry } from '../rig';
+import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
 import { createRangeControl } from './range-control';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import { sectionMarkup } from './workshop-section';
 import './character-editor.css';
 
-const JOINT_LABELS: Readonly<Record<AvatarJointId, string>> = {
-  body: 'Body', head: 'Head',
-  'left-upper-arm': 'Left upper arm', 'left-forearm': 'Left forearm', 'left-hand': 'Left hand',
-  'right-upper-arm': 'Right upper arm', 'right-forearm': 'Right forearm', 'right-hand': 'Right hand',
-};
 const HEAD_HALF_LENGTH = Math.max(...RIG.headVertices.map(point => point.x));
 const HEAD_HALF_HEIGHT = Math.max(...RIG.headVertices.map(point => point.y));
 const metres = (value: number): string => `${Number(value.toFixed(2))} m`;
@@ -174,8 +170,8 @@ export function createCharacterEditor(options: {
           <p class="appearance-format character-avatar-status" role="status" aria-live="polite"></p>
           <fieldset class="tuning-group character-bone-map" hidden>
             <legend>Bone map</legend>
-            <div class="character-bone-grid"></div>
-            <p class="character-bone-issue" role="alert" aria-atomic="true" hidden></p>
+            <div class="character-bone-grid bone-map-grid"></div>
+            <p class="character-bone-issue bone-map-issue" role="alert" aria-atomic="true" hidden></p>
           </fieldset>
           <details class="character-unmapped" hidden>
             <summary class="character-unmapped-summary"></summary>
@@ -418,7 +414,7 @@ export function createCharacterEditor(options: {
     const label = document.createElement('label');
     label.className = 'appearance-label';
     label.htmlFor = `character-bone-${joint}`;
-    label.textContent = JOINT_LABELS[joint];
+    label.textContent = AVATAR_JOINT_LABELS[joint];
     const select = document.createElement('select');
     select.id = `character-bone-${joint}`;
     select.name = `bone-${joint}`;
@@ -625,7 +621,7 @@ export function createCharacterEditor(options: {
     unmapped.hidden = followers.length === 0;
     setText(unmappedSummary, `${followers.length} unmapped joints follow their nearest mapped ancestor`);
     const text = followers.map(joint => `${joint.name || '(unnamed)'} follows ${
-      joint.follows === null ? 'the avatar root' : JOINT_LABELS[joint.follows].toLowerCase()}`);
+      joint.follows === null ? 'the avatar root' : AVATAR_JOINT_LABELS[joint.follows].toLowerCase()}`);
     if (unmappedList.childElementCount !== text.length ||
       Array.from(unmappedList.children).some((item, index) => item.textContent !== text[index])) {
       unmappedList.replaceChildren(...text.map(line => {

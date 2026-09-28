@@ -283,6 +283,80 @@ continue. An inactive profile is detached from the scene and does no per-frame
 work. A release with only `GAME_SPRITES` behaves exactly as before and shows no
 control.
 
+## Model library and runtime swaps
+
+A [project](projects.md) can list extra avatars, hammers and pots in its **model
+library**, and a release can show any of them in place of the characters' own models,
+each part on its own: a player might use one library avatar with the profile's hammer
+and another library pot. The game's backend decides which library model each part
+uses, stores that choice, and grants the model's content; the release only asks it
+and shows its answers. A modified client therefore cannot use a model the backend
+did not select, and the release keeps nothing about the choice in the browser.
+
+**Authoring.** Workshop / Project / **Model library** lists each part's models.
+**Add avatar / hammer / pot GLB** checks a file like the profile's own model of that
+part. An avatar maps Mixamo-style joints automatically; otherwise its bone map opens
+and the avatar is added once all eight joints resolve. **Bone map** edits an avatar's
+map later. An avatar entry carries what depends on its proportions: its bone map,
+grips, arm lengths and arm forward distance. A new avatar takes those of the open
+character, and **Use character settings** takes them again, so tune them in
+Workshop / Character first. **Preview** shows a library model in the Workshop's game
+exactly as a release shows it; previews are not saved. The project server stores the
+library as `models/<part>/<id>.glb` with its entries in `project.json`, with
+[API routes](projects.md#api-for-scripts-and-language-models) for each model.
+
+**What shows.** A library avatar replaces the avatar of an Avatar (3D) character and
+brings its own settings; the profile keeps everything else, such as its shading.
+Library hammers and pots show in every character type, fitted and shaded like the
+profile's own. The selection belongs to the player, so switching characters keeps it.
+
+**Content.** Each library GLB is its own content group, `library/<part>/<id>`, which
+the release's shell does not list; see [content delivery](content-delivery.md). The
+release fetches a library model only after the backend selects it, through a grant
+for that group, so the backend and its CDN can refuse models the player does not own.
+
+**The backend's contract.** The game's module adds `select(request, signal)` to its
+content access. With `null` it returns the stored selection, `{ avatar, hammer, pot }`
+of library IDs or `null` for the profile's own model; with `{ role, id }` it asks the
+backend to change one part, and returns the selection the backend then stores. The
+backend may refuse by throwing a `ContentError`, or answer with any selection:
+
+```ts
+export async function start(host: ReleaseHost): Promise<ReleaseModule> {
+  const access: ContentAccess = {
+    grant: (request, signal) => backend.grant(request, signal),
+    // Checks the player's entitlements, stores the result and answers it.
+    select: (request, signal) => backend.select(request, signal),
+  };
+  return {
+    access,
+    modelFailed: (error) => host.notice(error.message, 'error'),
+    ready: (api) => shop.onEquip((role, id) => api.modelLibrary.swap(role, id)),
+  };
+}
+```
+
+- At boot the release reads the stored selection alongside the game's first grant,
+  loads the selected models, and starts with them showing. Parts it replaces never
+  load the profile's own models.
+- `api.modelLibrary.swap(role, id)` relays one change and resolves with the
+  selection in use once the backend's answer shows. Requests go to the backend one
+  at a time, in order; a newer swap of the same part replaces one not yet sent,
+  which fails with `superseded`. IDs the release does not list fail with
+  `unknown-model` without a request. `available(role)` lists the IDs, `active(role)`
+  the one showing, and `refresh()` reads the stored selection again, for example
+  after it changed elsewhere.
+- An answer shows as a whole: every part it changes loads and shows. A part that
+  cannot, for example because its grant is refused, keeps its model and fails the
+  swap that asked for it, or reaches `modelFailed` when no swap asked; at boot it
+  starts with the profile's own model.
+- Without `select()`, parts use the profiles' models and swaps fail with `unavailable`.
+
+The release keeps the model each part shows and the most recent other one per
+part, so swapping back to it, or to the profile's own model, fetches nothing. A
+swap builds one part view; it adds no per-frame work, and its cost does not depend
+on the level.
+
 ## Runtime API
 
 Hosts inject model loading, so a game without models ships no GLB loader:
@@ -341,5 +415,11 @@ its size on the physical head. `npm run verify:game` builds a two-profile releas
 all three models. It checks the toggle mid-level, single asset loads, persistence,
 exact pot tracking, identical physics and each profile's own grip placement while
 switching, and failing builds for
-invalid models, bone maps and pot profiles. All fixtures are
-generated procedurally; no third-party artwork is involved.
+invalid models, bone maps and pot profiles. `npm run verify:model-swap` builds a
+project with a model library on a large course and plays it with a test backend and
+CDN: the stored selection shows at start without fetching replaced models, each part
+swaps on its own with one grant and one fetch per new model, the backend's refusals
+and different answers win, requests stay in order and superseded swaps are never
+sent, and nothing is stored. It also checks that builds and the project server refuse
+invalid library models, and the Workshop's library, previews and saving. All fixtures
+are generated procedurally; no third-party artwork is involved.

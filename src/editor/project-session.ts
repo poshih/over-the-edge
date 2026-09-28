@@ -4,6 +4,7 @@ import type { VisualAlignment } from '../appearance-profile';
 import { audioSources, DEFAULT_AUDIO, validateAudio } from '../audio-settings';
 import type { AudioSettings } from '../audio-settings';
 import type { ArmIkSettings, VisualPartId } from '../character';
+import type { AvatarBoneMap } from '../character-profile';
 import { ArtError } from '../art-types';
 import type { ArtMode } from '../art-types';
 import { validateCoursePackage } from '../course-package';
@@ -26,6 +27,12 @@ import type { ProjectBundle, ProjectContent, ProjectManifest } from '../project'
 import { EMPTY_SPRITES } from '../sprite-data';
 import type { SpriteDocument } from '../sprite-data';
 import { decodeBase64 } from '../sprite-fields';
+import { MODEL_LIMITS } from '../model-data';
+import {
+  checkLibraryModel, checkModelLibrary, libraryEntries, libraryIdForName, libraryModelFile, MODEL_LIBRARY_LIMITS, newAvatarEntry, PART_ROLES,
+  validateAvatarSettings, validateModelLibrary,
+} from '../model-library';
+import type { LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, ModelLibrary, PartRole } from '../model-library';
 import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
 import { ProjectApiError, ProjectClient } from './project-client';
@@ -36,7 +43,7 @@ import { loadPublishedProject } from './published-project';
 import type { PublishedProject } from './published-project';
 
 export const PROJECT_SECTIONS = [
-  'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance',
+  'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance', 'models',
   'theme', 'hud', 'audio', 'enemies', 'art', 'media',
 ] as const;
 export type ProjectSectionName = (typeof PROJECT_SECTIONS)[number];
@@ -44,7 +51,7 @@ export type ProjectSectionName = (typeof PROJECT_SECTIONS)[number];
 // Server writes happen in this order, so new files exist before references and references go before removals.
 const SAVE_ORDER: readonly ProjectSectionName[] = [
   'title', 'settings', 'arm-ik', 'theme', 'hud', 'enemies', 'level', 'audio',
-  'characters/primary', 'characters/alternate', 'art', 'appearance', 'media',
+  'characters/primary', 'characters/alternate', 'art', 'appearance', 'models', 'media',
 ];
 const ACTIVE_KEY = 'over-the-edge:project:active:v1';
 const POLL_MS = 2000;
@@ -114,6 +121,33 @@ interface ArtItem {
   readonly uploaded: boolean;
 }
 
+// One model in the project's library. A server project's files stay on the server until needed.
+interface LibraryItem {
+  readonly role: PartRole;
+  readonly entry: LibraryEntry | LibraryAvatarEntry;
+  // Identifies the item's GLB in this page: it changes whenever the file may have.
+  readonly key: number;
+  readonly blob: Blob | null;
+  // The GLB's size, as the server reported it for a file only the server holds.
+  readonly bytes: number;
+  // Whether the bound server holds this item's file.
+  readonly uploaded: boolean;
+}
+
+// A library model as the Workshop shows it.
+export interface LibraryModel {
+  readonly role: PartRole;
+  readonly id: string;
+  readonly name: string;
+  readonly key: number;
+  // An avatar's settings, the same object until they change; null for a hammer or pot.
+  readonly avatar: LibraryAvatarSettings | null;
+}
+
+function libraryOf(items: readonly LibraryItem[]): ModelLibrary {
+  return validateModelLibrary(Object.fromEntries(PART_ROLES.map((role) => [role, items.filter((item) => item.role === role).map((item) => item.entry)])));
+}
+
 interface Binding {
   readonly id: string;
   revision: number;
@@ -148,6 +182,7 @@ export interface ProjectSnapshot {
   readonly enemies: EnemyArtSettings;
   readonly art: { readonly mode: ArtMode; readonly assets: readonly { readonly id: string; readonly name: string }[] };
   readonly media: readonly { readonly path: string; readonly bytes: number; readonly kind: 'video' | 'audio' }[];
+  readonly library: readonly LibraryModel[];
   readonly alternate: SpriteDocument | null;
   readonly publish: PublishRecord | null;
   readonly error: string | null;
@@ -189,6 +224,10 @@ export class ProjectSession {
   private art: { mode: ArtMode; assets: ArtItem[] } = { mode: 'shapes', assets: [] };
   private media = new Map<string, MediaItem>();
   private mediaVersion = 0;
+  private library: LibraryItem[] = [];
+  private nextLibraryKey = 1;
+  // One settings object per avatar entry, so views can tell when an avatar's settings changed.
+  private readonly avatarSettings = new WeakMap<LibraryAvatarEntry, LibraryAvatarSettings>();
   private alternate: SpriteDocument | null = null;
   private binding: Binding | null = null;
   private synced: Record<ProjectSectionName, unknown> | null = null;
@@ -259,6 +298,9 @@ export class ProjectSession {
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
       art: { mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })) },
       media: [...this.media.values()].map((item) => ({ path: item.path, bytes: item.bytes, kind: mediaKind(item.path) })),
+      library: this.library.map(({ role, entry, key }) => ({
+        role, id: entry.id, name: entry.name, key, avatar: role === 'avatar' ? this.settingsOf(entry as LibraryAvatarEntry) : null,
+      })),
       alternate: this.alternate, publish: this.publishRecord, error: this.error,
       published: this.published === null ? null : {
         title: this.published.title, version: this.published.version,
@@ -353,6 +395,99 @@ export class ProjectSession {
       this.report(error);
       return false;
     }
+  }
+
+  // Adds a GLB to the model library for one part, checked like releases check it. A new avatar uses
+  // `boneMap` or maps its joints automatically, and takes the open character's grips, arm lengths
+  // and arm forward distance.
+  async addLibraryModel(role: PartRole, file: File, boneMap?: AvatarBoneMap): Promise<LibraryModel | null> {
+    try {
+      if (file.size === 0 || file.size > MODEL_LIMITS.bytes) {
+        throw new ProjectError(`Choose a GLB file no larger than ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'models' });
+      }
+      const total = this.library.reduce((sum, item) => sum + item.bytes, 0);
+      if (total + file.size > MODEL_LIBRARY_LIMITS.totalBytes) {
+        throw new ProjectError(`The model library holds at most ${MODEL_LIBRARY_LIMITS.totalBytes / 1024 ** 2} MiB.`, { section: 'models' });
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const taken = new Set(this.library.filter((item) => item.role === role).map((item) => item.entry.id));
+      const stem = libraryIdForName(file.name);
+      let id = stem;
+      for (let suffix = 2; taken.has(id); suffix++) id = `${stem.slice(0, MODEL_LIBRARY_LIMITS.id - String(suffix).length - 1)}-${suffix}`;
+      const base = { id, name: file.name.replace(/\.glb$/i, '').trim().slice(0, MODEL_LIBRARY_LIMITS.name) || id };
+      const settings = this.characterAvatarSettings();
+      const entry = role !== 'avatar' ? base : boneMap === undefined
+        ? inSection('models', () => newAvatarEntry(bytes, base, settings)) : { ...base, boneMap, ...settings };
+      inSection('models', () => checkLibraryModel(role, entry, bytes));
+      const blob = new Blob([bytes], { type: 'model/gltf-binary' });
+      const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, bytes: blob.size, uploaded: false }];
+      inSection('models', () => libraryOf(items));
+      this.library = items;
+      this.changed('content');
+      return this.snapshot().library.find((model) => model.role === role && model.id === id)!;
+    } catch (error) {
+      this.report(error);
+      return null;
+    }
+  }
+
+  removeLibraryModel(role: PartRole, id: string): void {
+    this.library = this.library.filter((item) => item.role !== role || item.entry.id !== id);
+    this.changed('content');
+  }
+
+  // Changes a library avatar's bone map and settings; the bone map must resolve against its model.
+  async setLibraryAvatar(id: string, settings: LibraryAvatarSettings): Promise<boolean> {
+    try {
+      const item = this.libraryItem('avatar', id);
+      const entry: LibraryAvatarEntry = Object.freeze({
+        id, name: item.entry.name, ...inSection('models', () => validateAvatarSettings(settings as unknown as Record<string, unknown>)),
+      });
+      const bytes = new Uint8Array(await (await this.libraryBlob('avatar', id)).arrayBuffer());
+      inSection('models', () => checkLibraryModel('avatar', entry, bytes));
+      if (!this.library.includes(item)) return false;
+      this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
+      this.changed('content');
+      return true;
+    } catch (error) {
+      this.report(error);
+      return false;
+    }
+  }
+
+  // Gives a library avatar the open character's grips, arm lengths and arm forward distance.
+  async useCharacterSettings(id: string): Promise<boolean> {
+    const item = this.library.find((candidate) => candidate.role === 'avatar' && candidate.entry.id === id);
+    if (item === undefined) return false;
+    return this.setLibraryAvatar(id, { boneMap: (item.entry as LibraryAvatarEntry).boneMap, ...this.characterAvatarSettings() });
+  }
+
+  private settingsOf(entry: LibraryAvatarEntry): LibraryAvatarSettings {
+    let settings = this.avatarSettings.get(entry);
+    if (settings === undefined) {
+      settings = Object.freeze({ boneMap: entry.boneMap, armForwardDistance: entry.armForwardDistance, grips: entry.grips, arms: entry.arms });
+      this.avatarSettings.set(entry, settings);
+    }
+    return settings;
+  }
+
+  private characterAvatarSettings(): Omit<LibraryAvatarSettings, 'boneMap'> {
+    const { armForwardDistance, grips, arms } = this.workspace.character.draft();
+    return { armForwardDistance, grips, arms };
+  }
+
+  // A library model's GLB, from this page or the bound server project.
+  async libraryBlob(role: PartRole, id: string): Promise<Blob> {
+    const item = this.libraryItem(role, id);
+    if (item.blob !== null) return item.blob;
+    if (this.binding === null) throw new ProjectError(`Library ${role} "${id}" is not available in this page.`, { section: 'models' });
+    return this.client.blob(this.client.libraryModelUrl(this.binding.id, role, id));
+  }
+
+  private libraryItem(role: PartRole, id: string): LibraryItem {
+    const item = this.library.find((candidate) => candidate.role === role && candidate.entry.id === id);
+    if (item === undefined) throw new ProjectError(`The project has no library ${role} "${id}".`, { section: 'models' });
+    return item;
   }
 
   useCurrentAsAlternate(): boolean {
@@ -475,7 +610,7 @@ export class ProjectSession {
     let result: { bundle: ProjectBundle; filename: string } | null = null;
     await this.run('Exporting project file', async () => {
       const draft = this.captureDraft();
-      const content = await this.captureFiles(draft, this.workspace.appearance.parts(), [...this.media.values()], [...this.art.assets]);
+      const content = await this.captureFiles(draft, this.workspace.appearance.parts(), [...this.media.values()], [...this.art.assets], this.library);
       result = { bundle: packProjectBundle(content), filename: `${this.binding?.id ?? projectFileName(this.title)}.project.json` };
     });
     return result;
@@ -496,6 +631,7 @@ export class ProjectSession {
       const parts = this.workspace.appearance.parts();
       const media = [...this.media.values()];
       const assets = [...this.art.assets];
+      const library = this.library;
       const dirty = new Set(PROJECT_SECTIONS.filter((name) => baseline[name] !== this.synced?.[name]));
       // An alternate needs its primary stored first, even when the primary itself did not change.
       if (dirty.has('characters/alternate') && draft.alternate !== null) dirty.add('characters/primary');
@@ -532,10 +668,17 @@ export class ProjectSession {
           this.syncedModels.set(part.part, part.blob);
         }
       }
+      if (dirty.has('models')) {
+        for (const item of library) {
+          if (item.blob === null || item.uploaded) continue;
+          adopt('models', await this.client.putLibraryModel(binding.id, item.role, item.entry, item.blob, revision('models')));
+          this.library = this.library.map((candidate) => candidate === item ? { ...item, uploaded: true } : candidate);
+        }
+      }
       const values: Record<ProjectSectionName, unknown> = {
         title: draft.manifest.title, level: draft.level, settings: draft.manifest.settings,
         'characters/primary': draft.primary, 'characters/alternate': draft.alternate, 'arm-ik': draft.manifest.armIk,
-        appearance: draft.manifest.appearance, theme: draft.manifest.theme, hud: draft.manifest.hud, audio: draft.manifest.audio,
+        appearance: draft.manifest.appearance, models: draft.manifest.models, theme: draft.manifest.theme, hud: draft.manifest.hud, audio: draft.manifest.audio,
         enemies: draft.manifest.enemies, art: draft.manifest.art, media: draft.manifest.media,
       };
       // The server removes an alternate before the primary it depends on, and adds them the other way round.
@@ -561,7 +704,8 @@ export class ProjectSession {
       const baseline = this.fingerprints();
       const savedLevel = this.workspace.level.get();
       const parts = this.workspace.appearance.parts();
-      const content = await this.captureFiles(draft, parts, [...this.media.values()], [...this.art.assets]);
+      const library = this.library;
+      const content = await this.captureFiles(draft, parts, [...this.media.values()], [...this.art.assets], library);
       const state = await this.client.putBundle(valid, packProjectBundle(content));
       this.binding = { id: valid, revision: state.revision, sections: { ...state.sections } };
       // Files that only the previous server project held are now served by this one.
@@ -569,6 +713,7 @@ export class ProjectSession {
         [path, { ...item, uploaded: true, url: item.blob === null ? this.client.mediaUrl(valid, path) : item.url }]));
       this.mediaVersion++;
       this.art = { ...this.art, assets: this.art.assets.map((asset) => ({ ...asset, uploaded: true })) };
+      this.library = this.library.map((item) => library.includes(item) ? { ...item, uploaded: true } : item);
       this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
       this.conflicts.clear();
       this.synced = baseline;
@@ -793,6 +938,10 @@ export class ProjectSession {
       if (asset.blob === null) return null;
       files.set(artFile(asset.id), asset.blob);
     }
+    for (const item of this.library) {
+      if (item.blob === null) return null;
+      files.set(libraryModelFile(item.role, item.entry.id), item.blob);
+    }
     return files;
   }
 
@@ -911,6 +1060,12 @@ export class ProjectSession {
         assets: manifest.art.assets.map((asset) => ({ ...asset, blob: existing.get(asset.id)?.blob ?? null, uploaded: serverId !== null })),
       };
     }
+    // A server project's library files stay on the server until the Workshop needs them.
+    if (has.has('models') && serverId !== null) {
+      this.library = libraryEntries(manifest.models).map(({ role, entry }) => ({
+        role, entry, key: this.nextLibraryKey++, blob: null, bytes: sizes.get(libraryModelFile(role, entry.id)) ?? 0, uploaded: true,
+      }));
+    }
     if (has.has('media') && serverId !== null) {
       const next = new Map<string, MediaItem>();
       for (const entry of manifest.media) {
@@ -937,9 +1092,11 @@ export class ProjectSession {
     const values = new Map<ProjectSectionName, unknown>([
       ['level', content.level], ['characters/primary', content.characters.primary], ['characters/alternate', content.characters.alternate],
     ]);
+    // Library models a release would refuse fail here, before anything in the page changes.
+    inSection('models', () => checkModelLibrary(manifest.models, (path) => content.files.get(path)!));
     this.unbind();
     try {
-      await this.applySections(manifest, PROJECT_SECTIONS.filter((name) => name !== 'media' && name !== 'art'), values, models, serverId);
+      await this.applySections(manifest, PROJECT_SECTIONS.filter((name) => name !== 'media' && name !== 'art' && name !== 'models'), values, models, serverId);
     } catch (error) {
       for (const item of media.values()) URL.revokeObjectURL(item.url);
       throw error;
@@ -951,6 +1108,10 @@ export class ProjectSession {
         ...asset, uploaded: false, blob: new Blob([content.files.get(artFile(asset.id))!], { type: 'model/gltf-binary' }),
       })),
     };
+    this.library = libraryEntries(manifest.models).map(({ role, entry }) => {
+      const blob = new Blob([content.files.get(libraryModelFile(role, entry.id))!], { type: 'model/gltf-binary' });
+      return { role, entry, key: this.nextLibraryKey++, uploaded: false, blob, bytes: blob.size };
+    });
     this.syncedModels.clear();
     this.synced = this.fingerprints();
     this.workspace.level.markSaved();
@@ -982,6 +1143,7 @@ export class ProjectSession {
       characters: { primary: null, alternate: null },
       armIk: this.workspace.appearance.armIk(),
       appearance: this.workspace.appearance.parts().map(({ part, name, alignment }) => ({ part, name, alignment })),
+      models: libraryOf(this.library),
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
       media: [...this.media.keys()].map((path) => ({ path })),
     });
@@ -1006,7 +1168,7 @@ export class ProjectSession {
 
   // The binary files for a captured draft, read from local blobs or the bound server project.
   private async captureFiles(draft: ReturnType<ProjectSession['captureDraft']>, parts: readonly AppearanceFile[],
-    media: readonly MediaItem[], assets: readonly ArtItem[]): Promise<ProjectContent> {
+    media: readonly MediaItem[], assets: readonly ArtItem[], library: readonly LibraryItem[]): Promise<ProjectContent> {
     const source = this.binding?.id ?? null;
     const files = new Map<string, Uint8Array>();
     for (const part of parts) files.set(appearanceFile(part.part), new Uint8Array(await part.blob.arrayBuffer()));
@@ -1015,6 +1177,11 @@ export class ProjectSession {
       const blob = asset.blob ?? (source === null ? null : await this.client.blob(this.client.artUrl(source, asset.id)));
       if (blob === null) throw new ProjectError(`Course artwork ${asset.name} is not available in this page.`, { section: 'art' });
       files.set(artFile(asset.id), new Uint8Array(await blob.arrayBuffer()));
+    }
+    for (const item of library) {
+      const blob = item.blob ?? (source === null ? null : await this.client.blob(this.client.libraryModelUrl(source, item.role, item.entry.id)));
+      if (blob === null) throw new ProjectError(`Library ${item.role} ${item.entry.name} is not available in this page.`, { section: 'models' });
+      files.set(libraryModelFile(item.role, item.entry.id), new Uint8Array(await blob.arrayBuffer()));
     }
     return loadProjectContent(draft.manifest, (ref) => ref.kind === 'level' ? draft.level
       : ref.kind === 'character' ? (ref.path === PROJECT_FILES.primary ? draft.primary : draft.alternate) : files.get(ref.path));
@@ -1038,6 +1205,7 @@ export class ProjectSession {
       'characters/alternate': this.alternate,
       'arm-ik': JSON.stringify(this.workspace.appearance.armIk()),
       appearance: JSON.stringify(this.workspace.appearance.parts().map((part) => [part.part, part.name, blob(part.blob), part.alignment])),
+      models: JSON.stringify(this.library.map((item) => [item.role, item.entry, blob(item.blob)])),
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
       art: JSON.stringify([this.art.mode, this.art.assets.map((asset) => [asset.id, asset.name])]),
       media: JSON.stringify([...this.media.values()].map((item) => [item.path, blob(item.blob)])),

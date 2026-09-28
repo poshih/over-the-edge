@@ -29,6 +29,11 @@ import { mergePatch } from '../src/project-fields';
 import { EMPTY_SPRITES, SPRITE_FILE_BYTES } from '../src/sprite-data';
 import { validateTheme } from '../src/theme';
 import { checkAppearanceModel } from '../src/appearance-model';
+import {
+  checkLibraryModel, checkModelLibrary, DEFAULT_AVATAR_SETTINGS, isPartRole, libraryEntries, libraryModelFile, libraryModelId,
+  MODEL_LIBRARY_LIMITS, newAvatarEntry, validateAvatarSettings, validateModelLibrary,
+} from '../src/model-library';
+import type { LibraryAvatarEntry, LibraryEntry, ModelLibrary, PartRole } from '../src/model-library';
 import { apiManual } from './api-manual';
 import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendError, sendFile, sendJson } from './http';
 import { ProjectStore, SECTION_NAMES } from './project-store';
@@ -235,6 +240,28 @@ export function createStudioHandler(config: StudioConfig) {
         }
         const removed = manifest.appearance.filter((current) => !parts.some((part) => part.part === current.part));
         return { manifest: withManifest(manifest, { appearance: parts }), remove: removed.map((part) => appearanceFile(part.part)) };
+      },
+    },
+    models: {
+      limit: JSON_LIMIT,
+      read: async (_id, manifest) => manifest.models,
+      write: async (id, manifest, value) => {
+        const models = inSection('models', () => validateModelLibrary(value));
+        const stored = (role: PartRole, modelId: string) => manifest.models[role].find((entry) => entry.id === modelId);
+        const listed = libraryEntries(models);
+        const added = listed.find(({ role, entry }) => stored(role, entry.id) === undefined);
+        if (added !== undefined) {
+          throw new HttpError(400, 'missing-file', `Upload ${added.role} ${added.entry.id} with PUT models/${added.role}/${added.entry.id}/model before listing it.`, { section: 'models' });
+        }
+        // A changed bone map must still resolve against the avatar's stored model.
+        for (const { role, entry } of listed) {
+          const previous = stored(role, entry.id) as LibraryAvatarEntry | undefined;
+          if (role !== 'avatar' || JSON.stringify(previous?.boneMap) === JSON.stringify((entry as LibraryAvatarEntry).boneMap)) continue;
+          const bytes = await store.readBytes(id, { path: libraryModelFile(role, entry.id), maxBytes: MODEL_LIMITS.bytes });
+          inSection('models', () => checkLibraryModel(role, entry, bytes));
+        }
+        const removed = libraryEntries(manifest.models).filter(({ role, entry }) => !models[role].some((kept) => kept.id === entry.id));
+        return { manifest: withManifest(manifest, { models }), remove: removed.map(({ role, entry }) => libraryModelFile(role, entry.id)) };
       },
     },
     theme: manifestSection('theme', validateTheme),
@@ -532,6 +559,101 @@ export function createStudioHandler(config: StudioConfig) {
       });
     });
   }
+  // Library models: each part's GLBs and their entries.
+  const libraryRole = (context: Context): PartRole => {
+    const candidate = context.params.role;
+    if (!isPartRole(candidate)) throw new HttpError(404, 'not-found', `Unknown part "${candidate}". Use avatar, hammer or pot.`, { section: 'models' });
+    return candidate;
+  };
+  const libraryId = (context: Context): string => {
+    try {
+      return libraryModelId(context.params.model);
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  };
+  const libraryEntry = (manifest: ProjectManifest, role: PartRole, modelId: string): LibraryEntry => {
+    const entry = manifest.models[role].find((candidate) => candidate.id === modelId);
+    if (entry === undefined) throw new HttpError(404, 'not-found', `No library ${role} "${modelId}".`, { section: 'models' });
+    return entry;
+  };
+  const avatarSettingsQuery = (value: string): Record<string, unknown> => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new ProjectError('The settings query must be JSON: { boneMap, armForwardDistance, grips, arms }.', { section: 'models' });
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new ProjectError('The settings query must be an object: { boneMap, armForwardDistance, grips, arms }.', { section: 'models' });
+    }
+    return parsed as Record<string, unknown>;
+  };
+  const withEntry = (library: ModelLibrary, role: PartRole, entry: LibraryEntry): ModelLibrary => inSection('models', () => validateModelLibrary({
+    ...library, [role]: library[role].some((candidate) => candidate.id === entry.id)
+      ? library[role].map((candidate) => candidate.id === entry.id ? entry : candidate) : [...library[role], entry],
+  }));
+  route('PUT', '/api/projects/:id/models/:role/:model/model', async (context) => {
+    const role = libraryRole(context);
+    const modelId = libraryId(context);
+    const bytes = await readUpload(context.request, MODEL_LIMITS.bytes, ['model/gltf-binary']);
+    const settings = context.url.searchParams.get('settings');
+    await change(context, ['models'], async (manifest) => {
+      const existing = manifest.models[role].find((candidate) => candidate.id === modelId);
+      const base = { id: modelId, name: context.url.searchParams.get('name') ?? existing?.name ?? modelId };
+      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, armForwardDistance, grips, arms }), or maps its joints.
+      const entry: LibraryEntry = role !== 'avatar' ? base : inSection('models', () => {
+        if (settings !== null) return { ...base, ...validateAvatarSettings(avatarSettingsQuery(settings)) };
+        if (existing !== undefined) return { ...(existing as LibraryAvatarEntry), ...base };
+        return newAvatarEntry(bytes, base, DEFAULT_AVATAR_SETTINGS);
+      });
+      inSection('models', () => checkLibraryModel(role, entry, bytes));
+      const models = withEntry(manifest.models, role, entry);
+      let total = bytes.byteLength;
+      for (const other of libraryEntries(manifest.models)) {
+        if (other.role !== role || other.entry.id !== modelId) total += await store.size(context.params.id!, libraryModelFile(other.role, other.entry.id));
+      }
+      if (total > MODEL_LIBRARY_LIMITS.totalBytes) {
+        throw new HttpError(413, 'too-large', `The model library exceeds ${formatBytes(MODEL_LIBRARY_LIMITS.totalBytes)}.`, { section: 'models' });
+      }
+      return { manifest: withManifest(manifest, { models }), binary: new Map([[libraryModelFile(role, modelId), bytes]]), result: libraryEntry({ ...manifest, models }, role, modelId) };
+    });
+  });
+  route('GET', '/api/projects/:id/models/:role/:model/model', async (context) => {
+    const role = libraryRole(context);
+    const modelId = libraryId(context);
+    libraryEntry((await project(context)).manifest, role, modelId);
+    sendFile(context.request, context.response, store.filePath(context.params.id!, libraryModelFile(role, modelId)), 'model/gltf-binary');
+  });
+  route('GET', '/api/projects/:id/models/:role/:model', async (context) => {
+    sendJson(context.response, 200, libraryEntry((await project(context)).manifest, libraryRole(context), libraryId(context)));
+  });
+  route('PATCH', '/api/projects/:id/models/:role/:model', async (context) => {
+    const role = libraryRole(context);
+    const modelId = libraryId(context);
+    const body = await readJson(context.request, JSON_LIMIT);
+    await change(context, ['models'], async (manifest) => {
+      const patched = { ...(mergePatch(libraryEntry(manifest, role, modelId), body) as object), id: modelId } as LibraryEntry;
+      const models = withEntry(manifest.models, role, patched);
+      const entry = libraryEntry({ ...manifest, models }, role, modelId);
+      if (role === 'avatar') {
+        const bytes = await store.readBytes(context.params.id!, { path: libraryModelFile(role, modelId), maxBytes: MODEL_LIMITS.bytes });
+        inSection('models', () => checkLibraryModel(role, entry, bytes));
+      }
+      return { manifest: withManifest(manifest, { models }), result: entry };
+    });
+  });
+  for (const path of ['/api/projects/:id/models/:role/:model', '/api/projects/:id/models/:role/:model/model']) {
+    route('DELETE', path, async (context) => {
+      const role = libraryRole(context);
+      const modelId = libraryId(context);
+      await change(context, ['models'], async (manifest) => {
+        libraryEntry(manifest, role, modelId);
+        const models = inSection('models', () => validateModelLibrary({ ...manifest.models, [role]: manifest.models[role].filter((entry) => entry.id !== modelId) }));
+        return { manifest: withManifest(manifest, { models }), remove: [libraryModelFile(role, modelId)] };
+      });
+    });
+  }
   const mediaEntry = (context: Context): string => {
     try {
       return mediaPath(`/media/${decodeURIComponent(context.params.file!)}`);
@@ -625,6 +747,7 @@ export function createStudioHandler(config: StudioConfig) {
       const document = content.characters[role];
       if (document !== null) inSection(`characters/${role}`, () => checkCharacterModels(document, `${role} character`));
     }
+    inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!));
     return content;
   }
 

@@ -28,12 +28,14 @@ import { decodeBase64, encodeBase64, SpriteError } from './sprite-fields';
 import { SkeletonError } from './skeleton-data';
 import { DirectionalError } from './directional-data';
 import { exactRecord, ProjectError, textValue } from './project-fields';
+import { EMPTY_MODEL_LIBRARY, libraryEntries, libraryModelFile, MODEL_LIBRARY_LIMITS, validateModelLibrary } from './model-library';
+import type { ModelLibrary } from './model-library';
 
 export { ProjectError } from './project-fields';
 
 export const PROJECT_FORMAT = 'over-the-edge-project';
 export const PROJECT_BUNDLE_FORMAT = 'over-the-edge-project-bundle';
-export const PROJECT_SCHEMA_VERSION = 1;
+export const PROJECT_SCHEMA_VERSION = 2;
 export const PROJECT_FILES = {
   manifest: 'project.json',
   level: 'level.json',
@@ -45,7 +47,10 @@ export const PROJECT_LIMITS = {
   id: 64,
   manifestBytes: 2 * 1024 * 1024,
   appearanceBytes: 64 * 1024 * 1024,
-  bundleBytes: 384 * 1024 * 1024,
+  // Holds every binary budget base64-encoded (art, appearance, media and the model library: 352 MiB,
+  // about 470 MiB encoded) with the JSON files, below the longest string Chromium holds (512 MiB):
+  // a project file is one JSON text, read and written whole.
+  bundleBytes: 480 * 1024 * 1024,
 } as const;
 const GLB_DATA = 'data:model/gltf-binary;base64,';
 
@@ -69,6 +74,8 @@ export interface ProjectManifest {
   readonly characters: ProjectCharacters;
   readonly armIk: Readonly<ArmIkSettings>;
   readonly appearance: readonly AppearancePart[];
+  // Extra avatar, hammer and pot models a release can swap to, one part at a time.
+  readonly models: ModelLibrary;
   readonly theme: GameTheme;
   readonly hud: HudSettings;
   readonly audio: AudioSettings;
@@ -77,7 +84,7 @@ export interface ProjectManifest {
 }
 
 const MANIFEST_KEYS = [
-  'format', 'schemaVersion', 'title', 'level', 'art', 'settings', 'characters', 'armIk', 'appearance',
+  'format', 'schemaVersion', 'title', 'level', 'art', 'settings', 'characters', 'armIk', 'appearance', 'models',
   'theme', 'hud', 'audio', 'enemies', 'media',
 ] as const;
 
@@ -188,6 +195,7 @@ export function validateProjectManifest(value: unknown): ProjectManifest {
     characters: inSection('characters', () => characterPaths(data.characters)),
     armIk: inSection('arm-ik', () => Object.freeze(validateArmIk(data.armIk))),
     appearance: inSection('appearance', () => validateAppearanceParts(data.appearance)),
+    models: inSection('models', () => validateModelLibrary(data.models)),
     theme: inSection('theme', () => validateTheme(data.theme)),
     hud: inSection('hud', () => validateHud(data.hud)),
     audio: inSection('audio', () => validateAudio(data.audio)),
@@ -200,12 +208,12 @@ export function defaultProjectManifest(title: string): ProjectManifest {
   return validateProjectManifest({
     format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title, level: PROJECT_FILES.level,
     art: { mode: 'shapes', assets: [] }, settings: DEFAULT_GAME_SETTINGS,
-    characters: { primary: null, alternate: null }, armIk: DEFAULT_ARM_IK, appearance: [],
+    characters: { primary: null, alternate: null }, armIk: DEFAULT_ARM_IK, appearance: [], models: EMPTY_MODEL_LIBRARY,
     theme: DEFAULT_THEME, hud: DEFAULT_HUD, audio: DEFAULT_AUDIO, enemies: DEFAULT_ENEMY_ART, media: [],
   });
 }
 
-export type ProjectFileKind = 'level' | 'character' | 'art' | 'appearance' | 'media';
+export type ProjectFileKind = 'level' | 'character' | 'art' | 'appearance' | 'model' | 'media';
 
 export interface ProjectFileRef {
   readonly path: string;
@@ -223,6 +231,9 @@ export function projectFileRefs(manifest: ProjectManifest): ProjectFileRef[] {
   for (const asset of manifest.art.assets) refs.push({ path: artFile(asset.id), kind: 'art', binary: true, maxBytes: ART_LIMITS.bytes });
   for (const part of manifest.appearance) {
     refs.push({ path: appearanceFile(part.part), kind: 'appearance', binary: true, maxBytes: MODEL_LIMITS.bytes });
+  }
+  for (const { role, entry } of libraryEntries(manifest.models)) {
+    refs.push({ path: libraryModelFile(role, entry.id), kind: 'model', binary: true, maxBytes: MODEL_LIMITS.bytes });
   }
   for (const entry of manifest.media) refs.push({ path: mediaFile(entry.path), kind: 'media', binary: true, maxBytes: MEDIA_LIMITS.bytes });
   return refs;
@@ -274,8 +285,10 @@ export function loadProjectContent(manifest: ProjectManifest, read: (ref: Projec
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   let level: LevelDefinition | null = null;
   const characters: { primary: SpriteDocument | null; alternate: SpriteDocument | null } = { primary: null, alternate: null };
-  const totals: Record<'art' | 'appearance' | 'media', number> = { art: 0, appearance: 0, media: 0 };
-  const budgets = { art: ART_LIMITS.totalBytes, appearance: PROJECT_LIMITS.appearanceBytes, media: MEDIA_LIMITS.totalBytes };
+  const totals: Record<'art' | 'appearance' | 'model' | 'media', number> = { art: 0, appearance: 0, model: 0, media: 0 };
+  const budgets = {
+    art: ART_LIMITS.totalBytes, appearance: PROJECT_LIMITS.appearanceBytes, model: MODEL_LIBRARY_LIMITS.totalBytes, media: MEDIA_LIMITS.totalBytes,
+  };
   for (const ref of refs) {
     const value = read(ref);
     if (ref.kind === 'level') level = inSection('level', () => validateLevel(value));
@@ -351,18 +364,28 @@ export function unpackProjectBundle(value: unknown): ProjectContent {
   });
 }
 
+// A project too large for one project file fails here, measured before any of its text is written.
 export function packProjectBundle(content: Pick<ProjectContent, 'manifest' | 'level' | 'characters' | 'files'>): ProjectBundle {
-  const files: Record<string, unknown> = { [PROJECT_FILES.manifest]: content.manifest };
-  for (const ref of projectFileRefs(content.manifest)) {
-    if (ref.kind === 'level') files[ref.path] = content.level;
-    else if (ref.kind === 'character') {
-      files[ref.path] = ref.path === PROJECT_FILES.primary ? content.characters.primary : content.characters.alternate;
-    } else {
-      const bytes = content.files.get(ref.path);
-      if (bytes === undefined) throw new ProjectError(`The project is missing ${ref.path}.`, { section: ref.path });
-      files[ref.path] = `data:${projectFileType(ref, content.manifest)};base64,${encodeBase64(bytes)}`;
-    }
+  const refs = projectFileRefs(content.manifest);
+  const json = (ref: ProjectFileRef): unknown => ref.kind === 'level' ? content.level
+    : ref.path === PROJECT_FILES.primary ? content.characters.primary : content.characters.alternate;
+  const binary = (ref: ProjectFileRef): Uint8Array => {
+    const bytes = content.files.get(ref.path);
+    if (bytes === undefined) throw new ProjectError(`The project is missing ${ref.path}.`, { section: ref.path });
+    return bytes;
+  };
+  const prefix = (ref: ProjectFileRef): string => `data:${projectFileType(ref, content.manifest)};base64,`;
+  // Each entry is "path":value, with its quotes and separators.
+  let length = PROJECT_FILES.manifest.length + JSON.stringify(content.manifest).length + 4;
+  for (const ref of refs) {
+    length += ref.path.length + 4 + (ref.binary ? prefix(ref).length + Math.ceil(binary(ref).byteLength / 3) * 4 + 2 : JSON.stringify(json(ref)).length);
   }
+  if (length > PROJECT_LIMITS.bundleBytes) {
+    throw new ProjectError(`This project needs a ${Math.ceil(length / 1024 ** 2)} MiB project file, and project files hold at most ${
+      PROJECT_LIMITS.bundleBytes / 1024 ** 2} MiB. Keep a game this large as a project directory or on the project server.`);
+  }
+  const files: Record<string, unknown> = { [PROJECT_FILES.manifest]: content.manifest };
+  for (const ref of refs) files[ref.path] = ref.binary ? `${prefix(ref)}${encodeBase64(binary(ref))}` : json(ref);
   return { format: PROJECT_BUNDLE_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, files };
 }
 

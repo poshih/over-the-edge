@@ -28,6 +28,8 @@ import {
   CONTENT_REF_PREFIX, isContentGroup, isContentPath, isContentRef, pathExtension, pathGroup,
 } from './content-ref';
 import type { ContentExtension } from './content-ref';
+import { libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSettings } from './model-library';
+import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
 export const CONTENT_SCHEMA_VERSION = 1;
@@ -101,6 +103,26 @@ export interface ContentArt {
   readonly assets: readonly ArtResource[];
 }
 
+export interface ContentLibraryEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly source: string;
+}
+
+export interface ContentLibraryAvatar extends ContentLibraryEntry, LibraryAvatarSettings {}
+
+// The project's model library. Each entry's GLB is its own group, so a backend grants it on its own.
+export interface ContentLibrary {
+  readonly avatar: readonly ContentLibraryAvatar[];
+  readonly hammer: readonly ContentLibraryEntry[];
+  readonly pot: readonly ContentLibraryEntry[];
+}
+
+// The content group of one library entry.
+export function libraryGroup(role: PartRole, id: string): string {
+  return contentGroup(`library/${role}/${libraryModelId(id)}`);
+}
+
 export interface ContentManifest {
   readonly format: typeof CONTENT_FORMAT;
   readonly schemaVersion: typeof CONTENT_SCHEMA_VERSION;
@@ -116,13 +138,14 @@ export interface ContentManifest {
   readonly art: ContentArt;
   // Authored /media/ paths and the packaged file each one plays.
   readonly media: Readonly<Record<string, string>>;
+  readonly library: ContentLibrary;
   // Every file the manifest references, by path, with its size in bytes.
   readonly files: Readonly<Record<string, number>>;
 }
 
 const MANIFEST_KEYS = [
   'format', 'schemaVersion', 'level', 'settings', 'theme', 'hud', 'enemies', 'armIk', 'audio', 'characters',
-  'appearance', 'art', 'media', 'files',
+  'appearance', 'art', 'media', 'library', 'files',
 ] as const;
 
 // Sources a level's trigger events play: videos and sounds.
@@ -141,6 +164,10 @@ export function characterSources(document: SpriteDocument): string[] {
   return [...document.images.map(image => image.source), ...(document.models ?? []).map(model => model.source)];
 }
 
+export function librarySources(library: ContentLibrary): string[] {
+  return PART_ROLES.flatMap(role => library[role].map(entry => entry.source));
+}
+
 // Every packaged source the manifest names, by kind.
 function manifestSources(manifest: Omit<ContentManifest, 'files'>): string[] {
   return [
@@ -149,6 +176,7 @@ function manifestSources(manifest: Omit<ContentManifest, 'files'>): string[] {
     ...manifest.appearance.map(part => part.source),
     ...manifest.art.assets.map(asset => asset.source),
     ...Object.values(manifest.media),
+    ...librarySources(manifest.library),
   ];
 }
 
@@ -210,6 +238,35 @@ function validateMediaTable(value: unknown): Readonly<Record<string, string>> {
   })));
 }
 
+function validateLibrary(value: unknown): ContentLibrary {
+  const library = exactRecord(value, PART_ROLES, 'The model library');
+  const entries = <T extends ContentLibraryEntry>(role: PartRole, entry: (data: Record<string, unknown>, base: ContentLibraryEntry) => T): readonly T[] => {
+    const list = library[role];
+    if (!Array.isArray(list) || list.length > MODEL_LIBRARY_LIMITS.entries) throw new ContentManifestError(`The ${role} library lists at most ${MODEL_LIBRARY_LIMITS.entries} models.`);
+    const ids = new Set<string>();
+    return Object.freeze(list.map((item: unknown) => {
+      const data = exactRecord(item, role === 'avatar' ? ['id', 'name', 'source', 'boneMap', 'armForwardDistance', 'grips', 'arms'] : ['id', 'name', 'source'], `A library ${role}`);
+      const id = libraryModelId(data.id);
+      if (ids.has(id)) throw new ContentManifestError(`The ${role} library lists "${id}" twice.`);
+      ids.add(id);
+      const source = packaged(String(data.source), `Library ${role} "${id}"`);
+      // Each entry's model is the only file in its own group.
+      if (pathGroup(refPath(source)) !== libraryGroup(role, id) || pathExtension(refPath(source)) !== 'glb') {
+        throw new ContentManifestError(`Library ${role} "${id}" must be a GLB in group ${libraryGroup(role, id)}.`);
+      }
+      if (typeof data.name !== 'string' || data.name.trim().length === 0 || data.name.length > MODEL_LIBRARY_LIMITS.name) {
+        throw new ContentManifestError(`Library ${role} "${id}" needs a name of 1-${MODEL_LIBRARY_LIMITS.name} characters.`);
+      }
+      return entry(data, { id, name: data.name, source });
+    }));
+  };
+  return Object.freeze({
+    avatar: entries('avatar', (data, base) => Object.freeze({ ...base, ...validateAvatarSettings(data) })),
+    hammer: entries('hammer', (_data, base) => Object.freeze(base)),
+    pot: entries('pot', (_data, base) => Object.freeze(base)),
+  });
+}
+
 function validateFiles(value: unknown, sources: readonly string[]): Readonly<Record<string, number>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new ContentManifestError('Files must map content paths to sizes.');
   const entries = Object.entries(value);
@@ -260,6 +317,7 @@ function validateSections(data: Record<string, unknown>): Omit<ContentManifest, 
     appearance: validateContentAppearance(data.appearance),
     art: validateContentArt(data.art, level),
     media,
+    library: validateLibrary(data.library),
   };
 }
 
@@ -267,16 +325,22 @@ export function validateContentManifest(value: unknown): ContentManifest {
   const data = exactRecord(value, MANIFEST_KEYS, 'The content manifest');
   const sections = validateSections(data);
   const files = validateFiles(data.files, manifestSources(sections));
+  // Library models are in their own groups; everything else the release uses is in the game group.
+  const library = new Set(librarySources(sections.library).map(refPath));
   for (const path of Object.keys(files)) {
-    if (pathGroup(path) !== GAME_GROUP) throw new ContentManifestError(`Content ${path} is outside the game group.`);
+    if (!library.has(path) && pathGroup(path) !== GAME_GROUP) throw new ContentManifestError(`Content ${path} is outside the game group.`);
   }
   return Object.freeze({ ...sections, files });
 }
 
 // Files the release needs before play: sprite images, character models, appearance models and
-// course meshes. Music and video stream when they play; sounds load in the background.
-export function bootSources(manifest: ContentManifest): string[] {
-  const characters = [manifest.characters.primary, manifest.characters.alternate].flatMap(document =>
-    document === null ? [] : characterSources(document));
+// course meshes. Music and video stream when they play; sounds load in the background. A profile's
+// model for a part the backend's selection `replaced` is not needed, so it is never fetched.
+export function bootSources(manifest: ContentManifest, replaced: ReadonlySet<PartRole> = new Set()): string[] {
+  const characters = [manifest.characters.primary, manifest.characters.alternate].flatMap(document => document === null ? [] : [
+    ...document.images.map(image => image.source),
+    ...(document.models ?? []).filter(model => !PART_ROLES.some(role => replaced.has(role) && document[role]?.model === model.id))
+      .map(model => model.source),
+  ]);
   return [...new Set([...characters, ...manifest.appearance.map(part => part.source), ...manifest.art.assets.map(asset => asset.source)])];
 }

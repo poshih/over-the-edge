@@ -12,6 +12,8 @@ import { readField, writeField } from '../project-fields';
 import type { FieldSpec } from '../project-fields';
 import { DEFAULT_THEME, THEME_FIELDS } from '../theme';
 import { createJsonDownload } from './json-download';
+import { createLibraryEditor } from './library-editor';
+import type { PartModelHost } from './library-preview';
 import type { ProjectSession, ProjectSnapshot } from './project-session';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
@@ -37,6 +39,8 @@ export interface ProjectEditorOptions {
   onNotice: (message: string, kind: 'info' | 'error') => void;
   // Plays a cue once, so authors can hear their choice.
   onTestCue: (cue: AudioCue) => void;
+  // The game that previews library models.
+  parts: PartModelHost;
 }
 
 /** Workshop / Project: the whole game's identity, look, HUD, audio, enemies, media and files. */
@@ -135,6 +139,10 @@ export function createProjectEditor(options: ProjectEditorOptions) {
           <button type="button" class="button project-alternate-remove">Remove alternate</button>
         </div>
         <input class="project-alternate-file" type="file" accept=".json,application/json" aria-label="Import alternate profile JSON" hidden />
+      `)}
+
+      ${sectionMarkup({ id: 'project-models', title: 'Model library', hint: 'Avatars, hammers and pots to swap to' }, `
+        <div class="project-library-mount"></div>
       `)}
 
       ${sectionMarkup({ id: 'project-art', title: 'Course artwork', hint: 'Terrain meshes from course packages' }, `
@@ -501,6 +509,9 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     event.returnValue = '';
   }, listen);
 
+  const library = createLibraryEditor({
+    mount: element(root, '.project-library-mount'), session, parts: options.parts, onNotice: options.onNotice,
+  });
   options.mount.append(root);
   renderContent(session.snapshot());
   renderStatus(session.snapshot());
@@ -508,6 +519,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     dispose(): void {
       events.abort();
       unsubscribe();
+      library.dispose();
       root.remove();
     },
   };

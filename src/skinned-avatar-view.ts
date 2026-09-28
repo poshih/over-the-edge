@@ -247,6 +247,8 @@ export class SkinnedAvatarView {
       chains: { left: { ...this.chains.left }, right: { ...this.chains.right } },
       joints,
       boneWrites: this.writes,
+      // False once another view took the model: this view then draws nothing.
+      modelAttached: this.model.scene.parent === this.fit,
     };
   }
 

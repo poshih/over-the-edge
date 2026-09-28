@@ -97,33 +97,6 @@
   font-size: 11px;
 }
 
-.character-bone-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  align-items: center;
-  gap: 6px 10px;
-}
-
-.character-bone-grid .appearance-label {
-  margin: 0;
-}
-
-.character-bone-grid select[aria-invalid="true"] {
-  border-color: #cc8f73;
-  background: #fff1e8;
-}
-
-.game-ui .character-bone-issue {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid #cc8f73;
-  border-radius: 5px;
-  color: #743925;
-  background: #fff1e8;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
 .character-unmapped {
   margin-top: 10px;
   font-size: 11px;

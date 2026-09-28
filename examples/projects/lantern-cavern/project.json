@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -50,6 +50,7 @@
     "rightHintZ": 0.45
   },
   "appearance": [],
+  "models": { "avatar": [], "hammer": [], "pot": [] },
   "theme": {
     "sky": "#0e1418",
     "fog": {

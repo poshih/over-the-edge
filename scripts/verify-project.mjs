@@ -149,7 +149,7 @@ async function examplePackage() {
     const name = entry.path.slice('/media/'.length);
     files[`media/${name}`] = `data:audio/wav;base64,${(await readFile(join(root, example, 'media', name))).toString('base64')}`;
   }
-  return { format: 'over-the-edge-project-bundle', schemaVersion: 1, files };
+  return { format: 'over-the-edge-project-bundle', schemaVersion: 2, files };
 }
 
 try {

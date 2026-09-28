@@ -7,6 +7,7 @@ import {
 } from '../src/project';
 import type { ProjectContent } from '../src/project';
 import { checkAppearanceModel } from '../src/appearance-model';
+import { checkModelLibrary } from '../src/model-library';
 
 function inside(root: string, path: string, label: string): string {
   const real = realpathSync(path);
@@ -94,6 +95,11 @@ export function loadProjectInput(root: string, requested: string): ProjectInput 
     } catch (error) {
       throw new Error(`GAME_PROJECT: appearance model ${part.name} (${part.part}): ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
+  }
+  try {
+    checkModelLibrary(manifest.models, binary);
+  } catch (error) {
+    throw new Error(`GAME_PROJECT: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   return loaded;
 }

@@ -149,6 +149,27 @@
   color: var(--muted);
 }
 
+.project-library-part + .project-library-part,
+.project-library-bones {
+  margin-top: 12px;
+}
+
+.project-library-list li {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.project-library-list .button {
+  grid-row: auto;
+  grid-column: auto;
+}
+
+.project-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .project-publish-status a {
   color: var(--teal-dark);
   font-weight: 600;
