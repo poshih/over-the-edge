@@ -73,7 +73,8 @@ no authentication uses the engine's public access, a plain fetch from the config
 - **Secrecy.** Grant URLs are credentials. The engine keeps them and all content in memory, never in browser storage,
   and names content by its manifest path, never its URL, in errors and notices.
 
-Suggested adapter (upstream's design call):
+Suggested adapter (upstream's design call; [runtime model swap](FEATURE-REQUEST-runtime-model-swap.md) adds a
+`select` method for the backend's model selection):
 
 ```ts
 interface ContentAccess {
@@ -155,6 +156,9 @@ code into the shell. It combines with `GAME_PROJECT` and the per-file inputs.
 
 ## Threat model
 
+- **Decisions.** The shell, the engine and the game's module run on the player's machine, where the player can change
+  them. So the game's backend makes every decision that matters, such as who may load which group, and enforces it by
+  what it grants and what its CDN serves; the release only carries decisions out.
 - **Protected.** A player the game's backend refuses (signed out, not entitled, or holding an expired grant) cannot
   get any content from the shell, its deployment, the CDN or the engine's API.
 - **Verified.** Whoever controls the CDN cannot make the release use anything but the build's content, except streamed
