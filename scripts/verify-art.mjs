@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import { modelFixture } from './verify-appearance.mjs';
 import { observeBrowserPage } from './verify-level.mjs';
 import { openSection } from './workshop-ui.mjs';
+import { releaseContent, shellCode } from './release-fixtures.mjs';
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -61,6 +62,12 @@ async function runPack(levelPath, assignmentsPath, outputPath, mode = 'meshes') 
 
 function bundleFiles(bundle) {
   return (Array.isArray(bundle) ? bundle : [bundle]).flatMap(entry => entry.output);
+}
+
+// The course meshes a written release packages as content.
+async function contentMeshes(outDir) {
+  const { files, manifest } = await releaseContent(outDir);
+  return { paths: [...files.keys()].filter(path => path.endsWith('.glb')), manifest };
 }
 
 function bundleModules(bundle) {
@@ -157,8 +164,13 @@ async function verifyRelease(packagePath, uniqueAssets) {
     assert.ok(!modules.some(id => id.includes('/src/editor/') || id.includes('/worker/') || id.includes('GLTFExporter')),
       'Game releases must not include editor modules or exporters.');
     assert.equal(modules.some(id => id.includes('GLTFLoader')), mode === 'meshes');
-    const glbs = bundleFiles(bundle).filter(file => file.type === 'asset' && file.fileName.endsWith('.glb'));
+    const { paths: glbs, manifest } = await contentMeshes(output);
     assert.equal(glbs.length, mode === 'meshes' ? uniqueAssets : 0);
+    assert.equal(manifest.art.mode, mode);
+    assert.ok(bundleFiles(bundle).every(file => !file.fileName.endsWith('.glb')), 'Course meshes are content, never shell files.');
+    const code = shellCode(bundle);
+    const { files } = await releaseContent(output);
+    assert.ok(glbs.every(path => !code.includes(files.get(path).toString('base64').slice(0, 2000))), 'Course meshes must not be embedded in the shell.');
     const release = await preview({ configFile, logLevel: 'silent', build: { outDir: output }, preview: { host: '127.0.0.1', port: 0, strictPort: true } });
     const page = await browser.newPage();
     const errors = [];
@@ -243,8 +255,9 @@ async function verifyLargeCourse(stonePath) {
   assert.equal(pack.assets.length, 1);
   process.env.GAME_LEVEL = relative(root, packagePath);
   process.env.GAME_ART_MODE = 'meshes';
-  const bundle = await build({ configFile, logLevel: 'silent', build: { write: false } });
-  const glbs = bundleFiles(bundle).filter(file => file.type === 'asset' && file.fileName.endsWith('.glb'));
+  const output = join(temporary, 'large-release');
+  await build({ configFile, logLevel: 'silent', build: { outDir: output } });
+  const { paths: glbs } = await contentMeshes(output);
   assert.equal(glbs.length, 1);
   report.sections.largeCourse = { objects: terrainObjects(pack.level).length, assets: pack.assets.length, emittedGlbs: glbs.length };
 }
@@ -468,8 +481,9 @@ async function verifyTextureBuild(fixtures) {
   await runPack(levelPath, assignmentsPath, packagePath);
   process.env.GAME_LEVEL = relative(root, packagePath);
   process.env.GAME_ART_MODE = 'meshes';
-  const bundle = await build({ configFile, logLevel: 'silent', build: { write: false } });
-  const glbs = bundleFiles(bundle).filter(file => file.type === 'asset' && file.fileName.endsWith('.glb'));
+  const output = join(temporary, 'texture-release');
+  await build({ configFile, logLevel: 'silent', build: { outDir: output } });
+  const { paths: glbs } = await contentMeshes(output);
   assert.equal(glbs.length, names.length, 'PNG, JPEG, and WebP textured GLBs must pass build-time validation.');
   delete process.env.GAME_LEVEL;
   delete process.env.GAME_ART_MODE;

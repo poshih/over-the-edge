@@ -15,6 +15,8 @@ import type { TriggerAction, EventOutcome } from './trigger-events';
 import { EventPresenter } from './event-presenter';
 import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
+import type { MediaHost } from './media-host';
+import type { ContentLoader } from './content-ref';
 import { impactStrength, IMPACT_SPEED } from './audio-settings';
 import type { AudioCue, GameCue } from './audio-settings';
 import type { GameTheme } from './theme';
@@ -54,10 +56,12 @@ export class Game {
     level: LevelDefinition;
     settings?: Readonly<GameSettings>;
     characterModels?: CharacterModelLoader | null;
+    // Loads a release's packaged sprite images.
+    content?: ContentLoader;
     theme?: GameTheme;
     enemyArt?: EnemyArtSettings;
-    // Maps authored media sources (video and sound events) to loadable URLs.
-    resolveMedia?: (source: string) => string;
+    // Streams authored video sources; by default sources are URLs.
+    media?: MediaHost;
     // Receives sound cues and play-sound events; without it the game tracks no impacts.
     onCue?: (cue: GameCue) => void;
     onAction: (action: UiAction, options?: UiActionOptions) => void;
@@ -74,7 +78,7 @@ export class Game {
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
     this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
-      characterModels: options.characterModels, theme: options.theme, enemyArt: options.enemyArt,
+      characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
     });
     if (this.onCue !== null) this.simulation.trackImpacts(true);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
@@ -87,7 +91,7 @@ export class Game {
     });
     this.presenter = new EventPresenter({
       mount: options.eventMount,
-      resolveSource: options.resolveMedia,
+      media: options.media,
       onModalChange: ({ active }) => {
         this.setPause({ reason: 'event', paused: active });
         this.setInputBlock({ reason: 'event', blocked: active });
@@ -217,7 +221,7 @@ export class Game {
 
   setEnemyArt(art: EnemyArtSettings): void { this.view.enemies.setArt(art); }
 
-  setMediaResolver(resolve: (source: string) => string): void { this.presenter.setSourceResolver(resolve); }
+  setMedia(media: MediaHost): void { this.presenter.setMedia(media); }
 
   setPause(options: { reason: string; paused: boolean }): void {
     if (options.paused) this.pauseReasons.add(options.reason);

@@ -38,77 +38,86 @@ export function characterLabels(types: readonly CharacterRiggingType[]): string[
   return labels.map((label, index) => labels.indexOf(label) !== labels.lastIndexOf(label) ? `${label} ${index + 1}` : label);
 }
 
-export function createPlayUI(options: { mount: HTMLElement; characters?: PlayCharacterChoice | null; hud?: HudSettings }) {
-  const hud = options.hud ?? DEFAULT_HUD;
+// The release's interface. Notices work from the start; the readouts and the character choice appear
+// once the release's content has said what they show.
+export function createPlayUI(options: { mount: HTMLElement }) {
   const root = document.createElement('div');
   root.className = 'game-ui play-ui';
-  root.innerHTML = `
-    <dl class="play-hud" aria-label="Climb statistics">
-      <div class="play-height">
-        <dt></dt>
-        <dd><span class="height-value"></span><span class="play-height-unit"></span></dd>
-      </div>
-      <div class="play-timer">
-        <dt></dt>
-        <dd class="elapsed-value">00:00</dd>
-      </div>
-    </dl>
-  `;
-  const height = element<HTMLElement>(root, '.height-value');
-  const elapsed = element<HTMLElement>(root, '.elapsed-value');
-  // Labels come from the project's HUD settings as text, never markup.
-  element<HTMLElement>(root, '.play-height dt').textContent = hud.height.label;
-  element<HTMLElement>(root, '.play-height-unit').textContent = hud.height.unit;
-  height.textContent = formatHeight(hud, 0);
-  element<HTMLElement>(root, '.play-timer dt').textContent = hud.timer.label;
-  if (!hud.height.visible) element<HTMLElement>(root, '.play-height').remove();
-  if (!hud.timer.visible) element<HTMLElement>(root, '.play-timer').remove();
-  if (!hud.height.visible && !hud.timer.visible) element<HTMLElement>(root, '.play-hud').remove();
   const events = new AbortController();
   const inputs: HTMLInputElement[] = [];
-  let selected = 0;
-  const characters = options.characters ?? null;
-  // A single-profile release shows no settings, exactly as before.
-  if (characters !== null && characters.types.length > 1) {
-    selected = storedCharacter(characters.types.length);
-    const group = document.createElement('div');
-    group.className = 'play-character';
-    group.setAttribute('role', 'radiogroup');
-    group.setAttribute('aria-label', 'Character');
-    const heading = document.createElement('span');
-    heading.className = 'play-character-label';
-    heading.setAttribute('aria-hidden', 'true');
-    heading.textContent = 'CHARACTER';
-    group.append(heading);
-    characterLabels(characters.types).forEach((label, index) => {
-      const option = document.createElement('label');
-      option.className = 'play-character-option';
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = 'play-character';
-      input.value = String(index);
-      input.checked = index === selected;
-      input.disabled = true;
-      input.addEventListener('change', () => {
-        if (!input.checked) return;
-        selected = index;
-        storeCharacter(index);
-        characters.onSelect(index);
-      }, { signal: events.signal });
-      const text = document.createElement('span');
-      text.textContent = label;
-      option.append(input, text);
-      group.append(option);
-      inputs.push(input);
-    });
-    root.append(group);
-  }
   const notice = createNotice({ mount: root });
   options.mount.append(root);
+  let hud = DEFAULT_HUD;
+  let height: HTMLElement | null = null;
+  let elapsed: HTMLElement | null = null;
+  let selected = 0;
   return {
+    show(settings: { hud: HudSettings; characters: PlayCharacterChoice | null }): void {
+      hud = settings.hud;
+      const readouts = document.createElement('dl');
+      readouts.className = 'play-hud';
+      readouts.setAttribute('aria-label', 'Climb statistics');
+      readouts.innerHTML = `
+        <div class="play-height">
+          <dt></dt>
+          <dd><span class="height-value"></span><span class="play-height-unit"></span></dd>
+        </div>
+        <div class="play-timer">
+          <dt></dt>
+          <dd class="elapsed-value">00:00</dd>
+        </div>
+      `;
+      // Labels come from the project's HUD settings as text, never markup.
+      element<HTMLElement>(readouts, '.play-height dt').textContent = hud.height.label;
+      element<HTMLElement>(readouts, '.play-height-unit').textContent = hud.height.unit;
+      element<HTMLElement>(readouts, '.play-timer dt').textContent = hud.timer.label;
+      height = hud.height.visible ? element<HTMLElement>(readouts, '.height-value') : null;
+      elapsed = hud.timer.visible ? element<HTMLElement>(readouts, '.elapsed-value') : null;
+      if (height !== null) height.textContent = formatHeight(hud, 0);
+      if (!hud.height.visible) element<HTMLElement>(readouts, '.play-height').remove();
+      if (!hud.timer.visible) element<HTMLElement>(readouts, '.play-timer').remove();
+      const shown: HTMLElement[] = hud.height.visible || hud.timer.visible ? [readouts] : [];
+      const characters = settings.characters;
+      // A single-profile release shows no settings, exactly as before.
+      if (characters !== null && characters.types.length > 1) {
+        selected = storedCharacter(characters.types.length);
+        const group = document.createElement('div');
+        group.className = 'play-character';
+        group.setAttribute('role', 'radiogroup');
+        group.setAttribute('aria-label', 'Character');
+        const heading = document.createElement('span');
+        heading.className = 'play-character-label';
+        heading.setAttribute('aria-hidden', 'true');
+        heading.textContent = 'CHARACTER';
+        group.append(heading);
+        characterLabels(characters.types).forEach((label, index) => {
+          const option = document.createElement('label');
+          option.className = 'play-character-option';
+          const input = document.createElement('input');
+          input.type = 'radio';
+          input.name = 'play-character';
+          input.value = String(index);
+          input.checked = index === selected;
+          input.disabled = true;
+          input.addEventListener('change', () => {
+            if (!input.checked) return;
+            selected = index;
+            storeCharacter(index);
+            characters.onSelect(index);
+          }, { signal: events.signal });
+          const text = document.createElement('span');
+          text.textContent = label;
+          option.append(input, text);
+          group.append(option);
+          inputs.push(input);
+        });
+        shown.push(group);
+      }
+      root.prepend(...shown);
+    },
     update(state: { height: number; elapsed: number }): void {
-      if (hud.height.visible) setText(height, formatHeight(hud, state.height));
-      if (hud.timer.visible) setText(elapsed, formatElapsedTime(state.elapsed));
+      if (height !== null) setText(height, formatHeight(hud, state.height));
+      if (elapsed !== null) setText(elapsed, formatElapsedTime(state.elapsed));
     },
     notice: notice.show,
     // Enables the character choice once every profile has loaded; returns the restored choice.

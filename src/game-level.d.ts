@@ -3,62 +3,35 @@ declare module 'virtual:game-title' {
   export default title;
 }
 
-declare module 'virtual:game-level' {
-  const level: import('./level').LevelDefinition;
-  export default level;
+// What the shell pins: the content URL, the manifest and every path of the game group.
+declare module 'virtual:game-content' {
+  const pins: import('./content').ContentPins;
+  export default pins;
+}
+
+// Each loader is null when the release's content does not need it, so the shell omits its code.
+declare module 'virtual:game-character-models' {
+  const create: typeof import('./character-model-loader').createCharacterModelLoader | null;
+  export default create;
 }
 
 declare module 'virtual:game-art' {
-  const loadArtwork: (game: import('./game').Game) => Promise<void>;
-  export default loadArtwork;
-}
-
-declare module 'virtual:game-settings' {
-  const settings: import('./game-settings').GameSettings;
-  export default settings;
-}
-
-declare module 'virtual:game-sprites' {
-  const sprites: import('./sprite-data').SpriteDocument;
-  export default sprites;
-}
-
-declare module 'virtual:game-alternate-sprites' {
-  const sprites: import('./sprite-data').SpriteDocument | null;
-  export default sprites;
-}
-
-declare module 'virtual:game-character-models' {
-  const loader: import('./character-model-types').CharacterModelLoader | null;
-  export default loader;
-}
-
-declare module 'virtual:game-presentation' {
-  const presentation: {
-    readonly theme: import('./theme').GameTheme;
-    readonly hud: import('./hud').HudSettings;
-    readonly enemies: import('./enemy-art-data').EnemyArtSettings;
-    readonly armIk: Readonly<import('./character').ArmIkSettings>;
-  };
-  export default presentation;
+  const load: typeof import('./release-art').loadCourseArt | null;
+  export default load;
 }
 
 declare module 'virtual:game-appearance' {
-  type Visuals = ReadonlyMap<import('./character').VisualPartId, import('./character').VisualBinding>;
-  const loadAppearance: ((visuals: Visuals, signal?: AbortSignal) => Promise<unknown>) | null;
-  export default loadAppearance;
+  const load: typeof import('./appearance-loader').loadAppearance | null;
+  export default load;
 }
 
 declare module 'virtual:game-audio' {
-  const createAudio: ((options: {
-    resolve: (source: string) => string;
-    onError: (message: string) => void;
-  }) => import('./audio').AudioDirector) | null;
-  export default createAudio;
+  const Director: typeof import('./audio').AudioDirector | null;
+  export default Director;
 }
 
-declare module 'virtual:game-media' {
-  // Bundled media files by authored /media/ path.
-  const media: Readonly<Record<string, string>>;
-  export default media;
+// The game's own module (GAME_MODULE), or null.
+declare module 'virtual:game-module' {
+  const start: import('./release-module').StartRelease | null;
+  export default start;
 }

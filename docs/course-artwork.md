@@ -102,8 +102,9 @@ referenced GLB. Unknown modes, missing assets, invalid GLBs, and content/hash
 mismatches fail the build instead of producing a misleading release.
 
 Shape-only releases include no GLBs, no GLTF loader, and no mesh renderer. Mesh
-releases emit each referenced GLB once and load all of them before play starts.
-Both are static, editor-free builds that need no backend.
+releases package each referenced GLB once as release content and load all of them,
+in parallel and verified, before play starts. Both are static, editor-free builds;
+see [content delivery](content-delivery.md) for how their content is served.
 
 ## Course package format
 

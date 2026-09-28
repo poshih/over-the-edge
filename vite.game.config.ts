@@ -1,17 +1,14 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { realpathSync, statSync } from 'node:fs';
+import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
-import { DEFAULT_GAME_SETTINGS, GAME_SETTINGS_LIMITS, validateGameSettings } from './src/game-settings';
-import { SPRITE_TARGET_IDS, VISUAL_PART_IDS } from './src/character';
-import { spriteBundle } from './build/sprite-bundle';
 import { gameTitle } from './build/game-title.ts';
-import { courseBundle } from './build/course-bundle';
-import { gameProject } from './build/project-bundle';
-import { loadReleaseProject } from './build/project-release';
+import { DEFAULT_CONTENT_URL, gameRelease } from './build/release';
+import { loadFileRelease, loadProjectRelease } from './build/release-input';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
+const FILE_INPUTS = ['GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES'] as const;
 
 function projectJson(variable: string): string | null {
   const requested = process.env[variable];
@@ -22,39 +19,32 @@ function projectJson(variable: string): string | null {
   return path;
 }
 
-function gameJson<T>(options: {
-  variable: string;
-  moduleId: string;
-  defaults: T;
-  fileBytes: number;
-  validate: (value: unknown) => T;
-  // An already-validated value from GAME_PROJECT, used instead of the variable's file.
-  value?: T;
-}): Plugin {
-  const path = options.value === undefined ? projectJson(options.variable) : null;
-  const resolvedModule = `\0${options.moduleId}`;
-  return {
-    name: `${options.moduleId.slice('virtual:'.length)}-data`,
-    resolveId(id) { if (id === options.moduleId) return resolvedModule; },
-    load(id) {
-      if (id !== resolvedModule) return;
-      let data = options.value ?? options.defaults;
-      if (path !== null) {
-        if (statSync(path).size > options.fileBytes) throw new Error(`${options.variable} exceeds the file size limit.`);
-        this.addWatchFile(path);
-        data = options.validate(JSON.parse(readFileSync(path, 'utf8')));
-      }
-      return `export default ${JSON.stringify(data)};`;
-    },
-    handleHotUpdate(context) {
-      if (context.file === path) {
-        const module = context.server.moduleGraph.getModuleById(resolvedModule);
-        if (module) context.server.moduleGraph.invalidateModule(module);
-        context.server.ws.send({ type: 'full-reload' });
-        return [];
-      }
-    },
-  };
+// Where the shell loads its content: an HTTP(S) URL or a path relative to the page, ending in /.
+function contentUrl(): string {
+  const value = process.env.GAME_CONTENT_URL ?? DEFAULT_CONTENT_URL;
+  let url: URL | null = null;
+  try { url = new URL(value, 'https://shell.invalid/game/'); } catch { url = null; }
+  if (url === null || !value.endsWith('/') || /[\s\\]/.test(value) || !['https:', 'http:'].includes(url.protocol) ||
+    url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
+    throw new Error('GAME_CONTENT_URL must be an HTTP(S) URL or a relative path ending in /, without credentials, query or fragment.');
+  }
+  return value;
+}
+
+// The game's own module, bundled into the shell and started before content loads.
+function gameModule(): string | null {
+  const requested = process.env.GAME_MODULE;
+  if (requested === undefined) return null;
+  let path: string;
+  try {
+    path = realpathSync(resolve(project, requested));
+  } catch {
+    throw new Error(`GAME_MODULE ${requested} does not exist.`);
+  }
+  if (!path.startsWith(project) || !['.ts', '.mts', '.js', '.mjs'].includes(extname(path)) || !statSync(path).isFile()) {
+    throw new Error('GAME_MODULE must name a .ts or .js module inside this project.');
+  }
+  return path;
 }
 
 function gameOnlyBoundary(): Plugin {
@@ -79,37 +69,36 @@ function gameOnlyBoundary(): Plugin {
   };
 }
 
-// GAME_PROJECT is a complete game; its parts cannot also come from the per-file inputs.
-function releaseProject() {
-  const requested = process.env.GAME_PROJECT;
-  if (requested === undefined) return null;
-  for (const variable of ['GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES']) {
-    if (process.env[variable] !== undefined) throw new Error(`${variable} cannot be combined with GAME_PROJECT; the project already contains it.`);
-  }
-  return loadReleaseProject(project, requested);
-}
-
 export default defineConfig(({ mode }) => {
-  const release = releaseProject();
-  const levelPath = projectJson('GAME_LEVEL');
+  // GAME_PROJECT is a complete game; its parts cannot also come from the per-file inputs.
+  const requested = process.env.GAME_PROJECT;
+  if (requested !== undefined) {
+    for (const variable of FILE_INPUTS) {
+      if (process.env[variable] !== undefined) throw new Error(`${variable} cannot be combined with GAME_PROJECT; the project already contains it.`);
+    }
+  }
+  const selectedMode = process.env.GAME_ART_MODE;
+  if (selectedMode !== undefined && selectedMode !== 'shapes' && selectedMode !== 'meshes') throw new Error('GAME_ART_MODE must be shapes or meshes.');
+  const files = {
+    level: projectJson('GAME_LEVEL'), settings: projectJson('GAME_SETTINGS'),
+    sprites: projectJson('GAME_SPRITES'), alternateSprites: projectJson('GAME_ALTERNATE_SPRITES'),
+  };
+  const release = requested === undefined ? null : loadProjectRelease(project, requested, selectedMode);
   return {
     root: resolve(project, 'play'),
     envDir: project,
-    publicDir: release === null ? resolve(project, 'public') : false,
+    // The shell carries no public files: content, including media, is packaged separately.
+    publicDir: false,
     resolve: { alias: { '/src': resolve(project, 'src') } },
     plugins: [
       gameTitle({ mode, envDir: project, projectTitle: release?.title }),
-      courseBundle(release === null ? levelPath : { value: release.course }, process.env.GAME_ART_MODE),
-      gameJson({
-        variable: 'GAME_SETTINGS', moduleId: 'virtual:game-settings', defaults: DEFAULT_GAME_SETTINGS,
-        fileBytes: GAME_SETTINGS_LIMITS.fileBytes, validate: validateGameSettings, value: release?.settings,
+      gameRelease({
+        load: release === null ? () => loadFileRelease(project, files, selectedMode) : () => release,
+        contentUrl: contentUrl(),
+        module: gameModule(),
+        watch: release === null ? Object.values(files).filter((path): path is string => path !== null) : release.files,
+        restartOnChange: release !== null,
       }),
-      spriteBundle({
-        path: projectJson('GAME_SPRITES'), alternatePath: projectJson('GAME_ALTERNATE_SPRITES'),
-        documents: release === null ? undefined : { primary: release.primary, alternate: release.alternate },
-        anchors: VISUAL_PART_IDS, targets: SPRITE_TARGET_IDS,
-      }),
-      gameProject({ release, levelPath }),
       gameOnlyBoundary(),
     ],
     build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },

@@ -5,6 +5,8 @@ import type { CharacterModelUsage } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
 import { fetchModelBlob, ModelError } from './model-data';
 import { loadVisualModel } from './visual-model';
+import { isContentRef } from './content-ref';
+import type { ContentLoader } from './content-ref';
 
 function modelFailure(model: CharacterModel, error: unknown): unknown {
   if (!(error instanceof ModelError)) return error;
@@ -13,15 +15,18 @@ function modelFailure(model: CharacterModel, error: unknown): unknown {
 }
 
 // Every load runs the same typed inspection as release builds before GLTFLoader parses the model.
-export function createCharacterModelLoader(): CharacterModelLoader {
+// `content` loads a release's packaged models; hosts without it reject content: sources.
+export function createCharacterModelLoader(options: { content?: ContentLoader } = {}): CharacterModelLoader {
   return {
     async load(model: CharacterModel, usage: CharacterModelUsage, signal: AbortSignal): Promise<LoadedCharacterModel> {
       signal.throwIfAborted();
       let data: ArrayBuffer;
       try {
         const embedded = embeddedModel(model.source);
-        data = embedded !== null ? embedded.buffer
-          : await (await fetchModelBlob(model.source, signal, 'character')).arrayBuffer();
+        if (embedded !== null) data = embedded.buffer;
+        else if (!isContentRef(model.source)) data = await (await fetchModelBlob(model.source, signal, 'character')).arrayBuffer();
+        else if (options.content === undefined) throw new CharacterModelError('invalid-model', `Character model "${model.name}" is packaged release content, which this host cannot load.`);
+        else data = (await options.content(model.source, signal)).buffer;
       } catch (error) {
         throw modelFailure(model, error);
       }

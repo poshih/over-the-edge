@@ -1,12 +1,13 @@
 import { AUDIO_CUES, DEFAULT_AUDIO } from './audio-settings';
 import type { AudioClip, AudioSettings, GameCue } from './audio-settings';
-import { MEDIA_LIMITS } from './media';
+import { urlMediaHost } from './media-host';
+import type { MediaHost } from './media-host';
 
 const IMPACT_INTERVAL = 0.07;
 const UNLOCK_EVENTS = ['pointerdown', 'keydown', 'touchend'] as const;
 
 interface LoadedSound {
-  readonly url: string;
+  readonly source: string;
   bytes: Promise<ArrayBuffer | null> | null;
   buffer: AudioBuffer | null;
   decoding: Promise<AudioBuffer | null> | null;
@@ -19,7 +20,7 @@ interface LoadedSound {
  */
 export class AudioDirector {
   private settings: AudioSettings = DEFAULT_AUDIO;
-  private resolve: (source: string) => string;
+  private media: MediaHost;
   private readonly onError: (message: string) => void;
   private readonly sounds = new Map<string, LoadedSound>();
   private readonly reported = new Set<string>();
@@ -29,6 +30,9 @@ export class AudioDirector {
   private output: GainNode | null = null;
   private music: HTMLAudioElement | null = null;
   private musicSource: string | null = null;
+  // Whether the music element has its streamed URL yet; it plays only once it has.
+  private musicReady = false;
+  private musicRequest = 0;
   private unlocked = false;
   private paused = true;
   private lastImpact = -Infinity;
@@ -37,12 +41,13 @@ export class AudioDirector {
 
   constructor(options: {
     settings: AudioSettings;
-    resolve?: (source: string) => string;
+    // Loads sounds and streams music; by default sources are URLs.
+    media?: MediaHost;
     // Sources used by authored play-sound events, preloaded with the cues.
     sounds?: readonly string[];
     onError?: (message: string) => void;
   }) {
-    this.resolve = options.resolve ?? ((source) => source);
+    this.media = options.media ?? urlMediaHost((source) => source);
     this.onError = options.onError ?? (() => {});
     for (const type of UNLOCK_EVENTS) {
       window.addEventListener(type, this.unlockHandler, { capture: true, signal: this.lifecycle.signal });
@@ -59,10 +64,10 @@ export class AudioDirector {
     this.syncMusic();
   }
 
-  // Changing the resolver (for example when another project opens) reloads sources lazily.
-  setResolver(resolve: (source: string) => string): void {
+  // Changing the media host (for example when another project opens) reloads sources lazily.
+  setMedia(media: MediaHost): void {
     if (this.disposed) return;
-    this.resolve = resolve;
+    this.media = media;
     this.sounds.clear();
     this.musicSource = null;
     this.setSettings(this.settings);
@@ -100,7 +105,7 @@ export class AudioDirector {
   inspect() {
     return {
       unlocked: this.unlocked, paused: this.paused, played: this.played,
-      loaded: [...this.sounds.values()].filter((sound) => sound.buffer !== null).map((sound) => sound.url),
+      loaded: [...this.sounds.values()].filter((sound) => sound.buffer !== null).map((sound) => sound.source),
       music: this.music === null ? null : { source: this.musicSource, playing: !this.music.paused, volume: this.music.volume },
     };
   }
@@ -132,27 +137,22 @@ export class AudioDirector {
   }
 
   private sound(source: string): LoadedSound {
-    const url = this.resolve(source);
-    let sound = this.sounds.get(url);
+    let sound = this.sounds.get(source);
     if (sound === undefined) {
-      sound = { url, bytes: null, buffer: null, decoding: null };
-      this.sounds.set(url, sound);
-      sound.bytes = this.fetchBytes(url);
+      sound = { source, bytes: null, buffer: null, decoding: null };
+      this.sounds.set(source, sound);
+      sound.bytes = this.load(source);
       if (this.context !== null) void this.decode(sound);
     }
     return sound;
   }
 
-  private async fetchBytes(url: string): Promise<ArrayBuffer | null> {
+  private async load(source: string): Promise<ArrayBuffer | null> {
     try {
-      const response = await fetch(url, { credentials: 'same-origin', signal: this.lifecycle.signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const bytes = await response.arrayBuffer();
-      if (bytes.byteLength > MEDIA_LIMITS.bytes) throw new Error('the file is too large');
-      return bytes;
+      return await this.media.load(source, this.lifecycle.signal);
     } catch (error) {
       if (this.disposed) return null;
-      this.report(url, error);
+      this.report(source, error);
       return null;
     }
   }
@@ -168,7 +168,7 @@ export class AudioDirector {
         sound.buffer = await context.decodeAudioData(bytes.slice(0));
         return sound.buffer;
       } catch (error) {
-        if (!this.disposed) this.report(sound.url, error);
+        if (!this.disposed) this.report(sound.source, error);
         return null;
       }
     });
@@ -197,33 +197,51 @@ export class AudioDirector {
     if (clip === null) {
       this.music?.pause();
       this.musicSource = null;
+      this.musicReady = false;
+      this.musicRequest++;
       return;
     }
-    const url = this.resolve(clip.source);
     if (this.music === null) {
       this.music = new Audio();
       this.music.loop = true;
       this.music.preload = 'auto';
-      this.music.addEventListener('error', () => this.report(this.musicSource ?? url, new Error('the music could not be loaded')),
-        { signal: this.lifecycle.signal });
+      this.music.addEventListener('error', () => {
+        if (this.musicReady) this.report(this.musicSource ?? clip.source, new Error('the music could not be loaded'));
+      }, { signal: this.lifecycle.signal });
     }
-    if (this.musicSource !== url) {
-      this.musicSource = url;
-      this.music.src = url;
+    if (this.musicSource !== clip.source) {
+      const music = this.music;
+      const source = clip.source;
+      const request = ++this.musicRequest;
+      this.musicSource = source;
+      this.musicReady = false;
+      music.pause();
+      music.removeAttribute('src');
+      this.media.stream(source, this.lifecycle.signal).then((stream) => {
+        if (request !== this.musicRequest || this.disposed) return;
+        if (stream.crossOrigin === null) music.removeAttribute('crossorigin');
+        else music.crossOrigin = stream.crossOrigin;
+        music.src = stream.url;
+        this.musicReady = true;
+        this.syncMusic();
+      }, (error: unknown) => {
+        if (request === this.musicRequest && !this.disposed) this.report(source, error);
+      });
     }
     this.music.volume = Math.min(1, clip.volume * this.settings.volume);
-    if (this.unlocked && !this.paused) {
+    if (this.musicReady && this.unlocked && !this.paused) {
+      const source = clip.source;
       void this.music.play().catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) this.report(url, error);
+        if (!(error instanceof DOMException && error.name === 'AbortError')) this.report(source, error);
       });
     } else {
       this.music.pause();
     }
   }
 
-  private report(url: string, error: unknown): void {
-    if (this.reported.has(url)) return;
-    this.reported.add(url);
-    this.onError(`Audio ${url} could not play: ${error instanceof Error ? error.message : String(error)}.`);
+  private report(source: string, error: unknown): void {
+    if (this.reported.has(source)) return;
+    this.reported.add(source);
+    this.onError(`Audio ${source} could not play: ${error instanceof Error ? error.message : String(error)}.`);
   }
 }

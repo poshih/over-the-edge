@@ -1,6 +1,11 @@
 # Feature request: load every game-release asset from a CDN through the game's own authentication
 
-**Date:** 2026-09-28 · **Baseline:** `95b9551` · **Status:** requested, not started.
+**Date:** 2026-09-28 · **Baseline:** `95b9551` · **Status:** implemented; see
+[content delivery](docs/content-delivery.md). Besides pinning the manifest, the shell lists every path of the `game`
+group, so one grant covers the group before the manifest arrives; each path names its file's SHA-256 and the manifest
+gives every other file's size. Content sources in the manifest are `content:<path>` references. `failed()` returns a
+promise: resolving it retries the whole load, rejecting it stops with that error shown. Published releases keep their
+content in `releases/<id>.content/`.
 
 A game with paid or account-bound content needs every asset of its release to reach only the players its own backend
 allows, such as signed-in accounts with the right entitlement. Games identify players in different ways, so the engine

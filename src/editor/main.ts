@@ -22,6 +22,7 @@ import { createUI } from './ui';
 import { createSpriteEditor } from './sprite-editor';
 import type { EditorAction, PracticeId, WorkshopState } from './ui-types';
 import { AudioDirector } from '../audio';
+import { urlMediaHost } from '../media-host';
 import { DEFAULT_AUDIO } from '../audio-settings';
 import { isDarkSky } from '../theme';
 import { ProjectSession } from './project-session';
@@ -43,13 +44,15 @@ let editing = false;
 // Media resolve through the open project, which is created once the editors exist.
 let resolveMedia = (source: string): string => source;
 let mediaVersion = 0;
+// The Workshop plays media from the open project's files, or from the URLs a level names.
+const media = urlMediaHost((source) => resolveMedia(source));
 const audio = new AudioDirector({
-  settings: DEFAULT_AUDIO, resolve: (source) => resolveMedia(source), onError: (message) => ui.notice(message, 'error'),
+  settings: DEFAULT_AUDIO, media, onError: (message) => ui.notice(message, 'error'),
 });
 const game = new Game({
   canvas, fatal, eventMount: mount, level: level.definition(),
   characterModels: createCharacterModelLoader(),
-  resolveMedia: (source) => resolveMedia(source),
+  media,
   onCue: (cue) => audio.handle(cue),
   onAction: perform,
   onNotice: (message) => ui.notice(message, 'error'),
@@ -156,7 +159,7 @@ const project = new ProjectSession({
       // Replaced or re-added files keep their paths, so drop sounds cached for the old files.
       if (look.mediaVersion !== mediaVersion) {
         mediaVersion = look.mediaVersion;
-        audio.setResolver(look.resolveMedia);
+        audio.setMedia(urlMediaHost(look.resolveMedia));
       }
       game.setTheme(look.theme);
       ui.setSceneTone(isDarkSky(look.theme));

@@ -269,9 +269,9 @@ A [game project](projects.md) stores the same two profiles as
 them exactly like these variables.
 
 The build validates both profiles and each character GLB with the checks above,
-failing on any error. Each distinct GLB and PNG becomes one hashed asset, outside
-executable JavaScript. A release that uses models includes the GLB loader; one
-without models omits it.
+failing on any error. Each distinct GLB and PNG becomes one content file, named by its
+SHA-256, outside the release's shell; see [content delivery](content-delivery.md). A
+release that uses models includes the GLB loader; one without models omits it.
 
 Players choose **CHARACTER: 2D / 3D** in the release's corner control. The
 labels follow each profile's type, numbered if they match. The choice is stored

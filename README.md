@@ -68,12 +68,22 @@ npm run build:game
 npm run preview:game
 ```
 
-`npm run build:game` writes the game-only release to **`dist-game/`**, and
-`npm run preview:game` serves it locally at **http://localhost:4175**.
-`npm run dev:game` uses **http://localhost:5182**. Neither local server deploys
-anything; deploy `dist-game/` with `wrangler.game.toml` as described below.
+`npm run build:game` writes the game-only release as a public **shell** in
+**`dist-game/`** (the page, code, styles and icon) and its **content** in
+**`dist-game-content/`**: the level, settings, profiles, theme, HUD, audio settings,
+images, models and media, each file named by its SHA-256. The shell holds no content;
+it loads the content from **`GAME_CONTENT_URL`** (default `content/`, beside the shell)
+and verifies every file. `npm run preview:game` serves both locally at
+**http://localhost:4175**. `npm run dev:game` uses **http://localhost:5182**. Neither
+local server deploys anything; deploy both outputs as described below.
 The existing `npm run build` and `wrangler.toml` continue to target the
 editor/workshop in `dist/`, not this separate release.
+
+A game whose content only some players may load bundles its own module with
+**`GAME_MODULE`**. The module signs players in with the game's own identity management
+and grants the release access to its content, typically short-lived signed CDN URLs
+from the game's backend; the engine never sees accounts or credentials. See
+[content delivery](docs/content-delivery.md).
 
 Set **`GAME_TITLE`** to use your own game name:
 
@@ -100,17 +110,20 @@ A command-line `GAME_TITLE` overrides the file. It can be combined with
 `GAME_LEVEL`, `GAME_SETTINGS`, `GAME_SPRITES`, and `GAME_ALTERNATE_SPRITES`. The setting changes display
 titles, not repository names, browser storage keys, or deployment identifiers.
 
-To deploy the game-only release, `wrangler.game.toml` uploads only `dist-game/`
-to a separate **gettingover-play** Worker:
+To deploy the game-only release, `wrangler.game.toml` uploads only the shell,
+`dist-game/`, to a separate **gettingover-play** Worker. Upload `dist-game-content/`
+to the static host or CDN that serves your content URL, with CORS headers for the
+shell's origin, and build with that URL:
 
 ```sh
-npm run build:game
+GAME_CONTENT_URL=https://cdn.example.com/my-game/ npm run build:game
 npx wrangler deploy --config wrangler.game.toml --keep-vars
+# then upload dist-game-content/ to https://cdn.example.com/my-game/
 ```
 
-This leaves the Workshop Worker and its domain unchanged. A custom domain is
-optional; attach a separate one to **gettingover-play** in your Cloudflare
-account after deploying.
+Deploying the shell alone never publishes content. This leaves the Workshop Worker
+and its domain unchanged. A custom domain is optional; attach a separate one to
+**gettingover-play** in your Cloudflare account after deploying.
 
 To include an authored course in the game-only release, export its JSON from the
 Level tab, place that file inside the project (for example
@@ -121,8 +134,9 @@ GAME_LEVEL=levels/my-level.json npm run build:game
 ```
 
 Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
-validated and bundled at build time; the game needs no editor or external level
-service. Level exports do not contain gameplay settings, sprite layouts,
+validated and packaged as content at build time; the game needs no editor or external
+level service. The `/media/` files its events play are packaged from `public/media/`,
+and a game build fails on any source it cannot package, such as an external URL. Level exports do not contain gameplay settings, sprite layouts,
 private character GLBs, or IK profiles; a [project](docs/projects.md) holds all of them. To dress terrain with meshes from your
 own art pipeline, combine the level JSON and your GLBs into a course package with
 `npm run pack:course`, then pass the package as `GAME_LEVEL`. `GAME_ART_MODE=shapes`
@@ -142,7 +156,7 @@ GAME_LEVEL=levels/my-level.json GAME_SETTINGS=profiles/my-game.json npm run buil
 
 Omitting `GAME_SETTINGS` uses the built-in game settings: a **1.5 m** handle
 that slides up to **1.15 m** past the shoulder hinge, and a **2.65 m** target radius
-around the hinge (the hammer's full reach). A supplied profile is validated and embedded in the game; an invalid,
+around the hinge (the hammer's full reach). A supplied profile is validated and packaged with the content; an invalid,
 missing, oversized, or outside-project file fails rather than reverting to
 defaults. Development reloads when the selected file changes. Browser-local
 saves do not change a release unless you export and select one.
@@ -170,7 +184,8 @@ boundary.
 
 `npm run verify:game` exercises the release, custom-course/sprite/aim-flipbook/settings/two-character builds,
 development entry, and editor-dependency rejection in isolation. `npm run verify:art`
-does the same for course packages and terrain meshes.
+does the same for course packages and terrain meshes, and `npm run verify:content`
+for the shell and content split, grants, verification and the module boundary.
 
 ### Complete games from a project
 

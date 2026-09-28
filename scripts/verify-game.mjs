@@ -9,13 +9,13 @@ import { dragTouch } from './verify-mobile.mjs';
 import { modelFixture, texturePng } from './verify-appearance.mjs';
 import { solidPng } from './verify-flipbook.mjs';
 import { hammerGlb, HUMANOID_BONE_MAP, potGlb, skinnedAvatarGlb } from './character-fixtures.mjs';
+import { releaseContent, shellCode } from './release-fixtures.mjs';
 
 const TOUCH_DRAG_PIXELS = 40;
 const TOUCH_PIXELS_PER_REACH = 100;
-const SETTINGS_MODULE = '\0virtual:game-settings';
-const SPRITES_MODULE = '\0virtual:game-sprites';
-const ALTERNATE_MODULE = '\0virtual:game-alternate-sprites';
+const CONTENT_MODULE = '\0virtual:game-content';
 const MODELS_MODULE = '\0virtual:game-character-models';
+const CONTENT_FILE = /^\/content\/game\/[0-9a-f]{64}\.(png|glb)$/;
 const CHARACTER_KEY = 'over-the-edge:play:character';
 const FLIPBOOK_FRAMES = 3;
 const DIRECTIONS = ['right', 'up-right', 'up', 'up-left', 'left', 'down-left', 'down', 'down-right'];
@@ -112,21 +112,13 @@ function bundleModules(bundle) {
     .flatMap(file => Object.keys(file.modules)));
 }
 
-async function settingsBuild(expected, buildOptions) {
-  let embedded = false;
-  const bundle = await build({
-    configFile, logLevel: 'silent', build: buildOptions,
-    plugins: [{
-      name: 'release-settings-proof', enforce: 'pre',
-      transform(code, id) {
-        if (id !== SETTINGS_MODULE) return;
-        assert.deepEqual(JSON.parse(code.slice('export default '.length, -1)), expected);
-        embedded = true;
-      },
-    }],
-  });
+async function settingsBuild(expected, outDir) {
+  const bundle = await build({ configFile, logLevel: 'silent', build: { outDir } });
   const modules = bundleModules(bundle);
-  assert.ok(embedded && modules.includes(SETTINGS_MODULE), 'The release must embed its validated settings.');
+  const { manifest } = await releaseContent(outDir);
+  assert.deepEqual(manifest.settings, expected, 'The release content must carry its validated settings.');
+  assert.ok(!shellCode(bundle).includes(JSON.stringify(expected.physics)), 'Settings are content, not shell code.');
+  assert.ok(modules.includes(CONTENT_MODULE));
   assert.ok(!modules.some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
 }
 
@@ -206,7 +198,7 @@ async function verifySettings(page) {
   const { defaults, fileBytes } = await withSettingsDevelopment(page, async (server, address) => {
     const shared = await server.ssrLoadModule('/src/game-settings.ts');
     const defaults = shared.DEFAULT_GAME_SETTINGS;
-    await settingsBuild(defaults, { write: false });
+    await settingsBuild(defaults, join(temporary, 'default-settings-game'));
     assert.equal((await page.goto(address, { waitUntil: 'networkidle' })).status(), 200);
     assert.deepEqual(await runtimeSettings(page, server), defaults);
     report.settings.defaults = { build: true, development: true, profile: defaults };
@@ -222,7 +214,7 @@ async function verifySettings(page) {
   await writeFile(settingsPath, JSON.stringify(selected));
   process.env.GAME_SETTINGS = relative(root, settingsPath);
   const output = join(temporary, 'settings-game');
-  await settingsBuild(selected, { outDir: output });
+  await settingsBuild(selected, output);
   const release = await preview({
     configFile, logLevel: 'silent', build: { outDir: output },
     preview: { host: '127.0.0.1', port: 0, strictPort: true },
@@ -312,7 +304,7 @@ async function verifySettings(page) {
     await assert.rejects(build({ configFile, logLevel: 'silent', build: { write: false } }), scenario.error,
       `${scenario.name} must fail the build instead of selecting defaults.`);
     const development = () => withSettingsDevelopment(page, async (_server, address) => {
-      const response = await fetch(`${address}@id/__x00__virtual:game-settings`);
+      const response = await fetch(`${address}@id/__x00__virtual:game-content`);
       assert.equal(response.status, 500, `${scenario.name} must not serve default settings.`);
       assert.match(await response.text(), scenario.error);
     });
@@ -383,22 +375,26 @@ async function verifyCharacterRelease(page) {
     configFile, logLevel: 'silent', build: { outDir: output },
     plugins: [{
       name: 'release-character-proof', enforce: 'pre',
-      transform(code, id) { if ([SPRITES_MODULE, ALTERNATE_MODULE, MODELS_MODULE].includes(id)) modules.set(id, code); },
+      transform(code, id) { if (id === MODELS_MODULE) modules.set(id, code); },
     }],
   });
-  const outputs = (Array.isArray(release) ? release : [release]).flatMap(result => result.output);
-  const glbs = outputs.filter(file => file.type === 'asset' && /character-[^/]+\.glb$/.test(file.fileName));
-  assert.equal(glbs.length, 3, 'The avatar, hammer and pot GLBs must be separate hashed assets.');
-  assert.equal(outputs.filter(file => file.type === 'asset' && /sprite-[^/]+\.png$/.test(file.fileName)).length, 2);
+  const { files, manifest } = await releaseContent(output);
+  const glbs = [...files.keys()].filter(path => path.endsWith('.glb'));
+  assert.equal(glbs.length, 3, 'The avatar, hammer and pot GLBs must be separate content files.');
+  assert.equal([...files.keys()].filter(path => path.endsWith('.png')).length, 2);
   const heroModels = heroProfile().models.map(model => model.source.slice(model.source.indexOf(',') + 1));
-  assert.ok(outputs.filter(file => file.type === 'chunk').every(file => heroModels.every(model => !file.code.includes(model.slice(0, 4096)))),
-    'Character GLB bytes must not be embedded in executable JavaScript.');
-  assert.match(modules.get(ALTERNATE_MODULE), /schemaVersion:12,.*grips:\{"placement":"sliding".*arms:\{"left":\{"upper":0\.5,.*models:\[.*import\.meta\.ROLLUP_FILE_URL_.*avatar:.*hammer:.*pot:.*shading:/s);
+  const code = shellCode(release);
+  assert.ok(heroModels.every(model => !code.includes(model.slice(0, 4096))), 'Character GLB bytes must not be in the shell.');
+  const hero = manifest.characters.alternate;
+  assert.equal(hero.schemaVersion, 12);
+  assert.deepEqual([hero.grips, hero.arms], [heroProfile().grips, heroProfile().arms]);
+  assert.ok(hero.models.every(model => /^content:game\/[0-9a-f]{64}\.glb$/.test(model.source)), 'Profile models become packaged sources.');
+  assert.deepEqual([hero.avatar.model, hero.hammer.model, hero.pot.model, hero.shading.mode], ['avatar', 'hammer', 'pot', 'cel']);
   assert.match(modules.get(MODELS_MODULE), /createCharacterModelLoader/);
   const releaseModules = bundleModules(release);
   assert.ok(!releaseModules.some(id => id.includes('/src/editor/')), 'The character release contains no editor modules.');
   assert.ok(releaseModules.some(id => id.endsWith('/src/character-model-loader.ts')));
-  const result = { assets: glbs.map(file => file.fileName), toggles: 0 };
+  const result = { assets: glbs, toggles: 0 };
 
   const server = await preview({
     configFile, logLevel: 'silent', build: { outDir: output }, preview: { host: '127.0.0.1', port: 0, strictPort: true },
@@ -622,6 +618,7 @@ try {
   const modules = bundleModules(bundle);
   assert.ok(modules.some(id => id.endsWith('/src/play.ts')));
   assert.ok(!modules.some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
+  assert.ok(!modules.some(id => id.endsWith('/src/default-level.ts') || id.endsWith('/src/course.ts')), 'Even the built-in course is content.');
   const results = Array.isArray(bundle) ? bundle : [bundle];
   const styles = results.flatMap(result => result.output.filter(file =>
     file.type === 'asset' && file.fileName.endsWith('.css')));
@@ -651,7 +648,7 @@ try {
   let spriteRequests = null;
   page.on('request', request => {
     const path = new URL(request.url()).pathname;
-    if (spriteRequests !== null && /\/sprite-[^/]+\.png$/.test(path)) spriteRequests.add(path);
+    if (spriteRequests !== null && CONTENT_FILE.test(path) && path.endsWith('.png')) spriteRequests.add(path);
   });
   let flipbookRelease = null;
   const ready = () => page.waitForFunction(() => {
@@ -665,10 +662,9 @@ try {
       process.env.GAME_LEVEL = levelPath;
       const custom = await build({ configFile, logLevel: 'silent', build: { outDir: customOutput } });
       assert.ok(!bundleModules(custom).some(id => id.endsWith('/src/course.ts') || id.endsWith('/src/default-level.ts')));
-      const outputs = Array.isArray(custom) ? custom : [custom];
-      const code = outputs.flatMap(result => result.output.filter(file => file.type === 'chunk').map(file => file.code)).join('\n');
-      assert.ok(code.includes('RELEASE_LEVEL_SENTINEL'));
-      assert.ok(!/["']ascent["']/.test(code), 'A custom release must replace the built-in course.');
+      const { manifest } = await releaseContent(customOutput);
+      assert.ok(!shellCode(custom).includes('RELEASE_LEVEL_SENTINEL'), 'The level is content, not shell code.');
+      assert.deepEqual(manifest.level.labels, customLevel(0).labels, 'A custom release must replace the built-in course.');
     }
     if (mode === 'sprites') {
       const source = `data:image/png;base64,${texturePng().toString('base64')}`;
@@ -686,11 +682,9 @@ try {
       }));
       process.env.GAME_SPRITES = spritePath;
       const skin = await build({ configFile, logLevel: 'silent', build: { outDir: customOutput } });
-      const outputs = (Array.isArray(skin) ? skin : [skin]).flatMap(result => result.output);
-      assert.equal(outputs.filter(file => file.type === 'asset' && file.fileName.endsWith('.png')).length, 1,
-        'Repeated PNG contents must share one hashed release asset.');
-      assert.ok(outputs.filter(file => file.type === 'chunk').every(file => !file.code.includes(source)),
-        'Uploaded PNG bytes must not be in executable JavaScript.');
+      const { files } = await releaseContent(customOutput);
+      assert.equal([...files.keys()].filter(path => path.endsWith('.png')).length, 1, 'Repeated PNG contents must share one content file.');
+      assert.ok(!shellCode(skin).includes(source.slice(source.indexOf(',') + 1, 4096)), 'Uploaded PNG bytes must not be in the shell.');
       assert.ok(!bundleModules(skin).some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
     }
     if (mode === 'flipbook') {
@@ -710,21 +704,14 @@ try {
       await writeFile(levelPath, JSON.stringify(customLevel(0)));
       await writeFile(flipbookPath, JSON.stringify(flipbook));
       process.env.GAME_SPRITES = flipbookPath;
-      let virtualModule = null;
-      const release = await build({
-        configFile, logLevel: 'silent', build: { outDir: customOutput },
-        plugins: [{
-          name: 'release-flipbook-proof', enforce: 'pre',
-          transform(code, id) { if (id === SPRITES_MODULE) virtualModule = code; },
-        }],
-      });
-      const outputs = (Array.isArray(release) ? release : [release]).flatMap(result => result.output);
-      assert.equal(outputs.filter(file => file.type === 'asset' && /sprite-[^/]+\.png$/.test(file.fileName)).length, FLIPBOOK_FRAMES,
-        'Every flipbook frame must become its own hashed release asset.');
-      assert.ok(virtualModule?.includes('schemaVersion:12,'), 'The release must embed the flipbook document.');
-      assert.deepEqual(JSON.parse(virtualModule.match(/layers:(\[.*\]),skeleton:/s)[1]), flipbook.layers,
-        'GAME_SPRITES must carry the flipbook layer without loss.');
-      assert.equal(virtualModule.match(/import\.meta\.ROLLUP_FILE_URL_/g).length, FLIPBOOK_FRAMES);
+      const release = await build({ configFile, logLevel: 'silent', build: { outDir: customOutput } });
+      const { files, manifest } = await releaseContent(customOutput);
+      assert.equal([...files.keys()].filter(path => path.endsWith('.png')).length, FLIPBOOK_FRAMES,
+        'Every flipbook frame must become its own content file.');
+      const document = manifest.characters.primary;
+      assert.equal(document.schemaVersion, 12, 'The release must carry the flipbook document.');
+      assert.deepEqual(document.layers, flipbook.layers, 'GAME_SPRITES must carry the flipbook layer without loss.');
+      assert.equal(document.images.filter(image => /^content:game\//.test(image.source)).length, FLIPBOOK_FRAMES);
       assert.ok(!bundleModules(release).some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
       spriteRequests = new Set();
     }

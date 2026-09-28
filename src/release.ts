@@ -1,0 +1,200 @@
+// A game release's boot: it starts the game's module, loads the content through the module's access
+// (or public access), builds the game from the manifest and hands the module its API. Nothing in
+// the release decides who may load what; a refusal reaches the module, which may retry.
+import type { AudioDirector } from './audio';
+import { bootSources, levelSoundSources } from './content';
+import type { ContentManifest, ContentPins } from './content';
+import type { ContentLoader } from './content-ref';
+import { ContentError, ContentSession, publicAccess } from './content-session';
+import type { ContentAccess } from './content-session';
+import type { CharacterModelLoader } from './character-model-types';
+import type { ArtResource } from './art-types';
+import type { AppearanceSource } from './appearance-loader';
+import type { VisualBinding, VisualPartId } from './character';
+import { Game } from './game';
+import type { MediaHost } from './media-host';
+import { createPlayUI } from './play-ui';
+import type { ReleaseApi, ReleaseHost, ReleaseModule, StartRelease } from './release-module';
+
+// Code the shell includes only when its content needs it, chosen at build time.
+export interface ReleaseCode {
+  readonly pins: ContentPins;
+  readonly createCharacterModels: ((options: { content: ContentLoader }) => CharacterModelLoader) | null;
+  readonly loadCourseArt: ((game: Game, assets: readonly ArtResource[], content: ContentLoader, signal: AbortSignal) => Promise<void>) | null;
+  readonly loadAppearance: ((visuals: ReadonlyMap<VisualPartId, VisualBinding>, parts: readonly AppearanceSource[],
+    options: { signal?: AbortSignal; content?: ContentLoader }) => Promise<unknown>) | null;
+  readonly AudioDirector: typeof AudioDirector | null;
+  readonly start: StartRelease | null;
+}
+
+interface Loaded {
+  readonly session: ContentSession;
+  readonly manifest: ContentManifest;
+  readonly game: Game;
+  readonly audio: AudioDirector | null;
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+export class Release {
+  private readonly canvas: HTMLCanvasElement;
+  private readonly mount: HTMLElement;
+  private readonly fatal: HTMLElement;
+  private readonly code: ReleaseCode;
+  private readonly lifecycle = new AbortController();
+  private readonly ui: ReturnType<typeof createPlayUI>;
+  private module: ReleaseModule | null = null;
+  private loading: { session: ContentSession; game: Game | null; audio: AudioDirector | null } | null = null;
+  private loaded: Loaded | null = null;
+
+  constructor(elements: { canvas: HTMLCanvasElement; mount: HTMLElement; fatal: HTMLElement }, code: ReleaseCode) {
+    this.canvas = elements.canvas;
+    this.mount = elements.mount;
+    this.fatal = elements.fatal;
+    this.code = code;
+    this.ui = createPlayUI({ mount: elements.mount });
+  }
+
+  async run(): Promise<void> {
+    try {
+      const contentUrl = new URL(this.code.pins.contentUrl, document.baseURI).href;
+      const host: ReleaseHost = Object.freeze({
+        mount: this.mount, contentUrl,
+        notice: (text: string, kind: 'info' | 'error' = 'info') => this.ui.notice(text, kind),
+      });
+      if (this.code.start !== null) {
+        try {
+          this.module = (await this.code.start(host)) ?? null;
+        } catch (error) {
+          throw new Error(`The game's module failed to start: ${message(error)}`);
+        }
+        // Closed while the module started, for example during sign-in: it is disposed now.
+        if (this.lifecycle.signal.aborted) {
+          this.module?.dispose?.();
+          return;
+        }
+      }
+      const access = this.module?.access ?? publicAccess(contentUrl);
+      for (;;) {
+        try {
+          this.loaded = await this.load(access);
+          break;
+        } catch (error) {
+          // A game that stopped itself has shown why; the loads it cancelled say nothing new.
+          const halted = this.loading?.game?.halted === true;
+          this.discardAttempt();
+          if (this.lifecycle.signal.aborted || halted && isAbort(error)) return;
+          if (!(error instanceof ContentError) || this.module?.failed === undefined) throw error;
+          await this.module.failed(error);
+          if (this.lifecycle.signal.aborted) return;
+        }
+      }
+      this.play(this.loaded);
+    } catch (error) {
+      if (this.lifecycle.signal.aborted && isAbort(error)) return;
+      this.fatal.hidden = false;
+      this.fatal.textContent = `The game could not load: ${message(error)}`;
+    }
+  }
+
+  dispose(): void {
+    this.lifecycle.abort(new DOMException('The release closed.', 'AbortError'));
+    this.module?.dispose?.();
+    this.discardAttempt();
+    if (this.loaded !== null) {
+      this.loaded.audio?.dispose();
+      this.loaded.game.dispose();
+      this.loaded.session.dispose();
+      this.loaded = null;
+    }
+    this.ui.dispose();
+  }
+
+  private discardAttempt(): void {
+    if (this.loading === null) return;
+    this.loading.audio?.dispose();
+    this.loading.game?.dispose();
+    this.loading.session.dispose();
+    this.loading = null;
+  }
+
+  private async load(access: ContentAccess): Promise<Loaded> {
+    const signal = this.lifecycle.signal;
+    const module = this.module;
+    const session = new ContentSession({
+      access, pins: this.code.pins, onProgress: module?.progress === undefined ? undefined : (progress) => module.progress!(progress),
+    });
+    const attempt: { session: ContentSession; game: Game | null; audio: AudioDirector | null } = { session, game: null, audio: null };
+    this.loading = attempt;
+    const manifest = await session.manifest(signal);
+    session.prefetch(bootSources(manifest));
+    const content: ContentLoader = (source, request) => session.bytes(source, request);
+    const packaged = (source: string): string => {
+      if (!Object.hasOwn(manifest.media, source)) throw new ContentError('integrity', `${source} is not part of this release.`);
+      return manifest.media[source]!;
+    };
+    const media: MediaHost = {
+      load: async (source, request) => (await session.bytes(packaged(source), request)).buffer,
+      stream: (source, request) => session.stream(packaged(source), request),
+    };
+    const notice = (text: string): void => this.ui.notice(text, 'error');
+    const audio = this.code.AudioDirector === null ? null : new this.code.AudioDirector({
+      settings: manifest.audio, sounds: levelSoundSources(manifest.level), media, onError: notice,
+    });
+    attempt.audio = audio;
+    const game = new Game({
+      canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
+      characterModels: this.code.createCharacterModels?.({ content }) ?? null, content, media,
+      theme: manifest.theme, enemyArt: manifest.enemies,
+      onCue: audio === null ? undefined : (cue) => audio.handle(cue),
+      onAction: (action, options) => game.perform(action, options),
+      onNotice: notice,
+    });
+    attempt.game = game;
+    game.setCharacter({ armIk: manifest.armIk });
+    game.setInputBlock({ reason: 'loading', blocked: true });
+    const { primary, alternate } = manifest.characters;
+    // Every profile loads once, before play; switching later only changes the presentation.
+    await Promise.all([
+      game.loadSprites(primary),
+      ...(alternate === null ? [] : [game.loadAlternateSprites(alternate)]),
+      ...(this.code.loadCourseArt === null ? [] : [this.code.loadCourseArt(game, manifest.art.assets, content, signal)]),
+      ...(this.code.loadAppearance === null ? [] : [this.code.loadAppearance(game.view.visuals,
+        manifest.appearance, { signal, content })]),
+    ]);
+    session.forgetDownloads();
+    this.loading = null;
+    return { session, manifest, game, audio };
+  }
+
+  private play(loaded: Loaded): void {
+    const { game, manifest, audio } = loaded;
+    const { primary, alternate } = manifest.characters;
+    this.ui.show({
+      hud: manifest.hud,
+      characters: alternate === null ? null : {
+        types: [primary.characterRiggingType, alternate.characterRiggingType],
+        onSelect: (index) => { if (!game.halted) game.selectCharacter(index); },
+      },
+    });
+    if (game.halted) return;
+    game.selectCharacter(this.ui.enableCharacters());
+    game.setInputBlock({ reason: 'loading', blocked: false });
+    const api: ReleaseApi = Object.freeze({
+      setPause: (paused: boolean) => game.setPause({ reason: 'module', paused }),
+      setInputBlock: (blocked: boolean) => game.setInputBlock({ reason: 'module', blocked }),
+      get halted() { return game.halted; },
+    });
+    this.module?.ready?.(api);
+    game.start((state) => {
+      this.ui.update(state);
+      audio?.setPaused(state.paused);
+    });
+  }
+}

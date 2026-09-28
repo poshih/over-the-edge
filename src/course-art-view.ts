@@ -13,6 +13,8 @@ import { loadVisualModel } from './visual-model';
 import type { LoadedVisual } from './visual-model';
 import { fetchModelBlob } from './model-data';
 import { validateCourseModel } from './course-art-model';
+import { isContentRef } from './content-ref';
+import type { ContentLoader } from './content-ref';
 
 interface Primitive { geometry: BufferGeometry; material: Material | Material[] }
 interface Asset {
@@ -35,6 +37,7 @@ export class CourseArtView {
   readonly root = new Group();
   private readonly terrain: TerrainView;
   private readonly missing: (message: string) => void;
+  private readonly content: ContentLoader | null;
   private readonly assets = new Map<string, Asset>();
   private readonly states = new Map<string, State>();
   private readonly entries = new Map<string, Entry>();
@@ -55,9 +58,12 @@ export class CourseArtView {
     terrain: TerrainView;
     subscribe: (listener: (event: TerrainEvent) => void) => () => void;
     onMissing: (message: string) => void;
+    // Loads a release's packaged meshes (content: sources).
+    content?: ContentLoader;
   }) {
     this.terrain = options.terrain;
     this.missing = options.onMissing;
+    this.content = options.content ?? null;
     this.root.name = 'course-artwork';
     this.root.matrixAutoUpdate = false;
     this.unsubscribe = options.subscribe((event) => this.apply(event));
@@ -81,7 +87,7 @@ export class CourseArtView {
       signal?.throwIfAborted();
       if (this.disposed) throw new ArtError('The course artwork renderer was closed.');
       if (this.assets.has(resource.id)) continue;
-      const blob = await fetchModelBlob(resource.source, signal);
+      const blob = await this.fetchResource(resource, signal);
       const bytes = [...this.assets.values()].reduce((sum, asset) => sum + asset.bytes, blob.size);
       if (blob.size > ART_LIMITS.bytes || bytes > ART_LIMITS.totalBytes) throw new ArtError('Course artwork exceeds its download budget.');
       const { pixels } = validateCourseModel(await blob.arrayBuffer());
@@ -113,6 +119,12 @@ export class CourseArtView {
       }
     }
     if (this.mode === 'meshes') for (const state of this.states.values()) this.sync(state);
+  }
+
+  private async fetchResource(resource: ArtResource, signal: AbortSignal): Promise<Blob> {
+    if (!isContentRef(resource.source)) return fetchModelBlob(resource.source, signal);
+    if (this.content === null) throw new ArtError(`"${resource.name}" is packaged release content, which this host cannot load.`);
+    return new Blob([await this.content(resource.source, signal)], { type: 'model/gltf-binary' });
   }
 
   hasAssets(ids: Iterable<string>): boolean {

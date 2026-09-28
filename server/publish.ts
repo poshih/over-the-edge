@@ -3,9 +3,12 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { extname, join, relative, sep } from 'node:path';
+import { basename, extname, join, relative, sep } from 'node:path';
 import { packProjectBundle, validateProjectId } from '../src/project';
 import type { ProjectContent } from '../src/project';
+import { pathType } from '../src/content';
+import { isContentPath } from '../src/content-ref';
+import { contentDirectory } from '../build/release';
 import { HttpError, sendFile } from './http';
 
 const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
@@ -26,6 +29,8 @@ export interface PublishRecord {
   readonly bytes: number;
   readonly url: string;
   readonly directory: string;
+  // The release's content, kept beside the shell's folder and served at <url>content/.
+  readonly content: { readonly files: number; readonly bytes: number; readonly directory: string };
 }
 
 async function folderSize(directory: string): Promise<{ files: number; bytes: number }> {
@@ -40,8 +45,10 @@ async function folderSize(directory: string): Promise<{ files: number; bytes: nu
 }
 
 /**
- * Builds game-only releases from stored projects with the regular release build, one at a time,
- * into releases/<id>/, and serves them at /play/<id>/ for previewing before you deploy them.
+ * Builds game-only releases from stored projects with the regular release build, one at a time.
+ * The shell goes to releases/<id>/ and its content to releases/<id>.content/, never inside the
+ * shell's folder; both are served at /play/<id>/, behind the studio's own authentication, for
+ * previewing before you deploy them.
  */
 export class Publisher {
   private readonly root: string;
@@ -84,6 +91,13 @@ export class Publisher {
       return;
     }
     const directory = join(this.releases, id);
+    if (match[2].startsWith('/content/')) {
+      const content = match[2].slice('/content/'.length);
+      const file = isContentPath(content) ? join(this.releases, `${id}.content`, ...content.split('/')) : null;
+      if (file === null || !existsSync(file) || !(await stat(file)).isFile()) throw new HttpError(404, 'not-found', 'Unknown release content.');
+      sendFile(request, response, file, pathType(content), { 'Cache-Control': 'public, max-age=31536000, immutable' });
+      return;
+    }
     let path: string;
     try {
       path = join(directory, ...decodeURIComponent(match[2] === '/' ? '/index.html' : match[2]).split('/').filter(Boolean));
@@ -114,15 +128,18 @@ export class Publisher {
       await writeFile(bundlePath, JSON.stringify(packProjectBundle(content)));
       const output = join(work, 'release');
       await this.runBuild(relative(this.root, bundlePath), output);
-      const target = join(this.releases, id);
-      const previous = join(this.releases, `.previous-${id}-${randomBytes(6).toString('hex')}`);
-      if (existsSync(target)) await rename(target, previous);
-      await rename(output, target);
-      await rm(previous, { recursive: true, force: true });
-      const size = await folderSize(target);
+      // The release build writes the content beside its output folder.
+      const outputs = [[output, join(this.releases, id)], [contentDirectory(output), join(this.releases, `${id}.content`)]] as const;
+      const previous = outputs.map(([, target]) =>
+        existsSync(target) ? join(this.releases, `.previous-${basename(target)}-${randomBytes(6).toString('hex')}`) : null);
+      for (const [index, [, target]] of outputs.entries()) if (previous[index] !== null) await rename(target, previous[index]!);
+      for (const [built, target] of outputs) await rename(built, target);
+      for (const folder of previous) if (folder !== null) await rm(folder, { recursive: true, force: true });
+      const [shellFolder, contentFolder] = outputs.map(([, target]) => target) as [string, string];
       const record: PublishRecord = {
-        id, revision, publishedAt: new Date().toISOString(), durationMs: Date.now() - started, ...size,
-        url: `/play/${id}/`, directory: relative(this.root, target),
+        id, revision, publishedAt: new Date().toISOString(), durationMs: Date.now() - started, ...await folderSize(shellFolder),
+        url: `/play/${id}/`, directory: relative(this.root, shellFolder),
+        content: { ...await folderSize(contentFolder), directory: relative(this.root, contentFolder) },
       };
       await writeFile(join(this.releases, `${id}.publish.json`), `${JSON.stringify(record, null, 2)}\n`);
       return record;
@@ -135,7 +152,10 @@ export class Publisher {
   private runBuild(project: string, output: string): Promise<void> {
     const env: NodeJS.ProcessEnv = { ...process.env, GAME_PROJECT: project, VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true' };
     // The project is the whole game; per-file inputs from the studio's own environment must not leak in.
-    for (const variable of ['GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE']) delete env[variable];
+    // A studio preview serves its own content, so it keeps the default content URL and public access.
+    for (const variable of [
+      'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE', 'GAME_CONTENT_URL', 'GAME_MODULE',
+    ]) delete env[variable];
     const vite = join(this.root, 'node_modules', 'vite', 'bin', 'vite.js');
     const args = [vite, 'build', '--config', join(this.root, 'vite.game.config.ts'), '--outDir', output, '--emptyOutDir', '--base', './', '--logLevel', 'warn'];
     return new Promise((resolve, reject) => {

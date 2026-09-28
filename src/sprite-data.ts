@@ -15,6 +15,7 @@ import type { ArmLengths, CharacterArms } from './character-arms.ts';
 import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, SLIDE_AT_LIMITS } from './grips.ts';
 import type { Grips } from './grips.ts';
 import { number, record, SpriteError, text } from './sprite-fields.ts';
+import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
 
 export { SpriteError };
 
@@ -236,6 +237,11 @@ export function encodePng(bytes: Uint8Array): string {
 function imageSource(value: unknown): string {
   if (typeof value !== 'string') throw new SpriteError('A sprite image requires a PNG source.');
   if (value.startsWith(PNG_PREFIX)) return value;
+  // A release's packaged image, loaded through its content access.
+  if (isContentRef(value)) {
+    if (!isPackagedSource(value) || pathExtension(value) !== 'png') throw new SpriteError('A packaged sprite image must be a content: PNG file.');
+    return value;
+  }
   if (value.length > 2048 || value.includes('\\') || value !== value.trim()) {
     throw new SpriteError('Use an embedded PNG, public HTTP(S) URL, or /site-relative image path.');
   }

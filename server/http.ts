@@ -71,9 +71,10 @@ export function sendError(response: ServerResponse, error: HttpError): void {
   sendJson(response, error.status, { error: { code: error.code, message: error.message, section: error.section } });
 }
 
-// Sends a file with single-range support, so media elements can seek.
-export function sendFile(request: IncomingMessage, response: ServerResponse, path: string, type: string, headers: Record<string, string> = {}): void {
-  const size = statSync(path).size;
+// Answers a request for `size` bytes with single-range support, so media elements can seek.
+// `body` streams the bytes from start to end, inclusive.
+function sendRange(request: IncomingMessage, response: ServerResponse, size: number, type: string,
+  headers: Record<string, string>, body: (start: number, end: number) => void): void {
   const common = { ...SECURITY_HEADERS, 'Content-Type': type, 'Accept-Ranges': 'bytes', ...headers };
   const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? '');
   if (range !== null && (range[1] !== '' || range[2] !== '')) {
@@ -86,13 +87,25 @@ export function sendFile(request: IncomingMessage, response: ServerResponse, pat
     }
     response.writeHead(206, { ...common, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) });
     if (request.method === 'HEAD') response.end();
-    else pipeline(createReadStream(path, { start, end }), response, () => {});
+    else body(start, end);
     return;
   }
   response.writeHead(200, { ...common, 'Content-Length': String(size) });
   if (request.method === 'HEAD') response.end();
+  else if (size === 0) response.end();
+  else body(0, size - 1);
+}
+
+// Sends a file with single-range support.
+export function sendFile(request: IncomingMessage, response: ServerResponse, path: string, type: string, headers: Record<string, string> = {}): void {
   // pipeline closes the file when the client aborts (media seeking does this constantly).
-  else pipeline(createReadStream(path), response, () => {});
+  sendRange(request, response, statSync(path).size, type, headers,
+    (start, end) => pipeline(createReadStream(path, { start, end }), response, () => {}));
+}
+
+// Sends bytes held in memory with single-range support.
+export function sendBytes(request: IncomingMessage, response: ServerResponse, bytes: Uint8Array, type: string, headers: Record<string, string> = {}): void {
+  sendRange(request, response, bytes.byteLength, type, headers, (start, end) => response.end(bytes.subarray(start, end + 1)));
 }
 
 export function formatBytes(bytes: number): string {

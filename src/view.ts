@@ -45,6 +45,7 @@ import type { RigTarget } from './skeleton-pose';
 import { DEFAULT_THEME } from './theme';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
+import type { ContentLoader } from './content-ref';
 
 const VISUAL = {
   viewHeight: 8.5,
@@ -185,6 +186,7 @@ export class GameView {
   private readonly headOffset = new Vector3();
   private avatar: AvatarView | null = null;
   private readonly characterModels: CharacterModelLoader | null;
+  private readonly content: ContentLoader | undefined;
   private readonly slots: CharacterSlot[] = [];
   private activeSlot = 0;
   private readonly shading = new CharacterShadingView();
@@ -245,11 +247,14 @@ export class GameView {
   constructor(canvas: HTMLCanvasElement, initial: PhysicsFrame, level: LevelDefinition, options: {
     // Loads imported character GLBs; hosts without one reject profiles that reference models.
     characterModels?: CharacterModelLoader | null;
+    // Loads a release's packaged sprite images.
+    content?: ContentLoader;
     theme?: GameTheme;
     enemyArt?: EnemyArtSettings;
   } = {}) {
     this.canvas = canvas;
     this.characterModels = options.characterModels ?? null;
+    this.content = options.content;
     this.theme = options.theme ?? DEFAULT_THEME;
     const theme = this.theme;
     this.enemies = new EnemyView(options.enemyArt);
@@ -440,6 +445,7 @@ export class GameView {
       },
       prepareTexture: (texture) => this.renderer.initTexture(texture),
       characterAssets: { prepare: (document, signal) => this.prepareModels(slot, document, signal) },
+      loadContent: this.content,
       armSlots: ARM_SLOTS,
     });
     slot = {

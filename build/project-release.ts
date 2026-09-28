@@ -1,41 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, sep } from 'node:path';
-import type { AudioSettings } from '../src/audio-settings';
-import type { AppearancePart } from '../src/appearance-profile';
-import type { GameSettings } from '../src/game-settings';
-import type { HudSettings } from '../src/hud';
-import type { LevelDefinition } from '../src/level';
-import type { SpriteDocument } from '../src/sprite-data';
-import type { GameTheme } from '../src/theme';
-import type { EnemyArtSettings } from '../src/enemy-art-data';
-import type { ArmIkSettings } from '../src/character';
 import {
-  appearanceFile, artAssetHashMatches, artFile, glbDataUrl, isProjectBundle, loadProjectContent, PROJECT_FILES,
+  appearanceFile, artAssetHashMatches, artFile, isProjectBundle, loadProjectContent, PROJECT_FILES,
   PROJECT_LIMITS, ProjectError, unpackProjectBundle, validateProjectManifest,
 } from '../src/project';
 import type { ProjectContent } from '../src/project';
-import { mediaFile } from '../src/media';
 import { checkAppearanceModel } from '../src/appearance-model';
-
-// Everything a game-only release needs from a project, validated and ready for the build plugins.
-export interface ReleaseProject {
-  readonly title: string;
-  // Files whose changes should reload a development server.
-  readonly files: readonly string[];
-  readonly level: LevelDefinition;
-  // A level, or a course package when the project has terrain artwork.
-  readonly course: unknown;
-  readonly settings: GameSettings;
-  readonly primary: SpriteDocument | null;
-  readonly alternate: SpriteDocument | null;
-  readonly presentation: {
-    readonly theme: GameTheme; readonly hud: HudSettings; readonly enemies: EnemyArtSettings; readonly armIk: Readonly<ArmIkSettings>;
-  };
-  readonly audio: AudioSettings;
-  readonly appearance: readonly (AppearancePart & { readonly bytes: Uint8Array })[];
-  readonly media: readonly { readonly path: string; readonly bytes: Uint8Array }[];
-}
 
 function inside(root: string, path: string, label: string): string {
   const real = realpathSync(path);
@@ -132,25 +103,5 @@ function projectBinary(content: ProjectContent): (path: string) => Uint8Array {
     const bytes = content.files.get(path);
     if (bytes === undefined) throw new Error(`GAME_PROJECT is missing ${path}.`);
     return bytes;
-  };
-}
-
-export function loadReleaseProject(root: string, requested: string): ReleaseProject {
-  const { content, files } = loadProjectInput(root, requested);
-  const { manifest } = content;
-  const binary = projectBinary(content);
-  const used = new Set(content.level.objects.flatMap(object => object.kind === 'terrain' && object.art ? [object.art.assetId] : []));
-  const course = used.size === 0 ? content.level : {
-    format: 'over-the-edge-course', schemaVersion: 1, mode: manifest.art.mode, level: content.level,
-    assets: manifest.art.assets.filter(asset => used.has(asset.id))
-      .map(asset => ({ id: asset.id, name: asset.name, source: glbDataUrl(binary(artFile(asset.id))) })),
-  };
-  return {
-    title: manifest.title, files, level: content.level, course, settings: manifest.settings,
-    primary: content.characters.primary, alternate: content.characters.alternate,
-    presentation: { theme: manifest.theme, hud: manifest.hud, enemies: manifest.enemies, armIk: manifest.armIk },
-    audio: manifest.audio,
-    appearance: manifest.appearance.map(part => ({ ...part, bytes: binary(appearanceFile(part.part)) })),
-    media: manifest.media.map(entry => ({ path: entry.path, bytes: binary(mediaFile(entry.path)) })),
   };
 }

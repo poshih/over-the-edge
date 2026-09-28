@@ -657,10 +657,10 @@ GAME_LEVEL=levels/my-level.json GAME_SPRITES=skins/my-sprites.json npm run build
 The build validates the document, anchors, bones, weights, and IK targets.
 Character type, skeletons, clips, directional presentation, layers, aim flipbooks, hair, and tile settings use this same
 `GAME_SPRITES` input; there is no separate rig profile. Embedded PNGs, including
-every flipbook frame, become separate
-hashed assets, deduplicated by content rather than embedded in executable
-JavaScript. Development uses the same document with embedded sources through
-the virtual module; changes to the selected file reload the page.
+every flipbook frame, become separate content files, deduplicated by content, outside
+the release's shell ([content delivery](content-delivery.md)). A profile whose images
+are URLs does not build: a game build packages every image. Development serves the
+same content; changes to the selected file reload the page.
 
 The release waits for its selected sprites before starting gameplay. It loads
 no editor UI, import controls, browser saves, GLB importer, or diagnostics.
@@ -670,7 +670,7 @@ A [game project](projects.md) carries both profiles with the rest of the game.
 `GAME_ALTERNATE_SPRITES` bundles a second profile that players can switch to, for
 example a skinned 3D avatar next to a 2D character; see
 [releases with two characters](characters.md#releases-with-two-characters).
-Character GLBs in either profile become hashed assets and are validated at build time.
+Character GLBs in either profile become content files and are validated at build time.
 
 ## Complete sprite-character example
 

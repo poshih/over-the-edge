@@ -39,6 +39,8 @@ import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as
 import { compileSpriteHeadTracking } from './sprite-head-aim';
 import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-aim';
 import { selectFlipbookFrame } from './sprite-flipbook';
+import { isContentRef } from './content-ref';
+import type { ContentLoader } from './content-ref';
 
 // How a host names one arm: the IK target its hand follows, and the anchors depicting its two segments.
 export interface SpriteArmSlots {
@@ -329,6 +331,7 @@ export class SpriteRig {
   private naturalArms: Readonly<Record<ArmSide, ArmLengths | null>> = Object.freeze({ left: null, right: null });
   private assets: CharacterAssets = {};
   private readonly assetHost: CharacterAssetHost | undefined;
+  private readonly loadContent: ContentLoader | undefined;
   private images = new Map<string, ImageResource>();
   private resources = new Map<string, ImageResource>();
   private layers = new Map<string, LayerInstance>();
@@ -377,6 +380,8 @@ export class SpriteRig {
     // Uploads a texture ahead of first use, so flipbook frame changes never upload during play.
     prepareTexture?: (texture: THREE.Texture) => void;
     characterAssets?: CharacterAssetHost;
+    // Loads a release's packaged images (content: sources); hosts without one reject them.
+    loadContent?: ContentLoader;
     armSlots?: Readonly<Record<ArmSide, SpriteArmSlots>>;
   }) {
     this.anchors = new Map(anchors);
@@ -393,6 +398,7 @@ export class SpriteRig {
     }
     this.prepareTexture = options.prepareTexture;
     this.assetHost = options.characterAssets;
+    this.loadContent = options.loadContent;
     this.headTracking = options.headTracking === undefined ? null : {
       anchor: options.headTracking.anchor,
       pivot: { ...options.headTracking.pivot },
@@ -438,9 +444,9 @@ export class SpriteRig {
           if (resource === undefined) {
             const remainingBytes = Math.min(SPRITE_LIMITS.imageBytes, SPRITE_LIMITS.documentBytes - bytes);
             const embedded = embeddedPng(image.source);
-            const png = embedded === null
-              ? await downloadPng(image.source, signal, remainingBytes)
-              : embedded;
+            const png = embedded !== null ? embedded
+              : isContentRef(image.source) ? await this.packagedPng(image.source, signal)
+                : await downloadPng(image.source, signal, remainingBytes);
             checkSignal(signal);
             if (png.byteLength > remainingBytes) throw new SpriteError('The sprite document exceeds its image byte budget.');
             const size = inspectPng(png);
@@ -916,6 +922,13 @@ export class SpriteRig {
     if (type === 'avatar-3d' && this.onCharacterPresentationChange === undefined) {
       throw new SpriteError('This host has no connected avatar renderer.');
     }
+  }
+
+  private async packagedPng(source: string, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+    if (this.loadContent === undefined) throw new SpriteError('This host cannot load packaged release images.');
+    const bytes = await this.loadContent(source, signal);
+    checkSignal(signal);
+    return bytes;
   }
 
   private decode(bytes: Uint8Array<ArrayBuffer>, signal: AbortSignal): Promise<ImageBitmap> {

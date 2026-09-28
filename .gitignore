@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist
 dist-game
+# A game build's private content, written beside its shell.
+dist-game-content
 dist-ssr
 artifacts
 *.local

@@ -2,6 +2,7 @@
 // model and shading. DOM-free, so builds and Node tools share the validator.
 import { MODEL_LIMITS } from './model-data.ts';
 import { decodeBase64, encodeBase64, number, record, SpriteError, text } from './sprite-fields.ts';
+import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
 
 // Left and right are screen sides: the character faces the camera, so a rig's anatomical right
 // arm drives the left-* joints.
@@ -130,6 +131,11 @@ function modelSource(value: unknown): string {
     if (value.length > MODEL_ENCODED_BYTES) {
       throw new CharacterModelError('model-limits', `Character models must be at most ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`);
     }
+    return value;
+  }
+  // A release's packaged model, loaded through its content access.
+  if (isContentRef(value)) {
+    if (!isPackagedSource(value) || pathExtension(value) !== 'glb') throw new SpriteError('A packaged character model must be a content: GLB file.');
     return value;
   }
   if (value.length > 2048 || value.includes('\\') || value !== value.trim()) {

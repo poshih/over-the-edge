@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, createServer, preview } from 'vite';
@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import { modelFixture } from './verify-appearance.mjs';
 import { hammerGlb, HUMANOID_BONE_MAP, skinnedAvatarGlb } from './character-fixtures.mjs';
 import { observeBrowserPage } from './verify-level.mjs';
+import { releaseContent, shellCode } from './release-fixtures.mjs';
 import { openSection } from './workshop-ui.mjs';
 import { wavFixture } from './project-fixtures.mjs';
 import { verifyWorkshopProject } from './verify-workshop-project.mjs';
@@ -35,6 +36,7 @@ const bundleModules = (bundle) => (Array.isArray(bundle) ? bundle : [bundle]).fl
   result.output.filter((file) => file.type === 'chunk').flatMap((file) => Object.keys(file.modules)));
 const bundleAssets = (bundle) => (Array.isArray(bundle) ? bundle : [bundle]).flatMap((result) =>
   result.output.filter((file) => file.type === 'asset').map((file) => file.fileName));
+const projectMedia = async () => JSON.parse(await readFile(join(root, example, 'project.json'), 'utf8')).media.map((entry) => entry.path);
 const bundleHtml = (bundle) => (Array.isArray(bundle) ? bundle : [bundle]).flatMap((result) => result.output)
   .find((file) => file.fileName === 'index.html').source;
 
@@ -153,24 +155,31 @@ async function examplePackage() {
 try {
   // 1. Standalone releases from project files --------------------------------------------------
   {
-    const bundle = await releaseBuild({ GAME_PROJECT: example });
+    const directoryOutput = join(temporary, 'lantern-directory-release');
+    const bundle = await releaseBuild({ GAME_PROJECT: example }, { outDir: directoryOutput });
     const modules = bundleModules(bundle);
     const assets = bundleAssets(bundle);
+    const content = await releaseContent(directoryOutput);
     assert.ok(modules.some((id) => id.endsWith('/src/play.ts')));
     assert.ok(!modules.some((id) => id.includes('/src/editor/')), 'A project release contains no editor modules.');
     assert.ok(modules.some((id) => id.endsWith('/src/audio.ts')), 'A project with audio ships the audio director.');
     assert.ok(!modules.some((id) => id.includes('GLTFLoader') || id.endsWith('/src/appearance-loader.ts')),
       'A project without GLBs ships no model loader.');
-    assert.equal(assets.filter((file) => file.endsWith('.wav')).length, 6, 'Every media file is emitted once.');
-    assert.ok(assets.includes('favicon.svg') && !assets.some((file) => file.includes('skyward')), 'Project releases skip public/ media.');
+    assert.equal([...content.files.keys()].filter((file) => file.endsWith('.wav')).length, 6, 'Every media file is packaged once.');
+    assert.deepEqual(Object.keys(content.manifest.media).sort(), (await projectMedia()).sort());
+    assert.ok(assets.every((file) => file === 'favicon.svg' || file === 'index.html' || /^assets\/index-[\w-]+\.css$/.test(file)),
+      'The shell carries no media or other content.');
+    assert.ok(!shellCode(bundle).includes('LANTERN TIME'), 'Project settings are content, not shell code.');
     assert.match(bundleHtml(bundle), /<title>Lantern Cavern<\/title>/);
     assert.match(bundleHtml(bundle), /href="favicon\.svg"/);
     report.builds.directory = { modules: modules.length, assets: assets.length };
 
     const packed = join(temporary, 'lantern.project.json');
     await writeFile(packed, JSON.stringify(await examplePackage()));
-    const fromBundle = await releaseBuild({ GAME_PROJECT: relative(root, packed) });
+    const bundleOutput = join(temporary, 'lantern-bundle-release');
+    const fromBundle = await releaseBuild({ GAME_PROJECT: relative(root, packed) }, { outDir: bundleOutput });
     assert.deepEqual(bundleAssets(fromBundle).sort(), assets.sort(), 'A bundle builds exactly like its directory.');
+    assert.deepEqual((await releaseContent(bundleOutput)).files, content.files, 'A bundle packages exactly the directory\'s content.');
     report.builds.bundle = { identical: true };
 
     const defaults = await releaseBuild({});
@@ -246,20 +255,16 @@ try {
       appearance: [{ part: 'torso', name: 'Armour.glb', alignment: { scale: 1.1, rotationX: 0, rotationY: 20, rotationZ: 0, offsetX: 0, offsetY: 0.05, offsetZ: 0 } }],
       armIk: { ...manifest.armIk, leftHintX: -0.9 },
     }));
-    const bundle = await releaseBuild({ GAME_PROJECT: relative(root, directory) });
+    const output = join(temporary, 'characters-release');
+    const bundle = await releaseBuild({ GAME_PROJECT: relative(root, directory) }, { outDir: output });
     const modules = bundleModules(bundle);
-    const assets = bundleAssets(bundle);
     assert.ok(modules.some((id) => id.endsWith('/src/appearance-loader.ts')), 'Appearance models ship their loader.');
     assert.ok(modules.some((id) => id.endsWith('/src/character-model-loader.ts')));
     assert.ok(!modules.some((id) => id.includes('/src/editor/')));
-    assert.equal(assets.filter((file) => /^assets\/torso-.*\.glb$/.test(file)).length, 1);
-    assert.equal(assets.filter((file) => /^assets\/character-.*\.glb$/.test(file)).length, 2);
-    const presentation = (Array.isArray(bundle) ? bundle : [bundle]).flatMap((result) => result.output)
-      .filter((file) => file.type === 'chunk').map((file) => file.code).join('\n');
-    assert.ok(presentation.includes('-0.9'), 'The release embeds the project arm IK hints.');
-
-    const output = join(temporary, 'characters-release');
-    await releaseBuild({ GAME_PROJECT: relative(root, directory) }, { outDir: output });
+    const { files, manifest: released } = await releaseContent(output);
+    assert.equal([...files.keys()].filter((file) => file.endsWith('.glb')).length, 3, 'The appearance and both character GLBs are content.');
+    assert.equal(released.appearance[0].part, 'torso');
+    assert.equal(released.armIk.leftHintX, -0.9, 'The release carries the project arm IK hints.');
     setGameEnv({ GAME_PROJECT: relative(root, directory) });
     const server = await preview({ configFile: gameConfig, logLevel: 'silent', build: { outDir: output }, preview: { host: '127.0.0.1', port: 0, strictPort: true } });
     setGameEnv({});
@@ -369,6 +374,11 @@ try {
     const published = await api('POST', '/api/projects/lantern/publish');
     assert.equal(published.status, 200, JSON.stringify(published.value));
     assert.equal(published.value.url, '/play/lantern/');
+    assert.equal(published.value.content.directory, `${published.value.directory}.content`);
+    assert.ok(published.value.content.files > 0, 'Publishing writes the release content.');
+    const shellFiles = await readdir(join(root, published.value.directory), { recursive: true });
+    assert.ok(!shellFiles.some((file) => /\.(json|wav|png|glb)$/.test(file)), 'The published shell folder holds no content.');
+    const manifestFile = (await readdir(join(root, published.value.content.directory, 'game'))).find((file) => file.endsWith('.json'));
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await observeBrowserPage(page, report.errors);
     try {
@@ -380,12 +390,16 @@ try {
       await page.close();
     }
     assert.equal((await api('GET', '/play/lantern/.hidden')).status, 404);
+    assert.equal((await api('GET', `/play/lantern/content/game/${manifestFile}`)).status, 200, 'The studio serves the release content.');
+    assert.equal((await api('GET', `/play/lantern/content/game/${'0'.repeat(64)}.json`)).status, 404);
+    assert.equal((await api('GET', '/play/lantern/content/project.json')).status, 404);
     report.api = { sections: Object.keys(manual.value.sections).length, endpoints: manual.value.endpoints.length, publishMs: Date.now() - started, publishFiles: published.value.files };
 
     // A token-protected studio accepts only its token (or the session cookie it sets).
     const tokenStudio = await studio({ STUDIO_TOKEN: 'correct-horse-battery-staple' });
     const anonymous = client(tokenStudio.base);
     assert.equal((await anonymous('GET', '/api/projects')).status, 401);
+    assert.equal((await anonymous('GET', `/play/lantern/content/game/${manifestFile}`)).status, 401, 'Previewed content needs the studio token.');
     assert.deepEqual((await anonymous('GET', '/api/health')).value, { ok: true, api: 1, auth: 'token', authenticated: false });
     assert.equal((await client(tokenStudio.base, { Authorization: 'Bearer wrong-token-value-here' })('GET', '/api/projects')).status, 401);
     const authorized = client(tokenStudio.base, { Authorization: 'Bearer correct-horse-battery-staple' });

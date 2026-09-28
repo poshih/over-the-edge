@@ -2,6 +2,8 @@ import './event-presenter.css';
 import { setText } from './dom';
 import type { PresentationAction, EventOutcome } from './trigger-events';
 import { EventExecutionError } from './trigger-events';
+import { urlMediaHost } from './media-host';
+import type { MediaHost } from './media-host';
 
 export type EventPresenterState = 'idle' | 'popup' | 'loading' | 'awaiting-input' | 'playing';
 
@@ -13,8 +15,8 @@ export interface EventPresenterStatus {
 export interface EventPresenterOptions {
   readonly mount: HTMLElement;
   readonly onModalChange: (state: { active: boolean }) => void;
-  // Maps an authored video source to the URL to load, e.g. a bundled /media/ file's asset URL.
-  readonly resolveSource?: (source: string) => string;
+  // Streams authored video sources, e.g. a release's packaged /media/ files; by default sources are URLs.
+  readonly media?: MediaHost;
 }
 
 let uid = 0;
@@ -65,7 +67,7 @@ class Presentation {
     mount: HTMLElement;
     onModalChange: (state: { active: boolean }) => void;
     onSettle: () => void;
-    resolveSource: (source: string) => string;
+    media: MediaHost;
   };
 
   constructor(
@@ -74,7 +76,7 @@ class Presentation {
       mount: HTMLElement;
       onModalChange: (state: { active: boolean }) => void;
       onSettle: () => void;
-      resolveSource: (source: string) => string;
+      media: MediaHost;
     },
   ) {
     this.host = host;
@@ -288,8 +290,17 @@ class Presentation {
     }, { signal: this.controller.signal });
     document.addEventListener('fullscreenchange', () => this.onFullscreenChange(), { signal: this.controller.signal });
 
-    video.src = this.host.resolveSource(action.source);
-    this.attemptPlay();
+    this.host.media.stream(action.source, this.controller.signal).then((stream) => {
+      if (this.settled) return;
+      if (stream.crossOrigin === null) video.removeAttribute('crossorigin');
+      else video.crossOrigin = stream.crossOrigin;
+      video.src = stream.url;
+      this.attemptPlay();
+    }, (error: unknown) => {
+      if (this.settled) return;
+      // A video that cannot be granted fails its event; it never stops the game.
+      this.fail(new EventExecutionError(`The video could not load: ${describeError(error)}`));
+    });
   }
 
   private attemptPlay(): void {
@@ -346,18 +357,18 @@ class Presentation {
 export class EventPresenter {
   private readonly mount: HTMLElement;
   private readonly onModalChange: (state: { active: boolean }) => void;
-  private resolveSource: (source: string) => string;
+  private media: MediaHost;
   private active: Presentation | null = null;
   private disposed = false;
 
   constructor(options: EventPresenterOptions) {
     this.mount = options.mount;
     this.onModalChange = options.onModalChange;
-    this.resolveSource = options.resolveSource ?? ((source) => source);
+    this.media = options.media ?? urlMediaHost((source) => source);
   }
 
-  setSourceResolver(resolve: (source: string) => string): void {
-    this.resolveSource = resolve;
+  setMedia(media: MediaHost): void {
+    this.media = media;
   }
 
   /** True while a full-window video presentation is covering the game view. */
@@ -375,7 +386,7 @@ export class EventPresenter {
       onSettle: () => {
         if (this.active === presentation) this.active = null;
       },
-      resolveSource: this.resolveSource,
+      media: this.media,
     });
     this.active = presentation;
     try {

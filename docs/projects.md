@@ -40,8 +40,8 @@ GAME_PROJECT=examples/projects/lantern-cavern npm run build:game
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: release look and terrain GLBs |
 | `media` | `project.json` + `media/<file>` | Videos and sounds, used as `/media/<file>` |
 
-Nothing else reaches a release: a project release does not copy `public/`, so it
-ships only its own media plus the site icon.
+Nothing else reaches a release: game builds do not copy `public/`, so a project
+release ships only its own content plus the site icon.
 
 ## Project directory
 
@@ -128,11 +128,15 @@ GAME_PROJECT=projects/my-game/project.json npm run build:game # its manifest
 GAME_PROJECT=exports/my-game.project.json npm run build:game  # a project file
 ```
 
-The path must be inside this repository. The release in `dist-game/` embeds the
-project's validated level, settings and presentation; character, appearance and
-course GLBs and media become hashed assets. Model and audio loaders are bundled
-only when the project uses them, and the build still fails if an editor module
-reaches the release. `npm run dev:game` restarts when a project file changes.
+The path must be inside this repository. The release's shell in `dist-game/` holds
+no project data: the validated level, settings and presentation, the character,
+appearance and course GLBs, and the media become content files in
+`dist-game-content/`, which the shell loads and verifies; see
+[content delivery](content-delivery.md). A project whose level events or audio name
+external URLs does not build: a game build packages everything it plays. Model and
+audio loaders are bundled only when the project uses them, and the build still fails
+if an editor module reaches the release. `npm run dev:game` restarts when a project
+file changes.
 
 `GAME_PROJECT` is the whole game, so combining it with `GAME_LEVEL`,
 `GAME_SETTINGS`, `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES` fails. The project
@@ -140,8 +144,10 @@ title replaces `GAME_TITLE`: a `GAME_TITLE` from `.env` files is ignored, and on
 passed on the command line fails. `GAME_ART_MODE` still overrides the project's
 course artwork look.
 
-Deploy `dist-game/` like any other release, for example with
-`npx wrangler deploy --config wrangler.game.toml`.
+Deploy it like any other release: the shell, for example with
+`npx wrangler deploy --config wrangler.game.toml`, and the content to the host or CDN
+that serves `GAME_CONTENT_URL`. A game whose players must sign in or own it adds its
+own module with `GAME_MODULE`.
 
 ## Working in the Workshop
 
@@ -157,7 +163,7 @@ project or one from the project server, plus which sections have unsaved changes
 - **Export project file** downloads the whole game as one bundle; **Import project
   file** replaces the Workshop's game with one. Both work without a server.
 - **Publish standalone game** saves unsaved changes, builds the release on the
-  server and links to it at `/play/<id>/`.
+  server and links to it at `/play/<id>/`, where the studio also serves its content.
 
 The remaining sections edit what only a project has, with a live preview:
 **Theme**, **HUD**, **Audio** (music and cue sounds from the media library, with
@@ -233,7 +239,7 @@ npm run studio   # builds the Workshop, then serves it with the project server a
 ```
 
 It stores projects in `projects/<id>/` and published releases in `releases/<id>/`,
-both ignored by Git. Settings, from the environment or `.env.local`:
+with each release's content beside it in `releases/<id>.content/`, all ignored by Git. Settings, from the environment or `.env.local`:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -294,7 +300,7 @@ Conventions:
 | GET, PUT, DELETE | `/api/projects/{id}/media/{file}` | Media library files |
 | POST | `/api/projects/{id}/validate` | Every release check, reported as problems |
 | POST, GET | `/api/projects/{id}/publish` | Build the release; latest publish record |
-| GET | `/play/{id}/` | The published release |
+| GET | `/play/{id}/` | The published release; its content is under `/play/{id}/content/` |
 
 For example, starting a new game and shaping it from a shell:
 
@@ -347,9 +353,9 @@ behaviour and display size stay the same, and all enemies still share one draw b
 
 **Media.** Files are addressed as `/media/<name>` with a lowercase name ending in
 `.webm`, `.mp4`, `.mp3`, `.ogg`, `.wav` or `.m4a`; at most 64 files, 64 MiB each and
-160 MiB in total. Releases bundle them as hashed assets and resolve the authored
-paths to those assets, so media keep working when a release is published below a
-sub-path such as `/play/<id>/`.
+160 MiB in total. Releases package them as content and resolve the authored paths
+to those files through the release's content access, so media keep working wherever
+the content is served.
 
 **Appearance, arm IK and characters.** Appearance parts are the Workshop's
 per-part GLB replacements (20 MiB each, 64 MiB in total), fitted with the same

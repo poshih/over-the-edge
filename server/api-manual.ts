@@ -45,7 +45,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET', '/api/projects/{id}/bundle', 'The whole project as one JSON bundle (add ?download=1 for a file download).'),
       endpoint('PUT', '/api/projects/{id}/bundle', 'Create or replace a project from a bundle.', 'project bundle JSON'),
       endpoint('POST', '/api/projects/{id}/validate', 'Deep check of every file, model and reference.'),
-      endpoint('POST', '/api/projects/{id}/publish', 'Build the standalone release into releases/{id}/ and serve it at /play/{id}/.'),
+      endpoint('POST', '/api/projects/{id}/publish', 'Build the standalone release: its shell into releases/{id}/ and its content into releases/{id}.content/, both served at /play/{id}/.'),
       endpoint('GET', '/api/projects/{id}/publish', 'The latest publish record, or null.'),
       endpoint('GET|PUT|PATCH', '/api/projects/{id}/{section}', 'Read or change one section; see "sections".', 'the section value'),
       endpoint('DELETE', '/api/projects/{id}/characters/{primary|alternate}', 'Remove a character profile (the primary needs the alternate removed first).'),
@@ -57,7 +57,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/appearance/{part}', 'A part\'s name and alignment.', '{ "alignment"?: {...}, "name"?: "..." }'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/media/{file}', 'Media library files, referenced as /media/{file}.', 'file bytes'),
-      endpoint('GET', '/play/{id}/', 'The latest published release of a project.'),
+      endpoint('GET', '/play/{id}/', 'The latest published release of a project; its content is under /play/{id}/content/.'),
     ],
     project: {
       files: PROJECT_FILES,
