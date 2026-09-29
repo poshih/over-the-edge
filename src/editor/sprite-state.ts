@@ -72,6 +72,8 @@ export interface AvatarModelState {
 export interface SpriteEditorSnapshot {
   readonly restoring: boolean;
   readonly busy: boolean;
+  // Changes whenever the draft or the pending avatar is replaced.
+  readonly revision: number;
   readonly error: string | null;
   readonly dirty: boolean;
   readonly hasContent: boolean;
@@ -213,7 +215,7 @@ export class SpriteEditorState {
   private readonly targetIds: ReadonlySet<string>;
   private readonly notice: (message: string, kind: 'info' | 'error') => void;
   private readonly describeModel: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
-  private pendingAvatar: PendingAvatar | null = null;
+  private pending: PendingAvatar | null = null;
   private modelIssue: CharacterModelIssue | null = null;
   private avatarState: { key: readonly unknown[]; value: AvatarModelState | null } = { key: [], value: null };
   private readonly store = new VisualStore<StoredSprites>({
@@ -221,7 +223,12 @@ export class SpriteEditorState {
   });
   private readonly listeners = new Set<() => void>();
   private readonly lifecycle = new AbortController();
-  private draft: SpriteDocument = EMPTY_SPRITES;
+  private draftDocument: SpriteDocument = EMPTY_SPRITES;
+  // Counts every replacement of the draft or the pending avatar, so work that finishes later, such as
+  // a download, can tell whether the character changed since it began.
+  private revision = 0;
+  // Resolved whenever the state stops restoring or finishes an operation.
+  private readonly settledWaiters: (() => void)[] = [];
   private saved: SpriteDocument | null = null;
   private selectedLayerId: string | null = null;
   private preview: SkeletonPreview | null = null;
@@ -230,6 +237,20 @@ export class SpriteEditorState {
   private busy = false;
   private error: string | null = null;
   private disposed = false;
+
+  private get draft(): SpriteDocument { return this.draftDocument; }
+
+  private set draft(document: SpriteDocument) {
+    this.draftDocument = document;
+    this.revision++;
+  }
+
+  private get pendingAvatar(): PendingAvatar | null { return this.pending; }
+
+  private set pendingAvatar(avatar: PendingAvatar | null) {
+    this.pending = avatar;
+    this.revision++;
+  }
 
   constructor(options: {
     rig: SpriteRig;
@@ -303,6 +324,7 @@ export class SpriteEditorState {
     } finally {
       this.restoring = false;
       this.changed();
+      this.settle();
     }
   }
 
@@ -310,6 +332,7 @@ export class SpriteEditorState {
     return {
       restoring: this.restoring,
       busy: this.busy,
+      revision: this.revision,
       error: this.error,
       dirty: this.saved === null || !sameDocument(this.draft, this.saved),
       hasContent: this.draft.characterRiggingType !== DEFAULT_CHARACTER_RIGGING_TYPE ||
@@ -932,8 +955,16 @@ export class SpriteEditorState {
     });
   }
 
-  async loadDocument(document: SpriteDocument): Promise<boolean> {
-    if (!this.canEdit()) return false;
+  // Replaces the draft with a whole profile. Refuses while an operation is in progress, unless `wait`
+  // asks it to wait for the operation instead: a project replacing the whole character, having let go
+  // of the previous project, must not find it busy.
+  async loadDocument(document: SpriteDocument, options: { readonly wait?: boolean } = {}): Promise<boolean> {
+    if (options.wait === true) {
+      while (!this.disposed && (this.restoring || this.busy)) await new Promise<void>((resolve) => this.settledWaiters.push(resolve));
+      if (this.disposed) return false;
+    } else if (!this.canEdit()) {
+      return false;
+    }
     this.pendingAvatar = null;
     let loaded = false;
     await this.run(async () => {
@@ -980,6 +1011,7 @@ export class SpriteEditorState {
     this.lifecycle.abort(new DOMException('The sprite editor was disposed.', 'AbortError'));
     this.listeners.clear();
     this.store.close();
+    this.settle();
   }
 
   private recordDocument(value: unknown): unknown {
@@ -1156,7 +1188,12 @@ export class SpriteEditorState {
     } finally {
       this.busy = false;
       this.changed();
+      this.settle();
     }
+  }
+
+  private settle(): void {
+    for (const resolve of this.settledWaiters.splice(0)) resolve();
   }
 
   private changed(): void {

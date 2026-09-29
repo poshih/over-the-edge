@@ -17,6 +17,7 @@ import type { PartModelHost } from './library-preview';
 import type { ProjectSession, ProjectSnapshot } from './project-session';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
+import type { ServerModels } from './server-models';
 import { sectionMarkup } from './workshop-section';
 import './project-editor.css';
 
@@ -41,6 +42,8 @@ export interface ProjectEditorOptions {
   onTestCue: (cue: AudioCue) => void;
   // The game that previews library models.
   parts: PartModelHost;
+  // The avatars, hammers and pots this Workshop's server shares, for the model library.
+  serverModels: ServerModels;
 }
 
 /** Workshop / Project: the whole game's identity, look, HUD, audio, enemies, media and files. */
@@ -514,7 +517,8 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   }, listen);
 
   const library = createLibraryEditor({
-    mount: element(root, '.project-library-mount'), session, parts: options.parts, onNotice: options.onNotice,
+    mount: element(root, '.project-library-mount'), session, parts: options.parts, serverModels: options.serverModels,
+    onNotice: options.onNotice,
   });
   options.mount.append(root);
   renderContent(session.snapshot());

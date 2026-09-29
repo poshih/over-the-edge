@@ -52,6 +52,20 @@ The deployed Workshop then opens that game, keeps each visitor's changes in thei
 and picks up redeployments; see [publishing a Workshop with its
 project](docs/projects.md#publishing-a-workshop-with-its-project).
 
+The Workshop also offers the GLBs in `models/avatar/`, `models/hammer/` and `models/pot/`
+as [server models](docs/characters.md#server-models), which designers pick in the Character
+tab and the project's model library instead of choosing files. They are delivered from a
+CDN, not with the Workshop: `npm run build` writes them to **`dist-content/`**, named by
+SHA-256, and the Workshop downloads them from **`WORKSHOP_CONTENT_URL`** (default
+`content/`, beside the Workshop, as `npm run dev` and `npm run preview` serve them).
+Upload `dist-content/` there, with CORS for the Workshop's origin:
+
+```sh
+WORKSHOP_CONTENT_URL=https://cdn.example.com/workshop/ npm run build
+npx wrangler deploy --config wrangler.toml --keep-vars
+# then upload dist-content/ to https://cdn.example.com/workshop/
+```
+
 A custom domain is optional. Attach it to the Worker in your Cloudflare account
 after deploying; domains are not stored in this repository.
 

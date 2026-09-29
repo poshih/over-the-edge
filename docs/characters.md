@@ -177,6 +177,50 @@ around their centre, with Z up, or in centimetres fail these checks with
 
 Appearance's pot import is hidden while a pot model is present.
 
+## Server models
+
+A Workshop can share avatars, hammers and pots with everyone who opens it, so designers
+pick them instead of passing GLB files around. Put GLBs in the `models` folder of the
+Workshop's repository, one folder per part:
+
+```text
+models/avatar/knight.glb
+models/hammer/maul.glb
+models/pot/urn.glb
+```
+
+Each file is checked like a GLB imported for that part when the Workshop builds or its
+development server starts, and one that fails stops it, naming the file. A model shows
+under its file name without `.glb`.
+
+**Picking.** Workshop / Character's **Skinned avatar (GLB)**, **One-model hammer (GLB)**
+and **Pot model (GLB)** sections list the server's models of their part. **Use server
+avatar** (hammer, pot) applies the chosen one exactly as if that file were chosen from the
+computer: an avatar maps Mixamo-style joints or opens its bone map, and the model is stored
+in the character profile. Workshop / Project / Model library offers the same models with
+**Add server avatar** (hammer, pot). The character downloads one model at a time and is not
+held meanwhile: if it changes before the model arrives, for example through another import,
+Revert or opening a project, that change wins and the model is not used. The model library
+holds the open project while a model downloads for it, so the project cannot change first.
+
+**Delivery.** The models never ship with the Workshop. A build lists only their names,
+sizes and SHA-256 digests, and writes the files to `dist-content/models/<sha256>.glb` for a
+CDN. The Workshop downloads a model only when one is picked, from `WORKSHOP_CONTENT_URL`,
+and refuses one whose size or digest differs from the build's.
+
+- The content URL is an HTTP(S) URL or a path relative to the Workshop, ending in `/`. It
+  defaults to `content/`, beside the Workshop, where `npm run dev` and `npm run preview`
+  serve the models.
+- To deploy, upload `dist-content/` to the content URL with CORS for the Workshop's origin;
+  see the [README](../README.md#run). A model's URL changes only with its bytes, so it can
+  be cached indefinitely.
+- Downloads send cookies only to the Workshop's own origin, so a CDN on another origin
+  serves the models publicly.
+
+**In releases.** A picked model belongs to the profile or project like any imported GLB, so
+a release packages it with the game's content, and players download it from the game's
+CDN; see [content delivery](content-delivery.md).
+
 ## Shading
 
 **Avatar shading** switches between **PBR**, the models' own materials, and
@@ -295,7 +339,8 @@ did not select, and the release keeps nothing about the choice in the browser.
 
 **Authoring.** Workshop / Project / **Model library** lists each part's models.
 **Add avatar / hammer / pot GLB** checks a file like the profile's own model of that
-part. An avatar maps Mixamo-style joints automatically; otherwise its bone map opens
+part, and **Add server avatar / hammer / pot** does the same with one of the Workshop's
+[server models](#server-models). An avatar maps Mixamo-style joints automatically; otherwise its bone map opens
 and the avatar is added once all eight joints resolve. **Bone map** edits an avatar's
 map later. An avatar entry carries what depends on its proportions: its bone map,
 grips, arm lengths and arm forward distance. A new avatar takes those of the open

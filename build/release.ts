@@ -42,7 +42,7 @@ export function contentDirectory(outDir: string): string {
   return `${resolve(outDir)}-content`;
 }
 
-function notFound(response: ServerResponse): void {
+export function notFound(response: ServerResponse): void {
   response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
   response.end('Unknown content file.');
 }
@@ -61,7 +61,7 @@ function courseOf(input: ReleaseInput): string {
 }
 
 // The path under /content/ that a request names, or null when it is not a content request.
-function contentRequest(request: IncomingMessage, base: string): string | null {
+export function contentRequest(request: IncomingMessage, base: string): string | null {
   const pathname = new URL(request.url ?? '/', 'http://content.invalid').pathname;
   const prefix = `${base.endsWith('/') ? base : `${base}/`}content/`;
   return pathname.startsWith(prefix) ? pathname.slice(prefix.length) : null;

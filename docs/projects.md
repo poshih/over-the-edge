@@ -180,8 +180,9 @@ The remaining sections edit what only a project has, with a live preview:
 **Theme**, **HUD**, **Audio** (music and cue sounds from the media library, with
 test buttons), **Enemy art** (JSON pixel art, starting from the built-in art),
 **Media library**, **Alternate character** (use, swap, import or remove a second
-profile), **Model library** (add, preview and remove library avatars, hammers and
-pots; see [imported 3D characters](characters.md#model-library-and-runtime-swaps)) and
+profile), **Model library** (add library avatars, hammers and pots from files or the Workshop's
+[server models](characters.md#server-models), then preview and remove them; see
+[imported 3D characters](characters.md#model-library-and-runtime-swaps)) and
 **Course artwork** (release look, or import a `pack:course` package).
 
 Everything else keeps its usual tab. Opening or importing a project replaces the

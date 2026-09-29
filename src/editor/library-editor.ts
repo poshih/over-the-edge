@@ -10,6 +10,8 @@ import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
 import { LibraryPreview } from './library-preview';
 import type { PartModelHost } from './library-preview';
 import type { LibraryModel, ProjectSession } from './project-session';
+import { createServerModelPicker } from './server-model-picker';
+import type { ServerModels } from './server-models';
 
 const ROLE_LABELS: Readonly<Record<PartRole, { one: string; many: string }>> = {
   avatar: { one: 'avatar', many: 'Avatars' },
@@ -55,6 +57,8 @@ export function createLibraryEditor(options: {
   readonly mount: HTMLElement;
   readonly session: ProjectSession;
   readonly parts: PartModelHost;
+  // The avatars, hammers and pots this Workshop's server shares.
+  readonly serverModels: ServerModels;
   readonly onNotice: (message: string, kind: 'info' | 'error') => void;
 }): { dispose(): void } {
   const { session } = options;
@@ -75,6 +79,7 @@ export function createLibraryEditor(options: {
         <select id="project-library-${role}-preview" class="project-library-preview"></select>
         <label class="appearance-label" for="project-library-${role}-file">Add ${ROLE_LABELS[role].one} GLB</label>
         <input id="project-library-${role}-file" class="project-library-file" type="file" accept=".glb,model/gltf-binary" />
+        <div class="project-library-server"></div>
       </fieldset>`).join('')}
     <fieldset class="tuning-group project-library-bones" hidden>
       <legend class="project-library-bones-title">Bone map</legend>
@@ -290,6 +295,14 @@ export function createLibraryEditor(options: {
   }
 
   for (const role of PART_ROLES) {
+    // A server model downloads while the open project is held, then is added like a GLB chosen from the computer.
+    element(root, `.project-library-part[data-role="${role}"] .project-library-server`).append(createServerModelPicker({
+      role, id: `project-library-${role}-server`, action: 'Add', served: options.serverModels, signal: events.signal,
+      take: async (download) => {
+        const file = await session.download(`Downloading a server ${ROLE_LABELS[role].one}`, download);
+        if (file !== null) await add(role, file);
+      },
+    }).root);
     const file = element<HTMLInputElement>(root, `#project-library-${role}-file`);
     file.addEventListener('change', () => {
       const chosen = file.files?.[0];

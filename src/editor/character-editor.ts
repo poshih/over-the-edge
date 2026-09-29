@@ -18,6 +18,9 @@ import { RIG_LIMITS } from '../rig';
 import type { RigGeometry } from '../rig';
 import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
 import { createRangeControl } from './range-control';
+import { createServerModelPicker } from './server-model-picker';
+import { ServerModelError } from './server-models';
+import type { ServerModels } from './server-models';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import { sectionMarkup } from './workshop-section';
 import './character-editor.css';
@@ -77,6 +80,8 @@ export function createCharacterEditor(options: {
     importDocument(): void;
     exportDocument(): void;
   };
+  // The avatars, hammers and pots this Workshop's server shares.
+  readonly serverModels: ServerModels;
   readonly onNotice: (message: string, kind: 'info' | 'error') => void;
   readonly signal: AbortSignal;
 }): { setHammerRig(rig: RigGeometry): void; dispose(): void } {
@@ -167,6 +172,7 @@ export function createCharacterEditor(options: {
           <input id="character-avatar-file" type="file" accept=".glb,model/gltf-binary" />
           <p class="appearance-format">Self-contained GLB 2.0 with one armature, up to
             ${CHARACTER_MODEL_LIMITS.bytes / 1024 ** 2} MiB, at most 4 weights per vertex, normalized.</p>
+          <div class="character-avatar-server"></div>
           <p class="appearance-format character-avatar-status" role="status" aria-live="polite"></p>
           <fieldset class="tuning-group character-bone-map" hidden>
             <legend>Bone map</legend>
@@ -195,6 +201,7 @@ export function createCharacterEditor(options: {
             <span class="character-hammer-geometry"></span> Length, reach, grips and contacts stay physical.</p>
           <label class="appearance-label" for="character-hammer-file">Hammer GLB</label>
           <input id="character-hammer-file" type="file" accept=".glb,model/gltf-binary" />
+          <div class="character-hammer-server"></div>
           <p class="appearance-format character-hammer-status" role="status" aria-live="polite"></p>
           <button type="button" class="button character-hammer-remove">Use two-part hammer</button>
         </div>
@@ -210,6 +217,7 @@ export function createCharacterEditor(options: {
             ${metres(POT_OUTLINE.rim.radius)}. Collision stays physical.</p>
           <label class="appearance-label" for="character-pot-file">Pot GLB</label>
           <input id="character-pot-file" type="file" accept=".glb,model/gltf-binary" />
+          <div class="character-pot-server"></div>
           <p class="appearance-format character-pot-status" role="status" aria-live="polite"></p>
           <button type="button" class="button character-pot-remove">Use default pot</button>
         </div>
@@ -478,6 +486,43 @@ export function createCharacterEditor(options: {
     if (file !== undefined) void options.state.importPropModel('pot', file);
   }, listen);
   potRemove.addEventListener('click', () => { void options.state.removePropModel('pot'); }, listen);
+  // A server model downloads without holding the character, so a project can still open meanwhile, and
+  // is used like a GLB chosen from the computer only if the character did not change while it
+  // downloaded: whatever happened in between wins. One downloads at a time.
+  let downloading = false;
+  const serverPickers = ([
+    ['avatar', (file: File) => options.state.importAvatarModel(file)],
+    ['hammer', (file: File) => options.state.importPropModel('hammer', file)],
+    ['pot', (file: File) => options.state.importPropModel('pot', file)],
+  ] as const).map(([role, use]) => {
+    const picker = createServerModelPicker({
+      role, id: `character-${role}-server`, action: 'Use', served: options.serverModels, signal: events.signal,
+      take: async (download) => {
+        const before = options.state.snapshot();
+        downloading = true;
+        render();
+        let file: File;
+        try {
+          file = await download();
+        } catch (error) {
+          if (!(error instanceof ServerModelError)) throw error;
+          options.onNotice(error.message, 'error');
+          return;
+        } finally {
+          downloading = false;
+          render();
+        }
+        const now = options.state.snapshot();
+        if (now.restoring || now.busy || now.revision !== before.revision) {
+          options.onNotice(`"${file.name.replace(/\.glb$/i, '')}" was not used because the character changed while it downloaded. Choose it again to use it.`, 'error');
+          return;
+        }
+        await use(file);
+      },
+    });
+    element(root, `.character-${role}-server`).append(picker.root);
+    return picker;
+  });
 
   for (const type of CHARACTER_RIGGING_TYPES) {
     const option = document.createElement('option');
@@ -586,6 +631,7 @@ export function createCharacterEditor(options: {
   function renderModels(snapshot: ReturnType<SpriteEditorState['snapshot']>, disabled: boolean): void {
     const avatar = snapshot.avatarModel;
     avatarFile.disabled = disabled;
+    for (const picker of serverPickers) picker.setDisabled(disabled || downloading);
     setText(avatarStatus, avatar === null ? 'Using the built-in avatar mesh.' :
       avatar.pending ? `"${avatar.name}" is not applied: complete its bone map below.` :
       `Using "${avatar.name}" as the avatar${avatar.joints === null ? '.' :

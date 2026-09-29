@@ -43,6 +43,7 @@ import { ProjectCopyStore } from './project-copy';
 import type { ProjectCopy } from './project-copy';
 import { loadPublishedProject } from './published-project';
 import type { PublishedProject } from './published-project';
+import { ServerModelError } from './server-models';
 
 export const PROJECT_SECTIONS = [
   'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance', 'models',
@@ -84,7 +85,8 @@ export interface ProjectWorkspace {
     draft(): SpriteDocument;
     hasContent(): boolean;
     validated(): SpriteDocument | null;
-    load(document: SpriteDocument): Promise<boolean>;
+    // Refuses while the character is busy, unless `wait` asks it to wait for the character instead.
+    load(document: SpriteDocument, options?: { readonly wait?: boolean }): Promise<boolean>;
   };
   readonly appearance: {
     armIk(): Readonly<ArmIkSettings>;
@@ -204,7 +206,8 @@ function describe(error: unknown): string {
 }
 
 function isExpected(error: unknown): error is Error {
-  return error instanceof ProjectApiError || isProjectDataError(error) || error instanceof SyntaxError || error instanceof DOMException;
+  return error instanceof ProjectApiError || isProjectDataError(error) || error instanceof SyntaxError || error instanceof DOMException ||
+    error instanceof ServerModelError;
 }
 
 /**
@@ -401,6 +404,14 @@ export class ProjectSession {
       this.report(error);
       return false;
     }
+  }
+
+  // Downloads a file as one of the session's operations, so the open project cannot change while it
+  // arrives. Null when another operation is running or the download failed, which is reported.
+  async download(label: string, source: () => Promise<File>): Promise<File | null> {
+    const result: { file: File | null } = { file: null };
+    await this.run(label, async () => { result.file = await source(); });
+    return result.file;
   }
 
   // Adds a GLB to the model library for one part, checked like releases check it. A new avatar uses
@@ -1044,7 +1055,9 @@ export class ProjectSession {
       const bytes = await part.blob.arrayBuffer();
       inSection('appearance', () => checkAppearanceModel(bytes));
     }
-    if (primary !== null && !await this.workspace.character.load(primary)) {
+    // A project that replaces the whole character has already let go of the previous project, so it waits
+    // for a character operation in progress; a sync keeps refusing, which records the conflict.
+    if (primary !== null && !await this.workspace.character.load(primary, { wait: mode === 'load' })) {
       throw new ProjectError('The project character could not be loaded; see Character.', { section: 'characters/primary' });
     }
     if (parts !== null && !await this.workspace.appearance.load(parts)) {

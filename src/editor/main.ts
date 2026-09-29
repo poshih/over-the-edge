@@ -31,6 +31,7 @@ import { serverLevels } from './server-levels';
 import { createDecorationView } from '../decoration-library';
 import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
+import serverModels from 'virtual:workshop-models';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
@@ -102,6 +103,7 @@ const spriteEditor = createSpriteEditor({
   targetIds: SPRITE_TARGET_IDS,
   hammerRig: game.simulation.rigGeometry,
   naturalArms: () => game.view.naturalArmLengths(),
+  serverModels,
   // The Character tab's handle length edits the same game setting as Physics.
   onHandleLength: (handleLength) => {
     const settings = ui.settings();
@@ -165,7 +167,7 @@ const project = new ProjectSession({
       draft: () => spriteEditor.snapshot().document,
       hasContent: () => spriteEditor.snapshot().hasContent,
       validated: () => spriteEditor.validatedDocument(),
-      load: (document) => spriteEditor.loadDocument(document),
+      load: (document, options) => spriteEditor.loadDocument(document, options),
     },
     appearance: {
       armIk: () => appearance.armIkSettings(),
@@ -195,6 +197,7 @@ const projectEditor = createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,
   onTestCue: (cue) => audio.handle({ type: 'cue', cue, strength: 1 }),
   parts: game.view,
+  serverModels,
 });
 
 function resetPractice(id: PracticeId): void {

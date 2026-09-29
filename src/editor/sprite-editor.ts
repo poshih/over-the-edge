@@ -14,6 +14,7 @@ import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
 import { createCharacterEditor } from './character-editor';
+import type { ServerModels } from './server-models';
 import { sectionMarkup } from './workshop-section';
 import './sprite-editor.css';
 
@@ -45,6 +46,8 @@ export interface SpriteEditorOptions {
   naturalArms: () => CharacterArms;
   // Sets the game's handle length from the Character tab.
   onHandleLength: (length: number) => void;
+  // The avatars, hammers and pots this Workshop's server shares, for the Character tab.
+  serverModels: ServerModels;
   // False when the page opens a project instead: the saved profile is then only the Revert target.
   applySavedProfile?: boolean;
 }
@@ -53,7 +56,7 @@ export interface SpriteEditorHandle {
   ready: Promise<void>;
   snapshot: () => SpriteEditorSnapshot;
   // Replaces the draft with a whole profile, for example from a project; false if it was rejected.
-  loadDocument: (document: SpriteDocument) => Promise<boolean>;
+  loadDocument: (document: SpriteDocument, options?: { readonly wait?: boolean }) => Promise<boolean>;
   // The validated draft, or null after reporting why it cannot be saved.
   validatedDocument: () => SpriteDocument | null;
   setActive: (active: boolean) => void;
@@ -454,7 +457,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   const characterEditor = createCharacterEditor({
     mount: options.characterMount, state, hammerRig: options.hammerRig,
     naturalArms: options.naturalArms, onHandleLength: options.onHandleLength, actions: documentActions,
-    onNotice: options.onNotice, signal: events.signal,
+    serverModels: options.serverModels, onNotice: options.onNotice, signal: events.signal,
   });
   const skeletonEditor = createSkeletonEditor({
     mount: element<HTMLDivElement>(root, '.sprite-skeleton-mount'),
@@ -471,7 +474,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   return {
     ready,
     snapshot: () => state.snapshot(),
-    loadDocument: (document) => state.loadDocument(document),
+    loadDocument: (document, options) => state.loadDocument(document, options),
     validatedDocument: () => state.validatedDraft(),
     setActive: (value) => {
       active = value;
