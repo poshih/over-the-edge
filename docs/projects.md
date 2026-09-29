@@ -31,7 +31,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | Section | Stored in | Contents |
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
-| `level` | `level.json` | Level JSON, schema 3, as exported from Workshop / Level |
+| `level` | `level.json` | Level JSON, schema 4, as exported from Workshop / Level |
 | `settings` | `project.json` | Game-settings profile, schema 4: physics (including the downswing boost), hammer rig and cursor target (radius and dead zone) |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
@@ -39,7 +39,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
 | `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
 | `theme` | `project.json` | Sky, fog, exposure, camera, lights, sun disc, backdrop, aim marker, procedural character colours |
-| `hud` | `project.json` | Release readout labels, unit, scale, decimals and visibility |
+| `hud` | `project.json` | Release readout labels, unit, scale, decimals and visibility; how trigger messages appear |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: release look, terrain GLBs and the GLBs replacing decoration models |
@@ -69,7 +69,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [], "decorations": {} },
@@ -83,7 +83,7 @@ The paths are fixed, so a manifest only says which files exist:
   "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club" }], "pot": [] },
   "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30 }, "...": "..." },
   "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
-           "timer": { "visible": true, "label": "LANTERN TIME" } },
+           "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
   "enemies": { "bird": { "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null },
   "media": [{ "path": "/media/cavern-loop.wav" }]
@@ -100,10 +100,10 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 3, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 4, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }
@@ -357,8 +357,11 @@ and materials in place.
 
 **HUD.** `height.label`, `height.unit` (may be empty), `height.scale` (metres are
 multiplied by it; `3.28084` shows feet), `height.decimals` (0-3) and
-`timer.label`; either readout can be hidden. The default HUD is exactly the
-original one.
+`timer.label`; either readout can be hidden. `messages.style` is how message events
+appear, in the Workshop and in releases: `toast` (the default) fades each message in
+and away as play goes on; `popup` pauses the game until the player continues. See
+[trigger events](../README.md#trigger-objects-and-events). The default readout is
+exactly the original one.
 
 **Audio.** `volume` (master) and each clip's `volume` are 0-1. `music` loops while
 the game runs and pauses with it. Cues: `impact` (hammer strikes, louder when

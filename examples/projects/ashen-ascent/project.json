@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -122,6 +122,9 @@
     "timer": {
       "visible": true,
       "label": "HOLLOWING"
+    },
+    "messages": {
+      "style": "toast"
     }
   },
   "audio": {

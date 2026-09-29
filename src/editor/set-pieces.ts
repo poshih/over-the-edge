@@ -109,7 +109,7 @@ function goal(centerX: number, bottom: number, width: number): TriggerPart {
 function note(x: number, y: number, radius: number, title: string, message: string, marker: TriggerPart['marker'] = 'none'): TriggerPart {
   return {
     kind: 'trigger', name: title, x, y, region: { type: 'circle', radius },
-    activation: 'once', marker, events: [{ type: 'popup', title, message }],
+    activation: 'once', marker, events: [{ type: 'message', title, message }],
   };
 }
 
@@ -169,7 +169,7 @@ const DRAFTS: readonly Draft[] = [
   },
   {
     id: 'tutorial-note', category: 'onboarding', name: 'Tutorial note',
-    skill: 'A small rock with a one-time popup: explain the next obstacle. Edit the message after placing.',
+    skill: 'A small rock with a one-time message: explain the next obstacle. Edit the message after placing.',
     parts: [
       hex(0, 0, 1.6, 0.9, { color: COLOR.stone }),
       note(0, 2.1, 1.2, 'Keep climbing', 'Swing the hammer over the rock, hook it and pull. Edit this message in Trigger events.'),
@@ -495,7 +495,7 @@ const DRAFTS: readonly Draft[] = [
   },
   {
     id: 'false-summit', category: 'route', name: 'False summit',
-    skill: 'A flag that is not the end: a popup breaks the news and the real climb continues behind it.',
+    skill: 'A flag that is not the end: a message breaks the news and the real climb continues behind it.',
     parts: [
       block(0, 0, 4, 2.4), block(1, 2.4, 2, 0.8),
       note(2, 4.2, 1.2, 'False summit', 'Not the top yet. The real climb continues.', 'flag'),
@@ -523,7 +523,7 @@ const DRAFTS: readonly Draft[] = [
   },
   {
     id: 'summit', category: 'stakes', name: 'Summit',
-    skill: 'The finish: a plinth under an ending trigger that stops the timer and shows the summit popup.',
+    skill: 'The finish: a plinth under an ending trigger that stops the timer and shows the summit message.',
     parts: [block(0, 0, 4, 1.2, { color: COLOR.stone }), block(0.6, 1.2, 2.8, 0.4, { color: COLOR.stone }), goal(2, 1.6, 2.6)],
   },
 ];

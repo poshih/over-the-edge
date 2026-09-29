@@ -112,11 +112,12 @@ Body contact causes knockback, not health damage. Kills persist until reset;
 editing and exporting retain the authored enemy homes.
 
 The once-only opening trigger plays the fullscreen title movie, then displays
-the course briefing. Five once-only chapter popups mark selected transitions.
+the course briefing. Five once-only chapter messages mark selected transitions.
 The summit trigger stops the run timer and displays **Above the weather**.
-Dismissal does not restart the timer or replay the finish event. Media and popup
-presentation pause gameplay, so reading the briefing or watching the movie does
-not add to the run time.
+Neither restarts the timer or replays the finish event. The movie pauses gameplay,
+so watching it does not add to the run time. Messages appear in the open project's
+[message style](../README.md#trigger-objects-and-events): toasts fade while the
+climb goes on, and popups pause gameplay until they are dismissed.
 
 ## Authoring budget
 

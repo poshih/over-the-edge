@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "labels": [
     {
       "x": 1.575,
@@ -7093,7 +7093,7 @@
           "source": "/media/skyward-ruins-intro.webm"
         },
         {
-          "type": "popup",
+          "type": "message",
           "title": "Skyward Ruins",
           "message": "Eight districts. One summit.\n\nPale ledges give way under the pot. Wind rings launch you. The hammer can fend off the watchkeepers. Broad landings are resting places, not checkpoints."
         }
@@ -7114,7 +7114,7 @@
       "marker": "none",
       "events": [
         {
-          "type": "popup",
+          "type": "message",
           "title": "Tilted Quarry",
           "message": "Work with the slopes. The side wind platforms are shortcuts, not the only way up."
         }
@@ -7135,7 +7135,7 @@
       "marker": "none",
       "events": [
         {
-          "type": "popup",
+          "type": "message",
           "title": "Bell Spires",
           "message": "Rounded stone rewards a planted hammer. Take the broad landings when you need to reset your grip."
         }
@@ -7156,7 +7156,7 @@
       "marker": "none",
       "events": [
         {
-          "type": "popup",
+          "type": "message",
           "title": "The Unraveling",
           "message": "Pale stone holds the hammer, but not the pot for long. The darker route remains after it disappears."
         }
@@ -7177,7 +7177,7 @@
       "marker": "none",
       "events": [
         {
-          "type": "popup",
+          "type": "message",
           "title": "Wind Galleries",
           "message": "A higher lift needs room for the hammer. The outside shafts lead back to broad landing lips."
         }
@@ -7198,7 +7198,7 @@
       "marker": "none",
       "events": [
         {
-          "type": "popup",
+          "type": "message",
           "title": "Prism Teeth",
           "message": "The guards can be outmaneuvered or struck. The last stretch rewards control more than speed."
         }
@@ -7222,7 +7222,7 @@
           "type": "stop-timer"
         },
         {
-          "type": "popup",
+          "type": "message",
           "title": "Above the weather",
           "message": "600 metres, one continuous climb.\n\nYour time is stopped. The ruins below are still there; the summit is yours."
         }

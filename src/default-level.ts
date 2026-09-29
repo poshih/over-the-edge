@@ -1,10 +1,10 @@
 import { COURSE, COURSE_LABELS, START_SPAWN, ENDING_ZONE } from './course';
-import { terrainFromOutline, TRIGGER_LIMITS, validateLevel } from './level';
+import { LEVEL_SCHEMA_VERSION, terrainFromOutline, TRIGGER_LIMITS, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 import { ENDING_EVENTS } from './trigger-events';
 
 export const DEFAULT_LEVEL: LevelDefinition = validateLevel({
-  schemaVersion: 3,
+  schemaVersion: LEVEL_SCHEMA_VERSION,
   labels: COURSE_LABELS,
   objects: [...COURSE.map(terrainFromOutline),
   {

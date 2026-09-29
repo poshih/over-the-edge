@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "labels": [
     {
       "x": 0,
@@ -255,7 +255,7 @@
           "volume": 0.8
         },
         {
-          "type": "popup",
+          "type": "message",
           "title": "Lantern Cavern",
           "message": "A lantern still burns at the top of the cavern.\n\nClimb to it. Mind the bats and the stone that watches."
         }
@@ -320,7 +320,7 @@
           "type": "stop-timer"
         },
         {
-          "type": "popup",
+          "type": "message",
           "title": "The lantern is lit",
           "message": "The cavern glows. You made it out of the dark."
         }

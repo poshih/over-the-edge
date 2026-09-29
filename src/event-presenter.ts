@@ -1,15 +1,18 @@
 import './event-presenter.css';
 import { setText } from './dom';
-import type { PresentationAction, EventOutcome } from './trigger-events';
+import type { EventOutcome, MessageAction, PresentationAction } from './trigger-events';
 import { EventExecutionError } from './trigger-events';
 import { urlMediaHost } from './media-host';
 import type { MediaHost } from './media-host';
+import { MessageToasts } from './message-toast';
+import type { MessageToastStatus } from './message-toast';
 
 export type EventPresenterState = 'idle' | 'popup' | 'loading' | 'awaiting-input' | 'playing';
 
 export interface EventPresenterStatus {
   readonly state: EventPresenterState;
   readonly action: PresentationAction | null;
+  readonly toasts: MessageToastStatus;
 }
 
 export interface EventPresenterOptions {
@@ -81,7 +84,7 @@ class Presentation {
   ) {
     this.host = host;
     this.action = action;
-    this.kind = action.type === 'popup' ? 'popup' : 'video';
+    this.kind = action.type === 'message' ? 'popup' : 'video';
     this.state = this.kind === 'popup' ? 'popup' : 'loading';
     this.promise = new Promise<EventOutcome>((resolve, reject) => {
       this.resolveOutcome = resolve;
@@ -100,7 +103,7 @@ class Presentation {
     this.host.onModalChange({ active: true });
     if (this.settled) return; // onModalChange synchronously aborted the signal.
 
-    if (this.action.type === 'popup') this.buildPopup(this.action);
+    if (this.action.type === 'message') this.buildPopup(this.action);
     else this.buildVideo(this.action);
     if (this.settled) return; // building (e.g. a synchronous play() throw) already settled us.
 
@@ -187,7 +190,7 @@ class Presentation {
     }, { signal: this.controller.signal, capture: true });
   }
 
-  private buildPopup(action: Extract<PresentationAction, { type: 'popup' }>): void {
+  private buildPopup(action: MessageAction): void {
     this.root.classList.add('event-presenter--popup');
     const backdrop = document.createElement('div');
     backdrop.className = 'event-presenter-backdrop';
@@ -357,13 +360,19 @@ class Presentation {
 export class EventPresenter {
   private readonly mount: HTMLElement;
   private readonly onModalChange: (state: { active: boolean }) => void;
+  private readonly toasts: MessageToasts;
   private media: MediaHost;
   private active: Presentation | null = null;
   private disposed = false;
 
   constructor(options: EventPresenterOptions) {
     this.mount = options.mount;
-    this.onModalChange = options.onModalChange;
+    this.toasts = new MessageToasts({ mount: options.mount });
+    // Toasts hold while a popup or video has the player's attention.
+    this.onModalChange = (state) => {
+      this.toasts.setHeld(state.active);
+      options.onModalChange(state);
+    };
     this.media = options.media ?? urlMediaHost((source) => source);
   }
 
@@ -398,14 +407,29 @@ export class EventPresenter {
     return presentation.promise;
   }
 
+  // Shows a message as a toast; it never pauses the game or takes input, so its event is done at once.
+  toast(action: MessageAction): void {
+    if (this.disposed) throw new Error('EventPresenter.toast was called after dispose().');
+    if (!this.toasts.show(action)) {
+      throw new EventExecutionError('Too many trigger messages are already waiting.');
+    }
+  }
+
+  // A new run begins: the toast showing leaves quickly and waiting ones are dropped.
+  clearToasts(): void {
+    this.toasts.clear();
+  }
+
   inspect(): EventPresenterStatus {
-    if (!this.active) return { state: 'idle', action: null };
-    return { state: this.active.state, action: this.active.action };
+    const toasts = this.toasts.inspect();
+    if (!this.active) return { state: 'idle', action: null, toasts };
+    return { state: this.active.state, action: this.active.action, toasts };
   }
 
   dispose(): void {
     this.disposed = true;
     this.active?.forceCancel();
     this.active = null;
+    this.toasts.dispose();
   }
 }

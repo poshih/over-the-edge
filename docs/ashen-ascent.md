@@ -49,7 +49,7 @@ connectors between pieces change from zone to zone rather than repeating one
 pattern. Stairs switch back or run in line, mixing shelves, slabs, crates, rocks and
 columns; floors, walls, towers and wind stones fill the rest. The first zone opens
 with the intro. Each later zone begins at a **bonfire**, a blade planted in warm ash,
-whose popup names the zone the first time you arrive. Bonfires are landmarks, not
+whose message names the zone the first time you arrive. Bonfires are landmarks, not
 checkpoints. As in any Over the Edge course, falling never kills you; you just land
 lower down.
 
@@ -127,7 +127,7 @@ its backdrop hills, because the scenery is the landscape, and pushes the fog out
 | --- | ---: | --- |
 | Terrain | 399 | Including 10 illusions; blocks, ramps, triangles, circles and hexagons only |
 | Updrafts | 16 | 13 marked, 3 hidden; lift 5-96 m |
-| Other triggers | 15 | 14 popups (11 with a sound) and the ending, which stops the timer |
+| Other triggers | 15 | 14 messages (11 with a sound) and the ending, which stops the timer |
 | Enemies | 34 | 23 crows and 11 hollow soldiers |
 | Labels | 16 | The level limit |
 | Decorations | 190 | Scenery only; all 26 library models |
@@ -170,6 +170,6 @@ each piece with the library's own `placeSetPiece`, so part IDs follow
 | `trail.mjs` | The route builder: stairs, floors and piece placement |
 | `pieces.mjs` | How each set piece is entered and left |
 | `checks.mjs` | Overlap, footprint, draft, cramped-collider, reach and trap checks |
-| `lore.mjs` | Every popup title and message |
+| `lore.mjs` | Every message title and text |
 | `project.mjs` | Theme, HUD, audio cues and enemy art |
 | `course.mjs`, `map.mjs` | Object builders and the SVG map |

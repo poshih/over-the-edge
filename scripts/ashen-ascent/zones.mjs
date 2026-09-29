@@ -99,7 +99,7 @@ const ZONES = [
       [-59.6, -58.4, -53.4, -51.8, -50.2].forEach((x) => grave(b, x, 0, rng));
       t.at(-48.2, 0);
       place(t, 'tutorial-note', { floor: false, retune: (object) => object.kind === 'trigger'
-        ? { ...object, name: TEXT.firstLesson.title, events: [{ type: 'popup', title: TEXT.firstLesson.title, message: TEXT.firstLesson.message }] } : object });
+        ? { ...object, name: TEXT.firstLesson.title, events: [{ type: 'message', title: TEXT.firstLesson.title, message: TEXT.firstLesson.message }] } : object });
       t.go(2.4);
       b.label(t.x + 0.2, 3.4, 'TRY HOOKING THE STONE');
       place(t, 'first-boulder', { floor: false });
@@ -424,7 +424,7 @@ const ZONES = [
     build(b, t, rng) {
       // The false summit crowns the stair; behind its flag the wind altar looks up at the keep.
       place(t, 'false-summit', { floorTone: 'stone', floorThickness: 1.2, retune: (object) => object.kind === 'trigger'
-        ? { ...object, name: TEXT.falseSummit.title, events: [{ type: 'popup', title: TEXT.falseSummit.title, message: TEXT.falseSummit.message }] }
+        ? { ...object, name: TEXT.falseSummit.title, events: [{ type: 'message', title: TEXT.falseSummit.title, message: TEXT.falseSummit.message }] }
         : object });
       b.label(t.x - 3.6, t.y - 3.2, 'THE TOP, SURELY');
       t.floor(3.6, { name: 'wind-altar', thickness: 1.2, tone: 'gold', depth: 2.6 });
@@ -482,7 +482,7 @@ const ZONES = [
       t.turn().at(curtain.bounds.right, walk);
       t.floor(5.8, { name: 'balcony', thickness: 0.9, tone: 'stone', depth: 2.4 });
       place(t, 'dead-end-tower', { floor: false, recolor: undefined, tone: 'stone', retune: (object) => object.kind === 'trigger'
-        ? { ...object, name: TEXT.deadEnd.title, events: [{ type: 'popup', title: TEXT.deadEnd.title, message: TEXT.deadEnd.message }] }
+        ? { ...object, name: TEXT.deadEnd.title, events: [{ type: 'message', title: TEXT.deadEnd.title, message: TEXT.deadEnd.message }] }
         : object });
       b.label(curtain.bounds.right + 1.6, walk + 2.4, 'GREAT VIEW AHEAD');
       // The wall walk to the keep.
@@ -509,7 +509,7 @@ const ZONES = [
       b.label(t.x - 2.2, t.y + 2.6, 'THE EMBER, AT LAST');
       t.floor(1.4, { name: 'spire-top', thickness: 1.2, tone: 'ivory', depth: 2.6 });
       place(t, 'summit', { floorTone: 'gold', floorThickness: 1.2, recolor: undefined, tone: 'gold', retune: (object) => object.kind === 'trigger'
-        ? { ...object, name: TEXT.ending.title, events: [{ type: 'stop-timer' }, { type: 'popup', title: TEXT.ending.title, message: TEXT.ending.message }] }
+        ? { ...object, name: TEXT.ending.title, events: [{ type: 'stop-timer' }, { type: 'message', title: TEXT.ending.title, message: TEXT.ending.message }] }
         : object });
     },
   },

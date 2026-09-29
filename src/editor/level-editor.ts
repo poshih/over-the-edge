@@ -3,8 +3,9 @@ import { DEFAULT_LEVEL } from '../default-level';
 import { ENEMY_BEHAVIOR, ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import {
-  DECORATION_LIMITS, ILLUSION, isDecorationObject, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
-  objectContains, objectVertices, shapeVertices, terrainFromOutline, TRIGGER_LIMITS, TRIGGER_MARKERS, validateLevel, validateLevelObject,
+  DECORATION_LIMITS, ILLUSION, isDecorationObject, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, LevelError,
+  ROCK_COLOR, SHAPE_KINDS, objectContains, objectVertices, shapeVertices, terrainFromOutline, TRIGGER_LIMITS, TRIGGER_MARKERS,
+  validateLevel, validateLevelObject,
 } from '../level';
 import type {
   DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject,
@@ -85,7 +86,7 @@ const TRIGGER_PRESETS: readonly TriggerPreset[] = [
   {
     id: 'trigger', label: 'Trigger', name: 'Trigger', anchorBottom: false,
     region: { type: 'circle', radius: 1.5 }, activation: 'once', marker: 'none',
-    events: [{ type: 'popup', title: 'Event', message: 'Describe what happens here.' }],
+    events: [{ type: 'message', title: 'Event', message: 'Describe what happens here.' }],
   },
   {
     id: 'ending-trigger', label: 'Ending trigger', name: 'Ending', anchorBottom: true,
@@ -278,7 +279,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
             Reach is the head's distance from the shoulder hinge, so the start pose is the same whatever the
             game's handle length; a hammer that cannot reach that far starts fully extended.
             A level always has exactly one start; moving it here relocates it instead of creating another. Start
-            is only the spawn pose — it cannot carry events. For an intro popup or video, place a normal trigger
+            is only the spawn pose — it cannot carry events. For an intro message or video, place a normal trigger
             around the start position instead.</p>
         </div>
         <div class="level-fields-enemy">
@@ -1512,7 +1513,7 @@ This restores the default ground and start location, removes all other objects a
     const start = DEFAULT_LEVEL.objects.find((object) => object.kind === 'start');
     if (ground === undefined || start === undefined) throw new Error('The starter level needs its authored ground and start.');
     resetSelection();
-    level.replace({ schemaVersion: 3, labels: [], objects: [ground, start] });
+    level.replace({ schemaVersion: LEVEL_SCHEMA_VERSION, labels: [], objects: [ground, start] });
     fitCourse();
     onNotice('New level started. Add terrain and place an ending trigger, then save or export before leaving.', 'info');
   });

@@ -12,7 +12,8 @@ import { clamp } from './math';
 import { Simulation } from './simulation';
 import { GameView } from './view';
 import { TriggerRuntime } from './triggers';
-import type { TriggerAction, EventOutcome } from './trigger-events';
+import { DEFAULT_MESSAGE_STYLE } from './trigger-events';
+import type { EventOutcome, MessageStyle, TriggerAction } from './trigger-events';
 import { EventPresenter } from './event-presenter';
 import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
@@ -43,6 +44,7 @@ export class Game {
   // Last phase of each enemy, so cues fire on hit and defeat transitions only.
   private readonly enemyPhases = new Map<string, EnemyPhase>();
   private character: CharacterState = { armIk: DEFAULT_ARM_IK };
+  private messageStyle: MessageStyle;
   private stopped = false;
   private started = false;
   private animationFrame = 0;
@@ -64,6 +66,8 @@ export class Game {
     enemyArt?: EnemyArtSettings;
     // Creates the decoration view, when the game draws decorations.
     decorations?: (() => DecorationView) | null;
+    // How message events appear; toasts by default.
+    messageStyle?: MessageStyle;
     // Streams authored video sources; by default sources are URLs.
     media?: MediaHost;
     // Receives sound cues and play-sound events; without it the game tracks no impacts.
@@ -76,6 +80,7 @@ export class Game {
     this.fatal = options.fatal;
     this.onAction = options.onAction;
     this.onCue = options.onCue ?? null;
+    this.messageStyle = options.messageStyle ?? DEFAULT_MESSAGE_STYLE;
     const listen = { signal: this.lifecycle.signal };
     window.addEventListener('error', (event) => this.stop(event.message), listen);
     window.addEventListener('unhandledrejection', (event) =>
@@ -229,6 +234,9 @@ export class Game {
 
   setMedia(media: MediaHost): void { this.presenter.setMedia(media); }
 
+  // Applies to future message events; toasts already showing or queued finish as toasts.
+  setMessageStyle(style: MessageStyle): void { this.messageStyle = style; }
+
   setPause(options: { reason: string; paused: boolean }): void {
     if (options.paused) this.pauseReasons.add(options.reason);
     else this.pauseReasons.delete(options.reason);
@@ -256,6 +264,7 @@ export class Game {
   // Everything a reset restarts besides the player and level objects.
   private restartRun(): void {
     this.triggers.reset();
+    this.presenter.clearToasts();
     this.view.resetPresentation();
     this.resetClock();
     this.accumulator = 0;
@@ -268,6 +277,7 @@ export class Game {
     this.simulation.applyLevel(change);
     this.view.applyLevel(change);
     if (change.kind === 'replace') {
+      this.presenter.clearToasts();
       this.view.resetPresentation();
       this.resetClock();
       this.accumulator = 0;
@@ -340,6 +350,11 @@ export class Game {
     }
     if (action.type === 'play-sound') {
       this.onCue?.({ type: 'sound', source: action.source, volume: action.volume });
+      return 'completed';
+    }
+    // A toast never holds up the triggers: the next event, or the next trigger, starts at once.
+    if (action.type === 'message' && this.messageStyle === 'toast') {
+      this.presenter.toast(action);
       return 'completed';
     }
     return this.presenter.present(action, signal);

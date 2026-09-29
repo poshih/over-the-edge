@@ -12,6 +12,7 @@ import type { TerrainArt } from './art-types';
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
+export const LEVEL_SCHEMA_VERSION = 4;
 export const LEVEL_LIMITS = {
   objects: 1000,
   geometryKinds: 32,
@@ -125,7 +126,7 @@ export interface LevelLabel extends Readonly<Point> {
 }
 
 export interface LevelDefinition {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: typeof LEVEL_SCHEMA_VERSION;
   readonly labels: readonly LevelLabel[];
   readonly objects: readonly LevelObject[];
 }
@@ -399,7 +400,9 @@ export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'la
 
 export function validateLevel(value: unknown): LevelDefinition {
   fields(value, ['schemaVersion', 'labels', 'objects'], 'Level');
-  if (value.schemaVersion !== 3) throw new LevelError('Levels require schema version 3.');
+  if (value.schemaVersion !== LEVEL_SCHEMA_VERSION) {
+    throw new LevelError(`Levels require schema version ${LEVEL_SCHEMA_VERSION}.`);
+  }
   const metadata = validateLevelMetadata({ labels: value.labels });
   if (!Array.isArray(value.objects) || value.objects.length > LEVEL_OBJECT_LIMIT) {
     throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, ${ENEMY_LIMITS.objects} enemies, ${DECORATION_LIMITS.objects} decorations, and one start.`);
@@ -415,7 +418,7 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (new Set(terrain.map((object) => geometryKey(object.shape))).size > LEVEL_LIMITS.geometryKinds) {
     throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
   }
-  return Object.freeze({ schemaVersion: 3, ...metadata, objects: Object.freeze(objects) });
+  return Object.freeze({ schemaVersion: LEVEL_SCHEMA_VERSION, ...metadata, objects: Object.freeze(objects) });
 }
 
 function validateTrigger(value: unknown): TriggerObject {
@@ -465,11 +468,11 @@ export function validateTriggerAction(value: unknown): TriggerAction {
       strength: number(value.strength, LAUNCH_FIELDS.strength.min, LAUNCH_FIELDS.strength.max, LAUNCH_FIELDS.strength.label),
     });
   }
-  if (type === 'popup') {
-    fields(value, ['type', 'title', 'message'], 'Popup event');
+  if (type === 'message') {
+    fields(value, ['type', 'title', 'message'], 'Message event');
     return Object.freeze({
-      type, title: text(value.title, TRIGGER_LIMITS.title, 'Popup title'),
-      message: text(value.message, TRIGGER_LIMITS.message, 'Popup message'),
+      type, title: text(value.title, TRIGGER_LIMITS.title, 'Message title'),
+      message: text(value.message, TRIGGER_LIMITS.message, 'Message text'),
     });
   }
   if (type === 'play-video') {
@@ -483,7 +486,7 @@ export function validateTriggerAction(value: unknown): TriggerAction {
       volume: number(value.volume, SOUND_VOLUME.min, SOUND_VOLUME.max, SOUND_VOLUME.label),
     });
   }
-  throw new LevelError('Choose popup, play video, play sound, stop timer, or launch player.');
+  throw new LevelError('Choose message, play video, play sound, stop timer, or launch player.');
 }
 
 function mediaSource(value: unknown, kind: 'video' | 'sound'): string {

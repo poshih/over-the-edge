@@ -180,7 +180,7 @@ export class Release {
     const game = new Game({
       canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations,
-      theme: manifest.theme, enemyArt: manifest.enemies,
+      theme: manifest.theme, enemyArt: manifest.enemies, messageStyle: manifest.hud.messages.style,
       onCue: audio === null ? undefined : (cue) => audio.handle(cue),
       onAction: (action, options) => game.perform(action, options),
       onNotice: notice,

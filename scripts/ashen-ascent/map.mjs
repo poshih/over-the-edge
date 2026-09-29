@@ -1,5 +1,5 @@
 // An SVG map of a course, drawn from its geometry: terrain in its own colours (illusions dashed),
-// updrafts with their lift, popups, the ending, enemies, labels and the start. `reach` overlays the
+// updrafts with their lift, messages, the ending, enemies, labels and the start. `reach` overlays the
 // reach check's stand points for debugging.
 import { outline } from './course.mjs';
 

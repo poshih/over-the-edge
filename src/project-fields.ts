@@ -19,8 +19,15 @@ interface FieldBase {
   readonly description?: string;
 }
 
+export interface FieldOption {
+  readonly value: string;
+  readonly label: string;
+}
+
 export type FieldSpec =
   | (FieldBase & { readonly kind: 'color' })
+  // One of a fixed set of values, listed in the order an editor offers them.
+  | (FieldBase & { readonly kind: 'choice'; readonly options: readonly FieldOption[] })
   | (FieldBase & { readonly kind: 'boolean' })
   | (FieldBase & { readonly kind: 'text'; readonly minLength: number; readonly maxLength: number })
   | (FieldBase & {
@@ -56,6 +63,13 @@ export function booleanValue(value: unknown, label: string): boolean {
   return value;
 }
 
+export function choiceValue(value: unknown, options: readonly FieldOption[], label: string): string {
+  if (typeof value !== 'string' || !options.some((option) => option.value === value)) {
+    throw new ProjectError(`${label} must be one of ${options.map((option) => option.value).join(', ')}.`);
+  }
+  return value;
+}
+
 export function textValue(value: unknown, minLength: number, maxLength: number, label: string): string {
   if (typeof value !== 'string' || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value)) {
     throw new ProjectError(`${label} must be single-line text.`);
@@ -69,6 +83,7 @@ export function textValue(value: unknown, minLength: number, maxLength: number, 
 function fieldValue(field: FieldSpec, value: unknown): unknown {
   switch (field.kind) {
     case 'color': return colorValue(value, field.label);
+    case 'choice': return choiceValue(value, field.options, field.label);
     case 'boolean': return booleanValue(value, field.label);
     case 'text': return textValue(value, field.minLength, field.maxLength, field.label);
     case 'number': return numberValue(value, field.min, field.max, field.label, field.integer === true);

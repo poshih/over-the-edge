@@ -1,0 +1,108 @@
+/*
+ * Trigger messages shown as toasts (message-toast.ts). The layer covers the game view without taking
+ * input and sits under modal presentations. One toast at a time stands in the upper middle of the
+ * view on a smoky veil that keeps its light words legible over any sky. Its canvas reaches past the
+ * toast on every side for the magic, and screens light over the words.
+ */
+
+.message-toasts {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.message-toast {
+  position: absolute;
+  top: clamp(84px, 16%, 190px);
+  left: 50%;
+  width: min(640px, calc(100% - 32px));
+  padding: 20px 30px 22px;
+  transform: translateX(-50%);
+  color: #fff3d8;
+  font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  text-align: center;
+}
+
+.message-toast-veil {
+  position: absolute;
+  inset: -30px -64px;
+  background: radial-gradient(closest-side, rgb(14 11 18 / 80%), rgb(14 11 18 / 58%) 55%, rgb(14 11 18 / 0%));
+  opacity: 0;
+}
+
+.message-toast-title {
+  position: relative;
+  margin: 0;
+  /* Balances the letter spacing that follows each word's last letter. */
+  padding-left: 0.2em;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-shadow: 0 0 3px rgb(255 238 204 / 85%), 0 0 14px rgb(255 184 88 / 60%), 0 0 30px rgb(255 140 50 / 30%);
+}
+
+/* Room for the rule of light the canvas draws between the title and the text. */
+.message-toast-rule {
+  height: 18px;
+  margin: 4px 0 6px;
+}
+
+.message-toast-text {
+  position: relative;
+  max-width: 46ch;
+  margin: 0 auto;
+  color: #efe4cb;
+  font-size: 17px;
+  line-height: 1.55;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 75%), 0 0 12px rgb(255 186 104 / 24%);
+}
+
+/* A title word wraps as a whole, though its letters animate on their own. */
+.message-toast-word {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.message-toast-glyph {
+  display: inline-block;
+  opacity: 0;
+}
+
+.message-toast-magic {
+  position: absolute;
+  mix-blend-mode: screen;
+}
+
+/* Reduced motion: the whole toast fades in and out, words and veil together. */
+.message-toast--still {
+  opacity: 0;
+}
+
+.message-toast--still .message-toast-glyph,
+.message-toast--still .message-toast-veil {
+  opacity: 1;
+}
+
+@media (max-width: 600px), (max-height: 520px) {
+  .message-toast {
+    top: clamp(72px, 14%, 150px);
+    padding: 14px 16px 16px;
+  }
+
+  .message-toast-title {
+    padding-left: 0.14em;
+    font-size: 20px;
+    letter-spacing: 0.14em;
+  }
+
+  .message-toast-text {
+    font-size: 15px;
+  }
+}

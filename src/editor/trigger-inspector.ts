@@ -7,15 +7,15 @@ import { TRIGGER_LIMITS } from '../level';
 import { DEFAULT_LAUNCH, LAUNCH_FIELDS, SOUND_VOLUME } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 
-const EVENT_TYPES = ['popup', 'play-video', 'play-sound', 'stop-timer', 'launch-player'] as const;
+const EVENT_TYPES = ['message', 'play-video', 'play-sound', 'stop-timer', 'launch-player'] as const;
 type EventType = TriggerAction['type'];
 const EVENT_LABELS: Record<EventType, string> = {
-  popup: 'Popup', 'play-video': 'Play video', 'play-sound': 'Play sound', 'stop-timer': 'Stop timer', 'launch-player': 'Launch player',
+  message: 'Message', 'play-video': 'Play video', 'play-sound': 'Play sound', 'stop-timer': 'Stop timer', 'launch-player': 'Launch player',
 };
 
 function defaultEvent(type: EventType): TriggerAction {
   switch (type) {
-    case 'popup': return { type, title: 'Event', message: 'Describe what happens here.' };
+    case 'message': return { type, title: 'Event', message: 'Describe what happens here.' };
     case 'play-video': return { type, source: '' };
     case 'play-sound': return { type, source: '', volume: 1 };
     case 'stop-timer': return { type };
@@ -146,7 +146,7 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
     }, listen);
     header.append(label, up, down, remove);
     item.append(header);
-    if (action.type === 'popup') {
+    if (action.type === 'message') {
       const title = document.createElement('label');
       title.className = 'level-field';
       title.textContent = 'Title';
@@ -158,12 +158,12 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
       message.textContent = 'Message';
       const messageInput = document.createElement('textarea');
       messageInput.maxLength = TRIGGER_LIMITS.message; messageInput.rows = 3; messageInput.value = action.message;
-      const updatePopup = (): void => {
-        entry.draft[index] = { type: 'popup', title: titleInput.value, message: messageInput.value };
+      const updateMessage = (): void => {
+        entry.draft[index] = { type: 'message', title: titleInput.value, message: messageInput.value };
         renderStatus();
       };
-      titleInput.addEventListener('input', updatePopup, listen);
-      messageInput.addEventListener('input', updatePopup, listen);
+      titleInput.addEventListener('input', updateMessage, listen);
+      messageInput.addEventListener('input', updateMessage, listen);
       message.append(messageInput);
       item.append(title, message);
     } else if (action.type === 'play-video') {

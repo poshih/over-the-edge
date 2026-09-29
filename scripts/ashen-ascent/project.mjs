@@ -23,6 +23,8 @@ export const THEME = {
 export const HUD = {
   height: { visible: true, label: 'ASCENT', unit: 'm', scale: 1, decimals: 0 },
   timer: { visible: true, label: 'HOLLOWING' },
+  // Lore rises as embers and drifts away while the climb goes on.
+  messages: { style: 'toast' },
 };
 
 export const MEDIA = ['ashen-loop.wav', 'ember.wav', 'bell.wav', 'chime.wav', 'triumph.wav', 'clank.wav', 'thud.wav', 'soul.wav',

@@ -1,4 +1,4 @@
-// Every popup and message of Ashen Ascent, in one place so the words can be edited together.
+// Every message title and text of Ashen Ascent, in one place so the words can be edited together.
 export const TEXT = {
   intro: {
     title: 'Ashen Ascent',

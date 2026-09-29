@@ -9,7 +9,7 @@ import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
 import { CURSOR_FIELDS, RIG_FIELDS, TUNING_FIELDS } from '../src/game-settings';
 import { HUD_FIELDS } from '../src/hud';
-import { LEVEL_LIMITS, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
+import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
 import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
@@ -70,7 +70,7 @@ export function apiManual(auth: 'token' | 'loopback') {
     sections: {
       title: { value: 'string, 1-80 characters', description: 'Game title: browser tab and release name.' },
       level: {
-        value: 'level JSON, schemaVersion 3: { schemaVersion, labels, objects }',
+        value: `level JSON, schemaVersion ${LEVEL_SCHEMA_VERSION}: { schemaVersion, labels, objects }`,
         description: 'The course. Prefer the level/objects endpoints for small edits.',
         limits: { ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects },
         objects: {
@@ -79,19 +79,19 @@ export function apiManual(auth: 'token' | 'loopback') {
           trigger: {
             kind: 'trigger', id: 'summit', name: 'Summit', x: 0, y: 40, region: { type: 'circle', radius: 2 },
             activation: 'once | on-enter', marker: TRIGGER_MARKERS.join(' | '),
-            events: [{ type: 'stop-timer' }, { type: 'popup', title: 'Summit reached', message: '...' }],
+            events: [{ type: 'stop-timer' }, { type: 'message', title: 'Summit reached', message: '...' }],
           },
           enemy: { kind: 'enemy', id: 'bird-1', species: ENEMY_SPECIES.join(' | '), x: 3, y: 5, facing: 'left | right', patrolDistance: 3, speed: 1.4 },
         },
         enemyFields: ENEMY_FIELDS,
         triggerEvents: {
-          popup: { type: 'popup', title: `<= ${TRIGGER_LIMITS.title} characters`, message: `<= ${TRIGGER_LIMITS.message} characters` },
+          message: { type: 'message', title: `<= ${TRIGGER_LIMITS.title} characters`, message: `<= ${TRIGGER_LIMITS.message} characters` },
           'play-video': { type: 'play-video', source: '/media/intro.webm or https URL' },
           'play-sound': { type: 'play-sound', source: '/media/bell.wav or https URL', volume: `${SOUND_VOLUME.min}-${SOUND_VOLUME.max}` },
           'stop-timer': { type: 'stop-timer' },
           'launch-player': { type: 'launch-player', height: `${LAUNCH_FIELDS.height.min}-${LAUNCH_FIELDS.height.max} m`, strength: `${LAUNCH_FIELDS.strength.min}-${LAUNCH_FIELDS.strength.max}` },
         },
-        notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach.',
+        notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {
         value: '{ schemaVersion: 4, physics: {...}, rig: { handleLength, maxExtension }, cursor: { maxTargetRadius, deadZone } }', patch: true,
@@ -118,7 +118,7 @@ export function apiManual(auth: 'token' | 'loopback') {
         notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; grips, arms and armForwardDistance follow the character profile format.',
       },
       theme: { value: 'scene look', patch: true, fields: THEME_FIELDS },
-      hud: { value: 'release readout', patch: true, fields: HUD_FIELDS },
+      hud: { value: 'game readout and trigger-message style', patch: true, fields: HUD_FIELDS },
       audio: {
         value: '{ volume, music: { source, volume } | null, cues: { <cue>: { source, volume } | null } }',
         patch: true, volume: AUDIO_VOLUME,

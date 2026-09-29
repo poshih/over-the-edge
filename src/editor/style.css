@@ -1051,7 +1051,8 @@ body[data-input-mode="touch"] .workshop-search-key {
 
 @media (min-width: 1040px) {
   body.workshop-open #game,
-body.workshop-open .game-chrome {
+body.workshop-open .game-chrome,
+body.workshop-open .message-toasts {
     width: calc(100% - var(--workshop-width));
   }
 
@@ -1073,7 +1074,8 @@ body.workshop-open .game-chrome {
   }
 
   body.workshop-open #game,
-body.workshop-open .game-chrome {
+body.workshop-open .game-chrome,
+body.workshop-open .message-toasts {
     width: calc(100% - var(--mobile-panel-width));
   }
 
@@ -1182,7 +1184,8 @@ body.workshop-open [data-action="reset"] {
   }
 
   body.workshop-open #game,
-body.workshop-open .game-chrome {
+body.workshop-open .game-chrome,
+body.workshop-open .message-toasts {
     width: 100%;
     height: calc(100% - var(--mobile-sheet-height));
   }

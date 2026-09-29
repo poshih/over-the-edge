@@ -116,11 +116,11 @@ export class CourseBuilder {
     }, options.group ?? `${this.zone.code}:${name}`);
   }
 
-  // A popup the player meets at (x, y), with an optional sound first.
+  // A message the player meets at (x, y), with an optional sound first.
   message(name, x, y, title, message, options = {}) {
     const events = [];
     if (options.sound) events.push({ type: 'play-sound', source: options.sound, volume: options.volume ?? 0.8 });
-    events.push({ type: 'popup', title, message });
+    events.push({ type: 'message', title, message });
     const region = options.region ?? { type: 'box', width: options.width ?? 3, height: options.height ?? 3 };
     return this.trigger(name, x, y, region, events, { title, marker: options.marker });
   }
@@ -163,7 +163,7 @@ export class CourseBuilder {
   /**
    * Places a library set piece with its base centre at (x, y). `recolor` maps the piece's own colours
    * to tones of the zone's palette, or `tone` recolours every part; `retune` edits a placed part, such
-   * as a popup's words. `direction: 'down'` marks a piece that is only traversed downward.
+   * as a message's words. `direction: 'down'` marks a piece that is only traversed downward.
    */
   piece(id, x, y, options = {}) {
     const { setPieceById, placeSetPiece } = this.library;
@@ -190,7 +190,7 @@ export class CourseBuilder {
   }
 
   level() {
-    return { schemaVersion: 3, labels: this.labels, objects: this.objects };
+    return { schemaVersion: 4, labels: this.labels, objects: this.objects };
   }
 }
 

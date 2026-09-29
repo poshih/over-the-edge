@@ -11,14 +11,22 @@ export const DEFAULT_LAUNCH: Readonly<LaunchSettings> = Object.freeze({ height: 
 export const SOUND_VOLUME = { label: 'Sound volume', min: 0, max: 1, step: 0.05, unit: '' } as const;
 
 export type TriggerAction =
-  | { readonly type: 'popup'; readonly title: string; readonly message: string }
+  // Shows a title and message in the project's message style: a toast, or a popup that pauses the game.
+  | { readonly type: 'message'; readonly title: string; readonly message: string }
   | { readonly type: 'play-video'; readonly source: string }
   | ({ readonly type: 'launch-player' } & LaunchSettings)
   | { readonly type: 'stop-timer' }
   // Plays a sound effect without pausing the game; the next event starts immediately.
   | { readonly type: 'play-sound'; readonly source: string; readonly volume: number };
 
-export type PresentationAction = Extract<TriggerAction, { readonly type: 'popup' | 'play-video' }>;
+export type PresentationAction = Extract<TriggerAction, { readonly type: 'message' | 'play-video' }>;
+export type MessageAction = Extract<TriggerAction, { readonly type: 'message' }>;
+
+// How message events appear: a toast that fades in and away while play goes on, or a popup that
+// pauses the game until the player continues.
+export const MESSAGE_STYLES = ['toast', 'popup'] as const;
+export type MessageStyle = (typeof MESSAGE_STYLES)[number];
+export const DEFAULT_MESSAGE_STYLE: MessageStyle = 'toast';
 export type EventOutcome = 'completed' | 'skipped' | 'cancelled';
 export type TriggerExecutor = (action: TriggerAction, signal: AbortSignal) => EventOutcome | Promise<EventOutcome>;
 
@@ -31,7 +39,7 @@ export const UPDRAFT_EVENTS: readonly TriggerAction[] = Object.freeze([
 export const ENDING_EVENTS: readonly TriggerAction[] = Object.freeze([
   Object.freeze({ type: 'stop-timer' }),
   Object.freeze({
-    type: 'popup', title: 'Summit reached',
+    type: 'message', title: 'Summit reached',
     message: 'A little closer to the sky.\n\nTake in the view. You earned it.',
   }),
 ]);

@@ -107,7 +107,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         <button type="button" class="button project-theme-reset">Reset theme</button>
       `)}
 
-      ${sectionMarkup({ id: 'project-hud', title: 'HUD', hint: 'The standalone game\'s readout' }, `
+      ${sectionMarkup({ id: 'project-hud', title: 'HUD', hint: 'Readout and trigger messages' }, `
         <div class="project-fields project-hud-fields"></div>
         <button type="button" class="button project-hud-reset">Reset HUD</button>
       `)}
@@ -202,6 +202,16 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       label.htmlFor = id;
       label.textContent = field.label;
       if (field.description !== undefined) label.title = field.description;
+      if (field.kind === 'choice') {
+        const select = document.createElement('select');
+        select.id = id;
+        select.name = id;
+        select.replaceChildren(...field.options.map((option) => new Option(option.label, option.value)));
+        row.append(label, select);
+        select.addEventListener('change', () => update(select.value), listen);
+        mount.append(row);
+        return { path: field.path, set: (value) => { select.value = String(value); } };
+      }
       const input = document.createElement('input');
       input.id = id;
       input.name = id;

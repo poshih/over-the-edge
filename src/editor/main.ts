@@ -187,6 +187,7 @@ const project = new ProjectSession({
       ui.setSceneTone(isDarkSky(look.theme));
       game.setEnemyArt(look.enemies);
       ui.setHud(look.hud);
+      game.setMessageStyle(look.hud.messages.style);
       audio.setSettings(look.audio);
     },
     notice: ui.notice,

@@ -478,7 +478,7 @@ newer edits. Use this same JSON with the `GAME_SETTINGS` build input above.
 Snapshots are stored independently in this browser's localStorage, on this site,
 so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save a [project](docs/projects.md) to your own project server. Settings use
-**schema version 3**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 4**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 
@@ -576,7 +576,7 @@ not their on-screen size.
 Place a **Trigger** to define a circular or rectangular proximity zone.
 The player's foot position activates the zone; the hammer and terrain do not.
 **Ending trigger** is a preset of the same trigger type, with a flag and an
-ordered **Stop timer**, then **Popup** event list. Move it, change its region,
+ordered **Stop timer**, then **Message** event list. Move it, change its region,
 or edit its events like any other trigger. Place a trigger around the start
 to play an intro or show instructions.
 
@@ -584,16 +584,36 @@ Supported events:
 
 | Event | Behavior |
 | --- | --- |
-| Popup | Shows a plain-text title and message until Continue; Escape skips it |
+| Message | Shows a plain-text title and message, as a toast or a popup (see below) |
 | Play video | Plays a public video URL or site-relative media path in a full-window overlay |
 | Stop timer | Freezes the run timer without stopping physics or illusion effects |
 | Launch player | Applies a mass-aware upward impulse with configurable lift height and strength |
 | Play sound | Plays a sound (0-1 volume) from a public URL or site-relative media path, without pausing; the next event starts immediately |
 
 Events execute in their authored order. Only one presentation runs at a time;
-simultaneous triggers queue deterministically. Popup/video presentation pauses
-gameplay and suspends hammer input until it closes. Skipping a presentation
-continues its remaining events. Failures are reported, not silently retried.
+simultaneous triggers queue deterministically. Popups and videos pause gameplay and
+suspend hammer input until they close. Skipping a presentation continues its
+remaining events. Failures are reported, not silently retried.
+
+The project's HUD settings choose how messages appear, in the Workshop and in releases
+(Workshop / Project / **HUD** / **Trigger messages**):
+
+- **Toast** (the default): an arcane seal gathers at the centre and draws a line of
+  light outward, and the words form as its beams pass. Once there has been time to
+  read them, they burn away into embers from the ends inward.
+  - Play goes on: a toast never pauses the game, takes input or holds up the next event.
+  - It stays readable for about 1.4 s plus 0.06 s per character, between 3 and 14 s.
+  - Messages show one at a time. A waiting message shortens the current one, never
+    below its fast reading time.
+  - Up to three messages wait. A further distinct message reports an event failure
+    instead of silently replacing one that was already queued.
+  - Toasts wait while a popup or video is showing. A restart dissolves the current toast
+    quickly and drops waiting ones.
+  - The effect is procedural (curves, easing and a swirling flow field) on one small
+    canvas with pooled particles, and costs nothing while no toast is showing.
+  - With reduced motion, a toast only fades in and out. Screen readers hear each
+    message through a live region.
+- **Popup**: a dialog that pauses the game until **Continue**; Escape skips it.
 The timer starts on a new attempt; Reset resets both its value and running state.
 
 **Once per run** claims activation before queuing, so repeated physics ticks
@@ -612,7 +632,7 @@ Autoplay with sound may require a user gesture: the overlay offers **Play video*
 when blocked. It always fills the game window; native browser fullscreen is
 requested through a user-operated fullscreen control.
 
-Level JSON uses **schema version 3**, with typed terrain, start, trigger and enemy
+Level JSON uses **schema version 4**, with typed terrain, start, trigger and enemy
 objects. A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
 Files and saved snapshots in any other version are rejected, not converted.
 
@@ -1058,8 +1078,9 @@ render/cache counts, including the imported avatar's joints and bone writes, the
 hammer model, shading, the active character profile, the arm chains it draws, and its
 grip placement and slide point with both grips' current distances from the butt.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
-state, and the independent run timer. Restart resets the attempt; physics time
-continues to be available separately as `snapshot().time`.
+state (including the message toast showing and how many wait), and the independent
+run timer. Restart resets the attempt; physics time continues to be available
+separately as `snapshot().time`.
 `window.gettingOver.sprites()` reports the character/sprite draft and save state
 with the sprite renderer's `inspect()` result, including each aim flipbook
 layer's shown frame.
