@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { build, createServer, preview } from 'vite';
 import { chromium } from 'playwright';
 import { modelFixture } from './verify-appearance.mjs';
@@ -19,6 +21,7 @@ const artifacts = join(root, 'artifacts');
 const gameConfig = join(root, 'vite.game.config.ts');
 const workshopConfig = join(root, 'vite.config.ts');
 const example = 'examples/projects/lantern-cavern';
+const ashenAscent = 'examples/projects/ashen-ascent';
 await mkdir(artifacts, { recursive: true });
 const temporary = await mkdtemp(join(artifacts, 'project-proof-'));
 const projects = join(temporary, 'projects');
@@ -149,7 +152,7 @@ async function examplePackage() {
     const name = entry.path.slice('/media/'.length);
     files[`media/${name}`] = `data:audio/wav;base64,${(await readFile(join(root, example, 'media', name))).toString('base64')}`;
   }
-  return { format: 'over-the-edge-project-bundle', schemaVersion: 2, files };
+  return { format: 'over-the-edge-project-bundle', schemaVersion: 3, files };
 }
 
 try {
@@ -226,6 +229,30 @@ try {
     } finally {
       await page.close();
       await server.close();
+    }
+
+    // The generated Ashen Ascent example matches its generator and releases editor-free.
+    await promisify(execFile)(process.execPath, [join(root, 'scripts/ashen-ascent/generate.mjs'), '--check'], { cwd: root });
+    const ashenOutput = join(temporary, 'ashen-ascent-release');
+    const ashen = await releaseBuild({ GAME_PROJECT: ashenAscent }, { outDir: ashenOutput });
+    assert.ok(!bundleModules(ashen).some((id) => id.includes('/src/editor/')), 'The Ashen Ascent release contains no editor modules.');
+    const ashenManifest = JSON.parse(await readFile(join(root, ashenAscent, 'project.json'), 'utf8'));
+    assert.deepEqual(Object.keys((await releaseContent(ashenOutput)).manifest.media).sort(), ashenManifest.media.map((entry) => entry.path).sort());
+    setGameEnv({ GAME_PROJECT: ashenAscent });
+    const ashenServer = await preview({ configFile: gameConfig, logLevel: 'silent', build: { outDir: ashenOutput }, preview: { host: '127.0.0.1', port: 0, strictPort: true } });
+    setGameEnv({});
+    const ashenPage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await observeBrowserPage(ashenPage, report.errors);
+    try {
+      await ashenPage.goto(`http://127.0.0.1:${ashenServer.httpServer.address().port}/`, { waitUntil: 'networkidle' });
+      assert.equal(await ashenPage.title(), 'Ashen Ascent');
+      assert.deepEqual(await ashenPage.locator('.play-hud dt').allTextContents(), [ashenManifest.hud.height.label, ashenManifest.hud.timer.label]);
+      assert.ok(await dismissPopup(ashenPage), 'Ashen Ascent greets the player at the start.');
+      await ashenPage.screenshot({ path: join(artifacts, 'ashen-ascent-release.png') });
+      report.builds.ashenAscent = { current: true, media: ashenManifest.media.length };
+    } finally {
+      await ashenPage.close();
+      await ashenServer.close();
     }
   }
 
@@ -361,6 +388,29 @@ try {
     const projectSettings = (await api('GET', '/api/projects/blank-test/settings')).value;
     assert.deepEqual(projectSettings.rig, { handleLength: 2.1, maxExtension: 0.55 });
     assert.equal(projectSettings.schemaVersion, 3);
+    assert.deepEqual((await api('POST', '/api/projects/blank-test/validate')).value, { ok: true, problems: [] });
+
+    // Course artwork replaces a decoration model's placeholder, or draws a model the library lacks.
+    const idol = { kind: 'decoration', id: 'idol', model: 'stone-idol', x: 2, y: 0, z: -3, height: 2, angle: 0, mirror: false, tint: 0xffffff };
+    const refused = await api('POST', '/api/projects/blank-test/level/objects', idol);
+    assert.equal(refused.status, 400);
+    assert.match(refused.value.error.message, /stone-idol, which is neither in the decoration library nor in the course artwork/);
+    const glb = await api('POST', '/api/projects/blank-test/art/assets?name=Idol.glb', new Uint8Array(modelFixture({ size: [1, 2, 1] })));
+    assert.equal(glb.status, 200);
+    const idolAsset = glb.value.result.id;
+    assert.match(idolAsset, /^asset-[a-f0-9]{64}$/);
+    assert.deepEqual((await api('GET', '/api/projects/blank-test/art')).value.decorations, {});
+    assert.equal((await api('PATCH', '/api/projects/blank-test/art', { decorations: { 'stone-idol': `asset-${'2'.repeat(64)}` } })).status, 400,
+      'A decoration model maps only to uploaded course artwork.');
+    assert.equal((await api('PATCH', '/api/projects/blank-test/art', { decorations: { 'stone-idol': idolAsset, 'dead-tree': idolAsset } })).status, 200);
+    assert.equal((await api('POST', '/api/projects/blank-test/level/objects', idol)).status, 200);
+    assert.equal((await api('DELETE', `/api/projects/blank-test/art/assets/${idolAsset}`)).status, 409, 'Artwork a decoration model uses stays.');
+    const assets = [{ id: idolAsset, name: 'Idol.glb' }];
+    assert.equal((await api('PUT', '/api/projects/blank-test/art', { mode: 'shapes', assets, decorations: { 'dead-tree': idolAsset } })).status, 400,
+      'A model the level uses keeps its artwork until its decorations are gone.');
+    assert.equal((await api('DELETE', '/api/projects/blank-test/level/objects/idol')).status, 200);
+    assert.equal((await api('PUT', '/api/projects/blank-test/art', { mode: 'shapes', assets, decorations: {} })).status, 200);
+    assert.equal((await api('DELETE', `/api/projects/blank-test/art/assets/${idolAsset}`)).status, 200);
     assert.deepEqual((await api('POST', '/api/projects/blank-test/validate')).value, { ok: true, problems: [] });
 
     // Bundles round-trip byte for byte.

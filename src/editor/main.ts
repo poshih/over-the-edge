@@ -27,7 +27,10 @@ import { DEFAULT_AUDIO } from '../audio-settings';
 import { isDarkSky } from '../theme';
 import { ProjectSession } from './project-session';
 import { createProjectEditor } from './project-editor';
+import { serverLevels } from './server-levels';
+import { createDecorationView } from '../decoration-library';
 import publishedProject from 'virtual:workshop-project';
+import folderLevels from 'virtual:workshop-levels';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
@@ -52,6 +55,7 @@ const audio = new AudioDirector({
 const game = new Game({
   canvas, fatal, eventMount: mount, level: level.definition(),
   characterModels: createCharacterModelLoader(),
+  decorations: createDecorationView,
   media,
   onCue: (cue) => audio.handle(cue),
   onAction: perform,
@@ -118,6 +122,8 @@ const spriteEditor = createSpriteEditor({
 const collisionOverlay = new CollisionOverlay();
 game.view.addLayer(collisionOverlay);
 const unsubscribeOverlay = game.simulation.subscribeTerrain((event) => collisionOverlay.apply(event));
+const decorations = game.view.decorations;
+if (decorations === null) throw new Error('The Workshop draws decorations.');
 const levelEditor = createLevelEditor({
   mount: ui.levelMount, canvas, level,
   camera: {
@@ -125,10 +131,17 @@ const levelEditor = createLevelEditor({
     set: (framing) => game.view.setFraming(framing),
     project: (point) => game.view.project(point),
     unproject: (point) => game.view.unproject(point),
+    projectDepth: (point, z) => game.view.projectDepth(point, z),
+    unprojectDepth: (point, z) => game.view.unprojectDepth(point, z),
+  },
+  decorations: {
+    size: (model) => decorations.size(model),
+    preview: (object) => decorations.setPreview(object),
   },
   onPlay: () => perform('play'),
   onNotice: ui.notice,
   warnBeforeUnload: !opensProject,
+  serverLevels: serverLevels(publishedProject, folderLevels),
 });
 const appearanceRestored = appearance.restore();
 const project = new ProjectSession({

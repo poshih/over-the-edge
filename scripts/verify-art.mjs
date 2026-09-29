@@ -43,10 +43,20 @@ function smallLevel() {
       baseTerrain('ramp', { type: 'ramp' }, 1800, 1200, 4, 1.5, { angle: 0.4, depth: 2 }),
       baseTerrain('circle', { type: 'circle' }, 1830, 1200, 2, 2, { depth: 1.2 }),
       baseTerrain('polygon', { type: 'polygon', vertices: [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.35 }, { x: 0.2, y: 0.5 }, { x: -0.45, y: 0.3 }] }, 1860, 1200, 3, 2, { depth: 1.4 }),
+      decoration('tree-1', 'dead-tree', 3, 0, false),
+      decoration('tree-2', 'dead-tree', -3, 0, true),
+      decoration('graves', 'graves', 5, 0, false),
       { kind: 'start', id: 'start', x: 0, y: 4, angle: 0.5, reach: 1.8 },
     ],
   };
 }
+
+function decoration(id, model, x, y, mirror) {
+  return { kind: 'decoration', id, model, x, y, z: -4, height: 3, angle: 0, mirror, tint: 0xffffff };
+}
+
+// A GLB for decorations whose index count (576) no other fixture shares, so its draws can be counted.
+const treeFixture = () => modelFixture({ size: [1, 2, 1], segments: 4 });
 
 async function writeJson(path, value) {
   await writeFile(path, JSON.stringify(value));
@@ -87,7 +97,7 @@ async function expectBuildRejects(pattern, message) {
 
 async function observeArtDraws(page) {
   await page.addInitScript(() => {
-    window.courseArtDraw = { stone: 0, slab: 0, history: [] };
+    window.courseArtDraw = { stone: 0, slab: 0, tree: 0, history: [] };
     const prototype = WebGL2RenderingContext.prototype;
     const clear = prototype.clear;
     const draw = prototype.drawElementsInstanced;
@@ -95,6 +105,7 @@ async function observeArtDraws(page) {
       if (this.canvas.id === 'game' && (args[0] & this.COLOR_BUFFER_BIT) !== 0) {
         window.courseArtDraw.stone = 0;
         window.courseArtDraw.slab = 0;
+        window.courseArtDraw.tree = 0;
       }
       return clear.apply(this, args);
     };
@@ -102,6 +113,7 @@ async function observeArtDraws(page) {
       if (this.canvas.id === 'game') {
         if (count === 9216) window.courseArtDraw.stone += instances;
         if (count === 36) window.courseArtDraw.slab += instances;
+        if (count === 576) window.courseArtDraw.tree += instances;
         window.courseArtDraw.history.push({ count, instances });
       }
       return draw.call(this, mode, count, type, offset, instances);
@@ -117,21 +129,28 @@ async function makePackageProof() {
   const stonePath = join(temporary, 'stone.glb');
   await writeFile(slabPath, modelFixture({ size: [2, 1, 3] }));
   await writeFile(stonePath, modelFixture({ textured: true, segments: 16 }));
+  await writeFile(join(temporary, 'tree.glb'), treeFixture());
   await writeJson(levelPath, smallLevel());
   await writeJson(assignmentsPath, {
-    floor: 'slab.glb',
-    ledge: 'stone.glb',
-    ramp: { file: 'slab.glb', mirror: 'x' },
-    circle: 'stone.glb',
-    polygon: 'slab.glb',
+    terrain: {
+      floor: 'slab.glb',
+      ledge: 'stone.glb',
+      ramp: { file: 'slab.glb', mirror: 'x' },
+      circle: 'stone.glb',
+      polygon: 'slab.glb',
+    },
+    decorations: { 'dead-tree': 'tree.glb' },
   });
   const { stdout } = await runPack(levelPath, assignmentsPath, outputPath);
   const pack = await readJson(outputPath);
   assert.equal(pack.format, 'over-the-edge-course');
-  assert.equal(pack.schemaVersion, 1);
+  assert.equal(pack.schemaVersion, 2);
   assert.equal(pack.mode, 'meshes');
-  assert.equal(pack.assets.length, 2, 'The CLI must deduplicate assets by hash.');
-  assert.ok(stdout.includes('5 terrain objects'));
+  assert.equal(pack.assets.length, 3, 'The CLI must deduplicate assets by hash.');
+  assert.ok(stdout.includes('5 terrain objects, 1 decoration model, 3 unique GLBs'), stdout);
+  assert.deepEqual(pack.decorations, { 'dead-tree': pack.assets[2].id }, 'Decoration models map to their GLB by model ID.');
+  assert.ok(pack.level.objects.filter(object => object.kind === 'decoration').every(object => !('art' in object)),
+    'Decorations stay placeholders in the level; the package maps their models.');
   const objects = Object.fromEntries(terrainObjects(pack.level).map(object => [object.id, object]));
   assert.equal(objects.floor.art.assetId, pack.assets[0].id);
   assert.equal(objects.floor.art.mirror, 'none');
@@ -141,15 +160,22 @@ async function makePackageProof() {
 
   const badAssignments = join(temporary, 'assignments-bad-id.json');
   const badOutput = join(temporary, 'bad-id-course.json');
-  await writeJson(badAssignments, { missing: 'slab.glb' });
+  await writeJson(badAssignments, { terrain: { missing: 'slab.glb' } });
   await assert.rejects(runPack(levelPath, badAssignments, badOutput), /unknown terrain object/);
+  await assert.rejects(readFile(badOutput), /ENOENT/);
+  await writeJson(badAssignments, { floor: 'slab.glb' });
+  await assert.rejects(runPack(levelPath, badAssignments, badOutput), /"terrain" and "decorations" sections/);
+  await writeJson(badAssignments, { decorations: { castle: 'tree.glb' } });
+  await assert.rejects(runPack(levelPath, badAssignments, badOutput), /no decoration in the level uses/);
   await assert.rejects(readFile(badOutput), /ENOENT/);
   const textPath = join(temporary, 'not-glb.txt');
   await writeFile(textPath, 'not a glb');
   const badGlb = join(temporary, 'assignments-bad-glb.json');
-  await writeJson(badGlb, { floor: 'not-glb.txt' });
+  await writeJson(badGlb, { terrain: { floor: 'not-glb.txt' } });
   await assert.rejects(runPack(levelPath, badGlb, join(temporary, 'bad-glb-course.json')), /not a GLB v2/);
-  report.sections.packCli = { assigned: 5, assets: pack.assets.length, outputPath };
+  await writeJson(badGlb, { decorations: { 'dead-tree': 'not-glb.txt' } });
+  await assert.rejects(runPack(levelPath, badGlb, join(temporary, 'bad-glb-course.json')), /decoration model "dead-tree" is not a GLB v2/);
+  report.sections.packCli = { assigned: 5, decorationModels: 1, assets: pack.assets.length, outputPath };
   return { packagePath: outputPath, pack, slabPath, stonePath };
 }
 
@@ -167,6 +193,8 @@ async function verifyRelease(packagePath, uniqueAssets) {
     const { paths: glbs, manifest } = await contentMeshes(output);
     assert.equal(glbs.length, mode === 'meshes' ? uniqueAssets : 0);
     assert.equal(manifest.art.mode, mode);
+    assert.deepEqual(Object.keys(manifest.art.decorations), mode === 'meshes' ? ['dead-tree'] : [],
+      'Mesh releases map decoration models to their GLBs; shape releases draw placeholders.');
     assert.ok(bundleFiles(bundle).every(file => !file.fileName.endsWith('.glb')), 'Course meshes are content, never shell files.');
     const code = shellCode(bundle);
     const { files } = await releaseContent(output);
@@ -189,6 +217,8 @@ async function verifyRelease(packagePath, uniqueAssets) {
       assert.equal(glbRequests.length, mode === 'meshes' ? uniqueAssets : 0);
       if (mode === 'meshes') {
         await page.waitForFunction(() => window.courseArtDraw.stone >= 1 && window.courseArtDraw.slab >= 1);
+        // Both dead trees draw the GLB: the mirrored one from its own mirrored-geometry batch.
+        await page.waitForFunction(() => window.courseArtDraw.tree === 2);
         const first = await page.evaluate(() => ({ ...window.courseArtDraw }));
         await page.waitForFunction(() => window.courseArtDraw.stone === 0 && window.courseArtDraw.slab >= 1, null, { timeout: 10000 });
         await page.keyboard.press('r');
@@ -197,6 +227,7 @@ async function verifyRelease(packagePath, uniqueAssets) {
       } else {
         await frames(page);
         assert.equal(await page.evaluate(() => window.courseArtDraw.stone), 0);
+        assert.equal(await page.evaluate(() => window.courseArtDraw.tree), 0);
         report.sections.release.push({ mode, glbs: glbs.length, requests: glbRequests.length });
       }
       assert.deepEqual(errors, []);
@@ -231,6 +262,30 @@ async function verifyNegativeBuilds(packagePath, pack) {
   process.env.GAME_LEVEL = relative(root, packagePath);
   process.env.GAME_ART_MODE = 'bogus';
   await expectBuildRejects(/GAME_ART_MODE/, 'Unknown GAME_ART_MODE must be rejected.');
+
+  // A model the library lacks draws only from its GLB, so only mesh releases can show it.
+  const custom = structuredClone(pack);
+  custom.level.objects.splice(-1, 0, decoration('idol', 'stone-idol', 7, 0, false));
+  custom.decorations['stone-idol'] = pack.assets[0].id;
+  const customPath = join(temporary, 'custom-model-course.json');
+  await writeJson(customPath, custom);
+  process.env.GAME_LEVEL = relative(root, customPath);
+  process.env.GAME_ART_MODE = 'shapes';
+  await expectBuildRejects(/stone-idol.*Shape releases draw only the built-in library/, 'A shape release cannot draw a model without a placeholder.');
+  process.env.GAME_ART_MODE = 'meshes';
+  const customRelease = join(temporary, 'custom-model-release');
+  await build({ configFile, logLevel: 'silent', build: { outDir: customRelease } });
+  const { manifest: customManifest } = await contentMeshes(customRelease);
+  assert.deepEqual(customManifest.art.decorations, { 'dead-tree': pack.assets[2].id, 'stone-idol': pack.assets[0].id });
+  delete custom.decorations['stone-idol'];
+  await writeJson(customPath, custom);
+  await expectBuildRejects(/stone-idol, which is neither in the decoration library nor in the course artwork/,
+    'A model neither built in nor mapped must be rejected.');
+  const dangling = structuredClone(pack);
+  dangling.decorations['dead-tree'] = `asset-${'1'.repeat(64)}`;
+  await writeJson(customPath, dangling);
+  await expectBuildRejects(/Decoration model dead-tree uses artwork asset-1+, which is not in the course artwork/,
+    'A package must contain the GLB of every decoration model it maps.');
   report.sections.negativeBuilds = true;
 }
 
@@ -249,7 +304,7 @@ async function verifyLargeCourse(stonePath) {
     ],
   };
   await writeJson(levelPath, level);
-  await writeJson(assignmentsPath, Object.fromEntries(terrainObjects(level).map(object => [object.id, relative(temporary, stonePath)])));
+  await writeJson(assignmentsPath, { terrain: Object.fromEntries(terrainObjects(level).map(object => [object.id, relative(temporary, stonePath)])) });
   await runPack(levelPath, assignmentsPath, packagePath);
   const pack = await readJson(packagePath);
   assert.equal(pack.assets.length, 1);
@@ -277,7 +332,7 @@ async function verifyRuntimeView(fixtures) {
     try {
       await page.goto(`${address}src/course-art-view.ts`, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(1000);
-      const runtimeProof = () => page.evaluate(async ({ slab, stone, png }) => {
+      const runtimeProof = () => page.evaluate(async ({ slab, stone, png, tree }) => {
         const assert = {
           ok(value, message = 'Assertion failed.') { if (!value) throw new Error(message); },
           equal(actual, expected, message = `Expected ${actual} to equal ${expected}.`) {
@@ -426,6 +481,42 @@ async function verifyRuntimeView(fixtures) {
           assert.equal(harness.view.inspect().assets, 1);
           harness.view.dispose();
         }
+
+        // A GLB replacing decoration placeholders: its own size, standing on the centre of its base.
+        const { DecorationView } = await import('/src/decoration-view.ts');
+        const { builtInDecorationMesh } = await import('/src/decoration-library.ts');
+        harness = await makeHarness([resource('tree', tree)]);
+        const model = harness.view.decorationMesh('tree');
+        assert.equal(harness.view.decorationMesh('absent'), null, 'An unloaded asset is no decoration model.');
+        assert.equal(harness.view.decorationMesh('tree'), model, 'An asset becomes a decoration model once.');
+        assert.deepEqual([model.width, model.height, model.depth, model.flatShaded], [1, 2, 1, false]);
+        model.parts[0].geometry.computeBoundingBox();
+        const { min, max } = model.parts[0].geometry.boundingBox;
+        assert.deepEqual(sort([[min.x, min.y, min.z], [max.x, max.y, max.z]]), [[-0.5, 0, -0.5], [0.5, 2, 0.5]]);
+        const decoration = (id, kind, x, mirror) => ({ kind: 'decoration', id, model: kind, x, y: 0, z: -2, height: 3, angle: 0, mirror, tint: 0xffffff });
+        const decorations = new DecorationView(builtInDecorationMesh);
+        decorations.setObjects([
+          decoration('tree-a', 'dead-tree', 0, false), decoration('tree-b', 'dead-tree', 5, true),
+          decoration('grave', 'graves', 10, false), decoration('idol', 'stone-idol', 15, false),
+        ]);
+        let state = decorations.inspect();
+        assert.deepEqual([state.instances, state.artwork, state.waiting], [3, 0, ['stone-idol']]);
+        decorations.useArtwork({ 'dead-tree': 'tree', 'stone-idol': 'tree' }, id => harness.view.decorationMesh(id));
+        state = decorations.inspect();
+        assert.deepEqual([state.instances, state.artwork, state.waiting], [4, 3, []],
+          'Artwork replaces placeholders by model and draws models the library lacks.');
+        const drawn = decorations.root.children.filter(child => child.isInstancedMesh && child.geometry.index?.count === 576);
+        assert.deepEqual(drawn.map(mesh => mesh.count).sort(), [1, 2], 'Plain copies share a batch; the mirrored one has its own.');
+        assert.ok(drawn[0].geometry !== drawn[1].geometry, 'A mirrored GLB copy draws mirrored geometry.');
+        const matrix = drawn[0].matrix.clone();
+        for (const mesh of drawn) {
+          for (let slot = 0; slot < mesh.count; slot++) {
+            mesh.getMatrixAt(slot, matrix);
+            assert.deepEqual([matrix.elements[0], matrix.elements[5], matrix.elements[10]], [1.5, 1.5, 1.5], 'The GLB scales to the decoration height.');
+          }
+        }
+        decorations.dispose();
+        harness.view.dispose();
       }, fixtures);
       for (let attempt = 0; ; attempt++) {
         try {
@@ -477,7 +568,7 @@ async function verifyTextureBuild(fixtures) {
   const assignmentsPath = join(temporary, 'texture-assignments.json');
   const packagePath = join(temporary, 'texture-course.json');
   await writeJson(levelPath, level);
-  await writeJson(assignmentsPath, assignments);
+  await writeJson(assignmentsPath, { terrain: assignments });
   await runPack(levelPath, assignmentsPath, packagePath);
   process.env.GAME_LEVEL = relative(root, packagePath);
   process.env.GAME_ART_MODE = 'meshes';
@@ -556,6 +647,7 @@ try {
     slab: dataUri(modelFixture({ size: [2, 1, 3] })),
     stone: dataUri(modelFixture({ textured: true, segments: 16 })),
     png: { png: dataUri(pngFixture), jpeg: dataUri(jpegFixture), webp: dataUri(webpFixture) },
+    tree: dataUri(treeFixture()),
   });
   await verifyEditorRoundTrip(proof.pack);
   report.status = 'passed';

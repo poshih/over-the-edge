@@ -2,6 +2,9 @@
 // with a project.json manifest plus JSON and binary files at fixed paths; a bundle is the same file
 // tree serialized into one JSON document for moving projects between machines and browsers.
 import { ART_LIMITS, ArtError, artId, artName } from './art-types';
+import { NO_DECORATION_ART, validateDecorationArt } from './decoration-art';
+import type { DecorationArt } from './decoration-art';
+import { unknownDecorationModels } from './decoration-models';
 import type { ArtMode } from './art-types';
 import { DEFAULT_GAME_SETTINGS, GameSettingsError, validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
@@ -35,7 +38,7 @@ export { ProjectError } from './project-fields';
 
 export const PROJECT_FORMAT = 'over-the-edge-project';
 export const PROJECT_BUNDLE_FORMAT = 'over-the-edge-project-bundle';
-export const PROJECT_SCHEMA_VERSION = 2;
+export const PROJECT_SCHEMA_VERSION = 3;
 export const PROJECT_FILES = {
   manifest: 'project.json',
   level: 'level.json',
@@ -57,6 +60,8 @@ const GLB_DATA = 'data:model/gltf-binary;base64,';
 export interface ProjectArt {
   readonly mode: ArtMode;
   readonly assets: readonly { readonly id: string; readonly name: string }[];
+  // The assets that draw decoration models in mesh releases, replacing their placeholders.
+  readonly decorations: DecorationArt;
 }
 
 export interface ProjectCharacters {
@@ -110,7 +115,7 @@ export function projectTitle(value: unknown): string {
 }
 
 export function validateProjectArt(value: unknown): ProjectArt {
-  const art = exactRecord(value, ['mode', 'assets'], 'Course artwork');
+  const art = exactRecord(value, ['mode', 'assets', 'decorations'], 'Course artwork');
   if (art.mode !== 'shapes' && art.mode !== 'meshes') throw new ProjectError('Course artwork mode must be shapes or meshes.');
   if (!Array.isArray(art.assets) || art.assets.length > ART_LIMITS.assets) {
     throw new ProjectError(`Course artwork lists at most ${ART_LIMITS.assets} GLB assets.`);
@@ -123,7 +128,7 @@ export function validateProjectArt(value: unknown): ProjectArt {
     ids.add(id);
     return Object.freeze({ id, name: artName(asset.name) });
   });
-  return Object.freeze({ mode: art.mode, assets: Object.freeze(assets) });
+  return Object.freeze({ mode: art.mode, assets: Object.freeze(assets), decorations: validateDecorationArt(art.decorations, ids) });
 }
 
 export function validateMediaIndex(value: unknown): readonly MediaEntry[] {
@@ -207,7 +212,7 @@ export function validateProjectManifest(value: unknown): ProjectManifest {
 export function defaultProjectManifest(title: string): ProjectManifest {
   return validateProjectManifest({
     format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title, level: PROJECT_FILES.level,
-    art: { mode: 'shapes', assets: [] }, settings: DEFAULT_GAME_SETTINGS,
+    art: { mode: 'shapes', assets: [], decorations: NO_DECORATION_ART }, settings: DEFAULT_GAME_SETTINGS,
     characters: { primary: null, alternate: null }, armIk: DEFAULT_ARM_IK, appearance: [], models: EMPTY_MODEL_LIBRARY,
     theme: DEFAULT_THEME, hud: DEFAULT_HUD, audio: DEFAULT_AUDIO, enemies: DEFAULT_ENEMY_ART, media: [],
   });
@@ -267,6 +272,7 @@ export function checkProjectReferences(manifest: ProjectManifest, level: LevelDe
       });
     }
   }
+  problems.push(...unknownDecorationModels(level, manifest.art.decorations));
   for (const source of audioSources(manifest.audio)) checkSource(source, 'Audio');
   if (problems.length > 0) throw new ProjectError(problems.slice(0, 8).join(' ') + (problems.length > 8 ? ` (${problems.length - 8} more)` : ''), { section: 'level' });
 }

@@ -2,7 +2,7 @@ import {
   ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry,
   CanvasTexture, CircleGeometry, CylinderGeometry, DirectionalLight, ExtrudeGeometry,
   Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial,
-  Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
+  Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera, PerspectiveCamera,
   RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
@@ -36,6 +36,7 @@ import { EnemyView } from './enemy-view';
 import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
+import type { DecorationView } from './decoration-view';
 import { SpriteRig } from './sprite-rig';
 import type { SpriteAnchor, SpriteArmSlots } from './sprite-rig';
 import { DEFAULT_CHARACTER_RIGGING_TYPE, SpriteError } from './sprite-data';
@@ -54,7 +55,13 @@ const VISUAL = {
   cameraLift: 1.15,
   cameraMinimumY: 2.9,
   cameraResponse: 3.5,
+  // The orthographic camera's distance from the course plane (z = 0).
   depth: 20,
+  // The depths either camera sees, from the course plane: in front of it and behind it.
+  sceneFront: 15,
+  // The deepest decoration's back, with room for its own depth.
+  sceneBack: 1100,
+  nearPlane: 0.1,
   compactWidth: 680,
   compactHeight: 580,
   reachMargin: 0.5,
@@ -188,9 +195,17 @@ export class GameView {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
   private readonly foreground = new Scene();
-  private readonly camera = new OrthographicCamera();
+  private readonly orthographic = new OrthographicCamera();
+  private readonly perspective = new PerspectiveCamera();
+  // The theme's camera. Either looks along -z at the course plane (z = 0) from `distance`, and
+  // shows it `worldHeight` tall, so the plane maps to the screen the same way in both.
+  private camera: OrthographicCamera | PerspectiveCamera;
+  private distance: number = VISUAL.depth;
   private readonly scenery = new Group();
-  private readonly decorations = new Group();
+  // Course labels.
+  private readonly labels = new Group();
+  // Null in a release whose level has no decorations; its shell then carries none of their code.
+  readonly decorations: DecorationView | null;
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
   private readonly layers = new Set<ViewLayer>();
   private readonly playerMeshes = new Map<string, Group>();
@@ -241,7 +256,8 @@ export class GameView {
   private readonly observer: ResizeObserver;
   private width = 1;
   private height = 1;
-  private worldHeight: number = VISUAL.viewHeight;
+  // Zero until the first frustum update, which always runs.
+  private worldHeight = 0;
   private compact = false;
   private framing: CameraFraming | null = null;
   private labelDefinition: readonly LevelLabel[] | null = null;
@@ -270,12 +286,15 @@ export class GameView {
     content?: ContentLoader;
     theme?: GameTheme;
     enemyArt?: EnemyArtSettings;
+    // Creates the decoration view; without it the view draws no decorations.
+    decorations?: (() => DecorationView) | null;
   } = {}) {
     this.canvas = canvas;
     this.characterModels = options.characterModels ?? null;
     this.content = options.content;
     this.theme = options.theme ?? DEFAULT_THEME;
     const theme = this.theme;
+    this.camera = theme.camera.perspective ? this.perspective : this.orthographic;
     this.enemies = new EnemyView(options.enemyArt);
     const root = this.part(initial, 'root');
     const head = this.part(initial, 'head');
@@ -289,7 +308,7 @@ export class GameView {
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
     this.renderer.setClearColor(theme.sky);
-    this.fog = new Fog(theme.fog.color, theme.fog.near, theme.fog.far);
+    this.fog = new Fog(theme.fog.color);
     this.scene.fog = this.fog;
     this.foreground.fog = this.fog;
     for (const pass of [this.scene, this.foreground]) {
@@ -305,12 +324,12 @@ export class GameView {
       this.lights.sun.push(sunlight);
       this.lights.rim.push(rimLight);
     }
-    this.camera.position.z = VISUAL.depth;
-    this.camera.near = 0.1;
-    this.camera.far = 100;
     this.sunDisc = new Mesh(new CircleGeometry(1.8, 48), new MeshBasicMaterial({ color: theme.sunDisc.color, fog: false }));
     this.buildScenery();
-    this.scene.add(this.terrain.root, this.flags.root, this.updrafts.root, this.enemies.root, this.decorations);
+    this.decorations = options.decorations?.() ?? null;
+    this.decorations?.setObjects(level.objects);
+    this.scene.add(this.terrain.root, this.flags.root, this.updrafts.root, this.enemies.root, this.labels);
+    if (this.decorations !== null) this.scene.add(this.decorations.root);
     this.setLabels(level.labels);
     this.flags.setObjects(level.objects);
     this.updrafts.setObjects(level.objects);
@@ -350,8 +369,8 @@ export class GameView {
     this.renderer.setClearColor(theme.sky);
     this.renderer.toneMappingExposure = theme.exposure;
     this.fog.color.set(theme.fog.color);
-    this.fog.near = theme.fog.near;
-    this.fog.far = theme.fog.far;
+    this.updateFrustum();
+    this.placeFog();
     for (const light of this.lights.hemisphere) {
       light.color.set(theme.hemisphere.sky);
       light.groundColor.set(theme.hemisphere.ground);
@@ -748,6 +767,7 @@ export class GameView {
     this.targetLine.geometry.attributes.position.needsUpdate = true;
     this.targetLine.computeLineDistances();
     this.terrain.update(frame.time);
+    this.decorations?.update();
     this.flags.update();
     this.updrafts.update(frame.time);
     this.enemies.update(frame.enemies, frame.time);
@@ -777,7 +797,7 @@ export class GameView {
 
   private snapCamera(): void {
     const target = this.cameraTarget();
-    this.camera.position.set(target.x, target.y, VISUAL.depth);
+    this.camera.position.set(target.x, target.y, this.distance);
     this.keepRigVisible();
     this.camera.updateMatrixWorld();
   }
@@ -797,11 +817,38 @@ export class GameView {
     };
   }
 
+  // Where a point at depth `z` is drawn, or null when it is at or behind the camera.
+  projectDepth(point: Point, z: number): Point | null {
+    const scale = this.depthScale(z);
+    if (scale === null) return null;
+    const { x, y } = this.camera.position;
+    return this.project({ x: x + (point.x - x) * scale, y: y + (point.y - y) * scale });
+  }
+
+  // The point at depth `z` under a client position, or null when that depth is at or behind the camera.
+  unprojectDepth(client: Point, z: number): Point | null {
+    const scale = this.depthScale(z);
+    if (scale === null) return null;
+    const plane = this.unproject(client);
+    const { x, y } = this.camera.position;
+    return { x: x + (plane.x - x) / scale, y: y + (plane.y - y) / scale };
+  }
+
+  // How much larger than on the course plane something at depth `z` looks, measured from the view's centre.
+  private depthScale(z: number): number | null {
+    if (this.camera !== this.perspective) return 1;
+    const distance = this.distance - z;
+    return distance <= this.perspective.near ? null : this.distance / distance;
+  }
+
+  // The point on the course plane under a client position.
   unproject(client: Point): Point {
     const rect = this.canvas.getBoundingClientRect();
-    this.projection.set((client.x - rect.left) / rect.width * 2 - 1,
-      1 - (client.y - rect.top) / rect.height * 2, 0).unproject(this.camera);
-    return { x: this.projection.x, y: this.projection.y };
+    const { halfWidth, halfHeight } = this.halfExtents();
+    return {
+      x: this.camera.position.x + ((client.x - rect.left) / rect.width * 2 - 1) * halfWidth,
+      y: this.camera.position.y + (1 - (client.y - rect.top) / rect.height * 2) * halfHeight,
+    };
   }
 
   setFraming(framing: CameraFraming | null): void {
@@ -822,6 +869,7 @@ export class GameView {
       geometries: this.renderer.info.memory.geometries,
       textures: this.renderer.info.memory.textures,
       terrain: this.terrain.inspect(),
+      decorations: this.decorations?.inspect() ?? null,
       flags: this.flags.inspect(),
       updrafts: this.updrafts.inspect(),
       enemies: this.enemies.inspect(),
@@ -837,6 +885,10 @@ export class GameView {
       potModel: this.propModels.pot === null ? null : this.propModels.pot.inspect(),
       shading: this.shading.inspect(),
       theme: { writes: this.themeWrites, sky: this.theme.sky, fog: { ...this.theme.fog }, backdrop: this.theme.backdrop.visible },
+      camera: {
+        perspective: this.camera === this.perspective, fieldOfView: this.perspective.fov, distance: this.distance,
+        near: this.camera.near, far: this.camera.far, fog: { near: this.fog.near, far: this.fog.far },
+      },
       characters: this.characterSelection(),
       armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },
       rig: this.rig,
@@ -870,6 +922,7 @@ export class GameView {
     this.shading.dispose();
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
+    this.decorations?.dispose();
     this.flags.dispose();
     this.updrafts.dispose();
     this.enemies.dispose();
@@ -911,13 +964,43 @@ export class GameView {
     ) : VISUAL.viewHeight;
     const halfHeight = worldHeight / 2;
     const halfWidth = halfHeight * aspect;
-    if (this.worldHeight === worldHeight && this.camera.right === halfWidth && this.camera.top === halfHeight) return;
+    const { perspective, fieldOfView } = this.theme.camera;
+    const camera = perspective ? this.perspective : this.orthographic;
+    if (camera === this.camera && worldHeight === this.worldHeight && (perspective
+      ? this.perspective.aspect === aspect && this.perspective.fov === fieldOfView
+      : this.orthographic.right === halfWidth && this.orthographic.top === halfHeight)) return;
+    if (perspective) {
+      // Far enough that the course plane fills the same height the orthographic camera shows.
+      this.perspective.fov = fieldOfView;
+      this.perspective.aspect = aspect;
+      this.distance = halfHeight / Math.tan(fieldOfView * Math.PI / 360);
+    } else {
+      this.orthographic.left = -halfWidth;
+      this.orthographic.right = halfWidth;
+      this.orthographic.top = halfHeight;
+      this.orthographic.bottom = -halfHeight;
+      this.distance = VISUAL.depth;
+    }
+    camera.position.set(this.camera.position.x, this.camera.position.y, this.distance);
+    camera.near = Math.max(VISUAL.nearPlane, this.distance - VISUAL.sceneFront);
+    camera.far = this.distance + VISUAL.sceneBack;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    this.camera = camera;
     this.worldHeight = worldHeight;
-    this.camera.left = -halfWidth;
-    this.camera.right = halfWidth;
-    this.camera.top = halfHeight;
-    this.camera.bottom = -halfHeight;
-    this.camera.updateProjectionMatrix();
+    this.placeFog();
+  }
+
+  // Theme fog depths are measured behind the course plane; the fog itself from the camera.
+  private placeFog(): void {
+    this.fog.near = this.distance + this.theme.fog.near;
+    this.fog.far = this.distance + this.theme.fog.far;
+  }
+
+  // Half the course plane's visible width and height.
+  private halfExtents(): { halfWidth: number; halfHeight: number } {
+    const halfHeight = this.worldHeight / 2;
+    return { halfWidth: halfHeight * this.width / this.height, halfHeight };
   }
 
   private cameraTarget(): Point {
@@ -934,8 +1017,7 @@ export class GameView {
   private keepRigVisible(): void {
     if (!this.compact || this.framing !== null) return;
     const bounds = this.framingBounds();
-    const halfWidth = this.camera.right;
-    const halfHeight = this.camera.top;
+    const { halfWidth, halfHeight } = this.halfExtents();
     this.camera.position.x = clamp(this.camera.position.x,
       bounds.maxX + VISUAL.framingMargin - halfWidth, bounds.minX - VISUAL.framingMargin + halfWidth);
     this.camera.position.y = clamp(this.camera.position.y,
@@ -946,13 +1028,14 @@ export class GameView {
     this.setLabels(change.level.labels);
     this.flags.apply(change);
     this.updrafts.apply(change);
+    this.decorations?.apply(change);
   }
 
   private setLabels(labels: readonly LevelLabel[]): void {
     if (this.labelDefinition === labels) return;
     this.labelDefinition = labels;
-    disposeResources(this.decorations);
-    this.decorations.clear();
+    disposeResources(this.labels);
+    this.labels.clear();
     for (const label of labels) this.addLabel(label.text, label);
   }
 
@@ -1201,7 +1284,7 @@ export class GameView {
     const sprite = new Sprite(new SpriteMaterial({ map: new CanvasTexture(canvas), transparent: true, depthTest: false }));
     sprite.position.set(position.x, position.y, 0.04);
     sprite.scale.set(2.25, 0.42, 1);
-    this.decorations.add(sprite);
+    this.labels.add(sprite);
   }
 
   private part(frame: PhysicsFrame, id: string): PartPose {

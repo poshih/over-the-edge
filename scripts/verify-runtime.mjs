@@ -5,6 +5,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { inspectArmGeometry, verifyAppearance } from './verify-appearance.mjs';
+import { verifyCamera } from './verify-camera.mjs';
+import { verifyDecorations } from './verify-decorations.mjs';
 import { verifyCharacter } from './verify-character.mjs';
 import { verifyFlipbook } from './verify-flipbook.mjs';
 import { verifyGrips } from './verify-grips.mjs';
@@ -533,6 +535,8 @@ try {
   report.scenarios.appearance = await verifyAppearance(page, artifacts);
   report.scenarios.mobile = await verifyMobile(browser, address, artifacts);
   report.scenarios.level = await verifyLevel(browser, address, artifacts);
+  report.scenarios.camera = await verifyCamera(browser, address, artifacts);
+  report.scenarios.decorations = await verifyDecorations(browser, address, artifacts);
   report.scenarios.setPieces = await verifySetPieces(browser, address, artifacts);
   report.scenarios.triggers = await verifyTriggers(browser, address, artifacts);
   report.scenarios.flipbook = await verifyFlipbook(browser, address, artifacts);

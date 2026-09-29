@@ -22,6 +22,10 @@ GAME_PROJECT=examples/projects/lantern-cavern npm run dev:game
 GAME_PROJECT=examples/projects/lantern-cavern npm run build:game
 ```
 
+[`examples/projects/ashen-ascent`](../examples/projects/ashen-ascent) is a full-length
+souls-like game that places all 59 set pieces from the library along one climb to a
+castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
+
 ## What a project contains
 
 | Section | Stored in | Contents |
@@ -34,11 +38,11 @@ GAME_PROJECT=examples/projects/lantern-cavern npm run build:game
 | `arm-ik` | `project.json` | Body-relative elbow hints |
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
 | `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
-| `theme` | `project.json` | Sky, fog, exposure, lights, sun disc, backdrop, aim marker, procedural character colours |
+| `theme` | `project.json` | Sky, fog, exposure, camera, lights, sun disc, backdrop, aim marker, procedural character colours |
 | `hud` | `project.json` | Release readout labels, unit, scale, decimals and visibility |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
-| `art` | `project.json` + `art/<assetId>.glb` | Course artwork: release look and terrain GLBs |
+| `art` | `project.json` + `art/<assetId>.glb` | Course artwork: release look, terrain GLBs and the GLBs replacing decoration models |
 | `media` | `project.json` + `media/<file>` | Videos and sounds, used as `/media/<file>` |
 
 Nothing else reaches a release: game builds do not copy `public/`, so a project
@@ -65,10 +69,10 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "title": "Lantern Cavern",
   "level": "level.json",
-  "art": { "mode": "shapes", "assets": [] },
+  "art": { "mode": "shapes", "assets": [], "decorations": {} },
   "settings": {
     "schemaVersion": 3, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15 }, "cursor": { "maxRadius": 2.65 }
@@ -77,7 +81,7 @@ The paths are fixed, so a manifest only says which files exist:
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
   "appearance": [],
   "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club" }], "pot": [] },
-  "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": 18, "far": 55 }, "...": "..." },
+  "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30 }, "...": "..." },
   "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
            "timer": { "visible": true, "label": "LANTERN TIME" } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
@@ -96,7 +100,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 3, "labels": [], "objects": [] },
@@ -116,7 +120,8 @@ release build already use. Additionally:
   source, must be a `/media/` file in the project's media library. External
   HTTP(S) sources remain allowed.
 - Every terrain `art.assetId` must be a course artwork asset, and each asset's ID
-  must match the SHA-256 of its GLB.
+  must match the SHA-256 of its GLB. Every decoration model must be in the built-in
+  library or drawn by a course artwork asset in `art.decorations`.
 - Character GLBs, appearance GLBs and course GLBs pass the same structure,
   rig and budget checks as their existing import paths. Each library GLB passes the
   checks of its part, and each library avatar's bone map must resolve against its
@@ -228,6 +233,9 @@ Workshop build is unchanged.
 - **New deployments.** A page without unsaved changes opens the new version. A page with
   unsaved changes keeps them and says that a newer version is published; **Reopen published
   project** takes it.
+- **Server levels.** **Workshop / Level / Server levels** lists the project's level first, then
+  the `levels/` folder's levels. Loading the project's level brings it back after trying another
+  one, without discarding the project's other changes.
 - **Project server.** Under `npm run dev` or `npm run studio`, a remembered server project
   still opens first, and opening or saving a server project removes the browser copy.
 
@@ -318,7 +326,7 @@ For example, starting a new game and shaping it from a shell:
 H='-H X-Studio-Request:1 -H Content-Type:application/json'
 curl -s -X POST localhost:5181/api/projects $H -d '{"title":"Night Climb","id":"night-climb"}'
 curl -s -X PATCH localhost:5181/api/projects/night-climb/theme $H \
-  -d '{"sky":"#0b1020","fog":{"color":"#0b1020","near":20,"far":70},"sunDisc":{"visible":false}}'
+  -d '{"sky":"#0b1020","fog":{"color":"#0b1020","near":0,"far":50},"camera":{"perspective":true},"sunDisc":{"visible":false}}'
 curl -s -X PATCH localhost:5181/api/projects/night-climb/settings $H -d '{"physics":{"hammerMass":1.2}}'
 curl -s -X PUT localhost:5181/api/projects/night-climb/media/bell.wav \
   -H X-Studio-Request:1 -H Content-Type:audio/wav --data-binary @bell.wav
@@ -332,9 +340,16 @@ An open Workshop page shows each change within two seconds.
 
 ## Section reference
 
-**Theme.** Colours are lowercase `#rrggbb`. `fog.near` and `fog.far` are metres
-from the camera (`far` must exceed `near`); `exposure` is 0.2-3; light intensities
-are 0-10. `sunDisc` and `backdrop` can be hidden. `character` recolours the
+**Theme.** Colours are lowercase `#rrggbb`. `fog.near` and `fog.far` are depths in
+metres behind the course (`near` up to 1,000 and `far` up to 2,000, past the deepest
+decoration; `far` must exceed `near`; a negative `near`, down to -20, hazes the course
+itself), so fog looks the same with either camera and at any zoom. `camera`
+chooses the projection: the default orthographic camera (`perspective: false`) shows
+depth flat, while `perspective: true` makes nearer objects look larger and pass faster
+than distant ones, with `fieldOfView` (10-90°) the vertical view angle. Both show the
+course plane, where the physics happens, exactly the same: the perspective camera stands
+back until the plane fills the same view height, so aiming, editing and picking are
+unchanged. `exposure` is 0.2-3; light intensities are 0-10. `sunDisc` and `backdrop` can be hidden. `character` recolours the
 procedural Mesh parts character (pot, trim, dark details, suit, skin, handle);
 imported models keep their own materials. Theme changes restyle existing lights
 and materials in place.
@@ -385,7 +400,10 @@ Releases list the library but load an entry only when the game's backend selects
 see [runtime swaps](characters.md#model-library-and-runtime-swaps).
 
 **Course artwork.** `mode` is `shapes` or `meshes`; assets come from
-`npm run pack:course` packages or the API upload. See [course artwork](course-artwork.md).
+`npm run pack:course` packages or the API upload. `decorations` maps decoration model IDs
+to assets: in mesh releases each asset replaces its model's placeholder on every
+decoration, and can draw a model the built-in library lacks. See
+[course artwork](course-artwork.md#decoration-models).
 
 ## Limits
 
@@ -403,13 +421,14 @@ npm run verify:project
 ```
 
 This builds the example project as a directory and as a project file, checks that
-invalid projects and conflicting inputs fail, builds and plays a project with two
-character profiles, an appearance model and arm IK, exercises the API (validation,
-revisions, token and host checks, cross-site protection, file signatures,
-references, bundles, publishing), drives the Project tab end to end (open, save,
-live sync, conflicts, enemy art, media, alternate character, export, import, save
-as, publish, reopen) and measures a 1,000-object project. It then deploys a Workshop
-built with a representative project (about 1,000 objects, a 10 MiB track, a skinned
-avatar and a second character) to a static site and checks that it opens the project,
-keeps changes across reloads, leaves older browser saves unchanged and follows a
-redeployment. It writes `artifacts/project-report.json`.
+the generated Ashen Ascent example matches its generator and builds and opens as an
+editor-free release, checks that invalid projects and conflicting inputs fail, builds
+and plays a project with two character profiles, an appearance model and arm IK,
+exercises the API (validation, revisions, token and host checks, cross-site
+protection, file signatures, references, bundles, publishing), drives the Project tab
+end to end (open, save, live sync, conflicts, enemy art, media, alternate character,
+export, import, save as, publish, reopen) and measures a 1,000-object project. It
+then deploys a Workshop built with a representative project (about 1,000 objects, a
+10 MiB track, a skinned avatar and a second character) to a static site and checks
+that it opens the project, keeps changes across reloads, leaves older browser saves
+unchanged and follows a redeployment. It writes `artifacts/project-report.json`.

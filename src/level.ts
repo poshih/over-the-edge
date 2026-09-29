@@ -39,7 +39,18 @@ export const TRIGGER_LIMITS = {
   // The default height of an ending zone above its summit.
   endingHeight: 5.3,
 } as const;
-export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + ENEMY_LIMITS.objects + 1;
+// Decorations are scenery only: they never collide, and depth places them anywhere from the far
+// background (negative) to just in front of the course (positive, toward the camera).
+export const DECORATION_LIMITS = {
+  objects: 1000,
+  back: 1000,
+  front: 15,
+  minimumHeight: 0.1,
+  maximumHeight: 1000,
+  modelId: 40,
+} as const;
+export const DECORATION_MODEL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + ENEMY_LIMITS.objects + DECORATION_LIMITS.objects + 1;
 export const TRIGGER_MARKERS = ['none', 'flag', 'updraft'] as const;
 export const ROCK_COLOR = 0x71817a;
 export const SHAPE_KINDS = ['box', 'ramp', 'triangle', 'circle', 'hexagon'] as const;
@@ -94,7 +105,20 @@ export interface EnemyObject extends Readonly<Point> {
   readonly speed: number;
 }
 
-export type LevelObject = TerrainObject | StartObject | TriggerObject | EnemyObject;
+// A model placed for its look alone, by the centre of its base. It is scaled uniformly to `height`,
+// then turned by `angle` and flipped left to right when mirrored; `tint` multiplies its colours.
+export interface DecorationObject extends Readonly<Point> {
+  readonly kind: 'decoration';
+  readonly id: string;
+  readonly model: string;
+  readonly z: number;
+  readonly height: number;
+  readonly angle: number;
+  readonly mirror: boolean;
+  readonly tint: number;
+}
+
+export type LevelObject = TerrainObject | StartObject | TriggerObject | EnemyObject | DecorationObject;
 
 export interface LevelLabel extends Readonly<Point> {
   readonly text: string;
@@ -256,7 +280,7 @@ function objectId(value: unknown): string {
 
 export function validateLevelObject(value: unknown): LevelObject {
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'kind')) {
-    throw new LevelError('Choose a terrain, start, trigger, or enemy object.');
+    throw new LevelError('Choose a terrain, start, trigger, enemy, or decoration object.');
   }
   const kind: unknown = Reflect.get(value, 'kind');
   if (kind === 'start') {
@@ -271,8 +295,32 @@ export function validateLevelObject(value: unknown): LevelObject {
   }
   if (kind === 'trigger') return validateTrigger(value);
   if (kind === 'enemy') return validateEnemy(value);
-  if (kind !== 'terrain') throw new LevelError('Choose a terrain, start, trigger, or enemy object.');
+  if (kind === 'decoration') return validateDecoration(value);
+  if (kind !== 'terrain') throw new LevelError('Choose a terrain, start, trigger, enemy, or decoration object.');
   return validateTerrain(value);
+}
+
+export function decorationModelId(value: unknown): string {
+  if (typeof value !== 'string' || value.length > DECORATION_LIMITS.modelId || !DECORATION_MODEL_ID.test(value)) {
+    throw new LevelError(`Decoration model IDs use lowercase letters, numbers and single hyphens, up to ${DECORATION_LIMITS.modelId} characters.`);
+  }
+  return value;
+}
+
+function validateDecoration(value: unknown): DecorationObject {
+  fields(value, ['kind', 'id', 'model', 'x', 'y', 'z', 'height', 'angle', 'mirror', 'tint'], 'Decoration object');
+  if (typeof value.mirror !== 'boolean') throw new LevelError('Mirror must be enabled or disabled.');
+  const tint = number(value.tint, 0, 0xffffff, 'Decoration tint');
+  if (!Number.isInteger(tint)) throw new LevelError('Decoration tint must be a whole RGB value.');
+  return Object.freeze({
+    kind: 'decoration', id: objectId(value.id), model: decorationModelId(value.model),
+    x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Decoration X'),
+    y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Decoration Y'),
+    z: number(value.z, -DECORATION_LIMITS.back, DECORATION_LIMITS.front, 'Decoration depth'),
+    height: number(value.height, DECORATION_LIMITS.minimumHeight, DECORATION_LIMITS.maximumHeight, 'Decoration height'),
+    angle: number(value.angle, -Math.PI, Math.PI, 'Decoration rotation'),
+    mirror: value.mirror, tint,
+  });
 }
 
 function validateEnemy(value: unknown): EnemyObject {
@@ -354,7 +402,7 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (value.schemaVersion !== 3) throw new LevelError('Levels require schema version 3.');
   const metadata = validateLevelMetadata({ labels: value.labels });
   if (!Array.isArray(value.objects) || value.objects.length > LEVEL_OBJECT_LIMIT) {
-    throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, ${ENEMY_LIMITS.objects} enemies, and one start.`);
+    throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, ${ENEMY_LIMITS.objects} enemies, ${DECORATION_LIMITS.objects} decorations, and one start.`);
   }
   const objects = value.objects.map(validateLevelObject);
   if (new Set(objects.map((object) => object.id)).size !== objects.length) throw new LevelError('Every object needs a unique ID.');
@@ -363,6 +411,7 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (terrain.length > LEVEL_LIMITS.objects) throw new LevelError(`A level supports up to ${LEVEL_LIMITS.objects} terrain objects.`);
   if (objects.filter(isTriggerObject).length > TRIGGER_LIMITS.objects) throw new LevelError(`A level supports up to ${TRIGGER_LIMITS.objects} triggers.`);
   if (objects.filter(isEnemyObject).length > ENEMY_LIMITS.objects) throw new LevelError(`A level supports up to ${ENEMY_LIMITS.objects} enemies.`);
+  if (objects.filter(isDecorationObject).length > DECORATION_LIMITS.objects) throw new LevelError(`A level supports up to ${DECORATION_LIMITS.objects} decorations.`);
   if (new Set(terrain.map((object) => geometryKey(object.shape))).size > LEVEL_LIMITS.geometryKinds) {
     throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
   }
@@ -458,6 +507,7 @@ function mediaSource(value: unknown, kind: 'video' | 'sound'): string {
 export function isTerrainObject(object: LevelObject): object is TerrainObject { return object.kind === 'terrain'; }
 export function isTriggerObject(object: LevelObject): object is TriggerObject { return object.kind === 'trigger'; }
 export function isEnemyObject(object: LevelObject): object is EnemyObject { return object.kind === 'enemy'; }
+export function isDecorationObject(object: LevelObject): object is DecorationObject { return object.kind === 'decoration'; }
 
 export function levelStart(level: LevelDefinition): StartObject {
   const start = level.objects.find((object): object is StartObject => object.kind === 'start');

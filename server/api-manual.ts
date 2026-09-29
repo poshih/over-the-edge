@@ -32,7 +32,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       validation: 'Every change is validated before anything is written. A rejected change leaves the project untouched and returns { "error": { "code", "message", "section" } }.',
       patch: 'PATCH applies a JSON merge patch (RFC 7386): objects merge, arrays and other values replace. Unlike RFC 7386, null sets a field to null, because sections have fixed keys.',
       concurrency: 'GET section responses carry ETag: "<section revision>". Send If-Match with that value on a change to fail with 412 if someone else changed the section first. GET /api/projects/{id}/revision is a cheap poll.',
-      references: 'Levels and audio may only use /media/ paths that exist in the project media library, and terrain artwork that exists in the course artwork, so every project always builds. Upload files before referencing them.',
+      references: 'Levels and audio may only use /media/ paths that exist in the project media library, and terrain artwork that exists in the course artwork, so every project always builds. Every decoration model must be built in or drawn by course artwork. Upload files before referencing them.',
       ids: 'Project IDs use lowercase letters, digits and inner hyphens.',
     },
     endpoints: [
@@ -53,7 +53,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|POST', '/api/projects/{id}/level/objects', 'List objects (?kind=terrain|trigger|enemy|start) or add one object, an array, or { "objects": [...] }.'),
       endpoint('GET|PUT|PATCH|DELETE', '/api/projects/{id}/level/objects/{objectId}', 'Read, replace, merge-patch or delete one level object.'),
       endpoint('GET|PUT', '/api/projects/{id}/level/labels', 'Course labels: [{ "text", "x", "y" }].'),
-      endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a static course GLB; returns its content ID for terrain "art": { "assetId", "mirror" }.', 'GLB bytes'),
+      endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a static course GLB; returns its content ID for terrain "art": { "assetId", "mirror" } or a decoration model in art.decorations.', 'GLB bytes'),
       endpoint('GET|DELETE', '/api/projects/{id}/art/assets/{assetId}', 'Download or remove course artwork (unused only).'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/appearance/{part}', 'A part\'s name and alignment.', '{ "alignment"?: {...}, "name"?: "..." }'),
@@ -130,7 +130,10 @@ export function apiManual(auth: 'token' | 'loopback') {
         description: 'Replacement pixel art (cosmetic only). Two frames of equal size, rows top to bottom, facing right; "." is transparent.',
         builtIn: Object.fromEntries(ENEMY_SPECIES.map((species) => [species, builtInEnemyArt(species)])),
       },
-      art: { value: '{ mode: "shapes" | "meshes", assets: [{ id, name }] }', patch: true, limits: ART_LIMITS, description: 'Course artwork. Upload GLBs with POST art/assets; PUT can rename or drop unused assets and change the mode.' },
+      art: {
+        value: '{ mode: "shapes" | "meshes", assets: [{ id, name }], decorations: { [modelId]: assetId } }', patch: true, limits: ART_LIMITS,
+        description: 'Course artwork. Upload GLBs with POST art/assets; PUT can rename or drop unused assets, change the mode, and map decoration models to assets: in mesh releases the asset replaces every decoration of that model, built-in placeholder or not.',
+      },
       media: { value: '[{ "path": "/media/file.ext" }]', types: MEDIA_TYPES, limits: MEDIA_LIMITS, description: 'Upload with PUT media/{file}; PUT this list to drop unused files.' },
     },
   };

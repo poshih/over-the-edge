@@ -551,14 +551,20 @@ async function verifyCharacterRelease(page) {
   return result;
 }
 
+// A custom course; its decorations stand where the pot starts, so the release only supports the pot
+// on its floor if scenery never collides.
 function customLevel(lift) {
+  const decoration = (id, model, z, height) => ({
+    kind: 'decoration', id, model, x: 11, y: lift + 4, z, height, angle: 0, mirror: false, tint: 0xffffff,
+  });
   return {
     schemaVersion: 3,
     labels: [{ x: 10, y: lift + 7, text: 'RELEASE_LEVEL_SENTINEL' }],
     objects: [{
       kind: 'terrain', id: 'release-floor', shape: { type: 'box' }, x: 11, y: lift + 3,
       width: 20, height: 2, angle: 0, depth: 2, color: 0x71817a, illusion: false,
-    }, { kind: 'start', id: 'release-start', x: 11, y: lift + 6, angle: -0.4, reach: 1.8 }],
+    }, { kind: 'start', id: 'release-start', x: 11, y: lift + 6, angle: -0.4, reach: 1.8 },
+    decoration('release-wall', 'broken-wall', 0, 6), decoration('release-chains', 'chains', 4, 8), decoration('release-castle', 'castle', -600, 110)],
   };
 }
 
@@ -619,6 +625,7 @@ try {
   assert.ok(modules.some(id => id.endsWith('/src/play.ts')));
   assert.ok(!modules.some(id => id.includes('/src/editor/') || id.includes('GLTFLoader')));
   assert.ok(!modules.some(id => id.endsWith('/src/default-level.ts') || id.endsWith('/src/course.ts')), 'Even the built-in course is content.');
+  assert.ok(!modules.some(id => /\/src\/decoration-(view|library|models|geometry)\.ts$/.test(id)), 'A release without decorations ships no decoration code.');
   const results = Array.isArray(bundle) ? bundle : [bundle];
   const styles = results.flatMap(result => result.output.filter(file =>
     file.type === 'asset' && file.fileName.endsWith('.css')));
@@ -665,6 +672,15 @@ try {
       const { manifest } = await releaseContent(customOutput);
       assert.ok(!shellCode(custom).includes('RELEASE_LEVEL_SENTINEL'), 'The level is content, not shell code.');
       assert.deepEqual(manifest.level.labels, customLevel(0).labels, 'A custom release must replace the built-in course.');
+      assert.deepEqual(manifest.level.objects.filter(object => object.kind === 'decoration'),
+        customLevel(0).objects.filter(object => object.kind === 'decoration'), 'Decorations ship with the level.');
+      assert.ok(bundleModules(custom).some(id => id.endsWith('/src/decoration-view.ts')), 'The release draws decorations.');
+      // A decoration model the library lacks, with no course artwork, fails the build instead of vanishing from the release.
+      const unknown = customLevel(0);
+      await writeFile(levelPath, JSON.stringify({ ...unknown, objects: [...unknown.objects, { ...unknown.objects.at(-1), id: 'release-lost', model: 'no-such-model' }] }));
+      await assert.rejects(build({ configFile, logLevel: 'silent', build: { write: false } }),
+        /no-such-model, which is neither in the decoration library nor in the course artwork\. Shape releases draw only the built-in library/);
+      await writeFile(levelPath, JSON.stringify(customLevel(0)));
     }
     if (mode === 'sprites') {
       const source = `data:image/png;base64,${texturePng().toString('base64')}`;

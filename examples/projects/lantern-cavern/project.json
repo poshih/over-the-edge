@@ -1,11 +1,12 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
     "mode": "shapes",
-    "assets": []
+    "assets": [],
+    "decorations": {}
   },
   "settings": {
     "schemaVersion": 3,
@@ -55,10 +56,14 @@
     "sky": "#0e1418",
     "fog": {
       "color": "#0e1418",
-      "near": 18,
-      "far": 55
+      "near": -2,
+      "far": 35
     },
     "exposure": 1.2,
+    "camera": {
+      "perspective": false,
+      "fieldOfView": 30
+    },
     "hemisphere": {
       "sky": "#8fb3c9",
       "ground": "#1b1410",

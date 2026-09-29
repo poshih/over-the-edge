@@ -16,6 +16,7 @@ const MODULES = {
   art: 'virtual:game-art',
   appearance: 'virtual:game-appearance',
   audio: 'virtual:game-audio',
+  decorations: 'virtual:game-decorations',
   module: 'virtual:game-module',
 } as const;
 type ModuleName = keyof typeof MODULES;
@@ -27,6 +28,7 @@ const LOADERS = {
   art: `export { loadCourseArt as default } from ${JSON.stringify(runtime('release-art.ts'))};`,
   appearance: `export { loadAppearance as default } from ${JSON.stringify(runtime('appearance-loader.ts'))};`,
   audio: `export { AudioDirector as default } from ${JSON.stringify(runtime('audio.ts'))};`,
+  decorations: `export { createDecorationView as default } from ${JSON.stringify(runtime('decoration-library.ts'))};`,
 } as const;
 const FAVICON = fileURLToPath(new URL('../public/favicon.svg', import.meta.url));
 // Where the shell finds its content by default: beside itself, as dev and preview serve it.

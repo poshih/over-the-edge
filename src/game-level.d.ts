@@ -30,6 +30,11 @@ declare module 'virtual:game-audio' {
   export default Director;
 }
 
+declare module 'virtual:game-decorations' {
+  const create: typeof import('./decoration-library').createDecorationView | null;
+  export default create;
+}
+
 // The game's own module (GAME_MODULE), or null.
 declare module 'virtual:game-module' {
   const start: import('./release-module').StartRelease | null;

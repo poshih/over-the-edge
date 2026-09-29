@@ -99,7 +99,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
           audio, enemy art, media and course artwork. Build it with GAME_PROJECT=path npm run build:game.</p>
       `)}
 
-      ${sectionMarkup({ id: 'project-theme', title: 'Theme', hint: 'Sky, fog, lights and colours' }, `
+      ${sectionMarkup({ id: 'project-theme', title: 'Theme', hint: 'Sky, fog, camera, lights and colours' }, `
         <div class="project-fields project-theme-fields"></div>
         <button type="button" class="button project-theme-reset">Reset theme</button>
       `)}
@@ -145,11 +145,11 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         <div class="project-library-mount"></div>
       `)}
 
-      ${sectionMarkup({ id: 'project-art', title: 'Course artwork', hint: 'Terrain meshes from course packages' }, `
+      ${sectionMarkup({ id: 'project-art', title: 'Course artwork', hint: 'Terrain and decoration meshes from course packages' }, `
         <label class="appearance-label" for="project-art-mode">Release look</label>
         <select id="project-art-mode">
-          <option value="shapes">Extruded shapes</option>
-          <option value="meshes">Terrain meshes</option>
+          <option value="shapes">Extruded shapes and placeholders</option>
+          <option value="meshes">Meshes</option>
         </select>
         <p class="appearance-format project-art-status"></p>
         <label class="appearance-label" for="project-course-file">Import course package</label>
@@ -377,8 +377,12 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       ? 'No alternate character. The standalone game shows no character choice.'
       : `Alternate character: ${snapshot.alternate.characterRiggingType}. Players can switch in the standalone game's corner control.`;
     artMode.value = snapshot.art.mode;
-    artStatus.textContent = snapshot.art.assets.length === 0 ? 'No terrain GLBs; terrain renders as extruded shapes.'
-      : `${snapshot.art.assets.length} terrain GLB${snapshot.art.assets.length === 1 ? '' : 's'}: ${snapshot.art.assets.map((asset) => asset.name).join(', ')}.`;
+    const models = Object.keys(snapshot.art.decorations);
+    artStatus.textContent = snapshot.art.assets.length === 0
+      ? 'No GLBs; terrain renders as extruded shapes and decorations as their placeholders.'
+      : `${snapshot.art.assets.length} GLB${snapshot.art.assets.length === 1 ? '' : 's'}: ${snapshot.art.assets.map((asset) => asset.name).join(', ')}. ` +
+        (models.length === 0 ? 'Decorations draw their placeholders.'
+          : `In mesh releases they replace the decoration placeholder${models.length === 1 ? '' : 's'} ${models.join(', ')}.`);
     previousContent = snapshot;
   }
 

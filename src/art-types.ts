@@ -6,6 +6,7 @@ export const ART_LIMITS = {
   triangles: 50_000,
   meshes: 16,
   texturePixels: 32 * 1024 * 1024,
+  decorationModels: 128,
 } as const;
 
 export class ArtError extends Error {}

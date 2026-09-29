@@ -182,6 +182,18 @@
   margin-top: 12px;
 }
 
+/* Decoration library: painted front views of the placeholder models. */
+.level-decoration-thumb {
+  width: 100%;
+  height: 44px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.level-tools [data-level-tool="decorate"] {
+  grid-column: 1 / -1;
+}
+
 .level-camera-controls {
   display: grid;
   grid-template-columns: 48px 48px repeat(2, minmax(0, 1fr));

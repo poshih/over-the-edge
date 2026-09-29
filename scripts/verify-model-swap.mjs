@@ -143,7 +143,7 @@ async function swapBundle() {
     files[`media/${name}`] = `data:audio/wav;base64,${(await readFile(join(example, 'media', name))).toString('base64')}`;
   }
   for (const role of ROLES) for (const entry of LIBRARY[role]) files[`models/${role}/${entry.id}.glb`] = glbData(entry.glb);
-  return { format: 'over-the-edge-project-bundle', schemaVersion: 2, files };
+  return { format: 'over-the-edge-project-bundle', schemaVersion: 3, files };
 }
 
 // The bundle as a project directory, for GAME_PROJECT builds.

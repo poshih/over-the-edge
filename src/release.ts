@@ -1,14 +1,14 @@
 // A game release's boot: it starts the game's module, loads the content through the module's access
 // (or public access), builds the game from the manifest and hands the module its API. Nothing in
 // the release decides who may load what; a refusal reaches the module, which may retry.
+import type { DecorationView } from './decoration-view';
 import type { AudioDirector } from './audio';
 import { bootSources, levelSoundSources } from './content';
-import type { ContentManifest, ContentPins } from './content';
+import type { ContentArt, ContentManifest, ContentPins } from './content';
 import type { ContentLoader } from './content-ref';
 import { ContentError, ContentSession, publicAccess } from './content-session';
 import type { ContentAccess } from './content-session';
 import type { CharacterModelLoader } from './character-model-types';
-import type { ArtResource } from './art-types';
 import type { AppearanceSource } from './appearance-loader';
 import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
@@ -23,10 +23,11 @@ import type { ModelSelection } from './model-library';
 export interface ReleaseCode {
   readonly pins: ContentPins;
   readonly createCharacterModels: ((options: { content: ContentLoader }) => CharacterModelLoader) | null;
-  readonly loadCourseArt: ((game: Game, assets: readonly ArtResource[], content: ContentLoader, signal: AbortSignal) => Promise<void>) | null;
+  readonly loadCourseArt: ((game: Game, art: ContentArt, content: ContentLoader, signal: AbortSignal) => Promise<void>) | null;
   readonly loadAppearance: ((visuals: ReadonlyMap<VisualPartId, VisualBinding>, parts: readonly AppearanceSource[],
     options: { signal?: AbortSignal; content?: ContentLoader }) => Promise<unknown>) | null;
   readonly AudioDirector: typeof AudioDirector | null;
+  readonly createDecorations: (() => DecorationView) | null;
   readonly start: StartRelease | null;
 }
 
@@ -170,7 +171,7 @@ export class Release {
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
       canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
-      characterModels, content, media,
+      characterModels, content, media, decorations: this.code.createDecorations,
       theme: manifest.theme, enemyArt: manifest.enemies,
       onCue: audio === null ? undefined : (cue) => audio.handle(cue),
       onAction: (action, options) => game.perform(action, options),
@@ -194,7 +195,7 @@ export class Release {
     await Promise.all([
       game.loadSprites(primary),
       ...(alternate === null ? [] : [game.loadAlternateSprites(alternate)]),
-      ...(this.code.loadCourseArt === null ? [] : [this.code.loadCourseArt(game, manifest.art.assets, content, signal)]),
+      ...(this.code.loadCourseArt === null ? [] : [this.code.loadCourseArt(game, manifest.art, content, signal)]),
       ...(this.code.loadAppearance === null ? [] : [this.code.loadAppearance(game.view.visuals,
         manifest.appearance, { signal, content })]),
       parts,

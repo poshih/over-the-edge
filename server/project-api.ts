@@ -492,6 +492,10 @@ export function createStudioHandler(config: StudioConfig) {
     await change(context, ['art'], async (manifest) => {
       const assets = manifest.art.assets.filter((asset) => asset.id !== context.params.assetId);
       if (assets.length === manifest.art.assets.length) throw new HttpError(404, 'not-found', 'Unknown course artwork.', { section: 'art' });
+      const models = Object.keys(manifest.art.decorations).filter((model) => manifest.art.decorations[model] === context.params.assetId);
+      if (models.length > 0) {
+        throw new HttpError(409, 'in-use', `${artFile(context.params.assetId!)} still draws decoration model${models.length === 1 ? '' : 's'} ${models.join(', ')}; unmap ${models.length === 1 ? 'it' : 'them'} in art.decorations first.`, { section: 'art' });
+      }
       const next = withManifest(manifest, { art: { ...manifest.art, assets } });
       stillUnused(context.params.assetId!, next, await level(context.params.id!));
       return { manifest: next, remove: [artFile(context.params.assetId!)] };

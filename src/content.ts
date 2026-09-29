@@ -7,6 +7,8 @@ import { validateAppearanceParts, validateArmIk } from './appearance-profile';
 import type { VisualAlignment } from './appearance-profile';
 import { ART_LIMITS, artId, artName } from './art-types';
 import type { ArtMode, ArtResource } from './art-types';
+import { usedDecorationArt, validateDecorationArt } from './decoration-art';
+import type { DecorationArt } from './decoration-art';
 import { audioSources, validateAudio } from './audio-settings';
 import type { AudioSettings } from './audio-settings';
 import { validateEnemyArt } from './enemy-art-data';
@@ -32,7 +34,7 @@ import { libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSetting
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
-export const CONTENT_SCHEMA_VERSION = 1;
+export const CONTENT_SCHEMA_VERSION = 2;
 // The group holding everything the release itself uses; other groups are granted separately.
 export const GAME_GROUP = 'game';
 export const CONTENT_TYPES: Readonly<Record<ContentExtension, string>> = {
@@ -101,6 +103,8 @@ export interface ContentAppearance {
 export interface ContentArt {
   readonly mode: ArtMode;
   readonly assets: readonly ArtResource[];
+  // The assets that draw decoration models in place of their placeholders.
+  readonly decorations: DecorationArt;
 }
 
 export interface ContentLibraryEntry {
@@ -206,7 +210,7 @@ function validateContentAppearance(value: unknown): readonly ContentAppearance[]
 }
 
 function validateContentArt(value: unknown, level: LevelDefinition): ContentArt {
-  const art = exactRecord(value, ['mode', 'assets'], 'Course artwork');
+  const art = exactRecord(value, ['mode', 'assets', 'decorations'], 'Course artwork');
   if (art.mode !== 'shapes' && art.mode !== 'meshes') throw new ContentManifestError('Course artwork mode must be shapes or meshes.');
   if (!Array.isArray(art.assets) || art.assets.length > ART_LIMITS.assets) {
     throw new ContentManifestError(`Course artwork lists at most ${ART_LIMITS.assets} assets.`);
@@ -217,13 +221,19 @@ function validateContentArt(value: unknown, level: LevelDefinition): ContentArt 
   });
   const ids = new Set(assets.map(asset => asset.id));
   if (ids.size !== assets.length) throw new ContentManifestError('Course artwork lists an asset twice.');
+  const decorations = validateDecorationArt(art.decorations, ids);
   // Shape releases carry no meshes; mesh releases carry exactly the meshes the level uses.
-  const used = new Set(art.mode === 'shapes' ? [] : level.objects.flatMap(object =>
-    object.kind === 'terrain' && object.art !== undefined ? [object.art.assetId] : []));
+  if (Object.keys(decorations).length !== Object.keys(usedDecorationArt(level, decorations)).length) {
+    throw new ContentManifestError('Decoration artwork must map only models the level uses.');
+  }
+  const used = new Set(art.mode === 'shapes' ? [] : [
+    ...level.objects.flatMap(object => object.kind === 'terrain' && object.art !== undefined ? [object.art.assetId] : []),
+    ...Object.values(decorations),
+  ]);
   if (used.size !== ids.size || [...used].some(id => !ids.has(id))) {
     throw new ContentManifestError('Course artwork must list exactly the meshes the level uses.');
   }
-  return Object.freeze({ mode: art.mode, assets: Object.freeze(assets) });
+  return Object.freeze({ mode: art.mode, assets: Object.freeze(assets), decorations });
 }
 
 function validateMediaTable(value: unknown): Readonly<Record<string, string>> {

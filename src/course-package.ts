@@ -1,14 +1,18 @@
 import { ART_LIMITS, ArtError, artId, artName, artRecord } from './art-types';
 import type { ArtMode, ArtResource } from './art-types';
+import { validateDecorationArt } from './decoration-art';
+import type { DecorationArt } from './decoration-art';
 import { validateLevel } from './level';
 import type { LevelDefinition } from './level';
 
 export interface CoursePackage {
   readonly format: 'over-the-edge-course';
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly mode: ArtMode;
   readonly level: LevelDefinition;
   readonly assets: readonly ArtResource[];
+  // The assets that draw decoration models, replacing their placeholders.
+  readonly decorations: DecorationArt;
 }
 
 export function isCoursePackage(value: unknown): boolean {
@@ -29,7 +33,7 @@ export function embeddedGlb(source: string): Uint8Array<ArrayBuffer> {
 
 export function validateCoursePackage(value: unknown): CoursePackage {
   const data = artRecord(value, 'Course package');
-  if (data.format !== 'over-the-edge-course' || data.schemaVersion !== 1 ||
+  if (data.format !== 'over-the-edge-course' || data.schemaVersion !== 2 ||
     (data.mode !== 'shapes' && data.mode !== 'meshes') ||
     !Array.isArray(data.assets) || data.assets.length > ART_LIMITS.assets) throw new ArtError('Unsupported course package.');
   let bytes = 0;
@@ -49,7 +53,7 @@ export function validateCoursePackage(value: unknown): CoursePackage {
     }
   }
   return Object.freeze({
-    format: 'over-the-edge-course', schemaVersion: 1, mode: data.mode, level,
-    assets: Object.freeze(assets),
+    format: 'over-the-edge-course', schemaVersion: 2, mode: data.mode, level,
+    assets: Object.freeze(assets), decorations: validateDecorationArt(data.decorations, ids),
   });
 }

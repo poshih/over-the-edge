@@ -12,6 +12,8 @@ import { checkCharacterModels } from '../src/character-model-check';
 import { levelMediaSources } from '../src/content';
 import { validateCourseModel } from '../src/course-art-model';
 import { embeddedGlb, isCoursePackage, validateCoursePackage } from '../src/course-package';
+import { NO_DECORATION_ART, usedDecorationArt } from '../src/decoration-art';
+import type { DecorationArt } from '../src/decoration-art';
 import { DEFAULT_LEVEL } from '../src/default-level';
 import { DEFAULT_ENEMY_ART } from '../src/enemy-art-data';
 import type { EnemyArtSettings } from '../src/enemy-art-data';
@@ -38,7 +40,11 @@ export interface ReleaseInput {
   // Files whose changes rebuild the content in development.
   readonly files: readonly string[];
   readonly level: LevelDefinition;
-  readonly art: { readonly mode: ArtMode; readonly assets: readonly { readonly id: string; readonly name: string; readonly bytes: Uint8Array }[] };
+  readonly art: {
+    readonly mode: ArtMode;
+    readonly assets: readonly { readonly id: string; readonly name: string; readonly bytes: Uint8Array }[];
+    readonly decorations: DecorationArt;
+  };
   readonly settings: GameSettings;
   readonly primary: SpriteDocument;
   readonly alternate: SpriteDocument | null;
@@ -77,10 +83,16 @@ function failure(label: string, error: unknown): Error {
   return new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
 }
 
-// The meshes a course draws in the chosen look, each checked like course packages at import.
-function courseArt(level: LevelDefinition, mode: ArtMode, assets: readonly { id: string; name: string; bytes: () => Uint8Array }[]) {
-  if (mode === 'shapes') return { mode, assets: [] };
-  const used = new Set(level.objects.flatMap(object => object.kind === 'terrain' && object.art ? [object.art.assetId] : []));
+// The meshes a course draws in the chosen look, each checked like course packages at import: its
+// terrain's and those replacing the placeholders of the decoration models it uses.
+function courseArt(level: LevelDefinition, mode: ArtMode, assets: readonly { id: string; name: string; bytes: () => Uint8Array }[],
+  art: DecorationArt): ReleaseInput['art'] {
+  if (mode === 'shapes') return { mode, assets: [], decorations: NO_DECORATION_ART };
+  const decorations = usedDecorationArt(level, art);
+  const used = new Set([
+    ...level.objects.flatMap(object => object.kind === 'terrain' && object.art ? [object.art.assetId] : []),
+    ...Object.values(decorations),
+  ]);
   let pixels = 0;
   const packaged = assets.filter(asset => used.has(asset.id)).map(asset => {
     const bytes = asset.bytes();
@@ -91,7 +103,7 @@ function courseArt(level: LevelDefinition, mode: ArtMode, assets: readonly { id:
     return { id: asset.id, name: asset.name, bytes };
   });
   if (packaged.length !== used.size) throw new Error('Mesh artwork needs a self-contained course package, not level JSON containing only asset IDs.');
-  return { mode, assets: packaged };
+  return { mode, assets: packaged, decorations };
 }
 
 function artMode(selected: string | undefined, packaged: ArtMode): ArtMode {
@@ -131,7 +143,8 @@ export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode:
   if (pack === null && bytes > LEVEL_LIMITS.fileBytes) throw new Error('GAME_LEVEL exceeds the level JSON size limit.');
   const level = pack?.level ?? validateLevel(raw);
   const art = courseArt(level, artMode(selectedMode, pack?.mode ?? 'shapes'),
-    (pack?.assets ?? []).map(asset => ({ id: asset.id, name: asset.name, bytes: () => embeddedGlb(asset.source) })));
+    (pack?.assets ?? []).map(asset => ({ id: asset.id, name: asset.name, bytes: () => embeddedGlb(asset.source) })),
+    pack?.decorations ?? NO_DECORATION_ART);
   let settings = DEFAULT_GAME_SETTINGS;
   if (files.settings !== null) {
     if (statSync(files.settings).size > GAME_SETTINGS_LIMITS.fileBytes) throw new Error('GAME_SETTINGS exceeds the file size limit.');
@@ -176,7 +189,8 @@ export function loadProjectRelease(root: string, requested: string, selectedMode
   let art;
   try {
     art = courseArt(content.level, artMode(selectedMode, manifest.art.mode),
-      manifest.art.assets.map(asset => ({ id: asset.id, name: asset.name, bytes: () => binary(artFile(asset.id)) })));
+      manifest.art.assets.map(asset => ({ id: asset.id, name: asset.name, bytes: () => binary(artFile(asset.id)) })),
+      manifest.art.decorations);
   } catch (error) {
     throw failure('GAME_PROJECT course artwork', error);
   }

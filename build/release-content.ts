@@ -9,6 +9,7 @@ import { PART_ROLES } from '../src/model-library';
 import type { ContentPins } from '../src/content';
 import type { ContentExtension } from '../src/content-ref';
 import { embeddedModel } from '../src/character-profile';
+import { unknownDecorationModels } from '../src/decoration-models';
 import { mediaExtension } from '../src/media';
 import { embeddedPng } from '../src/sprite-data';
 import type { SpriteDocument } from '../src/sprite-data';
@@ -19,7 +20,9 @@ export interface ReleaseContent {
   readonly files: ReadonlyMap<string, Uint8Array>;
   readonly pins: Omit<ContentPins, 'contentUrl'>;
   // Which runtime loaders the shell needs; a release that uses none of a kind omits its code.
-  readonly uses: { readonly models: boolean; readonly art: boolean; readonly appearance: boolean; readonly audio: boolean };
+  readonly uses: {
+    readonly models: boolean; readonly art: boolean; readonly appearance: boolean; readonly audio: boolean; readonly decorations: boolean;
+  };
 }
 
 const PACKAGED = 'A game build packages every asset';
@@ -56,6 +59,10 @@ export function packReleaseContent(input: ReleaseInput): ReleaseContent {
       if (!Object.hasOwn(media, source)) throw new Error(`${owner} plays ${source}. ${PACKAGED}, so play a /media/ file the game includes.`);
     }
   }
+  const unknown = unknownDecorationModels(input.level, input.art.decorations);
+  if (unknown.length > 0) {
+    throw new Error(`${unknown.join(' ')}${input.art.mode === 'shapes' ? ' Shape releases draw only the built-in library.' : ''}`);
+  }
   const draft = {
     format: CONTENT_FORMAT, schemaVersion: CONTENT_SCHEMA_VERSION,
     level: input.level, settings: input.settings, theme: input.theme, hud: input.hud, enemies: input.enemies,
@@ -65,7 +72,10 @@ export function packReleaseContent(input: ReleaseInput): ReleaseContent {
       alternate: input.alternate === null ? null : character(input.alternate, 'The alternate character'),
     },
     appearance: input.appearance.map(part => ({ part: part.part, name: part.name, alignment: part.alignment, source: add(part.bytes, 'glb') })),
-    art: { mode: input.art.mode, assets: input.art.assets.map(asset => ({ id: asset.id, name: asset.name, source: add(asset.bytes, 'glb') })) },
+    art: {
+      mode: input.art.mode, decorations: input.art.decorations,
+      assets: input.art.assets.map(asset => ({ id: asset.id, name: asset.name, source: add(asset.bytes, 'glb') })),
+    },
     media,
     library: Object.fromEntries(PART_ROLES.map(role => [role, input.library[role].map(({ bytes, ...entry }) =>
       ({ ...entry, source: add(bytes, 'glb', libraryGroup(role, entry.id)) }))])),
@@ -87,6 +97,7 @@ export function packReleaseContent(input: ReleaseInput): ReleaseContent {
       art: draft.art.assets.length > 0,
       appearance: draft.appearance.length > 0,
       audio: hasAudio(input.audio) || levelSoundSources(input.level).length > 0,
+      decorations: input.level.objects.some(object => object.kind === 'decoration'),
     },
   };
 }

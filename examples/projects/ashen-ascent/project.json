@@ -1,0 +1,284 @@
+{
+  "format": "over-the-edge-project",
+  "schemaVersion": 3,
+  "title": "Ashen Ascent",
+  "level": "level.json",
+  "art": {
+    "mode": "shapes",
+    "assets": [],
+    "decorations": {}
+  },
+  "settings": {
+    "schemaVersion": 3,
+    "physics": {
+      "hingeTorque": 420,
+      "sliderForce": 850,
+      "angleGain": 14,
+      "angleDamping": 0.12,
+      "extensionGain": 18,
+      "extensionDamping": 0.12,
+      "angularSpeed": 12,
+      "linearSpeed": 7,
+      "playerMass": 12,
+      "hammerMass": 1.8,
+      "shaftMass": 0.66,
+      "hingeCarrierMass": 0.5,
+      "sliderCarriageMass": 0.5,
+      "bodyDamping": 0.12,
+      "gripFriction": 2.5,
+      "handleFrequency": 0,
+      "handleDamping": 0.9,
+      "mouseSensitivity": 1
+    },
+    "rig": {
+      "handleLength": 1.5,
+      "maxExtension": 1.15
+    },
+    "cursor": {
+      "maxRadius": 2.65
+    }
+  },
+  "characters": {
+    "primary": null,
+    "alternate": null
+  },
+  "armIk": {
+    "leftHintX": -0.55,
+    "leftHintY": 0.15,
+    "leftHintZ": -0.35,
+    "rightHintX": 0.55,
+    "rightHintY": 0.15,
+    "rightHintZ": 0.45
+  },
+  "appearance": [],
+  "models": {
+    "avatar": [],
+    "hammer": [],
+    "pot": []
+  },
+  "theme": {
+    "sky": "#26252d",
+    "fog": {
+      "color": "#2d2b34",
+      "near": 8,
+      "far": 1500
+    },
+    "exposure": 1.25,
+    "camera": {
+      "perspective": true,
+      "fieldOfView": 35
+    },
+    "hemisphere": {
+      "sky": "#9aa8c0",
+      "ground": "#3a2e28",
+      "intensity": 2.2
+    },
+    "ambient": {
+      "color": "#6a6470",
+      "intensity": 0.7
+    },
+    "sun": {
+      "color": "#ffb070",
+      "intensity": 1.15
+    },
+    "rim": {
+      "color": "#8fb8d0",
+      "intensity": 1.2
+    },
+    "sunDisc": {
+      "visible": true,
+      "color": "#e8773a"
+    },
+    "backdrop": {
+      "visible": false,
+      "far": "#36333d",
+      "middle": "#2d2a33",
+      "near": "#232128"
+    },
+    "aim": {
+      "cursor": "#ffb35c",
+      "line": "#c98a4a"
+    },
+    "character": {
+      "pot": "#3c3b40",
+      "trim": "#b08a3e",
+      "dark": "#19191d",
+      "suit": "#5a2a28",
+      "ceramic": "#c9bfae",
+      "wood": "#3e2e22"
+    }
+  },
+  "hud": {
+    "height": {
+      "visible": true,
+      "label": "ASCENT",
+      "unit": "m",
+      "scale": 1,
+      "decimals": 0
+    },
+    "timer": {
+      "visible": true,
+      "label": "HOLLOWING"
+    }
+  },
+  "audio": {
+    "volume": 0.9,
+    "music": {
+      "source": "/media/ashen-loop.wav",
+      "volume": 0.45
+    },
+    "cues": {
+      "impact": {
+        "source": "/media/clank.wav",
+        "volume": 0.55
+      },
+      "enemy-hit": {
+        "source": "/media/thud.wav",
+        "volume": 0.8
+      },
+      "enemy-defeat": {
+        "source": "/media/soul.wav",
+        "volume": 0.8
+      },
+      "launch": {
+        "source": "/media/gust.wav",
+        "volume": 0.7
+      },
+      "finish": {
+        "source": "/media/triumph.wav",
+        "volume": 1
+      },
+      "fall": {
+        "source": "/media/boom.wav",
+        "volume": 0.75
+      }
+    }
+  },
+  "enemies": {
+    "bird": {
+      "frames": [
+        [
+          "................",
+          ".KK..........KK.",
+          "..KK........KK..",
+          "...KKK.##.KKK...",
+          "....KKGKKGKK....",
+          ".....KKKKKKEBB..",
+          "....#KKKKKK#....",
+          ".....#KKKK#.....",
+          "......#..#......",
+          "................"
+        ],
+        [
+          "................",
+          "................",
+          "......####......",
+          ".....#GKKG#.....",
+          "..KKKKKKKKKKK...",
+          ".KKK.KKKKKKEBB..",
+          "KK..#KKKKKK#.KK.",
+          "K....#KKKK#...KK",
+          "......#..#......",
+          "................"
+        ]
+      ],
+      "palette": {
+        "#": "#101014",
+        "K": "#3a3a48",
+        "G": "#6e6e84",
+        "B": "#9a8f7a",
+        "E": "#ff5a3c"
+      }
+    },
+    "hollow-soldier": {
+      "frames": [
+        [
+          "....####....",
+          "...#HHHH#...",
+          "..#HHhhHH#..",
+          "..#HEhhEH#..",
+          "..#hHHHHh#..",
+          "...#SSSS#...",
+          "..##CCCC##..",
+          ".#CCcCCcCC#.",
+          "#CCcCCCCcCC#",
+          "#C#CCRRCC#C#",
+          "#M#cCCCCc#C#",
+          ".M#CCCCCC#..",
+          ".M.#CCCC#...",
+          ".M.#Cc#cC#..",
+          "...#C#.#C#..",
+          "..##S#.#S##.",
+          "..###..###..",
+          "............"
+        ],
+        [
+          "....####....",
+          "...#HHHH#...",
+          "..#HHhhHH#..",
+          "..#HEhhEH#..",
+          "..#hHHHHh#..",
+          "...#SSSS#...",
+          "..##CCCC##..",
+          ".#CCcCCcCC#.",
+          "#CCcCCCCcCC#",
+          "M#CCCRRCC#C#",
+          "M#CcCCCCc#C#",
+          "M.#CCCCCC#..",
+          "...#CCCC#...",
+          "..#Cc##cC#..",
+          "..#C#..#C#..",
+          ".##S#..#S##.",
+          ".###....###.",
+          "............"
+        ]
+      ],
+      "palette": {
+        "#": "#121214",
+        "H": "#5a5550",
+        "h": "#3d3a36",
+        "E": "#ffae42",
+        "S": "#8d8577",
+        "C": "#3b2f2a",
+        "c": "#2a211d",
+        "R": "#7a4a2e",
+        "M": "#8a8d90"
+      }
+    }
+  },
+  "media": [
+    {
+      "path": "/media/ashen-loop.wav"
+    },
+    {
+      "path": "/media/ember.wav"
+    },
+    {
+      "path": "/media/bell.wav"
+    },
+    {
+      "path": "/media/chime.wav"
+    },
+    {
+      "path": "/media/triumph.wav"
+    },
+    {
+      "path": "/media/clank.wav"
+    },
+    {
+      "path": "/media/thud.wav"
+    },
+    {
+      "path": "/media/soul.wav"
+    },
+    {
+      "path": "/media/gust.wav"
+    },
+    {
+      "path": "/media/mist.wav"
+    },
+    {
+      "path": "/media/boom.wav"
+    }
+  ]
+}

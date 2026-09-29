@@ -7,7 +7,8 @@ import { triggerBounds } from '../level';
 import type { EnemyObject, LevelObject, StartObject, TriggerObject } from '../level';
 
 export interface Bounds { left: number; right: number; bottom: number; top: number }
-export type GizmoObject = Exclude<LevelObject, { kind: 'terrain' }>;
+// Starts, triggers and enemies; terrain and decorations draw themselves in the scene.
+export type GizmoObject = Exclude<LevelObject, { kind: 'terrain' } | { kind: 'decoration' }>;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const START_MARKER_RADIUS = 0.6;
@@ -202,7 +203,7 @@ export class EntityGizmos {
   sync(upsert: readonly LevelObject[], remove: readonly string[]): void {
     for (const id of remove) this.remove(id);
     for (const object of upsert) {
-      if (object.kind === 'terrain') { this.remove(object.id); continue; }
+      if (object.kind === 'terrain' || object.kind === 'decoration') { this.remove(object.id); continue; }
       let node = this.persistent.get(object.id);
       if (node === undefined) {
         node = svg('g');

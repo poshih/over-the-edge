@@ -8,9 +8,10 @@ so the default look always matches what the hammer and pot touch.
 To give a course bespoke artwork, make static GLB meshes with whatever tools you
 prefer, such as a modelling package, a procedural generator, or an image-to-3D
 service. Then package them with the level. The game fits each mesh onto its
-terrain object. Collision is never derived from a mesh, and the editor never
-generates artwork. A [game project](projects.md) can carry a packed course's GLBs;
-your own project server stores them with the rest of the game.
+terrain object, and draws a GLB in place of every [decoration](decorations.md)
+of a model you assign it to. Collision is never derived from a mesh, and the editor
+never generates artwork. A [game project](projects.md) can carry a packed course's
+GLBs; your own project server stores them with the rest of the game.
 
 ## How a mesh matches its collision
 
@@ -51,33 +52,44 @@ Compare the look with `GAME_ART_MODE=shapes` and `GAME_ART_MODE=meshes` in
 
 1. Design the course in **Workshop / Level**, then **Export level JSON**, for
    example to `levels/my-level.json`. Assignments refer to terrain object IDs,
-   so keep the IDs of dressed objects stable.
+   so keep the IDs of dressed objects stable. Keep assignments and packages out of
+   `levels/`: the Workshop serves every file there as a level (see
+   [server levels](../README.md#level-editing)).
 2. Make the GLBs with your own pipeline. Use the level JSON as its input: each
    terrain object's outline, size, rotation, and depth.
-3. Write an assignments file that maps terrain IDs to GLB paths, relative to the
-   assignments file. An entry can also choose a mirror:
+3. Write an assignments file. Its `terrain` section maps terrain IDs to GLB paths,
+   relative to the assignments file, and an entry can also choose a mirror. Its
+   `decorations` section maps decoration model IDs to GLB paths (see
+   [decoration models](#decoration-models)). Either section can be left out:
 
    ```json
    {
-     "floor": "art/floor.glb",
-     "ledge-1": "art/stone.glb",
-     "ledge-2": { "file": "art/stone.glb", "mirror": "x" }
+     "terrain": {
+       "floor": "art/floor.glb",
+       "ledge-1": "art/stone.glb",
+       "ledge-2": { "file": "art/stone.glb", "mirror": "x" }
+     },
+     "decorations": {
+       "dead-tree": "art/dead-tree.glb",
+       "stone-idol": "art/idol.glb"
+     }
    }
    ```
 
 4. Pack the course, then build or preview it:
 
    ```sh
-   npm run pack:course -- levels/my-level.json levels/assignments.json levels/my-course.json
-   GAME_LEVEL=levels/my-course.json npm run dev:game
-   GAME_LEVEL=levels/my-course.json npm run build:game
+   npm run pack:course -- levels/my-level.json courses/assignments.json courses/my-course.json
+   GAME_LEVEL=courses/my-course.json npm run dev:game
+   GAME_LEVEL=courses/my-course.json npm run build:game
    ```
 
 `pack:course` identifies each GLB by the SHA-256 hash of its contents and embeds
-each distinct file once. It sets `art` on assigned terrain objects and removes it
-from unassigned ones: the assignments file is the source of truth. It fails,
-without writing anything, on unknown terrain IDs, unsupported mirrors, missing or
-non-GLB files, and size limits. Packages default to meshes; add `--mode=shapes`
+each distinct file once, even when terrain and decorations share it. It sets `art`
+on assigned terrain objects and removes it from unassigned ones, and writes the
+package's decoration models: the assignments file is the source of truth. It fails,
+without writing anything, on unknown terrain IDs, decoration models no decoration
+in the level uses, unsupported mirrors, missing or non-GLB files, and size limits. Packages default to meshes; add `--mode=shapes`
 to package the artwork but release the extruded shapes unless overridden.
 
 To change the collision later, import the level JSON (not the package) into the
@@ -85,15 +97,33 @@ Workshop. Terrain `art` references survive editing and export. Re-pack afterward
 Moving or resizing an object keeps its mesh fitted to the new box. If you change
 an object's outline, update its mesh as well.
 
+## Decoration models
+
+Decorations are placed with the built-in placeholder library, and each names its model
+by ID. Assigning a GLB to a model ID replaces the placeholder of every decoration of
+that model in mesh releases, including decorations placed after packing. The Workshop
+keeps showing the placeholder. A model ID the library lacks, such as `stone-idol`, is
+drawn only by its GLB. The Workshop shows such decorations nowhere and lists their
+model as waiting, and shape releases refuse them.
+
+A decoration model keeps its own proportions, unlike terrain meshes, which stretch to
+their box. The game measures the GLB's bounding box and scales it uniformly so its
+height equals the decoration's height. It stands the centre of the bottom of that box
+on the decoration's position, at the decoration's depth. glTF's axes are used as-is:
++X is right, +Y is up, and +Z faces the camera. A decoration's rotation turns the
+model in the course plane. Mirror reflects it left to right, and its tint multiplies
+the model's material colours, so white leaves them unchanged. The GLB's own materials
+and PBR textures are used, and every copy shares them.
+
 ## Release modes
 
 ```sh
 # Use the look saved in the package:
-GAME_LEVEL=levels/my-course.json npm run build:game
+GAME_LEVEL=courses/my-course.json npm run build:game
 
 # Explicitly override it:
-GAME_LEVEL=levels/my-course.json GAME_ART_MODE=shapes npm run build:game
-GAME_LEVEL=levels/my-course.json GAME_ART_MODE=meshes npm run build:game
+GAME_LEVEL=courses/my-course.json GAME_ART_MODE=shapes npm run build:game
+GAME_LEVEL=courses/my-course.json GAME_ART_MODE=meshes npm run build:game
 ```
 
 `GAME_ART_MODE` also works with `npm run dev:game`. Plain level JSON and the
@@ -113,19 +143,21 @@ see [content delivery](content-delivery.md) for how their content is served.
 ```json
 {
   "format": "over-the-edge-course",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "mode": "meshes",
   "level": { "schemaVersion": 3, "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "stone.glb", "source": "data:model/gltf-binary;base64,..." }
-  ]
+  ],
+  "decorations": { "dead-tree": "asset-<sha256 hex of the GLB>" }
 }
 ```
 
 `level` is an ordinary level definition. A terrain object that uses a mesh adds
 `"art": { "assetId": "asset-...", "mirror": "none" }`, where mirror is `none`,
-`x`, or `diagonal`. Every referenced asset must be embedded exactly once, and
-each asset ID must match the SHA-256 hash of its GLB bytes. Asset names need
+`x`, or `diagonal`. `decorations` maps decoration model IDs to the asset drawing
+them, at most 128 models. Every referenced asset must be embedded exactly once,
+and each asset ID must match the SHA-256 hash of its GLB bytes. Asset names need
 1-80 characters.
 
 ## Limits
@@ -135,12 +167,15 @@ Meshopt, or KTX2. It must also be static: no skins, morph targets, animations,
 or GPU-instanced nodes. Textures must be PNG, JPEG, or WebP (convert AVIF first),
 so the build and game can enforce decoded image budgets before a browser
 allocates them. Per GLB: 20 MiB, 16 meshes, 50,000 triangles, and textures up to
-4096 pixels on a side. Per course: 64 distinct GLBs, 64 MiB of GLBs, and 32
-million decoded texture pixels. A course package can be at most 96 MiB.
+4096 pixels on a side. Per course, terrain and decorations together: 64 distinct
+GLBs, 64 MiB of GLBs, and 32 million decoded texture pixels. A course package can
+be at most 96 MiB.
 
 Opaque placements share geometry and materials, and are instanced in 32 m spatial
 chunks. Only edited transforms and dirty chunk bounds are uploaded, and fades
 update only active fading batches. Reusing a GLB never duplicates its textures.
+Decoration GLBs are instanced like the placeholders they replace (see
+[decoration performance](decorations.md#performance)).
 
 ## Verification
 
@@ -152,6 +187,9 @@ This packs a course with the command above, including its error cases. It
 builds and plays both release modes, and checks the following in a real browser:
 - Mesh bounds match collision boxes for every built-in shape and a custom
   polygon, across rotations and mirrors.
+- Decoration GLBs replace their models' placeholders in mesh releases only, stand
+  on their base at the decoration's height, and mirror from mirrored geometry. A
+  model the library lacks releases only with meshes.
 - A 1,000-object, 600 m course reuses one mesh.
 - Illusion fade, disappearance, and reset work with meshes.
 - PNG, JPEG, and WebP textures load.

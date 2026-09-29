@@ -15,11 +15,14 @@ import { fetchModelBlob } from './model-data';
 import { validateCourseModel } from './course-art-model';
 import { isContentRef } from './content-ref';
 import type { ContentLoader } from './content-ref';
+import type { DecorationMesh } from './decoration-view';
 
 interface Primitive { geometry: BufferGeometry; material: Material | Material[] }
 interface Asset {
   model: LoadedVisual;
   templates: Map<ArtMirror, Primitive[]>;
+  // The asset as a decoration model, built when a decoration first draws it.
+  decoration: DecorationMesh | null;
   pixels: number;
   bytes: number;
 }
@@ -32,6 +35,32 @@ interface Batch {
   materials: Map<Material, number>;
 }
 interface State { object: TerrainObject; fade: number | null; active: boolean }
+
+// A mesh's geometry in the asset's space with `transform` applied; a mirroring transform keeps its faces outward.
+function bake(node: Mesh, transform: Matrix4): BufferGeometry {
+  const geometry = node.geometry.clone();
+  const matrix = new Matrix4().multiplyMatrices(transform, node.matrixWorld);
+  geometry.applyMatrix4(matrix);
+  if (matrix.determinant() < 0) {
+    const length = geometry.index?.count ?? geometry.getAttribute('position').count;
+    const indices = new Uint32Array(length);
+    for (let i = 0; i < length; i += 3) {
+      indices[i] = geometry.index?.getX(i) ?? i;
+      indices[i + 1] = geometry.index?.getX(i + 2) ?? i + 2;
+      indices[i + 2] = geometry.index?.getX(i + 1) ?? i + 1;
+    }
+    geometry.setIndex(new BufferAttribute(indices, 1));
+    const tangents = geometry.getAttribute('tangent');
+    if (tangents) for (let index = 0; index < tangents.count; index++) tangents.setW(index, -tangents.getW(index));
+  }
+  return geometry;
+}
+
+function disposeAsset(asset: Asset): void {
+  for (const primitives of asset.templates.values()) for (const primitive of primitives) primitive.geometry.dispose();
+  for (const part of asset.decoration?.parts ?? []) part.geometry.dispose();
+  asset.model.dispose();
+}
 
 export class CourseArtView {
   readonly root = new Group();
@@ -78,8 +107,7 @@ export class CourseArtView {
     }
     for (const [id, asset] of this.assets) {
       if (retained.has(id)) continue;
-      for (const primitives of asset.templates.values()) for (const primitive of primitives) primitive.geometry.dispose();
-      asset.model.dispose();
+      disposeAsset(asset);
       this.assets.delete(id);
     }
     if (retained.size > ART_LIMITS.assets) throw new ArtError('A course can use at most 64 distinct artwork assets.');
@@ -111,7 +139,7 @@ export class CourseArtView {
         }
         const size = model.bounds.getSize(new Vector3());
         if (Math.min(size.x, size.y, size.z) < 0.000001) throw new ArtError('Course meshes need nonzero width, height, and depth.');
-        this.assets.set(resource.id, { model, pixels, bytes: blob.size, templates: new Map() });
+        this.assets.set(resource.id, { model, pixels, bytes: blob.size, templates: new Map(), decoration: null });
         this.reported.delete(resource.id);
       } catch (error) {
         model.dispose();
@@ -127,6 +155,26 @@ export class CourseArtView {
     return new Blob([await this.content(resource.source, signal)], { type: 'model/gltf-binary' });
   }
 
+  /**
+   * A loaded asset as a decoration model: its meshes at their own size, standing on the centre of
+   * their base, with their own materials. Null until the asset is loaded.
+   */
+  decorationMesh(id: string): DecorationMesh | null {
+    const asset = this.assets.get(id);
+    if (asset === undefined) return null;
+    if (asset.decoration === null) {
+      const { bounds } = asset.model;
+      const size = bounds.getSize(new Vector3());
+      const base = new Matrix4().makeTranslation(-(bounds.min.x + bounds.max.x) / 2, -bounds.min.y, -(bounds.min.z + bounds.max.z) / 2);
+      const parts: Primitive[] = [];
+      asset.model.scene.traverse((node) => {
+        if (node instanceof Mesh) parts.push({ geometry: bake(node, base), material: node.material });
+      });
+      asset.decoration = Object.freeze({ parts: Object.freeze(parts), flatShaded: false, width: size.x, height: size.y, depth: size.z });
+    }
+    return asset.decoration;
+  }
+
   hasAssets(ids: Iterable<string>): boolean {
     for (const id of ids) if (!this.assets.has(id)) return false;
     return true;
@@ -134,10 +182,7 @@ export class CourseArtView {
 
   clearLoaded(): void {
     if (this.mode !== 'shapes') throw new ArtError('Switch to editor shapes before releasing course artwork.');
-    for (const asset of this.assets.values()) {
-      for (const primitives of asset.templates.values()) for (const primitive of primitives) primitive.geometry.dispose();
-      asset.model.dispose();
-    }
+    for (const asset of this.assets.values()) disposeAsset(asset);
     this.assets.clear();
     this.reported.clear();
   }
@@ -184,10 +229,7 @@ export class CourseArtView {
     this.unsubscribe();
     for (const entry of [...this.entries.values()]) this.remove(entry);
     for (const id of this.states.keys()) this.terrain.setHidden(id, false);
-    for (const asset of this.assets.values()) {
-      for (const primitives of asset.templates.values()) for (const primitive of primitives) primitive.geometry.dispose();
-      asset.model.dispose();
-    }
+    for (const asset of this.assets.values()) disposeAsset(asset);
     this.assets.clear(); this.states.clear(); this.reported.clear();
     this.root.removeFromParent();
     this.disposed = true;
@@ -288,24 +330,9 @@ export class CourseArtView {
     const reflect = mirror === 'x' ? new Matrix4().makeScale(-1, 1, 1) :
       mirror === 'diagonal' ? new Matrix4().set(0, -1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1) : new Matrix4();
     const primitives: Primitive[] = [];
+    const transform = new Matrix4().multiplyMatrices(reflect, normalize);
     asset.model.scene.traverse((node) => {
-      if (!(node instanceof Mesh)) return;
-      const geometry = node.geometry.clone();
-      const transform = new Matrix4().multiplyMatrices(reflect, normalize).multiply(node.matrixWorld);
-      geometry.applyMatrix4(transform);
-      if (transform.determinant() < 0) {
-        const length = geometry.index?.count ?? geometry.getAttribute('position').count;
-        const indices = new Uint32Array(length);
-        for (let i = 0; i < length; i += 3) {
-          indices[i] = geometry.index?.getX(i) ?? i;
-          indices[i + 1] = geometry.index?.getX(i + 2) ?? i + 2;
-          indices[i + 2] = geometry.index?.getX(i + 1) ?? i + 1;
-        }
-        geometry.setIndex(new BufferAttribute(indices, 1));
-        const tangents = geometry.getAttribute('tangent');
-        if (tangents) for (let index = 0; index < tangents.count; index++) tangents.setW(index, -tangents.getW(index));
-      }
-      primitives.push({ geometry, material: node.material });
+      if (node instanceof Mesh) primitives.push({ geometry: bake(node, transform), material: node.material });
     });
     asset.templates.set(mirror, primitives);
     return primitives;

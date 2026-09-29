@@ -7,6 +7,8 @@ import type { ArmIkSettings, VisualPartId } from '../character';
 import type { AvatarBoneMap } from '../character-profile';
 import { ArtError } from '../art-types';
 import type { ArtMode } from '../art-types';
+import { NO_DECORATION_ART } from '../decoration-art';
+import type { DecorationArt } from '../decoration-art';
 import { validateCoursePackage } from '../course-package';
 import { DEFAULT_LEVEL } from '../default-level';
 import { DEFAULT_ENEMY_ART, validateEnemyArt } from '../enemy-art-data';
@@ -180,7 +182,11 @@ export interface ProjectSnapshot {
   readonly hud: HudSettings;
   readonly audio: AudioSettings;
   readonly enemies: EnemyArtSettings;
-  readonly art: { readonly mode: ArtMode; readonly assets: readonly { readonly id: string; readonly name: string }[] };
+  readonly art: {
+    readonly mode: ArtMode;
+    readonly assets: readonly { readonly id: string; readonly name: string }[];
+    readonly decorations: DecorationArt;
+  };
   readonly media: readonly { readonly path: string; readonly bytes: number; readonly kind: 'video' | 'audio' }[];
   readonly library: readonly LibraryModel[];
   readonly alternate: SpriteDocument | null;
@@ -221,7 +227,7 @@ export class ProjectSession {
   private hud: HudSettings = DEFAULT_HUD;
   private audio: AudioSettings = DEFAULT_AUDIO;
   private enemies: EnemyArtSettings = DEFAULT_ENEMY_ART;
-  private art: { mode: ArtMode; assets: ArtItem[] } = { mode: 'shapes', assets: [] };
+  private art: { mode: ArtMode; assets: ArtItem[]; decorations: DecorationArt } = { mode: 'shapes', assets: [], decorations: NO_DECORATION_ART };
   private media = new Map<string, MediaItem>();
   private mediaVersion = 0;
   private library: LibraryItem[] = [];
@@ -296,7 +302,7 @@ export class ProjectSession {
       server: this.server, projects: this.projects, busy: this.busy,
       dirty: this.dirtySections(), conflicts: [...this.conflicts],
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
-      art: { mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })) },
+      art: { mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations },
       media: [...this.media.values()].map((item) => ({ path: item.path, bytes: item.bytes, kind: mediaKind(item.path) })),
       library: this.library.map(({ role, entry, key }) => ({
         role, id: entry.id, name: entry.name, key, avatar: role === 'avatar' ? this.settingsOf(entry as LibraryAvatarEntry) : null,
@@ -533,10 +539,12 @@ export class ProjectSession {
         id: asset.id, name: asset.name, uploaded: false,
         blob: new Blob([decodeBase64(asset.source.slice('data:model/gltf-binary;base64,'.length))], { type: 'model/gltf-binary' }),
       }));
-      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art: { mode: pack.mode, assets: assets.map(({ id, name }) => ({ id, name })) } }), pack.level);
+      checkProjectReferences(validateProjectManifest({
+        ...this.draftManifest(), art: { mode: pack.mode, assets: assets.map(({ id, name }) => ({ id, name })), decorations: pack.decorations },
+      }), pack.level);
       this.workspace.level.load(pack.level);
-      this.art = { mode: pack.mode, assets };
-      this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${assets.length} terrain GLBs.`, 'info');
+      this.art = { mode: pack.mode, assets, decorations: pack.decorations };
+      this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${assets.length} GLBs.`, 'info');
       this.changed('content');
     });
   }
@@ -1056,7 +1064,7 @@ export class ProjectSession {
     if (has.has('art')) {
       const existing = new Map(this.art.assets.map((asset) => [asset.id, asset]));
       this.art = {
-        mode: manifest.art.mode,
+        mode: manifest.art.mode, decorations: manifest.art.decorations,
         assets: manifest.art.assets.map((asset) => ({ ...asset, blob: existing.get(asset.id)?.blob ?? null, uploaded: serverId !== null })),
       };
     }
@@ -1103,7 +1111,7 @@ export class ProjectSession {
     }
     this.setMedia(media);
     this.art = {
-      mode: manifest.art.mode,
+      mode: manifest.art.mode, decorations: manifest.art.decorations,
       assets: manifest.art.assets.map((asset) => ({
         ...asset, uploaded: false, blob: new Blob([content.files.get(artFile(asset.id))!], { type: 'model/gltf-binary' }),
       })),
@@ -1138,7 +1146,7 @@ export class ProjectSession {
   private draftManifest(): ProjectManifest {
     return validateProjectManifest({
       format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title: this.title, level: PROJECT_FILES.level,
-      art: validateProjectArt({ mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })) }),
+      art: validateProjectArt({ mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations }),
       settings: this.workspace.settings.get(),
       characters: { primary: null, alternate: null },
       armIk: this.workspace.appearance.armIk(),
@@ -1207,7 +1215,7 @@ export class ProjectSession {
       appearance: JSON.stringify(this.workspace.appearance.parts().map((part) => [part.part, part.name, blob(part.blob), part.alignment])),
       models: JSON.stringify(this.library.map((item) => [item.role, item.entry, blob(item.blob)])),
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
-      art: JSON.stringify([this.art.mode, this.art.assets.map((asset) => [asset.id, asset.name])]),
+      art: JSON.stringify([this.art.mode, this.art.assets.map((asset) => [asset.id, asset.name]), this.art.decorations]),
       media: JSON.stringify([...this.media.values()].map((item) => [item.path, blob(item.blob)])),
     };
   }

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { openSection } from './workshop-ui.mjs';
 
 const SHAPES = ['box', 'platform', 'ramp', 'triangle', 'circle', 'hexagon'];
+// Chromium logs the server level download that the scenario refuses on purpose.
+const REFUSED_SERVER_LEVEL = 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)';
 const terrainObjects = definition => definition.objects.filter(object => object.kind === 'terrain');
 
 export async function observeBrowserPage(target, errors) {
@@ -135,6 +137,39 @@ export async function verifyLevel(browser, address, artifacts) {
     await page.locator('.load-level').click();
     assert.deepEqual((await state()).definition, firstLevel);
     report.history = { repeatedNames: true, explicitLoad: true, survivedReload: true };
+
+    // Server levels: the levels folder's files, served with the Workshop and fetched only to load one.
+    await openSection(page, 'level-server');
+    const serverList = page.getByRole('combobox', { name: 'Server level', exact: true });
+    const loadServer = page.getByRole('button', { name: 'Load server level', exact: true });
+    assert.deepEqual(await serverList.locator('option').allTextContents(), ['skyward-ruins']);
+    const fetched = () => page.evaluate(() => performance.getEntriesByType('resource').filter((entry) => entry.name.includes('/skyward-ruins-')).length);
+    assert.equal(await fetched(), 0, 'Server levels download only when loaded.');
+    const notice = (text) => page.waitForFunction((part) => document.querySelector('.notice-message')?.textContent.includes(part), text);
+    const dismiss = () => page.getByRole('button', { name: 'Dismiss notification', exact: true }).click();
+    const beforeServer = (await state()).definition;
+    const serverAsset = '**/assets/skyward-ruins-*.json';
+    for (const [response, message] of [
+      [{ status: 503, body: 'unavailable' }, 'could not be downloaded from the server (HTTP 503)'],
+      [{ status: 200, contentType: 'application/json', body: '{}' }, 'does not match this Workshop'],
+    ]) {
+      await page.route(serverAsset, (route) => route.fulfill(response));
+      await loadServer.click();
+      await notice(message);
+      assert.deepEqual((await state()).definition, beforeServer, 'A server level that fails to load leaves the level unchanged.');
+      await page.unroute(serverAsset);
+      await dismiss();
+    }
+    const serverCommits = (await state()).editor.commits;
+    await loadServer.click();
+    await page.waitForFunction(previous => window.gettingOver.level().editor.commits > previous, serverCommits);
+    const served = await state();
+    assert.deepEqual(served.definition, JSON.parse(await readFile(new URL('../levels/skyward-ruins.json', import.meta.url), 'utf8')));
+    assert.equal(served.editor.dirty, false, 'A loaded server level has no unsaved changes.');
+    assert.equal(served.editor.loading, null);
+    await notice('Loaded "skyward-ruins" from the server.');
+    await dismiss();
+    report.serverLevels = { listed: ['skyward-ruins'], onDemand: true, rejected: ['unavailable', 'mismatch'], objects: served.definition.objects.length };
 
     const unchanged = (await state()).definition;
     await page.locator('.level-file').setInputFiles({
@@ -500,7 +535,7 @@ export async function verifyLevel(browser, address, artifacts) {
     } finally {
       await phone.close();
     }
-    assert.deepEqual(report.errors, []);
+    assert.deepEqual(report.errors, [REFUSED_SERVER_LEVEL]);
     return report;
   } finally {
     await writeFile(new URL('level-report.json', artifacts), JSON.stringify(report, null, 2));

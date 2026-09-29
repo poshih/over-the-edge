@@ -6,11 +6,13 @@ export interface ThemeLight {
   readonly intensity: number;
 }
 
-// The scene's look: sky, fog, lighting, backdrop, aim marker and the procedural character palette.
+// The scene's look: sky, fog, camera, lighting, backdrop, aim marker and the procedural character palette.
 export interface GameTheme {
   readonly sky: string;
+  // Depths behind the course plane (z = 0), so fog looks the same at any camera distance.
   readonly fog: { readonly color: string; readonly near: number; readonly far: number };
   readonly exposure: number;
+  readonly camera: { readonly perspective: boolean; readonly fieldOfView: number };
   readonly hemisphere: { readonly sky: string; readonly ground: string; readonly intensity: number };
   readonly ambient: ThemeLight;
   readonly sun: ThemeLight;
@@ -30,9 +32,11 @@ const intensity = (path: string, label: string): FieldSpec =>
 export const THEME_FIELDS: readonly FieldSpec[] = [
   { kind: 'color', path: 'sky', label: 'Sky colour', description: 'Background colour behind the backdrop.' },
   { kind: 'color', path: 'fog.color', label: 'Fog colour', description: 'Distant objects fade toward this colour; usually close to the sky.' },
-  { kind: 'number', path: 'fog.near', label: 'Fog start', min: 0, max: 500, step: 1, unit: 'm', description: 'Distance from the camera where fog begins.' },
-  { kind: 'number', path: 'fog.far', label: 'Fog end', min: 1, max: 1000, step: 1, unit: 'm', description: 'Distance where fog is complete; must exceed the fog start.' },
+  { kind: 'number', path: 'fog.near', label: 'Fog start', min: -20, max: 1000, step: 1, unit: 'm', description: 'Depth behind the course where fog begins; below 0 the course itself is hazy.' },
+  { kind: 'number', path: 'fog.far', label: 'Fog end', min: -19, max: 2000, step: 1, unit: 'm', description: 'Depth behind the course where fog is complete; must exceed the fog start. Decorations stand up to 1,000 m back.' },
   { kind: 'number', path: 'exposure', label: 'Exposure', min: 0.2, max: 3, step: 0.05, unit: 'x', description: 'Tone-mapping exposure for the whole scene.' },
+  { kind: 'boolean', path: 'camera.perspective', label: 'Perspective camera', description: 'Nearer objects look larger and pass faster than distant ones. Off keeps the flat orthographic view; the course looks the same size either way.' },
+  { kind: 'number', path: 'camera.fieldOfView', label: 'Field of view', min: 10, max: 90, step: 1, unit: '°', description: 'Vertical view angle of the perspective camera; wider angles deepen the perspective.' },
   { kind: 'color', path: 'hemisphere.sky', label: 'Sky light colour' },
   { kind: 'color', path: 'hemisphere.ground', label: 'Ground bounce colour' },
   intensity('hemisphere.intensity', 'Sky light intensity'),
@@ -67,8 +71,9 @@ export function validateTheme(value: unknown): GameTheme {
 // The original hand-tuned look; releases without a project keep rendering exactly this.
 export const DEFAULT_THEME: GameTheme = validateTheme({
   sky: '#d8e3d6',
-  fog: { color: '#d8e3d6', near: 35, far: 85 },
+  fog: { color: '#d8e3d6', near: 15, far: 65 },
   exposure: 1.35,
+  camera: { perspective: false, fieldOfView: 30 },
   hemisphere: { sky: '#fff6db', ground: '#4b6866', intensity: 2.4 },
   ambient: { color: '#f4e4ca', intensity: 0.5 },
   sun: { color: '#fff0d4', intensity: 3 },

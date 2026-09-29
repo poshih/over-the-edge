@@ -96,8 +96,9 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
 
   // 1. Builds -------------------------------------------------------------------------------
   const plain = bundleOutput(await workshopBuild({}));
-  assert.deepEqual(plain.filter((file) => PROJECT_ASSET.test(file.fileName)).map((file) => file.fileName), [],
-    'A Workshop built without GAME_PROJECT ships no project files.');
+  const plainData = plain.filter((file) => PROJECT_ASSET.test(file.fileName)).map((file) => file.fileName);
+  assert.ok(plainData.length === 1 && /^assets\/skyward-ruins-[\w-]+\.json$/.test(plainData[0]),
+    `A Workshop built without GAME_PROJECT ships its server levels and no project files: ${plainData.join(', ')}`);
   const plainScript = plain.filter((file) => file.type === 'chunk').reduce((sum, file) => sum + file.code.length, 0);
   const w1 = join(temporary, 'workshop-site-v1');
   const w2 = join(temporary, 'workshop-site-v2');
@@ -148,6 +149,12 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
     const toggle = page.getByRole('button', { name: 'Workshop', exact: true });
     if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
     await page.getByRole('tab', { name: 'Project', exact: true }).click();
+  };
+  const levelTab = async (page) => {
+    const toggle = page.getByRole('button', { name: 'Workshop', exact: true });
+    if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+    await page.getByRole('tab', { name: 'Level', exact: true }).click();
+    await page.waitForFunction(() => window.gettingOver.level().editor.mode === 'edit');
   };
   const ready = (page, origin) => page.waitForFunction((origin) => {
     const state = window.gettingOver?.gameProject();
@@ -445,6 +452,34 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
     assert.equal(await failing.evaluate(() => window.__notices.at(-1)), failed.error);
     assert.deepEqual([failed.published.origin, failed.browserCopy.stored], ['none', false]);
     report.flows.push('failed download');
+
+    // 10. Server levels: the published project's level, then the levels folder's -----------------
+    site.deploy(w2);
+    const levels = await open();
+    await levels.goto(site.base, { waitUntil: 'domcontentloaded' });
+    await ready(levels, 'current');
+    const published = await levels.evaluate(() => window.gettingOver.level().definition);
+    const skyward = JSON.parse(await readFile(join(root, 'levels/skyward-ruins.json'), 'utf8'));
+    await levelTab(levels);
+    await openSection(levels, 'level-server');
+    const serverList = levels.getByRole('combobox', { name: 'Server level', exact: true });
+    assert.deepEqual(await serverList.locator('option').allTextContents(), ['Lantern Cavern (published project)', 'skyward-ruins']);
+    const asked = dialogs.length;
+    const loadServer = async (label, objects) => {
+      await serverList.selectOption({ label });
+      await levels.getByRole('button', { name: 'Load server level', exact: true }).click();
+      await levels.waitForFunction((count) => {
+        const level = window.gettingOver.level();
+        return level.editor.loading === null && level.definition.objects.length === count;
+      }, objects);
+    };
+    await loadServer('skyward-ruins', skyward.objects.length);
+    assert.deepEqual(await levels.evaluate(() => window.gettingOver.level().definition), skyward);
+    await levels.waitForFunction(() => window.gettingOver.gameProject().dirty.includes('level'));
+    await loadServer('Lantern Cavern (published project)', published.objects.length);
+    assert.deepEqual(await levels.evaluate(() => window.gettingOver.level().definition), published);
+    assert.equal(dialogs.length, asked, 'Loading over a level without unsaved changes does not ask first.');
+    report.flows.push('server levels');
   } finally {
     for (const context of contexts) await context.close();
     await site.close();

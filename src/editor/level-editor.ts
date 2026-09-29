@@ -3,12 +3,16 @@ import { DEFAULT_LEVEL } from '../default-level';
 import { ENEMY_BEHAVIOR, ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import {
-  ILLUSION, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
+  DECORATION_LIMITS, ILLUSION, isDecorationObject, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError, ROCK_COLOR, SHAPE_KINDS,
   objectContains, objectVertices, shapeVertices, terrainFromOutline, TRIGGER_LIMITS, TRIGGER_MARKERS, validateLevel, validateLevelObject,
 } from '../level';
 import type {
-  EnemyObject, LevelDefinition, LevelLabel, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject, TriggerObject, TriggerRegion,
+  DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject,
+  TriggerObject, TriggerRegion,
 } from '../level';
+import { builtInDecoration, builtInGeometry, DECORATION_CATEGORIES, DECORATION_MODELS } from '../decoration-models';
+import type { DecorationCategory, DecorationModel } from '../decoration-models';
+import { decorationThumbnail } from './decoration-thumbnail';
 import { MAX_RIG_REACH } from '../rig';
 import { ENDING_EVENTS, UPDRAFT_EVENTS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
@@ -21,6 +25,7 @@ import { placeSetPiece, SET_PIECE_CATALOG, SET_PIECE_CATEGORIES, SET_PIECES, set
 import type { SetPiece, SetPieceCategory, SetPieceCounts } from './set-pieces';
 import { SurfaceIndex } from './surface-snap';
 import { NamedSnapshots, SnapshotError } from './named-snapshots';
+import { downloadServerLevel } from './server-levels';
 import { createSnapshotPicker } from './snapshot-picker';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import { DRAWING, PolygonDraft } from './polygon-draft';
@@ -29,8 +34,9 @@ import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
 
-type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piece' | 'start';
-type Tool = 'select' | 'pan' | 'draw' | PlacementTool;
+type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piece' | 'place-decoration' | 'start';
+// 'decorate' selects and moves decorations; 'select' never picks them, so scenery cannot get in the way of the course.
+type Tool = 'select' | 'decorate' | 'pan' | 'draw' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
 interface TerrainPreset { id: string; label: string; shape: LevelShape; width: number; height: number }
 interface TriggerPreset {
@@ -59,6 +65,8 @@ const WHEEL_LINE_PIXELS = 16;
 /** Vertical pointer distance within which a set piece rests on the terrain top below or above it. */
 const SNAP_PIXELS = 28;
 const SET_PIECE_HISTORY = 64;
+/** Decorations nearer the course than this rest on terrain tops while being placed. */
+const DECORATION_SNAP_DEPTH = 20;
 const PRESET_SETTINGS: Record<ShapeKind, { label: string; width: number; height: number }> = {
   box: { label: 'Block', width: 2.5, height: 2 },
   ramp: { label: 'Ramp', width: 3, height: 2 },
@@ -107,12 +115,18 @@ function asTrigger(object: LevelObject | null): TriggerObject | null {
 function asEnemy(object: LevelObject | null): EnemyObject | null {
   return object !== null && object.kind === 'enemy' ? object : null;
 }
-
-function isPlacementTool(tool: Tool): tool is PlacementTool {
-  return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'place-set-piece' || tool === 'start';
+function asDecoration(object: LevelObject | null): DecorationObject | null {
+  return object !== null && object.kind === 'decoration' ? object : null;
 }
 
+function isPlacementTool(tool: Tool): tool is PlacementTool {
+  return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'place-set-piece' ||
+    tool === 'place-decoration' || tool === 'start';
+}
+
+// Decorations are placed by their base anchor; their size on screen depends on depth and the camera.
 function objectBounds(object: LevelObject): Bounds {
+  if (object.kind === 'decoration') return { left: object.x, right: object.x, bottom: object.y, top: object.y };
   if (isTerrainObject(object)) {
     const vertices = objectVertices(object);
     return {
@@ -193,6 +207,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <div class="level-action-row">
           <button type="button" class="button" data-level-tool="select" aria-pressed="true">Select / move</button>
           <button type="button" class="button" data-level-tool="pan" aria-pressed="false">Pan view</button>
+          <button type="button" class="button" data-level-tool="decorate" aria-pressed="false">Select decorations</button>
         </div>
         <div class="level-camera-controls" aria-label="Editor camera">
           <button type="button" class="button level-zoom-out" aria-label="Zoom out">−</button>
@@ -277,6 +292,23 @@ export function createLevelEditor(options: LevelEditorOptions) {
             including entering Level mode.
             Patrol motion and deaths never change saved positions.</p>
         </div>
+        <div class="level-fields-decoration">
+          <div class="level-field-grid">
+            ${selectField('decoration-model', 'Model', DECORATION_MODELS.map(({ id, name }) => ({ value: id, label: name })))}
+            ${numericField('decoration-z', 'Depth', -DECORATION_LIMITS.back, DECORATION_LIMITS.front, 0.5)}
+            ${numericField('decoration-height', 'Height', DECORATION_LIMITS.minimumHeight, DECORATION_LIMITS.maximumHeight)}
+            <label class="level-field" for="level-decoration-tint">Tint
+              <input id="level-decoration-tint" type="color" />
+            </label>
+          </div>
+          <label class="level-checkbox" for="level-decoration-mirror">
+            <input id="level-decoration-mirror" type="checkbox" /> Mirror left / right (M)
+          </label>
+          <p class="level-help level-decoration-help">Scenery only: decorations never collide. Position is the centre of the
+            model's base. Negative depth sets it behind the course, out to ${DECORATION_LIMITS.back} m; positive depth brings it
+            up to ${DECORATION_LIMITS.front} m toward the camera, in front of the climb. With a perspective camera distant
+            decorations look smaller and drift slowly by. White tint keeps the model's own colours.</p>
+        </div>
         <div class="level-fields-trigger">
           <div class="level-field-grid">
             ${textField('trigger-name', 'Name', LEVEL_LIMITS.text)}
@@ -318,6 +350,33 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <button type="button" class="button level-set-piece-undo">Remove last placed set piece</button>
         <p class="level-help level-set-piece-status" role="status" aria-live="polite"></p>
       </fieldset>
+      `)}
+      ${sectionMarkup({ id: 'level-decorations', title: 'Decoration library', hint: `${DECORATION_MODELS.length} placeholder models, scenery only` }, `
+      <fieldset class="tuning-group level-decorations">
+        <legend class="visually-hidden">Decoration library</legend>
+        <p class="level-help">Scenery that never collides, to set the mood: far behind the course, just behind it,
+          or in front of it. Pick a model, adjust its depth and height under Object properties, then click / tap the
+          canvas. These are placeholders: course artwork (npm run pack:course) replaces any model with the game's own
+          GLB in mesh releases, while the Workshop keeps showing the placeholder.</p>
+        <p class="level-help">Depth reads best through a perspective camera (Project / Theme). Anything deeper than the
+          theme's fog end disappears into the fog, and the theme's backdrop mountains, about 10-25 m back, hide what
+          stands behind them: raise the fog end, or hide the backdrop, to show the far horizon.</p>
+        ${selectField('decoration-category', 'Category', DECORATION_CATEGORIES.map(({ id, label }) => ({ value: id, label })))}
+        <div class="level-set-piece-grid level-decoration-grid" aria-label="Decorations"></div>
+        <p class="level-help level-decoration-detail"></p>
+      </fieldset>
+      `)}
+      ${sectionMarkup({ id: 'level-server', title: 'Server levels', hint: 'Load a level shared on this server' }, `
+      <div class="snapshot-history level-server">
+        <label for="level-server-list">Server level</label>
+        <div class="tuning-profile-row">
+          <select id="level-server-list"></select>
+          <button type="button" class="button level-server-load">Load server level</button>
+        </div>
+        <p class="snapshot-history-help">${options.serverLevels.length === 0
+    ? 'This Workshop serves no levels. Put level JSON files in the levels folder of its repository, then build and deploy it again.'
+    : 'The same for everyone who opens this Workshop. Loading one replaces the current level; saved snapshots are kept.'}</p>
+      </div>
       `)}
       ${sectionMarkup({ id: 'level-saved', title: 'Saved levels', hint: 'Load a named snapshot' }, `
       <div class="level-history"></div>
@@ -388,6 +447,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const saveStatus = element<HTMLParagraphElement>(root, '.level-save-status');
   const importButton = element<HTMLButtonElement>(root, '.level-import');
   const fileInput = element<HTMLInputElement>(root, '.level-file');
+  const serverList = select('server-list');
+  const serverLoad = element<HTMLButtonElement>(root, '.level-server-load');
   const bounds = new Map(level.definition().objects.map((object) => [object.id, objectBounds(object)]));
   entityGizmos.sync(level.definition().objects, []);
   const downloadJson = createJsonDownload({ mount: root, signal: events.signal });
@@ -417,7 +478,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let savedDefinition: LevelDefinition | null = level.definition();
   let savedCamera: EditorCamera | null = null;
   let importGeneration = 0;
-  let importing = false;
+  // A level file being read, or a server level being downloaded; either blocks other loads.
+  let loading: 'file' | 'server' | null = null;
   let rect = options.canvas.getBoundingClientRect();
   let drawCount = 0;
   let commitCount = 0;
@@ -434,6 +496,16 @@ export function createLevelEditor(options: LevelEditorOptions) {
   // Most recent drops first to be removed; stale entries (parts already deleted) are skipped.
   const setPieceHistory: { readonly name: string; readonly ids: readonly string[]; readonly labels: readonly LevelLabel[] }[] = [];
   const setPieceButtons = new Map<string, HTMLButtonElement>();
+  // The library model being placed or last chosen, and the grid of the category on show.
+  let decorationId: string | null = null;
+  let decorationCategory: DecorationCategory = DECORATION_CATEGORIES[0].id;
+  let decorationGridCategory: DecorationCategory | null = null;
+  let decorationMirror = false;
+  let decorationPreview: DecorationObject | null = null;
+  const decorationButtons = new Map<string, HTMLButtonElement>();
+  const decorationList = select('decoration-model');
+  // Holds a model the library does not have, so the inspector can still show it.
+  const unknownModel = document.createElement('option');
   const surfaces = new SurfaceIndex(() => level.definition());
 
   const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts() ||
@@ -494,8 +566,9 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function renderStatus(): void {
     const counts = level.counts();
     saveStatus.textContent = `${counts.terrain} / ${LEVEL_LIMITS.objects} terrain · ${counts.triggers} / ${TRIGGER_LIMITS.objects} triggers · ${
-      counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${
-      importing ? 'Reading level file…' : drawing.vertices.length > 0 ? 'Unfinished outline - finish or cancel before saving' :
+      counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${counts.decorations} / ${DECORATION_LIMITS.objects} decorations · ${
+      loading === 'file' ? 'Reading level file…' : loading === 'server' ? 'Downloading server level…' :
+        drawing.vertices.length > 0 ? 'Unfinished outline - finish or cancel before saving' :
         dirty() ? 'Unsaved changes — save or export to keep them' : 'No unsaved changes'}`;
     saveStatus.dataset.dirty = String(dirty());
   }
@@ -506,9 +579,11 @@ Save a named snapshot or export first if you want to keep them. Continue without
     const start = asStart(object);
     const trigger = asTrigger(object);
     const enemy = asEnemy(object);
+    const decoration = asDecoration(object);
     inspector.disabled = object === null;
     element(root, '.level-fields-common').hidden = object === null;
-    element(root, '.level-fields-angle').hidden = terrain === null && start === null;
+    element(root, '.level-fields-angle').hidden = terrain === null && start === null && decoration === null;
+    element(root, '.level-fields-decoration').hidden = decoration === null;
     element(root, '.level-fields-terrain').hidden = terrain === null;
     element(root, '.level-fields-start').hidden = start === null;
     element(root, '.level-fields-trigger').hidden = trigger === null;
@@ -521,11 +596,13 @@ Save a named snapshot or export first if you want to keep them. Continue without
       tool === 'place' && terrain !== null ? `New ${terrain.shape.type} — click / tap the canvas to place` :
       tool === 'place-trigger' ? `New ${presetId === 'ending-trigger' ? 'ending trigger' : 'trigger'} — click / tap the canvas to place` :
       tool === 'place-enemy' && enemy !== null ? `New ${ENEMY_SPECS[enemy.species].label} - click / tap its base to place` :
+      tool === 'place-decoration' && decoration !== null ? `New ${modelName(decoration.model)}${decoration.mirror ? ' (mirrored)' : ''} — click / tap its base to place` :
       tool === 'start' ? 'Start location — click / tap the canvas to place' :
       terrain !== null ? `${terrain.shape.type} · ${terrain.id}` :
       start !== null ? `Start location · ${start.id}` :
       trigger !== null ? `Trigger "${trigger.name}" · ${trigger.id}` :
-      enemy !== null ? `${ENEMY_SPECS[enemy.species].label} - ${enemy.id}` : '';
+      enemy !== null ? `${ENEMY_SPECS[enemy.species].label} - ${enemy.id}` :
+      decoration !== null ? `${modelName(decoration.model)} · ${decoration.id}` : '';
 
     if (object !== null) {
       const coordLimit = trigger !== null ? TRIGGER_LIMITS.coordinate : LEVEL_LIMITS.coordinate;
@@ -548,6 +625,18 @@ Save a named snapshot or export first if you want to keep them. Continue without
     } else if (start !== null) {
       input('angle').value = String(Number((start.angle * DEGREES).toFixed(4)));
       input('reach').value = String(Number(start.reach.toFixed(4)));
+    } else if (decoration !== null) {
+      input('angle').value = String(Number((decoration.angle * DEGREES).toFixed(4)));
+      const known = builtInDecoration(decoration.model) !== undefined;
+      unknownModel.value = decoration.model;
+      unknownModel.textContent = `${decoration.model} (no placeholder: drawn only by course artwork)`;
+      if (known) unknownModel.remove();
+      else if (unknownModel.parentElement === null) decorationList.append(unknownModel);
+      decorationList.value = decoration.model;
+      input('decoration-z').value = String(Number(decoration.z.toFixed(4)));
+      input('decoration-height').value = String(Number(decoration.height.toFixed(4)));
+      input('decoration-tint').value = `#${decoration.tint.toString(16).padStart(6, '0')}`;
+      input('decoration-mirror').checked = decoration.mirror;
     } else if (enemy !== null) {
       const spec = ENEMY_SPECS[enemy.species];
       select('enemy-facing').value = enemy.facing;
@@ -585,7 +674,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
     if (trigger === null) triggerEvents.hide();
 
     const selected = selectedObject();
-    element<HTMLButtonElement>(root, '.level-delete').disabled = selected === null || tool !== 'select' || selected.kind === 'start';
+    element<HTMLButtonElement>(root, '.level-delete').disabled = selected === null || (tool !== 'select' && tool !== 'decorate') ||
+      selected.kind === 'start';
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-tool]')) {
       button.setAttribute('aria-pressed', String(button.dataset.levelTool === tool));
     }
@@ -612,7 +702,9 @@ Save a named snapshot or export first if you want to keep them. Continue without
     }
     const help: Record<Tool, string> = {
       select: 'Click / tap to select; drag to move. Pick enemies on their bodies, starts and triggers near their center handle. ' +
-        'V selects, H pans. Escape cancels a drag without changing the level.',
+        'V selects, H pans. Escape cancels a drag without changing the level. Decorations are picked with Select decorations.',
+      decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth. The course cannot be ' +
+        'picked in this mode. Delete removes the selection.',
       pan: 'Drag the canvas to pan anywhere in the course. Use + / − or the mouse wheel to zoom.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
         'Escape cancels. Pan and zoom keep your unfinished outline.',
@@ -621,6 +713,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
       'place-set-piece': 'Click / tap to drop the set piece. Its base rests on the terrain top nearest the pointer; move ' +
         'away from surfaces to place it freely. M mirrors it. Escape cancels.',
+      'place-decoration': 'Click / tap to place the decoration. Its base follows the pointer at its depth and rests on nearby ' +
+        'terrain tops when it is close to the course. Set depth, height and tint first if you like. M mirrors it. Escape cancels.',
       start: 'Click / tap the new pot-center position. Escape cancels.',
     };
     element(root, '.level-tool-help').textContent = help[tool];
@@ -629,7 +723,105 @@ Save a named snapshot or export first if you want to keep them. Continue without
     element(root, '.level-label-count').textContent = `${labels.length} course labels. Edits, saves and exports preserve them unless you remove them.`;
     element<HTMLButtonElement>(root, '.level-clear-labels').disabled = labels.length === 0;
     renderSetPieces();
+    renderDecorations();
     renderStatus();
+  }
+
+  function modelName(id: string): string {
+    return builtInDecoration(id)?.name ?? id;
+  }
+
+  function decorationButton(model: DecorationModel): HTMLButtonElement {
+    const cached = decorationButtons.get(model.id);
+    if (cached !== undefined) return cached;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button level-set-piece level-decoration';
+    button.dataset.decoration = model.id;
+    button.title = model.description;
+    button.setAttribute('aria-pressed', 'false');
+    button.append(decorationThumbnail(builtInGeometry(model)), document.createTextNode(model.name));
+    button.addEventListener('click', () => { if (active) armDecoration(model); }, listen);
+    decorationButtons.set(model.id, button);
+    return button;
+  }
+
+  function renderDecorations(): void {
+    // Models are built, and thumbnails painted, on first view of their category.
+    if (active && decorationGridCategory !== decorationCategory) {
+      decorationGridCategory = decorationCategory;
+      element(root, '.level-decoration-grid').replaceChildren(
+        ...DECORATION_MODELS.filter((model) => model.category === decorationCategory).map(decorationButton));
+    }
+    const full = level.counts().decorations >= DECORATION_LIMITS.objects;
+    for (const [id, button] of decorationButtons) {
+      button.setAttribute('aria-pressed', String(tool === 'place-decoration' && decorationId === id));
+      button.disabled = full;
+    }
+    const shown = decorationId === null ? null : builtInDecoration(decorationId) ?? null;
+    const depth = (z: number): string => z < 0 ? `${-z} m behind the course` : z > 0 ? `${z} m in front of it` : 'on the course';
+    element(root, '.level-decoration-detail').textContent = full ? `This level already has ${DECORATION_LIMITS.objects} decorations.`
+      : shown === null ? 'Choose a model to see what it is for.'
+        : `${shown.name}: ${shown.description} It starts ${shown.height} m tall, ${depth(shown.z)}.`;
+  }
+
+  function armDecoration(model: DecorationModel): void {
+    cancelGesture();
+    const view = camera.state();
+    tool = 'place-decoration'; decorationId = model.id; presetId = null; selectedId = null; drawingCursor = null;
+    placement = validateLevelObject({
+      kind: 'decoration', id: 'placement-preview', model: model.id, x: view.x, y: view.y - model.height / 2, z: model.z,
+      height: model.height, angle: 0, mirror: decorationMirror, tint: 0xffffff,
+    });
+    renderControls();
+    draw();
+  }
+
+  // The size of a decoration as placed; a model the view does not know yet counts as half as wide as tall.
+  function decorationSize(object: DecorationObject): { width: number; height: number } {
+    const model = options.decorations.size(object.model);
+    return { width: model === null ? object.height / 2 : model.width * object.height / model.height, height: object.height };
+  }
+
+  // The decoration's box as it appears on the course plane, or null when it is behind the camera.
+  function decorationOutline(object: DecorationObject): Point[] | null {
+    const { width, height } = decorationSize(object);
+    const cosine = Math.cos(object.angle);
+    const sine = Math.sin(object.angle);
+    const outline: Point[] = [];
+    for (const [x, y] of [[-width / 2, 0], [width / 2, 0], [width / 2, height], [-width / 2, height]] as const) {
+      const screen = camera.projectDepth({ x: object.x + x * cosine - y * sine, y: object.y + x * sine + y * cosine }, object.z);
+      if (screen === null) return null;
+      outline.push(camera.unproject(screen));
+    }
+    return outline;
+  }
+
+  // The nearest decoration drawn under a client position.
+  function hitDecoration(client: Point): DecorationObject | null {
+    hitTestCount++;
+    let hit: DecorationObject | null = null;
+    for (const object of level.definition().objects) {
+      if (object.kind !== 'decoration' || (hit !== null && object.z <= hit.z)) continue;
+      const at = camera.unprojectDepth(client, object.z);
+      if (at === null) continue;
+      const { width, height } = decorationSize(object);
+      const dx = at.x - object.x;
+      const dy = at.y - object.y;
+      const along = dx * Math.cos(object.angle) + dy * Math.sin(object.angle);
+      const up = -dx * Math.sin(object.angle) + dy * Math.cos(object.angle);
+      if (Math.abs(along) <= width / 2 && up >= 0 && up <= height) hit = object;
+    }
+    return hit;
+  }
+
+  // Where a decoration being placed goes: under the pointer at its depth, resting on a terrain top when close to the course.
+  function placeDecoration(object: DecorationObject, client: Point): DecorationObject {
+    const at = camera.unprojectDepth(client, object.z);
+    if (at === null) return object;
+    const below = camera.unprojectDepth({ x: client.x, y: client.y + SNAP_PIXELS }, object.z);
+    const top = Math.abs(object.z) > DECORATION_SNAP_DEPTH || below === null ? null : surfaces.nearestTop(at.x, at.y, at.y - below.y);
+    return { ...object, x: at.x, y: top ?? at.y };
   }
 
   function setPieceButton(piece: SetPiece): HTMLButtonElement {
@@ -725,15 +917,30 @@ Save a named snapshot or export first if you want to keep them. Continue without
     setPieceGhost.classList.toggle('level-set-piece-snapped', setPieceSnapped);
   }
 
+  function drawPoints(polygon: SVGPolygonElement, points: readonly Point[] | null): void {
+    polygon.toggleAttribute('hidden', points === null);
+    if (points === null) return;
+    polygon.setAttribute('points', points.map((point) => `${point.x},${point.y}`).join(' '));
+    polygon.classList.remove('level-illusion-outline');
+  }
+
   function draw(): void {
     if (!active || disposed || rect.width <= 0 || rect.height <= 0) return;
     drawCount++;
     const selected = selectedObject();
-    drawPolygon(selectionPolygon, asTerrain(selected));
     const ghost = ghostObject();
-    drawPolygon(ghostPolygon, ghost !== null ? asTerrain(ghost) : null);
-    entityGizmos.setSelection(selected !== null && !isTerrainObject(selected) ? selected : null);
-    entityGizmos.setGhost(ghost !== null && !isTerrainObject(ghost) ? ghost : null);
+    const selectedDecoration = asDecoration(selected);
+    const ghostDecoration = ghost === null ? null : asDecoration(ghost);
+    if (selectedDecoration !== null) drawPoints(selectionPolygon, decorationOutline(selectedDecoration));
+    else drawPolygon(selectionPolygon, asTerrain(selected));
+    if (ghostDecoration !== null) drawPoints(ghostPolygon, decorationOutline(ghostDecoration));
+    else drawPolygon(ghostPolygon, ghost !== null ? asTerrain(ghost) : null);
+    if (ghostDecoration !== decorationPreview) {
+      decorationPreview = ghostDecoration;
+      options.decorations.preview(ghostDecoration);
+    }
+    entityGizmos.setSelection(selected !== null && !isTerrainObject(selected) && !isDecorationObject(selected) ? selected : null);
+    entityGizmos.setGhost(ghost !== null && !isTerrainObject(ghost) && !isDecorationObject(ghost) ? ghost : null);
     drawSetPieceGhost();
     drawOutline();
   }
@@ -789,7 +996,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     draw();
   }
 
-  function chooseTool(next: 'select' | 'pan' | 'start' | 'draw'): void {
+  function chooseTool(next: 'select' | 'decorate' | 'pan' | 'start' | 'draw'): void {
     cancelGesture();
     tool = next;
     drawingCursor = null;
@@ -803,7 +1010,8 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function fitCourse(): void {
     cancelGesture();
     let combined: Bounds | null = null;
-    for (const bound of bounds.values()) {
+    for (const [id, bound] of bounds) {
+      if (level.object(id).kind === 'decoration') continue;
       combined = combined === null ? { ...bound } : {
         left: Math.min(combined.left, bound.left), right: Math.max(combined.right, bound.right),
         bottom: Math.min(combined.bottom, bound.bottom), top: Math.max(combined.top, bound.top),
@@ -973,8 +1181,23 @@ Save a named snapshot or export first if you want to keep them. Continue without
       return saved;
     },
   });
-  picker.setDisabled(true);
   element(root, '.level-save-dock').append(element(root, '.tuning-save-form'));
+  serverList.replaceChildren(...(options.serverLevels.length === 0 ? [new Option('No server levels', '')]
+    : options.serverLevels.map((entry, index) => new Option(entry.name, String(index)))));
+
+  function renderLoadControls(): void {
+    importButton.disabled = loading !== null;
+    picker.setDisabled(!active || loading !== null);
+    serverList.disabled = !active || loading !== null || options.serverLevels.length === 0;
+    serverLoad.disabled = serverList.disabled;
+  }
+
+  function setLoading(next: typeof loading): void {
+    loading = next;
+    renderLoadControls();
+    renderStatus();
+  }
+  renderLoadControls();
 
   for (const preset of PRESETS) {
     const button = document.createElement('button');
@@ -1069,7 +1292,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     button.addEventListener('click', () => {
       if (!active) return;
       const next = button.dataset.levelTool;
-      if (next !== 'select' && next !== 'pan' && next !== 'start' && next !== 'draw') throw new Error('Unknown level tool.');
+      if (next !== 'select' && next !== 'decorate' && next !== 'pan' && next !== 'start' && next !== 'draw') throw new Error('Unknown level tool.');
       chooseTool(next);
     }, listen);
   }
@@ -1085,7 +1308,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
   input('angle').addEventListener('change', () => {
     if (!active) return;
     const object = inspectorObject();
-    if (object === null || (object.kind !== 'terrain' && object.kind !== 'start')) return;
+    if (object === null || (object.kind !== 'terrain' && object.kind !== 'start' && object.kind !== 'decoration')) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, angle: input('angle').valueAsNumber / DEGREES }));
   }, listen);
@@ -1108,6 +1331,31 @@ Save a named snapshot or export first if you want to keep them. Continue without
     if (object === null) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, illusion: input('illusion').checked }));
+  }, listen);
+  const editDecoration = (change: (object: DecorationObject) => Partial<DecorationObject>): void => {
+    if (!active) return;
+    const object = asDecoration(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, ...change(object) }));
+  };
+  decorationList.addEventListener('change', () => editDecoration(() => {
+    if (tool === 'place-decoration') decorationId = decorationList.value;
+    return { model: decorationList.value };
+  }), listen);
+  for (const [name, field] of [['decoration-z', 'z'], ['decoration-height', 'height']] as const) {
+    input(name).addEventListener('change', () => editDecoration(() => ({ [field]: input(name).valueAsNumber })), listen);
+  }
+  input('decoration-tint').addEventListener('change', () => editDecoration(() => ({ tint: Number.parseInt(input('decoration-tint').value.slice(1), 16) })), listen);
+  input('decoration-mirror').addEventListener('change', () => editDecoration(() => {
+    if (tool === 'place-decoration') decorationMirror = input('decoration-mirror').checked;
+    return { mirror: input('decoration-mirror').checked };
+  }), listen);
+  select('decoration-category').addEventListener('change', () => {
+    const category = DECORATION_CATEGORIES.find((candidate) => candidate.id === select('decoration-category').value);
+    if (!active || category === undefined) return;
+    decorationCategory = category.id;
+    renderControls();
   }, listen);
   input('reach').addEventListener('change', () => {
     if (!active) return;
@@ -1217,7 +1465,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
   }, listen);
   action('.level-set-piece-undo', removeLastSetPiece);
   function deleteSelected(): void {
-    if (selectedId === null || tool !== 'select') return;
+    if (selectedId === null || (tool !== 'select' && tool !== 'decorate')) return;
     const object = selectedObject();
     if (object === null || object.kind === 'start') return;
     cancelGesture();
@@ -1269,7 +1517,7 @@ This restores the default ground and start location, removes all other objects a
       return;
     }
     const generation = ++importGeneration;
-    importing = true; importButton.disabled = true; picker.setDisabled(true); renderStatus();
+    setLoading('file');
     let definition: LevelDefinition;
     try {
       const text = await file.text();
@@ -1286,9 +1534,7 @@ This restores the default ground and start location, removes all other objects a
       else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
       return;
     } finally {
-      if (!disposed && generation === importGeneration) {
-        importing = false; importButton.disabled = false; picker.setDisabled(!active); renderStatus();
-      }
+      if (!disposed && generation === importGeneration) setLoading(null);
     }
     if (disposed || !active || generation !== importGeneration || !confirmReplacement('Importing this level')) return;
     resetSelection();
@@ -1303,6 +1549,30 @@ This restores the default ground and start location, removes all other objects a
     if (active && file !== undefined) void importFile(file);
   }, listen);
 
+  async function loadServerLevel(): Promise<void> {
+    const entry = options.serverLevels[Number(serverList.value)];
+    if (entry === undefined || loading !== null) return;
+    const generation = ++importGeneration;
+    setLoading('server');
+    let definition: LevelDefinition;
+    try {
+      definition = await downloadServerLevel(entry, events.signal);
+    } catch (error) {
+      if (!disposed && generation === importGeneration) report(error);
+      else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
+      return;
+    } finally {
+      if (!disposed && generation === importGeneration) setLoading(null);
+    }
+    if (disposed || !active || generation !== importGeneration || !confirmReplacement('Loading this server level')) return;
+    resetSelection();
+    level.replace(definition);
+    markSaved();
+    fitCourse();
+    onNotice(`Loaded "${entry.name}" from the server. Existing named snapshots were kept; save a snapshot to keep it in this browser.`, 'info');
+  }
+  action('.level-server-load', () => { void loadServerLevel(); });
+
   function hitTest(world: Point): LevelObject | null {
     hitTestCount++;
     const objects = level.definition().objects;
@@ -1310,7 +1580,7 @@ This restores the default ground and start location, removes all other objects a
     // Enemy bodies and small entity handles take priority; trigger regions never block terrain.
     for (let index = objects.length - 1; index >= 0; index--) {
       const object = objects[index];
-      if (isTerrainObject(object)) continue;
+      if (isTerrainObject(object) || isDecorationObject(object)) continue;
       if (Math.hypot(world.x - object.x, world.y - object.y) <= radius) return object;
       if (object.kind === 'enemy') {
         const bound = bounds.get(object.id);
@@ -1353,9 +1623,11 @@ This restores the default ground and start location, removes all other objects a
       drawingCursor = world;
     } else if (gesture?.kind === 'move') {
       const moved = Math.hypot(client.x - gesture.start.x, client.y - gesture.start.y) >= DRAG_DISTANCE;
+      // A decoration moves in its own depth plane, so it stays under the pointer at any depth.
+      const at = gesture.original.kind === 'decoration' ? camera.unprojectDepth(client, gesture.original.z) ?? gesture.world : world;
       gesture.preview = moved ? {
-        ...gesture.original, x: gesture.original.x + world.x - gesture.world.x,
-        y: gesture.original.y + world.y - gesture.world.y,
+        ...gesture.original, x: gesture.original.x + at.x - gesture.world.x,
+        y: gesture.original.y + at.y - gesture.world.y,
       } : gesture.original;
     } else if (tool === 'place' && placement !== null) {
       placement = { ...placement, x: world.x, y: world.y };
@@ -1367,6 +1639,8 @@ This restores the default ground and start location, removes all other objects a
       placement = anchorEnemy({ ...placement, x: world.x, y: world.y });
     } else if (tool === 'place-set-piece' && setPieceId !== null) {
       moveSetPiece(world);
+    } else if (tool === 'place-decoration' && placement !== null && placement.kind === 'decoration') {
+      placement = placeDecoration(placement, client);
     } else if (tool === 'start' && placement !== null && placement.kind === 'start') {
       placement = { ...placement, x: world.x, y: world.y };
     }
@@ -1383,6 +1657,14 @@ This restores the default ground and start location, removes all other objects a
       const object = hitTest(world);
       selectedId = object?.id ?? null;
       if (object !== null) gesture = { kind: 'move', pointerId: event.pointerId, start: client, world, original: object, preview: object };
+      renderControls(); draw();
+    } else if (tool === 'decorate') {
+      const object = hitDecoration(client);
+      const grab = object === null ? null : camera.unprojectDepth(client, object.z);
+      selectedId = object?.id ?? null;
+      if (object !== null && grab !== null) {
+        gesture = { kind: 'move', pointerId: event.pointerId, start: client, world: grab, original: object, preview: object };
+      }
       renderControls(); draw();
     } else if (tool === 'pan') {
       gesture = {
@@ -1444,6 +1726,11 @@ This restores the default ground and start location, removes all other objects a
         chooseTool('select');
       } else if (finished.kind === 'place-set-piece' && inside) {
         dropSetPiece();
+      } else if (finished.kind === 'place-decoration' && inside && placement !== null) {
+        const object = { ...placement, id: `decoration-${crypto.randomUUID()}` };
+        level.upsert(object);
+        selectedId = object.id;
+        chooseTool('decorate');
       } else if (finished.kind === 'start' && inside && placement !== null) {
         level.upsert(placement);
         selectedId = placement.id;
@@ -1483,8 +1770,12 @@ This restores the default ground and start location, removes all other objects a
       case 'v': chooseTool('select'); break;
       case 'h': chooseTool('pan'); break;
       case 'm':
-        if (tool !== 'place-set-piece') return;
-        toggleSetPieceMirror();
+        if (tool === 'place-set-piece') toggleSetPieceMirror();
+        else if (tool === 'place-decoration' && placement !== null && placement.kind === 'decoration') {
+          decorationMirror = !placement.mirror;
+          placement = { ...placement, mirror: decorationMirror };
+          renderControls(); draw();
+        } else return;
         break;
       case 'enter':
         if (target instanceof Element && target.closest('button, a[href], summary, [role="button"], [role="tab"]')) return;
@@ -1565,7 +1856,7 @@ This restores the default ground and start location, removes all other objects a
           active = true;
           root.hidden = false; root.inert = false; overlay.hidden = false;
           camera.set(savedCamera === null ? camera.state() : savedCamera);
-          picker.setDisabled(importing);
+          renderLoadControls();
           renderControls();
         }
         alignOverlay();
@@ -1575,9 +1866,11 @@ This restores the default ground and start location, removes all other objects a
           onNotice('Your unfinished outline is kept in Workshop / Level. Finish shape to include it in the level.', 'info');
         }
         active = false;
-        importGeneration++; importing = false; importButton.disabled = false;
+        importGeneration++;
         root.hidden = true; root.inert = true; overlay.hidden = true;
-        picker.setDisabled(true);
+        setLoading(null);
+        decorationPreview = null;
+        options.decorations.preview(null);
         camera.set(null);
       }
     },
@@ -1594,7 +1887,7 @@ This restores the default ground and start location, removes all other objects a
           vertices: Object.freeze(drawing.vertices.map((point) => Object.freeze({ ...point }))),
           strokeSamples: gesture?.kind === 'draw' ? gesture.samples.length : 0,
         }),
-        dirty: dirty(), importing, objectCount: current.objects.length,
+        dirty: dirty(), loading, objectCount: current.objects.length,
         start: level.start(), counts: level.counts(), labelCount: current.labels.length,
         camera: Object.freeze({ ...camera.state() }),
         overlay: Object.freeze({ visible: active && !overlay.hidden, x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
@@ -1607,6 +1900,10 @@ This restores the default ground and start location, removes all other objects a
           }))),
           surfaceIndexBuilds: surfaces.builds, catalog: SET_PIECE_CATALOG,
         }),
+        decorations: Object.freeze({
+          armed: tool === 'place-decoration' ? decorationId : null, category: decorationCategory, mirror: decorationMirror,
+          preview: decorationPreview === null ? null : Object.freeze({ ...decorationPreview }),
+        }),
       });
     },
     dispose(): void {
@@ -1614,6 +1911,7 @@ This restores the default ground and start location, removes all other objects a
       cancelGesture();
       drawing.clear();
       active = false; disposed = true; importGeneration++;
+      options.decorations.preview(null);
       events.abort(); resize.disconnect(); unsubscribe();
       camera.set(null);
       bounds.clear();

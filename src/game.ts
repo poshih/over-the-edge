@@ -1,4 +1,5 @@
 import { DEFAULT_ARM_IK } from './character';
+import type { DecorationView } from './decoration-view';
 import type { CharacterState } from './character';
 import { PHYSICS } from './config';
 import type { PlayerSpawn, UiAction, UiActionOptions } from './config';
@@ -60,6 +61,8 @@ export class Game {
     content?: ContentLoader;
     theme?: GameTheme;
     enemyArt?: EnemyArtSettings;
+    // Creates the decoration view, when the game draws decorations.
+    decorations?: (() => DecorationView) | null;
     // Streams authored video sources; by default sources are URLs.
     media?: MediaHost;
     // Receives sound cues and play-sound events; without it the game tracks no impacts.
@@ -79,6 +82,7 @@ export class Game {
     this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
     this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
       characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
+      decorations: options.decorations,
     });
     if (this.onCue !== null) this.simulation.trackImpacts(true);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));

@@ -131,7 +131,7 @@ async function richProject() {
   const cues = Object.fromEntries(Object.keys(example.audio.cues).map(cue => [cue, null]));
   await writeFile(join(directory, 'project.json'), JSON.stringify({
     ...example, title: 'Content Proof',
-    art: { mode: 'meshes', assets: [{ id: assetId, name: 'Slab' }] },
+    art: { mode: 'meshes', assets: [{ id: assetId, name: 'Slab' }], decorations: {} },
     characters: { primary: 'characters/primary.json', alternate: 'characters/alternate.json' },
     appearance: [{ part: 'torso', name: 'Armour.glb', alignment: { scale: 1, rotationX: 0, rotationY: 0, rotationZ: 0, offsetX: 0, offsetY: 0, offsetZ: 0 } }],
     audio: { volume: 1, music: { source: '/media/loop.wav', volume: 0.3 }, cues: { ...cues, impact: { source: '/media/bell.wav', volume: 0.5 } } },
@@ -546,7 +546,7 @@ async function verifyPerformance() {
   }
   objects.filter(object => object.kind === 'terrain').forEach((object, index) => { assignments[object.id] = `mesh-${index % meshes}.glb`; });
   await writeFile(levelPath, JSON.stringify({ schemaVersion: 3, labels: [], objects }));
-  await writeFile(assignmentsPath, JSON.stringify(assignments));
+  await writeFile(assignmentsPath, JSON.stringify({ terrain: assignments }));
   await exec(process.execPath, [join(root, 'scripts/pack-course.mjs'), levelPath, assignmentsPath, packagePath, '--mode=meshes'], { cwd: root });
   const images = Array.from({ length: 12 }, (_, index) => ({ id: `image-${index}`, name: `Image ${index}`, source: dataUrl('image/png', solidPng(16, 16, index * 20)) }));
   const spritesPath = join(temporary, 'many-images.json');

@@ -11,10 +11,11 @@ baseline, not a final balance claim.
 
 ## Load or release
 
-Run `npm run dev`, open **Workshop / Level**, and import
-[`levels/skyward-ruins.json`](../levels/skyward-ruins.json). Save a named level
-snapshot to retain it in that browser. Playtest starts at the authored start.
-Importing this course does not replace the built-in demo.
+Run `npm run dev`, open **Workshop / Level**, and load **skyward-ruins** from
+**Server levels**; the Workshop serves
+[`levels/skyward-ruins.json`](../levels/skyward-ruins.json) from its `levels/` folder.
+Save a named level snapshot to retain your changes in that browser. Playtest starts at
+the authored start. Loading this course does not replace the built-in demo.
 
 For the editor-free game:
 
