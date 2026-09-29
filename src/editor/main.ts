@@ -4,7 +4,7 @@ import './style.css';
 import { Vector3 } from 'three';
 import { PHYSICS } from '../config';
 import { SPRITE_TARGET_IDS } from '../character';
-import type { Point, UiActionOptions } from '../config';
+import type { PlayerSpawn, Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import { GameSettingsError, withRig } from '../game-settings';
 import { Game } from '../game';
@@ -42,7 +42,9 @@ if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface 
 const opensProject = publishedProject !== null;
 const level = new LevelState(DEFAULT_LEVEL);
 let debug = false;
-let practice: PracticeId = 'start';
+// Where attempts start: a starting point, or where the designer placed the player in the Level tab to
+// test part of the course. Placing the player never moves the level's own start.
+let origin: PracticeId | PlayerSpawn = 'start';
 let editing = false;
 // Media resolve through the open project, which is created once the editors exist.
 let resolveMedia = (source: string): string => source;
@@ -73,7 +75,7 @@ const game = new Game({
 });
 const unsubscribeLevel = level.subscribe((change) => {
   game.applyLevel(change);
-  if (change.kind === 'replace') practice = 'start';
+  if (change.kind === 'replace') origin = 'start';
 });
 const ui = createUI({
   mount,
@@ -139,6 +141,11 @@ const levelEditor = createLevelEditor({
     preview: (object) => decorations.setPreview(object),
   },
   onPlay: () => perform('play'),
+  player: {
+    place: placePlayer,
+    clear: () => resetPractice('start'),
+    placed: () => typeof origin !== 'string',
+  },
   onNotice: ui.notice,
   warnBeforeUnload: !opensProject,
   serverLevels: serverLevels(publishedProject, folderLevels),
@@ -192,9 +199,27 @@ const projectEditor = createProjectEditor({
 
 function resetPractice(id: PracticeId): void {
   spriteEditor.leavePreview();
-  practice = id;
+  origin = id;
   game.reset(id === 'start' ? levelSpawn(level.definition()) : practiceById(id));
 }
+
+// Moves the player to `position`, the pot's centre, in the start's pose, and starts attempts there.
+function placePlayer(position: Point): void {
+  const { angle, reach } = levelSpawn(level.definition());
+  spriteEditor.leavePreview();
+  origin = { position: { x: position.x, y: position.y }, angle, reach };
+  game.reset(origin);
+}
+
+function restart(): void {
+  if (typeof origin === 'string') resetPractice(origin);
+  else {
+    spriteEditor.leavePreview();
+    game.reset(origin);
+  }
+}
+
+const practice = (): PracticeId | null => typeof origin === 'string' ? origin : null;
 
 function updateWorkshop(state: WorkshopState): void {
   spriteEditor.setActive(state.open && state.tab === 'sprites');
@@ -216,16 +241,20 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
     return;
   }
   if (action === 'reset') {
-    resetPractice(practice);
+    restart();
     return;
   }
   if (action === 'play') {
     if (editing && !levelEditor.preparePlay()) return;
     spriteEditor.leavePreview();
-    const startFromLevel = editing;
+    const playtest = editing;
     const workshop = ui.workshopState();
     if (editing || workshop.compact) ui.closeWorkshop();
-    if (startFromLevel) resetPractice('start');
+    // A playtest starts at the level's start, or where the designer placed the player.
+    if (playtest) {
+      if (typeof origin === 'string') resetPractice('start');
+      else restart();
+    }
   }
   if (action === 'pause' && game.pauseState().length > 0) spriteEditor.leavePreview();
   game.perform(action, options);
@@ -236,7 +265,7 @@ const diagnostics = Object.freeze({
     const state = game.simulation.snapshot();
     const reasons = game.pauseState();
     return {
-      ...state, practice, debug,
+      ...state, practice: practice(), placedPlayer: typeof origin === 'string' ? null : origin, debug,
       parts: game.simulation.frame(1).parts.map((part) => ({
         ...part, vertices: part.vertices.map((point) => ({ ...point })),
       })),
@@ -270,7 +299,7 @@ window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
 void project.start();
 game.start((state) => {
-  ui.update({ ...state, debug, practice });
+  ui.update({ ...state, debug, practice: practice() });
   spriteEditor.updatePreview();
   audio.setPaused(state.paused);
 });

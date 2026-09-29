@@ -190,10 +190,6 @@
   object-fit: contain;
 }
 
-.level-tools [data-level-tool="decorate"] {
-  grid-column: 1 / -1;
-}
-
 .level-camera-controls {
   display: grid;
   grid-template-columns: 48px 48px repeat(2, minmax(0, 1fr));
@@ -464,6 +460,11 @@
 .level-gizmo-ghost .level-gizmo-region,
 .level-gizmo-ghost.level-gizmo-start {
   stroke-dasharray: 6 4;
+}
+
+/* Placing the player previews its pose in amber, so it is not mistaken for moving the start. */
+.level-overlay[data-tool="player"] .level-gizmo-ghost.level-gizmo-start {
+  stroke: #9a5c08;
 }
 
 .level-guides text {

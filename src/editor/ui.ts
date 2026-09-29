@@ -270,6 +270,7 @@ export function createUI(options: UiOptions): GameUi {
       setPressed(button, active);
       if (active) setText(practiceDescription, practice.description);
     }
+    if (state.practice === null) setText(practiceDescription, 'Where you placed the player in Workshop / Level. Reset returns there.');
   }
   renderSettings(settings);
   createGameSettingsUI({

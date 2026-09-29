@@ -488,6 +488,12 @@ hammer that cannot reach that far starts fully extended. Each level has one star
 and use Reset to repeat the course. Runtime effects never delete objects from
 the editor's authored definition.
 
+To test one part of a course without moving its start, choose **Place player** and
+click/tap where the pot should stand. The player moves there in the start's hammer
+pose, and the level is not edited. Playtests, Reset and falls out of the level then
+start from the placed player until you choose **Use the level start** in the Level
+tab, pick a starting point in **Physics**, or load another level.
+
 Named level saves use the existing snapshot-history mechanism: repeated names
 keep separate versions, choosing an entry does not apply it, and loading is
 explicit. **Save level** stays at the top of the Level tab; load past saves from

@@ -34,7 +34,8 @@ import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
 
-type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piece' | 'place-decoration' | 'start';
+// 'player' moves the live player without editing the level; it previews in the start's pose.
+type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piece' | 'place-decoration' | 'start' | 'player';
 // 'decorate' selects and moves decorations; 'select' never picks them, so scenery cannot get in the way of the course.
 type Tool = 'select' | 'decorate' | 'pan' | 'draw' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
@@ -121,7 +122,7 @@ function asDecoration(object: LevelObject | null): DecorationObject | null {
 
 function isPlacementTool(tool: Tool): tool is PlacementTool {
   return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'place-set-piece' ||
-    tool === 'place-decoration' || tool === 'start';
+    tool === 'place-decoration' || tool === 'start' || tool === 'player';
 }
 
 // Decorations are placed by their base anchor; their size on screen depends on depth and the camera.
@@ -198,6 +199,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <button type="button" class="button button-primary level-play">Playtest</button>
         <button type="button" class="button level-new">New level</button>
       </div>
+      <p class="level-help level-player-note" hidden>Playtests start where you placed the player.
+        <button type="button" class="button level-player-clear">Use the level start</button></p>
       <div class="level-save-dock"></div>
       <p class="level-save-status" role="status" aria-live="polite"></p>
     </div>
@@ -208,6 +211,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button" data-level-tool="select" aria-pressed="true">Select / move</button>
           <button type="button" class="button" data-level-tool="pan" aria-pressed="false">Pan view</button>
           <button type="button" class="button" data-level-tool="decorate" aria-pressed="false">Select decorations</button>
+          <button type="button" class="button" data-level-tool="player" aria-pressed="false">Place player</button>
         </div>
         <div class="level-camera-controls" aria-label="Editor camera">
           <button type="button" class="button level-zoom-out" aria-label="Zoom out">−</button>
@@ -598,6 +602,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       tool === 'place-enemy' && enemy !== null ? `New ${ENEMY_SPECS[enemy.species].label} - click / tap its base to place` :
       tool === 'place-decoration' && decoration !== null ? `New ${modelName(decoration.model)}${decoration.mirror ? ' (mirrored)' : ''} — click / tap its base to place` :
       tool === 'start' ? 'Start location — click / tap the canvas to place' :
+      tool === 'player' ? 'Place player — click / tap where the pot should stand' :
       terrain !== null ? `${terrain.shape.type} · ${terrain.id}` :
       start !== null ? `Start location · ${start.id}` :
       trigger !== null ? `Trigger "${trigger.name}" · ${trigger.id}` :
@@ -716,8 +721,11 @@ Save a named snapshot or export first if you want to keep them. Continue without
       'place-decoration': 'Click / tap to place the decoration. Its base follows the pointer at its depth and rests on nearby ' +
         'terrain tops when it is close to the course. Set depth, height and tint first if you like. M mirrors it. Escape cancels.',
       start: 'Click / tap the new pot-center position. Escape cancels.',
+      player: 'Click / tap where the pot should stand. The player moves there, in the start\'s pose, to test that part of ' +
+        'the course; the level\'s start stays where it is. Playtests and resets start there until you use the level start. Escape cancels.',
     };
     element(root, '.level-tool-help').textContent = help[tool];
+    element(root, '.level-player-note').hidden = !options.player.placed();
     overlay.dataset.tool = tool;
     const { labels } = level.definition();
     element(root, '.level-label-count').textContent = `${labels.length} course labels. Edits, saves and exports preserve them unless you remove them.`;
@@ -996,13 +1004,13 @@ Save a named snapshot or export first if you want to keep them. Continue without
     draw();
   }
 
-  function chooseTool(next: 'select' | 'decorate' | 'pan' | 'start' | 'draw'): void {
+  function chooseTool(next: 'select' | 'decorate' | 'pan' | 'start' | 'player' | 'draw'): void {
     cancelGesture();
     tool = next;
     drawingCursor = null;
     if (next === 'draw') selectedId = null;
     presetId = null;
-    placement = next === 'start' ? { ...level.start() } : null;
+    placement = next === 'start' || next === 'player' ? { ...level.start() } : null;
     renderControls();
     draw();
   }
@@ -1292,7 +1300,9 @@ Save a named snapshot or export first if you want to keep them. Continue without
     button.addEventListener('click', () => {
       if (!active) return;
       const next = button.dataset.levelTool;
-      if (next !== 'select' && next !== 'decorate' && next !== 'pan' && next !== 'start' && next !== 'draw') throw new Error('Unknown level tool.');
+      if (next !== 'select' && next !== 'decorate' && next !== 'pan' && next !== 'start' && next !== 'player' && next !== 'draw') {
+        throw new Error('Unknown level tool.');
+      }
       chooseTool(next);
     }, listen);
   }
@@ -1478,6 +1488,10 @@ Save a named snapshot or export first if you want to keep them. Continue without
   action('.level-drawing-undo', undoDrawing);
   action('.level-drawing-cancel', cancelDrawing);
   action('.level-play', options.onPlay);
+  action('.level-player-clear', () => {
+    options.player.clear();
+    renderControls();
+  });
   action('.level-fit', fitCourse);
   action('.level-zoom-in', () => zoom(1 / ZOOM_FACTOR));
   action('.level-zoom-out', () => zoom(ZOOM_FACTOR));
@@ -1641,7 +1655,7 @@ This restores the default ground and start location, removes all other objects a
       moveSetPiece(world);
     } else if (tool === 'place-decoration' && placement !== null && placement.kind === 'decoration') {
       placement = placeDecoration(placement, client);
-    } else if (tool === 'start' && placement !== null && placement.kind === 'start') {
+    } else if ((tool === 'start' || tool === 'player') && placement !== null && placement.kind === 'start') {
       placement = { ...placement, x: world.x, y: world.y };
     }
     draw();
@@ -1734,6 +1748,9 @@ This restores the default ground and start location, removes all other objects a
       } else if (finished.kind === 'start' && inside && placement !== null) {
         level.upsert(placement);
         selectedId = placement.id;
+        chooseTool('select');
+      } else if (finished.kind === 'player' && inside && placement !== null) {
+        options.player.place({ x: placement.x, y: placement.y });
         chooseTool('select');
       }
     });

@@ -9,7 +9,8 @@ export type WorkshopTab = 'project' | 'physics' | 'character' | 'appearance' | '
 
 export interface HudState extends GameHudState {
   debug: boolean;
-  practice: PracticeId;
+  // Null while attempts start where the designer placed the player.
+  practice: PracticeId | null;
   contacts: number;
   hingeLoad: number;
   sliderLoad: number;

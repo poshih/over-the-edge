@@ -273,6 +273,60 @@ export async function verifyLevel(browser, address, artifacts) {
     assert.deepEqual(JSON.parse(await readFile(await download.path(), 'utf8')), authoredIllusion);
     report.illusion = { topLanding: true, solidDuringFade: true, paused: true, removedAfterFade: true, restartRestores: true, authoredExportPreserved: true };
 
+    // Placing the player tests any part of a course, from design mode, without moving its start.
+    const testCourse = {
+      schemaVersion: 3, labels: [],
+      objects: [
+        { kind: 'terrain', id: 'test-floor', shape: { type: 'box' }, x: 0, y: -1, width: 40, height: 2, angle: 0, depth: 2, color: 0x71817a, illusion: false },
+        { kind: 'start', id: 'test-start', x: -8, y: 0.65, angle: 0.4, reach: 1.7 },
+      ],
+    };
+    await importLevel(testCourse);
+    const course = await state();
+    const testStart = course.definition.objects.find(object => object.kind === 'start');
+    const playerNote = page.locator('.level-player-note');
+    assert.equal(await playerNote.isHidden(), true, 'Playtests start at the level start until the player is placed.');
+    await page.getByRole('button', { name: 'Place player', exact: true }).click();
+    assert.equal((await state()).editor.tool, 'player');
+    const spot = await project({ x: 6, y: 0.65 });
+    await page.mouse.move(spot.x, spot.y, { steps: 4 });
+    const ghost = (await state()).editor.preview;
+    assert.deepEqual(ghost, { ...testStart, x: ghost.x, y: ghost.y }, 'The placement preview shows the player in the start\'s pose.');
+    await page.mouse.click(spot.x, spot.y);
+    await frames();
+    const placedCourse = await state();
+    const placed = await physics();
+    assert.deepEqual(placedCourse.definition, course.definition, 'Placing the player must not edit the level.');
+    assert.equal(placedCourse.editor.dirty, course.editor.dirty);
+    assert.deepEqual(placedCourse.editor.start, testStart, 'The level start stays where it was.');
+    assert.equal(placedCourse.editor.tool, 'select');
+    assert.ok(placed.placedPlayer !== null && Math.hypot(placed.placedPlayer.position.x - 6, placed.placedPlayer.position.y - 0.65) < 0.05,
+      'The player is placed under the pointer.');
+    assert.deepEqual([placed.placedPlayer.angle, placed.placedPlayer.reach, placed.practice], [testStart.angle, testStart.reach, null]);
+    assert.ok(Math.hypot(placed.root.x - placed.placedPlayer.position.x, placed.root.y - placed.placedPlayer.position.y) < 1e-6,
+      'The paused player stands exactly where it was placed.');
+    assert.equal(await playerNote.isVisible(), true);
+    await page.locator('.level-play').click();
+    await page.waitForFunction(() => !window.gettingOver.snapshot().paused && window.gettingOver.level().editor.mode === 'inactive');
+    await page.waitForFunction(() => window.gettingOver.snapshot().time >= 0.5);
+    const playtest = await physics();
+    assert.ok(Math.abs(playtest.root.x - placed.placedPlayer.position.x) < 1, 'A playtest starts from the placed player.');
+    await page.locator('#game').focus();
+    await page.keyboard.press('r');
+    await frames();
+    const again = await physics();
+    assert.ok(again.time < 0.2 && Math.abs(again.root.x - placed.placedPlayer.position.x) < 0.1, 'Reset returns to the placed player.');
+    await edit();
+    assert.equal(await playerNote.isVisible(), true);
+    await page.getByRole('button', { name: 'Use the level start', exact: true }).click();
+    await frames();
+    const cleared = await physics();
+    assert.deepEqual([cleared.placedPlayer, cleared.practice], [null, 'start']);
+    assert.ok(Math.abs(cleared.root.x - testStart.x) < 1e-6 && Math.abs(cleared.root.y - testStart.y) < 1e-6, 'The level start takes over again.');
+    assert.equal(await playerNote.isHidden(), true);
+    assert.deepEqual((await state()).definition, course.definition);
+    report.placePlayer = { placed: placed.placedPlayer, playtestFromPlacement: true, resetToPlacement: true, levelUnchanged: true };
+
     const creatureStart = { kind: 'start', id: 'creature-start', x: 0, y: 0.53, angle: 0, reach: 1.7 };
     const creatureFloor = { ...floor, width: 30 };
     const emptyCreatureCourse = { schemaVersion: 3, labels: [], objects: [creatureFloor, creatureStart] };

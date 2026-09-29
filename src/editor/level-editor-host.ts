@@ -29,6 +29,13 @@ export interface LevelEditorOptions {
     preview: (object: DecorationObject | null) => void;
   };
   onPlay: () => void;
+  // The live player, which the designer can place anywhere to test part of the course without moving
+  // the level's start. Playtests and resets start from it until `clear` returns them to the start.
+  player: {
+    place: (position: Point) => void;
+    clear: () => void;
+    placed: () => boolean;
+  };
   onNotice: (message: string, kind: 'info' | 'error') => void;
   // The levels served with this Workshop, listed under Server levels.
   serverLevels: readonly ServerLevel[];
