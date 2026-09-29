@@ -6,6 +6,9 @@ import { outline } from './course.mjs';
 // within about 2.5 m of it can be pulled over (see src/editor/set-pieces.ts). Connectors stay inside
 // easier limits, so the difficulty of the course lives in its set pieces.
 export const REACH = { shoulder: 1.15, pull: 2.35, rise: 2.5, hop: 1.9, drop: 9, slope: Math.cos(40 * Math.PI / 180) };
+// Small colliders, about the pot's size or less (it is 1 m wide), must stay farther apart than the pot is
+// wide: a narrower slot between them traps the pot or the hammer head.
+export const CRAMPED = { small: 1.5, clearance: 1.2 };
 const SAMPLE = 0.3;
 const CELL = 3;
 
@@ -37,6 +40,25 @@ export function penetration(first, second) {
     }
   }
   return depth;
+}
+
+function segmentDistance(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(point.x - a.x - t * dx, point.y - a.y - t * dy);
+}
+
+/** The gap between two convex outlines; zero when they touch or overlap. */
+export function separation(first, second) {
+  if (penetration(first, second) > 0) return 0;
+  let gap = Infinity;
+  for (const [points, polygon] of [[first, second], [second, first]]) {
+    for (const point of points) {
+      for (let index = 0; index < polygon.length; index++) gap = Math.min(gap, segmentDistance(point, polygon[index], polygon[(index + 1) % polygon.length]));
+    }
+  }
+  return gap;
 }
 
 function boundsOf(points) {
@@ -114,6 +136,29 @@ export function overlaps(level, groups, supports = new Set()) {
     ];
     for (const solid of grid.near(enemy.x, enemy.y, 1)) {
       if (penetration(box, solid.polygon) > 0.02) problems.push(`${enemy.id} starts inside ${solid.object.id}`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * No two small colliders may lie within the clearance of each other, touching included: dress a course with
+ * decorations, never with terrain props. A set piece's own parts are designed and tested together, so only
+ * they may sit close.
+ */
+export function crampedColliders(level, groups) {
+  const { solids, grid } = solidIndex(level);
+  const size = (bounds) => Math.max(bounds.right - bounds.left, bounds.top - bounds.bottom);
+  const small = new Set(solids.filter((solid) => size(solid.bounds) <= CRAMPED.small));
+  const problems = [];
+  for (const solid of small) {
+    const center = { x: (solid.bounds.left + solid.bounds.right) / 2, y: (solid.bounds.bottom + solid.bounds.top) / 2 };
+    for (const other of grid.near(center.x, center.y, CRAMPED.small + CRAMPED.clearance + CELL)) {
+      if (!small.has(other) || other.object.id <= solid.object.id) continue;
+      const group = groups.get(solid.object.id).group;
+      if (group.startsWith('piece:') && group === groups.get(other.object.id).group) continue;
+      const gap = separation(solid.polygon, other.polygon);
+      if (gap < CRAMPED.clearance) problems.push(`${solid.object.id} and ${other.object.id} are small colliders ${gap.toFixed(2)} m apart`);
     }
   }
   return problems;

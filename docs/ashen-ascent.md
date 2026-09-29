@@ -40,7 +40,7 @@ and open it from **Workshop / Project**.
 | III · The Ossuary | 26-79 m | Drop shaft, Ledge drop, Crawlspace, Pogo pit, False floor, Devil's chimney, Zigzag shaft, Mantle shelf, Crumbling holds | A deliberate drop into the catacombs, then the Bone Well |
 | IV · Blighted Mire | 71-86 m | The snake, Boulder field, Stepping stones, Pogo posts, Floating rock, Scree slope, Friction slab, Kicker ramp | Mud, roots, a grotto under the swamp |
 | V · Cinder Forge | 86-139 m | Orange hell, Hook swing, Chasm leap, Pole vault, Catch wall, Full-reach wall, Overhang roof, The spire, Tilted slab | Furnace stair, an iron catwalk, slag ledges |
-| VI · Frostbound Ramparts | 139-157 m | Knife-edge ridge, Perched boulder, Needle pillars, The dome, Ball stack, Ceiling traverse, Crumbling bridge, Danger sign, Long fall | Merlons, tower walks, icicles |
+| VI · Frostbound Ramparts | 139-157 m | Knife-edge ridge, Perched boulder, Needle pillars, The dome, Ball stack, Ceiling traverse, Crumbling bridge, Danger sign, Long fall | Ramparts, tower walks, icicles |
 | VII · Windward Stair | 157-266 m | Launch pad, Updraft ambush, Updraft cliff, The fork, Vent ladder | Seven wind stones alternating across the sky edge |
 | VIII · The Drifting Keep | 266-407 m | False summit, Bird gauntlet, Notch wall, Dead-end tower, Ledge ladder, Summit | The Great Updraft, drifting islets, sky dock, gatehouse, courtyard, keep, the gilded stair |
 
@@ -48,7 +48,7 @@ Each zone has its own palette, and pieces take their colours from it. The
 connectors between pieces change from zone to zone rather than repeating one
 pattern. Stairs switch back or run in line, mixing shelves, slabs, crates, rocks and
 columns; floors, walls, towers and wind stones fill the rest. The first zone opens
-with the intro. Each later zone begins at a **bonfire**, a blade coiled in a cairn,
+with the intro. Each later zone begins at a **bonfire**, a blade planted in warm ash,
 whose popup names the zone the first time you arrive. Bonfires are landmarks, not
 checkpoints. As in any Over the Edge course, falling never kills you; you just land
 lower down.
@@ -89,8 +89,12 @@ lowest terrain restarts the run, as in every level.
 
 ## Scenery
 
-143 decorations, using all 26 models of the decoration library, dress the climb from
-1,000 m behind the course to 3 m in front of it. None of them collide:
+190 decorations, using all 26 models of the decoration library, dress the climb from
+1,000 m behind the course to 3 m in front of it. None of them collide: every prop is a
+decoration, from the graves by the path, the bonfires and the heap of skulls in the
+catacombs to the stalactites, roots and icicles hanging below the route, the banners
+of the keep and the islets drifting past the Great Updraft. The only colliders are the
+course itself, so the pot never catches on a prop:
 
 - **Ashen Hollow:** graves, an iron fence, pillars, a knight statue and a lantern post in
   the graveyard. Behind it stand dead trees and a broken gothic arch, rows of rock shelves
@@ -121,16 +125,16 @@ its backdrop hills, because the scenery is the landscape, and pushes the fog out
 
 | Objects | Count | Notes |
 | --- | ---: | --- |
-| Terrain | 478 | Including 10 illusions; blocks, ramps, triangles, circles and hexagons only |
+| Terrain | 399 | Including 10 illusions; blocks, ramps, triangles, circles and hexagons only |
 | Updrafts | 16 | 13 marked, 3 hidden; lift 5-96 m |
 | Other triggers | 15 | 14 popups (11 with a sound) and the ending, which stops the timer |
 | Enemies | 34 | 23 crows and 11 hollow soldiers |
 | Labels | 16 | The level limit |
-| Decorations | 143 | Scenery only; all 26 library models |
+| Decorations | 190 | Scenery only; all 26 library models |
 
-That is 686 objects plus the start. The course uses the five built-in shapes, so
+That is 654 objects plus the start. The course uses the five built-in shapes, so
 all terrain shares **5 geometry templates** and no custom polygons. In the release it
-renders in **48-68 draw calls** (10,000-22,000 triangles) along the climb, about half
+renders in **46-65 draw calls** (8,000-23,000 triangles) along the climb, about half
 of them scenery, and only nearby enemies run physics. Idle frames upload nothing for
 the scenery. The project's 11 WAV files, about 1.2 MB in total, are synthesized by
 `ashenAscentMedia()` in [`scripts/project-fixtures.mjs`](../scripts/project-fixtures.mjs).
@@ -152,6 +156,9 @@ each piece with the library's own `placeSetPiece`, so part IDs follow
 - no connector overlaps a piece's parts or intrudes into its footprint;
 - enemies start clear of terrain;
 - the course's own drafts rise through open air up to their apex;
+- no two small colliders (1.5 m or less on their longest side) lie within 1.2 m of each
+  other, touching included, except parts of one set piece: a narrower slot traps the
+  pot or the hammer head;
 - the ending is reachable under conservative reach rules (2.35 m hammer pull, 2.5 m
   rise, 1.9 m hops, drops up to 9 m);
 - nothing reachable is a trap;
@@ -159,10 +166,10 @@ each piece with the library's own `placeSetPiece`, so part IDs follow
 
 | File | Contents |
 | --- | --- |
-| `zones.mjs` | The eight zones, their palettes and set dressing |
+| `zones.mjs` | The eight zones, their palettes and props, which are decorations |
 | `trail.mjs` | The route builder: stairs, floors and piece placement |
 | `pieces.mjs` | How each set piece is entered and left |
-| `checks.mjs` | Overlap, footprint, draft, reach and trap checks |
+| `checks.mjs` | Overlap, footprint, draft, cramped-collider, reach and trap checks |
 | `lore.mjs` | Every popup title and message |
 | `project.mjs` | Theme, HUD, audio cues and enemy art |
 | `course.mjs`, `map.mjs` | Object builders and the SVG map |

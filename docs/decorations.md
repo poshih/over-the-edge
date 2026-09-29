@@ -7,6 +7,10 @@ original, low-poly placeholder models in a dark-fantasy style, built from code a
 so a level can be blocked out before any art exists. When the art arrives, your own GLB
 models replace the placeholders by model ID (see [your own models](#your-own-models)).
 
+Make every prop a decoration. Terrain is for what the player climbs: small colliders
+close together, such as headstones, posts or rubble within about 1.2 m of each other,
+leave slots that trap the pot and the hammer head.
+
 ## Placing decorations
 
 Open **Workshop / Level / Decoration library**, choose a category and a model, then click or

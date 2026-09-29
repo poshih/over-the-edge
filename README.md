@@ -714,6 +714,10 @@ where its base should stand. Near the course its base rests on the terrain top u
 pointer. **Select decorations** picks and drags them, nearest first, at their own depth;
 **Select / move** never picks them, so scenery cannot get in the way of editing the course.
 
+Dress levels with decorations, not small terrain. Small colliders close together, such
+as headstones, fence posts or rubble within about 1.2 m of each other, leave slots that
+trap the pot and the hammer head, so keep colliders for the course itself.
+
 Depth reads best with the theme's [perspective camera](docs/projects.md#section-reference):
 distant decorations look smaller and drift slowly by, and near ones pass quickly in front.
 Fog still applies, so raise the theme's fog end to see the far horizon, and hide the

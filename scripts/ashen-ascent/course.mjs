@@ -95,10 +95,6 @@ export class CourseBuilder {
     return this.terrain(name, 'triangle', centerX, top - height / 2, width, height, { ...options, angle: Math.PI });
   }
 
-  ball(name, centerX, bottom, diameter, options) {
-    return this.terrain(name, 'circle', centerX, bottom + diameter / 2, diameter, diameter, options);
-  }
-
   hex(name, centerX, bottom, width, height, options) {
     return this.terrain(name, 'hexagon', centerX, bottom + height / 2, width, height, options);
   }

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { CourseBuilder } from './course.mjs';
-import { budget, keepOut, overlaps, reachGraph, ventShafts } from './checks.mjs';
+import { budget, crampedColliders, keepOut, overlaps, reachGraph, ventShafts } from './checks.mjs';
 import { courseMap, renderCrops } from './map.mjs';
 import { buildCourse } from './zones.mjs';
 import { projectManifest, TITLE } from './project.mjs';
@@ -39,7 +39,7 @@ try {
   if (missing.length > 0) problems.push(`Set pieces not placed: ${missing.join(', ')}`);
   if (repeated.length > 0) problems.push(`Set pieces placed twice: ${repeated.join(', ')}`);
   problems.push(...overlaps(level, builder.groups, builder.supports), ...keepOut(level, builder.groups, builder.pieces, builder.allowed),
-    ...ventShafts(level, builder.groups));
+    ...ventShafts(level, builder.groups), ...crampedColliders(level, builder.groups));
   const reach = reachGraph(level, builder.groups, builder.pieces, builder.links, { x: trail.x, y: trail.y });
   if (!reach.ending) {
     problems.push(`The ending is not reachable; the highest reached point is (${reach.highest.x.toFixed(1)}, ${reach.highest.y.toFixed(1)}) in ${reach.highest.group}.`);

@@ -24,20 +24,27 @@ function place(t, id, options = {}) {
   return t.piece(id, { recolor: MATERIALS, ...options });
 }
 
-// A bonfire landing: a coiled blade in a cairn, and the zone's title the first time the player arrives.
+// Props are decorations, never terrain: small colliders close together trap the pot and the hammer head
+// (see crampedColliders in checks.mjs), and the course passes straight through its props.
+
+// A bonfire landing: a blade in warm ash, and the zone's title the first time the player arrives.
 function bonfire(b, x, y, key) {
-  // Low enough to step over: the course always passes through its bonfires.
-  b.hex('cairn', x, y, 1.4, 0.35, { tone: 'stone', depth: 1 });
-  b.plank('blade', x - 0.03, y + 0.32, x + 0.06, y + 0.9, 0.25, { tone: 'ember', depth: 0.3 });
+  b.decoration('bonfire', 'ember-cairn', x, y, -0.8, 1.6);
   b.message(`bonfire-${key}`, x, y + 1.3, TEXT[key].title, TEXT[key].message, { sound: SOUND.bonfire, width: 4, height: 3 });
 }
 
-function grave(b, x, y, rng, kind = Math.floor(rng() * 3)) {
-  if (kind === 0) b.terrain('grave', 'box', x, y + 0.45, 0.42, 0.9, { tone: 'grave', depth: 0.5, angle: (rng() - 0.5) * 0.2 });
-  else if (kind === 1) {
-    b.block('cross', x - 0.13, y, 0.26, 1.3, { tone: 'wood', depth: 0.3 });
-    b.block('cross', x - 0.42, y + 0.78, 0.84, 0.25, { tone: 'wood', depth: 0.3 });
-  } else b.peak('grave', x - 0.35, y, 0.7, 1.05, { tone: 'grave', depth: 0.6 });
+// A grave beside the path, its look drawn from the zone's random stream: leaning headstones, a mirrored
+// plot set further back, or a sword driven into a mound.
+function grave(b, x, y, rng) {
+  const kind = Math.floor(rng() * 3);
+  if (kind === 0) b.decoration('grave', 'graves', x, y, -0.9, 1.2, { angle: (rng() - 0.5) * 0.2 });
+  else if (kind === 1) b.decoration('grave', 'graves', x, y, -1.5, 1.4, { mirror: true });
+  else b.decoration('grave', 'sword-grave', x, y, -1.2, 1.8);
+}
+
+// A stone or icicle hanging point-down from `top`.
+function hanging(b, name, x, top, height, tint) {
+  b.decoration(name, 'rock-spire', x, top, -1.2, height, { angle: Math.PI, tint });
 }
 
 // A wall or cliff of any height, built from terrain no taller than the level allows.
@@ -61,31 +68,29 @@ function windStair(b, t, rises, tones) {
   t.floor(5.2, { name: 'stair-stone', thickness: 1.2, tone: tones[0], depth: 2.4 });
 }
 
-// A castle tower standing on `bottom`: its shaft, a band of merlons and a conical slate roof.
+// A castle tower standing on `bottom`: its shaft and a conical slate roof.
 function castleTower(b, center, bottom, width, height, options = {}) {
   b.block('tower', center - width / 2, bottom, width, height, { tone: options.tone ?? 'stone', depth: options.depth ?? 3.4 });
-  b.block('tower-band', center - width / 2 - 0.3, bottom + height - 0.6, width + 0.6, 0.6, { tone: 'ivory', depth: (options.depth ?? 3.4) + 0.4 });
   b.peak('tower-roof', center - width / 2 - 0.5, bottom + height, width + 1, options.roof ?? width * 1.4, { tone: 'roof', depth: (options.depth ?? 3.4) + 0.6 });
 }
 
-// A banner hanging from `top` on a wall's face.
-function banner(b, x, top, length) {
-  b.block('banner', x - 0.3, top - length, 0.6, length, { tone: 'banner', depth: 0.3 });
+// A war banner on its pole, standing on a roof `z` behind the course. It is about 0.3 times as wide as it
+// is tall, and hides wherever it stands inside a tower's depth.
+function banner(b, x, y, height, z = -1) {
+  b.decoration('banner', 'banner', x, y, z, height);
 }
 
-// A floating islet with a rock keel below it and a chain hanging from the keel.
+// A floating islet: a crag hanging point-down from `top`, and chains hanging below it.
 function islet(b, center, top, width, chain = 0) {
-  b.hex('islet', center, top - width * 0.45, width, width * 0.45, { tone: 'dark', depth: 2.6 });
-  b.fang('keel', center, top - width * 0.45 + 0.02, width * 0.5, width * 0.55, { tone: 'dark', depth: 2.2 });
-  for (let link = 0; link < chain; link++) {
-    b.block('chain', center - 0.13 + (link % 2) * 0.06, top - width - 0.8 - link * 0.9, 0.26, 0.7, { tone: 'metal', depth: 0.3 });
-  }
+  const keel = width * 1.4;
+  b.decoration('islet', 'rock-spire', center, top, -2.5, keel, { angle: Math.PI, tint: 0x6f6d7e });
+  if (chain > 0) b.decoration('islet-chains', 'chains', center, top - keel - chain * 0.9, -2.5, chain * 0.9);
 }
 
 const ZONES = [
   {
     code: 'z1', name: 'I · Ashen Hollow', from: 0, to: 36, view: { left: -64, right: 30 },
-    palette: palette({ rock: 0x4f524e, stone: 0x6f716b, slate: 0x3f4543, leaf: 0x464c40, grave: 0x8a8b84, soil: 0x37332f, ember: 0xc0602a, bone: 0xb8b09a }),
+    palette: palette({ rock: 0x4f524e, stone: 0x6f716b, slate: 0x3f4543, leaf: 0x464c40, soil: 0x37332f, bone: 0xb8b09a }),
     build(b, t, rng) {
       b.block('ground', -64, -2, 128, 2, { tone: 'soil', depth: 3 });
       b.block('edge', -64, 0, 3.4, 18, { tone: 'rock', depth: 3 });
@@ -105,7 +110,7 @@ const ZONES = [
       const treeAt = t.x + 7.6;
       b.block('barrow', t.x, 0, treeAt + 0.3 - t.x, 3.4, { tone: 'soil', depth: 2.6 });
       t.at(t.x, 3.4);
-      b.block('sarcophagus', t.x + 1.4, 3.4, 2, 0.75, { tone: 'grave', depth: 1.2 });
+      b.decoration('barrow-sword', 'sword-grave', t.x + 2.4, 3.4, -1.4, 3.2);
       t.at(treeAt - 2.6, 3.4);
       const tree = place(t, 'the-tree', { floor: false });
       b.label(tree.bounds.left - 1.6, 6.4, 'THE DEAD STILL CLIMB');
@@ -126,7 +131,7 @@ const ZONES = [
   {
     code: 'z2', name: 'II · Hollow Hamlet', from: 34, to: 70, view: { left: -24, right: 64 },
     palette: palette({ rock: 0x57534d, stone: 0x7c776d, wood: 0x62544a, crate: 0x564a40, roof: 0x3c3a3c, brick: 0x5e5650,
-      plaster: 0x7e776a, metal: 0x5b5f62, ivory: 0x9a9284, canvas: 0x5a3a32, soil: 0x3d3934, ember: 0xc0602a, slate: 0x4a4e4c }),
+      plaster: 0x7e776a, metal: 0x5b5f62, ivory: 0x9a9284, canvas: 0x5a3a32, soil: 0x3d3934, slate: 0x4a4e4c }),
     build(b, t, rng) {
       // The hamlet stands on the mountain's shoulder: solid rock down to the valley floor.
       const left = t.x;
@@ -135,8 +140,7 @@ const ZONES = [
       bonfire(b, left + 3, street, 'hollowHamlet');
       t.at(left + 5.5, street);
       place(t, 'barrel-and-bucket', { floor: false });
-      b.block('fence', t.x + 1.2, street, 0.3, 0.9, { tone: 'wood', depth: 0.4 });
-      b.block('fence', t.x + 2.4, street, 0.3, 0.9, { tone: 'wood', depth: 0.4 });
+      b.decoration('fence', 'iron-fence', t.x + 1.8, street, -1, 1.3);
       t.go(3.6);
       place(t, 'hut-roof', { floor: false });
       t.go(1.6);
@@ -185,7 +189,7 @@ const ZONES = [
   {
     code: 'z3', name: 'III · The Ossuary', from: 20, to: 96, view: { left: -86, right: 6 },
     palette: palette({ rock: 0x3f3d3b, stone: 0x5e5a55, slate: 0x363a3a, bone: 0xc9c1a8, skull: 0xd8d0b8, candle: 0xd89a4a,
-      metal: 0x55595c, wood: 0x4f4336, crate: 0x4a3f33, soil: 0x2e2b29, ember: 0xd07a3a, rust: 0x7a4a30 }),
+      metal: 0x55595c, wood: 0x4f4336, crate: 0x4a3f33, soil: 0x2e2b29, rust: 0x7a4a30 }),
     build(b, t, rng) {
       const { lane, laneEnd } = ZONES[1].exit;
       // The lane runs on to its broken end, where a shaft hangs below it.
@@ -201,15 +205,15 @@ const ZONES = [
       t.edge(drop).floor(4.5, { name: 'brink', thickness: 1.4, tone: 'stone' });
       const brink = t.x;
       b.label(brink + 1.4, t.y + 1.7, 'TRY FALLING');
-      // The catacomb floor, far below; a heap of bones breaks the fall.
+      // The catacomb floor, far below, where the fallen lie in heaps.
       const floor = 26;
       // The catacombs reach past the graveyard's edge, over nothing.
       b.block('catacombs', -80, 18, brink + 14 + 80, floor - 18, { tone: 'rock', depth: 3 });
 
-      [0.4, 1.3].forEach((dx, index) => b.ball('bones', brink - dx, floor, 0.9 - index * 0.2, { tone: 'bone', depth: 1 }));
+      b.decoration('bones', 'skull-pile', brink - 0.8, floor, -0.9, 1);
       // Stalactites under the catacombs, hanging over the graveyard far below.
-      [[-58.4, 1.2, 2.2], [-54.6, 0.8, 1.4], [-50.2, 1.4, 2.8], [-45.8, 0.9, 1.6], [-41.1, 1.1, 2.4], [-36.4, 0.7, 1.2], [-31.2, 1.3, 2]]
-        .forEach(([x, width, height]) => b.fang('stalactite', x, 18, width, height, { tone: 'slate', depth: 1.4 }));
+      [[-58.4, 2.2], [-54.6, 1.4], [-50.2, 2.8], [-45.8, 1.6], [-41.1, 2.4], [-36.4, 1.2], [-31.2, 2]]
+        .forEach(([x, height]) => hanging(b, 'stalactite', x, 18, height, 0x7a7c80));
       t.at(brink - 1.8, floor);
       place(t, 'crawlspace', { floor: false });
       t.go(1.2);
@@ -241,7 +245,7 @@ const ZONES = [
   {
     code: 'z4', name: 'IV · Blighted Mire', from: 68, to: 104, view: { left: -60, right: 52 },
     palette: palette({ rock: 0x3e4638, stone: 0x55604c, slate: 0x34403a, snake: 0x5f7a2c, moss: 0x4a5e32, rot: 0x6b6a3a,
-      mud: 0x3a3a2c, wood: 0x4f4331, bark: 0x3f3527, metal: 0x4f5550, bone: 0xa9a58c, ember: 0xc0702a }),
+      mud: 0x3a3a2c, wood: 0x4f4331, metal: 0x4f5550, bone: 0xa9a58c }),
     build(b, t, rng) {
       const mire = t.y - 8;
       // The serpent sleeps across the only road: ride it down into the mire.
@@ -273,15 +277,15 @@ const ZONES = [
       place(t, 'stepping-stones', { floorTone: 'mud', floorThickness: 2 });
       b.enemy('bird', t.x - 5, mire + 4.6, 'left', 3, 1.3);
       floor(1.6);
-      b.ball('stump', t.x - 0.8, mire, 0.7, { tone: 'bark', depth: 1 });
+      b.decoration('stump', 'dead-tree', t.x - 0.8, mire, -1.4, 2.4, { tint: 0x9fb08a });
       place(t, 'pogo-posts');
       floor(1.2);
       place(t, 'floating-rock');
       b.enemy('bird', t.x - 4.7, mire + 5.2, 'right', 2, 1.4);
       floor(1.2);
       // Roots of the drowned forest hang from the mire over the hamlet below.
-      [[14.5, 0.6, 1.5], [19.4, 0.5, 1.1], [23.6, 0.7, 1.8], [30.2, 0.5, 1.2], [35.4, 0.6, 1.4]]
-        .forEach(([x, width, height]) => b.fang('root', x, mire - 2, width, height, { tone: 'bark', depth: 0.8 }));
+      [[14.5, 1.8], [19.4, 1.3], [23.6, 2.2], [30.2, 1.4], [35.4, 1.7]].forEach(([x, height], index) =>
+        b.decoration('root', 'dead-tree', x, mire - 2, -1.2, height, { angle: Math.PI, mirror: index % 2 === 1, tint: 0x8a7a66 }));
       const scree = place(t, 'scree-slope', { floorTone: 'mud', floorThickness: 2 });
       b.enemy('bird', scree.anchor.x + 3, mire + 8, 'left', 3, 1.2);
       t.floor(1, { name: 'bank', thickness: 1.4, tone: 'moss' });
@@ -293,7 +297,7 @@ const ZONES = [
   },
   {
     code: 'z5', name: 'V · Cinder Forge', from: 98, to: 142, view: { left: -80, right: 52 },
-    palette: palette({ rock: 0x3a302c, stone: 0x5a4a42, rust: 0xb4582a, metal: 0x55575a, iron: 0x3e4144, ember: 0xd8702a,
+    palette: palette({ rock: 0x3a302c, stone: 0x5a4a42, rust: 0xb4582a, metal: 0x55575a, iron: 0x3e4144,
       coal: 0x2a2624, slate: 0x3c3432, concrete: 0x6e625a, wood: 0x4a3a30, crate: 0x45352b, bark: 0x3a2e25 }),
     build(b, t, rng) {
       // A furnace stack, climbed from the ramp's landing while turning back into the forge.
@@ -339,23 +343,21 @@ const ZONES = [
   {
     code: 'z6', name: 'VI · Frostbound Ramparts', from: 138, to: 196, view: { left: -60, right: 52 },
     palette: palette({ rock: 0x6d7880, stone: 0x8e9aa2, slate: 0x56626b, ice: 0xa9c8d6, snow: 0xd6e0e6, frost: 0x7fa3b5,
-      metal: 0x6a747c, wood: 0x5e5650, bark: 0x4e4640, leaf: 0x8fa8b4, ember: 0xd07a3a, concrete: 0x9aa4ab }),
+      metal: 0x6a747c, wood: 0x5e5650, bark: 0x4e4640, leaf: 0x8fa8b4, concrete: 0x9aa4ab }),
     build(b, t, rng) {
       // Frozen steps up from the forge's last slab.
       t.turn();
       t.stairs(4, 5.7, { shapes: ['shelf', 'slab'], tones: ['ice', 'stone', 'snow'], width: [1.5, 2] });
       const wall = (length, name = 'rampart', thickness = 2) => t.floor(length, { name, thickness, tone: 'stone', depth: 3 });
-      const icicle = (x, width, height) => b.fang('icicle', x, t.y - 2, width, height, { tone: 'ice', depth: 0.8 });
-      const merlon = (x) => b.block('merlon', x - 0.35, t.y, 0.7, 0.7, { tone: 'snow', depth: 2.4 });
+      const icicle = (x, height) => hanging(b, 'icicle', x, t.y - 2, height, 0xc2cedb);
       wall(4.2);
       bonfire(b, t.x - 2, t.y, 'ramparts');
       wall(1.2);
       place(t, 'knife-edge', { recolor: undefined, tone: 'ice' });
       wall(2.6);
-      merlon(t.x - 1.3);
-      icicle(t.x - 2.2, 0.6, 1.6);
+      icicle(t.x - 2.2, 1.6);
       wall(1.6);
-      icicle(t.x - 0.8, 0.5, 1.1);
+      icicle(t.x - 0.8, 1.1);
       const boulder = place(t, 'perched-boulder', { floor: false, recolor: undefined, tone: 'ice' });
       b.enemy('hollow-soldier', t.x + 3.6, t.y, 'left', 1.2, 0.6);
       // The tower walk, reached across the ice boulder's crown.
@@ -375,8 +377,7 @@ const ZONES = [
       const gateOfFangs = place(t, 'ceiling-traverse', { recolor: undefined, tone: 'frost' });
       b.enemy('bird', gateOfFangs.anchor.x, gateOfFangs.bounds.top + 1.6, 'right', 3, 1.2);
       wall(2.2);
-      merlon(t.x - 1.1);
-      icicle(t.x - 1.6, 0.7, 2.2);
+      icicle(t.x - 1.6, 2.2);
       b.enemy('hollow-soldier', t.x - 1.9, t.y, 'left', 0.5, 0.6);
       wall(1.4);
       b.label(t.x - 2.6, t.y + 1.8, 'DO NOT LINGER');
@@ -391,14 +392,12 @@ const ZONES = [
   {
     code: 'z7', name: 'VII · Windward Stair', from: 156, to: 262, view: { left: -10, right: 66 },
     palette: palette({ rock: 0x585e66, stone: 0x7a818a, slate: 0x4a5058, cloud: 0xb9c0c8, metal: 0x646c74, rope: 0x7a6a50,
-      wood: 0x6a5a48, crate: 0x5a4c3e, concrete: 0x8a9098, ember: 0xd08a3a }),
+      wood: 0x6a5a48, crate: 0x5a4c3e, concrete: 0x8a9098 }),
     build(b, t, rng) {
       // The windward ledge at the mountain's edge, with the world's edge beyond it.
       t.floor(11.3, { name: 'windward-ledge', thickness: 1.2, tone: 'rock', depth: 2.6 });
       tower(b, 'sky-edge', t.x, 119.1, 66 - t.x, 330, { tone: 'rock', depth: 3 });
       bonfire(b, t.x - 8.6, t.y, 'windward');
-      b.hex('cairn', t.x - 5.6, t.y, 1.1, 0.4, { tone: 'stone', depth: 1 });
-      b.hex('cairn', t.x - 5.6, t.y + 0.4, 0.7, 0.35, { tone: 'cloud', depth: 0.9 });
       // A wind-scoured stair turns back up against the world's edge.
       t.go(-2).turn();
       t.stairs(7, 10, { shapes: ['shelf', 'slab'], tones: ['rock', 'stone'], width: [1.5, 2] });
@@ -419,9 +418,9 @@ const ZONES = [
   },
   {
     code: 'z8', name: 'VIII · The Drifting Keep', from: 262, to: 432, view: { left: -64, right: 30 },
-    palette: palette({ rock: 0x4a4640, stone: 0xb9b0a0, ivory: 0xd8ceb6, gold: 0xc9a24a, roof: 0x3e4a62, banner: 0x7e2a2a,
-      metal: 0x6f747b, crystal: 0x9fb8d8, wood: 0x5e4c3c, concrete: 0xa8a092, brick: 0x8a7e70, canvas: 0x7e2a2a,
-      slate: 0x5a6070, bark: 0x5a4a3a, leaf: 0x6a7a5a, ember: 0xe0903a, dark: 0x34302d }),
+    palette: palette({ rock: 0x4a4640, stone: 0xb9b0a0, ivory: 0xd8ceb6, gold: 0xc9a24a, roof: 0x3e4a62,
+      crystal: 0x9fb8d8, wood: 0x5e4c3c, concrete: 0xa8a092, brick: 0x8a7e70, canvas: 0x7e2a2a,
+      slate: 0x5a6070, bark: 0x5a4a3a, leaf: 0x6a7a5a, dark: 0x34302d }),
     build(b, t, rng) {
       // The false summit crowns the stair; behind its flag the wind altar looks up at the keep.
       place(t, 'false-summit', { floorTone: 'stone', floorThickness: 1.2, retune: (object) => object.kind === 'trigger'
@@ -450,8 +449,8 @@ const ZONES = [
       const gate = t.x;
       b.block('gatehouse', gate - 7.5, dock + 2.8, 7.5, 7, { tone: 'stone', depth: 5 });
       castleTower(b, gate - 3.8, dock + 9.8, 4, 8.5, { depth: 4.4 });
-      banner(b, gate + 0.35, dock + 9.4, 3.2);
-      banner(b, gate - 7.85, dock + 9.4, 2.6);
+      banner(b, gate - 0.6, dock + 9.8, 4.2);
+      banner(b, gate - 6.9, dock + 9.8, 3.6);
       t.floor(7.5, { name: 'gate-passage', thickness: 1.4, tone: 'stone', depth: 4 });
       b.message('mist-veil', gate - 4.2, dock + 1.3, TEXT.mistVeil.title, TEXT.mistVeil.message, { sound: '/media/mist.wav', width: 1.6, height: 2.4 });
       // The courtyard, where the keep's last guard still stands.
@@ -488,10 +487,7 @@ const ZONES = [
       b.label(curtain.bounds.right + 1.6, walk + 2.4, 'GREAT VIEW AHEAD');
       // The wall walk to the keep.
       t.turn().at(curtain.bounds.left, walk);
-      const merlon = (x) => b.block('merlon', x - 0.35, walk, 0.7, 0.7, { tone: 'ivory', depth: 2.4 });
-      t.floor(3.6, { name: 'wall-walk', thickness: 1.2, tone: 'stone', depth: 3 });
-      merlon(t.x + 1.6);
-      t.floor(4.2, { name: 'wall-walk', thickness: 1.2, tone: 'stone', depth: 3 });
+      t.floor(7.8, { name: 'wall-walk', thickness: 1.2, tone: 'stone', depth: 3 });
       b.enemy('bird', t.x + 2, walk + 3.2, 'left', 3, 1.4);
       const ladder = place(t, 'ledge-ladder', { floor: false, recolor: undefined, tone: 'ivory' });
       // The keep: its roof is level with the tower's top, its foundation hangs below.
@@ -500,7 +496,8 @@ const ZONES = [
       b.block('keep', body - 13, walk - 10, 13, roof - walk + 10, { tone: 'stone', depth: 5 });
       b.block('keep', ladder.bounds.left, walk - 1.2, ladder.bounds.right - ladder.bounds.left, 1.2, { tone: 'stone', depth: 3 });
       b.fang('keep-keel', body - 6.5, walk - 10, 11, 14, { tone: 'dark', depth: 4 });
-      banner(b, body - 13.35, roof - 0.6, 4);
+      // Between the keep's towers, just behind their faces, so neither hides it from either side.
+      banner(b, body - 8.3, roof, 3.8, -0.3);
       // The Ember Spire: a gilded stair turning up from the keep's roof past its towers to the summit.
       t.go(2.6);
       b.enemy('hollow-soldier', t.x + 1.8, roof, 'left', 0.6, 0.6);
