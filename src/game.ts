@@ -39,6 +39,7 @@ export class Game {
   private readonly unsubscribeEnemies: () => void;
   private readonly onAction: (action: UiAction, options?: UiActionOptions) => void;
   private readonly onCue: ((cue: GameCue) => void) | null;
+  private readonly stepObservers = new Set<() => void>();
   // Last phase of each enemy, so cues fire on hit and defeat transitions only.
   private readonly enemyPhases = new Map<string, EnemyPhase>();
   private character: CharacterState = { armIk: DEFAULT_ARM_IK };
@@ -136,6 +137,7 @@ export class Game {
             completed++;
             this.triggers.update(this.simulation.playerPosition(), this.simulation.time);
             if (this.stopped) return;
+            for (const observer of this.stepObservers) observer();
             if (this.simulation.fellOutOfLevel()) {
               // Falling below everything in the level restarts the attempt exactly like Reset.
               restarted = true;
@@ -238,6 +240,12 @@ export class Game {
     if (options.blocked) this.inputBlocks.add(options.reason);
     else this.inputBlocks.delete(options.reason);
     this.input.setInteraction({ enabled: this.inputBlocks.size === 0 });
+  }
+
+  // Runs `observer` after every physics step, before a fall restarts the attempt. Returns its removal.
+  observeSteps(observer: () => void): () => void {
+    this.stepObservers.add(observer);
+    return () => { this.stepObservers.delete(observer); };
   }
 
   reset(spawn?: Readonly<PlayerSpawn>): void {

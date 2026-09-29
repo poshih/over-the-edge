@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 import { gameTitle } from './build/game-title.ts';
+import { locationUrl } from './build/location-url.ts';
 import { DEFAULT_CONTENT_URL, gameRelease } from './build/release';
 import { loadFileRelease, loadProjectRelease } from './build/release-input';
 
@@ -19,16 +20,15 @@ function projectJson(variable: string): string | null {
   return path;
 }
 
-// Where the shell loads its content: an HTTP(S) URL or a path relative to the page, ending in /.
+// Where the shell loads its content.
 function contentUrl(): string {
-  const value = process.env.GAME_CONTENT_URL ?? DEFAULT_CONTENT_URL;
-  let url: URL | null = null;
-  try { url = new URL(value, 'https://shell.invalid/game/'); } catch { url = null; }
-  if (url === null || !value.endsWith('/') || /[\s\\]/.test(value) || !['https:', 'http:'].includes(url.protocol) ||
-    url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
-    throw new Error('GAME_CONTENT_URL must be an HTTP(S) URL or a relative path ending in /, without credentials, query or fragment.');
-  }
-  return value;
+  return locationUrl('GAME_CONTENT_URL', process.env.GAME_CONTENT_URL ?? DEFAULT_CONTENT_URL);
+}
+
+// Where the shell sends the player's phantoms and finds other players'. Setting it turns phantoms on.
+function phantomsUrl(): string | null {
+  const value = process.env.GAME_PHANTOMS_URL;
+  return value === undefined ? null : locationUrl('GAME_PHANTOMS_URL', value);
 }
 
 // The game's own module, bundled into the shell and started before content loads.
@@ -95,6 +95,7 @@ export default defineConfig(({ mode }) => {
       gameRelease({
         load: release === null ? () => loadFileRelease(project, files, selectedMode) : () => release,
         contentUrl: contentUrl(),
+        phantomsUrl: phantomsUrl(),
         module: gameModule(),
         watch: release === null ? Object.values(files).filter((path): path is string => path !== null) : release.files,
         restartOnChange: release !== null,

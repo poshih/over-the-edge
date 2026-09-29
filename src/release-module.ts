@@ -1,6 +1,7 @@
 // The contract between a release and the game's own module (GAME_MODULE). A module exports
 // `start(host)`; the release calls it once, before it fetches anything, and awaits it.
 import type { ContentAccess, ContentError, ContentProgress } from './content-session';
+import type { PhantomService } from './phantom-service';
 import type { ModelLibraryApi } from './release-library';
 
 // Modules refuse access with ContentError, coded unauthenticated, denied or unavailable.
@@ -8,6 +9,9 @@ export { ContentError } from './content-session';
 export type { ContentAccess, ContentErrorCode, ContentGrant, ContentGrantRequest, ContentProgress } from './content-session';
 export type { ModelSelection, ModelSelectionRequest, PartRole } from './model-library';
 export type { ModelLibraryApi } from './release-library';
+// A module that talks to its phantom backend its own way may start from the reference client.
+export { httpPhantoms, PhantomServiceError } from './phantom-service';
+export type { PhantomQuery, PhantomService } from './phantom-service';
 
 // What the release offers before any content loads, so the module can sign the player in first.
 export interface ReleaseHost {
@@ -15,6 +19,9 @@ export interface ReleaseHost {
   readonly mount: HTMLElement;
   // Where this build's content is served, as an absolute URL.
   readonly contentUrl: string;
+  // Where this build's phantoms go and come from (GAME_PHANTOMS_URL), as an absolute URL; null when the
+  // build has no phantoms.
+  readonly phantomsUrl: string | null;
   notice(message: string, kind?: 'info' | 'error'): void;
 }
 
@@ -32,9 +39,12 @@ export interface ReleaseApi {
 // content URL. `failed` receives each content failure: resolve to load again (for example after
 // the player signs in or buys the game), or reject to stop with that error shown. `modelFailed`
 // receives a part that could not follow the backend's selection outside a swap, at boot or after
-// another part's swap; that part keeps its model, or starts with the profile's own.
+// another part's swap; that part keeps its model, or starts with the profile's own. Without
+// `phantoms`, a build with phantoms speaks the reference protocol to the phantom URL; a module may
+// supply phantoms only to such a build.
 export interface ReleaseModule {
   readonly access?: ContentAccess;
+  readonly phantoms?: PhantomService;
   progress?(progress: ContentProgress): void;
   failed?(error: ContentError): Promise<void>;
   modelFailed?(error: Error): void;

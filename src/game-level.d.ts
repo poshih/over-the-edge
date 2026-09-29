@@ -35,6 +35,12 @@ declare module 'virtual:game-decorations' {
   export default create;
 }
 
+// Phantoms, when the build has GAME_PHANTOMS_URL, or null.
+declare module 'virtual:game-phantoms' {
+  const phantoms: import('./phantoms').PhantomBuild | null;
+  export default phantoms;
+}
+
 // The game's own module (GAME_MODULE), or null.
 declare module 'virtual:game-module' {
   const start: import('./release-module').StartRelease | null;

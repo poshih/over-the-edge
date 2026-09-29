@@ -37,6 +37,17 @@ export interface PhysicsFrame {
 // Settings apply to the running player, except a new rig, which rebuilds it and restarts the run.
 export type SettingsEffect = 'applied' | 'restarted';
 
+// Where the rig is: the character's centre, the pot's angle, the hammer head's centre and the handle's butt.
+export interface RigPose {
+  x: number;
+  y: number;
+  pot: number;
+  tipX: number;
+  tipY: number;
+  buttX: number;
+  buttY: number;
+}
+
 type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'cursor' | 'rig'> & { cursorOffset: Point };
 
 const IDLE_COMMAND: MotorCommand = {
@@ -170,6 +181,21 @@ export class Simulation {
   playerPosition(): Readonly<Point> {
     const root = this.rig.root.getPosition();
     return { x: root.x, y: root.y + RIG.potBottom };
+  }
+
+  // Writes the rig's current pose into `out`, allocating nothing, so it can be read every step.
+  rigPose(out: RigPose): RigPose {
+    const root = this.rig.root.getPosition();
+    const tip = this.rig.head.getPosition();
+    const butt = this.rig.sliderBody.getPosition();
+    out.x = root.x;
+    out.y = root.y;
+    out.pot = this.rig.pot.getAngle();
+    out.tipX = tip.x;
+    out.tipY = tip.y;
+    out.buttX = butt.x;
+    out.buttY = butt.y;
+    return out;
   }
 
   fellOutOfLevel(): boolean {

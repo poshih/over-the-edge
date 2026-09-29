@@ -131,6 +131,7 @@ export async function start(host: ReleaseHost): Promise<ReleaseModule> {
 | --- | --- |
 | `mount` | The element the release mounts its interface in |
 | `contentUrl` | The build's content URL, absolute |
+| `phantomsUrl` | The build's [phantom](phantoms.md) URL (`GAME_PHANTOMS_URL`), absolute; `null` without phantoms |
 | `notice(message, kind?)` | The release's notice, `info` or `error` |
 
 **`ReleaseModule`** (what `start` returns; every member is optional):
@@ -138,6 +139,7 @@ export async function start(host: ReleaseHost): Promise<ReleaseModule> {
 | Member | Meaning |
 | --- | --- |
 | `access` | The content access. Without it, content is public under the content URL |
+| `phantoms` | The [phantom](phantoms.md#the-games-own-backend) service. Without it, a build with phantoms uses the reference protocol at the phantom URL; a build without them refuses it |
 | `progress({ loaded, total })` | Bytes loaded before play |
 | `failed(error)` | A `ContentError`; resolve to retry the whole load, reject to stop with the rejection shown |
 | `modelFailed(error)` | A part that could not follow the backend's model selection outside a swap; it keeps its model, or starts with the profile's own |

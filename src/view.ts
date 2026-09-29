@@ -4,7 +4,7 @@ import {
   Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial,
   Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera, PerspectiveCamera,
   RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
-  Vector2, Vector3, WebGLRenderer,
+  Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D, Quaternion } from 'three';
 import { ARM_SIDES, HEAD_GEOMETRY, SHAFT_ARTWORK_LENGTH, SPRITE_TARGET_IDS } from './character';
@@ -26,6 +26,7 @@ import { PropModelView } from './prop-model-view';
 import { HammerHandleFit } from './hammer-handle-fit';
 import { SkinnedAvatarView } from './skinned-avatar-view';
 import { HeadAim } from './head-aim';
+import { createHammerHeadGeometry, createPotGeometry, placeLimb, PLAYER_FIGURE } from './player-figure';
 import { PHYSICS, RIG } from './config';
 import type { InputMode, Point } from './config';
 import type { LevelChange, LevelDefinition, LevelLabel } from './level';
@@ -244,10 +245,6 @@ export class GameView {
   // Whether the active character is 2D, whose arm chains that target the grips reach in the drawing plane.
   private spriteArms = false;
   private readonly arms = new Map<ArmSide, Arm>();
-  private readonly limbDirection = new Vector3();
-  private readonly limbSide = new Vector3();
-  private readonly limbNormal = new Vector3();
-  private readonly limbRotation = new Matrix4();
   // The physical tool: origin at the butt, +X along the handle, in unscaled metres.
   private readonly toolFrame = new Matrix4();
   private readonly cursor = new Group();
@@ -1078,11 +1075,7 @@ export class GameView {
     this.palette = { pot: brass, trim, dark, suit, ceramic, wood };
 
     const pot = new Group();
-    const profile = [
-      new Vector2(0.19, -0.47), new Vector2(0.33, -0.41), new Vector2(0.44, -0.28),
-      new Vector2(0.49, 0.05), new Vector2(0.46, 0.23), new Vector2(0.43, 0.32),
-    ];
-    pot.add(solid(new LatheGeometry(profile, 40), brass));
+    pot.add(solid(createPotGeometry(), brass));
     const rim = solid(new TorusGeometry(0.433, 0.035, 10, 40), trim, [0, 0.31, 0]);
     rim.rotation.x = Math.PI / 2;
     pot.add(rim);
@@ -1094,15 +1087,16 @@ export class GameView {
     this.playerMeshes.set('pot', potAnchor);
     this.scene.add(potAnchor);
 
+    const { chest: chestShape, neck, helmet: helmetShape, upperArm, forearm } = PLAYER_FIGURE;
     const body = new Group();
-    const chest = solid(new SphereGeometry(0.28, 16, 12), suit, [0, 0.56, 0]);
-    chest.scale.set(0.82, 1.25, 0.77);
+    const chest = solid(new SphereGeometry(chestShape.radius, 16, 12), suit, [0, chestShape.y, 0]);
+    chest.scale.set(...chestShape.scale);
     body.add(chest);
-    body.add(solid(new CylinderGeometry(0.07, 0.09, 0.16, 12), dark, [0, 0.89, 0]));
+    body.add(solid(new CylinderGeometry(neck.top, neck.bottom, neck.height, 12), dark, [0, neck.y, 0]));
     this.torso.add(this.visualSlot('torso', body));
     const characterHead = new Group();
-    const helmet = solid(new SphereGeometry(0.225, 20, 14), ceramic, [0, 1.095, 0]);
-    helmet.scale.y = 1.06;
+    const helmet = solid(new SphereGeometry(helmetShape.radius, 20, 14), ceramic, [0, helmetShape.y, 0]);
+    helmet.scale.y = helmetShape.scaleY;
     characterHead.add(helmet);
     const visor = solid(new SphereGeometry(0.19, 20, 12), dark, [0, 1.10, 0.16]);
     visor.scale.set(0.92, 0.52, 0.43);
@@ -1113,10 +1107,10 @@ export class GameView {
     this.scene.add(this.torso);
     for (const side of ARM_SIDES) {
       const arm: Arm = {
-        upper: this.visualSlot(`${side}-upper-arm`, solid(new CylinderGeometry(0.065, 0.073, 1, 10), side === 'left' ? dark : suit)),
-        lower: this.visualSlot(`${side}-forearm`, solid(new CylinderGeometry(0.055, 0.07, 1, 10), ceramic)),
-        elbow: this.visualSlot(`${side}-elbow`, solid(new SphereGeometry(0.077, 12, 8), brass)),
-        hand: this.visualSlot(`${side}-hand`, solid(new SphereGeometry(0.083, 12, 8), dark)),
+        upper: this.visualSlot(`${side}-upper-arm`, solid(new CylinderGeometry(upperArm.top, upperArm.bottom, 1, 10), side === 'left' ? dark : suit)),
+        lower: this.visualSlot(`${side}-forearm`, solid(new CylinderGeometry(forearm.top, forearm.bottom, 1, 10), ceramic)),
+        elbow: this.visualSlot(`${side}-elbow`, solid(new SphereGeometry(PLAYER_FIGURE.elbow, 12, 8), brass)),
+        hand: this.visualSlot(`${side}-hand`, solid(new SphereGeometry(PLAYER_FIGURE.hand, 12, 8), dark)),
         pose: null,
       };
       this.scene.add(arm.upper, arm.lower, arm.elbow, arm.hand);
@@ -1153,11 +1147,7 @@ export class GameView {
     for (const segment of shaftSegments) this.shading.register(segment);
     this.foreground.add(this.customShaft);
     const head = new Group();
-    const headMesh = new Mesh(new ExtrudeGeometry(polygonShape(RIG.headVertices), {
-      depth: 0.22, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 1,
-    }), dark);
-    headMesh.position.z = -0.11;
-    head.add(headMesh);
+    head.add(new Mesh(createHammerHeadGeometry(), dark));
     const bolt = solid(new SphereGeometry(0.052, 10, 8), brass, [0, 0, 0.13]);
     bolt.scale.z = 0.3;
     head.add(bolt);
@@ -1248,8 +1238,8 @@ export class GameView {
         hint: new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(body),
         shaftAxis: new Vector3(cos, sin, 0),
       }, { previous: arm.pose, dt: options.dt, lengths: chain });
-      this.positionLimb(arm.upper, pose.shoulder, pose.elbow, pose.normal);
-      this.positionLimb(arm.lower, pose.elbow, pose.hand, pose.normal);
+      placeLimb(arm.upper, pose.shoulder, pose.elbow, pose.normal);
+      placeLimb(arm.lower, pose.elbow, pose.hand, pose.normal);
       arm.elbow.position.copy(pose.elbow);
       arm.hand.position.copy(pose.hand);
       arm.hand.rotation.set(0, 0, options.shaftAngle);
@@ -1257,17 +1247,6 @@ export class GameView {
       poses.push(pose);
     }
     return poses;
-  }
-
-  private positionLimb(mesh: Object3D, start: Vector3, end: Vector3, normal: Vector3): void {
-    mesh.position.addVectors(start, end).multiplyScalar(0.5);
-    this.limbDirection.subVectors(end, start);
-    mesh.scale.y = this.limbDirection.length();
-    this.limbDirection.normalize();
-    this.limbSide.crossVectors(this.limbDirection, normal).normalize();
-    this.limbNormal.crossVectors(this.limbSide, this.limbDirection);
-    this.limbRotation.makeBasis(this.limbSide, this.limbDirection, this.limbNormal);
-    mesh.quaternion.setFromRotationMatrix(this.limbRotation);
   }
 
   private addLabel(text: string, position: Point): void {

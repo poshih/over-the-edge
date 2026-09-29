@@ -152,9 +152,11 @@ export class Publisher {
   private runBuild(project: string, output: string): Promise<void> {
     const env: NodeJS.ProcessEnv = { ...process.env, GAME_PROJECT: project, VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true' };
     // The project is the whole game; per-file inputs from the studio's own environment must not leak in.
-    // A studio preview serves its own content, so it keeps the default content URL and public access.
+    // A studio preview serves its own content, so it keeps the default content URL and public access, and
+    // it has no phantom service.
     for (const variable of [
       'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE', 'GAME_CONTENT_URL', 'GAME_MODULE',
+      'GAME_PHANTOMS_URL',
     ]) delete env[variable];
     const vite = join(this.root, 'node_modules', 'vite', 'bin', 'vite.js');
     const args = [vite, 'build', '--config', join(this.root, 'vite.game.config.ts'), '--outDir', output, '--emptyOutDir', '--base', './', '--logLevel', 'warn'];

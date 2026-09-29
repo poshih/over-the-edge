@@ -86,6 +86,14 @@ and grants the release access to its content, typically short-lived signed CDN U
 from the game's backend; the engine never sees accounts or credentials. See
 [content delivery](docs/content-delivery.md).
 
+A release built with **`GAME_PHANTOMS_URL`** records a random 10 seconds of the player now and
+then, sends it to the game's backend, and replays other players' recordings near the player as
+translucent white phantoms. Ten seconds take under 4 KB and reproduce every physics step within
+1.5 cm; arms are placed by the game's own IK rather than recorded. The backend decides what it
+keeps and whom it sends what. `GAME_PHANTOMS_URL=phantoms/ npm run dev:game` tries it locally
+with the development server's own store. Without the variable a release carries no phantom
+code. See [phantoms](docs/phantoms.md).
+
 Set **`GAME_TITLE`** to use your own game name:
 
 ```sh
@@ -769,6 +777,9 @@ Trigger proximity uses a spatial index rather than scanning the level every
 physics tick. Flag markers share instanced geometry, and their buffers update
 only when marker positions change. Runtime event state is separate from authored
 objects and remains available in editor diagnostics.
+[Phantoms](docs/phantoms.md) cost only while they play: at most three, each drawing 12
+meshes that share one geometry set, about 0.05 ms a frame on the full Ashen Ascent course.
+Recording checks only the stretch since its last keyframe, a few microseconds per physics step.
 
 These performance and editor-free release requirements are recorded in
 [`AGENTS.md`](AGENTS.md).

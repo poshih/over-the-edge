@@ -15,6 +15,7 @@ import { Game } from './game';
 import type { MediaHost } from './media-host';
 import { createPlayUI } from './play-ui';
 import type { ReleaseApi, ReleaseHost, ReleaseModule, StartRelease } from './release-module';
+import type { PhantomBuild, Phantoms } from './phantoms';
 import { readSelection, ReleaseModelLibrary } from './release-library';
 import { EMPTY_SELECTION } from './model-library';
 import type { ModelSelection } from './model-library';
@@ -28,6 +29,7 @@ export interface ReleaseCode {
     options: { signal?: AbortSignal; content?: ContentLoader }) => Promise<unknown>) | null;
   readonly AudioDirector: typeof AudioDirector | null;
   readonly createDecorations: (() => DecorationView) | null;
+  readonly phantoms: PhantomBuild | null;
   readonly start: StartRelease | null;
 }
 
@@ -64,6 +66,7 @@ export class Release {
   private module: ReleaseModule | null = null;
   private loading: Attempt | null = null;
   private loaded: Loaded | null = null;
+  private phantoms: Phantoms | null = null;
 
   constructor(elements: { canvas: HTMLCanvasElement; mount: HTMLElement; fatal: HTMLElement }, code: ReleaseCode) {
     this.canvas = elements.canvas;
@@ -77,7 +80,7 @@ export class Release {
     try {
       const contentUrl = new URL(this.code.pins.contentUrl, document.baseURI).href;
       const host: ReleaseHost = Object.freeze({
-        mount: this.mount, contentUrl,
+        mount: this.mount, contentUrl, phantomsUrl: this.phantomsUrl(),
         notice: (text: string, kind: 'info' | 'error' = 'info') => this.ui.notice(text, kind),
       });
       if (this.code.start !== null) {
@@ -90,6 +93,9 @@ export class Release {
         if (this.lifecycle.signal.aborted) {
           this.module?.dispose?.();
           return;
+        }
+        if (this.module?.phantoms !== undefined && this.code.phantoms === null) {
+          throw new Error('The game\'s module supplies phantoms, but this release was built without GAME_PHANTOMS_URL.');
         }
       }
       const access = this.module?.access ?? publicAccess(contentUrl);
@@ -119,6 +125,8 @@ export class Release {
     this.lifecycle.abort(new DOMException('The release closed.', 'AbortError'));
     this.module?.dispose?.();
     this.discardAttempt();
+    this.phantoms?.dispose();
+    this.phantoms = null;
     if (this.loaded !== null) {
       this.loaded.audio?.dispose();
       // The game's views let go of library models before the library disposes them.
@@ -208,6 +216,10 @@ export class Release {
     return { session, manifest, game, audio, library };
   }
 
+  private phantomsUrl(): string | null {
+    return this.code.phantoms === null ? null : new URL(this.code.phantoms.url, document.baseURI).href;
+  }
+
   private modelFailed(error: unknown): void {
     this.module?.modelFailed?.(error instanceof Error ? error : new Error(String(error)));
   }
@@ -232,6 +244,10 @@ export class Release {
       modelLibrary: library.api,
     });
     this.module?.ready?.(api);
+    const phantoms = this.code.phantoms;
+    if (phantoms !== null) {
+      this.phantoms = phantoms.start({ game, course: phantoms.course, url: this.phantomsUrl()!, service: this.module?.phantoms ?? null });
+    }
     game.start((state) => {
       this.ui.update(state);
       audio?.setPaused(state.paused);

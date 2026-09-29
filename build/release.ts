@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
@@ -6,6 +7,7 @@ import type { Plugin, ViteDevServer } from 'vite';
 import { pathType } from '../src/content';
 import { isContentPath } from '../src/content-ref';
 import { sendBytes, sendFile } from '../server/http';
+import { phantomMiddleware, PhantomStore } from '../server/phantom-store';
 import { packReleaseContent } from './release-content';
 import type { ReleaseContent } from './release-content';
 import type { ReleaseInput } from './release-input';
@@ -17,6 +19,7 @@ const MODULES = {
   appearance: 'virtual:game-appearance',
   audio: 'virtual:game-audio',
   decorations: 'virtual:game-decorations',
+  phantoms: 'virtual:game-phantoms',
   module: 'virtual:game-module',
 } as const;
 type ModuleName = keyof typeof MODULES;
@@ -44,6 +47,19 @@ function notFound(response: ServerResponse): void {
   response.end('Unknown content file.');
 }
 
+// The path a server answers phantom requests under: the phantom URL's, when it is on that server.
+function phantomPrefix(url: string | null, base: string): string | null {
+  if (url === null) return null;
+  const local = 'http://phantoms.invalid';
+  const resolved = new URL(url, `${local}${base.startsWith('/') ? base : '/'}`);
+  return resolved.origin === local ? resolved.pathname : null;
+}
+
+// The level's SHA-256, which names the course its phantoms belong to.
+function courseOf(input: ReleaseInput): string {
+  return createHash('sha256').update(JSON.stringify(input.level)).digest('hex');
+}
+
 // The path under /content/ that a request names, or null when it is not a content request.
 function contentRequest(request: IncomingMessage, base: string): string | null {
   const pathname = new URL(request.url ?? '/', 'http://content.invalid').pathname;
@@ -60,6 +76,8 @@ function contentRequest(request: IncomingMessage, base: string): string | null {
 export function gameRelease(options: {
   readonly load: () => ReleaseInput;
   readonly contentUrl: string;
+  // GAME_PHANTOMS_URL: where phantoms go and come from, or null without phantoms.
+  readonly phantomsUrl: string | null;
   readonly module: string | null;
   // Input files known before loading; a change reloads the page, or restarts the server for a project.
   readonly watch: readonly string[];
@@ -85,8 +103,13 @@ export function gameRelease(options: {
     if (name === 'module') {
       return options.module === null ? 'export default null;' : `export { start as default } from ${JSON.stringify(options.module)};`;
     }
-    const { content } = current();
+    const { input, content } = current();
     if (name === 'content') return `export default ${JSON.stringify({ contentUrl: options.contentUrl, ...content.pins })};`;
+    if (name === 'phantoms') {
+      if (options.phantomsUrl === null) return 'export default null;';
+      return `import { startPhantoms } from ${JSON.stringify(runtime('phantoms.ts'))};\n` +
+        `export default { url: ${JSON.stringify(options.phantomsUrl)}, course: ${JSON.stringify(courseOf(input))}, start: startPhantoms };`;
+    }
     return content.uses[name] ? LOADERS[name] : 'export default null;';
   };
   return {
@@ -114,6 +137,8 @@ export function gameRelease(options: {
     transformIndexHtml: { order: 'pre', handler: (html) => html.replace('href="/favicon.svg"', 'href="favicon.svg"') },
     configureServer(server) {
       development = server;
+      const phantoms = phantomPrefix(options.phantomsUrl, server.config.base);
+      if (phantoms !== null) server.middlewares.use(phantomMiddleware(new PhantomStore(), phantoms));
       server.middlewares.use('/favicon.svg', (_request, response) => {
         response.setHeader('Content-Type', 'image/svg+xml');
         response.end(readFileSync(FAVICON));
@@ -153,6 +178,8 @@ export function gameRelease(options: {
       });
     },
     configurePreviewServer(server) {
+      const phantoms = phantomPrefix(options.phantomsUrl, server.config.base);
+      if (phantoms !== null) server.middlewares.use(phantomMiddleware(new PhantomStore(), phantoms));
       const directory = contentDirectory(resolve(server.config.root, server.config.build.outDir));
       server.middlewares.use((request, response, next) => {
         const path = contentRequest(request, server.config.base);
