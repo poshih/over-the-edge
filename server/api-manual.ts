@@ -94,9 +94,9 @@ export function apiManual(auth: 'token' | 'loopback') {
         notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach.',
       },
       settings: {
-        value: '{ schemaVersion: 3, physics: {...}, rig: { handleLength, maxExtension }, cursor: { maxRadius } }', patch: true,
+        value: '{ schemaVersion: 4, physics: {...}, rig: { handleLength, maxExtension }, cursor: { maxTargetRadius, deadZone } }', patch: true,
         fields: { physics: TUNING_FIELDS, rig: RIG_FIELDS, cursor: CURSOR_FIELDS },
-        notes: 'The reach is rig.handleLength + rig.maxExtension; cursor.maxRadius may not exceed it. A rig change rebuilds the player and restarts the run.',
+        notes: 'The reach is rig.handleLength + rig.maxExtension; cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run.',
       },
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',

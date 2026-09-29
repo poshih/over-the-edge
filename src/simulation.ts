@@ -10,7 +10,9 @@ import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { rigGeometry, sameRig } from './rig';
 import type { RigGeometry } from './rig';
 import type { LaunchSettings } from './trigger-events';
-import { angleDifference, clampLength } from './math';
+import { angleDifference } from './math';
+import { aimAt, limitAim, moveAim } from './aim';
+import type { Aim } from './aim';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
 import type { EnemyEvent, EnemyPose } from './enemy-types';
@@ -37,7 +39,9 @@ export type SettingsEffect = 'applied' | 'restarted';
 
 type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'cursor' | 'rig'> & { cursorOffset: Point };
 
-const IDLE_COMMAND: MotorCommand = { angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0 };
+const IDLE_COMMAND: MotorCommand = {
+  angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0, hingeBoost: 1, sliderBoost: 1,
+};
 // Falling this far below the lowest terrain or launch zone restarts the attempt.
 const OUT_OF_BOUNDS_DEPTH = 20;
 // A contact counts as standing on terrain when it pushes the player at least this steeply upward.
@@ -52,7 +56,8 @@ export class Simulation {
   private settings: GameSettings;
   // Where the current run started; a rebuilt rig restarts from here.
   private spawn: Readonly<PlayerSpawn>;
-  private cursorOffset: Point;
+  // Hinge-relative: the cursor input moves, and the target the hammer drives toward.
+  private aim: Aim;
   private previous: PlayerFrame;
   private current: PlayerFrame;
   private command = { ...IDLE_COMMAND };
@@ -82,7 +87,7 @@ export class Simulation {
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       onBump: (delta) => changePlayerVelocity(this.rig, delta),
     });
-    this.cursorOffset = this.initialCursorOffset();
+    this.aim = this.initialAim();
     this.current = this.capture();
     this.previous = this.current;
   }
@@ -101,10 +106,11 @@ export class Simulation {
       this.reset(this.spawn);
       return 'restarted';
     }
-    if (next.cursor.maxRadius !== previous.cursor.maxRadius) {
-      this.cursorOffset = clampLength(this.cursorOffset, next.cursor.maxRadius);
-      this.previous = { ...this.previous, cursorOffset: clampLength(this.previous.cursorOffset, next.cursor.maxRadius) };
-      this.current = { ...this.current, cursorOffset: { ...this.cursorOffset } };
+    if (next.cursor.maxTargetRadius !== previous.cursor.maxTargetRadius || next.cursor.deadZone !== previous.cursor.deadZone) {
+      // A smaller radius pulls the target straight in; the cursor keeps to its dead zone.
+      this.aim = limitAim(this.aim, next.cursor.maxTargetRadius, next.cursor.deadZone);
+      this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
+      this.current = { ...this.current, cursorOffset: { ...this.aim.cursor } };
     }
     if (TUNING_FIELDS.some((field) => next.physics[field.key] !== previous.physics[field.key])) {
       tunePlayer(this.rig, next.physics);
@@ -201,13 +207,19 @@ export class Simulation {
       throw new Error('Pointer movement must be finite.');
     }
     this.previous = this.current;
+    let swinging = false;
     if (pointerDelta.x !== 0 || pointerDelta.y !== 0) {
-      const x = this.cursorOffset.x + pointerDelta.x;
-      const y = this.cursorOffset.y + pointerDelta.y;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Pointer target must remain finite.');
-      this.cursorOffset = clampLength({ x, y }, this.settings.cursor.maxRadius);
+      if (!Number.isFinite(this.aim.cursor.x + pointerDelta.x) || !Number.isFinite(this.aim.cursor.y + pointerDelta.y)) {
+        throw new Error('Pointer target must remain finite.');
+      }
+      const previousY = this.aim.target.y;
+      this.aim = moveAim(this.aim, pointerDelta, this.settings.cursor.maxTargetRadius, this.settings.cursor.deadZone);
+      // Input that lowers the target swings the hammer down.
+      swinging = this.aim.target.y < previousY;
     }
-    this.command = drivePlayer(this.rig, this.worldCursor(this.cursorOrigin(this.rig.root.getPosition()), this.cursorOffset), this.settings.physics);
+    this.command = drivePlayer(
+      this.rig, this.worldPoint(this.cursorOrigin(this.rig.root.getPosition()), this.aim.target), this.settings.physics, swinging,
+    );
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
     const velocity = this.impactTracking ? this.rig.head.getLinearVelocity() : null;
     const approachX = velocity?.x ?? 0;
@@ -241,7 +253,7 @@ export class Simulation {
     return {
       time: this.previous.time + (this.current.time - this.previous.time) * alpha,
       parts,
-      cursor: this.worldCursor(this.cursorOrigin(root), {
+      cursor: this.worldPoint(this.cursorOrigin(root), {
         x: this.previous.cursorOffset.x + (this.current.cursorOffset.x - this.previous.cursorOffset.x) * alpha,
         y: this.previous.cursorOffset.y + (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha,
       }),
@@ -259,13 +271,14 @@ export class Simulation {
     }
     const hingeTorque = this.rig.hinge.getMotorTorque(1 / PHYSICS.dt);
     const sliderForce = this.rig.slider.getMotorForce(1 / PHYSICS.dt);
+    // Loads are shares of the strength each motor had in the last step, downswing boost included.
     return {
       time: this.elapsed,
       height: Math.max(0, root.y + RIG.potBottom),
       bestHeight: this.bestHeight,
       contacts,
-      hingeLoad: Math.abs(hingeTorque) / this.settings.physics.hingeTorque,
-      sliderLoad: Math.abs(sliderForce) / this.settings.physics.sliderForce,
+      hingeLoad: Math.abs(hingeTorque) / (this.settings.physics.hingeTorque * this.command.hingeBoost),
+      sliderLoad: Math.abs(sliderForce) / (this.settings.physics.sliderForce * this.command.sliderBoost),
     };
   }
 
@@ -277,9 +290,11 @@ export class Simulation {
       ...status,
       root: { x: root.x, y: root.y, angle: this.rig.root.getAngle() },
       tip: { ...this.rig.head.getPosition() },
-      cursor: this.worldCursor(origin, this.cursorOffset),
+      cursor: this.worldPoint(origin, this.aim.cursor),
       cursorOrigin: origin,
-      cursorOffset: { ...this.cursorOffset },
+      cursorOffset: { ...this.aim.cursor },
+      target: this.worldPoint(origin, this.aim.target),
+      targetOffset: { ...this.aim.target },
       rootVelocity: { ...this.rig.root.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
       extension: this.rig.slider.getJointTranslation(),
@@ -326,7 +341,7 @@ export class Simulation {
           collides: fixture !== null && fixture.getFilterMaskBits() !== 0,
         };
       }),
-      cursorOffset: { ...this.cursorOffset },
+      cursorOffset: { ...this.aim.cursor },
     };
   }
 
@@ -337,7 +352,7 @@ export class Simulation {
     this.supported = false;
     this.headTouching = false;
     this.impactSpeed = 0;
-    this.cursorOffset = this.initialCursorOffset();
+    this.aim = this.initialAim();
     this.elapsed = 0;
     this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
     this.command = { ...IDLE_COMMAND };
@@ -377,10 +392,11 @@ export class Simulation {
     return count;
   }
 
-  private initialCursorOffset(): Point {
+  // An attempt starts aiming at the hammer head, with the cursor on the target.
+  private initialAim(): Aim {
     const origin = this.cursorOrigin(this.rig.root.getPosition());
     const tip = this.rig.head.getPosition();
-    return clampLength({ x: tip.x - origin.x, y: tip.y - origin.y }, this.settings.cursor.maxRadius);
+    return aimAt({ x: tip.x - origin.x, y: tip.y - origin.y }, this.settings.cursor.maxTargetRadius);
   }
 
   // Aim is hinge-relative like the hammer's reach; the root never rotates, so the hinge is a fixed offset.
@@ -388,7 +404,7 @@ export class Simulation {
     return { x: root.x + RIG.shoulder.x, y: root.y + RIG.shoulder.y };
   }
 
-  private worldCursor(origin: Readonly<Point>, offset: Readonly<Point>): Point {
+  private worldPoint(origin: Readonly<Point>, offset: Readonly<Point>): Point {
     return { x: origin.x + offset.x, y: origin.y + offset.y };
   }
 

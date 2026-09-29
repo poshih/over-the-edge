@@ -35,6 +35,9 @@ export interface MotorCommand {
   extensionError: number;
   angularSpeed: number;
   linearSpeed: number;
+  // How much stronger than their tuned strength the hinge and slider are: above 1 during a downswing.
+  hingeBoost: number;
+  sliderBoost: number;
 }
 
 const LAUNCH_SOLVER_ITERATIONS = 32;
@@ -250,10 +253,19 @@ export function tunePlayer(rig: PlayerRig, tuning: Readonly<Tuning>): void {
   }
 }
 
-export function drivePlayer(rig: PlayerRig, cursor: Readonly<Point>, tuning: Readonly<Tuning>): MotorCommand {
+// How directly a motor speeds the head up downward, from 0 to 1: its requested speed, and the change it
+// makes to the joint's speed, must both move the head down along `down`, the head's downward component per
+// unit of joint speed (unit length at most). Holding, braking and lifting get nothing.
+function downswing(requested: number, current: number, down: number): number {
+  return Math.sign(requested) === Math.sign(requested - current) ? Math.max(0, Math.sign(requested) * down) : 0;
+}
+
+// `swinging` is whether input lowered the target this step: only the player swings the hammer down, so the
+// motors' own corrections, such as pulling a sagging hang back into its pose, keep their tuned strength.
+export function drivePlayer(rig: PlayerRig, target: Readonly<Point>, tuning: Readonly<Tuning>, swinging: boolean): MotorCommand {
   const pivot = rig.root.getWorldPoint(RIG.shoulder);
-  const targetX = cursor.x - pivot.x;
-  const targetY = cursor.y - pivot.y;
+  const targetX = target.x - pivot.x;
+  const targetY = target.y - pivot.y;
   const distance = Math.hypot(targetX, targetY);
   // The slider axis remains defined even when the head is at the hinge.
   const axisAngle = rig.carrier.getAngle();
@@ -266,17 +278,26 @@ export function drivePlayer(rig: PlayerRig, cursor: Readonly<Point>, tuning: Rea
     reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), 0, maxReach,
   );
   const extensionError = projectedReach - handleLength - rig.slider.getJointTranslation();
+  const hingeSpeed = rig.hinge.getJointSpeed();
+  const sliderSpeed = rig.slider.getJointSpeed();
   const angularSpeed = clamp(
-    tuning.angleGain * angularError - tuning.angleDamping * rig.hinge.getJointSpeed(),
+    tuning.angleGain * angularError - tuning.angleDamping * hingeSpeed,
     -tuning.angularSpeed, tuning.angularSpeed,
   );
   const linearSpeed = clamp(
-    tuning.extensionGain * extensionError - tuning.extensionDamping * rig.slider.getJointSpeed(),
+    tuning.extensionGain * extensionError - tuning.extensionDamping * sliderSpeed,
     -tuning.linearSpeed, tuning.linearSpeed,
   );
+  // A downswing makes each motor stronger in proportion to how directly it drives the head down: turning
+  // counterclockwise moves the head along (-sin, cos) of the handle's angle, and extending along (cos, sin).
+  // The motors push between the player's own bodies, so the extra strength adds no outside force.
+  const hingeBoost = swinging ? 1 + (tuning.hingeDownswingBoost - 1) * downswing(angularSpeed, hingeSpeed, -Math.cos(axisAngle)) : 1;
+  const sliderBoost = swinging ? 1 + (tuning.sliderDownswingBoost - 1) * downswing(linearSpeed, sliderSpeed, -Math.sin(axisAngle)) : 1;
+  rig.hinge.setMaxMotorTorque(tuning.hingeTorque * hingeBoost);
+  rig.slider.setMaxMotorForce(tuning.sliderForce * sliderBoost);
   rig.hinge.setMotorSpeed(angularSpeed);
   rig.slider.setMotorSpeed(linearSpeed);
-  return { angularError, extensionError, angularSpeed, linearSpeed };
+  return { angularError, extensionError, angularSpeed, linearSpeed, hingeBoost, sliderBoost };
 }
 
 export function destroyPlayer(world: World, rig: PlayerRig): void {

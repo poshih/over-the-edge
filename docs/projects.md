@@ -32,7 +32,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 3, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 3: physics, hammer rig and cursor target |
+| `settings` | `project.json` | Game-settings profile, schema 4: physics (including the downswing boost), hammer rig and cursor target (radius and dead zone) |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -74,8 +74,8 @@ The paths are fixed, so a manifest only says which files exist:
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 3, "physics": { "...": "..." },
-    "rig": { "handleLength": 1.5, "maxExtension": 1.15 }, "cursor": { "maxRadius": 2.65 }
+    "schemaVersion": 4, "physics": { "...": "..." },
+    "rig": { "handleLength": 1.5, "maxExtension": 1.15 }, "cursor": { "maxTargetRadius": 2.65, "deadZone": 0.1 }
   },
   "characters": { "primary": null, "alternate": null },
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },

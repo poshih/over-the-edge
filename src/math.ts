@@ -7,6 +7,7 @@ export function clamp(value: number, min: number, max: number): number {
 export function clampLength(point: Readonly<Point>, maximum: number): Point {
   // Normalize before measuring so finite, very large input cannot overflow.
   const scale = Math.max(Math.abs(point.x), Math.abs(point.y), maximum);
+  if (scale === 0) return { x: 0, y: 0 };
   const x = point.x / scale;
   const y = point.y / scale;
   const length = Math.hypot(x, y);

@@ -331,12 +331,12 @@ export async function verifyLevel(browser, address, artifacts) {
       let current = await physics();
       const started = current.time;
       const deadline = Date.now() + 10_000;
-      // Keep aiming at the opponent as recoil carries the hinge-relative target.
+      // Keep aiming the hammer's target at the opponent as recoil carries it along with the character.
       while (current.time - started < 0.3) {
         assert.ok(Date.now() < deadline && !current.paused && !current.stopped, 'Combat aiming must advance through live physics.');
         const scale = current.camera.height / current.camera.worldHeight / current.tuning.mouseSensitivity;
-        pointer.x += (point.x - current.cursor.x) * scale;
-        pointer.y -= (point.y - current.cursor.y) * scale;
+        pointer.x += (point.x - current.target.x) * scale;
+        pointer.y -= (point.y - current.target.y) * scale;
         await page.mouse.move(pointer.x, pointer.y);
         await frames();
         current = await physics();

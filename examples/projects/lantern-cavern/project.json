@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -19,6 +19,8 @@
       "extensionDamping": 0.12,
       "angularSpeed": 12,
       "linearSpeed": 7,
+      "hingeDownswingBoost": 1.3,
+      "sliderDownswingBoost": 1.3,
       "playerMass": 12,
       "hammerMass": 1.8,
       "shaftMass": 0.66,
@@ -35,7 +37,8 @@
       "maxExtension": 1.15
     },
     "cursor": {
-      "maxRadius": 2.65
+      "maxTargetRadius": 2.65,
+      "deadZone": 0.1
     }
   },
   "characters": {

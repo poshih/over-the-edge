@@ -387,7 +387,7 @@ try {
       'A rig whose reach is shorter than the target radius is rejected.');
     const projectSettings = (await api('GET', '/api/projects/blank-test/settings')).value;
     assert.deepEqual(projectSettings.rig, { handleLength: 2.1, maxExtension: 0.55 });
-    assert.equal(projectSettings.schemaVersion, 3);
+    assert.equal(projectSettings.schemaVersion, 4);
     assert.deepEqual((await api('POST', '/api/projects/blank-test/validate')).value, { ok: true, problems: [] });
 
     // Course artwork replaces a decoration model's placeholder, or draws a model the library lacks.

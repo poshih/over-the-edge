@@ -185,7 +185,7 @@ async function runtimeRig(page, server) {
           viewSharesRig: this.view.rig === this.simulation.rigGeometry,
           shaftLength: Math.hypot(head.x - slider.x, head.y - slider.y),
           touchStep: -this.view.pointerDelta({ x: 0, y: 100 }, 1, 'touch').y,
-          maxRadius: this.settings().cursor.maxRadius,
+          maxTargetRadius: this.settings().cursor.maxTargetRadius,
         });
         return original.call(this);
       };
@@ -209,7 +209,7 @@ async function verifySettings(page) {
     ...defaults,
     physics: { ...defaults.physics, playerMass: 14, mouseSensitivity: 1.75 },
     rig: { handleLength: 2.1, maxExtension: 0.8 },
-    cursor: { maxRadius: 2.1 },
+    cursor: { maxTargetRadius: 2.1, deadZone: 0.15 },
   };
   await writeFile(settingsPath, JSON.stringify(selected));
   process.env.GAME_SETTINGS = relative(root, settingsPath);
@@ -251,12 +251,12 @@ async function verifySettings(page) {
     assert.ok(rig.viewSharesRig, 'The view must render the simulation\'s rig.');
     assert.ok(Math.abs(rig.shaftLength - 2.1) < 0.02, `The physical handle must be 2.1 m (${rig.shaftLength} m).`);
     close(rig.touchStep, 2.9, '100 touch pixels must move the target one reach');
-    assert.ok(rig.maxRadius <= rig.geometry.maxReach);
+    assert.ok(rig.maxTargetRadius <= rig.geometry.maxReach);
     report.settings.rig = rig;
     const edited = {
       ...selected,
-      physics: { ...selected.physics, mouseSensitivity: 0.8 },
-      cursor: { maxRadius: 1.1 },
+      physics: { ...selected.physics, mouseSensitivity: 0.8, hingeDownswingBoost: 1.6 },
+      cursor: { maxTargetRadius: 1.1, deadZone: 0 },
     };
     const reload = page.waitForEvent('domcontentloaded');
     await writeFile(settingsPath, JSON.stringify(edited));
@@ -268,18 +268,30 @@ async function verifySettings(page) {
   const invalidPath = join(temporary, 'invalid-settings.json');
   const invalid = [
     { name: 'malformed-json', source: '{broken', error: /JSON|Unexpected/ },
-    { name: 'unsupported-version', value: { ...defaults, schemaVersion: 2 }, error: /require schema version 3/ },
+    { name: 'unsupported-version', value: { ...defaults, schemaVersion: 3 }, error: /require schema version 4/ },
     {
       name: 'invalid-physics', value: { ...defaults, physics: { ...defaults.physics, playerMass: 0 } },
       error: /Player mass must be between/,
     },
     {
-      name: 'invalid-cursor', value: { ...defaults, cursor: { maxRadius: 1000 } },
+      name: 'invalid-cursor', value: { ...defaults, cursor: { ...defaults.cursor, maxTargetRadius: 1000 } },
       error: /Maximum target radius must be between/,
     },
     {
-      name: 'radius-beyond-reach', value: { ...defaults, cursor: { maxRadius: 3 } },
+      name: 'radius-beyond-reach', value: { ...defaults, cursor: { ...defaults.cursor, maxTargetRadius: 3 } },
       error: /must not exceed the hammer's 2\.65 m reach/,
+    },
+    {
+      name: 'invalid-dead-zone', value: { ...defaults, cursor: { ...defaults.cursor, deadZone: -0.1 } },
+      error: /Dead zone must be between 0 and 0\.5/,
+    },
+    {
+      name: 'renamed-radius', value: { ...defaults, cursor: { maxRadius: 2.65, deadZone: 0.1 } },
+      error: /Cursor settings contains missing or unknown settings/,
+    },
+    {
+      name: 'invalid-downswing', value: { ...defaults, physics: { ...defaults.physics, sliderDownswingBoost: 0.5 } },
+      error: /Slider downswing boost must be between 1 and 3/,
     },
     {
       name: 'invalid-rig', value: { ...defaults, rig: { handleLength: 0.2, maxExtension: 1 } },

@@ -288,8 +288,8 @@ export async function verifyWorkshopProject(browser, { root, temporary, errors, 
         settings: { leftHintX: -0.4, leftHintY: 0.1, leftHintZ: -0.3, rightHintX: 0.4, rightHintY: 0.1, rightHintZ: 0.4 },
       }));
       localStorage.setItem('over-the-edge:appearance:arm-ik:active:v2', JSON.stringify({ schemaVersion: 2, key: profile }));
-      localStorage.setItem('over-the-edge:game-settings:snapshot:v3:ffeeddccbbaa99887766554433221100', JSON.stringify({
-        schemaVersion: 3, name: 'Old physics', savedAt: 1_700_000_000_000, settings,
+      localStorage.setItem('over-the-edge:game-settings:snapshot:v4:ffeeddccbbaa99887766554433221100', JSON.stringify({
+        schemaVersion: 4, name: 'Old physics', savedAt: 1_700_000_000_000, settings,
       }));
     }, { head, settings: manifest.settings });
     const seeded = await storage(older);

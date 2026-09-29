@@ -27,6 +27,7 @@ type TuningGroup = (typeof TUNING_FIELDS)[number]['group'];
 const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title'>>> = {
   'Mass & recoil': { id: 'physics-mass', hint: 'Weights and swing kick', open: true },
   Motors: { id: 'physics-motors', hint: 'Strength and speed caps', open: true },
+  Downswing: { id: 'physics-downswing', hint: 'Extra strength swinging the hammer down' },
   Response: { id: 'physics-response', hint: 'How closely the hammer follows aim' },
   Materials: { id: 'physics-materials', hint: 'Friction, damping and handle flex' },
   Input: { id: 'physics-input', hint: 'Control sensitivity' },
@@ -110,7 +111,7 @@ export function createUI(options: UiOptions): GameUi {
     for (const field of CURSOR_FIELDS) {
       const control = cursorControls.get(field.key);
       if (!control) throw new Error(`Missing cursor control: ${field.key}`);
-      if (field.key === 'maxRadius') control.input.max = String(reach);
+      if (field.key === 'maxTargetRadius') control.input.max = String(reach);
       control.setValue(settings.cursor[field.key]);
     }
   }
@@ -191,12 +192,13 @@ export function createUI(options: UiOptions): GameUi {
     rigGroup.append(control.row);
   }
   const cursorGroup = tuningSection({
-    id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius around the hinge',
+    id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius and dead zone',
   }, 'Cursor target', 'tuning-group cursor-settings');
   const cursorHelp = document.createElement('p');
   cursorHelp.className = 'cursor-target-help';
-  cursorHelp.textContent = 'Aim inside a circle around the hammer\'s shoulder hinge. The target moves with the character and keeps your chosen offset until you aim again. ' +
-    'There is no return to the hammer or hinge. The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it.';
+  cursorHelp.textContent = 'The hammer aims inside a circle around its shoulder hinge. The target moves with the character and keeps your chosen offset until you aim again. ' +
+    'There is no return to the hammer or hinge. The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it. ' +
+    'The cursor moves freely within the dead zone around the target, then drags the target along, so it can reach the dead zone past the radius.';
   cursorGroup.append(cursorHelp);
   for (const field of CURSOR_FIELDS) {
     const control = createRangeControl(field, {

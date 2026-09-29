@@ -19,6 +19,9 @@ export interface Tuning {
   extensionDamping: number;
   angularSpeed: number;
   linearSpeed: number;
+  // Strength multipliers while input swings the hammer down and each motor speeds the head up downward.
+  hingeDownswingBoost: number;
+  sliderDownswingBoost: number;
   playerMass: number;
   hammerMass: number;
   shaftMass: number;
@@ -40,6 +43,8 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   extensionDamping: 0.12,
   angularSpeed: 12,
   linearSpeed: 7,
+  hingeDownswingBoost: 1.3,
+  sliderDownswingBoost: 1.3,
   playerMass: 12,
   hammerMass: 1.8,
   shaftMass: 0.66,

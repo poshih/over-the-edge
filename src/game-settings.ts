@@ -4,11 +4,14 @@ import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, RIG_LIMITS, rigGeometry } from './
 import type { RigSettings } from './rig';
 
 export interface CursorSettings {
-  readonly maxRadius: number;
+  // The farthest from the shoulder hinge the hammer aims; at most the rig's reach.
+  readonly maxTargetRadius: number;
+  // How far the cursor moves around the hammer's target before the hammer follows.
+  readonly deadZone: number;
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
@@ -16,10 +19,12 @@ export interface GameSettings {
 
 export const GAME_SETTINGS_LIMITS = { fileBytes: 64 * 1024 } as const;
 export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
-  maxRadius: rigGeometry(DEFAULT_RIG_SETTINGS).maxReach,
+  maxTargetRadius: rigGeometry(DEFAULT_RIG_SETTINGS).maxReach,
+  // About the hammer head's half-width, so small, unsteady input leaves the hammer where it is.
+  deadZone: 0.1,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 3, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 4, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -33,7 +38,7 @@ interface NumericSetting {
 
 interface TuningField extends NumericSetting {
   key: keyof Tuning;
-  group: 'Mass & recoil' | 'Motors' | 'Response' | 'Materials' | 'Input';
+  group: 'Mass & recoil' | 'Motors' | 'Downswing' | 'Response' | 'Materials' | 'Input';
 }
 
 type RigField = NumericSetting & { key: keyof RigSettings };
@@ -46,7 +51,8 @@ export const RIG_FIELDS: readonly RigField[] = [
 
 // The radius is also capped at the rig's reach, which validateGameSettings checks.
 export const CURSOR_FIELDS: readonly CursorField[] = [
-  { key: 'maxRadius', label: 'Maximum target radius', min: 0.25, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Maximum distance from the shoulder hinge the hammer pivots on, up to the rig\'s reach (handle length plus maximum extension). Aiming moves this offset; character movement carries it along. Motion beyond the radius is discarded.' },
+  { key: 'maxTargetRadius', label: 'Maximum target radius', min: 0.25, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Maximum distance from the shoulder hinge the hammer pivots on to the point the hammer aims at, up to the rig\'s reach (handle length plus maximum extension). Aiming moves this offset; character movement carries it along.' },
+  { key: 'deadZone', label: 'Dead zone', min: 0, max: 0.5, step: 0.01, unit: 'm', description: 'How far the cursor can move around the point the hammer aims at before the hammer follows. Beyond it, the cursor drags that point along, so the cursor reaches this far past the maximum target radius; motion beyond that is discarded. Zero makes the hammer follow every movement.' },
 ];
 
 export const TUNING_FIELDS: readonly TuningField[] = [
@@ -59,6 +65,8 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'hingeTorque', label: 'Hinge strength', group: 'Motors', min: 80, max: 1000, step: 10, unit: 'N m', description: 'Maximum rotational effort. This is not the requested motor speed.' },
   { key: 'sliderForce', label: 'Slider strength', group: 'Motors', min: 150, max: 2000, step: 25, unit: 'N', description: 'Maximum extension effort, including support against gravity.' },
   { key: 'linearSpeed', label: 'Extension speed cap', group: 'Motors', min: 1, max: 12, step: 0.5, unit: 'm/s', description: 'Upper bound on the slider velocity target.' },
+  { key: 'hingeDownswingBoost', label: 'Hinge downswing boost', group: 'Downswing', min: 1, max: 3, step: 0.05, unit: 'x', description: 'Multiplies the hinge strength while input moves the hammer\'s target down and the hinge speeds the head up downward: fully for a head swung straight down, less the more sideways it swings. Holds without input keep the tuned strength. 1 turns the boost off.' },
+  { key: 'sliderDownswingBoost', label: 'Slider downswing boost', group: 'Downswing', min: 1, max: 3, step: 0.05, unit: 'x', description: 'Multiplies the slider strength while input moves the hammer\'s target down and the slider speeds the head up downward, extending a hammer that points down or retracting one that points up: fully straight down, less the more sideways. 1 turns the boost off.' },
   { key: 'angleGain', label: 'Rotation response', group: 'Response', min: 2, max: 30, step: 0.5, unit: '/s', description: 'Angular position error becomes requested hinge speed.' },
   { key: 'angleDamping', label: 'Rotation damping', group: 'Response', min: 0, max: 0.8, step: 0.02, unit: '', description: 'Measured hinge speed opposes the angular command.' },
   { key: 'extensionGain', label: 'Extension response', group: 'Response', min: 2, max: 35, step: 0.5, unit: '/s', description: 'Error along the handle becomes requested slider speed.' },
@@ -108,23 +116,23 @@ function validateRig(value: unknown): RigSettings {
 export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSettings>): GameSettings {
   const previousReach = rigGeometry(settings.rig).maxReach;
   const reach = rigGeometry(rig).maxReach;
-  const fullReach = settings.cursor.maxRadius >= previousReach;
+  const fullReach = settings.cursor.maxTargetRadius >= previousReach;
   return {
     ...settings, rig,
-    cursor: { ...settings.cursor, maxRadius: fullReach ? reach : Math.min(settings.cursor.maxRadius, reach) },
+    cursor: { ...settings.cursor, maxTargetRadius: fullReach ? reach : Math.min(settings.cursor.maxTargetRadius, reach) },
   };
 }
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 3) throw new GameSettingsError('Game settings require schema version 3.');
+  if (value.schemaVersion !== 4) throw new GameSettingsError('Game settings require schema version 4.');
   const rig = validateRig(value.rig);
   settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
   const cursor = { ...DEFAULT_CURSOR_SETTINGS };
   for (const field of CURSOR_FIELDS) cursor[field.key] = settingNumber(value.cursor[field.key], field);
   const reach = rigGeometry(rig).maxReach;
-  if (cursor.maxRadius > reach) {
+  if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 3, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 4, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

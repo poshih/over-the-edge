@@ -156,8 +156,8 @@ GAME_LEVEL=levels/my-level.json GAME_SETTINGS=profiles/my-game.json npm run buil
 ```
 
 Omitting `GAME_SETTINGS` uses the built-in game settings: a **1.5 m** handle
-that slides up to **1.15 m** past the shoulder hinge, and a **2.65 m** target radius
-around the hinge (the hammer's full reach). A supplied profile is validated and packaged with the content; an invalid,
+that slides up to **1.15 m** past the shoulder hinge, a **2.65 m** target radius
+around the hinge (the hammer's full reach) and a **0.1 m** dead zone. A supplied profile is validated and packaged with the content; an invalid,
 missing, oversized, or outside-project file fails rather than reverting to
 defaults. Development reloads when the selected file changes. Browser-local
 saves do not change a release unless you export and select one.
@@ -342,15 +342,25 @@ iterations are distinct. Rendering interpolates the previous and current
 physics poses. Catch-up is bounded under overload; switching tabs discards
 elapsed wall-clock time rather than advancing a huge physics step.
 
-Mouse or touch movement updates the white circle's offset from the shoulder
-hinge the hammer pivots on, limited to a configurable radius. Without input,
-that offset stays unchanged: walking, falling, or being launched carries the
-target with the character. It does not rotate with the pot, follow the hammer,
-or drift back to the hinge. Camera movement does not modify the offset.
+Mouse or touch movement moves the white circle, the cursor, relative to the
+shoulder hinge the hammer pivots on. The hammer drives toward a target that
+follows the cursor with a little slack: while the cursor moves within the
+**dead zone** around the target (**0.1 m** by default, about half the head's
+width), the target and the hammer hold still, so small or unsteady input does not
+disturb a delicate hold. Once the cursor leaves the dead zone it drags the target
+along, a dead zone behind it, and the target moves no farther than it must. The
+target stays within a configurable radius of the hinge, and the cursor can go the
+dead zone beyond it. Without input, both offsets stay unchanged: walking,
+falling, or being launched carries them with the character. They do not rotate
+with the pot, follow the hammer, or drift back to the hinge. Camera movement
+does not modify them.
 
-Motion beyond the circle is discarded, so reversing input responds immediately
-without unwinding accumulated movement. Starting or resetting an attempt aims
-toward the initial hammer position, clamped inside the chosen radius.
+Motion beyond the cursor's reach, the target radius plus the dead zone, is
+discarded, so reversing input only has to cross the dead zone again, without
+unwinding accumulated movement. At the edge of the radius the target slides
+around it as the cursor sweeps past. Starting or resetting an attempt aims at the
+initial hammer position, clamped inside the chosen radius, with the cursor on the
+target.
 
 As in Getting Over It, the target and the head's mechanical reach (the handle
 length plus the maximum extension, **2.65 m** by default) share the hinge as their
@@ -365,8 +375,17 @@ unreachable inner ring. The hinge's own orientation defines aim even at zero
 reach; aiming does not normalize a zero-length hinge-to-head vector.
 
 Motor velocity targets come from angular and axial errors with measured joint
-velocity damping, speed caps, and independent force/torque limits. All angular
-quantities use radians. Collision visualization uses the authored physics
+velocity damping, speed caps, and independent force/torque limits. While input
+moves the target down, a **downswing boost** raises the limit of each motor that
+speeds the head up downward: the hinge swinging the head down, or the slider
+extending a hammer that points down or retracting one that points up. The boost
+scales with how directly downward that motor moves the head, so a head swung
+straight down gets all of it and a sideways swing none. Braking or lifting the
+head never gets it, and neither do the motors' own corrections without input,
+such as holding a hang: only the player swings the hammer down. The motors push
+between the player's own bodies, so the boost adds no outside force: a harder
+downswing into the ground lifts the player higher. All angular quantities use
+radians. Collision visualization uses the authored physics
 geometry and fixture filters, so it does not draw the non-colliding shaft as a
 terrain collider.
 
@@ -379,8 +398,12 @@ mass. Shaft mass is divided equally among the three handle segments; guide-body
 inertia scales with mass. The new defaults preserve the original 0.66 kg shaft
 and 0.5 kg per guide body. All masses stay positive.
 
-The other sections include motor strength and speed limits, response gains, damping,
-contact friction, handle compliance, and control sensitivity.
+The other sections include motor strength and speed limits, the downswing boost,
+response gains, damping, contact friction, handle compliance, and control
+sensitivity. **Downswing** has a **Hinge downswing boost** and a **Slider
+downswing boost**, each 1-3x (default **1.3x**; 1 turns it off), multiplying that
+motor's strength while input moves the target down and the motor speeds the head
+up downward.
 Zero handle frequency means rigid weld constraints; positive frequency enables
 rotational spring compliance.
 
@@ -406,13 +429,18 @@ The **Cursor target** section has a **Maximum target radius** slider, from
 **0.25 m** up to the hammer's reach, default the full reach. A saved radius beyond
 the reach is rejected. When the rig changes in the Workshop, a full-reach radius
 follows the new reach and a smaller one is capped at it. Reducing the radius
-immediately clamps an out-of-range target, including while paused; increasing
-it preserves the current offset. Changing it does not restart the attempt, alter
-body masses, or change the rig's forces, mechanical reach, or collision rules.
+immediately pulls an out-of-range target straight in, including while paused;
+increasing it preserves the current offset. Its **Dead zone** slider (0-0.5 m,
+default **0.1 m**) sets the slack between the cursor and the target; 0 makes the
+hammer follow every movement. Changing the dead zone never moves the target: a
+smaller one pulls the cursor toward it. Neither setting restarts the attempt,
+alters body masses, or changes the rig's forces, mechanical reach, or collision
+rules.
 
 In **Workshop / Physics / Saved game settings**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
-profile containing every physics setting, the hammer rig and the target radius.
+profile containing every physics setting, the hammer rig, the target radius and
+the dead zone.
 Reusing a name keeps both versions. Choose an entry in **Past game settings**,
 then **Load game settings** to apply it. Selecting an entry alone does not
 change the game. History survives reloads; loading remains manual.

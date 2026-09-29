@@ -267,7 +267,7 @@ export async function verifyGrips(browser, address, artifacts) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }, value);
-  // Real mouse input moves the hinge-relative target, then the hammer settles on it.
+  // Real mouse input drags the hinge-relative target along with the cursor, then the hammer settles on it.
   const aim = async (goal, seconds = 0.8) => {
     const box = await page.locator('#game').boundingBox();
     assert.ok(box, 'The canvas must be visible.');
@@ -280,8 +280,8 @@ export async function verifyGrips(browser, address, artifacts) {
     for (let step = 0; step < steps; step++) {
       const state = await snapshot();
       const remaining = steps - step;
-      pointer.x += (goal.x - state.cursorOffset.x) / remaining * scale;
-      pointer.y -= (goal.y - state.cursorOffset.y) / remaining * scale;
+      pointer.x += (goal.x - state.targetOffset.x) / remaining * scale;
+      pointer.y -= (goal.y - state.targetOffset.y) / remaining * scale;
       await page.mouse.move(pointer.x, pointer.y);
       await page.waitForTimeout(16);
     }
@@ -346,13 +346,13 @@ export async function verifyGrips(browser, address, artifacts) {
     await workshop('Physics');
     await openSection(page, 'physics-rig', 'physics-cursor');
     await changeRig('handleLength', LONG_HANDLE.handleLength);
-    close((await settings()).cursor.maxRadius, 2.1 + 1.15, 'A full-reach target radius follows a longer reach');
+    close((await settings()).cursor.maxTargetRadius, 2.1 + 1.15, 'A full-reach target radius follows a longer reach');
     const rebuilt = await changeRig('maxExtension', LONG_HANDLE.maxExtension);
     const rig = rebuilt.rig;
     close(rig.minExtension, -2.1, 'Fully retracted, the head reaches the hinge');
     close(rig.maxReach, 2.65, 'The reach is the handle plus the extension', 1e-12);
     close(rig.segmentLength, 0.7, 'Three segments share the handle', 1e-12);
-    close((await settings()).cursor.maxRadius, rig.maxReach, 'The full-reach target radius follows the reach again');
+    close((await settings()).cursor.maxTargetRadius, rig.maxReach, 'The full-reach target radius follows the reach again');
     const built = handle(rebuilt);
     close(built.shaft, 2.1, 'The physical handle is 2.1 m', 0.02);
     for (const spacing of built.spacing) close(spacing, 0.7, 'Handle segments are 0.7 m apart', 0.02);
@@ -427,21 +427,21 @@ export async function verifyGrips(browser, address, artifacts) {
     // 7. The target radius never exceeds the reach: a smaller radius is capped, a full one follows.
     await workshop('Physics');
     await openSection(page, 'physics-rig', 'physics-cursor');
-    await setRange('cursor-maxRadius', 2.3);
+    await setRange('cursor-maxTargetRadius', 2.3);
     await changeRig('maxExtension', 0);
-    close((await settings()).cursor.maxRadius, 2.1, 'A radius beyond the new reach is capped at it');
-    assert.equal(await page.locator('#cursor-maxRadius').getAttribute('max'), '2.1');
+    close((await settings()).cursor.maxTargetRadius, 2.1, 'A radius beyond the new reach is capped at it');
+    assert.equal(await page.locator('#cursor-maxTargetRadius').getAttribute('max'), '2.1');
     await changeRig('maxExtension', 0.55);
-    close((await settings()).cursor.maxRadius, 2.1 + 0.55, 'A radius at the full reach follows it');
-    await setRange('cursor-maxRadius', 2);
+    close((await settings()).cursor.maxTargetRadius, 2.1 + 0.55, 'A radius at the full reach follows it');
+    await setRange('cursor-maxTargetRadius', 2);
     await changeRig('maxExtension', 0.8);
-    close((await settings()).cursor.maxRadius, 2, 'A smaller radius stays put when the reach grows');
+    close((await settings()).cursor.maxTargetRadius, 2, 'A smaller radius stays put when the reach grows');
     // 2.05 + 0.55 sums to just under 2.6 in floats; the slider must still hold the full reach.
     await changeRig('maxExtension', 0.55);
-    await setRange('cursor-maxRadius', 2.65);
+    await setRange('cursor-maxTargetRadius', 2.65);
     await changeRig('handleLength', 2.05);
-    assert.equal((await settings()).cursor.maxRadius, 2.6, 'A full-reach radius follows to the decimal reach.');
-    const radius = page.locator('#cursor-maxRadius');
+    assert.equal((await settings()).cursor.maxTargetRadius, 2.6, 'A full-reach radius follows to the decimal reach.');
+    const radius = page.locator('#cursor-maxTargetRadius');
     assert.deepEqual([await radius.getAttribute('max'), await radius.inputValue()], ['2.6', '2.6']);
     // The touch layout's step buttons: at the full reach "+" must be off, never step down by rounding.
     assert.equal(await page.locator('button[aria-label="Increase Maximum target radius"]').evaluate(button => button.disabled), true,

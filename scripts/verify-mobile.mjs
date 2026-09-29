@@ -107,10 +107,12 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal((await snapshot()).pointerLocked, false);
       const beforeDrag = await snapshot();
       const dragGain = initial.rig.maxReach * TOUCH_DRAG_PIXELS / TOUCH_PIXELS_PER_REACH;
+      // The cursor reaches the dead zone past the target radius.
+      const { cursor } = await page.evaluate(() => window.gettingOver.settings());
       const expectedAfterDrag = clampLength({
         x: beforeDrag.cursorOffset.x,
         y: beforeDrag.cursorOffset.y + dragGain,
-      }, initial.rig.maxReach);
+      }, cursor.maxTargetRadius + cursor.deadZone);
       await drag(0, -TOUCH_DRAG_PIXELS);
       const afterDrag = await snapshot();
       const movedOffset = Math.hypot(
@@ -178,10 +180,10 @@ export async function verifyMobile(browser, address, artifacts) {
       const savedSettings = await page.evaluate(() => window.gettingOver.settings());
       await page.getByRole('button', { name: 'Save game settings', exact: true }).tap();
       const savedKey = await pastTuning.inputValue();
-      assert.ok(savedKey.startsWith('over-the-edge:game-settings:snapshot:v3:'));
+      assert.ok(savedKey.startsWith('over-the-edge:game-settings:snapshot:v4:'));
       const savedRecord = JSON.parse(await page.evaluate((key) => localStorage.getItem(key), savedKey));
-      assert.equal(savedRecord.schemaVersion, 3);
-      assert.equal(savedRecord.settings.schemaVersion, 3);
+      assert.equal(savedRecord.schemaVersion, 4);
+      assert.equal(savedRecord.settings.schemaVersion, 4);
       const noticeBox = await page.locator('.ui-notice').boundingBox();
       assert.ok(noticeBox && (noticeBox.y + noticeBox.height <= panelBox.y || noticeBox.x + noticeBox.width <= panelBox.x),
         'Save feedback must not cover the workshop controls.');
@@ -351,6 +353,7 @@ export async function verifyMobile(browser, address, artifacts) {
     await page.waitForFunction(() => window.gettingOver);
     await page.clock.pauseAt(new Date(start.getTime() + 10_000));
     const before = await page.evaluate(() => window.gettingOver.snapshot());
+    const { cursor } = await page.evaluate(() => window.gettingOver.settings());
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 190, y: 420, id: 1 }] });
     await protocol.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 230, y: 420, id: 1 }] });
     assert.ok(await page.evaluate(() => window.touchMoves > 0));
@@ -367,7 +370,7 @@ export async function verifyMobile(browser, address, artifacts) {
     const expected = clampLength({
       x: before.cursorOffset.x + before.rig.maxReach * 20 / TOUCH_PIXELS_PER_REACH,
       y: before.cursorOffset.y,
-    }, before.rig.maxReach);
+    }, cursor.maxTargetRadius + cursor.deadZone);
     assert.ok(Math.hypot(after.cursorOffset.x - expected.x, after.cursorOffset.y - expected.y) < 0.001,
       'A normal release must retain the last drag movement, clipped only by the target radius.');
     assert.deepEqual(errors, []);
