@@ -1,7 +1,8 @@
-// How the course travels through each library set piece, for travel toward +x. `mirror` is the
+// How a course travels through each library set piece, for travel toward +x. `mirror` is the
 // orientation that travels toward +x; `entry` and `exit` are points on the piece's surfaces (local to
-// its base centre; entries and exits at height sit on the outer edge, so neighbours touch), `floor` the local x-range that needs ground at the piece's base, if any, and
-// `down` marks descents. Coordinates follow the placed pieces (see src/editor/set-pieces.ts).
+// its base centre; entries and exits at height sit on the outer edge, so neighbours touch), `floor` the
+// local x-range that needs ground at the piece's base, if any, and `down` marks descents. Coordinates
+// follow the placed pieces (see src/editor/set-pieces.ts), whose parts are centred on their footprint.
 export const PIECE_PATHS = {
   'first-boulder': { entry: [-2.3, 0], exit: [2.3, 0], floor: [-2.8, 2.8] },
   'rising-steps': { entry: [-3.4, 0], exit: [3, 2.7], floor: [-3.8, 3] },
@@ -18,6 +19,7 @@ export const PIECE_PATHS = {
   'orange-hell': { entry: [-2.7, 0], exit: [2.25, 9], floor: [-3, 2.25] },
   'crate-tower': { entry: [-1.7, 0], exit: [0.55, 7], floor: [-2, 1.2] },
   'zigzag-shaft': { entry: [-3.1, 0], exit: [2.6, 9], floor: [-3.5, 2.6] },
+  'rotten-scaffold': { entry: [-2.8, 0], exit: [2.2, 9], floor: [-3.1, 2.2] },
   'stepping-stones': { entry: [-6.2, 2], exit: [6.2, 2], floor: [-6.2, 6.2] },
   'chasm-leap': { entry: [-6.2, 5], exit: [6.2, 5.3], floor: null },
   'pole-vault': { entry: [-4.6, 2.5], exit: [4.6, 3], floor: [-4.6, 4.6] },
@@ -33,12 +35,14 @@ export const PIECE_PATHS = {
   dome: { entry: [-2.5, 0], exit: [0, 4], floor: [-2.8, 2] },
   'ball-stack': { entry: [-1.7, 0], exit: [0, 5.4], floor: [-2, 1.2] },
   'tilted-slab': { entry: [-3.2, 0], exit: [2.55, 4.75], floor: [-3.5, 1] },
+  'flying-buttress': { entry: [-7.0993, 3], exit: [7.0993, 7.8577], floor: null },
   'pogo-pit': { entry: [-3.9, 0], exit: [3.4, 4.2], floor: [-4.2, 3.4] },
   'hook-swing': { entry: [-4.4, 3], exit: [4.4, 3], floor: null },
   'notch-wall': { entry: [-1.2, 0], exit: [0.75, 8.5], floor: [-1.6, 0.75] },
   'pogo-posts': { entry: [-4.8, 2], exit: [4.8, 2.4], floor: null },
   crawlspace: { entry: [-3.6, 0], exit: [3.6, 0], floor: [-4, 4] },
   'kicker-ramp': { entry: [-5, 0], exit: [4.6, 3.2], floor: [-5.3, 4.6] },
+  'castle-window': { entry: [-2.5, 0], exit: [1.9, 1], floor: [-2.8, 1.9] },
   'box-descent': { entry: [-3.2, 7], exit: [3.6, 0], floor: [-3.2, 4], down: true },
   'drop-shaft': { entry: [-2.4, 8], exit: [2.4, 4.3], floor: [-2.4, 2.4], down: true },
   'the-snake': { entry: [-4.74, 8], exit: [5.2, 0], floor: [-4.74, 5.6], down: true },
@@ -51,13 +55,18 @@ export const PIECE_PATHS = {
   'updraft-cliff': { entry: [-3, 0], exit: [2.6, 8.4], floor: [-3.3, 2.6] },
   'launch-pad': { entry: [-4.5, 0], exit: [4, 6], floor: [-4.8, 3.2] },
   'vent-ladder': { entry: [-4.2, 0], exit: [3.7, 6.4], floor: [-4.5, 3.7] },
+  'crow-nest': { entry: [-3.8, 0], exit: [3.5, 17.1], floor: [-4.1, 0.5] },
   'bird-ledge': { entry: [-3, 0], exit: [2.5, 3.8], floor: [-3.3, 2.5] },
   'guarded-landing': { entry: [-4, 0], exit: [3.5, 3.4], floor: [-4.3, 3.5] },
   'bird-gauntlet': { entry: [-6, 3], exit: [6, 3], floor: null },
   'updraft-ambush': { entry: [-3, 0], exit: [2.6, 7.2], floor: [-3.3, 2.6] },
+  'gargoyle-roof': { entry: [-6.4, 0], exit: [6, 1.8], floor: [-6.7, 6] },
+  'hollow-bridge': { entry: [-7.4, 4], exit: [7.4, 4], floor: null },
   'the-fork': { entry: [-5.4, 3], exit: [5.4, 4.2], floor: [-5.4, 5.4] },
   'false-floor': { entry: [-4.5, 0], exit: [4, 4.2], floor: [-4.8, 4] },
   'false-summit': { entry: [-3.3, 0], exit: [2.8, 6.8], floor: [-3.6, 2.8] },
+  'phantom-dare': { entry: [-6.2, 4.2], exit: [6.2, 5.4], floor: null },
+  'mimic-chest': { entry: [-3.8, 4], exit: [3.8, 4], floor: null },
   'danger-sign': { entry: [-2.4, 6], exit: [2.4, 6], floor: null },
   'long-fall': { entry: [-3.5, 12], exit: [3.5, 12], floor: null },
   'dead-end-tower': { entry: [-2, 0], exit: [-2, 0], floor: [-2.3, 1.6] },

@@ -1,46 +1,12 @@
 // The scenery of Ashen Ascent: decorations that never collide, from the far horizon to the foreground.
-// Each zone's scenery is built right after the zone, so its IDs share the zone's prefix. Distant
-// scenery is placed by where it should appear on screen while the camera looks at a point of the climb:
-// it barely drifts from there, while scenery near the course moves almost with it.
+// Each zone's scenery is built right after the zone, so its IDs share the zone's prefix. The course kit
+// places distant scenery for the theme's camera (see scripts/course-kit/scenery.mjs).
+import { sceneryHelpers } from '../course-kit/scenery.mjs';
 import { THEME } from './project.mjs';
 
-// The perspective camera's distance from the course plane at the game's 8.5 m view height.
-const DISTANCE = 8.5 / 2 / Math.tan(THEME.camera.fieldOfView * Math.PI / 360);
-// How much larger than it looks a decoration at depth z must be, measured on the course plane.
-const depthScale = (z) => (DISTANCE - z) / DISTANCE;
-// The rock shelf's slab top, as a share of its height; boulders stand above it.
-const SHELF_TOP = 0.8;
+const { far, landmark, shelves, row } = sceneryHelpers(THEME.camera);
 
 const TINT = { dusk: 0x8c8a9a, night: 0x6f6d7e, ash: 0xb3ada2, moss: 0x9fb08a, frost: 0xc2cedb, ember: 0xffcf9e, bone: 0xd6cdb8 };
-
-/** A decoration placed to appear `offset` from the view's centre, `size` tall, while the camera looks at `from`. */
-function far(b, model, from, [dx, dy], z, size, options) {
-  const scale = depthScale(z);
-  b.decoration(model, model, from[0] + dx * scale, from[1] + dy * scale, z, size * scale, options);
-}
-
-/** A far decoration standing on the valley floor, appearing `dx` from the view's centre and `size` tall seen from `x`. */
-function landmark(b, model, x, dx, z, size, options) {
-  const scale = depthScale(z);
-  b.decoration(model, model, x + dx * scale, 0, z, size * scale, options);
-}
-
-/** Rock shelves side by side from `left` to `right`, their tops level with `top`: ground behind the course. */
-function shelves(b, left, right, top, z, height, tint) {
-  const width = height * 24 / 5.01;
-  for (let x = left + width / 2; x - width / 2 < right; x += width * 0.92) {
-    b.decoration('shelf', 'rock-shelf', x, top - height * SHELF_TOP, z, height, { tint, mirror: Math.round(x) % 2 === 0 });
-  }
-}
-
-/** A row of models along a line, spaced `step` apart, alternating mirror and leaning a little. */
-function row(b, model, from, to, y, z, height, step, options = {}) {
-  for (let x = from, index = 0; x <= to; x += step, index++) {
-    b.decoration(model, model, x, y, z, height * (1 - 0.12 * (index % 3)), {
-      ...options, mirror: index % 2 === 1, angle: (options.lean ?? 0) * ((index % 3) - 1),
-    });
-  }
-}
 
 export const SCENERY = {
   // I · Ashen Hollow: a graveyard on ash-grey ground under a far range, the golden tree on the horizon.
@@ -140,7 +106,7 @@ export const SCENERY = {
     for (const x of [-9, -19]) b.decoration('candelabra', 'candelabra', x, 367.1, -1.2, 2.2);
     b.decoration('knight-statue', 'knight-statue', 3.5, 367.1, -2.6, 4.8);
     b.decoration('knight-statue', 'knight-statue', -10.5, 367.1, -2.6, 4.8, { mirror: true });
-    for (const [x, y] of [[-30, 375.7], [-34.5, 375.7]]) b.decoration('lantern-post', 'lantern-post', x, y, -1.2, 3.2);
+    for (const [x, y] of [[-27.1, 375.7], [-33.4, 375.7]]) b.decoration('lantern-post', 'lantern-post', x, y, -1.2, 3.2);
     b.decoration('banner', 'banner', 8, 367.1, -1.6, 5.5);
     b.decoration('hanging-cage', 'hanging-cage', 12, 352, 1.8, 6);
     b.decoration('chains', 'chains', 20, 356, 2.8, 8, { mirror: true });

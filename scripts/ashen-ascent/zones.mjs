@@ -1,8 +1,8 @@
 // The Ashen Ascent course: eight souls-like zones climbing from a graveyard to a castle adrift in
 // the sky. Every set piece of the Workshop's library appears once, recoloured for its zone.
-import { random } from './course.mjs';
+import { random } from '../course-kit/course.mjs';
+import { Trail } from '../course-kit/trail.mjs';
 import { SCENERY } from './scenery.mjs';
-import { Trail } from './trail.mjs';
 import { TEXT } from './lore.mjs';
 
 // The library's own colours, named as materials so each zone can repaint them.
@@ -24,8 +24,16 @@ function place(t, id, options = {}) {
   return t.piece(id, { recolor: MATERIALS, ...options });
 }
 
+// A recolouring that paints some materials in other tones of the zone's palette, such as { wood: 'gold' }.
+const repaint = (tones) => Object.fromEntries(Object.entries(MATERIALS).map(([color, material]) => [color, tones[material] ?? material]));
+
+// Retunes a placed piece's message to the words of `text`.
+const say = (text) => (object) => object.kind === 'trigger' && object.events.some((event) => event.type === 'message')
+  ? { ...object, name: text.title, events: [{ type: 'message', title: text.title, message: text.message }] }
+  : object;
+
 // Props are decorations, never terrain: small colliders close together trap the pot and the hammer head
-// (see crampedColliders in checks.mjs), and the course passes straight through its props.
+// (see crampedColliders in scripts/course-kit/checks.mjs), and the course passes straight through its props.
 
 // A bonfire landing: a blade in warm ash, and the zone's title the first time the player arrives.
 function bonfire(b, x, y, key) {
@@ -56,16 +64,14 @@ function tower(b, name, left, bottom, width, height, style) {
 
 // Floating stones stacked in one tower. The player crosses each to its far end, where a vent lifts
 // them `rise` metres, just past the next stone's edge; stones alternate direction, so no stone sits
-// in a vent's column below its apex and no vent lies inside another's column.
-function windStair(b, t, rises, tones) {
-  for (const [index, rise] of rises.entries()) {
-    const width = 4.4 + (index % 3) * 0.4;
-    t.floor(width, { name: 'stair-stone', thickness: 1, tone: tones[index % tones.length], depth: 2.2 });
+// in a vent's column below its apex and no vent lies inside another's column. The stair ends on `top`.
+function windStair(b, t, stones, top) {
+  for (const { width, rise, tone } of stones) {
+    t.floor(width, { name: 'stair-stone', thickness: 1, tone, depth: 2.2 });
     b.vent('stair-wind', t.x - t.dir * 1.1, t.y, rise + 1.3, { width: 2, title: 'Stair wind' });
     t.at(t.x - t.dir * 2.3, t.y + rise).turn();
   }
-  // The top stone, where the stair ends.
-  t.floor(5.2, { name: 'stair-stone', thickness: 1.2, tone: tones[0], depth: 2.4 });
+  t.floor(top.width, { name: 'stair-stone', thickness: 1.2, tone: top.tone, depth: 2.4 });
 }
 
 // A castle tower standing on `bottom`: its shaft and a conical slate roof.
@@ -98,8 +104,7 @@ const ZONES = [
       b.message('intro', -56.5, 1.6, TEXT.intro.title, TEXT.intro.message, { sound: SOUND.bell, width: 5, height: 3.2 });
       [-59.6, -58.4, -53.4, -51.8, -50.2].forEach((x) => grave(b, x, 0, rng));
       t.at(-48.2, 0);
-      place(t, 'tutorial-note', { floor: false, retune: (object) => object.kind === 'trigger'
-        ? { ...object, name: TEXT.firstLesson.title, events: [{ type: 'message', title: TEXT.firstLesson.title, message: TEXT.firstLesson.message }] } : object });
+      place(t, 'tutorial-note', { floor: false, retune: say(TEXT.firstLesson) });
       t.go(2.4);
       b.label(t.x + 0.2, 3.4, 'TRY HOOKING THE STONE');
       place(t, 'first-boulder', { floor: false });
@@ -182,8 +187,12 @@ const ZONES = [
       b.block('chapel-yard', perch.bounds.left, lane, yard - perch.bounds.left, 3.4, { tone: 'plaster', depth: 2.2 });
       // Down into the ossuary: the charnel crates step down from the perch to the lane.
       t.edge(perch).at(t.x, lane + 7);
-      const crypt = place(t, 'box-descent', { floor: false });
-      b.zone.exit = { x: t.x, y: t.y, lane, laneEnd, crypt };
+      place(t, 'box-descent', { floor: false });
+      // The old chapel at the lane's broken end, under the mire: crows dive from its gargoyles.
+      t.go(1.2);
+      const chapel = place(t, 'gargoyle-roof', { floor: false });
+      b.decoration('chapel-banner', 'banner', chapel.anchor.x + 7, lane, -1.6, 4.4, { mirror: true });
+      b.zone.exit = { lane, laneEnd };
     },
   },
   {
@@ -407,10 +416,18 @@ const ZONES = [
       place(t, 'the-fork', { floorTone: 'stone', floorThickness: 1 });
       b.enemy('bird', t.x + 4, t.y + 3.4, 'right', 2.5, 1.4);
       place(t, 'vent-ladder', { gap: 0.4, floorTone: 'stone', floorThickness: 1 });
-      // The broken stair: stones that once were steps, each crossed to its far end, where the wind
-      // lifts the player just past the next stone above.
+      // The broken stair begins at a pinnacle, where a crow's nest hides the strongest gust of the
+      // climb; it throws the player up beside the pinnacle to the first of the stair's stones.
       const stairFoot = { x: t.x, y: t.y };
-      windStair(b, t, [9.4, 8.2, 11.6, 9, 12.4, 8.6, 10.2], ['stone', 'rock', 'cloud']);
+      t.go(0.3);
+      place(t, 'crow-nest', { floorTone: 'stone', floorThickness: 1 });
+      // The stair itself: stones that once were steps, each crossed to its far end, where the wind
+      // lifts the player just past the next stone above. The long terrace spans the nest's column
+      // well above its apex.
+      windStair(b, t, [
+        { width: 4.4, rise: 12.1, tone: 'cloud' }, { width: 11.6, rise: 9, tone: 'stone' }, { width: 4.8, rise: 12.4, tone: 'rock' },
+        { width: 5.2, rise: 8.6, tone: 'cloud' }, { width: 4.4, rise: 10.2, tone: 'stone' },
+      ], { width: 5.2, tone: 'stone' });
       b.enemy('bird', stairFoot.x - 9, stairFoot.y + 24, 'right', 2.5, 1.4);
       b.enemy('bird', stairFoot.x + 6, stairFoot.y + 46, 'left', 2.5, 1.5);
       b.enemy('bird', t.x - t.dir * 2, t.y + 3, 'left', 3, 1.5);
@@ -423,9 +440,7 @@ const ZONES = [
       slate: 0x5a6070, bark: 0x5a4a3a, leaf: 0x6a7a5a, dark: 0x34302d }),
     build(b, t, rng) {
       // The false summit crowns the stair; behind its flag the wind altar looks up at the keep.
-      place(t, 'false-summit', { floorTone: 'stone', floorThickness: 1.2, retune: (object) => object.kind === 'trigger'
-        ? { ...object, name: TEXT.falseSummit.title, events: [{ type: 'message', title: TEXT.falseSummit.title, message: TEXT.falseSummit.message }] }
-        : object });
+      place(t, 'false-summit', { floorTone: 'stone', floorThickness: 1.2, retune: say(TEXT.falseSummit) });
       b.label(t.x - 3.6, t.y - 3.2, 'THE TOP, SURELY');
       t.floor(3.6, { name: 'wind-altar', thickness: 1.2, tone: 'gold', depth: 2.6 });
       const lift = 96;
@@ -456,39 +471,33 @@ const ZONES = [
       // The courtyard, where the keep's last guard still stands.
       const court = t.x;
       const yard = (length) => t.floor(length, { name: 'courtyard', thickness: 1.4, tone: 'concrete', depth: 3.4 });
-      yard(6.4);
-      [court - 2.4, court - 5.2].forEach((x, index) => b.enemy('hollow-soldier', x, dock, index ? 'right' : 'left', 1, 0.8));
-      // A chest on the flagstones. It is a mimic: chest and flagstones are illusions over the undercroft,
-      // whose opening is wide enough for a pot with a tucked or raised hammer to ride the draft back out.
-      const hole = t.x - 1.2;
-      b.block('mimic', hole - 0.8, dock, 1.6, 0.8, { tone: 'gold', depth: 1.2, illusion: true });
-      b.block('mimic-flagstone', t.x - 2.4, dock - 1.4, 2.4, 1.4, { tone: 'concrete', depth: 3.4, illusion: true });
-      b.label(hole, dock + 2.1, 'TREASURE AHEAD');
-      t.go(2.4);
-      yard(8.6);
+      yard(5.2);
+      [court - 2, court - 4.4].forEach((x, index) => b.enemy('hollow-soldier', x, dock, index ? 'right' : 'left', 1, 0.8));
+      // A gilded chest on the flagstones. It is a mimic over a shaft, whose hidden draft throws the pot back out.
+      const mimic = place(t, 'mimic-chest', { recolor: repaint({ rock: 'concrete', wood: 'gold' }), retune: say(TEXT.treasure) });
+      const gullet = mimic.objects.find((object) => object.kind === 'trigger' && object.events.some((event) => event.type === 'launch-player'));
+      b.message('mimic', gullet.x, gullet.y + 0.5, TEXT.mimic.title, TEXT.mimic.message, { sound: SOUND.secret, width: 1.4, height: 2 });
+      yard(4.6);
       b.enemy('hollow-soldier', t.x + 3.2, dock, 'right', 1.8, 0.9);
-      const below = dock - 6.4;
-      b.block('undercroft', hole - 3.4, below - 1.2, 6.8, 1.2, { tone: 'dark', depth: 3 });
-      b.block('undercroft-wall', hole - 3.4, below, 0.8, 5, { tone: 'dark', depth: 3 });
-      b.block('undercroft-wall', hole + 2.6, below, 0.8, 5, { tone: 'dark', depth: 3 });
-      b.vent('mimic-draft', hole, below, 8.2, { hidden: true, width: 2, height: 1, title: 'Undercroft draft' });
-      b.message('mimic', hole, below + 2.4, TEXT.mimic.title, TEXT.mimic.message, { sound: '/media/chime.wav', width: 4.4, height: 2.2 });
-      // The keep's rock foundation, clear of the undercroft.
-      b.fang('foundation', court - 3, dock - 1.4, 5.6, 9, { tone: 'dark', depth: 3.6 });
-      b.fang('foundation', t.x + 2.6, dock - 1.4, 5, 12, { tone: 'dark', depth: 3.6 });
+      // The keep's rock foundation, below the courtyard and the mimic's shaft.
+      b.fang('foundation', court - 2.6, dock - 1.4, 4.6, 9, { tone: 'dark', depth: 3.6 });
+      b.fang('foundation', mimic.anchor.x, mimic.anchor.y, 7.6, 8, { tone: 'dark', depth: 3.6 });
+      b.fang('foundation', t.x + 2.2, dock - 1.4, 4.2, 12, { tone: 'dark', depth: 3.6 });
       // The curtain wall: notches cut into its face, and a balcony to a turret that goes nowhere.
       const curtain = place(t, 'notch-wall', { floor: false, recolor: undefined, tone: 'stone' });
       const walk = t.y;
       t.turn().at(curtain.bounds.right, walk);
       t.floor(5.8, { name: 'balcony', thickness: 0.9, tone: 'stone', depth: 2.4 });
-      place(t, 'dead-end-tower', { floor: false, recolor: undefined, tone: 'stone', retune: (object) => object.kind === 'trigger'
-        ? { ...object, name: TEXT.deadEnd.title, events: [{ type: 'message', title: TEXT.deadEnd.title, message: TEXT.deadEnd.message }] }
-        : object });
+      place(t, 'dead-end-tower', { floor: false, recolor: undefined, tone: 'stone', retune: say(TEXT.deadEnd) });
       b.label(curtain.bounds.right + 1.6, walk + 2.4, 'GREAT VIEW AHEAD');
-      // The wall walk to the keep.
+      // The wall walk to the keep dips under a window in the keep's outer wall: hook its sill and squeeze through.
       t.turn().at(curtain.bounds.left, walk);
-      t.floor(7.8, { name: 'wall-walk', thickness: 1.2, tone: 'stone', depth: 3 });
-      b.enemy('bird', t.x + 2, walk + 3.2, 'left', 3, 1.4);
+      const wallWalk = (length) => t.floor(length, { name: 'wall-walk', thickness: 1.2, tone: 'stone', depth: 3 });
+      wallWalk(1.4);
+      t.at(t.x, walk - 1);
+      wallWalk(2);
+      place(t, 'castle-window', { floorTone: 'stone', floorThickness: 1.2 });
+      b.enemy('bird', t.x + 1.2, walk + 2.4, 'left', 1.2, 1.4);
       const ladder = place(t, 'ledge-ladder', { floor: false, recolor: undefined, tone: 'ivory' });
       // The keep: its roof is level with the tower's top, its foundation hangs below.
       const roof = t.y;
@@ -496,16 +505,22 @@ const ZONES = [
       b.block('keep', body - 13, walk - 10, 13, roof - walk + 10, { tone: 'stone', depth: 5 });
       b.block('keep', ladder.bounds.left, walk - 1.2, ladder.bounds.right - ladder.bounds.left, 1.2, { tone: 'stone', depth: 3 });
       b.fang('keep-keel', body - 6.5, walk - 10, 11, 14, { tone: 'dark', depth: 4 });
-      // Between the keep's towers, just behind their faces, so neither hides it from either side.
-      banner(b, body - 8.3, roof, 3.8, -0.3);
-      // The Ember Spire: a gilded stair turning up from the keep's roof past its towers to the summit.
-      t.go(2.6);
-      b.enemy('hollow-soldier', t.x + 1.8, roof, 'left', 0.6, 0.6);
-      castleTower(b, body - 10.4, roof, 3, 12, { depth: 4 });
-      castleTower(b, body - 6.6, roof, 2.2, 7, { depth: 3.6 });
+      banner(b, body - 3.4, roof, 3.8);
+      b.enemy('hollow-soldier', body - 1.2, roof, 'left', 0.6, 0.6);
+      // The keep's last defences. A rotten scaffold on the roof reaches a flying buttress, which rises back over
+      // the roof to a bridge the hollows still guard; beyond it a phantom dares a leap below the Ember Spire.
+      t.go(6.2);
+      place(t, 'rotten-scaffold', { floor: false, exit: [-2.2, 9] });
+      t.turn();
+      place(t, 'flying-buttress');
+      const bridge = place(t, 'hollow-bridge');
+      [bridge.bounds.left + 1.2, bridge.bounds.right - 1.2].forEach((x) => banner(b, x, bridge.bounds.top, 3.6));
+      place(t, 'phantom-dare', { retune: say(TEXT.phantomDare) });
+      // The Ember Spire: a gilded stair up from the far cliff to the summit.
+      t.floor(3.2, { name: 'spire-foot', thickness: 1, tone: 'ivory', depth: 2.6 });
       const spireFoot = { x: t.x, y: t.y };
-      t.stairs(1, 22, { shapes: ['shelf', 'crate', 'slab'], tones: ['gold', 'ivory', 'stone'], width: [1.5, 2] });
-      b.enemy('bird', spireFoot.x + 7.4, spireFoot.y + 12, 'left', 1.5, 1.6);
+      t.stairs(3, 7, { shapes: ['shelf', 'crate', 'slab'], tones: ['gold', 'ivory', 'stone'], width: [1.5, 2] });
+      b.enemy('bird', spireFoot.x + 1.4, spireFoot.y + 9.6, 'left', 1.5, 1.6);
       b.label(t.x - 2.2, t.y + 2.6, 'THE EMBER, AT LAST');
       t.floor(1.4, { name: 'spire-top', thickness: 1.2, tone: 'ivory', depth: 2.6 });
       place(t, 'summit', { floorTone: 'gold', floorThickness: 1.2, recolor: undefined, tone: 'gold', retune: (object) => object.kind === 'trigger'

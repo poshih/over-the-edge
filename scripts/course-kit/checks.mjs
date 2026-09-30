@@ -2,10 +2,42 @@
 // groups, and a conservative reach graph that must lead from the start to the ending.
 import { outline } from './course.mjs';
 
-// What a connector may ask of the player: the shoulder rides 1.15 m above the pot's base, and a lip
-// within about 2.5 m of it can be pulled over (see src/editor/set-pieces.ts). Connectors stay inside
-// easier limits, so the difficulty of the course lives in its set pieces.
-export const REACH = { shoulder: 1.15, pull: 2.35, rise: 2.5, hop: 1.9, drop: 9, slope: Math.cos(40 * Math.PI / 180) };
+/**
+ * What a connector may ask of the player under the engine's default physics: the shoulder rides 1.15 m
+ * above the pot's base, and a lip within about 2.5 m of it can be pulled over (see
+ * src/editor/set-pieces.ts). Connectors stay inside easier limits, so the difficulty of a course lives in
+ * its set pieces. `maxStandSlope` is the steepest face, in degrees, the pot is assumed to rest on.
+ *
+ * A project passes its own model when its physics differ. Above all, the pot's grip on terrain is
+ * sqrt(terrainFriction * potFriction) and it slides on slopes steeper than atan(grip): a game with lower
+ * terrain or pot friction stands on fewer slopes, so it lowers `maxStandSlope`, and a longer or shorter
+ * rig changes `shoulder`, `pull` and `rise`.
+ */
+export const ENGINE_DEFAULT_REACH = Object.freeze({ shoulder: 1.15, pull: 2.35, rise: 2.5, hop: 1.9, drop: 9, maxStandSlope: 40 });
+const REACH_FIELDS = Object.keys(ENGINE_DEFAULT_REACH);
+
+export class ReachModelError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ReachModelError';
+  }
+}
+
+/** Validates a reach model and adds `standNormal`, the least upward share of a face's normal the pot stands on. */
+function reachRules(model) {
+  if (model === null || typeof model !== 'object') throw new ReachModelError('A reach model is required; pass ENGINE_DEFAULT_REACH or your own.');
+  const unknown = Object.keys(model).filter((field) => !REACH_FIELDS.includes(field));
+  if (unknown.length > 0) throw new ReachModelError(`Unknown reach model fields: ${unknown.join(', ')}. Expected ${REACH_FIELDS.join(', ')}.`);
+  for (const field of REACH_FIELDS) {
+    const value = model[field];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      throw new ReachModelError(`Reach model field "${field}" must be a finite positive number of metres (degrees for maxStandSlope).`);
+    }
+  }
+  if (model.maxStandSlope >= 90) throw new ReachModelError('Reach model field "maxStandSlope" must be between 0 and 90 degrees.');
+  return { ...model, standNormal: Math.cos(model.maxStandSlope * Math.PI / 180) };
+}
+
 // Small colliders, about the pot's size or less (it is 1 m wide), must stay farther apart than the pot is
 // wide: a narrower slot between them traps the pot or the hammer head.
 export const CRAMPED = { small: 1.5, clearance: 1.2 };
@@ -206,8 +238,12 @@ export function ventShafts(level, groups) {
   return problems;
 }
 
-/** Points where the pot can stand: upward faces no steeper than 40 degrees with room above them. */
-export function standPoints(level, groups) {
+/** Points where the pot can stand: upward faces no steeper than the reach model's `maxStandSlope` with room above them. */
+export function standPoints(level, groups, reach) {
+  return collectStandPoints(level, groups, reachRules(reach));
+}
+
+function collectStandPoints(level, groups, rules) {
   const index = solidIndex(level);
   const points = [];
   for (const { object, polygon } of index.solids) {
@@ -217,7 +253,7 @@ export function standPoints(level, groups) {
       const length = Math.hypot(b.x - a.x, b.y - a.y);
       if (length < 1e-6) continue;
       const normal = { x: (b.y - a.y) / length, y: -(b.x - a.x) / length };
-      if (normal.y < REACH.slope) continue;
+      if (normal.y < rules.standNormal) continue;
       const count = Math.max(1, Math.floor(length / SAMPLE));
       const inset = Math.min(0.5, 0.1 / length);
       for (let step = 0; step <= count; step++) {
@@ -244,12 +280,14 @@ function clearLine(index, from, to, ignore) {
 }
 
 /**
- * Breadth-first search over stand points. Moves between separately built groups must fit REACH;
- * inside a set piece every surface reaches every other (downward only for descents), as the library
- * designed it; updrafts lift the player to anything beside their column; `links` add designed moves.
+ * Breadth-first search over stand points. Moves between separately built groups must fit the reach
+ * model; inside a set piece every surface reaches every other (downward only for descents), as the
+ * library designed it; updrafts lift the player to anything beside their column; `links` add designed
+ * moves. While a course is being built, `goal` stands in for its missing ending.
  */
-export function reachGraph(level, groups, pieces, links, goal = null) {
-  const { points, index } = standPoints(level, groups);
+export function reachGraph(level, groups, pieces, links, reach, goal = null) {
+  const rules = reachRules(reach);
+  const { points, index } = collectStandPoints(level, groups, rules);
   const grid = new Grid();
   points.forEach((point, id) => { point.id = id; grid.insert(point, { left: point.x, right: point.x, bottom: point.y, top: point.y }); });
   const neighbours = points.map(() => new Set());
@@ -257,24 +295,24 @@ export function reachGraph(level, groups, pieces, links, goal = null) {
   const solid = (point) => !point.illusion;
   for (const a of points) {
     if (!solid(a)) continue;
-    const shoulder = { x: a.x, y: a.y + REACH.shoulder };
-    for (const b of grid.near(a.x, a.y, Math.max(REACH.pull + 0.5, 3))) {
+    const shoulder = { x: a.x, y: a.y + rules.shoulder };
+    for (const b of grid.near(a.x, a.y, Math.max(rules.pull + 0.5, 3))) {
       if (a === b || !solid(b)) continue;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       // Climbing pulls the pot over a lip; hops and drops carry it over anything below knee height.
       const ignore = new Set([a.object, b.object]);
       if (dy > 0.05 && a.object !== b.object) {
-        if (dy <= REACH.rise && Math.hypot(dx, b.y - shoulder.y) <= REACH.pull &&
+        if (dy <= rules.rise && Math.hypot(dx, b.y - shoulder.y) <= rules.pull &&
           clearLine(index, shoulder, { x: b.x, y: b.y + 0.3 }, ignore)) connect(a, b);
-      } else if (dy >= -2.5 && dy <= 0.6 && Math.abs(dx) <= REACH.hop) {
+      } else if (dy >= -2.5 && dy <= 0.6 && Math.abs(dx) <= rules.hop) {
         if (clearLine(index, { x: a.x, y: a.y + 1.2 }, { x: b.x, y: b.y + 1.2 }, ignore)) connect(a, b);
       }
     }
     // Dropping off an edge onto something below, drifting a little further the longer the fall.
-    for (const b of grid.near(a.x, a.y - REACH.drop / 2, REACH.drop / 2 + 3)) {
+    for (const b of grid.near(a.x, a.y - rules.drop / 2, rules.drop / 2 + 3)) {
       const fall = a.y - b.y;
-      if (b === a || !solid(b) || fall < 0.05 || fall > REACH.drop || Math.abs(b.x - a.x) > 2.2 + 0.25 * fall) continue;
+      if (b === a || !solid(b) || fall < 0.05 || fall > rules.drop || Math.abs(b.x - a.x) > 2.2 + 0.25 * fall) continue;
       if (clearLine(index, { x: a.x, y: a.y + 1.2 }, { x: b.x, y: b.y + 1.2 }, new Set([a.object, b.object]))) connect(a, b);
     }
   }

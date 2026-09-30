@@ -56,9 +56,11 @@ import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { ContentLoader } from './content-ref';
 import type { LibraryAvatarSettings, PartRole } from './model-library';
+// Plain data, so course scripts running in Node place scenery for the same framing.
+import VIEW_FRAME from './view-frame.json' with { type: 'json' };
 
 const VISUAL = {
-  viewHeight: 8.5,
+  viewHeight: VIEW_FRAME.viewHeight,
   cameraLead: 0.9,
   cameraLift: 1.15,
   cameraMinimumY: 2.9,

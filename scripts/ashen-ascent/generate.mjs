@@ -8,14 +8,16 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
-import { CourseBuilder } from './course.mjs';
-import { budget, crampedColliders, keepOut, overlaps, reachGraph, ventShafts } from './checks.mjs';
-import { courseMap, renderCrops } from './map.mjs';
+import { CourseBuilder } from '../course-kit/course.mjs';
+import { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, ventShafts } from '../course-kit/checks.mjs';
+import { courseMap, renderCrops } from '../course-kit/map.mjs';
 import { buildCourse } from './zones.mjs';
 import { projectManifest, TITLE } from './project.mjs';
 import { ashenAscentMedia } from '../project-fixtures.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+// The map's background, from the valley floor to the sky above the keep.
+const MAP_SKY = ['#1d1b1f', '#2b2a33', '#4a3f3a'];
 const flags = new Set(process.argv.slice(2));
 const server = await createServer({ configFile: false, root, logLevel: 'silent', server: { middlewareMode: true }, appType: 'custom' });
 try {
@@ -40,7 +42,7 @@ try {
   if (repeated.length > 0) problems.push(`Set pieces placed twice: ${repeated.join(', ')}`);
   problems.push(...overlaps(level, builder.groups, builder.supports), ...keepOut(level, builder.groups, builder.pieces, builder.allowed),
     ...ventShafts(level, builder.groups), ...crampedColliders(level, builder.groups));
-  const reach = reachGraph(level, builder.groups, builder.pieces, builder.links, { x: trail.x, y: trail.y });
+  const reach = reachGraph(level, builder.groups, builder.pieces, builder.links, ENGINE_DEFAULT_REACH, { x: trail.x, y: trail.y });
   if (!reach.ending) {
     problems.push(`The ending is not reachable; the highest reached point is (${reach.highest.x.toFixed(1)}, ${reach.highest.y.toFixed(1)}) in ${reach.highest.group}.`);
   }
@@ -55,7 +57,7 @@ try {
   if (flags.has('--preview')) {
     const directory = join(root, 'artifacts/ashen-ascent');
     await mkdir(directory, { recursive: true });
-    const map = courseMap(level, { zones, scale: 8, reach });
+    const map = courseMap(level, { zones, scale: 8, reach, sky: MAP_SKY });
     await writeFile(join(directory, 'reach.svg'), map.svg);
     const crops = builder.zones.map((zone) => ({ name: zone.code, left: zone.view?.left ?? map.left, right: zone.view?.right ?? map.right,
       bottom: zone.from - 4, top: zone.to + 8 }));
@@ -76,7 +78,7 @@ try {
     [`${example}/project.json`, `${JSON.stringify(manifest, null, 2)}\n`],
     [`${example}/level.json`, `${JSON.stringify(level)}\n`],
     ...Object.entries(media).map(([name, bytes]) => [`${example}/media/${name}`, bytes]),
-    ['docs/ashen-ascent-map.svg', `${courseMap(level, { zones, scale: 6 }).svg}\n`],
+    ['docs/ashen-ascent-map.svg', `${courseMap(level, { zones, scale: 6, sky: MAP_SKY }).svg}\n`],
   ]);
   const strays = (await readdir(join(root, example, 'media')).catch(() => []))
     .map((name) => `${example}/media/${name}`).filter((path) => !outputs.has(path));

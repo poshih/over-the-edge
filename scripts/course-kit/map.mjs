@@ -1,12 +1,27 @@
 // An SVG map of a course, drawn from its geometry: terrain in its own colours (illusions dashed),
 // updrafts with their lift, messages, the ending, enemies, labels and the start. `reach` overlays the
-// reach check's stand points for debugging.
+// reach check's stand points for debugging. `sky` gives the background gradient's three colours, from
+// the bottom of the map to its top.
 import { outline } from './course.mjs';
 
 const hex = (color) => `#${color.toString(16).padStart(6, '0')}`;
 const escape = (text) => text.replace(/[&<>"]/g, (character) => `&#${character.charCodeAt(0)};`);
+// Where the sky's three colours sit, from the bottom of the map to its top.
+const SKY_STOPS = [0, 0.7, 1];
+const COLOR = /^#[0-9a-f]{6}$/i;
 
-export function courseMap(level, options = {}) {
+export class CourseMapError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CourseMapError';
+  }
+}
+
+export function courseMap(level, options) {
+  const { sky } = options;
+  if (!Array.isArray(sky) || sky.length !== SKY_STOPS.length || !sky.every((color) => typeof color === 'string' && COLOR.test(color))) {
+    throw new CourseMapError(`A course map needs options.sky: ${SKY_STOPS.length} colours such as "#1d1b1f", from the bottom of the map to its top.`);
+  }
   const scale = options.scale ?? 6;
   const margin = 4;
   const terrain = level.objects.filter((object) => object.kind === 'terrain');
@@ -21,7 +36,8 @@ export function courseMap(level, options = {}) {
   const height = (top - bottom) * scale;
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width.toFixed(0)} ${height.toFixed(0)}" width="${width.toFixed(0)}" height="${height.toFixed(0)}" font-family="monospace" data-map="${escape(JSON.stringify({ left, top, scale }))}">`,
-    `<defs><linearGradient id="sky" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#1d1b1f"/><stop offset="0.7" stop-color="#2b2a33"/><stop offset="1" stop-color="#4a3f3a"/></linearGradient></defs>`,
+    `<defs><linearGradient id="sky" x1="0" y1="1" x2="0" y2="0">${SKY_STOPS.map((offset, index) =>
+      `<stop offset="${offset}" stop-color="${sky[index]}"/>`).join('')}</linearGradient></defs>`,
     `<rect width="100%" height="100%" fill="url(#sky)"/>`,
   ];
   for (const zone of options.zones ?? []) {

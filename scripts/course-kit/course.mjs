@@ -1,5 +1,5 @@
-// The level builder behind scripts/ashen-ascent/generate.mjs. Set pieces come from the Workshop's
-// library through placeSetPiece, so the example uses the library's own prefabs; everything else is
+// The level builder of a generated course (see docs/course-kit.md). Set pieces come from the Workshop's
+// library through placeSetPiece, so a course uses the library's own prefabs; everything else is
 // ordinary terrain, triggers, enemies and labels, grouped so the checks can tell them apart.
 
 // A small deterministic generator, so a seed always builds the same course.

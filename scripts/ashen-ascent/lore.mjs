@@ -36,6 +36,14 @@ export const TEXT = {
     title: 'The Drifting Keep',
     message: 'It drifts on air that should not hold it. Its guard never left the walls.\n\nThe ember waits above its highest tower.',
   },
+  phantomDare: {
+    title: 'Try jumping',
+    message: 'Written in pale light at the brink, by a hand that is barely there.\n\nThe ledge beyond looks solid enough.',
+  },
+  treasure: {
+    title: 'Treasure ahead',
+    message: 'A gilded chest, unguarded, in the middle of the courtyard.\n\nSurely whoever left it here meant well.',
+  },
   mimic: {
     title: 'It was a mimic',
     message: 'It was always a mimic.\n\nBut something stirs in the dark below: a draft, warm and upward.',

@@ -91,10 +91,19 @@ function plank(x1: number, y1: number, x2: number, y2: number, thickness: number
     length, thickness, Math.atan2(uy, ux), style);
 }
 
-function vent(centerX: number, bottom: number, lift: number, width = 2, height = 1.4): TriggerPart {
+interface VentOptions {
+  readonly width?: number;
+  readonly height?: number;
+  /** A hidden vent (`none`) shows no wind marker, so it surprises the player. */
+  readonly marker?: Extract<TriggerPart['marker'], 'updraft' | 'none'>;
+}
+
+function vent(centerX: number, bottom: number, lift: number, options: VentOptions = {}): TriggerPart {
+  const width = options.width ?? 2;
+  const height = options.height ?? 1.4;
   return {
     kind: 'trigger', name: 'Updraft', x: centerX, y: bottom + height / 2, region: { type: 'box', width, height },
-    activation: 'on-enter', marker: 'updraft', events: [{ type: 'launch-player', height: lift, strength: 1 }],
+    activation: 'on-enter', marker: options.marker ?? 'updraft', events: [{ type: 'launch-player', height: lift, strength: 1 }],
   };
 }
 
@@ -125,7 +134,9 @@ const sign = (x: number, y: number, text: string): LabelPart => ({ kind: 'label'
 interface Draft { readonly id: string; readonly category: SetPieceCategory; readonly name: string; readonly skill: string; readonly parts: readonly SetPiecePart[] }
 
 // Distances follow the rig: the shoulder sits about 1.15 m above the pot's base and a lip within about
-// 2.5 m of it can be pulled over; the pot slides on slopes steeper than about 49 degrees.
+// 2.5 m of it can be pulled over; the pot slides on slopes steeper than about 49 degrees. That limit is
+// atan(grip), with grip sqrt(terrain friction * pot friction), so a game with less friction slides sooner:
+// unless sliding is the point, keep every surface the pot must rest on at 30 degrees or flatter.
 const DRAFTS: readonly Draft[] = [
   {
     id: 'first-boulder', category: 'onboarding', name: 'First boulder',
@@ -232,6 +243,18 @@ const DRAFTS: readonly Draft[] = [
     ],
   },
   {
+    id: 'rotten-scaffold', category: 'vertical', name: 'Rotten scaffold',
+    skill: 'Zigzag up a wooden scaffold where two of the obvious boards are rotten and drop you: take the short sound board above you.',
+    parts: [
+      block(0, 2.2, 0.3, 6.8, { color: COLOR.bark, depth: 1 }), block(4.1, 0, 0.3, 8.7, { color: COLOR.bark, depth: 1 }),
+      block(1.6, 1.5, 2.5, 0.3, { color: COLOR.wood, depth: 1.2 }),
+      block(3, 3.3, 1.1, 0.3, { color: COLOR.wood, depth: 1.2 }), block(0.3, 3.3, 1.5, 0.3, { color: COLOR.wood, depth: 1.2, illusion: true }),
+      block(0.3, 5.1, 2.5, 0.3, { color: COLOR.wood, depth: 1.2 }),
+      block(0.3, 6.9, 1.1, 0.3, { color: COLOR.wood, depth: 1.2 }), block(2.6, 6.9, 1.5, 0.3, { color: COLOR.wood, depth: 1.2, illusion: true }),
+      block(1.6, 8.7, 2.8, 0.3, { color: COLOR.wood, depth: 1.2 }),
+    ],
+  },
+  {
     id: 'stepping-stones', category: 'gaps', name: 'Stepping stones',
     skill: 'Hop across narrow pillars without stopping to rebalance; a slip drops you to the floor.',
     parts: [
@@ -324,6 +347,14 @@ const DRAFTS: readonly Draft[] = [
     parts: [block(-0.3, 0, 0.6, 2.4, { color: COLOR.stone }), plank(-3.1603, 0, 2.202, 4.4995, 0.4)],
   },
   {
+    id: 'flying-buttress', category: 'balance', name: 'Flying buttress',
+    skill: 'Walk up a long, narrow beam rising 24 degrees over a sheer drop while a bird harries you: any knock throws you off.',
+    parts: [
+      block(0, 0, 2.2, 3, { color: COLOR.stone }), plank(2.2, 3, 12.2, 7.4, 0.5, { color: COLOR.stone }),
+      block(11.9986, 0, 2.2, 7.8577, { color: COLOR.stone }), bird(7.2, 7.4, 'left', 2.5),
+    ],
+  },
+  {
     id: 'pogo-pit', category: 'technique', name: 'Pogo pit',
     skill: 'Cross a pit whose floor is too deep to pull out of: fall in and you must pogo off the floor.',
     parts: [
@@ -365,6 +396,14 @@ const DRAFTS: readonly Draft[] = [
     id: 'kicker-ramp', category: 'technique', name: 'Kicker ramp',
     skill: 'Carry speed up a short ramp and launch off its lip onto a higher block.',
     parts: [rampUp(0, 0, 3, 1.6, { color: COLOR.stone }), block(6.2, 0, 3, 3.2)],
+  },
+  {
+    id: 'castle-window', category: 'technique', name: 'Castle window',
+    skill: 'Hook the sill of a narrow window in a thick wall, squeeze the pot and the hammer through, and drop to the ledge beyond.',
+    parts: [
+      block(0, 0, 1.4, 2.4, { color: COLOR.stone, depth: 2.4 }), block(0, 3.9, 1.4, 2.6, { color: COLOR.stone, depth: 2.4 }),
+      block(1.4, 0, 2.4, 1),
+    ],
   },
   {
     id: 'box-descent', category: 'descent', name: 'Box descent',
@@ -448,7 +487,16 @@ const DRAFTS: readonly Draft[] = [
     skill: 'Chain two vents, drifting onto each higher ledge before the next launch.',
     parts: [
       block(0.2, 0, 2, 0.25, { color: COLOR.metal }), vent(1.2, 0.25, 5),
-      block(2.6, 0, 2.2, 3.2), vent(3.7, 3.2, 5, 1.6), block(5.4, 0, 2.2, 6.4),
+      block(2.6, 0, 2.2, 3.2), vent(3.7, 3.2, 5, { width: 1.6 }), block(5.4, 0, 2.2, 6.4),
+    ],
+  },
+  {
+    id: 'crow-nest', category: 'forces', name: "Crow's nest",
+    skill: 'A nest of twigs on a pinnacle hides a strong draft that throws the pot up beside its column to a high ledge: a secret shortcut.',
+    parts: [
+      block(0, 0, 2, 1.6), block(2, 0, 2, 3.2, { color: COLOR.stone }),
+      peak(2, 3.2, 0.5, 0.45, { color: COLOR.bark, depth: 0.8 }), peak(3.5, 3.2, 0.5, 0.45, { color: COLOR.bark, depth: 0.8 }),
+      vent(3, 3.2, 15, { width: 1, height: 0.8, marker: 'none' }), block(4.4, 16.6, 2.6, 0.5, { color: COLOR.stone }),
     ],
   },
   {
@@ -478,6 +526,25 @@ const DRAFTS: readonly Draft[] = [
     ],
   },
   {
+    id: 'gargoyle-roof', category: 'enemies', name: 'Gargoyle roof',
+    skill: "Climb over a hall's pitched roof while two birds dive at you; hook the chimney by the ridge to hold on.",
+    parts: [
+      block(-1.8, 0, 2.4, 1.8, { color: COLOR.stone }), block(0.6, 0, 7.2, 3.6, { color: COLOR.brick }),
+      peak(0, 3.6, 8.4, 2.2, { color: COLOR.roof }), block(3.2, 5, 0.7, 1.4, { color: COLOR.roof, depth: 1 }),
+      block(7.8, 0, 2.4, 1.8, { color: COLOR.stone }),
+      bird(2.2, 6.4, 'right', 2), bird(6.4, 6.6, 'left', 2),
+    ],
+  },
+  {
+    id: 'hollow-bridge', category: 'enemies', name: 'Hollow bridge',
+    skill: 'Two hollow soldiers patrol a bridge without rails: fight them one at a time or slip past; a knock-back throws you off.',
+    parts: [
+      block(0, 0, 2.4, 4, { color: COLOR.stone }), block(2.4, 3.5, 10, 0.5, { color: COLOR.wood, depth: 1.2 }),
+      block(12.4, 0, 2.4, 4, { color: COLOR.stone }),
+      soldier(5, 4, 'right', 1.5), soldier(9.8, 4, 'left', 1.5),
+    ],
+  },
+  {
     id: 'the-fork', category: 'route', name: 'The fork',
     skill: 'A choice: drop into the valley and climb the steps, or gamble on a leap off the pole.',
     parts: [
@@ -500,6 +567,26 @@ const DRAFTS: readonly Draft[] = [
       block(0, 0, 4, 2.4), block(1, 2.4, 2, 0.8),
       note(2, 4.2, 1.2, 'False summit', 'Not the top yet. The real climb continues.', 'flag'),
       block(4, 0, 1.6, 6.8, { color: COLOR.stone }),
+    ],
+  },
+  {
+    id: 'phantom-dare', category: 'route', name: "Phantom's dare",
+    skill: 'A glowing message dares a leap to a floating ledge that is an illusion: climb out of the pit on the far holds, or hook the far lip before the ledge fades.',
+    parts: [
+      block(0, 0, 3, 4.2), block(3, 0, 6.4, 0.6, { color: COLOR.slate }),
+      block(5.4, 3.9, 2.2, 0.35, { color: COLOR.stone, illusion: true }), block(9.4, 0, 3, 5.4),
+      block(8.7, 2, 0.7, 0.3, { color: COLOR.stone }), block(8.7, 3.6, 0.7, 0.3, { color: COLOR.stone }),
+      note(2.4, 5.6, 1.4, 'Try jumping', 'A glowing message at the edge. Surely it is sincere.'),
+    ],
+  },
+  {
+    id: 'mimic-chest', category: 'route', name: 'Mimic chest',
+    skill: 'A chest on the path is an illusion over a shaft: hop over it, or fall in and ride the hidden draft back out.',
+    parts: [
+      block(0, 0, 3, 4), block(3, 0, 1.6, 0.4, { color: COLOR.slate }), block(4.6, 0, 3, 4),
+      block(3.05, 4, 1.5, 0.9, { color: COLOR.wood, depth: 1.2, illusion: true }),
+      vent(3.8, 0.4, 6, { width: 1.4, height: 1, marker: 'none' }),
+      note(1.5, 5.3, 1.2, 'Treasure ahead', 'A chest, left on the path. Surely it holds something.'),
     ],
   },
   {

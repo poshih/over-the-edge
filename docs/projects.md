@@ -23,7 +23,7 @@ GAME_PROJECT=examples/projects/lantern-cavern npm run build:game
 ```
 
 [`examples/projects/ashen-ascent`](../examples/projects/ashen-ascent) is a full-length
-souls-like game that places all 59 set pieces from the library along one climb to a
+souls-like game that places all 67 set pieces from the library along one climb to a
 castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 
 ## What a project contains
