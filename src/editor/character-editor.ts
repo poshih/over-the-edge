@@ -10,7 +10,10 @@ import type { AvatarJointId, CelOutline, CharacterShading, ShadingMode } from '.
 import { RIG } from '../config';
 import { ARM_LENGTH_LIMITS } from '../character-arms';
 import type { ArmLengths, CharacterArms } from '../character-arms';
-import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, HEAD_GRIP_MARGIN, SLIDE_AT_LIMITS } from '../grips';
+import {
+  DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_ROTATION_LIMITS, HEAD_GRIP_MARGIN, NO_GRIP_ROTATION, sameGripRotation,
+  SLIDE_AT_LIMITS,
+} from '../grips';
 import type { GripPlacement } from '../grips';
 import { HAMMER_MODEL_HANDLE, HAMMER_MODEL_HEAD_END } from '../hammer-handle-fit';
 import { clamp } from '../math';
@@ -64,6 +67,11 @@ const ARM_SEGMENTS = [
   { side: 'right', segment: 'forearm', label: 'Right forearm' },
 ] as const;
 const GRIP_SIDES = [{ side: 'left', label: 'Left hand grip' }, { side: 'right', label: 'Right hand grip' }] as const;
+const GRIP_ROTATION_AXES = [
+  { axis: 'x', about: 'the handle' },
+  { axis: 'y', about: 'the axis across the handle in the course plane' },
+  { axis: 'z', about: 'the axis toward the camera' },
+] as const;
 
 export function createCharacterEditor(options: {
   readonly mount: HTMLElement;
@@ -154,6 +162,18 @@ export function createCharacterEditor(options: {
             both hands just enough to bring them back within it. Lower slide points keep the hands nearer the
             shoulders; at 100% they slide only when an arm could not otherwise reach. Avatars, mesh parts and 2D
             grip targets use the same grips. Physics is unchanged. Save the character profile to keep them.</p>
+          <fieldset class="tuning-group character-grip-rotation">
+            <legend>Hand rotation</legend>
+            <div class="character-grip-rotation-controls"></div>
+            <button type="button" class="button character-grip-rotation-reset">Reset hand rotation</button>
+            <p class="appearance-format">Turns each 3D hand on its grip so its palm and fingers close around the
+              handle. X runs along the handle toward the head, Y across it in the course plane and Z toward the
+              camera. The axes follow the handle as it swings, and the hand pivots on its grip, turning about X,
+              then Y, then Z. Mesh parts and both avatars turn their hands; an imported avatar's rig turns its wrist
+              offset with them. Visual only. Save the character profile to keep it.</p>
+            <p class="appearance-format character-grip-rotation-inactive" hidden>Applies to Mesh parts and Avatar.
+              2D characters set wrist rotation on their IK chains in Sprites; the saved rotation is retained.</p>
+          </fieldset>
           <div class="character-handle-control"></div>
           <p class="appearance-format">The handle length is the game's, shared by every character: it is physics,
             also in Physics / Hammer rig, and changing it rebuilds the player and restarts the run.</p>
@@ -352,6 +372,8 @@ export function createCharacterEditor(options: {
   const shadingModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-shading-mode"]'));
   const gripModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-grips"]'));
   const gripReset = element<HTMLButtonElement>(root, '.character-grip-reset');
+  const gripRotationReset = element<HTMLButtonElement>(root, '.character-grip-rotation-reset');
+  const gripRotationInactive = element<HTMLParagraphElement>(root, '.character-grip-rotation-inactive');
   const armStatus = element<HTMLParagraphElement>(root, '.character-arm-length-status');
   const armReset = element<HTMLButtonElement>(root, '.character-arm-length-reset');
   const hammerGeometry = element<HTMLSpanElement>(root, '.character-hammer-geometry');
@@ -393,6 +415,22 @@ export function createCharacterEditor(options: {
     element(root, '.character-grip-controls').append(control.row);
     return { side, control };
   });
+  const gripRotationControls = GRIP_SIDES.flatMap(({ side }) => GRIP_ROTATION_AXES.map(({ axis, about }) => {
+    const hand = side === 'left' ? 'Left hand' : 'Right hand';
+    const control = createRangeControl({
+      ...GRIP_ROTATION_LIMITS, label: `${hand} ${axis.toUpperCase()}`, unit: 'deg',
+      description: `Turns the ${side} hand on its grip about ${about}.`,
+    }, {
+      id: `character-${side}-grip-rotation-${axis}`, name: `${side}GripRotation${axis.toUpperCase()}`, signal: events.signal,
+      onInput: value => {
+        const grips = options.state.snapshot().document.grips;
+        const rotation = { ...grips.rotation, [side]: { ...grips.rotation[side], [axis]: value } };
+        if (!options.state.setGrips({ ...grips, rotation })) render();
+      },
+    });
+    element(root, '.character-grip-rotation-controls').append(control.row);
+    return { side, axis, control };
+  }));
   const slidePoint = createRangeControl({
     min: SLIDE_AT_LIMITS.min * 100, max: SLIDE_AT_LIMITS.max * 100, step: SLIDE_AT_LIMITS.step * 100,
     label: 'Slide beyond', unit: '%',
@@ -461,8 +499,11 @@ export function createCharacterEditor(options: {
     }, listen);
   }
   gripReset.addEventListener('click', () => {
-    const { placement } = options.state.snapshot().document.grips;
-    options.state.setGrips({ ...DEFAULT_GRIPS, placement });
+    const { placement, rotation } = options.state.snapshot().document.grips;
+    options.state.setGrips({ ...DEFAULT_GRIPS, placement, rotation });
+  }, listen);
+  gripRotationReset.addEventListener('click', () => {
+    options.state.setGrips({ ...options.state.snapshot().document.grips, rotation: DEFAULT_GRIPS.rotation });
   }, listen);
   armReset.addEventListener('click', () => { options.state.setArms(null); }, listen);
   outlineEnabled.addEventListener('change', () => editShading({ outline: outlineEnabled.checked ? lastOutline : null }), listen);
@@ -582,6 +623,15 @@ export function createCharacterEditor(options: {
     slidePoint.setValue(Math.round(profile.grips.slideAt * 100), { disabled: disabled || profile.grips.placement === 'fixed' });
     gripReset.disabled = disabled || profile.grips.left === DEFAULT_GRIPS.left && profile.grips.right === DEFAULT_GRIPS.right &&
       profile.grips.slideAt === DEFAULT_GRIPS.slideAt;
+    // 2D characters keep their authored wrist rotation, like their authored sprite depths.
+    const rotationInactive = profile.characterRiggingType === 'sprite-2d';
+    const { rotation } = profile.grips;
+    for (const { side, axis, control } of gripRotationControls) {
+      control.setValue(rotation[side][axis], { disabled: disabled || rotationInactive });
+    }
+    gripRotationReset.disabled = disabled || rotationInactive ||
+      sameGripRotation(rotation.left, NO_GRIP_ROTATION) && sameGripRotation(rotation.right, NO_GRIP_ROTATION);
+    gripRotationInactive.hidden = !rotationInactive;
     const arms = shownArms(profile.arms);
     for (const { side, segment, control } of armControls) control.setValue(Number(arms[side][segment].toFixed(3)), { disabled });
     setText(armStatus, profile.arms === null ? 'Using this character type\'s own arm lengths.' :

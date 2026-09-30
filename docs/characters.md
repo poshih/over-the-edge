@@ -248,18 +248,22 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 13**. Every profile has `grips`: the placement, each
-hand's distance from the butt (0-3 m) and the slide point `slideAt`, a share of each
-arm's length (0.4-1). It also has `arms`, `null` for each type's own arm lengths or each
-side's `upper` and `forearm` (0.1-2 m). The model and shading fields below are present
-only while used.
+Profiles use **schema version 14**. Every profile has `grips`: the placement, each
+hand's distance from the butt (0-3 m), the slide point `slideAt`, a share of each
+arm's length (0.4-1), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
+and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It also has
+`arms`, `null` for each type's own arm lengths or each side's `upper` and `forearm`
+(0.1-2 m). The model and shading fields below are present only while used.
 
 ```json
 {
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
-  "grips": { "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85 },
+  "grips": {
+    "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85,
+    "rotation": { "left": { "x": 0, "y": 0, "z": 0 }, "right": { "x": 20, "y": 0, "z": -10 } }
+  },
   "arms": { "left": { "upper": 0.5, "forearm": 0.48 }, "right": { "upper": 0.5, "forearm": 0.48 } },
   "images": [], "layers": [], "skeleton": null, "presentation": null,
   "models": [
@@ -329,6 +333,9 @@ export default { apiVersion: AVATAR_RIG_API_VERSION, strategies: [strategy] } sa
 The module's default export is an `apiVersion` and its strategies. A strategy is trusted host
 code, not content: it is pure numeric code that never sees a scene, material or renderer, and
 frame plans are passed explicitly between phases; scratch belongs to one avatar, never a global.
+When the profile rotates a hand, the engine turns a copy of that side's frame plan about the
+hand's grip after phase 1: its `offset`, `shaft` and `forward` all turn, so the arms reach the
+turned wrist and phase 2 receives the turned plan. The plan phase 1 wrote is never rewritten.
 A module that is not an object, declares another API version, has malformed strategies, or duplicates
 an ID (including `standard`) fails with a typed `AvatarRigError`. The factory always supplies the
 standard strategy. Only a direct registry constructor that omits it produces `missing-standard`.

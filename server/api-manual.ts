@@ -3,7 +3,7 @@ import { ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS } from '../src/appearanc
 import { ART_LIMITS } from '../src/art-types';
 import { CHARACTER_RIGGING_TYPES, SPRITE_SCHEMA_VERSION } from '../src/sprite-data';
 import { ARM_LENGTH_LIMITS } from '../src/character-arms';
-import { GRIP_LIMITS, GRIP_PLACEMENTS, SLIDE_AT_LIMITS } from '../src/grips';
+import { GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_ROTATION_LIMITS, SLIDE_AT_LIMITS } from '../src/grips';
 import { VISUAL_PART_IDS } from '../src/character';
 import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
@@ -101,7 +101,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',
         patch: true,
-        description: `Export one from Workshop / Character. schemaVersion is ${SPRITE_SCHEMA_VERSION}; characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}; an imported avatar's driver is { "id", "config" }, naming the trusted rig strategy that interprets its bone map; grips is { placement: ${GRIP_PLACEMENTS.join(' | ')}, left, right, slideAt }: each hand's distance from the butt (${GRIP_LIMITS.min}-${GRIP_LIMITS.max} m) and, for sliding, the share of each arm's length a grip may be from its shoulder before the handle slides (${SLIDE_AT_LIMITS.min}-${SLIDE_AT_LIMITS.max}); arms is null for each type's own arm lengths, or { left: { upper, forearm }, right: { upper, forearm } } (${ARM_LENGTH_LIMITS.min}-${ARM_LENGTH_LIMITS.max} m). See docs/characters.md and docs/sprites.md.`,
+        description: `Export one from Workshop / Character. schemaVersion is ${SPRITE_SCHEMA_VERSION}; characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}; an imported avatar's driver is { "id", "config" }, naming the trusted rig strategy that interprets its bone map; grips is { placement: ${GRIP_PLACEMENTS.join(' | ')}, left, right, slideAt, rotation: { left: { x, y, z }, right: { x, y, z } } }: each hand's distance from the butt (${GRIP_LIMITS.min}-${GRIP_LIMITS.max} m), for sliding, the share of each arm's length a grip may be from its shoulder before the handle slides (${SLIDE_AT_LIMITS.min}-${SLIDE_AT_LIMITS.max}), and each 3D hand's turn on its grip in degrees (${GRIP_ROTATION_LIMITS.min} to ${GRIP_ROTATION_LIMITS.max}) about the handle (x), across it in the course plane (y) and toward the camera (z), applied in that order; arms is null for each type's own arm lengths, or { left: { upper, forearm }, right: { upper, forearm } } (${ARM_LENGTH_LIMITS.min}-${ARM_LENGTH_LIMITS.max} m). See docs/characters.md and docs/sprites.md.`,
       },
       'characters/alternate': { value: 'character profile JSON or null', patch: true, description: 'A second character players can switch to; needs a primary.' },
       'arm-ik': { value: 'body-relative elbow hints', patch: true, fields: ARM_IK_FIELDS.map((field) => ({ ...field, ...ARM_IK_LIMITS })) },

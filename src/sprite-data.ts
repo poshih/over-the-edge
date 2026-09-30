@@ -12,8 +12,8 @@ import {
 import type { CharacterAssets, CharacterModel } from './character-profile.ts';
 import { ARM_LENGTH_LIMITS } from './character-arms.ts';
 import type { ArmLengths, CharacterArms } from './character-arms.ts';
-import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, SLIDE_AT_LIMITS } from './grips.ts';
-import type { Grips } from './grips.ts';
+import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_ROTATION_LIMITS, SLIDE_AT_LIMITS } from './grips.ts';
+import type { GripRotation, Grips } from './grips.ts';
 import { number, record, SpriteError, text } from './sprite-fields.ts';
 import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
 
@@ -68,7 +68,7 @@ export interface CharacterPresentation extends CharacterAssets {
   readonly arms: CharacterArms | null;
 }
 
-export const SPRITE_SCHEMA_VERSION = 13;
+export const SPRITE_SCHEMA_VERSION = 14;
 
 export interface SpriteDocument extends CharacterPresentation {
   readonly schemaVersion: typeof SPRITE_SCHEMA_VERSION;
@@ -136,15 +136,27 @@ export function validateArmForwardDistance(value: unknown): number {
 }
 
 export function validateGrips(value: unknown): Grips {
-  const grips = record(value, ['placement', 'left', 'right', 'slideAt'], 'Hand grips');
+  const grips = record(value, ['placement', 'left', 'right', 'slideAt', 'rotation'], 'Hand grips');
   const placement = GRIP_PLACEMENTS.find(candidate => candidate === grips.placement);
   if (placement === undefined) throw new SpriteError(`Grip placement must be ${GRIP_PLACEMENTS.join(' or ')}.`);
+  const rotation = record(grips.rotation, ['left', 'right'], 'Hand rotation');
   return Object.freeze({
     placement,
     left: number(grips.left, GRIP_LIMITS.min, GRIP_LIMITS.max, 'Left hand grip'),
     right: number(grips.right, GRIP_LIMITS.min, GRIP_LIMITS.max, 'Right hand grip'),
     slideAt: number(grips.slideAt, SLIDE_AT_LIMITS.min, SLIDE_AT_LIMITS.max, 'Grip slide point'),
+    rotation: Object.freeze({
+      left: validateGripRotation(rotation.left, 'Left hand rotation'),
+      right: validateGripRotation(rotation.right, 'Right hand rotation'),
+    }),
   });
+}
+
+function validateGripRotation(value: unknown, label: string): GripRotation {
+  const rotation = record(value, ['x', 'y', 'z'], label);
+  const angle = (axis: 'x' | 'y' | 'z'): number =>
+    number(rotation[axis], GRIP_ROTATION_LIMITS.min, GRIP_ROTATION_LIMITS.max, `${label} ${axis.toUpperCase()}`);
+  return Object.freeze({ x: angle('x'), y: angle('y'), z: angle('z') });
 }
 
 export function validateArms(value: unknown): CharacterArms | null {

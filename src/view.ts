@@ -1,9 +1,9 @@
 import {
   ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry,
-  CanvasTexture, CircleGeometry, CylinderGeometry, DirectionalLight, ExtrudeGeometry,
-  Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial,
+  CanvasTexture, CircleGeometry, CylinderGeometry, DirectionalLight, Euler, ExtrudeGeometry,
+  Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial, MathUtils,
   Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera, PerspectiveCamera,
-  RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
+  Quaternion, RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
   Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D } from 'three';
@@ -13,8 +13,8 @@ import { DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
 import type { ArmChains, ArmPose } from './arm-ik';
 import type { ArmLengths, CharacterArms } from './character-arms';
-import { DEFAULT_GRIPS, placeGrips } from './grips';
-import type { GripDistances, Grips, GripShoulder } from './grips';
+import { DEFAULT_GRIPS, NO_GRIP_ROTATION, placeGrips, sameGripRotation } from './grips';
+import type { GripDistances, GripRotation, Grips, GripShoulder } from './grips';
 import { AvatarView } from './avatar-view';
 import { DEFAULT_AVATAR_RIGS, createArmSolutions, createFramePlan, createPose, projectGripShoulder } from './avatar-rig';
 import type {
@@ -217,6 +217,17 @@ function withArmLengths(chains: ArmChains, arms: CharacterArms | null): ArmChain
   });
 }
 
+// Toward the camera: the grip frame's Z in world space.
+const WORLD_FORWARD = Object.freeze(new Vector3(0, 0, 1));
+
+// A hand's grip rotation as a quaternion in its grip frame, or null for none, so unrotated hands do no
+// per-frame work. Three.js's 'ZYX' order composes Rz · Ry · Rx: X first, then Y, then Z, about fixed axes.
+function gripQuaternion(rotation: GripRotation): Quaternion | null {
+  if (sameGripRotation(rotation, NO_GRIP_ROTATION)) return null;
+  return new Quaternion().setFromEuler(new Euler(
+    MathUtils.degToRad(rotation.x), MathUtils.degToRad(rotation.y), MathUtils.degToRad(rotation.z), 'ZYX'));
+}
+
 function disposeResources(...roots: Object3D[]): void {
   const geometries = new Set<BufferGeometry>();
   const materials = new Set<Material>();
@@ -289,6 +300,18 @@ export class GameView {
   private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private grips: Grips = DEFAULT_GRIPS;
   private readonly gripDistances: GripDistances = { left: 0, right: 0 };
+  // Each hand's grip rotation in its grip frame, or null for none.
+  private gripRotations: Record<ArmSide, Quaternion | null> = { left: null, right: null };
+  // Scratch for turning a grip rotation into another space, and each glove's world-space turn this frame.
+  private readonly gripBasis = new Matrix4();
+  private readonly gripFrame = new Quaternion();
+  private readonly gripAcross = new Vector3();
+  private readonly gripTurn = new Quaternion();
+  private readonly gloveTurns: Record<ArmSide, Quaternion | null> = { left: null, right: null };
+  private readonly gloveTurnScratch: Record<ArmSide, Quaternion> = { left: new Quaternion(), right: new Quaternion() };
+  // A prepared rig's frame plan as the grip rotations turn it: the view's own copy, so a strategy's plan,
+  // which may carry its state between frames, is never rewritten.
+  private readonly turnedPlan: AvatarRigFramePlan = createFramePlan();
   // Each shoulder against the handle, refreshed every frame for the grip placement.
   private readonly gripShoulders: Record<ArmSide, GripShoulder> = {
     left: { along: 0, aside2: 0, arm: 0 }, right: { along: 0, aside2: 0, arm: 0 },
@@ -865,6 +888,11 @@ export class GameView {
     this.armChains = withArmLengths(imported?.chains ?? DEFAULT_ARM_CHAINS, presentation.arms);
     this.grips = presentation.grips;
     this.spriteArms = type === 'sprite-2d';
+    // 2D characters keep the wrist rotation authored on their IK chains, and their art hangs from these
+    // hand anchors, so only 3D hands turn on their grips.
+    const rotation = this.spriteArms ? null : this.grips.rotation;
+    this.gripRotations = rotation === null ? { left: null, right: null }
+      : { left: gripQuaternion(rotation.left), right: gripQuaternion(rotation.right) };
     // Shading styles Avatar mode: the connected character and its separate pot and hammer.
     this.shading.apply(presentation.shading ?? DEFAULT_CHARACTER_SHADING, avatarMode);
   }
@@ -932,8 +960,8 @@ export class GameView {
     // sprite avatars take the world-space poses directly.
     if (this.avatarRenderer instanceof SkinnedAvatarView) {
       this.avatarRenderer.apply(this.torso.matrixWorld, this.headAim.rotation, this.activeAvatar!.pose);
-    } else {
-      this.avatarRenderer?.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
+    } else if (this.avatarRenderer !== null) {
+      this.avatarRenderer.update(this.torso.matrixWorld, armPoses, this.headAim.rotation, this.turnGloves());
     }
     // The one-model hammer follows the physical tool frame; its handle is fitted to the rig, not per frame.
     this.propModels.hammer?.update(this.toolFrame);
@@ -1412,8 +1440,9 @@ export class GameView {
     const shaftAxis = this.gripAxis.set(cos, sin, 0);
     const slot = this.slots[this.activeSlot]!;
     const prepared = this.activeAvatar;
-    // Phase 1: the prepared rig writes each side's wrist target track before grips are placed.
-    if (prepared !== null) this.frameAvatarRig(prepared, body, tool, cos, sin, shaftLength, options.dt);
+    // Phase 1: the prepared rig writes each side's wrist target track before grips are placed; the arms
+    // then follow that plan as the grip rotations turn it.
+    const plan = prepared === null ? null : this.frameAvatarRig(prepared, body, tool, cos, sin, shaftLength, options.dt);
     // Every arm reaches from the body's shoulders with the lengths it is drawn at. A 2D arm chain that targets
     // a hand's grip reaches in the drawing plane, at its authored lengths unless the profile has its own; every
     // other arm reaches forward to the tool's depth.
@@ -1423,7 +1452,7 @@ export class GameView {
       const local = chains[side].shoulder;
       const shoulder = this.gripShoulder.set(local[0], local[1], local[2]);
       // Reach is measured to the wrist, which a rig may hold off the handle's contact point.
-      if (prepared !== null) shoulder.sub(prepared.plan[side].offset);
+      if (plan !== null) shoulder.sub(plan[side].offset);
       shoulder.applyMatrix4(body);
       if (sprite !== null) shoulder.z = butt.z;
       const lengths = sprite !== null && slot.presentation.arms === null ? sprite : chains[side];
@@ -1438,10 +1467,10 @@ export class GameView {
       const chain = chains[side];
       const grip = this.gripDistances[side];
       const hand = new Vector3(grip, 0, 0).applyMatrix4(tool);
-      if (prepared !== null) {
+      if (plan !== null) {
         // The IK reaches the wrist, not the contact point, so the palm and its grip can differ.
         this.wristAvatar.copy(this.avatarButt).addScaledVector(this.avatarShaft, grip);
-        this.handAvatar.copy(this.wristAvatar).add(prepared.plan[side].offset).applyMatrix4(body);
+        this.handAvatar.copy(this.wristAvatar).add(plan[side].offset).applyMatrix4(body);
         hand.copy(this.handAvatar);
       }
       const pose = solveArmPose(side, {
@@ -1461,20 +1490,24 @@ export class GameView {
       arm.elbow.position.copy(pose.elbow);
       arm.hand.position.copy(pose.hand);
       arm.hand.rotation.set(0, 0, options.shaftAngle);
+      // A mesh-part hand's own frame is its grip frame, so its rotation applies there.
+      const rotation = this.gripRotations[side];
+      if (rotation !== null) arm.hand.quaternion.multiply(rotation);
       poses.push(pose);
     }
-    // Phase 2: the prepared rig composes its mapped-joint matrices from the plan it wrote and these solutions.
-    if (prepared !== null) {
+    // Phase 2: the prepared rig composes its mapped-joint matrices from the turned plan and these solutions.
+    if (prepared !== null && plan !== null) {
       prepared.rig.writePose({
-        body, inverseBody: this.inverseBody, plan: prepared.plan, arms: this.solutions, dt: options.dt,
+        body, inverseBody: this.inverseBody, plan, arms: this.solutions, dt: options.dt,
       }, prepared.pose);
     }
     return poses;
   }
 
   // Phase 1 inputs for a prepared rig: the tool frame and the standard hand directions, in avatar space.
+  // Returns the plan the arms follow: the rig's own, or the view's copy turned about each rotated hand's grip.
   private frameAvatarRig(prepared: PreparedAvatar, body: Matrix4, tool: Matrix4, cos: number, sin: number,
-    shaftLength: number, dt: number): void {
+    shaftLength: number, dt: number): AvatarRigFramePlan {
     this.inverseBody.copy(body).invert();
     this.avatarTool.copy(this.inverseBody).multiply(tool);
     this.avatarButt.setFromMatrixPosition(this.avatarTool);
@@ -1484,6 +1517,41 @@ export class GameView {
       body, inverseBody: this.inverseBody, tool: this.avatarTool,
       shaftAxis: this.avatarShaft, forward: this.avatarForward, shaftLength, dt,
     }, prepared.plan);
+    if (this.gripRotations.left === null && this.gripRotations.right === null) return prepared.plan;
+    for (const side of ARM_SIDES) {
+      const track = prepared.plan[side];
+      const turned = this.turnedPlan[side];
+      turned.offset.copy(track.offset);
+      turned.shaft.copy(track.shaft);
+      turned.forward.copy(track.forward);
+      const rotation = this.gripRotations[side];
+      if (rotation === null) continue;
+      // The wrist swings about the grip with the hand, so a rig's wrist offset turns too.
+      const turn = this.turnAboutGrip(rotation, this.avatarShaft, this.avatarForward, this.gripTurn);
+      turned.offset.applyQuaternion(turn);
+      turned.shaft.applyQuaternion(turn);
+      turned.forward.applyQuaternion(turn);
+    }
+    return this.turnedPlan;
+  }
+
+  // Each rotated glove's turn about its grip in world space, where the grip frame follows the tool's shaft
+  // axis this frame, for the built-in avatar.
+  private turnGloves(): Readonly<Record<ArmSide, Quaternion | null>> {
+    for (const side of ARM_SIDES) {
+      const rotation = this.gripRotations[side];
+      this.gloveTurns[side] = rotation === null ? null
+        : this.turnAboutGrip(rotation, this.gripAxis, WORLD_FORWARD, this.gloveTurnScratch[side]);
+    }
+    return this.gloveTurns;
+  }
+
+  // `rotation`, given in a hand's grip frame, as a turn in the space where that frame's X (the handle,
+  // toward the head) is `shaft` and its Z (toward the camera) is `forward`.
+  private turnAboutGrip(rotation: Quaternion, shaft: Vector3, forward: Vector3, out: Quaternion): Quaternion {
+    this.gripAcross.crossVectors(forward, shaft);
+    this.gripFrame.setFromRotationMatrix(this.gripBasis.makeBasis(shaft, this.gripAcross, forward));
+    return out.copy(this.gripFrame).multiply(rotation).multiply(this.gripFrame.invert());
   }
 
   // Phase 2 inputs: the solved arm in avatar space, with `wrist` the actual IK target.

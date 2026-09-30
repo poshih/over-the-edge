@@ -473,10 +473,13 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "characterRiggingType": "sprite-2d",
   "armForwardDistance": 0.25,
-  "grips": { "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85 },
+  "grips": {
+    "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85,
+    "rotation": { "left": { "x": 0, "y": 0, "z": 0 }, "right": { "x": 0, "y": 0, "z": 0 } }
+  },
   "arms": null,
   "presentation": null,
   "skeleton": null,
@@ -524,11 +527,13 @@ Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
-Profiles use **schema version 13**; any other version is rejected, not converted.
+Profiles use **schema version 14**; any other version is rejected, not converted.
 `characterRiggingType` is `sprite-2d`, `model-3d` or `avatar-3d`;
-`armForwardDistance` is 0-2 m; `grips` is `{ "placement", "left", "right", "slideAt" }`, the
-placement (`fixed` or `sliding`), each hand's distance from the butt (0-3 m) and the share of
-each arm's length a sliding hand may be from its shoulder before the handle slides (0.4-1);
+`armForwardDistance` is 0-2 m; `grips` is `{ "placement", "left", "right", "slideAt", "rotation" }`, the
+placement (`fixed` or `sliding`), each hand's distance from the butt (0-3 m), the share of
+each arm's length a sliding hand may be from its shoulder before the handle slides (0.4-1) and each
+3D hand's turn on its grip, `{ "left": { "x", "y", "z" }, "right": {...} }` in degrees (-180 to 180),
+which 2D grip targets ignore;
 `arms` is `null` or each side's `upper` and `forearm` length (0.1-2 m). The optional
 `models`, `avatar`, `hammer`, `pot` and `shading` fields for
 [imported 3D characters](characters.md) are present only while used.

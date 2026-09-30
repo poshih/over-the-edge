@@ -841,7 +841,7 @@ profile's [grips](#hand-grips) on the physical tool, with its [arm lengths](#arm
 The choice is stored as `characterRiggingType` in the character/sprite profile.
 Changing it retains the other artwork, but does not silently save it. Use the
 profile's **Save**, **Revert**, and JSON controls. Profiles use **schema version
-13**; profiles in any other version are rejected, not converted.
+14**; profiles in any other version are rejected, not converted.
 
 Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend
@@ -960,10 +960,21 @@ more than a millimetre along it. It costs the same every frame. The same section
 length** is the game's [hammer rig](#game-settings) setting, shown here too: it is shared by every
 character, and changing it restarts the run.
 
-Grips are saved as `grips: { "placement", "left", "right", "slideAt" }` in the character profile,
-with `slideAt` a fraction (0.4-1), so each character keeps its own; Mesh parts, both avatars and
-the 2D `left-grip` and `right-grip` targets share them. Grips are presentation: physics, input and
-the hammer models never read them.
+**Hand rotation**, in the same section, turns each 3D hand on its grip so its palm and fingers
+close around the handle. Each hand has **X**, **Y** and **Z** sliders from -180° to 180°, all 0 by
+default. X runs along the handle toward the head, Y across it in the course plane and Z toward the
+camera. The axes follow the handle as it swings, and the hand pivots on its grip, turning about X,
+then Y, then Z. Mesh-part hands, the built-in avatar's gloves and an imported avatar's hand bones
+turn; when an imported avatar's [rig strategy](docs/characters.md#rig-strategies) holds the wrist
+off the handle, that wrist swings about the grip too and the arm follows it. 2D characters keep the
+wrist rotation authored on their IK chains in Sprites. **Reset hand rotation** returns both hands
+to 0, and **Reset hand grips** leaves them. An unrotated hand does no extra work per frame.
+
+Grips are saved as `grips: { "placement", "left", "right", "slideAt", "rotation" }` in the character
+profile, with `slideAt` a fraction (0.4-1) and `rotation` each hand's `{ "x", "y", "z" }` in degrees
+(`{ "left": {...}, "right": {...} }`), so each character keeps its own; Mesh parts, both avatars and
+the 2D `left-grip` and `right-grip` targets share the grip positions, and the 2D targets ignore
+`rotation`. Grips are presentation: physics, input and the hammer models never read them.
 
 ### Arm lengths
 

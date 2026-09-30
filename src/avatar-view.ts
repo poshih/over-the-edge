@@ -91,14 +91,14 @@ export class AvatarView {
     this.mesh.bind(this.skeleton, this.mesh.matrixWorld);
   }
 
-  update(body: Matrix4, poses: readonly ArmPose[], headRotation: Quaternion): void {
+  // `turns` rotates each glove about its grip in world space, or is null for a glove that keeps the tool's frame.
+  update(body: Matrix4, poses: readonly ArmPose[], headRotation: Quaternion,
+    turns: Readonly<Record<ArmSide, Quaternion | null>>): void {
     this.root.matrix.copy(body);
     this.root.matrixWorldNeedsUpdate = true;
     this.head.matrix.makeRotationFromQuaternion(headRotation).setPosition(0, AVATAR_BIND.headY, 0);
     this.head.matrixWorldNeedsUpdate = true;
     this.inverseBody.copy(body).invert();
-    // The tool's shaft lies in the world's XY plane; keep the glove's front facing world +Z.
-    this.handForward.fromArray(AVATAR_BIND.handForward).transformDirection(this.inverseBody);
     for (let index = 0; index < poses.length; index++) {
       const pose = poses[index];
       const arm = this.arms[pose.side];
@@ -106,7 +106,16 @@ export class AvatarView {
       this.elbow.copy(pose.elbow).applyMatrix4(this.inverseBody);
       this.hand.copy(pose.hand).applyMatrix4(this.inverseBody);
       this.armNormal.copy(pose.normal).transformDirection(this.inverseBody);
-      this.shaft.copy(pose.shaftAxis).transformDirection(this.inverseBody);
+      // The tool's shaft lies in the world's XY plane; the glove's front faces world +Z unless it is turned.
+      this.shaft.copy(pose.shaftAxis);
+      this.handForward.fromArray(AVATAR_BIND.handForward);
+      const turn = turns[pose.side];
+      if (turn !== null) {
+        this.shaft.applyQuaternion(turn);
+        this.handForward.applyQuaternion(turn);
+      }
+      this.shaft.transformDirection(this.inverseBody);
+      this.handForward.transformDirection(this.inverseBody);
       limbFrame(this.upperFrame, this.shoulder, this.elbow, this.armNormal, ARM_LENGTH.upper);
       limbFrame(this.forearmFrame, this.elbow, this.hand, this.armNormal, ARM_LENGTH.forearm);
       handFrame(this.handMatrix, this.hand, this.shaft, this.handForward);

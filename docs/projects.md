@@ -69,7 +69,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [], "decorations": {} },
@@ -100,7 +100,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 4, "labels": [], "objects": [] },
