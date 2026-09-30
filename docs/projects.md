@@ -164,13 +164,27 @@ strategies with `AVATAR_RIG_MODULE`; see [rig strategies](characters.md#rig-stra
 ## Working in the Workshop
 
 **Workshop / Project** shows the game title and whether the page holds a local
-project or one from the project server, plus which sections have unsaved changes.
+project or one from the project server, plus how far saving has got.
+
+A server project saves itself: about a second after you stop adjusting something, in
+any tab, the changed sections are written to the project's files. The status says
+*saving shortly*, *saving…* or *every change saved*. Leaving the page saves at once,
+and the browser warns if something could not be saved yet.
+
+- A section that cannot be saved yet holds back only itself. The status and one message
+  say why, for example a character profile that does not validate or a level naming a
+  missing media file, and the section saves as soon as you fix it.
+- An unfinished outline and trigger event edits not yet applied are not part of the
+  level, so they save once finished or applied.
+- If the server cannot be reached, saving tries again every few seconds.
 
 - **Open project** loads a server project into every editor at once: the level,
   physics, character profile, appearance models, arm IK and all project sections.
-  The page remembers it and reopens it after a reload.
-- **Save project** writes only the changed sections. **Save as project ID** stores
-  the whole game as a new project (or replaces the project with that ID).
+  The page remembers it and reopens it after a reload. A Workshop started with a
+  project that the project server holds (`GAME_PROJECT=projects/<id>` under
+  `npm run dev` or `npm run studio`) opens that server project at start instead.
+- **Save as project ID** stores the whole game as a new project (or replaces the
+  project with that ID), which then saves itself.
 - **New project** starts from the built-in course and defaults.
 - **Export project file** downloads the whole game as one bundle; **Import project
   file** replaces the Workshop's game with one. Both work without a server.
@@ -191,11 +205,15 @@ page's current game, its sprite draft and its browser-saved appearance models; t
 Workshop asks first when there are unsaved changes.
 
 While a server project is open, the page checks the server every two seconds.
-Sections changed on the server, for example by a script or a language model, load
-automatically when you have not changed them; level changes arrive as incremental
-edits, so a playtest keeps going. A section changed on both sides is reported as a
-conflict and kept as you edited it: **Save project** then overwrites the server's
-version, and **Open project** takes it instead.
+Sections changed on the server, for example by a script, a language model or a tool
+editing the project's files directly, load automatically when you have not changed
+them; level changes arrive as incremental edits, so a playtest keeps going.
+
+A section changed on both sides is a conflict. It is kept as you edited it and does not
+save until you choose, in Project:
+
+- **Keep my version** saves yours over the project's.
+- **Use the project's** replaces yours.
 
 The editor HUD previews the project's HUD labels and units. Opening a project runs
 its level like any imported level, including intro events.
@@ -239,7 +257,11 @@ Workshop build is unchanged.
   the `levels/` folder's levels. Loading the project's level brings it back after trying another
   one, without discarding the project's other changes.
 - **Project server.** Under `npm run dev` or `npm run studio`, a remembered server project
-  still opens first, and opening or saving a server project removes the browser copy.
+  still opens first, then the server's copy of the published project when the server holds
+  it; either way every change saves to the server.
+  - Opening or saving a server project removes the browser copy.
+  - A browser copy that still holds unsaved changes waits in Project instead: **Restore into
+    the project** loads them, replacing those sections, and **Discard them** removes them.
 
 **Workshop / Project** says what the page holds: the published project, an older version of
 it or another local project, and whether it is kept in this browser. A site has one copy,
@@ -298,6 +320,10 @@ Conventions:
 - Sections have revisions: `GET` returns `ETag: "<revision>"`, and a change with
   `If-Match` fails with `412` if the section changed meanwhile.
   `GET /api/projects/{id}/revision` is a cheap poll.
+- Editing a project's files directly (by a tool, an editor or version control) counts
+  too. Every read notices a section whose part of `project.json` or whose files changed
+  since the server last counted it, and bumps its revision. The server keeps that
+  bookkeeping in the project's `.studio.json`.
 - Upload files before referencing them. Deleting a file that is still used fails
   with `409`.
 

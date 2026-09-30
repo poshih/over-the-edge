@@ -1,11 +1,11 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   loadProjectContent, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, validateProjectId,
   validateProjectManifest,
 } from '../src/project';
-import type { ProjectContent, ProjectFileRef, ProjectManifest } from '../src/project';
+import type { ProjectContent, ProjectFileKind, ProjectFileRef, ProjectManifest } from '../src/project';
 import { HttpError } from './http';
 
 // API sections; each has its own revision so concurrent editors only conflict on what they share.
@@ -20,6 +20,38 @@ export interface ProjectState {
   readonly sections: Readonly<Record<SectionName, number>>;
   readonly updatedAt: string;
 }
+
+// The state file also records what each section's stored content was when the store last counted it, so a change
+// made outside the API (a tool, an editor or version control writing the files) is counted too. Null until first seen.
+interface StoredState extends ProjectState {
+  readonly observed: Readonly<Record<SectionName, string>> | null;
+}
+
+// Each section's stored content: its part of the manifest (null for one kept only in files) and the files it owns.
+const SECTION_MANIFEST: Readonly<Record<SectionName, (manifest: ProjectManifest) => unknown>> = {
+  title: (manifest) => manifest.title,
+  level: () => null,
+  settings: (manifest) => manifest.settings,
+  'characters/primary': (manifest) => manifest.characters.primary,
+  'characters/alternate': (manifest) => manifest.characters.alternate,
+  'arm-ik': (manifest) => manifest.armIk,
+  appearance: (manifest) => manifest.appearance,
+  models: (manifest) => manifest.models,
+  theme: (manifest) => manifest.theme,
+  hud: (manifest) => manifest.hud,
+  audio: (manifest) => manifest.audio,
+  enemies: (manifest) => manifest.enemies,
+  art: (manifest) => manifest.art,
+  media: (manifest) => manifest.media,
+};
+const FILE_SECTIONS: Readonly<Record<ProjectFileKind, (path: string) => SectionName>> = {
+  level: () => 'level',
+  character: (path) => path === PROJECT_FILES.primary ? 'characters/primary' : 'characters/alternate',
+  art: () => 'art',
+  appearance: () => 'appearance',
+  model: () => 'models',
+  media: () => 'media',
+};
 
 export interface ProjectChange {
   readonly manifest?: ProjectManifest;
@@ -41,11 +73,25 @@ export interface ProjectSummary {
 const STATE_FILE = '.studio.json';
 const FILE_PATTERN = /^(?:project\.json|level\.json|characters\/(?:primary|alternate)\.json|art\/asset-[a-f0-9]{64}\.glb|appearance\/[a-z-]+\.glb|models\/(?:avatar|hammer|pot)\/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.glb|media\/[a-z0-9][a-z0-9._-]*)$/;
 
-function initialState(): ProjectState {
+function initialState(): StoredState {
   return {
-    revision: 1, updatedAt: new Date().toISOString(),
+    revision: 1, updatedAt: new Date().toISOString(), observed: null,
     sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, 1])) as Record<SectionName, number>,
   };
+}
+
+// Each section's stored content in `directory` as a short signature: its part of the manifest and, for every file it
+// owns, the file's size and modification time in nanoseconds, which any write changes. Costs one stat per file.
+async function signatures(directory: string, manifest: ProjectManifest): Promise<Record<SectionName, string>> {
+  const parts = Object.fromEntries(SECTION_NAMES.map((name) => [name, [SECTION_MANIFEST[name](manifest)]])) as Record<SectionName, unknown[]>;
+  for (const ref of projectFileRefs(manifest)) {
+    const found = await stat(join(directory, ...ref.path.split('/')), { bigint: true }).then(
+      (file) => `${file.size}:${file.mtimeNs}`,
+      (error: unknown) => { if (missing(error)) return 'missing'; throw error; });
+    parts[FILE_SECTIONS[ref.kind](ref.path)]!.push(ref.path, found);
+  }
+  return Object.fromEntries(SECTION_NAMES.map((name) =>
+    [name, createHash('sha256').update(JSON.stringify(parts[name])).digest('hex')])) as Record<SectionName, string>;
 }
 
 function missing(error: unknown): boolean {
@@ -64,7 +110,10 @@ async function atomicWrite(path: string, data: string | Uint8Array): Promise<voi
   }
 }
 
-/** Projects stored as directories: project.json, its referenced files, and revision state. */
+/**
+ * Projects stored as directories: project.json, its referenced files, and revision state. Every read counts sections
+ * whose files changed outside the API as changed, so pages reload them instead of overwriting them.
+ */
 export class ProjectStore {
   readonly root: string;
   private readonly locks = new Map<string, Promise<void>>();
@@ -116,9 +165,28 @@ export class ProjectStore {
   }
 
   async read(id: string): Promise<{ manifest: ProjectManifest; state: ProjectState }> {
+    return this.locked(id, () => this.current(id));
+  }
+
+  // The manifest and its state under the project's lock, with sections whose stored content changed since the store
+  // last counted them (by the signatures above) counted as changed; the state file keeps that bookkeeping.
+  private async current(id: string): Promise<{ manifest: ProjectManifest; state: StoredState }> {
     const directory = this.directory(id);
-    // Commits write data before state; reading state first keeps a revision from describing newer data.
-    const state = await this.state(directory);
+    const recorded = await this.state(directory);
+    const manifest = await this.manifest(id);
+    const observed = await signatures(directory, manifest);
+    const changed = recorded.observed === null ? [] : SECTION_NAMES.filter((name) => recorded.observed![name] !== observed[name]);
+    if (recorded.observed !== null && changed.length === 0) return { manifest, state: recorded };
+    const sections = { ...recorded.sections };
+    for (const name of changed) sections[name] += 1;
+    const state: StoredState = changed.length === 0 ? { ...recorded, observed }
+      : { revision: recorded.revision + 1, sections, updatedAt: new Date().toISOString(), observed };
+    await atomicWrite(join(directory, STATE_FILE), `${JSON.stringify(state)}\n`);
+    return { manifest, state };
+  }
+
+  private async manifest(id: string): Promise<ProjectManifest> {
+    const directory = this.directory(id);
     let text: string;
     try {
       const path = join(directory, PROJECT_FILES.manifest);
@@ -135,7 +203,7 @@ export class ProjectStore {
       if (!(error instanceof SyntaxError)) throw error;
       throw new ProjectError(`project.json is not valid JSON: ${error.message}`);
     }
-    return { manifest: validateProjectManifest(value), state };
+    return validateProjectManifest(value);
   }
 
   async readJson(id: string, ref: Pick<ProjectFileRef, 'path' | 'maxBytes'>): Promise<unknown> {
@@ -169,19 +237,18 @@ export class ProjectStore {
   }
 
   // Reads and fully validates every referenced file.
-  async content(id: string, manifest?: ProjectManifest): Promise<ProjectContent> {
-    const current = manifest ?? (await this.read(id)).manifest;
+  async content(id: string, manifest: ProjectManifest): Promise<ProjectContent> {
     const values = new Map<string, unknown>();
-    for (const ref of projectFileRefs(current)) {
+    for (const ref of projectFileRefs(manifest)) {
       values.set(ref.path, ref.binary ? new Uint8Array(await this.readBytes(id, ref)) : await this.readJson(id, ref));
     }
-    return loadProjectContent(current, (ref) => values.get(ref.path));
+    return loadProjectContent(manifest, (ref) => values.get(ref.path));
   }
 
   // A consistent copy of the whole project with its revision, taken while no change can commit.
   async snapshot(id: string): Promise<{ content: ProjectContent; state: ProjectState }> {
     return this.locked(id, async () => {
-      const { manifest, state } = await this.read(id);
+      const { manifest, state } = await this.current(id);
       return { content: await this.content(id, manifest), state };
     });
   }
@@ -190,9 +257,9 @@ export class ProjectStore {
   async mutate<T>(id: string, change: (current: { manifest: ProjectManifest; state: ProjectState }) =>
     Promise<ProjectChange & { readonly result?: T }>): Promise<{ state: ProjectState; result: T | undefined }> {
     return this.locked(id, async () => {
-      const current = await this.read(id);
+      const current = await this.current(id);
       const next = await change(current);
-      const state = await this.commit(id, current.state, next);
+      const state = await this.commit(id, current, next);
       return { state, result: next.result };
     });
   }
@@ -203,7 +270,7 @@ export class ProjectStore {
       const directory = this.directory(id);
       let previous: ProjectState | null = null;
       try {
-        previous = (await this.read(id)).state;
+        previous = (await this.current(id)).state;
       } catch (error) {
         if (!(error instanceof HttpError && error.status === 404)) {
           if (!options.replace) throw error;
@@ -223,8 +290,9 @@ export class ProjectStore {
         }
         await atomicWrite(join(staging, PROJECT_FILES.manifest), `${JSON.stringify(content.manifest, null, 2)}\n`);
         const base = previous ?? { ...initialState(), revision: 0, sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, 0])) as Record<SectionName, number> };
-        const state: ProjectState = {
-          revision: base.revision + 1, updatedAt: new Date().toISOString(),
+        // Renaming the staging folder keeps its files' sizes and times, so they are signed here.
+        const state: StoredState = {
+          revision: base.revision + 1, updatedAt: new Date().toISOString(), observed: await signatures(staging, content.manifest),
           sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, base.sections[name] + 1])) as Record<SectionName, number>,
         };
         await atomicWrite(join(staging, STATE_FILE), `${JSON.stringify(state)}\n`);
@@ -242,24 +310,27 @@ export class ProjectStore {
 
   async remove(id: string): Promise<void> {
     await this.locked(id, async () => {
-      await this.read(id);
+      await this.current(id);
       const trash = join(this.root, `.trash-${id}-${randomBytes(6).toString('hex')}`);
       await rename(this.directory(id), trash);
       await rm(trash, { recursive: true, force: true });
     });
   }
 
-  private async state(directory: string): Promise<ProjectState> {
+  private async state(directory: string): Promise<StoredState> {
     try {
       const value: unknown = JSON.parse(await readFile(join(directory, STATE_FILE), 'utf8'));
       if (typeof value === 'object' && value !== null && typeof Reflect.get(value, 'revision') === 'number') {
         const sections = Reflect.get(value, 'sections') as Record<string, unknown> | undefined;
+        const observed = Reflect.get(value, 'observed') as Record<string, unknown> | null | undefined;
         const base = initialState();
         return {
           revision: Reflect.get(value, 'revision') as number,
           updatedAt: typeof Reflect.get(value, 'updatedAt') === 'string' ? Reflect.get(value, 'updatedAt') as string : base.updatedAt,
           sections: Object.fromEntries(SECTION_NAMES.map((name) =>
             [name, typeof sections?.[name] === 'number' ? sections[name] : 1])) as Record<SectionName, number>,
+          observed: typeof observed === 'object' && observed !== null && SECTION_NAMES.every((name) => typeof observed[name] === 'string')
+            ? Object.fromEntries(SECTION_NAMES.map((name) => [name, observed[name] as string])) as Record<SectionName, string> : null,
         };
       }
     } catch (error) {
@@ -269,7 +340,8 @@ export class ProjectStore {
     return initialState();
   }
 
-  private async commit(id: string, state: ProjectState, change: ProjectChange): Promise<ProjectState> {
+  private async commit(id: string, current: { manifest: ProjectManifest; state: StoredState }, change: ProjectChange): Promise<ProjectState> {
+    const { state } = current;
     if (change.sections.length === 0) return state;
     for (const [path, value] of change.json ?? []) {
       await atomicWrite(this.filePath(id, path), path === PROJECT_FILES.level ? `${JSON.stringify(value, null, 2)}\n` : JSON.stringify(value));
@@ -281,7 +353,10 @@ export class ProjectStore {
     for (const path of change.remove ?? []) await rm(this.filePath(id, path), { force: true });
     const sections = { ...state.sections };
     for (const name of new Set(change.sections)) sections[name] += 1;
-    const next: ProjectState = { revision: state.revision + 1, sections, updatedAt: new Date().toISOString() };
+    const next: StoredState = {
+      revision: state.revision + 1, sections, updatedAt: new Date().toISOString(),
+      observed: await signatures(this.directory(id), change.manifest ?? current.manifest),
+    };
     await atomicWrite(join(this.directory(id), STATE_FILE), `${JSON.stringify(next)}\n`);
     return next;
   }

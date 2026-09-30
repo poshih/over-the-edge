@@ -60,8 +60,21 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         <label class="appearance-label" for="project-title">Game title</label>
         <input id="project-title" type="text" maxlength="80" autocomplete="off" spellcheck="false" />
         <p class="project-status" role="status" aria-live="polite"></p>
+        <div class="project-conflict" hidden>
+          <p class="appearance-format project-conflict-status"></p>
+          <div class="sprite-action-row">
+            <button type="button" class="button project-keep-mine" title="Save this page's version over the project's">Keep my version</button>
+            <button type="button" class="button project-use-project" title="Replace this page's version with the project's">Use the project's</button>
+          </div>
+        </div>
+        <div class="project-kept" hidden>
+          <p class="appearance-format project-kept-status"></p>
+          <div class="sprite-action-row">
+            <button type="button" class="button project-restore" title="Load these changes into the project, which then saves them">Restore into the project</button>
+            <button type="button" class="button project-discard" title="Remove these changes from this browser">Discard them</button>
+          </div>
+        </div>
         <div class="sprite-action-row">
-          <button type="button" class="button button-primary project-save" title="Save changed sections to the project server">Save project</button>
           <button type="button" class="button project-new" title="Start a new game from the built-in course and defaults">New project</button>
         </div>
         <button type="button" class="button project-reopen" hidden
@@ -164,7 +177,10 @@ export function createProjectEditor(options: ProjectEditorOptions) {
 
   const title = element<HTMLInputElement>(root, '#project-title');
   const status = element<HTMLParagraphElement>(root, '.project-status');
-  const saveButton = element<HTMLButtonElement>(root, '.project-save');
+  const conflict = element<HTMLDivElement>(root, '.project-conflict');
+  const conflictStatus = element<HTMLParagraphElement>(root, '.project-conflict-status');
+  const keptChanges = element<HTMLDivElement>(root, '.project-kept');
+  const keptStatus = element<HTMLParagraphElement>(root, '.project-kept-status');
   const reopenButton = element<HTMLButtonElement>(root, '.project-reopen');
   const serverStatus = element<HTMLParagraphElement>(root, '.project-server-status');
   const signin = element<HTMLDivElement>(root, '.project-signin');
@@ -408,9 +424,21 @@ export function createProjectEditor(options: ProjectEditorOptions) {
           : published.origin === 'outdated' ? 'An older version of the published project; a newer one is published'
             : 'A local project, not the published one';
     const kept = snapshot.browserCopy?.stored === true ? ' · kept in this browser' : '';
-    status.textContent = `${where}${kept} · ${snapshot.busy !== null ? `${snapshot.busy}…` : dirty.length === 0 ? 'no unsaved changes'
-      : `unsaved: ${dirty.join(', ')}`}${snapshot.conflicts.length > 0 ? ` · changed on the server: ${snapshot.conflicts.join(', ')}` : ''}`;
+    // A server project saves itself; the status says how far that got.
+    const saving = snapshot.autosave;
+    const progress = snapshot.busy !== null ? `${snapshot.busy}…`
+      : saving === null ? dirty.length === 0 ? 'no unsaved changes' : `unsaved: ${dirty.join(', ')}`
+        : snapshot.conflicts.length > 0 ? `also changed in the project: ${snapshot.conflicts.join(', ')}`
+          : saving.problem !== null ? `not saved yet: ${saving.problem}`
+            : saving.saving ? 'saving…' : dirty.length > 0 ? 'saving shortly' : 'every change saved';
+    status.textContent = `${where}${kept} · ${progress}`;
     status.dataset.dirty = String(dirty.length > 0);
+    conflict.hidden = snapshot.conflicts.length === 0;
+    conflictStatus.textContent = `${snapshot.conflicts.join(', ')} changed in the project while you edited it here. Keep your version to ` +
+      'save it over the project\'s, or use the project\'s instead of yours.';
+    keptChanges.hidden = snapshot.kept === null;
+    keptStatus.textContent = snapshot.kept === null ? '' : `This browser kept unsaved changes to ${snapshot.kept.join(', ')} from an ` +
+      'earlier session. Restoring them replaces those sections of the project.';
     reopenButton.hidden = published === null;
     idInput.placeholder = snapshot.binding?.id ?? projectIdForTitle(snapshot.title);
     const server = snapshot.server;
@@ -434,7 +462,6 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     }
     const busy = snapshot.busy !== null;
     for (const button of buttons) button.disabled = busy;
-    saveButton.disabled = busy || snapshot.binding === null;
     element<HTMLButtonElement>(root, '.project-publish').disabled = busy || snapshot.binding === null;
     element<HTMLButtonElement>(root, '.project-open').disabled = busy || choices.length === 0;
     element<HTMLButtonElement>(root, '.project-alternate-swap').disabled = busy || snapshot.alternate === null;
@@ -464,7 +491,17 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const confirmReplace = (action: string): boolean => session.dirtySections().length === 0 ||
     window.confirm(`${action} replaces the current game in the Workshop. Unsaved changes (${session.dirtySections().join(', ')}) will be lost. Continue?`);
   title.addEventListener('change', () => { if (!session.setTitle(title.value)) title.value = session.snapshot().title; }, listen);
-  saveButton.addEventListener('click', () => { void session.save(); }, listen);
+  element(root, '.project-keep-mine').addEventListener('click', () => { void session.keepMyVersions(); }, listen);
+  element(root, '.project-use-project').addEventListener('click', () => { void session.useProjectVersions(); }, listen);
+  element(root, '.project-restore').addEventListener('click', () => {
+    const sections = session.snapshot().kept ?? [];
+    if (window.confirm(`Restore this browser's changes to ${sections.join(', ')}? They replace the project's version of those sections.`)) {
+      void session.restoreKept();
+    }
+  }, listen);
+  element(root, '.project-discard').addEventListener('click', () => {
+    if (window.confirm('Discard the changes this browser kept? They cannot be recovered.')) void session.discardKept();
+  }, listen);
   element(root, '.project-new').addEventListener('click', () => {
     if (confirmReplace('A new project')) void session.newProject();
   }, listen);

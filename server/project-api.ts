@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { loadEnv } from 'vite';
 import type { Plugin } from 'vite';
 import { validateAppearanceParts, validateArmIk, DEFAULT_ALIGNMENT } from '../src/appearance-profile';
@@ -49,6 +49,9 @@ export interface StudioConfig {
   readonly token: string | null;
   // The trusted rig strategies every project check resolves avatar drivers against.
   readonly avatarRigs: AvatarRigRegistry;
+  // The project the Workshop was started with (GAME_PROJECT) when it is one of these projects: its page opens and
+  // saves it here. Null otherwise.
+  readonly workshopProject: string | null;
 }
 
 interface Context {
@@ -780,7 +783,11 @@ export function createStudioHandler(config: StudioConfig) {
     }
     try {
       if (pathname === '/api/health' && request.method === 'GET') {
-        sendJson(response, 200, { ok: true, api: 1, auth: tokenDigest === null ? 'loopback' : 'token', authenticated: authenticated(request) });
+        const signedIn = authenticated(request);
+        sendJson(response, 200, {
+          ok: true, api: 1, auth: tokenDigest === null ? 'loopback' : 'token', authenticated: signedIn,
+          ...(signedIn ? { project: config.workshopProject } : {}),
+        });
         return;
       }
       if (pathname === '/api/session' && request.method === 'POST') {
@@ -824,15 +831,36 @@ function insideRoot(root: string, value: string, variable: string): string {
   return path.endsWith(sep) ? path.slice(0, -1) : path;
 }
 
-/** The self-hosted project server, added to the Workshop's dev and preview servers. */
-export function projectStudio(options: { root: string; mode: string; avatarRigs: AvatarRigRegistry }): Plugin | null {
+// The project GAME_PROJECT names when it is a project folder, or its manifest, in the projects folder; a project file
+// or a folder elsewhere names none.
+function studioProjectId(root: string, projects: string, requested: string | undefined): string | null {
+  if (requested === undefined || requested === '') return null;
+  const path = resolve(root, requested);
+  const folder = basename(path) === PROJECT_FILES.manifest ? dirname(path) : path;
+  if (dirname(folder) !== projects) return null;
+  try {
+    return validateProjectId(basename(folder));
+  } catch (error) {
+    if (error instanceof ProjectError) return null;
+    throw error;
+  }
+}
+
+/**
+ * The self-hosted project server, added to the Workshop's dev and preview servers. `workshopProject` is the
+ * GAME_PROJECT the Workshop was started with.
+ */
+export function projectStudio(options: { root: string; mode: string; avatarRigs: AvatarRigRegistry; workshopProject: string | undefined }): Plugin | null {
   const env = loadEnv(options.mode, options.root, 'STUDIO_');
   if (env.STUDIO_API === 'off') return null;
   const token = env.STUDIO_TOKEN === undefined || env.STUDIO_TOKEN === '' ? null : env.STUDIO_TOKEN;
   if (token !== null && token.length < MIN_TOKEN) throw new Error(`STUDIO_TOKEN must contain at least ${MIN_TOKEN} characters.`);
   const projects = env.STUDIO_PROJECTS ? resolve(options.root, env.STUDIO_PROJECTS) : resolve(options.root, 'projects');
   const releases = insideRoot(options.root, env.STUDIO_RELEASES ?? 'releases', 'STUDIO_RELEASES');
-  const handler = createStudioHandler({ root: options.root, projects, releases, token, avatarRigs: options.avatarRigs });
+  const handler = createStudioHandler({
+    root: options.root, projects, releases, token, avatarRigs: options.avatarRigs,
+    workshopProject: studioProjectId(options.root, projects, options.workshopProject),
+  });
   // Hooks must not return the middleware stack: Vite would call a returned function as a post hook.
   const use = (server: { middlewares: { use: (handler: (request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => void) => unknown } }): void => {
     server.middlewares.use((request, response, next) => { void handler(request, response, next); });

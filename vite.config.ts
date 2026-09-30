@@ -33,7 +33,8 @@ export default defineConfig(async ({ mode, isPreview }) => {
       workshopLevels(levels),
       workshopModels({ models, contentUrl }),
       avatarRigs({ module: rigModule }),
-      projectStudio({ root: project, mode, avatarRigs: rigRegistry }),
+      // A preview serves a build made with GAME_PROJECT, so the studio reads it from the environment either way.
+      projectStudio({ root: project, mode, avatarRigs: rigRegistry, workshopProject: process.env.GAME_PROJECT }),
     ],
     server: { host: '0.0.0.0', port: 5181, strictPort: true },
     preview: { host: '0.0.0.0', port: 4174, strictPort: true },

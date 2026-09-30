@@ -65,6 +65,13 @@ const SAVE_ORDER: readonly ProjectSectionName[] = [
 const ACTIVE_KEY = 'over-the-edge:project:active:v1';
 const POLL_MS = 2000;
 const COPY_MS = 1000;
+// A server project saves itself: changes are written once they have held still for one check. A write that failed to
+// reach the server is retried after SAVE_RETRY_MS; one the server refused waits for the sections to change.
+const SAVE_MS = 1000;
+const SAVE_RETRY_MS = 5000;
+// Sections whose files a server project keeps on the server, so only a project file or a browser copy loads them from
+// local bytes.
+const LOCAL_FILES: ReadonlySet<ProjectSectionName> = new Set(['media', 'art', 'models']);
 // A section reopened with unsaved changes: equal to no fingerprint, so it stays unsaved.
 const UNSAVED = Symbol('unsaved');
 
@@ -171,6 +178,21 @@ interface CopyState {
   readonly dirty: readonly ProjectSectionName[];
 }
 
+// A save that left changed sections unsaved: what they were, why, and when to try them again unchanged (null: only
+// once they change).
+interface SaveFailure {
+  readonly fingerprints: Record<ProjectSectionName, unknown>;
+  readonly message: string;
+  readonly retryAt: number | null;
+}
+
+// Unsaved changes this browser kept to a server project's published version, found when that project opened.
+interface KeptChanges {
+  readonly copy: ProjectCopy;
+  readonly project: string;
+  readonly sections: readonly ProjectSectionName[];
+}
+
 function sameCopy(a: CopyState | null, b: CopyState | null): boolean {
   return a !== null && b !== null && a.origin === b.origin && a.dirty.join() === b.dirty.join() &&
     PROJECT_SECTIONS.every((name) => a.fingerprints[name] === b.fingerprints[name]);
@@ -205,6 +227,12 @@ export interface ProjectSnapshot {
   readonly published: { readonly title: string; readonly version: string; readonly origin: 'current' | 'outdated' | 'none' } | null;
   // This browser's copy of the open project, in a Workshop built with a project.
   readonly browserCopy: { readonly stored: boolean; readonly pending: boolean; readonly writes: number } | null;
+  // Automatic saving to the open server project, null without one: whether a save is running, and why changes are not
+  // saved yet.
+  readonly autosave: { readonly saving: boolean; readonly problem: string | null } | null;
+  // Sections with unsaved changes this browser kept from an earlier session, waiting to be restored into the open server
+  // project or discarded; null when there are none.
+  readonly kept: readonly ProjectSectionName[] | null;
 }
 
 function describe(error: unknown): string {
@@ -271,7 +299,17 @@ export class ProjectSession {
   // Copy writes run one after another.
   private copyTask: Promise<void> | null = null;
   private copyTimer: ReturnType<typeof setInterval> | null = null;
+  // Automatic saving (autosave): its check timer, the save running, the fingerprints the previous check saw, and the
+  // last save that left changes unsaved.
+  private saver: ReturnType<typeof setInterval> | null = null;
+  private saving: Promise<void> | null = null;
+  private saveSeen: Record<ProjectSectionName, unknown> | null = null;
+  private saveFailure: SaveFailure | null = null;
+  // Changes this browser kept to the Workshop's own project, found when it opened from the server at start.
+  private kept: KeptChanges | null = null;
   private readonly checkedCharacters = new WeakSet<SpriteDocument>();
+  // Each character draft validated once, so repeated saves do not report the same problem again.
+  private readonly validatedDrafts = new WeakMap<SpriteDocument, SpriteDocument | null>();
 
   constructor(options: { workspace: ProjectWorkspace; avatarRigs: AvatarRigRegistry; client?: ProjectClient; published?: PublishedProject | null }) {
     this.workspace = options.workspace;
@@ -281,30 +319,40 @@ export class ProjectSession {
     this.copy = this.published === null ? null : new ProjectCopyStore();
   }
 
-  // After the editors restore their browser-local state: find the server and reopen its project.
-  // Otherwise a Workshop built with a project reopens this browser's copy or the published project.
+  // After the editors restore their browser-local state: find the server and open its project, the one this page
+  // opened last or else the one this Workshop was started with; every change then saves to it. Otherwise a Workshop
+  // built with a project reopens this browser's copy or the published project.
   async start(): Promise<void> {
     await this.workspace.ready;
     if (this.disposed) return;
     this.synced = this.fingerprints();
     this.applyLook();
     await this.refreshServer();
-    const remembered = this.rememberedProject();
-    if (remembered !== null && this.server?.authenticated === true && this.projects.some((project) => project.id === remembered)) {
-      await this.open(remembered, { quiet: true });
-    }
+    const server = this.server;
+    const signedIn = server !== null && server.available && server.authenticated;
+    const listed = (id: string | null): string | null => id !== null && this.projects.some((project) => project.id === id) ? id : null;
+    const remembered = signedIn ? listed(this.rememberedProject()) : null;
+    const own = signedIn ? listed(server.project) : null;
+    // This browser's copy of the Workshop's own project, which may hold changes from an earlier session.
+    const copy = own === null ? null : await this.readCopy();
+    // A copy holding another project (imported or new) reopens instead, as without a server.
+    const opening = remembered ?? (copy?.origin === null ? null : own);
+    if (opening !== null && !this.disposed) await this.open(opening);
+    if (own !== null && this.binding?.id === own && !this.disposed) await this.keepChanges(own, copy);
     if (this.binding === null && this.published !== null && !this.disposed) await this.openStartProject();
     if (this.disposed) return;
     this.poller = setInterval(() => { void this.poll(); }, POLL_MS);
-    if (this.copy !== null) {
-      this.copyTimer = setInterval(() => { void this.keepCopy(); }, COPY_MS);
-      // Leaving the page stores the latest changes at once.
-      const leaving = (): void => { void this.keepCopy({ now: true }); };
-      const signal = this.lifecycle.signal;
-      window.addEventListener('beforeunload', leaving, { signal });
-      window.addEventListener('pagehide', leaving, { signal });
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leaving(); }, { signal });
-    }
+    this.saver = setInterval(() => { void this.autosave(); }, SAVE_MS);
+    // Leaving the page saves, or stores in this browser, the latest changes at once.
+    const leaving = (): void => {
+      void this.autosave({ now: true });
+      void this.keepCopy({ now: true });
+    };
+    const signal = this.lifecycle.signal;
+    window.addEventListener('beforeunload', leaving, { signal });
+    window.addEventListener('pagehide', leaving, { signal });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leaving(); }, { signal });
+    if (this.copy !== null) this.copyTimer = setInterval(() => { void this.keepCopy(); }, COPY_MS);
   }
 
   snapshot(): ProjectSnapshot {
@@ -325,6 +373,8 @@ export class ProjectSession {
         origin: this.origin === this.published.version ? 'current' : this.origin === null ? 'none' : 'outdated',
       },
       browserCopy: this.copy === null ? null : { stored: this.copyStored, pending: this.hasUnsavedProjectChanges(), writes: this.copyWrites },
+      autosave: this.binding === null ? null : { saving: this.saving !== null, problem: this.saveFailure?.message ?? null },
+      kept: this.kept?.sections ?? null,
     };
   }
 
@@ -613,7 +663,7 @@ export class ProjectSession {
     });
   }
 
-  async open(id: string, options: { quiet?: boolean } = {}): Promise<boolean> {
+  async open(id: string): Promise<boolean> {
     return this.run(`Opening ${id}`, async () => {
       const project = await this.client.project(id);
       const read = async (name: string) => (await this.client.section(id, name)).value;
@@ -623,8 +673,7 @@ export class ProjectSession {
       const models = await Promise.all(project.manifest.appearance.map(async (part) => this.client.blob(this.client.modelUrl(id, part.part))));
       await this.applyServerProject(project.manifest, project, { level, primary, alternate, models, sizes: fileSizes(project.files) });
       this.publishRecord = (await this.client.publishStatus(id)).release;
-      if (!options.quiet) this.workspace.notice(`Opened "${project.manifest.title}" from the project server.`, 'info');
-      else this.workspace.notice(`Reopened project "${project.manifest.title}" from the project server.`, 'info');
+      this.workspace.notice(`Opened "${project.manifest.title}" from the project server; every change saves to it.`, 'info');
     });
   }
 
@@ -648,6 +697,7 @@ export class ProjectSession {
   async exportBundle(): Promise<{ bundle: ProjectBundle; filename: string } | null> {
     let result: { bundle: ProjectBundle; filename: string } | null = null;
     await this.run('Exporting project file', async () => {
+      this.prepareLevel();
       const draft = this.captureDraft();
       const content = await this.captureFiles(draft, this.workspace.appearance.parts(), [...this.media.values()], [...this.art.assets], this.library);
       result = { bundle: packProjectBundle(content), filename: `${this.binding?.id ?? projectFileName(this.title)}.project.json` };
@@ -655,83 +705,51 @@ export class ProjectSession {
     return result;
   }
 
-  // Saves the changed sections to the bound server project.
-  async save(): Promise<boolean> {
+  // Saves this page's version of the sections that also changed in the server project, over the project's.
+  async keepMyVersions(): Promise<boolean> {
     const binding = this.binding;
-    if (binding === null) {
-      this.report(new ProjectError('This project is not on the project server yet; use Save as.'));
+    if (binding === null || this.conflicts.size === 0) return false;
+    return this.run('Saving your version', async () => {
+      const names = new Set(this.conflicts);
+      this.requireSaved(await this.write(binding, names, names));
+      this.workspace.notice(`Saved your ${[...names].join(', ')} over the project's.`, 'info');
+    });
+  }
+
+  // Replaces this page's version of the sections that also changed in the server project with the project's.
+  async useProjectVersions(): Promise<boolean> {
+    const binding = this.binding;
+    if (binding === null || this.conflicts.size === 0) return false;
+    return this.run('Loading the project\'s version', async () => {
+      const names = [...this.conflicts];
+      await this.loadFromServer(binding, names);
+      this.workspace.notice(`Loaded the project's ${names.join(', ')}.`, 'info');
+    });
+  }
+
+  // Loads the changes this browser kept from an earlier session into their server project, where they save like any
+  // edit, replacing the project's version of those sections.
+  async restoreKept(): Promise<boolean> {
+    const kept = this.kept;
+    if (kept === null) return false;
+    if (this.binding?.id !== kept.project) {
+      this.report(new ProjectError(`Open "${kept.project}" to restore the changes this browser kept to it.`));
       return false;
     }
-    return this.run('Saving', async () => {
-      const draft = this.captureDraft();
-      // Exactly what this save sends; edits made while its requests run stay unsaved.
-      const baseline = this.fingerprints();
-      const savedLevel = this.workspace.level.get();
-      const parts = this.workspace.appearance.parts();
-      const media = [...this.media.values()];
-      const assets = [...this.art.assets];
-      const library = this.library;
-      const dirty = new Set(PROJECT_SECTIONS.filter((name) => baseline[name] !== this.synced?.[name]));
-      // An alternate needs its primary stored first, even when the primary itself did not change.
-      if (dirty.has('characters/alternate') && draft.alternate !== null) dirty.add('characters/primary');
-      if (dirty.size === 0) {
-        this.workspace.notice('The project has no unsaved changes.', 'info');
-        return;
-      }
-      const revision = (name: ProjectSectionName): number | undefined => this.conflicts.has(name) ? undefined : binding.sections[name];
-      // Only the written section's revision: other sections may have changed meanwhile, for the next poll.
-      const adopt = (name: ProjectSectionName, state: ServerRevisions): void => {
-        binding.sections[name] = state.sections[name]!;
-      };
-      // New files first, so the sections that reference them validate on the server.
-      if (dirty.has('media')) {
-        for (const item of media) {
-          if (item.blob === null || item.uploaded) continue;
-          adopt('media', await this.client.putMedia(binding.id, item.path, item.blob, revision('media')));
-          if (this.media.get(item.path) === item) this.media.set(item.path, { ...item, uploaded: true });
-        }
-      }
-      if (dirty.has('art')) {
-        const uploaded = new Set<string>();
-        for (const asset of assets) {
-          if (asset.blob === null || asset.uploaded) continue;
-          adopt('art', await this.client.postArt(binding.id, asset.blob, asset.name, revision('art')));
-          uploaded.add(asset.id);
-        }
-        this.art = { ...this.art, assets: this.art.assets.map((asset) => uploaded.has(asset.id) ? { ...asset, uploaded: true } : asset) };
-      }
-      if (dirty.has('appearance')) {
-        for (const part of parts) {
-          if (this.syncedModels.get(part.part) === part.blob) continue;
-          adopt('appearance', await this.client.putModel(binding.id, part.part, part.blob, part.name, revision('appearance')));
-          this.syncedModels.set(part.part, part.blob);
-        }
-      }
-      if (dirty.has('models')) {
-        for (const item of library) {
-          if (item.blob === null || item.uploaded) continue;
-          adopt('models', await this.client.putLibraryModel(binding.id, item.role, item.entry, item.blob, revision('models')));
-          this.library = this.library.map((candidate) => candidate === item ? { ...item, uploaded: true } : candidate);
-        }
-      }
-      const values: Record<ProjectSectionName, unknown> = {
-        title: draft.manifest.title, level: draft.level, settings: draft.manifest.settings,
-        'characters/primary': draft.primary, 'characters/alternate': draft.alternate, 'arm-ik': draft.manifest.armIk,
-        appearance: draft.manifest.appearance, models: draft.manifest.models, theme: draft.manifest.theme, hud: draft.manifest.hud, audio: draft.manifest.audio,
-        enemies: draft.manifest.enemies, art: draft.manifest.art, media: draft.manifest.media,
-      };
-      // The server removes an alternate before the primary it depends on, and adds them the other way round.
-      const order = draft.alternate !== null ? SAVE_ORDER : SAVE_ORDER.flatMap((name) =>
-        name === 'characters/primary' ? ['characters/alternate', name] as const : name === 'characters/alternate' ? [] : [name]);
-      for (const name of order) {
-        if (!dirty.has(name)) continue;
-        adopt(name, await this.client.putSection(binding.id, name, values[name], revision(name)));
-      }
-      this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
-      this.conflicts.clear();
-      this.synced = baseline;
-      this.workspace.level.markSaved(savedLevel);
-      this.workspace.notice(`Saved ${dirty.size === 1 ? 'one section' : `${dirty.size} sections`} of "${draft.manifest.title}" to the project server.`, 'info');
+    return this.run('Restoring this browser\'s changes', async () => {
+      await this.applyChanges(kept.copy.content, kept.sections);
+      this.kept = null;
+      await this.copy!.clear();
+      this.workspace.notice(`Restored your changes to ${kept.sections.join(', ')}; they save to the project now.`, 'info');
+    });
+  }
+
+  async discardKept(): Promise<boolean> {
+    if (this.kept === null) return false;
+    return this.run('Discarding this browser\'s changes', async () => {
+      await this.copy!.clear();
+      this.kept = null;
+      this.workspace.notice('Discarded the changes this browser kept.', 'info');
     });
   }
 
@@ -739,6 +757,7 @@ export class ProjectSession {
   async saveAs(id: string): Promise<boolean> {
     return this.run('Saving to the server', async () => {
       const valid = validateProjectId(id);
+      this.prepareLevel();
       const draft = this.captureDraft();
       const baseline = this.fingerprints();
       const savedLevel = this.workspace.level.get();
@@ -766,12 +785,14 @@ export class ProjectSession {
   }
 
   async publish(): Promise<PublishRecord | null> {
-    if (this.binding === null) {
+    const binding = this.binding;
+    if (binding === null) {
       this.report(new ProjectError('Save the project to the project server before publishing it.'));
       return null;
     }
-    if (this.dirtySections().length > 0 && !await this.save()) return null;
-    const id = this.binding.id;
+    // A release builds what the server holds: pending level edits apply and every change is saved first.
+    if (!this.workspace.level.prepare() || !await this.saveEverything(binding)) return null;
+    const id = binding.id;
     let record: PublishRecord | null = null;
     await this.run('Publishing', async () => {
       record = await this.client.publish(id);
@@ -786,11 +807,245 @@ export class ProjectSession {
     this.disposed = true;
     this.lifecycle.abort();
     if (this.poller !== null) clearInterval(this.poller);
+    if (this.saver !== null) clearInterval(this.saver);
     if (this.copyTimer !== null) clearInterval(this.copyTimer);
     this.copy?.dispose();
     for (const item of this.media.values()) if (item.blob !== null) URL.revokeObjectURL(item.url);
     this.media.clear();
     this.listeners.clear();
+  }
+
+  // This browser's copy of the published project, or null without one; a copy that cannot be read is reported.
+  private async readCopy(): Promise<ProjectCopy | null> {
+    if (this.copy === null) return null;
+    try {
+      return await this.copy.read();
+    } catch (error) {
+      if (!isExpected(error)) throw error;
+      this.workspace.notice(error.message, 'error');
+      return null;
+    }
+  }
+
+  // Once the Workshop's own project opened from the server, `copy`, this browser's copy of its published version:
+  // unsaved changes in it wait for the owner to restore them into the project or discard them; a copy without any goes.
+  private async keepChanges(project: string, copy: ProjectCopy | null): Promise<void> {
+    if (copy === null || copy.origin === null) return;
+    const sections = PROJECT_SECTIONS.filter((name) => copy.dirty.includes(name));
+    if (sections.length === 0) {
+      try {
+        await this.copy!.clear();
+      } catch (error) {
+        if (!isExpected(error)) throw error;
+        this.workspace.notice(error.message, 'error');
+      }
+      return;
+    }
+    this.kept = { copy, project, sections };
+    this.workspace.notice(`This browser kept unsaved changes to ${sections.join(', ')} from an earlier session. ` +
+      'Restore them into the project, or discard them, in Project.', 'info');
+    this.changed('status');
+  }
+
+  // Runs every second while a server project is open: writes the changed sections once they have held still for one
+  // check, or at once when the page is being left. Sections that also changed in the project wait for the owner.
+  private async autosave(options: { now?: boolean } = {}): Promise<void> {
+    const binding = this.binding;
+    const synced = this.synced;
+    if (binding === null || synced === null || this.busy !== null || this.saving !== null || this.disposed) return;
+    const current = this.fingerprints();
+    const pending = PROJECT_SECTIONS.filter((name) => current[name] !== synced[name] && !this.conflicts.has(name));
+    const seen = this.saveSeen;
+    this.saveSeen = pending.length === 0 ? null : current;
+    if (pending.length === 0) {
+      if (this.saveFailure !== null) {
+        this.saveFailure = null;
+        this.changed('status');
+      }
+      return;
+    }
+    if (options.now !== true && (seen === null || pending.some((name) => seen[name] !== current[name]))) return;
+    const failure = this.saveFailure;
+    if (failure !== null && pending.every((name) => failure.fingerprints[name] === current[name]) &&
+      (failure.retryAt === null || Date.now() < failure.retryAt)) return;
+    const saving: Promise<void> = this.attemptSave(binding, new Set(pending), current).finally(() => {
+      if (this.saving === saving) this.saving = null;
+      this.changed('status');
+    });
+    this.saving = saving;
+    this.changed('status');
+    await saving;
+  }
+
+  // One automatic save. What it leaves unsaved is reported once and tried again when it changes, or shortly after the
+  // server could not be reached; a section that also changed in the project becomes a conflict for the owner.
+  private async attemptSave(binding: Binding, names: ReadonlySet<ProjectSectionName>,
+    fingerprints: Record<ProjectSectionName, unknown>): Promise<void> {
+    let message: string | null = null;
+    let retryAt: number | null = null;
+    try {
+      const problems = await this.write(binding, names, new Set());
+      if (problems.size > 0) message = [...problems].map(([name, reason]) => `${name}: ${reason}`).join(' ');
+    } catch (error) {
+      if (error instanceof ProjectApiError && error.status === 412 && error.section !== null) {
+        this.conflicts.add(error.section as ProjectSectionName);
+        this.saveFailure = null;
+        this.workspace.notice(`${error.section} changed in the project while you edited it here; choose which version to keep in Project.`, 'error');
+        return;
+      }
+      if (!isExpected(error)) throw error;
+      message = describe(error);
+      if (error instanceof ProjectApiError && (error.status === 0 || error.status >= 500)) retryAt = Date.now() + SAVE_RETRY_MS;
+    }
+    if (this.binding !== binding) return;
+    if (message !== null && message !== this.saveFailure?.message) this.workspace.notice(`Not saved yet: ${message}`, 'error');
+    this.saveFailure = message === null ? null : { fingerprints, message, retryAt };
+  }
+
+  // Saves every change now, for an action that needs the project saved; false, with the reason reported, when a change
+  // cannot be saved or also changed in the project.
+  private async saveEverything(binding: Binding): Promise<boolean> {
+    while (this.saving !== null) await this.saving;
+    if (this.conflicts.size > 0) {
+      this.report(new ProjectError(`${[...this.conflicts].join(', ')} also changed in the project; keep your version or use the project's in Project first.`));
+      return false;
+    }
+    const names = new Set(this.dirtySections());
+    if (names.size === 0) return true;
+    return this.run('Saving', async () => { this.requireSaved(await this.write(binding, names, new Set())); });
+  }
+
+  // Fails with the first section a save left unsaved.
+  private requireSaved(problems: ReadonlyMap<ProjectSectionName, string>): void {
+    for (const [section, message] of problems) throw new ProjectError(`${section}: ${message}`, { section });
+  }
+
+  // Writes `names`, changed sections, to the bound server project and returns the ones that cannot be saved yet, with
+  // why. A section in `overwrite` replaces the project's version even if that changed meanwhile; any other section
+  // that changed there fails with a conflict (412).
+  private async write(binding: Binding, names: ReadonlySet<ProjectSectionName>,
+    overwrite: ReadonlySet<ProjectSectionName>): Promise<Map<ProjectSectionName, string>> {
+    // Exactly what this save sends; edits made while its requests run stay unsaved.
+    const baseline = this.fingerprints();
+    const savedLevel = this.workspace.level.get();
+    const parts = this.workspace.appearance.parts();
+    const media = [...this.media.values()];
+    const assets = [...this.art.assets];
+    const library = this.library;
+    const alternate = this.alternate;
+    const wanted = new Set(names);
+    // An alternate needs its primary stored first, even when the primary itself did not change.
+    if (wanted.has('characters/alternate') && alternate !== null) wanted.add('characters/primary');
+    const { values, problems } = this.capture(wanted);
+    if (problems.has('characters/primary') && wanted.has('characters/alternate') && alternate !== null) {
+      problems.set('characters/alternate', 'waits for the primary character.');
+    }
+    const saving = new Set([...wanted].filter((name) => !problems.has(name)));
+    const revision = (name: ProjectSectionName): number | undefined => overwrite.has(name) ? undefined : binding.sections[name];
+    // Only the written section's revision: other sections may have changed meanwhile, for the next poll.
+    const adopt = (name: ProjectSectionName, state: ServerRevisions): void => {
+      binding.sections[name] = state.sections[name]!;
+    };
+    // New files first, so the sections that reference them validate on the server.
+    if (saving.has('media')) {
+      for (const item of media) {
+        if (item.blob === null || item.uploaded) continue;
+        adopt('media', await this.client.putMedia(binding.id, item.path, item.blob, revision('media')));
+        if (this.media.get(item.path) === item) this.media.set(item.path, { ...item, uploaded: true });
+      }
+    }
+    if (saving.has('art')) {
+      const uploaded = new Set<string>();
+      for (const asset of assets) {
+        if (asset.blob === null || asset.uploaded) continue;
+        adopt('art', await this.client.postArt(binding.id, asset.blob, asset.name, revision('art')));
+        uploaded.add(asset.id);
+      }
+      this.art = { ...this.art, assets: this.art.assets.map((asset) => uploaded.has(asset.id) ? { ...asset, uploaded: true } : asset) };
+    }
+    if (saving.has('appearance')) {
+      for (const part of parts) {
+        if (this.syncedModels.get(part.part) === part.blob) continue;
+        adopt('appearance', await this.client.putModel(binding.id, part.part, part.blob, part.name, revision('appearance')));
+        this.syncedModels.set(part.part, part.blob);
+      }
+    }
+    if (saving.has('models')) {
+      for (const item of library) {
+        if (item.blob === null || item.uploaded) continue;
+        adopt('models', await this.client.putLibraryModel(binding.id, item.role, item.entry, item.blob, revision('models')));
+        this.library = this.library.map((candidate) => candidate === item ? { ...item, uploaded: true } : candidate);
+      }
+    }
+    // The server removes an alternate before the primary it depends on, and adds them the other way round.
+    const order = alternate !== null ? SAVE_ORDER : SAVE_ORDER.flatMap((name) =>
+      name === 'characters/primary' ? ['characters/alternate', name] as const : name === 'characters/alternate' ? [] : [name]);
+    for (const name of order) {
+      if (!saving.has(name)) continue;
+      adopt(name, await this.client.putSection(binding.id, name, values.get(name), revision(name)));
+      this.synced![name] = baseline[name];
+      this.conflicts.delete(name);
+      if (name === 'level') this.workspace.level.markSaved(savedLevel);
+      if (name === 'appearance') this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
+      this.changed('status');
+    }
+    return problems;
+  }
+
+  // The given sections as the server stores them, each checked on its own as the server checks it, so a section that
+  // cannot be saved yet (a character mid-edit, a level naming a missing file) holds back only itself; the reasons come
+  // back by section.
+  private capture(names: ReadonlySet<ProjectSectionName>): { values: Map<ProjectSectionName, unknown>; problems: Map<ProjectSectionName, string> } {
+    const manifest = this.manifestDraft();
+    const value: Record<ProjectSectionName, () => unknown> = {
+      title: () => manifest.title,
+      level: () => this.levelDraft(manifest),
+      settings: () => manifest.settings,
+      'characters/primary': () => this.primaryDraft(),
+      'characters/alternate': () => this.alternate === null ? null : this.checkedCharacter(this.alternate, 'alternate character'),
+      'arm-ik': () => manifest.armIk,
+      appearance: () => manifest.appearance,
+      models: () => manifest.models,
+      theme: () => manifest.theme,
+      hud: () => manifest.hud,
+      audio: () => manifest.audio,
+      enemies: () => manifest.enemies,
+      art: () => manifest.art,
+      media: () => manifest.media,
+    };
+    const values = new Map<ProjectSectionName, unknown>();
+    const problems = new Map<ProjectSectionName, string>();
+    for (const name of names) {
+      try {
+        values.set(name, value[name]());
+      } catch (error) {
+        if (!isProjectDataError(error)) throw error;
+        problems.set(name, error.message);
+      }
+    }
+    return { values, problems };
+  }
+
+  // Loads `names` from the bound server project into the page, as saved.
+  private async loadFromServer(binding: Binding, names: readonly ProjectSectionName[]): Promise<void> {
+    const project = await this.client.project(binding.id);
+    const values = new Map<ProjectSectionName, unknown>();
+    for (const name of names) {
+      if (name === 'characters/primary' || name === 'characters/alternate') {
+        values.set(name, project.manifest.characters[name === 'characters/primary' ? 'primary' : 'alternate'] === null ? null
+          : (await this.client.section(binding.id, name)).value);
+      } else if (name === 'level') values.set(name, (await this.client.section(binding.id, name)).value);
+    }
+    const models = names.includes('appearance')
+      ? await Promise.all(project.manifest.appearance.map((part) => this.client.blob(this.client.modelUrl(binding.id, part.part)))) : [];
+    await this.applySections(project.manifest, names, values, models, binding.id, 'sync', fileSizes(project.files));
+    if (names.includes('appearance')) this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
+    for (const name of names) binding.sections[name] = project.sections[name]!;
+    const synced = this.fingerprints();
+    for (const name of names) {
+      this.synced![name] = synced[name];
+      this.conflicts.delete(name);
+    }
   }
 
   // A copy that holds changes, or another project, reopens; otherwise the published project opens.
@@ -957,16 +1212,8 @@ export class ProjectSession {
         characters: { primary: primary === null ? null : PROJECT_FILES.primary, alternate: this.alternate === null ? null : PROJECT_FILES.alternate },
       });
       checkProjectReferences(manifest, level);
-      if (primary !== null && !this.checkedCharacters.has(primary)) {
-        validateProjectCharacter(primary);
-        this.checkCharacterProfile(primary, 'primary character');
-        this.checkedCharacters.add(primary);
-      }
-      if (this.alternate !== null && !this.checkedCharacters.has(this.alternate)) {
-        validateProjectCharacter(this.alternate);
-        this.checkCharacterProfile(this.alternate, 'alternate character');
-        this.checkedCharacters.add(this.alternate);
-      }
+      if (primary !== null) this.checkedCharacter(primary, 'primary character');
+      if (this.alternate !== null) this.checkedCharacter(this.alternate, 'alternate character');
     } catch (error) {
       if (isProjectDataError(error)) return null;
       throw error;
@@ -993,7 +1240,7 @@ export class ProjectSession {
   // Applies server changes to sections this page has not changed; changed ones become conflicts.
   private async poll(): Promise<void> {
     const binding = this.binding;
-    if (binding === null || this.busy !== null || this.disposed || document.visibilityState !== 'visible') return;
+    if (binding === null || this.busy !== null || this.saving !== null || this.disposed || document.visibilityState !== 'visible') return;
     let state: ServerRevisions;
     try {
       state = await this.client.revisions(binding.id);
@@ -1002,13 +1249,13 @@ export class ProjectSession {
       return;
     }
     // binding.revision is the server revision this page has fully reconciled with.
-    if (this.binding !== binding || this.busy !== null || state.revision === binding.revision) return;
+    if (this.binding !== binding || this.busy !== null || this.saving !== null || state.revision === binding.revision) return;
     const changed = PROJECT_SECTIONS.filter((name) => state.sections[name] !== binding.sections[name]);
     const dirty = new Set(this.dirtySections());
     const conflicting = changed.filter((name) => dirty.has(name) && !this.conflicts.has(name));
     for (const name of conflicting) this.conflicts.add(name);
     if (conflicting.length > 0) {
-      this.workspace.notice(`${conflicting.join(', ')} changed on the project server while you have unsaved changes. Save to overwrite, or open the project again to take the server version.`, 'error');
+      this.workspace.notice(`${conflicting.join(', ')} changed in the project while you edited it here; choose which version to keep in Project.`, 'error');
     }
     const incoming = changed.filter((name) => !this.conflicts.has(name));
     if (incoming.length === 0) {
@@ -1017,31 +1264,18 @@ export class ProjectSession {
       return;
     }
     await this.run('Updating from the server', async () => {
-      const project = await this.client.project(binding.id);
       // An edit made while the revisions were in flight wins over the server's version.
       const edited = new Set(this.dirtySections());
       for (const name of incoming) if (edited.has(name)) this.conflicts.add(name);
       const applying = incoming.filter((name) => !edited.has(name));
       if (applying.length > 0) {
-        const values = new Map<ProjectSectionName, unknown>();
-        for (const name of applying) {
-          if (name === 'characters/primary' || name === 'characters/alternate') {
-            values.set(name, project.manifest.characters[name === 'characters/primary' ? 'primary' : 'alternate'] === null ? null
-              : (await this.client.section(binding.id, name)).value);
-          } else if (name === 'level') values.set(name, (await this.client.section(binding.id, name)).value);
-        }
-        const models = applying.includes('appearance')
-          ? await Promise.all(project.manifest.appearance.map((part) => this.client.blob(this.client.modelUrl(binding.id, part.part)))) : [];
         try {
-          await this.applySections(project.manifest, applying, values, models, binding.id, 'sync', fileSizes(project.files));
+          await this.loadFromServer(binding, applying);
         } catch (error) {
-          // Stop retrying every poll; saving overwrites the server, opening the project takes it.
+          // Stop retrying every poll; keeping this page's version or using the project's resolves it.
           for (const name of applying) this.conflicts.add(name);
           throw error;
         }
-        for (const name of applying) binding.sections[name] = project.sections[name]!;
-        const synced = this.fingerprints();
-        for (const name of applying) this.synced![name] = synced[name];
         this.workspace.notice(`Updated ${applying.join(', ')} from the project server.`, 'info');
       }
       // Every section that changed by this revision is now loaded or reported as a conflict.
@@ -1132,41 +1366,41 @@ export class ProjectSession {
   }
 
   private async applyContent(content: ProjectContent, serverId: string | null): Promise<void> {
-    const { manifest } = content;
-    const media = new Map(manifest.media.map((entry) => {
-      const blob = new Blob([content.files.get(mediaFile(entry.path))!], { type: mediaType(entry.path) });
-      return [entry.path, { path: entry.path, blob, url: URL.createObjectURL(blob), bytes: blob.size, uploaded: false }];
-    }));
-    const models = manifest.appearance.map((part) => new Blob([content.files.get(appearanceFile(part.part))!], { type: 'model/gltf-binary' }));
-    const values = new Map<ProjectSectionName, unknown>([
-      ['level', content.level], ['characters/primary', content.characters.primary], ['characters/alternate', content.characters.alternate],
-    ]);
     // Library models a release would refuse fail here, before anything in the page changes.
-    inSection('models', () => checkModelLibrary(manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
+    inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
     this.unbind();
-    try {
-      await this.applySections(manifest, PROJECT_SECTIONS.filter((name) => name !== 'media' && name !== 'art' && name !== 'models'), values, models, serverId);
-    } catch (error) {
-      for (const item of media.values()) URL.revokeObjectURL(item.url);
-      throw error;
-    }
-    this.setMedia(media);
-    this.art = {
-      mode: manifest.art.mode, decorations: manifest.art.decorations,
-      assets: manifest.art.assets.map((asset) => ({
-        ...asset, uploaded: false, blob: new Blob([content.files.get(artFile(asset.id))!], { type: 'model/gltf-binary' }),
-      })),
-    };
-    this.library = libraryEntries(manifest.models).map(({ role, entry }) => {
-      const blob = new Blob([content.files.get(libraryModelFile(role, entry.id))!], { type: 'model/gltf-binary' });
-      return { role, entry, key: this.nextLibraryKey++, uploaded: false, blob, bytes: blob.size };
-    });
+    await this.applySections(content.manifest, PROJECT_SECTIONS.filter((name) => !LOCAL_FILES.has(name)), contentValues(content),
+      appearanceBlobs(content), serverId);
+    this.setMedia(localMedia(content));
+    this.art = localArt(content);
+    this.library = this.localLibrary(content);
     this.syncedModels.clear();
     this.synced = this.fingerprints();
     this.workspace.level.markSaved();
     this.keeping = true;
     this.changed('content');
     this.applyLook();
+  }
+
+  // Loads `names` from `content`, a browser copy, into the page as changes to the open project: they save like any edit.
+  private async applyChanges(content: ProjectContent, names: readonly ProjectSectionName[]): Promise<void> {
+    const has = new Set(names);
+    if (has.has('models')) inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
+    await this.applySections(content.manifest, names.filter((name) => !LOCAL_FILES.has(name)), contentValues(content), appearanceBlobs(content), null);
+    if (has.has('level')) this.workspace.level.markSaved(null);
+    if (has.has('media')) this.setMedia(localMedia(content));
+    if (has.has('art')) this.art = localArt(content);
+    if (has.has('models')) this.library = this.localLibrary(content);
+    this.changed('content');
+    this.applyLook();
+  }
+
+  // A project file's or browser copy's library, held in this page until a server stores it.
+  private localLibrary(content: ProjectContent): LibraryItem[] {
+    return libraryEntries(content.manifest.models).map(({ role, entry }) => {
+      const blob = new Blob([content.files.get(libraryModelFile(role, entry.id))!], { type: 'model/gltf-binary' });
+      return { role, entry, key: this.nextLibraryKey++, uploaded: false, blob, bytes: blob.size };
+    });
   }
 
   // Before a whole project replaces the page's game: a failure part way must not leave the page
@@ -1198,23 +1432,59 @@ export class ProjectSession {
     });
   }
 
-  // Everything except binary files, validated together with the level's references.
-  private captureDraft(): { manifest: ProjectManifest; level: LevelDefinition; primary: SpriteDocument | null; alternate: SpriteDocument | null } {
+  // Before exporting or storing a whole project: pending trigger event edits apply, and an unfinished outline stops it.
+  private prepareLevel(): void {
     if (!this.workspace.level.prepare()) {
       throw new ProjectError('Finish or cancel the unfinished outline, and fix any trigger events, in Level first.', { section: 'level' });
     }
-    const document = this.workspace.character.validated();
-    if (document === null) throw new ProjectError('The character profile cannot be saved yet; see Character.', { section: 'characters/primary' });
-    const primary = this.workspace.character.hasContent() || this.alternate !== null ? document : null;
-    if (primary !== null) this.checkCharacterProfile(primary, 'primary character');
-    if (this.alternate !== null) this.checkCharacterProfile(this.alternate, 'alternate character');
-    const level = validateLevel(this.workspace.level.get());
-    const manifest = validateProjectManifest({
+  }
+
+  // Everything except binary files, validated together with the level's references.
+  private captureDraft(): { manifest: ProjectManifest; level: LevelDefinition; primary: SpriteDocument | null; alternate: SpriteDocument | null } {
+    const manifest = this.manifestDraft();
+    const primary = this.primaryDraft();
+    if (this.alternate !== null) this.checkedCharacter(this.alternate, 'alternate character');
+    return { manifest, level: this.levelDraft(manifest), primary, alternate: this.alternate };
+  }
+
+  // The manifest of this page's project, referring to the characters it holds.
+  private manifestDraft(): ProjectManifest {
+    const primary = this.workspace.character.hasContent() || this.alternate !== null;
+    return validateProjectManifest({
       ...this.draftManifest(),
-      characters: { primary: primary === null ? null : PROJECT_FILES.primary, alternate: this.alternate === null ? null : PROJECT_FILES.alternate },
+      characters: { primary: primary ? PROJECT_FILES.primary : null, alternate: this.alternate === null ? null : PROJECT_FILES.alternate },
     });
+  }
+
+  // The primary character as a project stores it, or null when the project has none. Each draft is validated once:
+  // the character editor reports a draft it refuses.
+  private primaryDraft(): SpriteDocument | null {
+    if (!this.workspace.character.hasContent() && this.alternate === null) return null;
+    const draft = this.workspace.character.draft();
+    let document = this.validatedDrafts.get(draft);
+    if (document === undefined) {
+      document = this.workspace.character.validated();
+      this.validatedDrafts.set(draft, document);
+    }
+    if (document === null) throw new ProjectError('The character profile cannot be saved yet; see Character.', { section: 'characters/primary' });
+    return this.checkedCharacter(document, 'primary character');
+  }
+
+  // A character as a project stores it, checked once as a project file and as releases check it.
+  private checkedCharacter(document: SpriteDocument, label: string): SpriteDocument {
+    if (!this.checkedCharacters.has(document)) {
+      validateProjectCharacter(document);
+      this.checkCharacterProfile(document, label);
+      this.checkedCharacters.add(document);
+    }
+    return document;
+  }
+
+  // The level as a project stores it, with every media and artwork reference found in `manifest`.
+  private levelDraft(manifest: ProjectManifest): LevelDefinition {
+    const level = validateLevel(this.workspace.level.get());
     checkProjectReferences(manifest, level);
-    return { manifest, level, primary, alternate: this.alternate };
+    return level;
   }
 
   // The binary files for a captured draft, read from local blobs or the bound server project.
@@ -1291,6 +1561,8 @@ export class ProjectSession {
   }
 
   private async run(label: string, task: () => Promise<void>): Promise<boolean> {
+    // An automatic save finishes first, so an action never sees the project half written.
+    while (this.saving !== null) await this.saving;
     if (this.busy !== null) {
       this.workspace.notice(`Wait for "${this.busy}" to finish first.`, 'error');
       return false;
@@ -1304,7 +1576,7 @@ export class ProjectSession {
     } catch (error) {
       if (error instanceof ProjectApiError && error.status === 412 && error.section !== null) {
         this.conflicts.add(error.section as ProjectSectionName);
-        this.report(new ProjectError(`${error.message} Save again to overwrite the server's ${error.section}, or open the project again to take it.`));
+        this.report(new ProjectError(`${error.message} In Project, keep your version of ${error.section} or use the project's.`));
       } else {
         this.report(error);
       }
@@ -1353,6 +1625,33 @@ export class ProjectSession {
       if (!(error instanceof DOMException)) throw error;
     }
   }
+}
+
+// A project file's or browser copy's level and characters, as applySections takes them.
+function contentValues(content: ProjectContent): Map<ProjectSectionName, unknown> {
+  return new Map<ProjectSectionName, unknown>([
+    ['level', content.level], ['characters/primary', content.characters.primary], ['characters/alternate', content.characters.alternate],
+  ]);
+}
+
+function appearanceBlobs(content: ProjectContent): Blob[] {
+  return content.manifest.appearance.map((part) => new Blob([content.files.get(appearanceFile(part.part))!], { type: 'model/gltf-binary' }));
+}
+
+// A project file's or browser copy's media and course artwork, held in this page until a server stores them.
+function localMedia(content: ProjectContent): Map<string, MediaItem> {
+  return new Map(content.manifest.media.map((entry) => {
+    const blob = new Blob([content.files.get(mediaFile(entry.path))!], { type: mediaType(entry.path) });
+    return [entry.path, { path: entry.path, blob, url: URL.createObjectURL(blob), bytes: blob.size, uploaded: false }];
+  }));
+}
+
+function localArt(content: ProjectContent): { mode: ArtMode; assets: ArtItem[]; decorations: DecorationArt } {
+  const { art } = content.manifest;
+  return {
+    mode: art.mode, decorations: art.decorations,
+    assets: art.assets.map((asset) => ({ ...asset, uploaded: false, blob: new Blob([content.files.get(artFile(asset.id))!], { type: 'model/gltf-binary' }) })),
+  };
 }
 
 function fileSizes(files: readonly { readonly path: string; readonly bytes: number }[]): Map<string, number> {

@@ -45,11 +45,14 @@ export interface PublishRecord {
   readonly directory: string;
 }
 
-export interface ServerHealth {
-  readonly available: boolean;
-  readonly authenticated: boolean;
-  readonly auth: 'loopback' | 'token' | null;
-}
+// The project server as this page sees it: absent, present but waiting for its token, or signed in, with the project
+// this Workshop was started with when the server holds it (null otherwise).
+export type ServerHealth =
+  | { readonly available: false }
+  | { readonly available: true; readonly authenticated: false; readonly auth: 'loopback' | 'token' }
+  | { readonly available: true; readonly authenticated: true; readonly auth: 'loopback' | 'token'; readonly project: string | null };
+
+const NO_SERVER: ServerHealth = Object.freeze({ available: false });
 
 const JSON_TYPE = 'application/json';
 
@@ -65,15 +68,15 @@ export class ProjectClient {
   async health(): Promise<ServerHealth> {
     try {
       const response = await fetch(`${this.base}/health`, { headers: { Accept: JSON_TYPE }, credentials: 'same-origin' });
-      if (!response.ok || !(response.headers.get('content-type') ?? '').startsWith(JSON_TYPE)) {
-        return { available: false, authenticated: false, auth: null };
-      }
+      if (!response.ok || !(response.headers.get('content-type') ?? '').startsWith(JSON_TYPE)) return NO_SERVER;
       const value: unknown = await response.json();
-      if (typeof value !== 'object' || value === null || Reflect.get(value, 'api') !== 1) return { available: false, authenticated: false, auth: null };
-      const auth = Reflect.get(value, 'auth');
-      return { available: true, authenticated: Reflect.get(value, 'authenticated') === true, auth: auth === 'token' ? 'token' : 'loopback' };
+      if (typeof value !== 'object' || value === null || Reflect.get(value, 'api') !== 1) return NO_SERVER;
+      const auth = Reflect.get(value, 'auth') === 'token' ? 'token' : 'loopback';
+      if (Reflect.get(value, 'authenticated') !== true) return { available: true, authenticated: false, auth };
+      const project = Reflect.get(value, 'project');
+      return { available: true, authenticated: true, auth, project: typeof project === 'string' ? project : null };
     } catch (error) {
-      if (error instanceof TypeError || error instanceof SyntaxError) return { available: false, authenticated: false, auth: null };
+      if (error instanceof TypeError || error instanceof SyntaxError) return NO_SERVER;
       throw error;
     }
   }
