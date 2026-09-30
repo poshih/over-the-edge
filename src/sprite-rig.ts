@@ -55,10 +55,16 @@ export interface SpriteAnchor {
   readonly setCovered: (options: { covered: boolean }) => void;
 }
 
+// The host's lease on the models it prepared. The rig releases it once the replacement commits or
+// fails, so a refused or superseded preparation holds no model past its own operation.
+export interface CharacterAssetLease {
+  release(): void;
+}
+
 // Loads and validates a profile's character models before the rig commits it, so failures
 // leave the previous presentation untouched. Hosts without one reject documents with models.
 export interface CharacterAssetHost {
-  prepare(document: SpriteDocument, signal: AbortSignal): Promise<void>;
+  prepare(document: SpriteDocument, signal: AbortSignal): Promise<CharacterAssetLease>;
 }
 
 interface ImageResource {
@@ -157,6 +163,9 @@ interface BuildState extends CharacterPresentation {
   readonly skeleton: SkeletonRuntime | null;
   readonly presentation: DirectionalPresentation | null;
   readonly headTracking: SpriteHeadTrackingPlan;
+  // The host's prepared commit for this presentation, or undefined when nothing character-related
+  // changed. Built before any allocation and invoked at the old notification point.
+  readonly commitPresentation: (() => void) | undefined;
   readonly mode: 'replace' | 'edit';
 }
 
@@ -313,7 +322,10 @@ export class SpriteRig {
   private readonly anchors: ReadonlyMap<string, SpriteAnchor>;
   private readonly root: THREE.Object3D;
   private readonly targetIds: ReadonlySet<string>;
-  private readonly onCharacterPresentationChange: ((settings: CharacterPresentation) => void) | undefined;
+  // The host's preflight: runs the pure preparation a presentation needs and returns the commit that
+  // installs it. Called before any committed presentation or scene mutation, once per changed
+  // presentation, so a strategy refusal leaves the previous presentation untouched.
+  private readonly prepareCharacterPresentation: ((settings: CharacterPresentation) => () => void) | undefined;
   private readonly prepareTexture: ((texture: THREE.Texture) => void) | undefined;
   private readonly headTracking: SpriteHeadTracking | null;
   private headTrackingPlan: SpriteHeadTrackingPlan;
@@ -375,7 +387,7 @@ export class SpriteRig {
   constructor(anchors: ReadonlyMap<string, SpriteAnchor>, options: {
     root: THREE.Object3D;
     targetIds: readonly string[];
-    onCharacterPresentationChange?: (settings: CharacterPresentation) => void;
+    prepareCharacterPresentation?: (settings: CharacterPresentation) => () => void;
     headTracking?: SpriteHeadTracking;
     // Uploads a texture ahead of first use, so flipbook frame changes never upload during play.
     prepareTexture?: (texture: THREE.Texture) => void;
@@ -388,7 +400,7 @@ export class SpriteRig {
     for (const name of this.anchors.keys()) this.coverage.set(name, false);
     this.root = options.root;
     this.targetIds = new Set(options.targetIds);
-    this.onCharacterPresentationChange = options.onCharacterPresentationChange;
+    this.prepareCharacterPresentation = options.prepareCharacterPresentation;
     this.armSlots = options.armSlots === undefined ? null : Object.freeze({
       left: Object.freeze({ ...options.armSlots.left }), right: Object.freeze({ ...options.armSlots.right }),
     });
@@ -431,9 +443,10 @@ export class SpriteRig {
     const images = new Map<string, ImageResource>();
     let pixels = 0;
     let bytes = 0;
+    let assetLease: CharacterAssetLease | null = null;
     try {
       if (document.models !== undefined) {
-        await this.assetHost!.prepare(document, signal);
+        assetLease = await this.assetHost!.prepare(document, signal);
         checkSignal(signal);
       }
       for (const image of document.images) {
@@ -483,6 +496,7 @@ export class SpriteRig {
       this.commit(next, { preview: null });
     } finally {
       options.signal.removeEventListener('abort', abort);
+      assetLease?.release();
       for (const resource of operation.staged.values()) this.releaseResource(resource);
       operation.staged.clear();
       if (this.replacement === operation) this.replacement = null;
@@ -502,16 +516,18 @@ export class SpriteRig {
     this.assertMutable();
     const distance = validateArmForwardDistance(value);
     if (distance === this.armForwardDistance) return;
+    const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), armForwardDistance: distance });
     this.armForwardDistance = distance;
-    this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+    commit?.();
   }
 
   setGrips(value: Grips): void {
     this.assertMutable();
     const grips = validateGrips(value);
     if (sameGrips(grips, this.grips)) return;
+    const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), grips });
     this.grips = grips;
-    this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+    commit?.();
   }
 
   // Stretches the 2D arm chains and informs the host, which sizes its 3D arms; nothing reloads.
@@ -519,9 +535,10 @@ export class SpriteRig {
     this.assertMutable();
     const arms = validateArms(value);
     if (sameArms(arms, this.arms)) return;
+    const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), arms });
     this.arms = arms;
     this.applyArmLengths(this.skeleton);
-    this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+    commit?.();
   }
 
   // Each hand's authored 2D arm chain lengths, or null for a hand without one; nothing is allocated.
@@ -536,8 +553,9 @@ export class SpriteRig {
     const shading = sameShading(validated, DEFAULT_CHARACTER_SHADING) ? undefined : validated;
     const current = this.assets.shading;
     if (current === shading || current !== undefined && shading !== undefined && sameShading(current, shading)) return;
+    const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), shading });
     this.assets = characterAssets({ ...this.assets, shading });
-    this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+    commit?.();
   }
 
   configureSkeleton(
@@ -873,6 +891,10 @@ export class SpriteRig {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    const commitPresentation = this.prepareCharacterPresentation?.({
+      characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+      grips: DEFAULT_GRIPS, arms: null,
+    });
     this.replacement?.controller.abort(new DOMException('The sprite rig was disposed.', 'AbortError'));
     for (const resource of this.replacement?.staged.values() ?? []) this.releaseResource(resource);
     this.replacement?.staged.clear();
@@ -895,10 +917,7 @@ export class SpriteRig {
     this.coverage.clear();
     for (const [name, covered] of previousCoverage) if (covered) this.anchor(name).setCovered({ covered: false });
     this.assets = {};
-    this.onCharacterPresentationChange?.({
-      characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-      grips: DEFAULT_GRIPS, arms: null,
-    });
+    commitPresentation?.();
   }
 
   private assertLive(): void {
@@ -919,7 +938,7 @@ export class SpriteRig {
   }
 
   private assertCharacterRenderer(type: CharacterRiggingType): void {
-    if (type === 'avatar-3d' && this.onCharacterPresentationChange === undefined) {
+    if (type === 'avatar-3d' && this.prepareCharacterPresentation === undefined) {
       throw new SpriteError('This host has no connected avatar renderer.');
     }
   }
@@ -997,6 +1016,20 @@ export class SpriteRig {
     validateGrips(options.grips);
     validateArms(options.arms);
     this.assertCharacterRenderer(options.characterRiggingType);
+    const nextAssets = characterAssets(options);
+    const changedAssets = nextAssets.models !== this.assets.models || nextAssets.avatar !== this.assets.avatar ||
+      nextAssets.hammer !== this.assets.hammer || nextAssets.pot !== this.assets.pot ||
+      nextAssets.shading !== this.assets.shading;
+    const changedCharacter = options.characterRiggingType !== this.characterRiggingType ||
+      options.armForwardDistance !== this.armForwardDistance ||
+      !sameGrips(options.grips, this.grips) || !sameArms(options.arms, this.arms) || changedAssets;
+    // The host's pure presentation preparation runs before any skeleton or layer is allocated, so a
+    // strategy refusal leaves no new visual resource to unwind. The caller's staged image cleanup
+    // still runs, because buildState throws before it takes ownership of those resources.
+    const commitPresentation = changedCharacter ? this.prepareCharacterPresentation?.({
+      characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance,
+      grips: options.grips, arms: options.arms, ...nextAssets,
+    }) : undefined;
     const attachments = new Map<string, Attachment>();
     const skeletonMounts = new Map<THREE.Object3D, THREE.Group>();
     const instances = new Map<string, LayerInstance>();
@@ -1024,12 +1057,12 @@ export class SpriteRig {
         attachment.count++;
         instances.set(data.id, instance);
       }
-      return { resources, images, layers: instances, attachments, skeletonMounts, skeleton,
+      return { resources, images, layers: instances, attachments, skeletonMounts, skeleton, commitPresentation,
         presentation: options.presentation,
         headTracking: compileSpriteHeadTracking(this.headTracking, layers, definition, options.presentation),
         characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance,
         grips: options.grips, arms: options.arms, mode: options.mode,
-        ...characterAssets(options) };
+        ...nextAssets };
     } catch (error) {
       for (const instance of instances.values()) if (this.layers.get(instance.data.id) !== instance) this.disposeLayer(instance);
       if (skeleton !== this.skeleton) this.disposeSkeleton(skeleton);
@@ -1353,10 +1386,6 @@ export class SpriteRig {
     const oldSkeleton = this.skeleton;
     const changedType = next.characterRiggingType !== this.characterRiggingType;
     const nextAssets = characterAssets(next);
-    const changedAssets = nextAssets.models !== this.assets.models || nextAssets.avatar !== this.assets.avatar ||
-      nextAssets.hammer !== this.assets.hammer || nextAssets.shading !== this.assets.shading;
-    const changedCharacter = changedType || next.armForwardDistance !== this.armForwardDistance ||
-      !sameGrips(next.grips, this.grips) || !sameArms(next.arms, this.arms) || changedAssets;
     const presentation = next.presentation ?? next.headTracking.presentation;
     const resetDirection = changedType || next.mode === 'replace' || presentation !== this.runtimePresentation();
     const previousCoverage = new Map(this.coverage);
@@ -1417,7 +1446,7 @@ export class SpriteRig {
     for (const [name, covered] of this.coverage) {
       if (previousCoverage.get(name) !== covered) this.anchor(name).setCovered({ covered });
     }
-    if (changedCharacter) this.onCharacterPresentationChange?.(this.currentCharacterPresentation());
+    next.commitPresentation?.();
     for (const layer of oldLayers.values()) if (!retained.has(layer)) this.disposeLayer(layer);
     if (oldSkeleton !== this.skeleton) this.disposeSkeleton(oldSkeleton);
     for (const [source, resource] of oldResources) {

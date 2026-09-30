@@ -7,6 +7,9 @@ import { validateAppearanceParts, validateArmIk, DEFAULT_ALIGNMENT } from '../sr
 import { validateAudio } from '../src/audio-settings';
 import { ART_LIMITS } from '../src/art-types';
 import { checkCharacterModels } from '../src/character-model-check';
+import type { AvatarRigRegistry } from '../src/avatar-rig';
+import { sameAvatarDriver } from '../src/avatar-driver';
+import { sameBoneMap } from '../src/character-profile';
 import { VISUAL_PART_IDS } from '../src/character';
 import type { VisualPartId } from '../src/character';
 import { validateCourseModel } from '../src/course-art-model';
@@ -45,6 +48,8 @@ export interface StudioConfig {
   readonly projects: string;
   readonly releases: string;
   readonly token: string | null;
+  // The trusted rig strategies every project check resolves avatar drivers against.
+  readonly avatarRigs: AvatarRigRegistry;
 }
 
 interface Context {
@@ -253,12 +258,14 @@ export function createStudioHandler(config: StudioConfig) {
         if (added !== undefined) {
           throw new HttpError(400, 'missing-file', `Upload ${added.role} ${added.entry.id} with PUT models/${added.role}/${added.entry.id}/model before listing it.`, { section: 'models' });
         }
-        // A changed bone map must still resolve against the avatar's stored model.
+        // A changed bone map or driver must still resolve against the avatar's stored model.
         for (const { role, entry } of listed) {
+          const next = entry as LibraryAvatarEntry;
           const previous = stored(role, entry.id) as LibraryAvatarEntry | undefined;
-          if (role !== 'avatar' || JSON.stringify(previous?.boneMap) === JSON.stringify((entry as LibraryAvatarEntry).boneMap)) continue;
+          if (role !== 'avatar' || (previous !== undefined && sameBoneMap(previous.boneMap, next.boneMap) &&
+            sameAvatarDriver(previous.driver, next.driver))) continue;
           const bytes = await store.readBytes(id, { path: libraryModelFile(role, entry.id), maxBytes: MODEL_LIMITS.bytes });
-          inSection('models', () => checkLibraryModel(role, entry, bytes));
+          inSection('models', () => checkLibraryModel(role, entry, bytes, config.avatarRigs));
         }
         const removed = libraryEntries(manifest.models).filter(({ role, entry }) => !models[role].some((kept) => kept.id === entry.id));
         return { manifest: withManifest(manifest, { models }), remove: removed.map(({ role, entry }) => libraryModelFile(role, entry.id)) };
@@ -331,7 +338,7 @@ export function createStudioHandler(config: StudioConfig) {
           throw new HttpError(409, 'missing-primary', 'Set a primary character before adding an alternate one.', { section });
         }
         const document = inSection(section, () => validateProjectCharacter(value));
-        inSection(section, () => checkCharacterModels(document, `${role} character`));
+        inSection(section, () => checkCharacterModels(document, `${role} character`, config.avatarRigs));
         return {
           manifest: withManifest(manifest, { characters: { ...manifest.characters, [role]: path } }),
           json: new Map([[path, document]]),
@@ -586,10 +593,10 @@ export function createStudioHandler(config: StudioConfig) {
     try {
       parsed = JSON.parse(value);
     } catch {
-      throw new ProjectError('The settings query must be JSON: { boneMap, armForwardDistance, grips, arms }.', { section: 'models' });
+      throw new ProjectError('The settings query must be JSON: { boneMap, driver, armForwardDistance, grips, arms }.', { section: 'models' });
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new ProjectError('The settings query must be an object: { boneMap, armForwardDistance, grips, arms }.', { section: 'models' });
+      throw new ProjectError('The settings query must be an object: { boneMap, driver, armForwardDistance, grips, arms }.', { section: 'models' });
     }
     return parsed as Record<string, unknown>;
   };
@@ -605,13 +612,13 @@ export function createStudioHandler(config: StudioConfig) {
     await change(context, ['models'], async (manifest) => {
       const existing = manifest.models[role].find((candidate) => candidate.id === modelId);
       const base = { id: modelId, name: context.url.searchParams.get('name') ?? existing?.name ?? modelId };
-      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, armForwardDistance, grips, arms }), or maps its joints.
+      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, driver, armForwardDistance, grips, arms }), or maps its joints.
       const entry: LibraryEntry = role !== 'avatar' ? base : inSection('models', () => {
         if (settings !== null) return { ...base, ...validateAvatarSettings(avatarSettingsQuery(settings)) };
         if (existing !== undefined) return { ...(existing as LibraryAvatarEntry), ...base };
         return newAvatarEntry(bytes, base, DEFAULT_AVATAR_SETTINGS);
       });
-      inSection('models', () => checkLibraryModel(role, entry, bytes));
+      inSection('models', () => checkLibraryModel(role, entry, bytes, config.avatarRigs));
       const models = withEntry(manifest.models, role, entry);
       let total = bytes.byteLength;
       for (const other of libraryEntries(manifest.models)) {
@@ -642,7 +649,7 @@ export function createStudioHandler(config: StudioConfig) {
       const entry = libraryEntry({ ...manifest, models }, role, modelId);
       if (role === 'avatar') {
         const bytes = await store.readBytes(context.params.id!, { path: libraryModelFile(role, modelId), maxBytes: MODEL_LIMITS.bytes });
-        inSection('models', () => checkLibraryModel(role, entry, bytes));
+        inSection('models', () => checkLibraryModel(role, entry, bytes, config.avatarRigs));
       }
       return { manifest: withManifest(manifest, { models }), result: entry };
     });
@@ -749,9 +756,9 @@ export function createStudioHandler(config: StudioConfig) {
     }
     for (const role of ['primary', 'alternate'] as const) {
       const document = content.characters[role];
-      if (document !== null) inSection(`characters/${role}`, () => checkCharacterModels(document, `${role} character`));
+      if (document !== null) inSection(`characters/${role}`, () => checkCharacterModels(document, `${role} character`, config.avatarRigs));
     }
-    inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!));
+    inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, config.avatarRigs));
     return content;
   }
 
@@ -820,14 +827,14 @@ function insideRoot(root: string, value: string, variable: string): string {
 }
 
 /** The self-hosted project server, added to the Workshop's dev and preview servers. */
-export function projectStudio(options: { root: string; mode: string }): Plugin | null {
+export function projectStudio(options: { root: string; mode: string; avatarRigs: AvatarRigRegistry }): Plugin | null {
   const env = loadEnv(options.mode, options.root, 'STUDIO_');
   if (env.STUDIO_API === 'off') return null;
   const token = env.STUDIO_TOKEN === undefined || env.STUDIO_TOKEN === '' ? null : env.STUDIO_TOKEN;
   if (token !== null && token.length < MIN_TOKEN) throw new Error(`STUDIO_TOKEN must contain at least ${MIN_TOKEN} characters.`);
   const projects = env.STUDIO_PROJECTS ? resolve(options.root, env.STUDIO_PROJECTS) : resolve(options.root, 'projects');
   const releases = insideRoot(options.root, env.STUDIO_RELEASES ?? 'releases', 'STUDIO_RELEASES');
-  const handler = createStudioHandler({ root: options.root, projects, releases, token });
+  const handler = createStudioHandler({ root: options.root, projects, releases, token, avatarRigs: options.avatarRigs });
   // Hooks must not return the middleware stack: Vite would call a returned function as a post hook.
   const use = (server: { middlewares: { use: (handler: (request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => void) => unknown } }): void => {
     server.middlewares.use((request, response, next) => { void handler(request, response, next); });

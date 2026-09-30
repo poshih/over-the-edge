@@ -255,7 +255,7 @@ function validateLibrary(value: unknown): ContentLibrary {
     if (!Array.isArray(list) || list.length > MODEL_LIBRARY_LIMITS.entries) throw new ContentManifestError(`The ${role} library lists at most ${MODEL_LIBRARY_LIMITS.entries} models.`);
     const ids = new Set<string>();
     return Object.freeze(list.map((item: unknown) => {
-      const data = exactRecord(item, role === 'avatar' ? ['id', 'name', 'source', 'boneMap', 'armForwardDistance', 'grips', 'arms'] : ['id', 'name', 'source'], `A library ${role}`);
+      const data = exactRecord(item, role === 'avatar' ? ['id', 'name', 'source', 'boneMap', 'driver', 'armForwardDistance', 'grips', 'arms'] : ['id', 'name', 'source'], `A library ${role}`);
       const id = libraryModelId(data.id);
       if (ids.has(id)) throw new ContentManifestError(`The ${role} library lists "${id}" twice.`);
       ids.add(id);

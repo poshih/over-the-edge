@@ -473,7 +473,7 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "characterRiggingType": "sprite-2d",
   "armForwardDistance": 0.25,
   "grips": { "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85 },
@@ -524,7 +524,7 @@ Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
-Profiles use **schema version 12**; any other version is rejected, not converted.
+Profiles use **schema version 13**; any other version is rejected, not converted.
 `characterRiggingType` is `sprite-2d`, `model-3d` or `avatar-3d`;
 `armForwardDistance` is 0-2 m; `grips` is `{ "placement", "left", "right", "slideAt" }`, the
 placement (`fixed` or `sliding`), each hand's distance from the butt (0-3 m) and the share of
@@ -553,15 +553,19 @@ Skeleton edits default to live playback; pass `{ preview }` as the second
 changing the host's physical anchors. It ends previews and reinitializes visual
 motion when the mode changes. `replaces()` reports whether sprites hide the
 host's underlying visuals: all are hidden in pure 2D, none in either 3D mode.
-Hosts that support Avatar must provide `onCharacterPresentationChange` when
-constructing `SpriteRig`. It receives the character type, arm forward distance,
-grips, arm lengths and any character model fields. A host whose IK targets carry the hands
+Hosts that support Avatar provide `prepareCharacterPresentation` when constructing `SpriteRig`.
+It receives the character type, arm forward distance, grips, arm lengths and model fields, then
+returns a synchronous commit callback. Preflight validates/prepares without scene mutation; the
+callback installs that exact preparation after the sprite state is committed. Refusals occur before
+new skeleton/layer allocation, with staged images still owned by the replace operation. A host whose IK targets carry the hands
 passes `armSlots: { left, right }`, each naming the arm's IK `target` and the anchors that
 depict its `upper` arm and `forearm`, so the arm lengths reach those 2D chains;
 `naturalArmLengths()` reports their authored lengths. Hosts that load character models also pass
-`characterAssets: { prepare(document, signal) }`, which loads and validates a
-document's models before the rig commits it; without it, documents with models are
-rejected. `setShading()` applies a shading change without reloading anything.
+`characterAssets: { prepare(document, signal) }`, which acquires the document's models and returns
+`{ release() }`. The rig releases that lease in `finally` after success, failure or cancellation;
+the host retains separate ownership for committed views. Without this hook, model documents are
+rejected. This game's per-profile pool coalesces loads and admits at most nine models, including
+abandoned decoders until they finish; last release disposes resources or aborts their load. `setShading()` applies a shading change without reloading anything.
 This game uses that callback to update the shared grip depth, enable the connected
 avatar and disable the separate upper-body meshes; `VisualVisibility` retains
 the imported parts for switching back. Other hosts reject avatar profiles if

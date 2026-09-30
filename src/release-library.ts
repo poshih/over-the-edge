@@ -5,7 +5,7 @@ import type { ContentLibrary, ContentLibraryAvatar, ContentLibraryEntry } from '
 import { ContentError } from './content-session';
 import type { ContentAccess } from './content-session';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
-import { EMPTY_SELECTION, isPartRole, PART_ROLES } from './model-library';
+import { EMPTY_SELECTION, isPartRole, libraryAvatarSettings, PART_ROLES } from './model-library';
 import type { LibraryAvatarSettings, ModelSelection, ModelSelectionRequest, PartRole } from './model-library';
 import type { GameView, PartModel } from './view';
 
@@ -226,7 +226,7 @@ export class ReleaseModelLibrary {
     const avatar = entry as ContentLibraryAvatar;
     let settings = this.settings.get(avatar);
     if (settings === undefined) {
-      settings = Object.freeze({ boneMap: avatar.boneMap, armForwardDistance: avatar.armForwardDistance, grips: avatar.grips, arms: avatar.arms });
+      settings = libraryAvatarSettings(avatar);
       this.settings.set(avatar, settings);
     }
     return { id, model, avatar: settings };

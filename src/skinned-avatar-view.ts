@@ -1,30 +1,19 @@
 import { Group, Matrix4, Mesh, SkinnedMesh, Vector3 } from 'three';
 import type { Material, Object3D, Quaternion } from 'three';
-import { ARM_GEOMETRY } from './arm-ik';
-import type { ArmChain, ArmChains, ArmPose } from './arm-ik';
-import { AVATAR_BIND } from './avatar-geometry';
+import type { ArmChain, ArmChains } from './arm-ik';
+import type { AvatarRigBinds, AvatarRigPose } from './avatar-rig';
 import { ARM_SIDES } from './character';
 import { AVATAR_JOINT_IDS, AVATAR_JOINT_PARENTS } from './character-profile';
 import type { AvatarBoneMap, AvatarJointId } from './character-profile';
 import type { ResolvedAvatarJoints, UnmappedAvatarJoint } from './character-model-inspect';
 import type { LoadedCharacterModel } from './character-model-types';
 
-const SHOULDER_SPAN = ARM_GEOMETRY.right.shoulder[0] - ARM_GEOMETRY.left.shoulder[0];
-const SHOULDER_CENTER = new Vector3(...ARM_GEOMETRY.left.shoulder).add(new Vector3(...ARM_GEOMETRY.right.shoulder)).multiplyScalar(0.5);
-const BIND_ARM_NORMAL = new Vector3(...AVATAR_BIND.armNormal);
-const FALLBACK_ARM_NORMAL = new Vector3(0, -1, 0);
-const HAND_FORWARD = new Vector3(...AVATAR_BIND.handForward);
-const PARALLEL_LIMIT = 0.99;
-
 interface DrivenJoint {
-  readonly id: AvatarJointId;
   readonly bone: Object3D;
   readonly predecessor: DrivenJoint | null;
   // The bone parent's bind transform relative to the predecessor (in avatar space for the body).
   readonly parentOffset: Matrix4;
   readonly bind: Matrix4;
-  // The bone relative to its solver frame, captured in the bind pose.
-  readonly offset: Matrix4;
   readonly current: Matrix4;
 }
 
@@ -32,13 +21,16 @@ interface DrivenArm {
   readonly upper: DrivenJoint;
   readonly forearm: DrivenJoint;
   readonly hand: DrivenJoint;
-  readonly chain: ArmChain;
 }
 
 /**
- * An imported skinned GLB driven like the built-in avatar. Mapped joints receive the same IK,
- * grip and head-gaze frames; unmapped joints keep their bind pose relative to their parents, so
- * they follow their nearest mapped ancestor. Per frame it writes seven bone matrices and allocates nothing.
+ * An imported skinned GLB driven like the built-in avatar. Mapped joints receive the prepared rig's
+ * avatar-space matrices; unmapped joints keep their bind pose relative to their parents, so they
+ * follow their nearest mapped ancestor. Per frame it writes seven bone matrices and allocates nothing.
+ *
+ * This class is the engine's scene applicator: it owns the model's attachment, resets it to the
+ * skin's inverse bind pose, and derives each mapped joint's real node-parent offset from the scene
+ * hierarchy. Rig math and strategy code never see the scene.
  */
 export class SkinnedAvatarView {
   readonly root = new Group();
@@ -53,22 +45,13 @@ export class SkinnedAvatarView {
   private readonly headPivot = new Vector3();
   private readonly scale: number;
   private readonly statistics: { meshes: number; skinnedMeshes: number; vertices: number; materials: number };
-  private readonly inverseBody = new Matrix4();
   private readonly frame = new Matrix4();
   private readonly parentNow = new Matrix4();
-  private readonly shoulder = new Vector3();
-  private readonly elbow = new Vector3();
-  private readonly hand = new Vector3();
-  private readonly armNormal = new Vector3();
-  private readonly shaft = new Vector3();
-  private readonly handForward = new Vector3();
-  private readonly segment = new Vector3();
-  private readonly frameSide = new Vector3();
-  private readonly frameNormal = new Vector3();
   private readonly rotated = new Vector3();
   private writes = 0;
 
-  constructor(model: LoadedCharacterModel, resolved: ResolvedAvatarJoints, boneMap: AvatarBoneMap) {
+  constructor(model: LoadedCharacterModel, resolved: ResolvedAvatarJoints, boneMap: AvatarBoneMap,
+    bindings: AvatarRigBinds) {
     this.model = model;
     this.boneMap = boneMap;
     this.unmapped = resolved.unmapped;
@@ -81,11 +64,13 @@ export class SkinnedAvatarView {
     scene.removeFromParent();
 
     // Reset every joint to the skin's bind pose (inverse bind matrices), whatever pose the file stored.
-    const binds = new Map<Object3D, Matrix4>();
-    for (const joint of model.report.joints) binds.set(model.nodes.get(joint.node)!, new Matrix4().fromArray(joint.bind));
+    const bindPose = new Map<Object3D, Matrix4>();
+    for (const joint of model.report.joints) {
+      bindPose.set(model.nodes.get(joint.node)!, new Matrix4().fromArray(joint.bind));
+    }
     const modelSpace = new Map<Object3D, Matrix4>();
     const place = (object: Object3D, parent: Matrix4): void => {
-      let world = binds.get(object);
+      let world = bindPose.get(object);
       if (world !== undefined) {
         object.matrix.copy(parent).invert().multiply(world);
         object.matrixAutoUpdate = false;
@@ -100,54 +85,38 @@ export class SkinnedAvatarView {
     place(scene, new Matrix4());
     this.fit.add(scene);
 
-    // Match the built-in shoulders: span and midpoint, preserving the model's proportions.
-    const bone = (id: AvatarJointId): Object3D => model.nodes.get(resolved.nodes[id])!;
-    const bindPosition = (object: Object3D): Vector3 => new Vector3().setFromMatrixPosition(modelSpace.get(object)!);
-    const left = bindPosition(bone('left-upper-arm'));
-    const right = bindPosition(bone('right-upper-arm'));
-    this.scale = SHOULDER_SPAN / (right.x - left.x);
-    const center = left.add(right).multiplyScalar(0.5 * this.scale);
-    this.fit.matrix.makeScale(this.scale, this.scale, this.scale).setPosition(SHOULDER_CENTER.clone().sub(center));
-    const avatarSpace = (object: Object3D): Matrix4 => new Matrix4().multiplyMatrices(this.fit.matrix, modelSpace.get(object)!);
+    // The fitted frame and mapped bind matrices come from the shared fit; the scene supplies only
+    // the real node-parent offsets, which non-joint parents cannot be derived without.
+    this.scale = bindings.scale;
+    this.fit.matrix.copy(bindings.fit);
+    const avatarSpace = (object: Object3D): Matrix4 =>
+      new Matrix4().multiplyMatrices(bindings.fit, modelSpace.get(object)!);
 
     const joints = {} as Record<AvatarJointId, DrivenJoint>;
     for (const id of AVATAR_JOINT_IDS) {
-      const object = bone(id);
-      const bind = avatarSpace(object);
+      const object = model.nodes.get(resolved.nodes[id])!;
+      const bind = bindings.joints[id];
       const predecessorId = AVATAR_JOINT_PARENTS[id];
       const predecessor = predecessorId === null ? null : joints[predecessorId];
       const parentBind = avatarSpace(object.parent!);
       joints[id] = {
-        id, bone: object, predecessor, bind, offset: new Matrix4(), current: bind.clone(),
+        bone: object, predecessor, bind,
+        // The body is stationary in avatar space and is read as a predecessor; every other joint's
+        // current matrix is written by apply() before the frame's bone pass reads it.
+        current: predecessor === null ? bind.clone() : new Matrix4(),
         parentOffset: predecessor === null ? parentBind : predecessor.bind.clone().invert().multiply(parentBind),
       };
     }
     this.joints = joints;
-    this.headPivot.setFromMatrixPosition(joints.head.bind);
+    this.headPivot.setFromMatrixPosition(bindings.joints.head);
 
     const arms = {} as Record<'left' | 'right', DrivenArm>;
     const chains = {} as Record<'left' | 'right', ArmChain>;
     for (const side of ARM_SIDES) {
-      const upper = joints[`${side}-upper-arm`];
-      const forearm = joints[`${side}-forearm`];
-      const hand = joints[`${side}-hand`];
-      const shoulder = new Vector3().setFromMatrixPosition(upper.bind);
-      const elbow = new Vector3().setFromMatrixPosition(forearm.bind);
-      const wrist = new Vector3().setFromMatrixPosition(hand.bind);
-      const chain: ArmChain = Object.freeze({
-        shoulder: Object.freeze([shoulder.x, shoulder.y, shoulder.z] as [number, number, number]),
-        upper: shoulder.distanceTo(elbow),
-        forearm: elbow.distanceTo(wrist),
-      });
-      this.limbFrame(this.frame, shoulder, elbow, this.bindNormal(shoulder, elbow), chain.upper);
-      upper.offset.copy(this.frame).invert().multiply(upper.bind);
-      this.limbFrame(this.frame, elbow, wrist, this.bindNormal(elbow, wrist), chain.forearm);
-      forearm.offset.copy(this.frame).invert().multiply(forearm.bind);
-      // In the bind pose the virtual shaft runs along the forearm like the built-in avatar's gloves.
-      this.shaft.subVectors(wrist, elbow).normalize().multiplyScalar(AVATAR_BIND.armDirection[side]);
-      this.handFrame(this.frame, wrist, this.shaft, HAND_FORWARD);
-      hand.offset.copy(this.frame).invert().multiply(hand.bind);
-      arms[side] = { upper, forearm, hand, chain };
+      const chain = bindings.arms[side].chain;
+      arms[side] = {
+        upper: joints[`${side}-upper-arm`], forearm: joints[`${side}-forearm`], hand: joints[`${side}-hand`],
+      };
       chains[side] = chain;
     }
     this.arms = arms;
@@ -170,12 +139,11 @@ export class SkinnedAvatarView {
     this.statistics = { meshes, skinnedMeshes, vertices, materials: materials.size };
   }
 
-  update(body: Matrix4, poses: readonly ArmPose[], headRotation: Quaternion): void {
+  // Applies the prepared rig's avatar-space pose, which the engine wrote this frame from the plan
+  // and the arm solutions.
+  apply(body: Matrix4, headRotation: Quaternion, pose: AvatarRigPose): void {
     this.root.matrix.copy(body);
     this.root.matrixWorldNeedsUpdate = true;
-    this.inverseBody.copy(body).invert();
-    // The tool's shaft lies in the world's XY plane; keep each hand's front facing world +Z.
-    this.handForward.copy(HAND_FORWARD).transformDirection(this.inverseBody);
 
     const head = this.joints.head;
     this.frame.makeRotationFromQuaternion(headRotation);
@@ -183,20 +151,12 @@ export class SkinnedAvatarView {
     this.frame.setPosition(this.headPivot.x - this.rotated.x, this.headPivot.y - this.rotated.y, this.headPivot.z - this.rotated.z);
     head.current.multiplyMatrices(this.frame, head.bind);
 
-    for (let index = 0; index < poses.length; index++) {
-      const pose = poses[index];
-      const arm = this.arms[pose.side];
-      this.shoulder.copy(pose.shoulder).applyMatrix4(this.inverseBody);
-      this.elbow.copy(pose.elbow).applyMatrix4(this.inverseBody);
-      this.hand.copy(pose.hand).applyMatrix4(this.inverseBody);
-      this.armNormal.copy(pose.normal).transformDirection(this.inverseBody);
-      this.shaft.copy(pose.shaftAxis).transformDirection(this.inverseBody);
-      this.limbFrame(this.frame, this.shoulder, this.elbow, this.armNormal, arm.chain.upper);
-      arm.upper.current.multiplyMatrices(this.frame, arm.upper.offset);
-      this.limbFrame(this.frame, this.elbow, this.hand, this.armNormal, arm.chain.forearm);
-      arm.forearm.current.multiplyMatrices(this.frame, arm.forearm.offset);
-      this.handFrame(this.frame, this.hand, this.shaft, this.handForward);
-      arm.hand.current.multiplyMatrices(this.frame, arm.hand.offset);
+    for (const side of ARM_SIDES) {
+      const arm = this.arms[side];
+      const armPose = pose[side];
+      arm.upper.current.copy(armPose.upper);
+      arm.forearm.current.copy(armPose.forearm);
+      arm.hand.current.copy(armPose.hand);
     }
 
     // Desired avatar-space transforms become exact local matrices, parents first. Keeping
@@ -208,24 +168,6 @@ export class SkinnedAvatarView {
       joint.bone.matrixWorldNeedsUpdate = true;
     }
     this.writes += this.driven.length;
-  }
-
-  private bindNormal(start: Vector3, end: Vector3): Vector3 {
-    this.segment.subVectors(end, start).normalize();
-    return Math.abs(this.segment.dot(BIND_ARM_NORMAL)) < PARALLEL_LIMIT ? BIND_ARM_NORMAL : FALLBACK_ARM_NORMAL;
-  }
-
-  private limbFrame(target: Matrix4, start: Vector3, end: Vector3, normal: Vector3, restLength: number): void {
-    this.segment.subVectors(end, start).divideScalar(restLength);
-    this.frameSide.crossVectors(this.segment, normal).normalize();
-    this.frameNormal.crossVectors(this.frameSide, this.segment).normalize();
-    target.makeBasis(this.frameSide, this.segment, this.frameNormal).setPosition(start);
-  }
-
-  private handFrame(target: Matrix4, position: Vector3, shaft: Vector3, forward: Vector3): void {
-    this.frameSide.crossVectors(shaft, forward).normalize();
-    this.frameNormal.crossVectors(this.frameSide, shaft).normalize();
-    target.makeBasis(this.frameSide, shaft, this.frameNormal).setPosition(position);
   }
 
   inspect() {
@@ -254,6 +196,7 @@ export class SkinnedAvatarView {
 
   dispose(): void {
     this.root.removeFromParent();
-    this.model.scene.removeFromParent();
+    // A replacement view may already own the same model; leaving its scene alone keeps it rendering.
+    if (this.model.scene.parent === this.fit) this.model.scene.removeFromParent();
   }
 }

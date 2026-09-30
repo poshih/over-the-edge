@@ -7,6 +7,7 @@ import {
 } from '../src/project';
 import type { ProjectContent } from '../src/project';
 import { checkAppearanceModel } from '../src/appearance-model';
+import type { AvatarRigRegistry } from '../src/avatar-rig';
 import { checkModelLibrary } from '../src/model-library';
 
 function inside(root: string, path: string, label: string): string {
@@ -57,7 +58,7 @@ export interface ProjectInput {
 
 // Loads GAME_PROJECT (a project directory, its project.json, or a single-file project bundle) with
 // every release check; failures name the section.
-export function loadProjectInput(root: string, requested: string): ProjectInput {
+export function loadProjectInput(root: string, requested: string, avatarRigs: AvatarRigRegistry): ProjectInput {
   let target: string;
   try {
     target = inside(root, join(root, requested), 'GAME_PROJECT');
@@ -97,7 +98,7 @@ export function loadProjectInput(root: string, requested: string): ProjectInput 
     }
   }
   try {
-    checkModelLibrary(manifest.models, binary);
+    checkModelLibrary(manifest.models, binary, avatarRigs);
   } catch (error) {
     throw new Error(`GAME_PROJECT: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }

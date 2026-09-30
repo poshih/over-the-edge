@@ -100,6 +100,10 @@ and grants the release access to its content, typically short-lived signed CDN U
 from the game's backend; the engine never sees accounts or credentials. See
 [content delivery](docs/content-delivery.md).
 
+A game that ships custom avatars adds its own rig strategies with
+**`AVATAR_RIG_MODULE`**, and its profiles then name them in each avatar's `driver`.
+See [rig strategies](docs/characters.md#rig-strategies).
+
 A release built with **`GAME_PHANTOMS_URL`** records a random 10 seconds of the player now and
 then, sends it to the game's backend, and replays other players' recordings near the player as
 translucent white phantoms. Ten seconds take under 4 KB and reproduce every physics step within
@@ -835,7 +839,7 @@ profile's [grips](#hand-grips) on the physical tool, with its [arm lengths](#arm
 The choice is stored as `characterRiggingType` in the character/sprite profile.
 Changing it retains the other artwork, but does not silently save it. Use the
 profile's **Save**, **Revert**, and JSON controls. Profiles use **schema version
-11**; profiles in any other version are rejected, not converted.
+13**; profiles in any other version are rejected, not converted.
 
 Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend

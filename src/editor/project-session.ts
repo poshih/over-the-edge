@@ -5,6 +5,8 @@ import { audioSources, DEFAULT_AUDIO, validateAudio } from '../audio-settings';
 import type { AudioSettings } from '../audio-settings';
 import type { ArmIkSettings, VisualPartId } from '../character';
 import type { AvatarBoneMap } from '../character-profile';
+import { embeddedModel } from '../character-profile';
+import { checkCharacterModels } from '../character-model-check';
 import { ArtError } from '../art-types';
 import type { ArtMode } from '../art-types';
 import { NO_DECORATION_ART } from '../decoration-art';
@@ -31,10 +33,12 @@ import type { SpriteDocument } from '../sprite-data';
 import { decodeBase64 } from '../sprite-fields';
 import { MODEL_LIMITS } from '../model-data';
 import {
-  checkLibraryModel, checkModelLibrary, libraryEntries, libraryIdForName, libraryModelFile, MODEL_LIBRARY_LIMITS, newAvatarEntry, PART_ROLES,
+  checkLibraryModel, checkModelLibrary, libraryAvatarSettings, libraryEntries, libraryIdForName, libraryModelFile, MODEL_LIBRARY_LIMITS, newAvatarEntry, PART_ROLES,
   validateAvatarSettings, validateModelLibrary,
 } from '../model-library';
 import type { LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, ModelLibrary, PartRole } from '../model-library';
+import { STANDARD_AVATAR_DRIVER } from '../avatar-driver';
+import type { AvatarRigRegistry } from '../avatar-rig';
 import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
 import { ProjectApiError, ProjectClient } from './project-client';
@@ -218,6 +222,8 @@ function isExpected(error: unknown): error is Error {
  */
 export class ProjectSession {
   private readonly workspace: ProjectWorkspace;
+  // The avatar drivers this Workshop accepts; injected so a custom AVATAR_RIG_MODULE reaches every validator.
+  private readonly avatarRigs: AvatarRigRegistry;
   private readonly client: ProjectClient;
   private readonly published: PublishedProject | null;
   private readonly copy: ProjectCopyStore | null;
@@ -265,8 +271,9 @@ export class ProjectSession {
   private copyTimer: ReturnType<typeof setInterval> | null = null;
   private readonly checkedCharacters = new WeakSet<SpriteDocument>();
 
-  constructor(options: { workspace: ProjectWorkspace; client?: ProjectClient; published?: PublishedProject | null }) {
+  constructor(options: { workspace: ProjectWorkspace; avatarRigs: AvatarRigRegistry; client?: ProjectClient; published?: PublishedProject | null }) {
     this.workspace = options.workspace;
+    this.avatarRigs = options.avatarRigs;
     this.client = options.client ?? new ProjectClient();
     this.published = options.published ?? null;
     this.copy = this.published === null ? null : new ProjectCopyStore();
@@ -434,8 +441,9 @@ export class ProjectSession {
       const base = { id, name: file.name.replace(/\.glb$/i, '').trim().slice(0, MODEL_LIBRARY_LIMITS.name) || id };
       const settings = this.characterAvatarSettings();
       const entry = role !== 'avatar' ? base : boneMap === undefined
-        ? inSection('models', () => newAvatarEntry(bytes, base, settings)) : { ...base, boneMap, ...settings };
-      inSection('models', () => checkLibraryModel(role, entry, bytes));
+        ? inSection('models', () => newAvatarEntry(bytes, base, settings))
+        : { ...base, boneMap, driver: STANDARD_AVATAR_DRIVER, ...settings };
+      inSection('models', () => checkLibraryModel(role, entry, bytes, this.avatarRigs));
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
       const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, bytes: blob.size, uploaded: false }];
       inSection('models', () => libraryOf(items));
@@ -461,7 +469,7 @@ export class ProjectSession {
         id, name: item.entry.name, ...inSection('models', () => validateAvatarSettings(settings as unknown as Record<string, unknown>)),
       });
       const bytes = new Uint8Array(await (await this.libraryBlob('avatar', id)).arrayBuffer());
-      inSection('models', () => checkLibraryModel('avatar', entry, bytes));
+      inSection('models', () => checkLibraryModel('avatar', entry, bytes, this.avatarRigs));
       if (!this.library.includes(item)) return false;
       this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
       this.changed('content');
@@ -476,21 +484,29 @@ export class ProjectSession {
   async useCharacterSettings(id: string): Promise<boolean> {
     const item = this.library.find((candidate) => candidate.role === 'avatar' && candidate.entry.id === id);
     if (item === undefined) return false;
-    return this.setLibraryAvatar(id, { boneMap: (item.entry as LibraryAvatarEntry).boneMap, ...this.characterAvatarSettings() });
+    return this.setLibraryAvatar(id, { ...libraryAvatarSettings(item.entry as LibraryAvatarEntry), ...this.characterAvatarSettings() });
   }
 
   private settingsOf(entry: LibraryAvatarEntry): LibraryAvatarSettings {
     let settings = this.avatarSettings.get(entry);
     if (settings === undefined) {
-      settings = Object.freeze({ boneMap: entry.boneMap, armForwardDistance: entry.armForwardDistance, grips: entry.grips, arms: entry.arms });
+      settings = libraryAvatarSettings(entry);
       this.avatarSettings.set(entry, settings);
     }
     return settings;
   }
 
-  private characterAvatarSettings(): Omit<LibraryAvatarSettings, 'boneMap'> {
+  private characterAvatarSettings(): Omit<LibraryAvatarSettings, 'boneMap' | 'driver'> {
     const { armForwardDistance, grips, arms } = this.workspace.character.draft();
     return { armForwardDistance, grips, arms };
+  }
+
+  // Runs the same embedded-GLB and rig checks a release and the project server run, with this
+  // Workshop's registry. A profile with an external model is left to the runtime loader, so an
+  // editor-only profile that cannot be packaged never fails here.
+  private checkCharacterProfile(document: SpriteDocument, label: string): void {
+    if (document.models === undefined || !document.models.every((model) => embeddedModel(model.source) !== null)) return;
+    checkCharacterModels(document, label, this.avatarRigs);
   }
 
   // A library model's GLB, from this page or the bound server project.
@@ -527,7 +543,9 @@ export class ProjectSession {
 
   async importAlternate(file: File): Promise<boolean> {
     try {
-      this.alternate = parseProjectCharacter(await file.text());
+      const document = parseProjectCharacter(await file.text());
+      this.checkCharacterProfile(document, 'alternate character');
+      this.alternate = document;
       this.changed('content');
       return true;
     } catch (error) {
@@ -939,7 +957,13 @@ export class ProjectSession {
       checkProjectReferences(manifest, level);
       if (primary !== null && !this.checkedCharacters.has(primary)) {
         validateProjectCharacter(primary);
+        this.checkCharacterProfile(primary, 'primary character');
         this.checkedCharacters.add(primary);
+      }
+      if (this.alternate !== null && !this.checkedCharacters.has(this.alternate)) {
+        validateProjectCharacter(this.alternate);
+        this.checkCharacterProfile(this.alternate, 'alternate character');
+        this.checkedCharacters.add(this.alternate);
       }
     } catch (error) {
       if (isProjectDataError(error)) return null;
@@ -1049,6 +1073,8 @@ export class ProjectSession {
       : validateProjectCharacter(values.get('characters/primary')) : null;
     const alternate = has.has('characters/alternate') ? values.get('characters/alternate') === null ? null
       : validateProjectCharacter(values.get('characters/alternate')) : undefined;
+    if (primary !== null) this.checkCharacterProfile(primary, 'primary character');
+    if (alternate !== undefined && alternate !== null) this.checkCharacterProfile(alternate, 'alternate character');
     const parts = has.has('appearance') ? validateAppearanceParts(manifest.appearance).map((part, index) => ({ ...part, blob: models[index]! })) : null;
     // Models the runtime would refuse fail here, before anything in the page changes.
     for (const part of parts ?? []) {
@@ -1114,7 +1140,7 @@ export class ProjectSession {
       ['level', content.level], ['characters/primary', content.characters.primary], ['characters/alternate', content.characters.alternate],
     ]);
     // Library models a release would refuse fail here, before anything in the page changes.
-    inSection('models', () => checkModelLibrary(manifest.models, (path) => content.files.get(path)!));
+    inSection('models', () => checkModelLibrary(manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
     this.unbind();
     try {
       await this.applySections(manifest, PROJECT_SECTIONS.filter((name) => name !== 'media' && name !== 'art' && name !== 'models'), values, models, serverId);
@@ -1178,6 +1204,8 @@ export class ProjectSession {
     const document = this.workspace.character.validated();
     if (document === null) throw new ProjectError('The character profile cannot be saved yet; see Character.', { section: 'characters/primary' });
     const primary = this.workspace.character.hasContent() || this.alternate !== null ? document : null;
+    if (primary !== null) this.checkCharacterProfile(primary, 'primary character');
+    if (this.alternate !== null) this.checkCharacterProfile(this.alternate, 'alternate character');
     const level = validateLevel(this.workspace.level.get());
     const manifest = validateProjectManifest({
       ...this.draftManifest(),

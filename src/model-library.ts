@@ -3,9 +3,13 @@
 // so project validation, the project server, the Workshop and builds share one definition.
 import { AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, validateAvatarBoneMap } from './character-profile';
 import type { AvatarBoneMap, PartialAvatarBoneMap } from './character-profile';
+import { STANDARD_AVATAR_DRIVER, validateAvatarDriver } from './avatar-driver';
+import type { AvatarDriver } from './avatar-driver';
+import { checkAvatarRig, DEFAULT_AVATAR_RIGS } from './avatar-rig';
+import type { AvatarRigRegistry } from './avatar-rig';
 import type { CharacterArms } from './character-arms';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
-import { inspectCharacterModel, resolveAvatarJoints, suggestAvatarBoneMap } from './character-model-inspect';
+import { inspectCharacterModel, suggestAvatarBoneMap } from './character-model-inspect';
 import { DEFAULT_GRIPS } from './grips';
 import type { Grips } from './grips';
 import { exactRecord, ProjectError, textValue } from './project-fields';
@@ -41,9 +45,10 @@ export interface LibraryEntry {
   readonly name: string;
 }
 
-// What an avatar model's proportions size: its bone map, grips, arm lengths and arm forward distance.
+// What an avatar model's proportions size: its bone map, driver, grips, arm lengths and arm forward distance.
 export interface LibraryAvatarSettings {
   readonly boneMap: AvatarBoneMap;
+  readonly driver: AvatarDriver;
   readonly armForwardDistance: number;
   readonly grips: Grips;
   readonly arms: CharacterArms | null;
@@ -62,7 +67,7 @@ export const EMPTY_MODEL_LIBRARY: ModelLibrary = Object.freeze({
 });
 
 const ENTRY_KEYS = ['id', 'name'] as const;
-const AVATAR_KEYS = [...ENTRY_KEYS, 'boneMap', 'armForwardDistance', 'grips', 'arms'] as const;
+const AVATAR_KEYS = [...ENTRY_KEYS, 'boneMap', 'driver', 'armForwardDistance', 'grips', 'arms'] as const;
 const ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 export function isPartRole(value: unknown): value is PartRole {
@@ -91,9 +96,22 @@ export function libraryModelFile(role: PartRole, id: string): string {
 export function validateAvatarSettings(value: Record<string, unknown>): LibraryAvatarSettings {
   return Object.freeze({
     boneMap: validateAvatarBoneMap(value.boneMap),
+    driver: validateAvatarDriver(value.driver),
     armForwardDistance: validateArmForwardDistance(value.armForwardDistance),
     grips: validateGrips(value.grips),
     arms: validateArms(value.arms),
+  });
+}
+
+// The settings fields a library avatar contributes, copied as one list so release caches and the
+// editor never drift from the profile schema.
+export function libraryAvatarSettings(entry: LibraryAvatarSettings): LibraryAvatarSettings {
+  return Object.freeze({
+    boneMap: entry.boneMap,
+    driver: entry.driver,
+    armForwardDistance: entry.armForwardDistance,
+    grips: entry.grips,
+    arms: entry.arms,
   });
 }
 
@@ -134,31 +152,43 @@ function entryLabel(role: PartRole, entry: LibraryEntry): string {
 
 // Checks a library GLB exactly as release builds and loads do: MODEL_LIMITS, the typed character
 // model checks, the part's conventions, and an avatar's bone map against its skin.
-export function checkLibraryModel(role: PartRole, entry: LibraryEntry | LibraryAvatarEntry, bytes: Uint8Array): void {
+export function checkLibraryModel(
+  role: PartRole,
+  entry: LibraryEntry | LibraryAvatarEntry,
+  bytes: Uint8Array,
+  registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS,
+): void {
   try {
     const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, role);
-    if (role === 'avatar') resolveAvatarJoints(report, (entry as LibraryAvatarEntry).boneMap);
+    if (role === 'avatar') {
+      const avatar = entry as LibraryAvatarEntry;
+      checkAvatarRig(report, avatar.boneMap, avatar.driver, registry);
+    }
   } catch (error) {
     if (error instanceof Error) error.message = `${entryLabel(role, entry)}: ${error.message}`;
     throw error;
   }
 }
 
-export function checkModelLibrary(library: ModelLibrary, bytes: (path: string) => Uint8Array): void {
-  for (const { role, entry } of libraryEntries(library)) checkLibraryModel(role, entry, bytes(libraryModelFile(role, entry.id)));
+export function checkModelLibrary(
+  library: ModelLibrary,
+  bytes: (path: string) => Uint8Array,
+  registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS,
+): void {
+  for (const { role, entry } of libraryEntries(library)) checkLibraryModel(role, entry, bytes(libraryModelFile(role, entry.id)), registry);
 }
 
-// A new avatar entry for an imported GLB: its mapped joints, when every joint resolves, and settings
-// taken from `settings`, typically the open character's.
-export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings: Omit<LibraryAvatarSettings, 'boneMap'>): LibraryAvatarEntry {
+// A new avatar entry for an imported GLB: its mapped joints, when every joint resolves, standard
+// rig strategy, and settings taken from `settings`, typically the open character's.
+export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings: Omit<LibraryAvatarSettings, 'boneMap' | 'driver'>): LibraryAvatarEntry {
   const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'avatar');
   const suggested: PartialAvatarBoneMap = suggestAvatarBoneMap(report);
   const boneMap = validateAvatarBoneMap(Object.fromEntries(AVATAR_JOINT_IDS.map((joint) => [joint, suggested[joint] ?? null])));
-  const avatar: LibraryAvatarEntry = Object.freeze({ ...entry, boneMap, ...settings });
+  const avatar: LibraryAvatarEntry = Object.freeze({ ...entry, boneMap, driver: STANDARD_AVATAR_DRIVER, ...settings });
   checkLibraryModel('avatar', avatar, bytes);
   return avatar;
 }
 
-export const DEFAULT_AVATAR_SETTINGS: Omit<LibraryAvatarSettings, 'boneMap'> = Object.freeze({
+export const DEFAULT_AVATAR_SETTINGS: Omit<LibraryAvatarSettings, 'boneMap' | 'driver'> = Object.freeze({
   armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE, grips: DEFAULT_GRIPS, arms: null,
 });

@@ -56,6 +56,7 @@ export class PropModelView {
 
   dispose(): void {
     this.root.removeFromParent();
-    this.model.scene.removeFromParent();
+    // A replacement view may already own the same model; leaving its scene alone keeps it rendering.
+    if (this.model.scene.parent === this.root) this.model.scene.removeFromParent();
   }
 }

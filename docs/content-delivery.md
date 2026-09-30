@@ -158,6 +158,31 @@ never imports anything the module brings, such as an identity provider's SDK, an
 the module's API nor anything else on a global. The shell is public, so the module must hold no
 secrets.
 
+## Avatar rig strategies: the rig module
+
+`AVATAR_RIG_MODULE` adds a game's own [avatar rig strategies](characters.md#rig-strategies) to
+the registry that already holds the standard strategy, so its imported avatars may select them.
+Like `GAME_MODULE`, it must be a `.ts` or `.js` file inside this repository:
+
+```sh
+AVATAR_RIG_MODULE=games/my-game/rigs.ts npm run build:game
+```
+
+The module default-exports `{ apiVersion, strategies }` at **API version 1**
+(`AVATAR_RIG_API_VERSION` in `src/avatar-rig.ts`). It is imported once, when the dev server,
+build or project server starts, through Vite's own resolver, so the validators check exactly
+the strategies the browser runs. A module whose export is malformed, declares another API
+version, duplicates a strategy ID or omits the standard strategy fails with a typed
+`AvatarRigError` naming the fault, not a plain loader error.
+
+Unlike `GAME_MODULE`, the rig module is **not** ignored by publishing: the project server loads
+it to validate every model it stores, and the release it builds keeps it, so a published game
+shows the same avatars. The registry is a **startup snapshot** — it is not reloaded when the
+module changes, so restart the dev server, rebuild or restart the project server. Every
+validator enforces it: importing or opening a project, the project server's writes, release
+packaging and the running release, so a custom driver never falls back to the standard rig in
+one path and works in another.
+
 ## Grants
 
 `access.grant({ group, paths, refresh }, signal)` returns a `ContentGrant`:
@@ -251,7 +276,9 @@ keep requesting ranges while they play.
 - The project server's **Publish** writes the shell to `releases/<id>/` and the content to
   `releases/<id>.content/`, and serves both at `/play/<id>/`, behind the studio's own access
   checks. Publishing ignores `GAME_CONTENT_URL` and `GAME_MODULE`: a studio preview uses public
-  access to its own content, and, without a backend that selects, shows no library models.
+  access to its own content, and, without a backend that selects, shows no library models. It
+  honors [`AVATAR_RIG_MODULE`](#avatar-rig-strategies-the-rig-module): the published shell bundles
+  the same strategies the project server validated the project's models against.
 - A Workshop built with `GAME_PROJECT` publishes every project file, so a game with protected
   content deploys that Workshop only behind its own access control, or not at all.
 

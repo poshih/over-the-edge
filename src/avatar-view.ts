@@ -3,6 +3,7 @@ import type { Quaternion } from 'three';
 import { ARM_GEOMETRY, ARM_LENGTH } from './arm-ik';
 import type { ArmPose } from './arm-ik';
 import { AVATAR_BIND, AVATAR_JOINTS, createAvatarGeometry } from './avatar-geometry';
+import { handFrame, limbFrame } from './avatar-rig-math';
 import { ARM_SIDES } from './character';
 import type { ArmSide } from './character';
 
@@ -55,16 +56,13 @@ export class AvatarView {
   private readonly inverseParent = new Matrix4();
   private readonly upperFrame = new Matrix4();
   private readonly forearmFrame = new Matrix4();
-  private readonly handFrame = new Matrix4();
+  private readonly handMatrix = new Matrix4();
   private readonly shoulder = new Vector3();
   private readonly elbow = new Vector3();
   private readonly hand = new Vector3();
   private readonly armNormal = new Vector3();
   private readonly shaft = new Vector3();
   private readonly handForward = new Vector3();
-  private readonly segment = new Vector3();
-  private readonly frameSide = new Vector3();
-  private readonly frameNormal = new Vector3();
 
   constructor() {
     this.root.name = 'original-connected-avatar';
@@ -109,11 +107,9 @@ export class AvatarView {
       this.hand.copy(pose.hand).applyMatrix4(this.inverseBody);
       this.armNormal.copy(pose.normal).transformDirection(this.inverseBody);
       this.shaft.copy(pose.shaftAxis).transformDirection(this.inverseBody);
-      this.limbFrame(this.upperFrame, this.shoulder, this.elbow, this.armNormal, ARM_LENGTH.upper);
-      this.limbFrame(this.forearmFrame, this.elbow, this.hand, this.armNormal, ARM_LENGTH.forearm);
-      this.frameSide.crossVectors(this.shaft, this.handForward).normalize();
-      this.frameNormal.crossVectors(this.frameSide, this.shaft).normalize();
-      this.handFrame.makeBasis(this.frameSide, this.shaft, this.frameNormal).setPosition(this.hand);
+      limbFrame(this.upperFrame, this.shoulder, this.elbow, this.armNormal, ARM_LENGTH.upper);
+      limbFrame(this.forearmFrame, this.elbow, this.hand, this.armNormal, ARM_LENGTH.forearm);
+      handFrame(this.handMatrix, this.hand, this.shaft, this.handForward);
 
       // Desired avatar-space frames become exact hierarchical locals. Keeping matrices avoids
       // lossy TRS decomposition/shear and cancels inherited stretch at the elbow and grip.
@@ -121,18 +117,11 @@ export class AvatarView {
       this.inverseParent.copy(this.upperFrame).invert();
       arm.forearm.matrix.multiplyMatrices(this.inverseParent, this.forearmFrame);
       this.inverseParent.copy(this.forearmFrame).invert();
-      arm.hand.matrix.multiplyMatrices(this.inverseParent, this.handFrame);
+      arm.hand.matrix.multiplyMatrices(this.inverseParent, this.handMatrix);
       arm.upper.matrixWorldNeedsUpdate = true;
       arm.forearm.matrixWorldNeedsUpdate = true;
       arm.hand.matrixWorldNeedsUpdate = true;
     }
-  }
-
-  private limbFrame(target: Matrix4, start: Vector3, end: Vector3, normal: Vector3, restLength: number): void {
-    this.segment.subVectors(end, start).divideScalar(restLength);
-    this.frameSide.crossVectors(this.segment, normal).normalize();
-    this.frameNormal.crossVectors(this.frameSide, this.segment).normalize();
-    target.makeBasis(this.frameSide, this.segment, this.frameNormal).setPosition(start);
   }
 
   inspect(): { kind: 'skinned-upper-body'; meshes: number; triangles: number; vertices: number; bones: number; materials: number } {
