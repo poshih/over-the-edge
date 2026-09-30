@@ -473,7 +473,7 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 14,
+  "schemaVersion": 15,
   "characterRiggingType": "sprite-2d",
   "armForwardDistance": 0.25,
   "grips": {
@@ -527,7 +527,7 @@ Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
-Profiles use **schema version 14**; any other version is rejected, not converted.
+Profiles use **schema version 15**; any other version is rejected, not converted.
 `characterRiggingType` is `sprite-2d`, `model-3d` or `avatar-3d`;
 `armForwardDistance` is 0-2 m; `grips` is `{ "placement", "left", "right", "slideAt", "rotation" }`, the
 placement (`fixed` or `sliding`), each hand's distance from the butt (0-3 m), the share of

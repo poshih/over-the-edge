@@ -8,8 +8,7 @@ import { validateAudio } from '../src/audio-settings';
 import { ART_LIMITS } from '../src/art-types';
 import { checkCharacterModels } from '../src/character-model-check';
 import type { AvatarRigRegistry } from '../src/avatar-rig';
-import { sameAvatarDriver } from '../src/avatar-driver';
-import { sameBoneMap } from '../src/character-profile';
+import { sameAvatarModelSettings } from '../src/character-profile';
 import { VISUAL_PART_IDS } from '../src/character';
 import type { VisualPartId } from '../src/character';
 import { validateCourseModel } from '../src/course-art-model';
@@ -258,12 +257,11 @@ export function createStudioHandler(config: StudioConfig) {
         if (added !== undefined) {
           throw new HttpError(400, 'missing-file', `Upload ${added.role} ${added.entry.id} with PUT models/${added.role}/${added.entry.id}/model before listing it.`, { section: 'models' });
         }
-        // A changed bone map or driver must still resolve against the avatar's stored model.
+        // A changed bone map, driver or hair must still resolve against the avatar's stored model.
         for (const { role, entry } of listed) {
           const next = entry as LibraryAvatarEntry;
           const previous = stored(role, entry.id) as LibraryAvatarEntry | undefined;
-          if (role !== 'avatar' || (previous !== undefined && sameBoneMap(previous.boneMap, next.boneMap) &&
-            sameAvatarDriver(previous.driver, next.driver))) continue;
+          if (role !== 'avatar' || (previous !== undefined && sameAvatarModelSettings(previous, next))) continue;
           const bytes = await store.readBytes(id, { path: libraryModelFile(role, entry.id), maxBytes: MODEL_LIMITS.bytes });
           inSection('models', () => checkLibraryModel(role, entry, bytes, config.avatarRigs));
         }
@@ -593,10 +591,10 @@ export function createStudioHandler(config: StudioConfig) {
     try {
       parsed = JSON.parse(value);
     } catch {
-      throw new ProjectError('The settings query must be JSON: { boneMap, driver, armForwardDistance, grips, arms }.', { section: 'models' });
+      throw new ProjectError('The settings query must be JSON: { boneMap, driver, hair, armForwardDistance, grips, arms }.', { section: 'models' });
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new ProjectError('The settings query must be an object: { boneMap, driver, armForwardDistance, grips, arms }.', { section: 'models' });
+      throw new ProjectError('The settings query must be an object: { boneMap, driver, hair, armForwardDistance, grips, arms }.', { section: 'models' });
     }
     return parsed as Record<string, unknown>;
   };
@@ -612,7 +610,7 @@ export function createStudioHandler(config: StudioConfig) {
     await change(context, ['models'], async (manifest) => {
       const existing = manifest.models[role].find((candidate) => candidate.id === modelId);
       const base = { id: modelId, name: context.url.searchParams.get('name') ?? existing?.name ?? modelId };
-      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, driver, armForwardDistance, grips, arms }), or maps its joints.
+      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, driver, hair, armForwardDistance, grips, arms }), or maps its joints.
       const entry: LibraryEntry = role !== 'avatar' ? base : inSection('models', () => {
         if (settings !== null) return { ...base, ...validateAvatarSettings(avatarSettingsQuery(settings)) };
         if (existing !== undefined) return { ...(existing as LibraryAvatarEntry), ...base };

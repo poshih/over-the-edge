@@ -16,14 +16,14 @@ import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin }
 import { autoWeights, restPose } from '../skeleton-pose';
 import {
   AVATAR_MODEL_ID, CharacterModelError, characterAssets, CHARACTER_MODEL_LIMITS, DEFAULT_CHARACTER_SHADING, encodeModel,
-  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, POT_MODEL_ID, sameCharacterAssets, sameShading,
+  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, NO_AVATAR_HAIR, POT_MODEL_ID, sameCharacterAssets, sameShading,
   validateCharacterShading,
 } from '../character-profile';
 import type {
-  AvatarBoneMap, AvatarJointId, CharacterAssets, CharacterModel, CharacterModelErrorCode, CharacterShading,
+  AvatarBoneMap, AvatarHair, AvatarJointId, CharacterAssets, CharacterModel, CharacterModelErrorCode, CharacterShading,
   PartialAvatarBoneMap, PropModelRole,
 } from '../character-profile';
-import { inspectCharacterModel, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
+import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
 import { STANDARD_AVATAR_DRIVER } from '../avatar-driver';
 import type { AvatarDriver } from '../avatar-driver';
@@ -100,6 +100,7 @@ interface PendingAvatar {
   readonly report: CharacterModelReport;
   readonly boneMap: PartialAvatarBoneMap;
   readonly driver: AvatarDriver;
+  readonly hair: AvatarHair;
   readonly issue: CharacterModelIssue;
 }
 
@@ -367,11 +368,15 @@ export class SpriteEditorState {
       if (this.disposed) return;
       const report = inspectCharacterModel(bytes.buffer, 'avatar');
       const source = encodeModel(bytes);
-      // Re-importing the avatar's own GLB keeps its trusted driver; only a different model starts standard.
+      // Re-importing the avatar's own GLB keeps its trusted driver and its hair; a different model starts standard,
+      // without hair, whose chains name another model's joints.
       const avatar = this.draft.avatar;
       const current = avatar === undefined ? null : this.model(avatar.model);
-      const driver = avatar !== undefined && current !== null && current.source === source ? avatar.driver : STANDARD_AVATAR_DRIVER;
-      await this.applyAvatar({ name: modelName(file), source, report, boneMap: suggestAvatarBoneMap(report), driver });
+      const same = avatar !== undefined && current !== null && current.source === source;
+      await this.applyAvatar({
+        name: modelName(file), source, report, boneMap: suggestAvatarBoneMap(report),
+        driver: same ? avatar.driver : STANDARD_AVATAR_DRIVER, hair: same ? avatar.hair : NO_AVATAR_HAIR,
+      });
     });
   }
 
@@ -386,7 +391,9 @@ export class SpriteEditorState {
       const boneMap: Partial<Record<AvatarJointId, string>> = { ...base.boneMap };
       if (name === null || name === '') delete boneMap[joint];
       else boneMap[joint] = name;
-      await this.applyAvatar({ name: base.name, source: base.source, report: base.report, boneMap: Object.freeze(boneMap), driver: base.driver });
+      await this.applyAvatar({
+        name: base.name, source: base.source, report: base.report, boneMap: Object.freeze(boneMap), driver: base.driver, hair: base.hair,
+      });
     });
   }
 
@@ -1075,13 +1082,13 @@ export class SpriteEditorState {
     const model = this.model(avatar.model);
     const report = this.describeModel(model.source, 'avatar');
     if (report === null) throw new SpriteError('The avatar model is still loading; try again once it appears.');
-    return { name: model.name, source: model.source, report, boneMap: avatar.boneMap, driver: avatar.driver };
+    return { name: model.name, source: model.source, report, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair };
   }
 
-  // Keeps an import pending, with its typed issue, until its bone map resolves against the model.
+  // Keeps an import pending, with its typed issue, until its bone map and hair resolve against the model.
   private async applyAvatar(candidate: Omit<PendingAvatar, 'issue'>): Promise<void> {
     try {
-      resolveAvatarJoints(candidate.report, candidate.boneMap);
+      resolveAvatarHair(candidate.report, resolveAvatarJoints(candidate.report, candidate.boneMap), candidate.hair);
     } catch (error) {
       if (!(error instanceof CharacterModelError)) throw error;
       this.pendingAvatar = Object.freeze({ ...candidate, issue: issueOf(error) });
@@ -1090,7 +1097,9 @@ export class SpriteEditorState {
     const current = this.draft.avatar === undefined ? null : this.model(this.draft.avatar.model);
     const model = current !== null && current.source === candidate.source && current.name === candidate.name
       ? current : Object.freeze({ id: AVATAR_MODEL_ID, name: candidate.name, source: candidate.source });
-    const document = this.characterDocument({ avatar: { model, boneMap: candidate.boneMap as AvatarBoneMap, driver: candidate.driver } });
+    const document = this.characterDocument({
+      avatar: { model, boneMap: candidate.boneMap as AvatarBoneMap, driver: candidate.driver, hair: candidate.hair },
+    });
     await this.replaceRig(document);
     if (this.disposed) return;
     this.draft = document;
@@ -1099,13 +1108,14 @@ export class SpriteEditorState {
 
   // A validated draft with the avatar, hammer or pot replaced (or removed with null), other fields kept.
   private characterDocument(changes: {
-    avatar?: { model: CharacterModel; boneMap: AvatarBoneMap; driver: AvatarDriver } | null;
+    avatar?: { model: CharacterModel; boneMap: AvatarBoneMap; driver: AvatarDriver; hair: AvatarHair } | null;
     hammer?: CharacterModel | null;
     pot?: CharacterModel | null;
   }): SpriteDocument {
     const avatar = changes.avatar === undefined
       ? this.draft.avatar === undefined ? null
-        : { model: this.model(this.draft.avatar.model), boneMap: this.draft.avatar.boneMap, driver: this.draft.avatar.driver }
+        : { model: this.model(this.draft.avatar.model), boneMap: this.draft.avatar.boneMap, driver: this.draft.avatar.driver,
+          hair: this.draft.avatar.hair }
       : changes.avatar;
     const prop = (role: PropModelRole): CharacterModel | null => {
       const change = changes[role];
@@ -1119,7 +1129,7 @@ export class SpriteEditorState {
     const models = [avatar?.model, hammer, pot].filter((model): model is CharacterModel => model !== null && model !== undefined);
     const assets: CharacterAssets = characterAssets({
       models: models.length === 0 ? undefined : models,
-      avatar: avatar === null ? undefined : { model: avatar.model.id, boneMap: avatar.boneMap, driver: avatar.driver },
+      avatar: avatar === null ? undefined : { model: avatar.model.id, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair },
       hammer: hammer === null ? undefined : { model: hammer.id },
       pot: pot === null ? undefined : { model: pot.id },
       shading: this.draft.shading,

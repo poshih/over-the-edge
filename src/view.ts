@@ -20,12 +20,12 @@ import { DEFAULT_AVATAR_RIGS, createArmSolutions, createFramePlan, createPose, p
 import type {
   AvatarRig, AvatarRigArmSolution, AvatarRigFramePlan, AvatarRigPose, AvatarRigRegistry, PreparedAvatarRig,
 } from './avatar-rig';
-import { sameAvatarDriver } from './avatar-driver';
 import type { AvatarDriver } from './avatar-driver';
-import type { CharacterModelUsage } from './character-model-inspect';
+import { resolveAvatarHair } from './character-model-inspect';
+import type { CharacterModelUsage, ResolvedAvatarHair } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
-import { characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameBoneMap } from './character-profile';
-import type { AvatarBoneMap, CharacterAssets, PropModelRole } from './character-profile';
+import { characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameAvatarModelSettings } from './character-profile';
+import type { AvatarBoneMap, AvatarHair, AvatarModelSettings, CharacterAssets, PropModelRole } from './character-profile';
 import { CharacterShadingView } from './character-shading';
 import { PropModelView } from './prop-model-view';
 import { HammerHandleFit } from './hammer-handle-fit';
@@ -168,6 +168,7 @@ interface PreparedAvatar {
   readonly model: LoadedCharacterModel;
   readonly boneMap: AvatarBoneMap;
   readonly driver: AvatarDriver;
+  readonly hair: AvatarHair;
   readonly rig: AvatarRig;
   readonly plan: AvatarRigFramePlan;
   readonly pose: AvatarRigPose;
@@ -182,7 +183,10 @@ interface PreparedAvatarView {
   readonly model: LoadedCharacterModel;
   readonly boneMap: AvatarBoneMap;
   readonly driver: AvatarDriver;
+  readonly hair: AvatarHair;
   readonly prepared: PreparedAvatarRig;
+  // The hair's chains found in the model, checked before any scene changes.
+  readonly resolvedHair: ResolvedAvatarHair;
 }
 
 // A slot-owned avatar view: the prepared avatar plus the pool reference that keeps its model alive.
@@ -642,7 +646,7 @@ export class GameView {
             if (avatar === undefined) continue;
             const holding = await this.acquireModel(slot, presentation, role, avatar.model, signal);
             leases.push(holding.lease);
-            const view = this.prepareAvatarFrom(slot, holding.model, avatar.boneMap, avatar.driver);
+            const view = this.prepareAvatarFrom(slot, holding.model, avatar);
             if (view !== null) prepared.set(slot, view);
           } else {
             const profile = presentation[role];
@@ -678,11 +682,12 @@ export class GameView {
         // old view goes first: disposing a view detaches its model's scene, and new settings keep
         // the same model.
         const prepared = this.avatarRigs.prepare(part.model.report, part.avatar.boneMap, part.avatar.driver);
+        const hair = resolveAvatarHair(part.model.report, prepared.resolved, part.avatar.hair);
         this.disposePart(role);
-        const view = new SkinnedAvatarView(part.model, prepared.resolved, part.avatar.boneMap, prepared.binds);
+        const view = new SkinnedAvatarView(part.model, prepared.resolved, part.avatar.boneMap, prepared.binds, hair);
         this.shading.register(view.root);
         this.parts.avatar = {
-          id: part.id, model: part.model, settings: part.avatar, driver: part.avatar.driver,
+          id: part.id, model: part.model, settings: part.avatar, driver: part.avatar.driver, hair: part.avatar.hair,
           boneMap: part.avatar.boneMap, rig: prepared.rig, plan: createFramePlan(), pose: createPose(), view,
           previous: { left: null, right: null },
         };
@@ -752,7 +757,7 @@ export class GameView {
     if (avatar === undefined) return null;
     const loaded = this.resolvedModel(slot, presentation, 'avatar', avatar.model);
     if (loaded === null) return null;
-    return this.prepareAvatarFrom(slot, loaded, avatar.boneMap, avatar.driver);
+    return this.prepareAvatarFrom(slot, loaded, avatar);
   }
 
   // The single cached-vs-reserved decision: the model a presentation references from the slot's
@@ -769,14 +774,17 @@ export class GameView {
   }
 
   // The pure preparation for an avatar view from an already-resolved model, unless the slot already
-  // shows that exact model, bone map and driver. Shared by presentation changes and part restores, so
-  // a prepared rig is always bound to the model and settings it was prepared from.
-  private prepareAvatarFrom(slot: CharacterSlot, loaded: LoadedCharacterModel, boneMap: AvatarBoneMap,
-    driver: AvatarDriver): PreparedAvatarView | null {
+  // shows that exact model, bone map, driver and hair. Shared by presentation changes and part restores,
+  // so a prepared rig and hair are always bound to the model and settings they were prepared from.
+  private prepareAvatarFrom(slot: CharacterSlot, loaded: LoadedCharacterModel,
+    avatar: AvatarModelSettings): PreparedAvatarView | null {
     const current = slot.avatar;
-    if (current !== null && current.model === loaded && sameBoneMap(current.boneMap, boneMap) &&
-      sameAvatarDriver(current.driver, driver)) return null;
-    return { model: loaded, boneMap, driver, prepared: this.avatarRigs.prepare(loaded.report, boneMap, driver) };
+    if (current !== null && current.model === loaded && sameAvatarModelSettings(current, avatar)) return null;
+    const prepared = this.avatarRigs.prepare(loaded.report, avatar.boneMap, avatar.driver);
+    return {
+      model: loaded, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair, prepared,
+      resolvedHair: resolveAvatarHair(loaded.report, prepared.resolved, avatar.hair),
+    };
   }
 
   // Commits views for the models a slot's committed presentation references, reusing the pure
@@ -787,8 +795,7 @@ export class GameView {
     const avatarModel = avatar === undefined ? null : this.resolvedModel(slot, slot.presentation, 'avatar', avatar.model);
     const current = slot.avatar;
     const replaceAvatar = current !== null && (avatar === undefined || avatarModel === null ||
-      current.model !== avatarModel || !sameBoneMap(current.boneMap, avatar.boneMap) ||
-      !sameAvatarDriver(current.driver, avatar.driver));
+      current.model !== avatarModel || !sameAvatarModelSettings(current, avatar));
     // Take the replacement reference before dropping the old one, so a model shared by both views
     // never reaches zero references in the middle of the commit.
     const avatarLease = preparedAvatar === null ? null : slot.pool.hold(preparedAvatar.model, 'avatar');
@@ -800,10 +807,10 @@ export class GameView {
     }
     if (preparedAvatar !== null && avatarLease !== null) {
       const view = new SkinnedAvatarView(preparedAvatar.model, preparedAvatar.prepared.resolved,
-        preparedAvatar.boneMap, preparedAvatar.prepared.binds);
+        preparedAvatar.boneMap, preparedAvatar.prepared.binds, preparedAvatar.resolvedHair);
       this.shading.register(view.root);
       slot.avatar = {
-        model: preparedAvatar.model, boneMap: preparedAvatar.boneMap, driver: preparedAvatar.driver,
+        model: preparedAvatar.model, boneMap: preparedAvatar.boneMap, driver: preparedAvatar.driver, hair: preparedAvatar.hair,
         rig: preparedAvatar.prepared.rig, plan: createFramePlan(), pose: createPose(), view,
         previous: { left: null, right: null }, lease: avatarLease,
       };
@@ -959,7 +966,7 @@ export class GameView {
     // A prepared imported rig reads its avatar-space pose, written by updateArms; the built-in and
     // sprite avatars take the world-space poses directly.
     if (this.avatarRenderer instanceof SkinnedAvatarView) {
-      this.avatarRenderer.apply(this.torso.matrixWorld, this.headAim.rotation, this.activeAvatar!.pose);
+      this.avatarRenderer.apply(this.torso.matrixWorld, this.headAim.rotation, this.activeAvatar!.pose, frame.time);
     } else if (this.avatarRenderer !== null) {
       this.avatarRenderer.update(this.torso.matrixWorld, armPoses, this.headAim.rotation, this.turnGloves());
     }

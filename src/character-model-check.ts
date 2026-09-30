@@ -1,12 +1,12 @@
 import { characterModel, embeddedModel } from './character-profile';
-import { inspectCharacterModel } from './character-model-inspect';
+import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints } from './character-model-inspect';
 import type { SpriteDocument } from './sprite-data';
 import { SpriteError } from './sprite-fields';
 import { checkAvatarRig } from './avatar-rig';
 import type { AvatarRigRegistry } from './avatar-rig';
 
 // Validates a profile's embedded GLBs against MODEL_LIMITS, their skins, bone maps, prop
-// conventions and avatar rigs, exactly as the runtime loader will; used before bundling or storing
+// conventions, avatar rigs and hair chains, exactly as the runtime loader will; used before bundling or storing
 // a profile. The registry is the host's trusted rig strategies, passed in so the same custom
 // AVATAR_RIG_MODULE is applied to build, server and browser checks.
 export function checkCharacterModels(document: SpriteDocument, label: string, registry: AvatarRigRegistry): void {
@@ -22,6 +22,7 @@ export function checkCharacterModels(document: SpriteDocument, label: string, re
       const report = inspectCharacterModel(bytes.buffer, usage);
       if (usage === 'avatar' && document.avatar !== undefined) {
         checkAvatarRig(report, document.avatar.boneMap, document.avatar.driver, registry);
+        resolveAvatarHair(report, resolveAvatarJoints(report, document.avatar.boneMap), document.avatar.hair);
       }
     } catch (error) {
       if (error instanceof Error) error.message = `${label}: ${usage} model "${model.name}": ${error.message}`;

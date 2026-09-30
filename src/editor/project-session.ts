@@ -5,7 +5,7 @@ import { audioSources, DEFAULT_AUDIO, validateAudio } from '../audio-settings';
 import type { AudioSettings } from '../audio-settings';
 import type { ArmIkSettings, VisualPartId } from '../character';
 import type { AvatarBoneMap } from '../character-profile';
-import { embeddedModel } from '../character-profile';
+import { embeddedModel, NO_AVATAR_HAIR } from '../character-profile';
 import { checkCharacterModels } from '../character-model-check';
 import { ArtError } from '../art-types';
 import type { ArtMode } from '../art-types';
@@ -36,7 +36,9 @@ import {
   checkLibraryModel, checkModelLibrary, libraryAvatarSettings, libraryEntries, libraryIdForName, libraryModelFile, MODEL_LIBRARY_LIMITS, newAvatarEntry, PART_ROLES,
   validateAvatarSettings, validateModelLibrary,
 } from '../model-library';
-import type { LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, ModelLibrary, PartRole } from '../model-library';
+import type {
+  AvatarHoldSettings, LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, ModelLibrary, PartRole,
+} from '../model-library';
 import { STANDARD_AVATAR_DRIVER } from '../avatar-driver';
 import type { AvatarRigRegistry } from '../avatar-rig';
 import { DEFAULT_THEME, validateTheme } from '../theme';
@@ -442,7 +444,7 @@ export class ProjectSession {
       const settings = this.characterAvatarSettings();
       const entry = role !== 'avatar' ? base : boneMap === undefined
         ? inSection('models', () => newAvatarEntry(bytes, base, settings))
-        : { ...base, boneMap, driver: STANDARD_AVATAR_DRIVER, ...settings };
+        : { ...base, boneMap, driver: STANDARD_AVATAR_DRIVER, hair: NO_AVATAR_HAIR, ...settings };
       inSection('models', () => checkLibraryModel(role, entry, bytes, this.avatarRigs));
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
       const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, bytes: blob.size, uploaded: false }];
@@ -496,7 +498,7 @@ export class ProjectSession {
     return settings;
   }
 
-  private characterAvatarSettings(): Omit<LibraryAvatarSettings, 'boneMap' | 'driver'> {
+  private characterAvatarSettings(): AvatarHoldSettings {
     const { armForwardDistance, grips, arms } = this.workspace.character.draft();
     return { armForwardDistance, grips, arms };
   }

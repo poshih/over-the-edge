@@ -1,10 +1,11 @@
+import { HairSolver } from './hair-solver';
+import type { HairChainState } from './hair-solver';
 import { angleDifference, clamp, transformPoint } from './math';
 import { FACING_DIRECTIONS, fixedJointIds, SkeletonError } from './skeleton-data';
 import type {
   BonePose,
   BoneWeight,
   FacingDirection,
-  HairChain,
   SkeletonClip,
   SkeletonCollider,
   SkeletonDefinition,
@@ -40,16 +41,6 @@ const JOINT_TOLERANCE = 1e-6;
 const DISTANCE_EPSILON = 1e-8;
 const SEGMENT_EPSILON = 1e-6;
 const AUTO_WEIGHT_EPSILON = 1e-6;
-const HAIR_FIXED_STEP_SECONDS = 1 / 60;
-const HAIR_MAX_STEPS = 15;
-const HAIR_MAX_CATCHUP_SECONDS = HAIR_FIXED_STEP_SECONDS * HAIR_MAX_STEPS;
-const HAIR_TIME_EPSILON = 1e-9;
-const HAIR_CONSTRAINT_ITERATIONS = 8;
-const HAIR_STIFFNESS_FACTOR = 0.35;
-const HAIR_COLLISION_SLOP = 1e-6;
-const HAIR_STATE_VECTORS = [
-  'currentX', 'currentY', 'previousX', 'previousY', 'targetX', 'targetY', 'solvedTargetX', 'solvedTargetY',
-] as const;
 
 interface DensePose {
   readonly x: Float64Array;
@@ -86,33 +77,16 @@ interface CompiledIk {
   readonly handRotation: number;
 }
 
-interface HairState {
-  readonly currentX: Float64Array;
-  readonly currentY: Float64Array;
-  readonly previousX: Float64Array;
-  readonly previousY: Float64Array;
-  readonly targetX: Float64Array;
-  readonly targetY: Float64Array;
-  readonly solvedTargetX: Float64Array;
-  readonly solvedTargetY: Float64Array;
-  initialized: boolean;
-}
-
+// A hair chain's bones, root first; the shared solver owns its particles.
 interface CompiledHair {
   readonly bones: readonly number[];
-  readonly lengths: Float64Array;
-  readonly stiffness: number;
-  readonly damping: number;
-  readonly gravity: number;
-  readonly radius: number;
-  readonly state: HairState;
 }
 
+// A collision circle riding on a bone; the shared solver owns its radius.
 interface CompiledCollider {
   readonly bone: number;
   readonly x: number;
   readonly y: number;
-  readonly radius: number;
 }
 
 const FACING_DIRECTION_SET = new Set<string>(FACING_DIRECTIONS);
@@ -441,13 +415,7 @@ export class SkeletonPose {
   private readonly ik: readonly CompiledIk[];
   private readonly hair: readonly CompiledHair[];
   private readonly colliders: readonly CompiledCollider[];
-  private readonly colliderWorldX: Float64Array;
-  private readonly colliderWorldY: Float64Array;
-  private readonly solvedColliderWorldX: Float64Array;
-  private readonly solvedColliderWorldY: Float64Array;
-  private lastEvaluatedTime: number | null = null;
-  private hairRemainder = 0;
-  private constraintsActive = false;
+  private readonly hairSolver: HairSolver;
   private rotationRoots: readonly number[] = [];
   private rotationTopology: readonly number[] = [];
 
@@ -485,12 +453,14 @@ export class SkeletonPose {
         return depthDifference !== 0 ? depthDifference : left.index - right.index;
       })
       .map(({ chain }) => this.compileIk(chain));
-    this.hair = definition.hair.map(chain => this.compileHair(chain));
+    this.hair = definition.hair.map(chain => ({ bones: chain.bones.map(id => this.requireBone(id, 'Hair bone')) }));
     this.colliders = definition.colliders.map(collider => this.compileCollider(collider));
-    this.colliderWorldX = new Float64Array(this.colliders.length);
-    this.colliderWorldY = new Float64Array(this.colliders.length);
-    this.solvedColliderWorldX = new Float64Array(this.colliders.length);
-    this.solvedColliderWorldY = new Float64Array(this.colliders.length);
+    this.hairSolver = new HairSolver(definition.hair.map(chain => ({ parameters: chain, segments: chain.bones.length })),
+      definition.colliders.map(collider => collider.radius));
+    // A sprite chain's segments are its bones at their authored lengths: particles at each bone and the last tip.
+    for (const [index, chain] of this.hair.entries()) {
+      this.hairSolver.chains[index].lengths.set(chain.bones.map(bone => definition.bones[bone].length));
+    }
   }
 
   configureRotation(bones: readonly string[]): void {
@@ -519,18 +489,7 @@ export class SkeletonPose {
     copy.lengthScale.set(this.lengthScale);
     copy.rotationRoots = this.rotationRoots;
     copy.rotationTopology = this.rotationTopology;
-    copy.lastEvaluatedTime = this.lastEvaluatedTime;
-    copy.hairRemainder = this.hairRemainder;
-    copy.constraintsActive = this.constraintsActive;
-    copy.colliderWorldX.set(this.colliderWorldX);
-    copy.colliderWorldY.set(this.colliderWorldY);
-    copy.solvedColliderWorldX.set(this.solvedColliderWorldX);
-    copy.solvedColliderWorldY.set(this.solvedColliderWorldY);
-    for (const [index, chain] of this.hair.entries()) {
-      const state = copy.hair[index].state;
-      for (const key of HAIR_STATE_VECTORS) state[key].set(chain.state[key]);
-      state.initialized = chain.state.initialized;
-    }
+    copy.hairSolver.copyFrom(this.hairSolver);
     return copy;
   }
 
@@ -576,16 +535,11 @@ export class SkeletonPose {
     if (options.rotation !== undefined && options.rotation !== null) this.applyRotation(options.rotation);
 
     if (options.constraints === 'disabled') {
-      this.constraintsActive = false;
-      this.lastEvaluatedTime = time;
+      this.hairSolver.interrupt();
       return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle, this.lengthScale);
     }
 
     if (this.hair.length > 0) this.solveHair(time, options.origin);
-    else {
-      this.constraintsActive = true;
-      this.lastEvaluatedTime = time;
-    }
 
     return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle, this.lengthScale);
   }
@@ -639,36 +593,8 @@ export class SkeletonPose {
     };
   }
 
-  private compileHair(chain: HairChain): CompiledHair {
-    const bones = chain.bones.map(id => this.requireBone(id, 'Hair bone'));
-    return {
-      bones,
-      lengths: Float64Array.from(bones.map(index => this.definition.bones[index].length)),
-      stiffness: chain.stiffness,
-      damping: chain.damping,
-      gravity: chain.gravity,
-      radius: chain.radius,
-      state: {
-        currentX: new Float64Array(bones.length + 1),
-        currentY: new Float64Array(bones.length + 1),
-        previousX: new Float64Array(bones.length + 1),
-        previousY: new Float64Array(bones.length + 1),
-        targetX: new Float64Array(bones.length + 1),
-        targetY: new Float64Array(bones.length + 1),
-        solvedTargetX: new Float64Array(bones.length + 1),
-        solvedTargetY: new Float64Array(bones.length + 1),
-        initialized: false,
-      },
-    };
-  }
-
   private compileCollider(collider: SkeletonCollider): CompiledCollider {
-    return {
-      bone: this.requireBone(collider.bone, 'Hair collider bone'),
-      x: collider.x,
-      y: collider.y,
-      radius: collider.radius,
-    };
+    return { bone: this.requireBone(collider.bone, 'Hair collider bone'), x: collider.x, y: collider.y };
   }
 
   private resolveClip(id: string | null): CompiledClip | null {
@@ -748,55 +674,19 @@ export class SkeletonPose {
   private solveHair(time: number, origin: RigPoint): void {
     this.populateHairTargets(origin);
     this.populateColliderWorld(origin);
-
-    const lastTime = this.lastEvaluatedTime;
-    const reset = !this.constraintsActive || lastTime === null || time < lastTime ||
-      time - lastTime > HAIR_MAX_CATCHUP_SECONDS || this.hair.some(chain => !chain.state.initialized);
-    if (reset) {
-      this.hairRemainder = 0;
-      for (const chain of this.hair) {
-        this.resetHairState(chain);
-        this.constrainHair(chain, 'kinematic');
-        chain.state.previousX.set(chain.state.currentX);
-        chain.state.previousY.set(chain.state.currentY);
-      }
-    } else {
-      this.hairRemainder += time - lastTime;
-      const steps = Math.min(HAIR_MAX_STEPS, Math.floor((this.hairRemainder + HAIR_TIME_EPSILON) / HAIR_FIXED_STEP_SECONDS));
-      this.hairRemainder = Math.max(0, this.hairRemainder - steps * HAIR_FIXED_STEP_SECONDS);
-      if (steps === 0) {
-        const collidersChanged = this.colliders.some((_, index) =>
-          Math.abs(this.colliderWorldX[index] - this.solvedColliderWorldX[index]) > JOINT_TOLERANCE ||
-          Math.abs(this.colliderWorldY[index] - this.solvedColliderWorldY[index]) > JOINT_TOLERANCE);
-        for (const chain of this.hair) {
-          if (collidersChanged || this.targetsChanged(chain)) this.constrainHair(chain, 'kinematic');
-        }
-      } else {
-        for (let step = 0; step < steps; step += 1) {
-          for (const chain of this.hair) {
-            this.integrateHair(chain, HAIR_FIXED_STEP_SECONDS);
-            this.constrainHair(chain, 'dynamic');
-          }
-        }
-      }
-    }
-    for (const chain of this.hair) this.rememberTargets(chain);
-    this.solvedColliderWorldX.set(this.colliderWorldX);
-    this.solvedColliderWorldY.set(this.colliderWorldY);
-
-    for (const chain of this.hair) this.applyHairPose(chain, origin);
+    this.hairSolver.solve(time);
+    for (const [index, chain] of this.hair.entries()) this.applyHairPose(chain, this.hairSolver.chains[index], origin);
     reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle,
       this.lengthScale);
-    this.constraintsActive = true;
-    this.lastEvaluatedTime = time;
   }
 
   private populateHairTargets(origin: RigPoint): void {
-    for (const chain of this.hair) {
+    for (const [chainIndex, chain] of this.hair.entries()) {
+      const state = this.hairSolver.chains[chainIndex];
       for (let index = 0; index < chain.bones.length; index += 1) {
         const bone = chain.bones[index];
-        chain.state.targetX[index] = this.worldX[bone] + origin.x;
-        chain.state.targetY[index] = this.worldY[bone] + origin.y;
+        state.targetX[index] = this.worldX[bone] + origin.x;
+        state.targetY[index] = this.worldY[bone] + origin.y;
       }
       const last = chain.bones[chain.bones.length - 1];
       const tip = transformPoint(
@@ -804,8 +694,8 @@ export class SkeletonPose {
         { x: this.worldX[last] + origin.x, y: this.worldY[last] + origin.y },
         this.worldAngle[last],
       );
-      chain.state.targetX[chain.bones.length] = tip.x;
-      chain.state.targetY[chain.bones.length] = tip.y;
+      state.targetX[chain.bones.length] = tip.x;
+      state.targetY[chain.bones.length] = tip.y;
     }
   }
 
@@ -816,174 +706,18 @@ export class SkeletonPose {
         { x: this.worldX[collider.bone] + origin.x, y: this.worldY[collider.bone] + origin.y },
         this.worldAngle[collider.bone],
       );
-      this.colliderWorldX[index] = position.x;
-      this.colliderWorldY[index] = position.y;
+      this.hairSolver.colliderX[index] = position.x;
+      this.hairSolver.colliderY[index] = position.y;
     }
   }
 
-  private resetHairState(chain: CompiledHair): void {
-    for (let index = 0; index < chain.state.targetX.length; index += 1) {
-      chain.state.currentX[index] = chain.state.targetX[index];
-      chain.state.currentY[index] = chain.state.targetY[index];
-      chain.state.previousX[index] = chain.state.targetX[index];
-      chain.state.previousY[index] = chain.state.targetY[index];
-      chain.state.solvedTargetX[index] = chain.state.targetX[index];
-      chain.state.solvedTargetY[index] = chain.state.targetY[index];
-    }
-    chain.state.initialized = true;
-  }
-
-  private targetsChanged(chain: CompiledHair): boolean {
-    for (let index = 0; index < chain.state.targetX.length; index += 1) {
-      if (Math.abs(chain.state.targetX[index] - chain.state.solvedTargetX[index]) > JOINT_TOLERANCE ||
-        Math.abs(chain.state.targetY[index] - chain.state.solvedTargetY[index]) > JOINT_TOLERANCE) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private rememberTargets(chain: CompiledHair): void {
-    for (let index = 0; index < chain.state.targetX.length; index += 1) {
-      chain.state.solvedTargetX[index] = chain.state.targetX[index];
-      chain.state.solvedTargetY[index] = chain.state.targetY[index];
-    }
-  }
-
-  private integrateHair(chain: CompiledHair, dt: number): void {
-    const drag = clamp(1 - chain.damping, 0, 1);
-    const gravity = chain.gravity * dt * dt;
-    chain.state.currentX[0] = chain.state.targetX[0];
-    chain.state.currentY[0] = chain.state.targetY[0];
-    chain.state.previousX[0] = chain.state.targetX[0];
-    chain.state.previousY[0] = chain.state.targetY[0];
-    for (let index = 1; index < chain.state.currentX.length; index += 1) {
-      const currentX = chain.state.currentX[index];
-      const currentY = chain.state.currentY[index];
-      const velocityX = (currentX - chain.state.previousX[index]) * drag;
-      const velocityY = (currentY - chain.state.previousY[index]) * drag;
-      chain.state.previousX[index] = currentX;
-      chain.state.previousY[index] = currentY;
-      chain.state.currentX[index] = currentX + velocityX;
-      chain.state.currentY[index] = currentY + velocityY - gravity;
-    }
-  }
-
-  private constrainHair(chain: CompiledHair, mode: 'dynamic' | 'kinematic'): void {
-    for (let iteration = 0; iteration < HAIR_CONSTRAINT_ITERATIONS; iteration += 1) {
-      chain.state.currentX[0] = chain.state.targetX[0];
-      chain.state.currentY[0] = chain.state.targetY[0];
-      if (mode === 'dynamic' && chain.stiffness > 0) {
-        const follow = chain.stiffness * HAIR_STIFFNESS_FACTOR;
-        for (let index = 1; index < chain.state.currentX.length; index += 1) {
-          chain.state.currentX[index] += (chain.state.targetX[index] - chain.state.currentX[index]) * follow;
-          chain.state.currentY[index] += (chain.state.targetY[index] - chain.state.currentY[index]) * follow;
-        }
-      }
-
-      for (let index = 0; index < chain.lengths.length; index += 1) {
-        this.enforceDistance(chain, index, index + 1, chain.lengths[index]);
-      }
-      for (let particle = 1; particle < chain.state.currentX.length; particle += 1) {
-        this.enforceCollisions(chain, particle);
-      }
-      chain.state.currentX[0] = chain.state.targetX[0];
-      chain.state.currentY[0] = chain.state.targetY[0];
-    }
-    // Reflow renders exact bone lengths, so its endpoints must match the collision particles.
-    for (let index = 0; index < chain.lengths.length; index += 1) this.projectHairTip(chain, index);
-  }
-
-  private enforceDistance(chain: CompiledHair, leftIndex: number, rightIndex: number, length: number): void {
-    const dx = chain.state.currentX[rightIndex] - chain.state.currentX[leftIndex];
-    const dy = chain.state.currentY[rightIndex] - chain.state.currentY[leftIndex];
-    const distance = Math.hypot(dx, dy);
-    const angle = this.worldAngle[chain.bones[leftIndex]];
-    const correctionX = (distance > SEGMENT_EPSILON ? dx / distance : Math.cos(angle)) * (distance - length);
-    const correctionY = (distance > SEGMENT_EPSILON ? dy / distance : Math.sin(angle)) * (distance - length);
-    if (leftIndex === 0) {
-      chain.state.currentX[rightIndex] -= correctionX;
-      chain.state.currentY[rightIndex] -= correctionY;
-      return;
-    }
-
-    chain.state.currentX[leftIndex] += correctionX * 0.5;
-    chain.state.currentY[leftIndex] += correctionY * 0.5;
-    chain.state.currentX[rightIndex] -= correctionX * 0.5;
-    chain.state.currentY[rightIndex] -= correctionY * 0.5;
-  }
-
-  private collisionPenetration(chain: CompiledHair, x: number, y: number): number {
-    let penetration = 0;
-    for (const [index, collider] of this.colliders.entries()) {
-      const distance = Math.hypot(x - this.colliderWorldX[index], y - this.colliderWorldY[index]);
-      penetration += Math.max(0, collider.radius + chain.radius + HAIR_COLLISION_SLOP - distance);
-    }
-    return penetration;
-  }
-
-  private projectHairTip(chain: CompiledHair, index: number): void {
-    const x = chain.state.currentX[index], y = chain.state.currentY[index];
-    const dx = chain.state.currentX[index + 1] - x, dy = chain.state.currentY[index + 1] - y;
-    const distance = Math.hypot(dx, dy), length = chain.lengths[index];
-    const angle = this.worldAngle[chain.bones[index]];
-    const desiredX = x + length * (distance > SEGMENT_EPSILON ? dx / distance : Math.cos(angle));
-    const desiredY = y + length * (distance > SEGMENT_EPSILON ? dy / distance : Math.sin(angle));
-    let bestX = desiredX, bestY = desiredY;
-    let bestPenetration = this.collisionPenetration(chain, bestX, bestY), bestDistance = 0;
-    if (bestPenetration > DISTANCE_EPSILON) {
-      const consider = (candidateX: number, candidateY: number): void => {
-        const penetration = this.collisionPenetration(chain, candidateX, candidateY);
-        const separation = (candidateX - desiredX) ** 2 + (candidateY - desiredY) ** 2;
-        if (penetration < bestPenetration - DISTANCE_EPSILON ||
-          Math.abs(penetration - bestPenetration) <= DISTANCE_EPSILON && separation < bestDistance) {
-          bestX = candidateX; bestY = candidateY; bestPenetration = penetration; bestDistance = separation;
-        }
-      };
-      for (const [colliderIndex, collider] of this.colliders.entries()) {
-        const toX = this.colliderWorldX[colliderIndex] - x, toY = this.colliderWorldY[colliderIndex] - y;
-        const centerDistance = Math.hypot(toX, toY);
-        const radius = collider.radius + chain.radius + HAIR_COLLISION_SLOP;
-        if (centerDistance <= DISTANCE_EPSILON) continue;
-        const axisX = toX / centerDistance, axisY = toY / centerDistance;
-        const along = (length ** 2 + centerDistance ** 2 - radius ** 2) / (2 * centerDistance);
-        if (Math.abs(along) <= length) {
-          const across = Math.sqrt(Math.max(0, length ** 2 - along ** 2));
-          consider(x + axisX * along - axisY * across, y + axisY * along + axisX * across);
-          consider(x + axisX * along + axisY * across, y + axisY * along - axisX * across);
-        }
-        consider(x - axisX * length, y - axisY * length);
-      }
-    }
-    chain.state.currentX[index + 1] = bestX;
-    chain.state.currentY[index + 1] = bestY;
-  }
-
-  private enforceCollisions(chain: CompiledHair, particle: number): void {
-    for (const [index, collider] of this.colliders.entries()) {
-      const minimum = collider.radius + chain.radius;
-      const dx = chain.state.currentX[particle] - this.colliderWorldX[index];
-      const dy = chain.state.currentY[particle] - this.colliderWorldY[index];
-      const distance = Math.hypot(dx, dy);
-      if (distance >= minimum) continue;
-      if (distance <= SEGMENT_EPSILON) {
-        chain.state.currentX[particle] = this.colliderWorldX[index] + minimum;
-        chain.state.currentY[particle] = this.colliderWorldY[index];
-        continue;
-      }
-      const scale = minimum / distance;
-      chain.state.currentX[particle] = this.colliderWorldX[index] + dx * scale;
-      chain.state.currentY[particle] = this.colliderWorldY[index] + dy * scale;
-    }
-  }
-
-  private applyHairPose(chain: CompiledHair, origin: RigPoint): void {
+  private applyHairPose(chain: CompiledHair, state: HairChainState, origin: RigPoint): void {
     let parentAngle = 0;
     for (let index = 0; index < chain.bones.length; index += 1) {
       const bone = chain.bones[index];
       const worldAngle = Math.atan2(
-        chain.state.currentY[index + 1] - chain.state.currentY[index],
-        chain.state.currentX[index + 1] - chain.state.currentX[index],
+        state.currentY[index + 1] - state.currentY[index],
+        state.currentX[index + 1] - state.currentX[index],
       );
       if (index === 0) {
         const parent = this.parentIndex[bone];
@@ -994,8 +728,8 @@ export class SkeletonPose {
     }
 
     const root = chain.bones[0];
-    const rootWorldX = chain.state.currentX[0] - origin.x;
-    const rootWorldY = chain.state.currentY[0] - origin.y;
+    const rootWorldX = state.currentX[0] - origin.x;
+    const rootWorldY = state.currentY[0] - origin.y;
     const parent = this.parentIndex[root];
     if (parent < 0) {
       this.localX[root] = rootWorldX;

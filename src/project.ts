@@ -38,7 +38,7 @@ export { ProjectError } from './project-fields';
 
 export const PROJECT_FORMAT = 'over-the-edge-project';
 export const PROJECT_BUNDLE_FORMAT = 'over-the-edge-project-bundle';
-export const PROJECT_SCHEMA_VERSION = 5;
+export const PROJECT_SCHEMA_VERSION = 6;
 export const PROJECT_FILES = {
   manifest: 'project.json',
   level: 'level.json',

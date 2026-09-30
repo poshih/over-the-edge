@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {

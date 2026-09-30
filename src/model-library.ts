@@ -1,15 +1,15 @@
 // A project's model library: extra avatar, hammer and pot models a release can swap to, each part
 // on its own. An avatar entry carries everything that depends on its model's proportions. DOM-free,
 // so project validation, the project server, the Workshop and builds share one definition.
-import { AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, validateAvatarBoneMap } from './character-profile';
-import type { AvatarBoneMap, PartialAvatarBoneMap } from './character-profile';
+import { AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, NO_AVATAR_HAIR, validateAvatarBoneMap, validateAvatarHair } from './character-profile';
+import type { AvatarBoneMap, AvatarHair, AvatarModelSettings, PartialAvatarBoneMap } from './character-profile';
 import { STANDARD_AVATAR_DRIVER, validateAvatarDriver } from './avatar-driver';
 import type { AvatarDriver } from './avatar-driver';
 import { checkAvatarRig, DEFAULT_AVATAR_RIGS } from './avatar-rig';
 import type { AvatarRigRegistry } from './avatar-rig';
 import type { CharacterArms } from './character-arms';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
-import { inspectCharacterModel, suggestAvatarBoneMap } from './character-model-inspect';
+import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestAvatarBoneMap } from './character-model-inspect';
 import { DEFAULT_GRIPS } from './grips';
 import type { Grips } from './grips';
 import { exactRecord, ProjectError, textValue } from './project-fields';
@@ -45,14 +45,19 @@ export interface LibraryEntry {
   readonly name: string;
 }
 
-// What an avatar model's proportions size: its bone map, driver, grips, arm lengths and arm forward distance.
+// What an avatar model's proportions size: its bone map, driver and hair, bound to its joints, and its grips,
+// arm lengths and arm forward distance.
 export interface LibraryAvatarSettings {
   readonly boneMap: AvatarBoneMap;
   readonly driver: AvatarDriver;
+  readonly hair: AvatarHair;
   readonly armForwardDistance: number;
   readonly grips: Grips;
   readonly arms: CharacterArms | null;
 }
+
+// The hold settings a new avatar may take from another character; its model-bound settings are its own.
+export type AvatarHoldSettings = Omit<LibraryAvatarSettings, keyof AvatarModelSettings>;
 
 export interface LibraryAvatarEntry extends LibraryEntry, LibraryAvatarSettings {}
 
@@ -67,7 +72,7 @@ export const EMPTY_MODEL_LIBRARY: ModelLibrary = Object.freeze({
 });
 
 const ENTRY_KEYS = ['id', 'name'] as const;
-const AVATAR_KEYS = [...ENTRY_KEYS, 'boneMap', 'driver', 'armForwardDistance', 'grips', 'arms'] as const;
+const AVATAR_KEYS = [...ENTRY_KEYS, 'boneMap', 'driver', 'hair', 'armForwardDistance', 'grips', 'arms'] as const;
 const ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 export function isPartRole(value: unknown): value is PartRole {
@@ -94,9 +99,11 @@ export function libraryModelFile(role: PartRole, id: string): string {
 }
 
 export function validateAvatarSettings(value: Record<string, unknown>): LibraryAvatarSettings {
+  const boneMap = validateAvatarBoneMap(value.boneMap);
   return Object.freeze({
-    boneMap: validateAvatarBoneMap(value.boneMap),
+    boneMap,
     driver: validateAvatarDriver(value.driver),
+    hair: validateAvatarHair(value.hair, boneMap),
     armForwardDistance: validateArmForwardDistance(value.armForwardDistance),
     grips: validateGrips(value.grips),
     arms: validateArms(value.arms),
@@ -109,6 +116,7 @@ export function libraryAvatarSettings(entry: LibraryAvatarSettings): LibraryAvat
   return Object.freeze({
     boneMap: entry.boneMap,
     driver: entry.driver,
+    hair: entry.hair,
     armForwardDistance: entry.armForwardDistance,
     grips: entry.grips,
     arms: entry.arms,
@@ -163,6 +171,7 @@ export function checkLibraryModel(
     if (role === 'avatar') {
       const avatar = entry as LibraryAvatarEntry;
       checkAvatarRig(report, avatar.boneMap, avatar.driver, registry);
+      resolveAvatarHair(report, resolveAvatarJoints(report, avatar.boneMap), avatar.hair);
     }
   } catch (error) {
     if (error instanceof Error) error.message = `${entryLabel(role, entry)}: ${error.message}`;
@@ -179,16 +188,16 @@ export function checkModelLibrary(
 }
 
 // A new avatar entry for an imported GLB: its mapped joints, when every joint resolves, standard
-// rig strategy, and settings taken from `settings`, typically the open character's.
-export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings: Omit<LibraryAvatarSettings, 'boneMap' | 'driver'>): LibraryAvatarEntry {
+// rig strategy, no hair, and hold settings taken from `settings`, typically the open character's.
+export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings: AvatarHoldSettings): LibraryAvatarEntry {
   const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'avatar');
   const suggested: PartialAvatarBoneMap = suggestAvatarBoneMap(report);
   const boneMap = validateAvatarBoneMap(Object.fromEntries(AVATAR_JOINT_IDS.map((joint) => [joint, suggested[joint] ?? null])));
-  const avatar: LibraryAvatarEntry = Object.freeze({ ...entry, boneMap, driver: STANDARD_AVATAR_DRIVER, ...settings });
+  const avatar: LibraryAvatarEntry = Object.freeze({ ...entry, boneMap, driver: STANDARD_AVATAR_DRIVER, hair: NO_AVATAR_HAIR, ...settings });
   checkLibraryModel('avatar', avatar, bytes);
   return avatar;
 }
 
-export const DEFAULT_AVATAR_SETTINGS: Omit<LibraryAvatarSettings, 'boneMap' | 'driver'> = Object.freeze({
+export const DEFAULT_AVATAR_SETTINGS: AvatarHoldSettings = Object.freeze({
   armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE, grips: DEFAULT_GRIPS, arms: null,
 });

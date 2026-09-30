@@ -9,7 +9,9 @@ import { validateContainer } from './visual-model';
 import {
   AVATAR_JOINT_IDS, AVATAR_JOINT_PARENTS, CharacterModelError, missingAvatarJoints, validatePartialBoneMap,
 } from './character-profile';
-import type { AvatarBoneMap, AvatarJointId, PartialAvatarBoneMap } from './character-profile';
+import type {
+  AvatarBoneMap, AvatarHair, AvatarHairChain, AvatarHairCollider, AvatarJointId, PartialAvatarBoneMap,
+} from './character-profile';
 
 export type CharacterModelUsage = 'avatar' | 'hammer' | 'pot';
 
@@ -47,6 +49,18 @@ export interface UnmappedAvatarJoint {
 export interface ResolvedAvatarJoints {
   readonly nodes: Readonly<Record<AvatarJointId, number>>;
   readonly unmapped: readonly UnmappedAvatarJoint[];
+}
+
+// An avatar hair chain found in a model: its joints' nodes root first, and the mapped joint its root follows.
+export interface ResolvedHairChain {
+  readonly chain: AvatarHairChain;
+  readonly nodes: readonly number[];
+  readonly follows: AvatarJointId;
+}
+
+export interface ResolvedAvatarHair {
+  readonly chains: readonly ResolvedHairChain[];
+  readonly colliders: readonly AvatarHairCollider[];
 }
 
 // Hammers follow the physical tool frame: origin at the butt, handle along +X, in metres.
@@ -538,6 +552,69 @@ export function resolveAvatarJoints(report: CharacterModelReport, boneMap: Parti
       name: joint.name, node: joint.node, follows: nearestMapped(joint.node),
     }))),
   });
+}
+
+// Checks an avatar's hair against its skin; validateAvatarHair() has checked the hair itself. Every chain joint is
+// one uniquely named unmapped skin joint and the child of the joint before it; the root follows a mapped joint; no
+// chain hangs from another chain, and no mapped joint hangs from a chain, whose simulated pose it would not follow.
+export function resolveAvatarHair(report: CharacterModelReport, resolved: ResolvedAvatarJoints, hair: AvatarHair): ResolvedAvatarHair {
+  const byName = new Map<string, CharacterModelJoint[]>();
+  for (const joint of report.joints) byName.set(joint.name, [...byName.get(joint.name) ?? [], joint]);
+  const unmapped = new Map<number, UnmappedAvatarJoint>(resolved.unmapped.map(joint => [joint.node, joint]));
+  const simulated = new Map<number, string>();
+  const chains = hair.chains.map((chain): ResolvedHairChain => {
+    const nodes = chain.joints.map((name) => {
+      const joints = byName.get(name);
+      if (joints === undefined) {
+        throw new CharacterModelError('unknown-joint', `Hair chain "${chain.id}" names "${name}", which is not a skin joint.`,
+          { joints: [name] });
+      }
+      if (joints.length > 1) {
+        throw new CharacterModelError('ambiguous-joint', `Several skin joints are named "${name}"; hair chain "${chain.id}" `
+          + 'needs unique names.', { joints: [name] });
+      }
+      if (!unmapped.has(joints[0]!.node)) {
+        throw new CharacterModelError('duplicate-joint', `Hair chain "${chain.id}" cannot simulate "${name}", which the bone map drives.`,
+          { joints: [name] });
+      }
+      return joints[0]!.node;
+    });
+    for (let index = 1; index < nodes.length; index += 1) {
+      if (report.parents[nodes[index]!] !== nodes[index - 1]) {
+        throw new CharacterModelError('broken-chain', `Hair chain "${chain.id}" must run from parent to child: "${chain.joints[index]}" `
+          + `is not a child of "${chain.joints[index - 1]}".`, { joints: [chain.joints[index - 1]!, chain.joints[index]!] });
+      }
+    }
+    const follows = unmapped.get(nodes[0]!)!.follows;
+    if (follows === null) {
+      throw new CharacterModelError('broken-chain', `Hair chain "${chain.id}" must hang from the body, the head or an arm; `
+        + `"${chain.joints[0]}" follows no mapped joint.`, { joints: [chain.joints[0]!] });
+    }
+    for (const [index, node] of nodes.entries()) simulated.set(node, chain.joints[index]!);
+    return Object.freeze({ chain, nodes: Object.freeze(nodes), follows });
+  });
+  const hangsFrom = (node: number): string | undefined => {
+    for (let parent = report.parents[node] ?? null; parent !== null; parent = report.parents[parent] ?? null) {
+      const name = simulated.get(parent);
+      if (name !== undefined) return name;
+    }
+    return undefined;
+  };
+  for (const { chain, nodes } of chains) {
+    const name = hangsFrom(nodes[0]!);
+    if (name !== undefined) {
+      throw new CharacterModelError('broken-chain', `Hair chain "${chain.id}" hangs from "${name}" of another chain; make them one chain.`,
+        { joints: [chain.joints[0]!, name] });
+    }
+  }
+  for (const id of AVATAR_JOINT_IDS) {
+    const name = hangsFrom(resolved.nodes[id]);
+    if (name !== undefined) {
+      throw new CharacterModelError('broken-chain', `The ${id} joint hangs from hair joint "${name}"; hair must hang from the body, `
+        + 'not carry it.', { joints: [id, name] });
+    }
+  }
+  return Object.freeze({ chains: Object.freeze(chains), colliders: hair.colliders });
 }
 
 function side(name: string): 'left' | 'right' | null {

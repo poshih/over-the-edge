@@ -57,7 +57,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|DELETE', '/api/projects/{id}/art/assets/{assetId}', 'Download or remove course artwork (unused only).'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/appearance/{part}', 'A part\'s name and alignment.', '{ "alignment"?: {...}, "name"?: "..." }'),
-      endpoint('GET|PUT|DELETE', '/api/projects/{id}/models/{role}/{model}/model?name=Hooded%20hero', 'A library GLB for the avatar, hammer or pot. A new avatar maps its joints, or takes ?settings={ boneMap, driver, armForwardDistance, grips, arms }.', 'GLB bytes'),
+      endpoint('GET|PUT|DELETE', '/api/projects/{id}/models/{role}/{model}/model?name=Hooded%20hero', 'A library GLB for the avatar, hammer or pot. A new avatar maps its joints, or takes ?settings={ boneMap, driver, hair, armForwardDistance, grips, arms }.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/models/{role}/{model}', 'A library entry: its name, and an avatar\'s bone map and settings.', '{ "name"?: "...", "boneMap"?: {...}, ... }'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/media/{file}', 'Media library files, referenced as /media/{file}.', 'file bytes'),
       endpoint('GET', '/play/{id}/', 'The latest published release of a project; its content is under /play/{id}/content/.'),

@@ -853,7 +853,8 @@ To use your own character, import a **skinned avatar GLB** in Character, for
 example a Mixamo-rigged humanoid. A bone map names its body, head, upper-arm,
 forearm and hand joints. The existing arm IK, grips, head gaze and arm forward
 distance then drive them, with arm lengths from the GLB's bind pose; unmapped
-joints follow their nearest mapped ancestor. Mixamo names map automatically,
+joints follow their nearest mapped ancestor, and chains of them can swing as
+[spring-bone hair](docs/characters.md#hair), such as a braid. Mixamo names map automatically,
 and invalid models or maps fail with typed error codes. The same tab adds a
 **one-model hammer** GLB on the physical tool frame, with its handle fitted to the
 game's, a **pot model** GLB that follows the physical pot body and hides the body

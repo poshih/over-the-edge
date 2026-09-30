@@ -125,8 +125,8 @@ export class ProjectClient {
   putLibraryModel(id: string, role: PartRole, entry: LibraryEntry | LibraryAvatarEntry, blob: Blob, revision?: number): Promise<ServerRevisions> {
     const query = new URLSearchParams({ name: entry.name });
     if (role === 'avatar') {
-      const { boneMap, driver, armForwardDistance, grips, arms } = entry as LibraryAvatarEntry;
-      query.set('settings', JSON.stringify({ boneMap, driver, armForwardDistance, grips, arms }));
+      const { boneMap, driver, hair, armForwardDistance, grips, arms } = entry as LibraryAvatarEntry;
+      query.set('settings', JSON.stringify({ boneMap, driver, hair, armForwardDistance, grips, arms }));
     }
     return this.json('PUT', `/projects/${encodeURIComponent(id)}/models/${role}/${entry.id}/model?${query}`,
       { body: blob, type: 'model/gltf-binary', revision });

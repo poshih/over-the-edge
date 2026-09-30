@@ -65,7 +65,8 @@ Mapped joints must form ancestor chains: `body` above the head and both upper
 arms, each upper arm above its forearm, and each forearm above its hand. They
 need not be direct children: a clavicle between the spine and upper arm is
 fine. Unmapped joints, such as spine, neck, clavicles, fingers, twist bones and
-legs, follow their nearest mapped ancestor rigidly in their bind-pose offset.
+legs, follow their nearest mapped ancestor rigidly in their bind-pose offset,
+except the joints of [hair chains](#hair), which swing.
 Joints above the body stay in their bind pose. The Character tab lists every
 unmapped joint and what it follows.
 
@@ -95,6 +96,46 @@ The pot hides the body behind its walls through the depth buffer, but does not
 clip it. The pot's bottom is 1.22 m below the fitted shoulders; anything lower,
 such as long legs, shows beneath it. A [pot model](#pot-model) can be shaped to
 suit the body.
+
+### Hair
+
+An imported avatar can swing chains of its own skin joints as spring-bone hair, with the
+solver sprite skeletons use ([spring-bone hair](sprites.md#spring-bone-hair)). Skin the
+hair's geometry to a chain of joints in the GLB and list the chain in `avatar.hair`:
+
+```json
+"hair": {
+  "chains": [{ "id": "braid", "joints": ["Braid0", "Braid1", "Braid2", "Braid3"],
+               "stiffness": 0.05, "damping": 0.12, "gravity": 9.81, "radius": 0.03 }],
+  "colliders": [{ "id": "hips", "joint": "body", "x": 0, "y": -0.4, "radius": 0.2 }]
+}
+```
+
+- A chain is one continuous parent-to-child run of unmapped skin joints, root first,
+  at least two. The root hangs from a joint that follows a mapped joint, usually
+  under `head`, and stays where that joint carries it; the joints after it swing.
+  Chains may not share joints, hang from another chain or carry a mapped joint.
+- Every frame, after the head and arms, the chain's rigid pose, as it would follow
+  its mapped joint, gives each joint its target. The solver moves the joints in the
+  game's X-Y plane with world-space inertia, `gravity` (m/s², positive down), a pull
+  toward the target (`stiffness`, 0-1), velocity lost on each 1/60 s step (`damping`,
+  0-1) and the rigid pose's segment lengths. Each joint keeps the depth of its rigid
+  pose and turns by the least rotation from its rigid segment to the simulated one,
+  so the skin bends along the chain and anything below its last joint follows it.
+  Hair in front of or behind the body therefore swings across the view, not into it.
+- `colliders` are circles in the X-Y plane riding on an avatar joint (`body`, `head`
+  or an arm joint): offset `x`, `y` in that joint's frame and `radius`, in fitted
+  metres. A chain keeps its joints its own `radius` clear of every collider; pinned
+  roots and segment lengths win where both cannot hold.
+- The simulation freezes while time stands still, catches up at most 15 steps, and
+  restarts from the rigid pose on a rewind, a restart or a new avatar. Hair never
+  drives IK, gameplay or physics.
+- `{ "chains": [], "colliders": [] }` keeps every unmapped joint rigid, at no cost.
+  At most 16 chains, 64 joints over all chains and 32 colliders.
+- Chains are checked against the model wherever the bone map is: `unknown-joint`,
+  `ambiguous-joint`, `duplicate-joint` (a joint the bone map drives) and
+  `broken-chain` (not a parent-to-child run, not hanging from a mapped joint, hanging
+  from another chain, or carrying a mapped joint).
 
 ### Errors
 
@@ -248,7 +289,7 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 14**. Every profile has `grips`: the placement, each
+Profiles use **schema version 15**. Every profile has `grips`: the placement, each
 hand's distance from the butt (0-3 m), the slide point `slideAt`, a share of each
 arm's length (0.4-1), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
 and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It also has
@@ -257,7 +298,7 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
 
 ```json
 {
-  "schemaVersion": 14,
+  "schemaVersion": 15,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
   "grips": {
@@ -278,7 +319,8 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
       "left-upper-arm": "RightArm", "left-forearm": "RightForeArm", "left-hand": "RightHand",
       "right-upper-arm": "LeftArm", "right-forearm": "LeftForeArm", "right-hand": "LeftHand"
     },
-    "driver": { "id": "standard", "config": null }
+    "driver": { "id": "standard", "config": null },
+    "hair": { "chains": [], "colliders": [] }
   },
   "hammer": { "model": "hammer" },
   "pot": { "model": "pot" },
@@ -297,6 +339,7 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
   model and poses its arms. `standard` is the only built-in strategy and accepts a `null`
   config; a profile whose driver no host registered fails to load with `unknown-strategy`
   rather than falling back to another rig.
+- `avatar.hair` is the avatar's [hair](#hair), bound to its model's joints like the bone map.
 - `shading` is absent for the default look (`pbr`, 3 bands, outline `#1f2428` at
   0.02 m). `outline` is `null` for none; colours are lowercase `#rrggbb`; widths
   are 0.002-0.1 m.
@@ -395,10 +438,10 @@ did not select, and the release keeps nothing about the choice in the browser.
 part, and **Add server avatar / hammer / pot** does the same with one of the Workshop's
 [server models](#server-models). An avatar maps Mixamo-style joints automatically; otherwise its bone map opens
 and the avatar is added once all eight joints resolve. **Bone map** edits an avatar's
-map later. An avatar entry carries its rig `driver` and what depends on its proportions: its
-bone map, grips, arm lengths and arm forward distance. A new avatar takes those of the open
-character, and **Use character settings** takes them again, so tune them in
-Workshop / Character first. **Preview** shows a library model in the Workshop's game
+map later. An avatar entry carries its rig `driver`, its [hair](#hair) and what depends on its
+proportions: its bone map, grips, arm lengths and arm forward distance. A new avatar starts
+without hair and takes the grips, arm lengths and arm forward distance of the open character,
+and **Use character settings** takes them again, so tune them in Workshop / Character first. **Preview** shows a library model in the Workshop's game
 exactly as a release shows it; previews are not saved. The project server stores the
 library as `models/<part>/<id>.glb` with its entries in `project.json`, with
 [API routes](projects.md#api-for-scripts-and-language-models) for each model.
@@ -480,7 +523,8 @@ change without reloading anything. Without a host, documents with models are rej
 
 Imported avatars are built once when their profile loads. Each frame writes the
 seven driven bone matrices, with no allocation. Unmapped joints keep static local
-matrices. The hammer and pot models copy one matrix each; a new handle length
+matrices; hair chains add their joints' matrices and at most 15 solver steps, bounded by
+their joints and colliders. The hammer and pot models copy one matrix each; a new handle length
 rewrites the hammer model's vertices once. This cost does not depend on the level.
 In the editor, `window.gettingOver.level().rendering` reports `importedAvatar`
 (joints, unmapped joints, chains and cumulative `boneWrites`), `hammerModel` and

@@ -5,6 +5,8 @@ import { decodeBase64, encodeBase64, number, record, SpriteError, text } from '.
 import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
 import { sameAvatarDriver, validateAvatarDriver } from './avatar-driver.ts';
 import type { AvatarDriver } from './avatar-driver.ts';
+import { HAIR_PARAMETER_LIMITS } from './hair-solver.ts';
+import type { HairParameters } from './hair-solver.ts';
 
 // Left and right are screen sides: the character faces the camera, so a rig's anatomical right
 // arm drives the left-* joints.
@@ -33,11 +35,48 @@ export interface CharacterModel {
   readonly source: string;
 }
 
+// A spring-bone hair chain over the avatar's own skin joints, root first: one continuous parent-to-child run of
+// unmapped joints whose root hangs from a joint that follows a mapped one. The sprite hair solver moves it.
+export interface AvatarHairChain extends HairParameters {
+  readonly id: string;
+  readonly joints: readonly string[];
+}
+
+// A circle the hair slides around, riding on a mapped avatar joint; x and y are offsets in that joint's frame, and
+// every length is in fitted metres (avatar space).
+export interface AvatarHairCollider {
+  readonly id: string;
+  readonly joint: AvatarJointId;
+  readonly x: number;
+  readonly y: number;
+  readonly radius: number;
+}
+
+// Secondary motion for an imported avatar; empty lists leave every unmapped joint rigid.
+export interface AvatarHair {
+  readonly chains: readonly AvatarHairChain[];
+  readonly colliders: readonly AvatarHairCollider[];
+}
+
+export const NO_AVATAR_HAIR: AvatarHair = Object.freeze({ chains: Object.freeze([]), colliders: Object.freeze([]) });
+
+export const AVATAR_HAIR_LIMITS = Object.freeze({
+  chains: 16,
+  // Simulated joints over every chain, the solver's per-frame budget; a chain needs at least two.
+  joints: 64,
+  colliders: 32,
+  id: 80,
+  offset: 4,
+  colliderRadius: Object.freeze({ min: 0.01, max: 4 }),
+});
+
 export interface AvatarModelProfile {
   readonly model: string;
   readonly boneMap: AvatarBoneMap;
   // Which rig strategy interprets the bone map; its configuration is trusted host data.
   readonly driver: AvatarDriver;
+  // Bound to the model's joints like the bone map, so it travels with the model.
+  readonly hair: AvatarHair;
 }
 
 // A rigid prop that replaces the hammer or the pot; each role names its own model.
@@ -268,12 +307,101 @@ export function validateAvatarBoneMap(value: unknown): AvatarBoneMap {
   return map as AvatarBoneMap;
 }
 
+function hairId(value: unknown, label: string, ids: Set<string>): string {
+  const id = text(value, AVATAR_HAIR_LIMITS.id, label);
+  if (ids.has(id)) throw new SpriteError(`${label} "${id}" is used twice.`);
+  ids.add(id);
+  return id;
+}
+
+// The hair's own consistency; resolveAvatarHair() checks its chains against a model's skin.
+export function validateAvatarHair(value: unknown, boneMap: AvatarBoneMap): AvatarHair {
+  const hair = record(value, ['chains', 'colliders'], 'The avatar hair');
+  if (!Array.isArray(hair.chains) || hair.chains.length > AVATAR_HAIR_LIMITS.chains) {
+    throw new SpriteError(`The avatar hair lists at most ${AVATAR_HAIR_LIMITS.chains} chains.`);
+  }
+  if (!Array.isArray(hair.colliders) || hair.colliders.length > AVATAR_HAIR_LIMITS.colliders) {
+    throw new SpriteError(`The avatar hair lists at most ${AVATAR_HAIR_LIMITS.colliders} colliders.`);
+  }
+  const mapped = new Set(AVATAR_JOINT_IDS.map(id => boneMap[id]));
+  const chainIds = new Set<string>();
+  const used = new Set<string>();
+  let joints = 0;
+  const limits = HAIR_PARAMETER_LIMITS;
+  const chains = hair.chains.map((entry: unknown): AvatarHairChain => {
+    const chain = record(entry, ['id', 'joints', 'stiffness', 'damping', 'gravity', 'radius'], 'An avatar hair chain');
+    const id = hairId(chain.id, 'Hair chain ID', chainIds);
+    if (!Array.isArray(chain.joints) || chain.joints.length < 2) {
+      throw new SpriteError(`Hair chain "${id}" needs at least two joints: its root and one that swings.`);
+    }
+    joints += chain.joints.length;
+    if (joints > AVATAR_HAIR_LIMITS.joints) throw new SpriteError(`The avatar hair simulates at most ${AVATAR_HAIR_LIMITS.joints} joints.`);
+    const names = chain.joints.map((name: unknown) => {
+      if (typeof name !== 'string' || name.length === 0 || name.length > CHARACTER_MODEL_LIMITS.jointName ||
+        /[\u0000-\u001f\u007f]/.test(name)) {
+        throw new SpriteError(`Hair chain "${id}" must name GLB joints of 1-${CHARACTER_MODEL_LIMITS.jointName} characters.`);
+      }
+      if (mapped.has(name)) throw new SpriteError(`Hair chain "${id}" cannot simulate "${name}", which the bone map drives.`);
+      if (used.has(name)) throw new SpriteError(`Joint "${name}" belongs to more than one hair chain.`);
+      used.add(name);
+      return name;
+    });
+    return Object.freeze({
+      id, joints: Object.freeze(names),
+      stiffness: number(chain.stiffness, limits.stiffness.min, limits.stiffness.max, 'Hair stiffness'),
+      damping: number(chain.damping, limits.damping.min, limits.damping.max, 'Hair damping'),
+      gravity: number(chain.gravity, limits.gravity.min, limits.gravity.max, 'Hair gravity'),
+      radius: number(chain.radius, limits.radius.min, limits.radius.max, 'Hair collision radius'),
+    });
+  });
+  const colliderIds = new Set<string>();
+  const colliders = hair.colliders.map((entry: unknown): AvatarHairCollider => {
+    const collider = record(entry, ['id', 'joint', 'x', 'y', 'radius'], 'An avatar hair collider');
+    const id = hairId(collider.id, 'Hair collider ID', colliderIds);
+    if (!isAvatarJoint(collider.joint)) {
+      throw new SpriteError(`Hair collider "${id}" must ride on an avatar joint: ${AVATAR_JOINT_IDS.join(', ')}.`);
+    }
+    return Object.freeze({
+      id, joint: collider.joint,
+      x: number(collider.x, -AVATAR_HAIR_LIMITS.offset, AVATAR_HAIR_LIMITS.offset, 'Hair collider X'),
+      y: number(collider.y, -AVATAR_HAIR_LIMITS.offset, AVATAR_HAIR_LIMITS.offset, 'Hair collider Y'),
+      radius: number(collider.radius, AVATAR_HAIR_LIMITS.colliderRadius.min, AVATAR_HAIR_LIMITS.colliderRadius.max,
+        'Hair collider radius'),
+    });
+  });
+  return Object.freeze({ chains: Object.freeze(chains), colliders: Object.freeze(colliders) });
+}
+
+// The settings bound to an avatar's model: they change together with it, while hold settings (grips, arms) do not.
+export type AvatarModelSettings = Pick<AvatarModelProfile, 'boneMap' | 'driver' | 'hair'>;
+
+export function sameAvatarModelSettings(left: AvatarModelSettings, right: AvatarModelSettings): boolean {
+  return sameBoneMap(left.boneMap, right.boneMap) && sameAvatarDriver(left.driver, right.driver) && sameAvatarHair(left.hair, right.hair);
+}
+
+export function sameAvatarHair(left: AvatarHair, right: AvatarHair): boolean {
+  return left === right || left.chains.length === right.chains.length && left.colliders.length === right.colliders.length &&
+    left.chains.every((chain, index) => {
+      const other = right.chains[index]!;
+      return chain.id === other.id && chain.stiffness === other.stiffness && chain.damping === other.damping &&
+        chain.gravity === other.gravity && chain.radius === other.radius && chain.joints.length === other.joints.length &&
+        chain.joints.every((joint, at) => joint === other.joints[at]);
+    }) &&
+    left.colliders.every((collider, index) => {
+      const other = right.colliders[index]!;
+      return collider.id === other.id && collider.joint === other.joint && collider.x === other.x &&
+        collider.y === other.y && collider.radius === other.radius;
+    });
+}
+
 export function validateAvatarModelProfile(value: unknown): AvatarModelProfile {
-  const avatar = record(value, ['model', 'boneMap', 'driver'], 'The avatar model');
+  const avatar = record(value, ['model', 'boneMap', 'driver', 'hair'], 'The avatar model');
+  const boneMap = validateAvatarBoneMap(avatar.boneMap);
   return Object.freeze({
     model: text(avatar.model, CHARACTER_MODEL_LIMITS.id, 'Avatar model ID'),
-    boneMap: validateAvatarBoneMap(avatar.boneMap),
+    boneMap,
     driver: validateAvatarDriver(avatar.driver),
+    hair: validateAvatarHair(avatar.hair, boneMap),
   });
 }
 
@@ -339,8 +467,7 @@ export function sameCharacterAssets(left: CharacterAssets, right: CharacterAsset
     });
   return sameModels &&
     (left.avatar === right.avatar || left.avatar !== undefined && right.avatar !== undefined &&
-      left.avatar.model === right.avatar.model && sameBoneMap(left.avatar.boneMap, right.avatar.boneMap) &&
-      sameAvatarDriver(left.avatar.driver, right.avatar.driver)) &&
+      left.avatar.model === right.avatar.model && sameAvatarModelSettings(left.avatar, right.avatar)) &&
     sameProp(left.hammer, right.hammer) && sameProp(left.pot, right.pot) &&
     (left.shading === right.shading || left.shading !== undefined && right.shading !== undefined &&
       sameShading(left.shading, right.shading));
