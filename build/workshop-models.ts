@@ -13,19 +13,11 @@ import { checkAvatarModelSettings, PART_ROLES } from '../src/model-library';
 import type { PartRole } from '../src/model-library';
 import { sendBytes, sendFile } from '../server/http';
 import { contentDirectory, contentRequest, notFound } from './release';
+import { SERVER_MODEL_SETTINGS_EXTENSION, SERVER_MODELS, serverAvatarSettingsFile } from './server-model-paths';
 
-/**
- * The folder, relative to the repository root, whose GLBs a Workshop offers: `models/<part>/<name>.glb`. An avatar may
- * carry its model settings beside it in `<name>.json`: `{ "boneMap", "driver", "hair" }`, as a profile's avatar has them.
- */
-export const SERVER_MODELS = 'models';
-const SETTINGS_EXTENSION = '.json';
+// Server models are `models/<part>/<name>.glb` (server-model-paths.ts). An avatar may carry its model settings beside it:
+// `{ "boneMap", "driver", "hair" }`, as a profile's avatar has them.
 const MODEL_FILE = /\.glb$/i;
-
-// Where the server avatar `name`'s model settings file is, relative to the repository root.
-export function serverAvatarSettingsFile(name: string): string {
-  return `${SERVER_MODELS}/avatar/${name}${SETTINGS_EXTENSION}`;
-}
 const MODEL_TYPE = 'model/gltf-binary';
 // Where a server model is under the Workshop's content URL: named by its SHA-256.
 const MODEL_PATH = /^models\/[0-9a-f]{64}\.glb$/;
@@ -76,10 +68,10 @@ export function loadServerModels(root: string, registry: AvatarRigRegistry): Ser
     }
     const names = files.filter((name) => MODEL_FILE.test(name));
     const stems = new Set(names.map((name) => name.replace(MODEL_FILE, '')));
-    for (const name of files.filter((entry) => entry.endsWith(SETTINGS_EXTENSION))) {
+    for (const name of files.filter((entry) => entry.endsWith(SERVER_MODEL_SETTINGS_EXTENSION))) {
       const file = `${SERVER_MODELS}/${role}/${name}`;
       if (role !== 'avatar') throw new Error(`${file}: only avatars carry model settings.`);
-      if (!stems.has(name.slice(0, -SETTINGS_EXTENSION.length))) throw new Error(`${file} has no model: add its .glb or remove it.`);
+      if (!stems.has(name.slice(0, -SERVER_MODEL_SETTINGS_EXTENSION.length))) throw new Error(`${file} has no model: add its .glb or remove it.`);
     }
     for (const name of names) {
       const stem = name.replace(MODEL_FILE, '');
