@@ -55,11 +55,13 @@ export interface SetPiecePlacement {
 export const LABEL_SIZE = { width: 2.25, height: 0.42 } as const;
 const CHECK_ID = 'set-piece-check';
 const DEPTH = 1.5;
-const COLOR = {
+/** The library's materials by name; generated courses repaint pieces by these colours. */
+export const SET_PIECE_COLORS = Object.freeze({
   rock: ROCK_COLOR, stone: 0x8a8f86, slate: 0x5d6b68, wood: 0x9a7660, crate: 0x7f5f4b, bark: 0x6e5540,
   leaf: 0x5f7f4b, metal: 0x707a80, rust: 0xb0643a, concrete: 0xa6a59b, snake: 0x6f8f3c, brick: 0x8c5a48,
   roof: 0x7a4a3c, ivory: 0xcfc6ad, canvas: 0xb44a3c,
-} as const;
+} as const);
+const COLOR = SET_PIECE_COLORS;
 
 interface Style { readonly color?: number; readonly depth?: number; readonly illusion?: boolean }
 
