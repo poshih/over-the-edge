@@ -1,5 +1,6 @@
 import { ARM_GEOMETRY } from '../arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, PLAYER_DEPTH } from '../character-depth';
+import { DEFAULT_WAIST_LEAN } from '../waist-lean';
 import { ARM_SIDES, SHAFT_ARTWORK_LENGTH } from '../character';
 import type { ArmSide, VisualPartId } from '../character';
 import { RIG } from '../config';
@@ -398,7 +399,7 @@ export function createSpriteCharacterExample(): SpriteDocument {
   );
   return validateSpriteDocument({
     schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType: 'sprite-2d', armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-    grips: DEFAULT_GRIPS, arms: null, images, layers, presentation: null,
+    waistLean: DEFAULT_WAIST_LEAN, grips: DEFAULT_GRIPS, arms: null, images, layers, presentation: null,
     skeleton: { anchor: 'torso', bones, poses: [], clips: [], animation: null, ik, hair: [], colliders: [] },
   });
 }

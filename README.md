@@ -880,6 +880,8 @@ Tune **Workshop / Character / Arm forward distance** from **0-2 m** in
 hammer together in the two 3D modes. The value is part of the character profile:
 Save, Revert and JSON export/import preserve it, including game-only releases.
 Pure 2D rendering retains its authored depths and keeps this 3D setting dormant.
+**Waist lean** (0-45°, default 0) leans a 3D character's upper body toward the hammer, turning at the waist on the
+jar's rim, with the arms and head following; see [waist lean](docs/sprites.md#waist-lean).
 The pot keeps its own depth. This affects only presentation, not hammer length,
 aim, contacts, or physics. Imported models and all hammer sprite bindings use
 the same foreground pass.

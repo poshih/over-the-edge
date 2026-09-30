@@ -42,11 +42,16 @@ export interface AvatarHairChain extends HairParameters {
   readonly joints: readonly string[];
 }
 
+// What a hair collider rides with: a mapped avatar joint, which carries it as the body moves and leans, or `pot`, the
+// jar, which stays with the physical pot.
+export const HAIR_COLLIDER_FRAMES = [...AVATAR_JOINT_IDS, 'pot'] as const;
+export type HairColliderFrame = (typeof HAIR_COLLIDER_FRAMES)[number];
+
 // A circle the hair slides around: its centre at bind in the avatar's fitted frame (metres, +Y up, the shoulders
-// 0.74 m above the player root), carried by the mapped avatar joint it rides on, and its radius in metres.
+// 0.74 m above the player root), carried by the frame it rides with, and its radius in metres.
 export interface AvatarHairCollider {
   readonly id: string;
-  readonly joint: AvatarJointId;
+  readonly joint: HairColliderFrame;
   readonly x: number;
   readonly y: number;
   readonly radius: number;
@@ -358,11 +363,12 @@ export function validateAvatarHair(value: unknown, boneMap: AvatarBoneMap): Avat
   const colliders = hair.colliders.map((entry: unknown): AvatarHairCollider => {
     const collider = record(entry, ['id', 'joint', 'x', 'y', 'radius'], 'An avatar hair collider');
     const id = hairId(collider.id, 'Hair collider ID', colliderIds);
-    if (!isAvatarJoint(collider.joint)) {
-      throw new SpriteError(`Hair collider "${id}" must ride on an avatar joint: ${AVATAR_JOINT_IDS.join(', ')}.`);
+    const joint = HAIR_COLLIDER_FRAMES.find((frame) => frame === collider.joint);
+    if (joint === undefined) {
+      throw new SpriteError(`Hair collider "${id}" must ride on an avatar joint or the jar: ${HAIR_COLLIDER_FRAMES.join(', ')}.`);
     }
     return Object.freeze({
-      id, joint: collider.joint,
+      id, joint,
       x: number(collider.x, -AVATAR_HAIR_LIMITS.position, AVATAR_HAIR_LIMITS.position, 'Hair collider X'),
       y: number(collider.y, -AVATAR_HAIR_LIMITS.position, AVATAR_HAIR_LIMITS.position, 'Hair collider Y'),
       radius: number(collider.radius, AVATAR_HAIR_LIMITS.colliderRadius.min, AVATAR_HAIR_LIMITS.colliderRadius.max,

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_SPRITE_RIGGING, SPRITE_SCHEMA_VERSION, validateSpriteDocument } from '../src/sprite-data.ts';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from '../src/character-depth.ts';
+import { DEFAULT_WAIST_LEAN } from '../src/waist-lean.ts';
 import { DEFAULT_GRIPS } from '../src/grips.ts';
 
 const [anchor, ...extra] = process.argv.slice(2);
@@ -16,6 +17,7 @@ const document = validateSpriteDocument({
   schemaVersion: SPRITE_SCHEMA_VERSION,
   characterRiggingType: 'sprite-2d',
   armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
+  waistLean: DEFAULT_WAIST_LEAN,
   grips: DEFAULT_GRIPS,
   arms: null,
   skeleton: null,

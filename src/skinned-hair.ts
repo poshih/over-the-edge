@@ -3,6 +3,7 @@ import type { Object3D } from 'three';
 import { HairSolver } from './hair-solver';
 import type { HairChainState } from './hair-solver';
 import type { AvatarJointId } from './character-profile';
+import { RIG } from './config';
 import type { ResolvedAvatarHair } from './character-model-inspect';
 
 // The mapped joints' avatar-space matrices at bind and this frame, as the rig wrote them.
@@ -37,11 +38,11 @@ interface SkinnedChain {
   readonly depth: Float64Array;
 }
 
-// A collider's centre in avatar space at bind, and the mapped joint whose motion carries it.
-interface SkinnedCollider {
-  readonly joint: AvatarJointId;
-  readonly centre: Vector3;
-}
+// A collider's centre, carried by a mapped joint's motion from its avatar-space place at bind, or held in the jar's
+// frame (origin at its bottom-centre), which stays with the physical pot as the body leans.
+type SkinnedCollider =
+  | { readonly frame: 'joint'; readonly joint: AvatarJointId; readonly centre: Vector3 }
+  | { readonly frame: 'pot'; readonly centre: Vector3 };
 
 const DIRECTION_EPSILON = 1e-9;
 
@@ -52,8 +53,8 @@ const DIRECTION_EPSILON = 1e-9;
  * segment lengths. The solver moves the joints in the world's X-Y plane, the game's view. Each joint keeps the world
  * depth of its rest position and turns by the least rotation that carries its rest segment onto the simulated one,
  * so the skin bends along the chain; the tip joint turns with the last segment. Colliders are carried by their
- * mapped joints. Runs after the rig has written the mapped joints; allocation-free per frame, its cost bounded by the
- * chains' joints and the colliders.
+ * mapped joints, or held by the jar. Runs after the rig has written the mapped joints; allocation-free per frame, its
+ * cost bounded by the chains' joints and the colliders.
  */
 export class SkinnedHair {
   private readonly solver: HairSolver;
@@ -89,23 +90,29 @@ export class SkinnedHair {
         depth: new Float64Array(bones.length),
       };
     }));
-    this.colliders = Object.freeze(hair.colliders.map(collider => ({
-      joint: collider.joint,
+    this.colliders = Object.freeze(hair.colliders.map((collider): SkinnedCollider => collider.joint === 'pot'
+      // The jar's bottom-centre is at the player root's pot bottom at bind.
+      ? { frame: 'pot', centre: new Vector3(collider.x, collider.y - RIG.potBottom, 0) }
       // In the plane of the joint it rides on.
-      centre: new Vector3(collider.x, collider.y, new Vector3().setFromMatrixPosition(mappedBind[collider.joint]).z),
-    })));
+      : {
+        frame: 'joint', joint: collider.joint,
+        centre: new Vector3(collider.x, collider.y, new Vector3().setFromMatrixPosition(mappedBind[collider.joint]).z),
+      }));
     this.bindInverse = Object.freeze(Object.fromEntries(Object.entries(mappedBind).map(([id, bind]) => [id, bind.clone().invert()])) as
       Record<AvatarJointId, Matrix4>);
   }
 
   // Simulates the hair for the frame at `time` and writes its joints' local matrices. `body` places avatar space in
-  // the world, as the view's root does.
-  apply(body: Matrix4, time: number, mapped: MappedJointFrames): void {
+  // the world, as the view's root does; `pot` places the jar, its origin at the jar's bottom-centre.
+  apply(body: Matrix4, pot: Matrix4, time: number, mapped: MappedJointFrames): void {
     this.bodyInverse.copy(body).invert();
     for (const chain of this.chains) this.target(chain, body, mapped);
     for (const [index, collider] of this.colliders.entries()) {
-      this.follow.multiplyMatrices(mapped.current[collider.joint], this.bindInverse[collider.joint]);
-      this.point.copy(collider.centre).applyMatrix4(this.follow).applyMatrix4(body);
+      if (collider.frame === 'pot') this.point.copy(collider.centre).applyMatrix4(pot);
+      else {
+        this.follow.multiplyMatrices(mapped.current[collider.joint], this.bindInverse[collider.joint]);
+        this.point.copy(collider.centre).applyMatrix4(this.follow).applyMatrix4(body);
+      }
       this.solver.colliderX[index] = this.point.x;
       this.solver.colliderY[index] = this.point.y;
     }

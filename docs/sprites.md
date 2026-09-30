@@ -35,6 +35,20 @@ import/export include `armForwardDistance`; `GAME_SPRITES` carries it into a
 game-only release. In pure 2D the control is disabled and its saved value is
 retained for the next 3D selection, without changing authored sprite depths.
 
+### Waist lean
+
+**Waist lean** (Workshop / Character / 3D upper body) is the most a Mesh parts or Avatar character's upper body leans
+toward the hammer, 0-45° in 1° steps; 0 (the default) keeps it upright.
+
+- The upper body turns at the waist, a pivot on the jar's rim, toward the side the shaft points: the most when the
+  shaft is level, not at all when it points straight up or down. It eases there in about 0.15 s.
+- The torso, the shoulders and the arms' reach turn with it. The head turns within the leaning torso and keeps looking
+  at the cursor, and the body below the waist stays inside the jar.
+- It is presentation only: hammer length, aim, contacts and physics are unchanged.
+- It is part of the character profile (`waistLean`). A library avatar shown in the profile's place keeps the profile's
+  lean.
+- 2D sprite skeletons stay upright and keep the saved value for the next 3D selection.
+
 Both 3D modes hide and detach sprite rendering without discarding its resources;
 inactive sprite animation, hair, and UV work do not run. Sprite/skeleton
 previews require 2D. The Sprites tab offers **Use 2D sprite character** when
@@ -473,9 +487,10 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 15,
+  "schemaVersion": 16,
   "characterRiggingType": "sprite-2d",
   "armForwardDistance": 0.25,
+  "waistLean": 0,
   "grips": {
     "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85,
     "rotation": { "left": { "x": 0, "y": 0, "z": 0 }, "right": { "x": 0, "y": 0, "z": 0 } }
@@ -527,9 +542,9 @@ Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
-Profiles use **schema version 15**; any other version is rejected, not converted.
+Profiles use **schema version 16**; any other version is rejected, not converted.
 `characterRiggingType` is `sprite-2d`, `model-3d` or `avatar-3d`;
-`armForwardDistance` is 0-2 m; `grips` is `{ "placement", "left", "right", "slideAt", "rotation" }`, the
+`armForwardDistance` is 0-2 m; `waistLean` is 0-45°; `grips` is `{ "placement", "left", "right", "slideAt", "rotation" }`, the
 placement (`fixed` or `sliding`), each hand's distance from the butt (0-3 m), the share of
 each arm's length a sliding hand may be from its shoulder before the handle slides (0.4-1) and each
 3D hand's turn on its grip, `{ "left": { "x", "y", "z" }, "right": {...} }` in degrees (-180 to 180),

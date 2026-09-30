@@ -31,6 +31,7 @@ import { PropModelView } from './prop-model-view';
 import { HammerHandleFit } from './hammer-handle-fit';
 import { SkinnedAvatarView } from './skinned-avatar-view';
 import { HeadAim } from './head-aim';
+import { DEFAULT_WAIST_LEAN, WaistLean } from './waist-lean';
 import { createHammerHeadGeometry, createPotGeometry, placeLimb, PLAYER_FIGURE } from './player-figure';
 import { PHYSICS, RIG } from './config';
 import type { InputMode, Point } from './config';
@@ -47,7 +48,7 @@ import { CharacterModelPool } from './character-model-pool';
 import type { CharacterModelLease } from './character-model-pool';
 import { SpriteRig } from './sprite-rig';
 import type { CharacterAssetLease, SpriteAnchor, SpriteArmSlots } from './sprite-rig';
-import { DEFAULT_CHARACTER_RIGGING_TYPE, SpriteError } from './sprite-data';
+import { DEFAULT_CHARACTER_RIGGING_TYPE, SpriteError, UPPER_BODY_3D } from './sprite-data';
 import type { CharacterPresentation, CharacterRiggingType, SpriteDocument } from './sprite-data';
 import { VisualVisibility } from './visual-visibility';
 import type { RigTarget } from './skeleton-pose';
@@ -204,8 +205,9 @@ const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer
 const PROP_VIEW_NAMES: Readonly<Record<PropModelRole, string>> = { hammer: 'one-model-hammer', pot: 'profile-pot-model' };
 const DEFAULT_PRESENTATION: CharacterPresentation = Object.freeze({
   characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-  grips: DEFAULT_GRIPS, arms: null,
+  waistLean: DEFAULT_WAIST_LEAN, grips: DEFAULT_GRIPS, arms: null,
 });
+
 // Each arm's grip target and segment slots, so a character's arm lengths also stretch its 2D arms.
 const ARM_SLOTS: Readonly<Record<ArmSide, SpriteArmSlots>> = Object.freeze({
   left: Object.freeze({ target: 'left-grip', upper: 'left-upper-arm', forearm: 'left-forearm' }),
@@ -277,6 +279,10 @@ export class GameView {
   private readonly torso = new Group();
   private readonly meshHead = new Group();
   private readonly headAim = new HeadAim();
+  // The upper body turns about the waist, at the jar's rim, toward the hammer, up to the character's waistLean.
+  private readonly waistLean = new WaistLean(Math.max(...RIG.potVertices.map((point) => point.y)));
+  private maxWaistLean = DEFAULT_WAIST_LEAN;
+  private readonly torsoOrigin = { x: 0, y: 0 };
   private readonly headPivot = new Vector3(...HEAD_GEOMETRY.neck);
   private readonly headOffset = new Vector3();
   private avatar: AvatarView | null = null;
@@ -859,7 +865,12 @@ export class GameView {
     // A library avatar replaces an Avatar character's own, with the settings its proportions need.
     const partAvatar = avatarMode ? this.parts.avatar : null;
     const presentation = partAvatar === null ? character : { ...character, ...partAvatar.settings };
-    this.toolDepth = getToolDepth(type === 'sprite-2d' ? DEFAULT_ARM_FORWARD_DISTANCE : presentation.armForwardDistance);
+    const upperBody3d = UPPER_BODY_3D[type];
+    this.toolDepth = getToolDepth(upperBody3d ? presentation.armForwardDistance : DEFAULT_ARM_FORWARD_DISTANCE);
+    const maxWaistLean = upperBody3d ? presentation.waistLean : 0;
+    // A new lean applies at once, also while time stands still, rather than easing in from the previous one.
+    if (maxWaistLean !== this.maxWaistLean) this.waistLean.reset();
+    this.maxWaistLean = maxWaistLean;
     const imported = avatarMode ? partAvatar?.view ?? slot?.avatar?.view ?? null : null;
     if (avatarMode && imported === null && this.avatar === null) {
       this.avatar = new AvatarView();
@@ -936,26 +947,35 @@ export class GameView {
       if (!mesh) continue;
       mesh.position.set(part.x, part.y, part.kind === 'pot' ? PLAYER_DEPTH.pot : this.toolDepth);
       mesh.rotation.z = part.angle;
-      if (part.kind === 'pot' && this.propModels.pot !== null) {
-        // The pot model's origin is the physical pot's bottom-centre, at the pot's own depth.
+      if (part.kind === 'pot') {
+        // The jar's frame: origin at the physical pot's bottom-centre, at the pot's own depth. The pot model and
+        // hair colliders held by the jar follow it.
         const cos = Math.cos(part.angle), sin = Math.sin(part.angle);
         this.potFrame.makeRotationZ(part.angle)
           .setPosition(part.x - RIG.potBottom * sin, part.y + RIG.potBottom * cos, PLAYER_DEPTH.pot);
-        this.propModels.pot.update(this.potFrame);
+        this.propModels.pot?.update(this.potFrame);
       }
     }
-    this.torso.position.set(root.x, root.y, PLAYER_DEPTH.torso);
-    this.torso.updateWorldMatrix(true, false);
     const shaftBase = this.part(frame, 'slider');
-    const aimOrigin = this.part(frame, 'carrier');
-    const aim = { x: frame.cursor.x - aimOrigin.x, y: frame.cursor.y - aimOrigin.y };
-    this.headAim.update(aim, frame.time);
-    this.headOffset.copy(this.headPivot).applyQuaternion(this.headAim.rotation).negate().add(this.headPivot);
-    this.meshHead.matrix.makeRotationFromQuaternion(this.headAim.rotation).setPosition(this.headOffset);
-    this.meshHead.matrixWorldNeedsUpdate = true;
     const shaftLength = Math.hypot(tip.x - shaftBase.x, tip.y - shaftBase.y);
     const shaftCenter = { x: (shaftBase.x + tip.x) / 2, y: (shaftBase.y + tip.y) / 2 };
     const shaftAngle = shaftLength <= PHYSICS.aimEpsilon ? shaftBase.angle : Math.atan2(tip.y - shaftBase.y, tip.x - shaftBase.x);
+    // The upper body leans toward the hammer, turning about the waist; everything drawn on the torso and the arms'
+    // shoulders turn with it.
+    this.waistLean.update(shaftAngle, this.maxWaistLean, frame.time);
+    const lean = this.waistLean.angle;
+    const origin = this.waistLean.torsoOrigin(root.x, root.y, this.torsoOrigin);
+    this.torso.position.set(origin.x, origin.y, PLAYER_DEPTH.torso);
+    this.torso.rotation.z = lean;
+    this.torso.updateWorldMatrix(true, false);
+    const aimOrigin = this.part(frame, 'carrier');
+    const aim = { x: frame.cursor.x - aimOrigin.x, y: frame.cursor.y - aimOrigin.y };
+    // The head turns within the leaning torso, so it aims in the torso's frame to keep looking at the cursor.
+    const cos = Math.cos(lean), sin = Math.sin(lean);
+    this.headAim.update({ x: aim.x * cos + aim.y * sin, y: aim.y * cos - aim.x * sin }, frame.time);
+    this.headOffset.copy(this.headPivot).applyQuaternion(this.headAim.rotation).negate().add(this.headPivot);
+    this.meshHead.matrix.makeRotationFromQuaternion(this.headAim.rotation).setPosition(this.headOffset);
+    this.meshHead.matrixWorldNeedsUpdate = true;
     this.cursor.position.set(frame.cursor.x, frame.cursor.y, 1);
     this.customShaft.position.set(shaftCenter.x, shaftCenter.y, this.toolDepth);
     this.customShaft.rotation.z = shaftAngle;
@@ -966,7 +986,7 @@ export class GameView {
     // A prepared imported rig reads its avatar-space pose, written by updateArms; the built-in and
     // sprite avatars take the world-space poses directly.
     if (this.avatarRenderer instanceof SkinnedAvatarView) {
-      this.avatarRenderer.apply(this.torso.matrixWorld, this.headAim.rotation, this.activeAvatar!.pose, frame.time);
+      this.avatarRenderer.apply(this.torso.matrixWorld, this.potFrame, this.headAim.rotation, this.activeAvatar!.pose, frame.time);
     } else if (this.avatarRenderer !== null) {
       this.avatarRenderer.update(this.torso.matrixWorld, armPoses, this.headAim.rotation, this.turnGloves());
     }
@@ -1013,6 +1033,7 @@ export class GameView {
 
   resetPresentation(): void {
     this.headAim.reset();
+    this.waistLean.reset();
     for (const slot of this.slots) slot.rig.resetPresentation();
     this.resetPoseHistory();
   }

@@ -9,6 +9,7 @@ import {
   SpriteError,
   validateArmForwardDistance,
   validateCharacterRiggingType,
+  validateWaistLean,
   validateDirectionalReferences,
   validateArms,
   validateGrips,
@@ -19,6 +20,7 @@ import {
 } from './sprite-data';
 import type { CharacterPresentation, CharacterRiggingType, SpriteDocument, SpriteFlipbook, SpriteLayer } from './sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
+import { DEFAULT_WAIST_LEAN } from './waist-lean';
 import type { ArmSide } from './character';
 import { sameArms } from './character-arms';
 import type { ArmLengths, CharacterArms } from './character-arms';
@@ -333,6 +335,7 @@ export class SpriteRig {
   private readonly coverage = new Map<string, boolean>();
   private characterRiggingType: CharacterRiggingType = DEFAULT_CHARACTER_RIGGING_TYPE;
   private armForwardDistance: number = DEFAULT_ARM_FORWARD_DISTANCE;
+  private waistLean: number = DEFAULT_WAIST_LEAN;
   private grips: Grips = DEFAULT_GRIPS;
   private arms: CharacterArms | null = null;
   // How this host names each arm, so the character's arm lengths reach its 2D arm chains.
@@ -490,7 +493,7 @@ export class SpriteRig {
       checkSignal(signal);
       const next = this.buildState(document.layers, document.skeleton, images, resources,
         { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
-          armForwardDistance: document.armForwardDistance, grips: document.grips, arms: document.arms,
+          armForwardDistance: document.armForwardDistance, waistLean: document.waistLean, grips: document.grips, arms: document.arms,
           ...characterAssets(document) });
       operation.staged.clear();
       this.commit(next, { preview: null });
@@ -518,6 +521,15 @@ export class SpriteRig {
     if (distance === this.armForwardDistance) return;
     const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), armForwardDistance: distance });
     this.armForwardDistance = distance;
+    commit?.();
+  }
+
+  setWaistLean(value: number): void {
+    this.assertMutable();
+    const lean = validateWaistLean(value);
+    if (lean === this.waistLean) return;
+    const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), waistLean: lean });
+    this.waistLean = lean;
     commit?.();
   }
 
@@ -823,6 +835,7 @@ export class SpriteRig {
       disposed: this.disposed,
       characterRiggingType: this.characterRiggingType,
       armForwardDistance: this.armForwardDistance,
+      waistLean: this.waistLean,
       grips: this.grips,
       arms: this.arms,
       shading: this.assets.shading ?? DEFAULT_CHARACTER_SHADING,
@@ -893,7 +906,7 @@ export class SpriteRig {
     this.disposed = true;
     const commitPresentation = this.prepareCharacterPresentation?.({
       characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
-      grips: DEFAULT_GRIPS, arms: null,
+      waistLean: DEFAULT_WAIST_LEAN, grips: DEFAULT_GRIPS, arms: null,
     });
     this.replacement?.controller.abort(new DOMException('The sprite rig was disposed.', 'AbortError'));
     for (const resource of this.replacement?.staged.values() ?? []) this.releaseResource(resource);
@@ -999,8 +1012,8 @@ export class SpriteRig {
 
   private currentCharacterPresentation(): CharacterPresentation {
     return {
-      characterRiggingType: this.characterRiggingType, armForwardDistance: this.armForwardDistance, grips: this.grips,
-      arms: this.arms, ...this.assets,
+      characterRiggingType: this.characterRiggingType, armForwardDistance: this.armForwardDistance, waistLean: this.waistLean,
+      grips: this.grips, arms: this.arms, ...this.assets,
     };
   }
 
@@ -1013,6 +1026,7 @@ export class SpriteRig {
   ): BuildState {
     validateCharacterRiggingType(options.characterRiggingType, layers.length);
     validateArmForwardDistance(options.armForwardDistance);
+    validateWaistLean(options.waistLean);
     validateGrips(options.grips);
     validateArms(options.arms);
     this.assertCharacterRenderer(options.characterRiggingType);
@@ -1021,14 +1035,14 @@ export class SpriteRig {
       nextAssets.hammer !== this.assets.hammer || nextAssets.pot !== this.assets.pot ||
       nextAssets.shading !== this.assets.shading;
     const changedCharacter = options.characterRiggingType !== this.characterRiggingType ||
-      options.armForwardDistance !== this.armForwardDistance ||
+      options.armForwardDistance !== this.armForwardDistance || options.waistLean !== this.waistLean ||
       !sameGrips(options.grips, this.grips) || !sameArms(options.arms, this.arms) || changedAssets;
     // The host's pure presentation preparation runs before any skeleton or layer is allocated, so a
     // strategy refusal leaves no new visual resource to unwind. The caller's staged image cleanup
     // still runs, because buildState throws before it takes ownership of those resources.
     const commitPresentation = changedCharacter ? this.prepareCharacterPresentation?.({
       characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance,
-      grips: options.grips, arms: options.arms, ...nextAssets,
+      waistLean: options.waistLean, grips: options.grips, arms: options.arms, ...nextAssets,
     }) : undefined;
     const attachments = new Map<string, Attachment>();
     const skeletonMounts = new Map<THREE.Object3D, THREE.Group>();
@@ -1061,7 +1075,7 @@ export class SpriteRig {
         presentation: options.presentation,
         headTracking: compileSpriteHeadTracking(this.headTracking, layers, definition, options.presentation),
         characterRiggingType: options.characterRiggingType, armForwardDistance: options.armForwardDistance,
-        grips: options.grips, arms: options.arms, mode: options.mode,
+        waistLean: options.waistLean, grips: options.grips, arms: options.arms, mode: options.mode,
         ...nextAssets };
     } catch (error) {
       for (const instance of instances.values()) if (this.layers.get(instance.data.id) !== instance) this.disposeLayer(instance);
@@ -1406,6 +1420,7 @@ export class SpriteRig {
     this.headTrackingPlan = next.headTracking;
     this.characterRiggingType = next.characterRiggingType;
     this.armForwardDistance = next.armForwardDistance;
+    this.waistLean = next.waistLean;
     this.grips = next.grips;
     this.arms = next.arms;
     this.assets = nextAssets;

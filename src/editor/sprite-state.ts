@@ -2,11 +2,12 @@ import type { SpriteRig } from '../sprite-rig';
 import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
-  DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType, validateArmForwardDistance, validateArms, validateGrips,
+  DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType, validateArmForwardDistance, validateArms, validateGrips, validateWaistLean,
   FLIPBOOK_LIMITS, flipbookSizeMessage, spriteLayerImages, SPRITE_FILE_BYTES, SPRITE_SCHEMA_VERSION,
 } from '../sprite-data';
 import type { SpriteDocument, SpriteFlipbook, SpriteImage, SpriteLayer, SpriteOffset } from '../sprite-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
+import { DEFAULT_WAIST_LEAN } from '../waist-lean';
 import { sameArms } from '../character-arms';
 import { DEFAULT_GRIPS, sameGrips } from '../grips';
 import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
@@ -163,7 +164,7 @@ function usedImages(images: readonly SpriteImage[], layers: readonly SpriteLayer
 function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (left === right) return true;
   if (left.characterRiggingType !== right.characterRiggingType || left.armForwardDistance !== right.armForwardDistance ||
-    !sameGrips(left.grips, right.grips) || !sameArms(left.arms, right.arms)) return false;
+    left.waistLean !== right.waistLean || !sameGrips(left.grips, right.grips) || !sameArms(left.arms, right.arms)) return false;
   if (!sameCharacterAssets(left, right)) return false;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
   return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
@@ -194,7 +195,7 @@ function modelName(file: File): string {
 function spriteFields(document: SpriteDocument) {
   return {
     characterRiggingType: document.characterRiggingType, armForwardDistance: document.armForwardDistance,
-    grips: document.grips, arms: document.arms,
+    waistLean: document.waistLean, grips: document.grips, arms: document.arms,
     images: document.images, layers: document.layers, skeleton: document.skeleton, presentation: document.presentation,
   };
 }
@@ -340,7 +341,8 @@ export class SpriteEditorState {
       error: this.error,
       dirty: this.saved === null || !sameDocument(this.draft, this.saved),
       hasContent: this.draft.characterRiggingType !== DEFAULT_CHARACTER_RIGGING_TYPE ||
-        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE || !sameGrips(this.draft.grips, DEFAULT_GRIPS) ||
+        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE || this.draft.waistLean !== DEFAULT_WAIST_LEAN ||
+        !sameGrips(this.draft.grips, DEFAULT_GRIPS) ||
         this.draft.arms !== null ||
         hasCharacterAssets(this.draft) ||
         this.draft.layers.length > 0 || this.draft.images.length > 0 ||
@@ -709,6 +711,31 @@ export class SpriteEditorState {
       const document = Object.freeze({ ...this.draft, armForwardDistance });
       this.validateDraft(document);
       this.rig.setArmForwardDistance(armForwardDistance);
+      this.draft = document;
+      this.error = null;
+      this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message, error);
+      return false;
+    }
+  }
+
+  setWaistLean(value: unknown): boolean {
+    if (!this.canEdit()) return false;
+    try {
+      const waistLean = validateWaistLean(value);
+      if (waistLean === this.draft.waistLean) {
+        if (this.error !== null) {
+          this.error = null;
+          this.changed();
+        }
+        return true;
+      }
+      const document = Object.freeze({ ...this.draft, waistLean });
+      this.validateDraft(document);
+      this.rig.setWaistLean(waistLean);
       this.draft = document;
       this.error = null;
       this.changed();

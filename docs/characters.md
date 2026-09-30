@@ -125,11 +125,14 @@ hair's geometry to a chain of joints in the GLB and list the chain in `avatar.ha
   by the least rotation from its rest segment to the simulated one, so the skin bends
   along the chain and anything below its last joint follows it. Hair in front of or
   behind the body therefore swings across the view, not into it.
-- `colliders` are circles in the X-Y plane, each riding on an avatar joint (`body`,
-  `head` or an arm joint): `x` and `y` place its centre at bind in the avatar's fitted
-  frame (metres, +Y up, the shoulders 0.74 m above the player root), and the joint's
-  motion carries it; `radius` is in metres. A chain keeps its joints its own `radius`
-  clear of every collider; pinned roots and segment lengths win where both cannot hold.
+- `colliders` are circles in the X-Y plane: `x` and `y` place the centre at bind in the avatar's fitted frame (metres,
+  +Y up, the shoulders 0.74 m above the player root), and `radius` is in metres. Each rides with a frame (`joint`):
+  - an avatar joint (`body`, `head` or an arm joint), whose motion carries it, including the upper body's
+    [waist lean](sprites.md#waist-lean);
+  - `pot`, the jar, which stays with the physical pot. Use it for the jar a braid drapes over.
+
+  A chain keeps its joints its own `radius` clear of every collider; pinned roots and segment lengths win where both
+  cannot hold.
 - The simulation freezes while time stands still, catches up at most 15 steps, and
   restarts from the rigid pose on a rewind, a restart or a new avatar. Hair never
   drives IK, gameplay or physics.
@@ -292,7 +295,8 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 15**. Every profile has `grips`: the placement, each
+Profiles use **schema version 16**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
+the hammer in degrees (0-45; see [waist lean](sprites.md#waist-lean)), and `grips`: the placement, each
 hand's distance from the butt (0-3 m), the slide point `slideAt`, a share of each
 arm's length (0.4-1), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
 and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It also has
@@ -301,9 +305,10 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
 
 ```json
 {
-  "schemaVersion": 15,
+  "schemaVersion": 16,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
+  "waistLean": 20,
   "grips": {
     "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85,
     "rotation": { "left": { "x": 0, "y": 0, "z": 0 }, "right": { "x": 20, "y": 0, "z": -10 } }

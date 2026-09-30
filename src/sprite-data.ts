@@ -6,6 +6,7 @@ import type { DirectionalPresentation } from './directional-data.ts';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateDirection, validateSkeleton, validateSkin } from './skeleton-data.ts';
 import type { FacingDirection, SkeletonDefinition, SpriteSkin } from './skeleton-data.ts';
 import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth.ts';
+import { DEFAULT_WAIST_LEAN, WAIST_LEAN_LIMITS } from './waist-lean.ts';
 import {
   CHARACTER_ASSET_FIELDS, CHARACTER_MODEL_LIMITS, checkEmbeddedModel, validateCharacterAssets,
 } from './character-profile.ts';
@@ -21,6 +22,11 @@ export { SpriteError };
 
 export const CHARACTER_RIGGING_TYPES = ['sprite-2d', 'model-3d', 'avatar-3d'] as const;
 export type CharacterRiggingType = (typeof CHARACTER_RIGGING_TYPES)[number];
+// Whether a rigging type's upper body is a 3D rig, which reaches forward to the tool's plane (armForwardDistance) and
+// leans at the waist (waistLean). A 2D sprite skeleton keeps to the drawing plane and stays upright.
+export const UPPER_BODY_3D: Readonly<Record<CharacterRiggingType, boolean>> = Object.freeze({
+  'sprite-2d': false, 'model-3d': true, 'avatar-3d': true,
+});
 export const DEFAULT_CHARACTER_RIGGING_TYPE: CharacterRiggingType = 'model-3d';
 
 export interface SpriteOffset {
@@ -63,12 +69,14 @@ export interface SpriteLayer {
 export interface CharacterPresentation extends CharacterAssets {
   readonly characterRiggingType: CharacterRiggingType;
   readonly armForwardDistance: number;
+  // The most the upper body leans toward the hammer, in degrees (src/waist-lean.ts); 0 keeps it upright.
+  readonly waistLean: number;
   readonly grips: Grips;
   // null keeps each character type's natural arm lengths.
   readonly arms: CharacterArms | null;
 }
 
-export const SPRITE_SCHEMA_VERSION = 15;
+export const SPRITE_SCHEMA_VERSION = 16;
 
 export interface SpriteDocument extends CharacterPresentation {
   readonly schemaVersion: typeof SPRITE_SCHEMA_VERSION;
@@ -122,7 +130,7 @@ export const SPRITE_FIELDS = [
 
 export const EMPTY_SPRITES: SpriteDocument = Object.freeze({
   schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE,
-  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE, grips: DEFAULT_GRIPS, arms: null,
+  armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE, waistLean: DEFAULT_WAIST_LEAN, grips: DEFAULT_GRIPS, arms: null,
   images: Object.freeze([]), layers: Object.freeze([]), skeleton: null, presentation: null,
 });
 
@@ -133,6 +141,10 @@ export function spriteLayerImages(layer: SpriteLayer): readonly string[] {
 
 export function validateArmForwardDistance(value: unknown): number {
   return number(value, ARM_FORWARD_DISTANCE_LIMITS.min, ARM_FORWARD_DISTANCE_LIMITS.max, 'Arm forward distance');
+}
+
+export function validateWaistLean(value: unknown): number {
+  return number(value, WAIST_LEAN_LIMITS.min, WAIST_LEAN_LIMITS.max, 'Waist lean');
 }
 
 export function validateGrips(value: unknown): Grips {
@@ -363,8 +375,8 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   }
   const assetFields = CHARACTER_ASSET_FIELDS.filter(key => Object.hasOwn(value as object, key));
   const document = record(value, [
-    'schemaVersion', 'images', 'layers', 'skeleton', 'presentation', 'characterRiggingType', 'armForwardDistance', 'grips', 'arms',
-    ...assetFields,
+    'schemaVersion', 'images', 'layers', 'skeleton', 'presentation', 'characterRiggingType', 'armForwardDistance', 'waistLean',
+    'grips', 'arms', ...assetFields,
   ], 'A sprite document');
   if (!Array.isArray(document.images) || !Array.isArray(document.layers) ||
     document.images.length > SPRITE_LIMITS.images || document.layers.length > SPRITE_LIMITS.layers) {
@@ -411,11 +423,12 @@ export function validateSpriteMetadata(value: unknown): SpriteDocument {
   validateDirectionalReferences(presentation, layers, skeleton);
   const characterRiggingType = validateCharacterRiggingType(document.characterRiggingType, layers.length);
   const armForwardDistance = validateArmForwardDistance(document.armForwardDistance);
+  const waistLean = validateWaistLean(document.waistLean);
   const grips = validateGrips(document.grips);
   const arms = validateArms(document.arms);
   const character = validateCharacterAssets(document);
   const result: SpriteDocument = Object.freeze({
-    schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType, armForwardDistance, grips, arms,
+    schemaVersion: SPRITE_SCHEMA_VERSION, characterRiggingType, armForwardDistance, waistLean, grips, arms,
     images: Object.freeze(images), layers: Object.freeze(layers), skeleton, presentation, ...character,
   });
   validateSpriteBudget(result);
@@ -506,6 +519,7 @@ export function validateDirectionalReferences(
 export function validateSpriteAnchors(document: SpriteDocument, anchors: Iterable<string>, targets?: Iterable<string>): void {
   validateCharacterRiggingType(document.characterRiggingType, document.layers.length);
   validateArmForwardDistance(document.armForwardDistance);
+  validateWaistLean(document.waistLean);
   validateGrips(document.grips);
   validateArms(document.arms);
   const available = new Set(anchors);

@@ -3,6 +3,8 @@ import { CHARACTER_RIGGING_TYPES, SpriteError, SPRITE_FILE_BYTES } from '../spri
 import type { CharacterRiggingType, SpriteDocument } from '../sprite-data';
 import type { SpriteEditorState } from './sprite-state';
 import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
+import { UPPER_BODY_3D } from '../sprite-data';
+import { DEFAULT_WAIST_LEAN, WAIST_LEAN_LIMITS } from '../waist-lean';
 import {
   AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, DEFAULT_CEL_OUTLINE, SHADING_LIMITS,
 } from '../character-profile';
@@ -117,17 +119,22 @@ export function createCharacterEditor(options: {
           Export preserves their URLs. Never use links containing credentials or private/internal addresses.</p>
       </section>
 
-      ${sectionMarkup({ id: 'character-arms', title: '3D arm placement', hint: 'Hand and hammer depth', open: true }, `
+      ${sectionMarkup({ id: 'character-arms', title: '3D upper body', hint: 'Hand and hammer depth, waist lean', open: true }, `
         <fieldset class="tuning-group character-arm-placement">
-          <legend class="visually-hidden">3D arm placement</legend>
+          <legend class="visually-hidden">3D upper body</legend>
           <div class="character-arm-forward-control"></div>
           <button type="button" class="button character-arm-forward-reset">Reset arm forward distance</button>
           <p class="appearance-format">Moves the hand and hammer plane toward the camera, measured from the
             configured chest front. The default is ${DEFAULT_ARM_FORWARD_DISTANCE} m.
             This is visual only: the hammer still draws on top and gameplay physics stay unchanged.
-            Save the character profile to keep it.</p>
-          <p class="appearance-format character-arm-forward-inactive" hidden>Applies to Mesh parts and Avatar.
-            The saved value is retained in 2D mode, which keeps its authored sprite depths.</p>
+            It is part of the character profile.</p>
+          <div class="character-waist-lean-control"></div>
+          <button type="button" class="button character-waist-lean-reset">Reset waist lean</button>
+          <p class="appearance-format">Leans the upper body toward the hammer, turning at the waist on the jar's rim:
+            the most when the shaft is level, not at all when it points straight up or down. The shoulders, arms and
+            head turn with it, and the head keeps looking at the cursor. Visual only; 0° keeps the body upright.</p>
+          <p class="appearance-format character-arm-forward-inactive" hidden>Both apply to Mesh parts and Avatar.
+            The saved values are retained in 2D mode, which keeps its authored sprite depths and stays upright.</p>
         </fieldset>
       `)}
 
@@ -353,6 +360,16 @@ export function createCharacterEditor(options: {
   });
   element(root, '.character-arm-forward-control').append(forward.row);
   forwardReset.addEventListener('click', () => { options.state.setArmForwardDistance(DEFAULT_ARM_FORWARD_DISTANCE); }, listen);
+  const leanReset = element<HTMLButtonElement>(root, '.character-waist-lean-reset');
+  const lean = createRangeControl({
+    ...WAIST_LEAN_LIMITS, label: 'Waist lean', unit: 'deg',
+    description: 'The most the upper body leans toward the hammer, turning at the waist. Applies to the two 3D character modes.',
+  }, {
+    id: 'character-waist-lean', name: 'waistLean', signal: events.signal,
+    onInput: value => { if (!options.state.setWaistLean(value)) render(); },
+  });
+  element(root, '.character-waist-lean-control').append(lean.row);
+  leanReset.addEventListener('click', () => { options.state.setWaistLean(DEFAULT_WAIST_LEAN); }, listen);
 
   const avatarFile = element<HTMLInputElement>(root, '#character-avatar-file');
   const avatarStatus = element<HTMLParagraphElement>(root, '.character-avatar-status');
@@ -611,10 +628,13 @@ export function createCharacterEditor(options: {
     const disabled = snapshot.restoring || snapshot.busy;
     typeSelect.disabled = disabled;
     typeSelect.value = profile.characterRiggingType;
-    const forwardDisabled = disabled || profile.characterRiggingType === 'sprite-2d';
-    forward.setValue(profile.armForwardDistance, { disabled: forwardDisabled });
-    forwardReset.disabled = forwardDisabled || profile.armForwardDistance === DEFAULT_ARM_FORWARD_DISTANCE;
-    forwardInactive.hidden = profile.characterRiggingType !== 'sprite-2d';
+    const upperBody3d = UPPER_BODY_3D[profile.characterRiggingType];
+    const upperBodyDisabled = disabled || !upperBody3d;
+    forward.setValue(profile.armForwardDistance, { disabled: upperBodyDisabled });
+    forwardReset.disabled = upperBodyDisabled || profile.armForwardDistance === DEFAULT_ARM_FORWARD_DISTANCE;
+    lean.setValue(profile.waistLean, { disabled: upperBodyDisabled });
+    leanReset.disabled = upperBodyDisabled || profile.waistLean === DEFAULT_WAIST_LEAN;
+    forwardInactive.hidden = upperBody3d;
     for (const input of gripModes) {
       input.checked = input.value === profile.grips.placement;
       input.disabled = disabled;
