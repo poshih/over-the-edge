@@ -153,7 +153,7 @@ export class Trail {
       const right = x + Math.max(from * flip, to * flip);
       // The ground a piece stands on is part of its design, so it shares the piece's group.
       this.b.block(options.floorName ?? 'ground', left, y - (options.floorThickness ?? 1), right - left, options.floorThickness ?? 1,
-        { tone: options.floorTone ?? 'rock', depth: options.floorDepth ?? 1.6, group: `piece:${id}`, support: true });
+        { tone: options.floorTone ?? 'rock', depth: options.floorDepth ?? 1.6, group: this.b.pieceGroup(id), support: true });
     }
     const record = this.b.piece(id, x, y, { ...options, mirror, direction: path.down ? 'down' : 'any' });
     const exit = options.exit ?? path.exit;

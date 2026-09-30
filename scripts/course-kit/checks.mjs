@@ -208,7 +208,7 @@ export function keepOut(level, groups, pieces, allowed = new Set()) {
     ];
     const seen = new Set();
     for (const solid of grid.near((box.left + box.right) / 2, (box.bottom + box.top) / 2, Math.max(box.right - box.left, box.top - box.bottom) / 2 + 3)) {
-      if (seen.has(solid) || groups.get(solid.object.id).group === `piece:${piece.id}` || allowed.has(`${solid.object.id}|${piece.id}`)) continue;
+      if (seen.has(solid) || groups.get(solid.object.id).group === piece.group || allowed.has(`${solid.object.id}|${piece.id}`)) continue;
       seen.add(solid);
       const depth = penetration(solid.polygon, inner);
       if (depth > 0.05) problems.push(`${solid.object.id} reaches ${depth.toFixed(2)} m into ${piece.id}`);
@@ -345,7 +345,7 @@ export function reachGraph(level, groups, pieces, links, reach, goal = null) {
     byGroup.get(point.group).push(point);
   }
   for (const piece of pieces) {
-    const members = byGroup.get(`piece:${piece.id}`) ?? [];
+    const members = byGroup.get(piece.group) ?? [];
     for (const a of members) {
       for (const b of members) if (piece.direction !== 'down' || b.y < a.y + 0.05) connect(a, b);
     }
@@ -412,8 +412,8 @@ export function reachGraph(level, groups, pieces, links, reach, goal = null) {
     traps.get(key).count++;
   }
   const reached = points.filter((point) => seen[point.id]);
-  const unreachedPieces = pieces.filter((piece) => (byGroup.get(`piece:${piece.id}`) ?? []).length > 0 &&
-    !(byGroup.get(`piece:${piece.id}`) ?? []).some((point) => seen[point.id])).map((piece) => piece.id);
+  const unreachedPieces = pieces.filter((piece) => (byGroup.get(piece.group) ?? []).length > 0 &&
+    !(byGroup.get(piece.group) ?? []).some((point) => seen[point.id])).map((piece) => `${piece.id} (${piece.stamp})`);
   return {
     points, seen, reached: reached.length, total: points.length,
     ending: points.some((point) => seen[point.id] && inEnding(point)),

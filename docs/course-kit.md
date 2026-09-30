@@ -40,7 +40,9 @@ const level = builder.level();
   `go`, `turn` and `edge` move the cursor without building.
 - **Set pieces.** `trail.piece(id, options)` places a library piece so its designed entry
   sits at the cursor, builds the ground its path needs, mirrors it when the trail runs
-  left, and moves the cursor to its exit. Options: `gap` and `lift` offset the piece,
+  left, and moves the cursor to its exit. A piece may be placed any number of times: each
+  placement is checked as a piece of its own, and a second placement in the same zone takes
+  the IDs `<piece>-<zone>-2-<part>`. Options: `gap` and `lift` offset the piece,
   `floor: false` skips the ground (with `floorTone`, `floorThickness` and `floorDepth` to
   style it), `recolor` or `tone` repaint it, `retune` edits a placed part such as a
   message, and `exit` leaves it by another point.

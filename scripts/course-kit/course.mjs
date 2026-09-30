@@ -33,6 +33,8 @@ export class CourseBuilder {
     this.allowed = new Set();
     // The ground built under set pieces: it may merge with neighbouring connectors.
     this.supports = new Set();
+    // How often each piece has been placed in each zone, as `<zone>:<piece>`.
+    this.placements = new Map();
   }
 
   beginZone(zone) {
@@ -161,6 +163,20 @@ export class CourseBuilder {
   }
 
   /**
+   * The stamp the next placement of piece `id` in this zone takes: the zone's code the first time, then
+   * `<zone>-2`, `<zone>-3` and so on, so a piece placed again gets IDs of its own.
+   */
+  pieceStamp(id) {
+    const count = (this.placements.get(`${this.zone.code}:${id}`) ?? 0) + 1;
+    return count === 1 ? this.zone.code : `${this.zone.code}-${count}`;
+  }
+
+  /** The group of the next placement of piece `id`: every placement is checked as its own piece. */
+  pieceGroup(id) {
+    return `piece:${id}:${this.pieceStamp(id)}`;
+  }
+
+  /**
    * Places a library set piece with its base centre at (x, y). `recolor` maps the piece's own colours
    * to tones of the zone's palette, or `tone` recolours every part; `retune` edits a placed part, such
    * as a message's words. `direction: 'down'` marks a piece that is only traversed downward.
@@ -168,8 +184,10 @@ export class CourseBuilder {
   piece(id, x, y, options = {}) {
     const { setPieceById, placeSetPiece } = this.library;
     const piece = setPieceById(id);
-    const placement = placeSetPiece(piece, { x, y }, { mirror: options.mirror ?? false, stamp: this.zone.code });
-    const group = `piece:${id}`;
+    const stamp = this.pieceStamp(id);
+    const group = this.pieceGroup(id);
+    this.placements.set(`${this.zone.code}:${id}`, (this.placements.get(`${this.zone.code}:${id}`) ?? 0) + 1);
+    const placement = placeSetPiece(piece, { x, y }, { mirror: options.mirror ?? false, stamp });
     const placed = [];
     for (const object of placement.objects) {
       let next = object;
@@ -182,7 +200,7 @@ export class CourseBuilder {
     }
     for (const label of placement.labels) this.labels.push(options.retuneLabel ? options.retuneLabel(label) : label);
     const record = {
-      id, zone: this.zone.code, anchor: { x, y }, mirror: options.mirror ?? false, objects: placed,
+      id, zone: this.zone.code, stamp, group, anchor: { x, y }, mirror: options.mirror ?? false, objects: placed,
       bounds: worldBounds(placed.filter((object) => object.kind === 'terrain')), direction: options.direction ?? 'any',
     };
     this.pieces.push(record);
