@@ -69,3 +69,8 @@ export async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string>
   const subtle = globalThis.crypto?.subtle;
   return hex(subtle === undefined ? digest(bytes) : new Uint8Array(await subtle.digest('SHA-256', bytes)));
 }
+
+// The same digest without WebCrypto, for report building and offline tools that cannot await.
+export function sha256HexSync(bytes: Uint8Array): string {
+  return hex(digest(bytes));
+}

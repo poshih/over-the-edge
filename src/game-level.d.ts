@@ -46,3 +46,10 @@ declare module 'virtual:game-module' {
   const start: import('./release-module').StartRelease | null;
   export default start;
 }
+
+// The trusted rig registry both the game shell and the Workshop build from AVATAR_RIG_MODULE (or the
+// standard registry without one). The same registry reaches GameView before any character loads.
+declare module 'virtual:avatar-rigs' {
+  const registry: import('./avatar-rig').AvatarRigRegistry;
+  export default registry;
+}

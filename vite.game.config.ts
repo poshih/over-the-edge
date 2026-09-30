@@ -1,10 +1,12 @@
-import { realpathSync, statSync } from 'node:fs';
-import { extname, resolve, sep } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
+import { avatarRigModulePath, avatarRigs, loadAvatarRigRegistry } from './build/avatar-rig-module.ts';
 import { gameTitle } from './build/game-title.ts';
 import { locationUrl } from './build/location-url.ts';
+import { projectModulePath } from './build/module-path.ts';
 import { DEFAULT_CONTENT_URL, gameRelease } from './build/release';
 import { loadFileRelease, loadProjectRelease } from './build/release-input';
 
@@ -33,18 +35,7 @@ function phantomsUrl(): string | null {
 
 // The game's own module, bundled into the shell and started before content loads.
 function gameModule(): string | null {
-  const requested = process.env.GAME_MODULE;
-  if (requested === undefined) return null;
-  let path: string;
-  try {
-    path = realpathSync(resolve(project, requested));
-  } catch {
-    throw new Error(`GAME_MODULE ${requested} does not exist.`);
-  }
-  if (!path.startsWith(project) || !['.ts', '.mts', '.js', '.mjs'].includes(extname(path)) || !statSync(path).isFile()) {
-    throw new Error('GAME_MODULE must name a .ts or .js module inside this project.');
-  }
-  return path;
+  return projectModulePath(project, process.env.GAME_MODULE, 'GAME_MODULE');
 }
 
 function gameOnlyBoundary(): Plugin {
@@ -69,7 +60,7 @@ function gameOnlyBoundary(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode }) => {
   // GAME_PROJECT is a complete game; its parts cannot also come from the per-file inputs.
   const requested = process.env.GAME_PROJECT;
   if (requested !== undefined) {
@@ -83,7 +74,11 @@ export default defineConfig(({ mode }) => {
     level: projectJson('GAME_LEVEL'), settings: projectJson('GAME_SETTINGS'),
     sprites: projectJson('GAME_SPRITES'), alternateSprites: projectJson('GAME_ALTERNATE_SPRITES'),
   };
-  const release = requested === undefined ? null : loadProjectRelease(project, requested, selectedMode);
+  // The trusted rig module is resolved and evaluated once here, so the release's model checks and
+  // the browser's registry both use the same strategies.
+  const rigModule = avatarRigModulePath(project, process.env.AVATAR_RIG_MODULE);
+  const rigRegistry = await loadAvatarRigRegistry(rigModule, mode);
+  const release = requested === undefined ? null : loadProjectRelease(project, requested, selectedMode, rigRegistry);
   return {
     root: resolve(project, 'play'),
     envDir: project,
@@ -93,7 +88,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       gameTitle({ mode, envDir: project, projectTitle: release?.title }),
       gameRelease({
-        load: release === null ? () => loadFileRelease(project, files, selectedMode) : () => release,
+        load: release === null ? () => loadFileRelease(project, files, selectedMode, rigRegistry) : () => release,
         contentUrl: contentUrl(),
         phantomsUrl: phantomsUrl(),
         module: gameModule(),
@@ -101,6 +96,7 @@ export default defineConfig(({ mode }) => {
         restartOnChange: release !== null,
       }),
       gameOnlyBoundary(),
+      avatarRigs({ module: rigModule }),
     ],
     build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },
     server: { host: '0.0.0.0', port: 5182, strictPort: true, fs: { allow: [project] } },

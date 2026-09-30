@@ -57,7 +57,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|DELETE', '/api/projects/{id}/art/assets/{assetId}', 'Download or remove course artwork (unused only).'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/appearance/{part}', 'A part\'s name and alignment.', '{ "alignment"?: {...}, "name"?: "..." }'),
-      endpoint('GET|PUT|DELETE', '/api/projects/{id}/models/{role}/{model}/model?name=Hooded%20hero', 'A library GLB for the avatar, hammer or pot. A new avatar maps its joints, or takes ?settings={ boneMap, armForwardDistance, grips, arms }.', 'GLB bytes'),
+      endpoint('GET|PUT|DELETE', '/api/projects/{id}/models/{role}/{model}/model?name=Hooded%20hero', 'A library GLB for the avatar, hammer or pot. A new avatar maps its joints, or takes ?settings={ boneMap, driver, armForwardDistance, grips, arms }.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/models/{role}/{model}', 'A library entry: its name, and an avatar\'s bone map and settings.', '{ "name"?: "...", "boneMap"?: {...}, ... }'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/media/{file}', 'Media library files, referenced as /media/{file}.', 'file bytes'),
       endpoint('GET', '/play/{id}/', 'The latest published release of a project; its content is under /play/{id}/content/.'),
@@ -101,7 +101,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',
         patch: true,
-        description: `Export one from Workshop / Character. schemaVersion is ${SPRITE_SCHEMA_VERSION}; characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}; grips is { placement: ${GRIP_PLACEMENTS.join(' | ')}, left, right, slideAt }: each hand's distance from the butt (${GRIP_LIMITS.min}-${GRIP_LIMITS.max} m) and, for sliding, the share of each arm's length a grip may be from its shoulder before the handle slides (${SLIDE_AT_LIMITS.min}-${SLIDE_AT_LIMITS.max}); arms is null for each type's own arm lengths, or { left: { upper, forearm }, right: { upper, forearm } } (${ARM_LENGTH_LIMITS.min}-${ARM_LENGTH_LIMITS.max} m). See docs/characters.md and docs/sprites.md.`,
+        description: `Export one from Workshop / Character. schemaVersion is ${SPRITE_SCHEMA_VERSION}; characterRiggingType is one of ${CHARACTER_RIGGING_TYPES.join(', ')}; an imported avatar's driver is { "id", "config" }, naming the trusted rig strategy that interprets its bone map; grips is { placement: ${GRIP_PLACEMENTS.join(' | ')}, left, right, slideAt }: each hand's distance from the butt (${GRIP_LIMITS.min}-${GRIP_LIMITS.max} m) and, for sliding, the share of each arm's length a grip may be from its shoulder before the handle slides (${SLIDE_AT_LIMITS.min}-${SLIDE_AT_LIMITS.max}); arms is null for each type's own arm lengths, or { left: { upper, forearm }, right: { upper, forearm } } (${ARM_LENGTH_LIMITS.min}-${ARM_LENGTH_LIMITS.max} m). See docs/characters.md and docs/sprites.md.`,
       },
       'characters/alternate': { value: 'character profile JSON or null', patch: true, description: 'A second character players can switch to; needs a primary.' },
       'arm-ik': { value: 'body-relative elbow hints', patch: true, fields: ARM_IK_FIELDS.map((field) => ({ ...field, ...ARM_IK_LIMITS })) },
@@ -111,11 +111,11 @@ export function apiManual(auth: 'token' | 'loopback') {
         alignmentFields: ALIGNMENT_FIELDS,
       },
       models: {
-        value: '{ "avatar": [{ "id", "name", "boneMap", "armForwardDistance", "grips", "arms" }], "hammer": [{ "id", "name" }], "pot": [{ "id", "name" }] }',
+        value: '{ "avatar": [{ "id", "name", "boneMap", "driver", "armForwardDistance", "grips", "arms" }], "hammer": [{ "id", "name" }], "pot": [{ "id", "name" }] }',
         description: 'The model library: extra avatar, hammer and pot models a release can swap to, one part at a time, as the game\'s backend selects. '
           + 'Upload each GLB with PUT models/{role}/{id}/model first; PUT this section to rename entries, change avatar settings or drop entries.',
         limits: MODEL_LIBRARY_LIMITS,
-        notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; grips, arms and armForwardDistance follow the character profile format.',
+        notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; driver is { "id", "config" } naming the trusted rig strategy that interprets them ("standard" is the default); grips, arms and armForwardDistance follow the character profile format.',
       },
       theme: { value: 'scene look', patch: true, fields: THEME_FIELDS },
       hud: { value: 'release readout', patch: true, fields: HUD_FIELDS },

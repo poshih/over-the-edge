@@ -6,7 +6,7 @@ import {
   RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
   Vector3, WebGLRenderer,
 } from 'three';
-import type { Material, Object3D, Quaternion } from 'three';
+import type { Material, Object3D } from 'three';
 import { ARM_SIDES, HEAD_GEOMETRY, SHAFT_ARTWORK_LENGTH, SPRITE_TARGET_IDS } from './character';
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
 import { DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
@@ -16,7 +16,12 @@ import type { ArmLengths, CharacterArms } from './character-arms';
 import { DEFAULT_GRIPS, placeGrips } from './grips';
 import type { GripDistances, Grips, GripShoulder } from './grips';
 import { AvatarView } from './avatar-view';
-import { resolveAvatarJoints } from './character-model-inspect';
+import { DEFAULT_AVATAR_RIGS, createArmSolutions, createFramePlan, createPose, projectGripShoulder } from './avatar-rig';
+import type {
+  AvatarRig, AvatarRigArmSolution, AvatarRigFramePlan, AvatarRigPose, AvatarRigRegistry, PreparedAvatarRig,
+} from './avatar-rig';
+import { sameAvatarDriver } from './avatar-driver';
+import type { AvatarDriver } from './avatar-driver';
 import type { CharacterModelUsage } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
 import { characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameBoneMap } from './character-profile';
@@ -38,8 +43,10 @@ import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import type { DecorationView } from './decoration-view';
+import { CharacterModelPool } from './character-model-pool';
+import type { CharacterModelLease } from './character-model-pool';
 import { SpriteRig } from './sprite-rig';
-import type { SpriteAnchor, SpriteArmSlots } from './sprite-rig';
+import type { CharacterAssetLease, SpriteAnchor, SpriteArmSlots } from './sprite-rig';
 import { DEFAULT_CHARACTER_RIGGING_TYPE, SpriteError } from './sprite-data';
 import type { CharacterPresentation, CharacterRiggingType, SpriteDocument } from './sprite-data';
 import { VisualVisibility } from './visual-visibility';
@@ -109,9 +116,17 @@ export interface ViewLayer {
   dispose: () => void;
 }
 
-interface AvatarRenderer {
-  readonly root: Object3D;
-  update: (body: Matrix4, poses: readonly ArmPose[], headRotation: Quaternion) => void;
+// A rendered avatar: the built-in skinned mesh, which builds its own frames from world arm poses,
+// or an imported skinned model, which applies the prepared rig's avatar-space pose matrices.
+type AvatarRenderer = AvatarView | SkinnedAvatarView;
+
+// A slot-owned prop view plus the pool reference that keeps its model alive. Library parts are
+// borrowed from their caller and therefore have no lease.
+interface OwnedProp {
+  readonly model: LoadedCharacterModel;
+  readonly lease: CharacterModelLease;
+  readonly view: PropModelView;
+  readonly fit: HammerHandleFit | null;
 }
 
 // One loaded character profile. Its sprite rig, models and views are built once and kept while
@@ -123,12 +138,12 @@ interface CharacterSlot {
   readonly mounts: readonly { readonly node: Group; readonly parent: Object3D }[];
   readonly coverage: Map<string, boolean>;
   presentation: CharacterPresentation;
-  readonly models: Map<CharacterModelUsage, Map<string, LoadedCharacterModel>>;
-  avatar: { readonly model: LoadedCharacterModel; readonly boneMap: AvatarBoneMap; readonly view: SkinnedAvatarView } | null;
+  // This profile's sole model cache: one shared entry per (usage, source), kept alive by the leases
+  // its committed views and in-flight preparations hold.
+  readonly pool: CharacterModelPool;
+  avatar: OwnedPreparedAvatar | null;
   // A hammer model also fits its handle to the game's.
-  readonly props: Record<PropModelRole, {
-    readonly model: LoadedCharacterModel; readonly view: PropModelView; readonly fit: HammerHandleFit | null;
-  } | null>;
+  readonly props: Record<PropModelRole, OwnedProp | null>;
 }
 
 // A library model shown for one part in place of every character's own model for that part.
@@ -140,9 +155,41 @@ export interface PartModel {
 }
 
 interface PartViews {
-  avatar: { readonly id: string; readonly model: LoadedCharacterModel; readonly settings: LibraryAvatarSettings; readonly view: SkinnedAvatarView } | null;
+  avatar: (PreparedAvatar & { readonly id: string; readonly settings: LibraryAvatarSettings }) | null;
   hammer: { readonly id: string; readonly model: LoadedCharacterModel; readonly view: PropModelView; readonly fit: HammerHandleFit } | null;
   pot: { readonly id: string; readonly model: LoadedCharacterModel; readonly view: PropModelView } | null;
+}
+
+// A fitted imported avatar and the state its frames need. Each profile and library avatar owns one,
+// so pose history and strategy state never leak from the avatar that was showing before it.
+interface PreparedAvatar {
+  readonly model: LoadedCharacterModel;
+  readonly boneMap: AvatarBoneMap;
+  readonly driver: AvatarDriver;
+  readonly rig: AvatarRig;
+  readonly plan: AvatarRigFramePlan;
+  readonly pose: AvatarRigPose;
+  readonly view: SkinnedAvatarView;
+  readonly previous: Record<ArmSide, ArmPose | null>;
+}
+
+// The exact inputs a commit needs to build one avatar view: the cached model, the settings it was
+// fitted with, and the pure preparation. Bound together, so a compiled rig can never be committed
+// against a different model or bone map.
+interface PreparedAvatarView {
+  readonly model: LoadedCharacterModel;
+  readonly boneMap: AvatarBoneMap;
+  readonly driver: AvatarDriver;
+  readonly prepared: PreparedAvatarRig;
+}
+
+// A slot-owned avatar view: the prepared avatar plus the pool reference that keeps its model alive.
+type OwnedPreparedAvatar = PreparedAvatar & { readonly lease: CharacterModelLease };
+
+// One operation's single-flight acquisition of a model and the lease it holds until commit/failure.
+interface ModelHolding {
+  readonly lease: CharacterModelLease;
+  readonly model: LoadedCharacterModel;
 }
 
 export const MAX_CHARACTER_PROFILES = 2;
@@ -223,6 +270,9 @@ export class GameView {
   private readonly shading = new CharacterShadingView();
   private armChains: ArmChains = DEFAULT_ARM_CHAINS;
   private avatarRenderer: AvatarRenderer | null = null;
+  // The prepared rig (if any) the active character shows, with its per-avatar pose history.
+  private activeAvatar: PreparedAvatar | null = null;
+  private readonly avatarRigs: AvatarRigRegistry;
   private readonly propModels: Record<PropModelRole, PropModelView | null> = { hammer: null, pot: null };
   // Library models chosen for each part, shown for every character.
   private readonly parts: PartViews = { avatar: null, hammer: null, pot: null };
@@ -242,6 +292,9 @@ export class GameView {
     left: { along: 0, aside2: 0, arm: 0 }, right: { along: 0, aside2: 0, arm: 0 },
   };
   private readonly gripShoulder = new Vector3();
+  private readonly gripButt = new Vector3();
+  private readonly gripAxis = new Vector3();
+  private readonly spriteContact = new Vector3();
   // Whether the active character is 2D, whose arm chains that target the grips reach in the drawing plane.
   private spriteArms = false;
   private readonly arms = new Map<ArmSide, Arm>();
@@ -261,6 +314,14 @@ export class GameView {
   private focus: Point;
   private hammer: Point;
   private readonly projection = new Vector3();
+  private readonly inverseBody = new Matrix4();
+  private readonly avatarTool = new Matrix4();
+  private readonly avatarButt = new Vector3();
+  private readonly avatarShaft = new Vector3();
+  private readonly avatarForward = new Vector3();
+  private readonly wristAvatar = new Vector3();
+  private readonly handAvatar = new Vector3();
+  private readonly solutions: Record<ArmSide, AvatarRigArmSolution> = createArmSolutions();
   private readonly spriteTargets = new Map<string, RigTarget>();
   private theme: GameTheme;
   private readonly fog: Fog;
@@ -283,11 +344,14 @@ export class GameView {
     content?: ContentLoader;
     theme?: GameTheme;
     enemyArt?: EnemyArtSettings;
+    // The rig strategies this host registers besides the standard one.
+    avatarRigs?: AvatarRigRegistry;
     // Creates the decoration view; without it the view draws no decorations.
     decorations?: (() => DecorationView) | null;
   } = {}) {
     this.canvas = canvas;
     this.characterModels = options.characterModels ?? null;
+    this.avatarRigs = options.avatarRigs ?? DEFAULT_AVATAR_RIGS;
     this.content = options.content;
     this.theme = options.theme ?? DEFAULT_THEME;
     const theme = this.theme;
@@ -420,6 +484,7 @@ export class GameView {
     }
     for (const [id, binding] of this.bindings) binding.visibility.setCovered({ covered: slot.coverage.get(id) ?? false });
     this.applyPresentation();
+    this.resetPoseHistory();
     slot.rig.resetPresentation();
   }
 
@@ -439,12 +504,17 @@ export class GameView {
 
   // Validation report of a model loaded for the primary profile, for authoring tools.
   characterModelReport(source: string, usage: CharacterModelUsage) {
-    return this.slots[0]?.models.get(usage)?.get(source)?.report ?? null;
+    return this.slots[0]?.pool.value(usage, source)?.report ?? null;
   }
 
   // Cancels and releases every profile, for example when the game stops.
   disposeCharacters(): void {
-    for (const slot of this.slots) slot.rig.dispose();
+    for (const slot of this.slots) {
+      // Disposing the rig commits the default presentation, which releases every committed view
+      // lease; the pool then aborts anything still in flight and disposes anything left.
+      slot.rig.dispose();
+      slot.pool.dispose();
+    }
     for (const role of ['avatar', 'hammer', 'pot'] as const) this.disposePart(role);
   }
 
@@ -474,7 +544,7 @@ export class GameView {
     }
     const rig = new SpriteRig(anchors, {
       root, targetIds: SPRITE_TARGET_IDS,
-      onCharacterPresentationChange: (settings) => this.presentationChanged(slot, settings),
+      prepareCharacterPresentation: (settings) => this.prepareCharacterPresentation(slot, settings),
       headTracking: {
         anchor: 'character-head',
         pivot: { anchor: 'torso', x: HEAD_GEOMETRY.neck[0], y: HEAD_GEOMETRY.neck[1] },
@@ -486,7 +556,14 @@ export class GameView {
     });
     slot = {
       index, rig, mounts, coverage, presentation: DEFAULT_PRESENTATION,
-      models: new Map([['avatar', new Map()], ['hammer', new Map()], ['pot', new Map()]]),
+      // One pool per profile, so models never leak across profiles and each profile's admission
+      // budget is its own.
+      pool: new CharacterModelPool({
+        load: async (model, usage, signal) => {
+          if (this.characterModels === null) throw new SpriteError('This host cannot load character models.');
+          return this.characterModels.load(model, usage, signal);
+        },
+      }),
       avatar: null, props: { hammer: null, pot: null },
     };
     for (const mount of mounts) this.attach(mount.node, mount.parent, index === this.activeSlot);
@@ -494,14 +571,23 @@ export class GameView {
     return slot;
   }
 
-  private async prepareModels(slot: CharacterSlot, document: SpriteDocument, signal: AbortSignal): Promise<void> {
-    if (document.avatar !== undefined && !this.reserved.has('avatar')) {
-      const loaded = await this.loadModel(slot, document, 'avatar', document.avatar.model, signal);
-      resolveAvatarJoints(loaded.report, document.avatar.boneMap);
-    }
-    for (const role of PROP_MODEL_ROLES) {
-      const prop = document[role];
-      if (prop !== undefined && !this.reserved.has(role)) await this.loadModel(slot, document, role, prop.model, signal);
+  private async prepareModels(slot: CharacterSlot, document: SpriteDocument, signal: AbortSignal): Promise<CharacterAssetLease> {
+    const leases: CharacterModelLease[] = [];
+    try {
+      if (document.avatar !== undefined && !this.reserved.has('avatar')) {
+        leases.push((await this.acquireModel(slot, document, 'avatar', document.avatar.model, signal)).lease);
+      }
+      for (const role of PROP_MODEL_ROLES) {
+        const prop = document[role];
+        if (prop !== undefined && !this.reserved.has(role)) {
+          leases.push((await this.acquireModel(slot, document, role, prop.model, signal)).lease);
+        }
+      }
+      signal.throwIfAborted();
+      return { release: () => { for (const lease of leases) lease.release(); } };
+    } catch (error) {
+      for (const lease of leases) lease.release();
+      throw error;
     }
   }
 
@@ -516,31 +602,65 @@ export class GameView {
   // failure leaves the part as it was.
   async setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void> {
     if (part === null) {
-      for (const slot of this.slots) {
-        const presentation = slot.presentation;
-        const profile = presentation[role];
-        if (profile === undefined) continue;
-        const loaded = await this.loadModel(slot, presentation, role, profile.model, signal);
-        // Checked before anything changes, so a failure leaves the library model showing.
-        if (role === 'avatar') resolveAvatarJoints(loaded.report, presentation.avatar!.boneMap);
+      // Snapshot the committed slots and the library view before awaiting. Every character model is
+      // loaded and every avatar rig pure-prepared from these snapshots; nothing in the scene or the
+      // reservation changes until all of it has succeeded. Each load is a transaction lease, held
+      // until this operation commits or fails.
+      const snapshots = this.slots.map(slot => ({ slot, presentation: slot.presentation }));
+      const library = this.parts[role];
+      const prepared = new Map<CharacterSlot, PreparedAvatarView>();
+      const leases: CharacterModelLease[] = [];
+      try {
+        for (const { slot, presentation } of snapshots) {
+          if (role === 'avatar') {
+            const avatar = presentation.avatar;
+            if (avatar === undefined) continue;
+            const holding = await this.acquireModel(slot, presentation, role, avatar.model, signal);
+            leases.push(holding.lease);
+            const view = this.prepareAvatarFrom(slot, holding.model, avatar.boneMap, avatar.driver);
+            if (view !== null) prepared.set(slot, view);
+          } else {
+            const profile = presentation[role];
+            if (profile === undefined) continue;
+            leases.push((await this.acquireModel(slot, presentation, role, profile.model, signal)).lease);
+          }
+        }
+        signal.throwIfAborted();
+        // Immediately before any live mutation, refuse a slot, a presentation or the library view that
+        // moved while the loads ran. The model and its compiled rig are bound together in `prepared`, so
+        // the commit below never pairs a preparation with reread mutable state. On refusal the library
+        // model, selection and reservation all stay exactly as they were.
+        const superseded = this.parts[role] !== library || this.slots.length !== snapshots.length ||
+          snapshots.some(({ slot, presentation }) => slot.presentation !== presentation || !this.slots.includes(slot));
+        if (superseded) {
+          throw new SpriteError(`The ${role} changed while its character models were loading; the library model stays as it was.`);
+        }
+        // Commit boundary: drop the reservation, then build every character's own view from the
+        // immutable preparations above before dropping the library view. Each commit retains its own
+        // pool reference, so releasing these transaction leases afterwards cannot evict a shown model.
+        this.reserved.delete(role);
+        for (const { slot } of snapshots) this.syncModelViews(slot, prepared.get(slot) ?? null);
+        this.disposePart(role);
+      } finally {
+        for (const lease of leases) lease.release();
       }
-      signal.throwIfAborted();
-      this.reserved.delete(role);
-      this.disposePart(role);
-      // Views only: models a character replace in flight has loaded stay cached for its commit.
-      for (const slot of this.slots) this.syncModelViews(slot);
     } else {
       const previous = this.parts[role];
       if (previous?.model === part.model && (role !== 'avatar' || part.avatar === (previous as PartViews['avatar'])!.settings)) return;
       if (role === 'avatar') {
         if (part.avatar === undefined) throw new SpriteError(`Library avatar "${part.id}" needs its settings.`);
-        // Resolved before anything changes, so a failure leaves the part as it was. The old view goes
-        // first: disposing a view detaches its model's scene, and new settings keep the same model.
-        const joints = resolveAvatarJoints(part.model.report, part.avatar.boneMap);
+        // Fitted and prepared before anything changes, so a failure leaves the part as it was. The
+        // old view goes first: disposing a view detaches its model's scene, and new settings keep
+        // the same model.
+        const prepared = this.avatarRigs.prepare(part.model.report, part.avatar.boneMap, part.avatar.driver);
         this.disposePart(role);
-        const view = new SkinnedAvatarView(part.model, joints, part.avatar.boneMap);
+        const view = new SkinnedAvatarView(part.model, prepared.resolved, part.avatar.boneMap, prepared.binds);
         this.shading.register(view.root);
-        this.parts.avatar = { id: part.id, model: part.model, settings: part.avatar, view };
+        this.parts.avatar = {
+          id: part.id, model: part.model, settings: part.avatar, driver: part.avatar.driver,
+          boneMap: part.avatar.boneMap, rig: prepared.rig, plan: createFramePlan(), pose: createPose(), view,
+          previous: { left: null, right: null },
+        };
       } else {
         // Fitted before shading, whose outline hulls share the fitted geometry.
         const fit = role === 'hammer' ? new HammerHandleFit(part.model, this.rig.handleLength) : null;
@@ -569,82 +689,134 @@ export class GameView {
     this.parts[role] = null;
   }
 
-  private async loadModel(
+  // A single-flight acquisition of one model for an operation. The lease is registered before the
+  // await and held until the operation commits or fails; any other caller that needs the same source
+  // shares the one load, and only the last release aborts or disposes it.
+  private async acquireModel(
     slot: CharacterSlot, assets: CharacterAssets, usage: CharacterModelUsage, id: string, signal: AbortSignal,
-  ): Promise<LoadedCharacterModel> {
+  ): Promise<ModelHolding> {
     const model = characterModel(assets, id);
-    const cache = slot.models.get(usage)!;
-    const cached = cache.get(model.source);
-    if (cached !== undefined) return cached;
-    if (this.characterModels === null) throw new SpriteError('This host cannot load character models.');
-    const loaded = await this.characterModels.load(model, usage, signal);
-    cache.set(model.source, loaded);
-    return loaded;
+    const lease = slot.pool.acquire(model, usage, signal);
+    try {
+      const loaded = await lease.loaded;
+      signal.throwIfAborted();
+      return { lease, model: loaded };
+    } catch (error) {
+      lease.release();
+      throw error;
+    }
   }
 
-  private presentationChanged(slot: CharacterSlot, settings: CharacterPresentation): void {
-    slot.presentation = settings;
-    this.syncModelViews(slot);
-    this.releaseUnusedModels(slot);
-    if (this.slots[this.activeSlot] === slot) this.applyPresentation();
-  }
-
-  // Builds views for newly referenced models once, and drops views of models the profile dropped.
-  private syncModelViews(slot: CharacterSlot): void {
-    const { avatar } = slot.presentation;
-    const loaded = (usage: CharacterModelUsage, id: string): LoadedCharacterModel | null => {
-      const model = characterModel(slot.presentation, id);
-      const result = slot.models.get(usage)!.get(model.source);
-      if (result !== undefined) return result;
-      // A part reserved for a library model never loaded the character's own.
-      if (this.reserved.has(usage)) return null;
-      throw new SpriteError(`Character model "${model.name}" was not loaded before use.`);
+  // Pure preparation for the presentation a change selects, run before any committed presentation or
+  // scene changes. Returns the commit that installs the exact settings it prepared, so a strategy
+  // refusal leaves both the committed presentation and the avatar that was showing untouched.
+  private prepareCharacterPresentation(slot: CharacterSlot, settings: CharacterPresentation): () => void {
+    const prepared = this.prepareProfileAvatar(slot, settings);
+    return () => {
+      slot.presentation = settings;
+      this.syncModelViews(slot, prepared);
+      if (this.slots[this.activeSlot] === slot) this.applyPresentation();
     };
-    const avatarModel = avatar === undefined ? null : loaded('avatar', avatar.model);
-    if (slot.avatar !== null && (avatarModel === null || slot.avatar.model !== avatarModel ||
-      !sameBoneMap(slot.avatar.boneMap, avatar!.boneMap))) {
-      this.shading.unregister(slot.avatar.view.root);
-      slot.avatar.view.dispose();
+  }
+
+  // Pure preparation for the avatar a presentation selects: resolves and fits the model and runs the
+  // strategy's prepare, all before any scene is touched. Returns null when the slot keeps its current
+  // avatar view, has none to build, or has the part reserved for a library model.
+  private prepareProfileAvatar(slot: CharacterSlot, presentation: CharacterPresentation): PreparedAvatarView | null {
+    const avatar = presentation.avatar;
+    if (avatar === undefined) return null;
+    const loaded = this.resolvedModel(slot, presentation, 'avatar', avatar.model);
+    if (loaded === null) return null;
+    return this.prepareAvatarFrom(slot, loaded, avatar.boneMap, avatar.driver);
+  }
+
+  // The single cached-vs-reserved decision: the model a presentation references from the slot's
+  // cache, or null when the part is reserved for a library model and its own was therefore never
+  // loaded. Any other miss is a programmer error, because preparation loads every model a commit
+  // needs before the commit runs.
+  private resolvedModel(slot: CharacterSlot, presentation: CharacterPresentation,
+    usage: CharacterModelUsage, id: string): LoadedCharacterModel | null {
+    const model = characterModel(presentation, id);
+    const loaded = slot.pool.value(usage, model.source);
+    if (loaded !== undefined) return loaded;
+    if (this.reserved.has(usage)) return null;
+    throw new SpriteError(`Character model "${model.name}" was not loaded before use.`);
+  }
+
+  // The pure preparation for an avatar view from an already-resolved model, unless the slot already
+  // shows that exact model, bone map and driver. Shared by presentation changes and part restores, so
+  // a prepared rig is always bound to the model and settings it was prepared from.
+  private prepareAvatarFrom(slot: CharacterSlot, loaded: LoadedCharacterModel, boneMap: AvatarBoneMap,
+    driver: AvatarDriver): PreparedAvatarView | null {
+    const current = slot.avatar;
+    if (current !== null && current.model === loaded && sameBoneMap(current.boneMap, boneMap) &&
+      sameAvatarDriver(current.driver, driver)) return null;
+    return { model: loaded, boneMap, driver, prepared: this.avatarRigs.prepare(loaded.report, boneMap, driver) };
+  }
+
+  // Commits views for the models a slot's committed presentation references, reusing the pure
+  // preparation the caller computed before any scene change. Callers pass the prepared avatar for any
+  // avatar this commit builds; null means the slot keeps its current avatar view.
+  private syncModelViews(slot: CharacterSlot, preparedAvatar: PreparedAvatarView | null): void {
+    const { avatar } = slot.presentation;
+    const avatarModel = avatar === undefined ? null : this.resolvedModel(slot, slot.presentation, 'avatar', avatar.model);
+    const current = slot.avatar;
+    const replaceAvatar = current !== null && (avatar === undefined || avatarModel === null ||
+      current.model !== avatarModel || !sameBoneMap(current.boneMap, avatar.boneMap) ||
+      !sameAvatarDriver(current.driver, avatar.driver));
+    // Take the replacement reference before dropping the old one, so a model shared by both views
+    // never reaches zero references in the middle of the commit.
+    const avatarLease = preparedAvatar === null ? null : slot.pool.hold(preparedAvatar.model, 'avatar');
+    if (replaceAvatar) {
+      this.shading.unregister(current.view.root);
+      current.view.dispose();
+      current.lease.release();
       slot.avatar = null;
     }
-    if (avatar !== undefined && avatarModel !== null && slot.avatar === null) {
-      const view = new SkinnedAvatarView(avatarModel!, resolveAvatarJoints(avatarModel!.report, avatar.boneMap), avatar.boneMap);
+    if (preparedAvatar !== null && avatarLease !== null) {
+      const view = new SkinnedAvatarView(preparedAvatar.model, preparedAvatar.prepared.resolved,
+        preparedAvatar.boneMap, preparedAvatar.prepared.binds);
       this.shading.register(view.root);
-      slot.avatar = { model: avatarModel!, boneMap: avatar.boneMap, view };
+      slot.avatar = {
+        model: preparedAvatar.model, boneMap: preparedAvatar.boneMap, driver: preparedAvatar.driver,
+        rig: preparedAvatar.prepared.rig, plan: createFramePlan(), pose: createPose(), view,
+        previous: { left: null, right: null }, lease: avatarLease,
+      };
     }
     for (const role of PROP_MODEL_ROLES) {
       const profile = slot.presentation[role];
-      const model = profile === undefined ? null : loaded(role, profile.model);
+      const model = profile === undefined ? null : this.resolvedModel(slot, slot.presentation, role, profile.model);
       const current = slot.props[role];
-      if (current !== null && current.model !== model) {
-        this.shading.unregister(current.view.root);
-        current.view.dispose();
-        current.fit?.dispose();
-        slot.props[role] = null;
+      if (current !== null && current.model === model) continue;
+      if (model === null) {
+        this.releaseProp(slot, role);
+        continue;
       }
-      if (model !== null && slot.props[role] === null) {
-        // Fitted before shading, whose outline hulls share the fitted geometry.
-        const fit = role === 'hammer' ? new HammerHandleFit(model, this.rig.handleLength) : null;
-        const view = new PropModelView(model, PROP_VIEW_NAMES[role]);
-        this.shading.register(view.root);
-        slot.props[role] = { model, view, fit };
-      }
+      const lease = slot.pool.hold(model, role);
+      this.releaseProp(slot, role);
+      slot.props[role] = this.mountProp(role, model, lease);
     }
   }
 
-  // Releases cached models the committed profile no longer uses. Only a commit may do this: until
-  // then, the cache also holds the models a replace in flight has loaded for its own profile.
-  private releaseUnusedModels(slot: CharacterSlot): void {
-    const inUse: Readonly<Record<CharacterModelUsage, LoadedCharacterModel | undefined>> = {
-      avatar: slot.avatar?.model, hammer: slot.props.hammer?.model, pot: slot.props.pot?.model,
-    };
-    for (const [usage, cache] of slot.models) {
-      for (const [source, model] of cache) {
-        if (model === inUse[usage]) continue;
-        model.dispose();
-        cache.delete(source);
-      }
-    }
+  // Builds one committed prop view, fitting a hammer's handle to the game's rig before shading,
+  // whose outline hulls share the fitted geometry.
+  private mountProp(role: PropModelRole, model: LoadedCharacterModel, lease: CharacterModelLease): OwnedProp {
+    const fit = role === 'hammer' ? new HammerHandleFit(model, this.rig.handleLength) : null;
+    const view = new PropModelView(model, PROP_VIEW_NAMES[role]);
+    this.shading.register(view.root);
+    return { model, lease, view, fit };
+  }
+
+  // Drops one committed prop view, releasing its pool reference last so the model stays alive until
+  // the scene no longer draws it.
+  private releaseProp(slot: CharacterSlot, role: PropModelRole): void {
+    const current = slot.props[role];
+    if (current === null) return;
+    this.shading.unregister(current.view.root);
+    current.view.dispose();
+    current.fit?.dispose();
+    current.lease.release();
+    slot.props[role] = null;
   }
 
   private applyPresentation(): void {
@@ -662,6 +834,11 @@ export class GameView {
       this.shading.register(this.avatar.root);
     }
     this.avatarRenderer = !avatarMode ? null : imported ?? this.avatar;
+    // The prepared rig the frame plan and pose phases use, or null for the built-in zero-offset avatar.
+    const previousAvatar = this.activeAvatar;
+    this.activeAvatar = avatarMode ? partAvatar ?? slot?.avatar ?? null : null;
+    // A newly activated avatar solves arms from its own bind, never the pose the previous avatar left.
+    if (this.activeAvatar !== previousAvatar) this.resetPoseHistory();
     if (this.avatar !== null) this.attach(this.avatar.root, this.scene, this.avatarRenderer === this.avatar);
     for (const other of this.slots) {
       if (other.avatar !== null) this.attach(other.avatar.view.root, this.scene, other.avatar.view === imported);
@@ -749,12 +926,22 @@ export class GameView {
     // Unscaled physical coordinates keep grip offsets independent of artwork and tiling.
     this.toolFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, this.toolDepth);
     const armPoses = this.updateArms(this.torso.matrixWorld, this.toolFrame, shaftLength, { ...options, shaftAngle });
-    this.avatarRenderer?.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
+    // A prepared imported rig reads its avatar-space pose, written by updateArms; the built-in and
+    // sprite avatars take the world-space poses directly.
+    if (this.avatarRenderer instanceof SkinnedAvatarView) {
+      this.avatarRenderer.apply(this.torso.matrixWorld, this.headAim.rotation, this.activeAvatar!.pose);
+    } else {
+      this.avatarRenderer?.update(this.torso.matrixWorld, armPoses, this.headAim.rotation);
+    }
     // The one-model hammer follows the physical tool frame; its handle is fitted to the rig, not per frame.
     this.propModels.hammer?.update(this.toolFrame);
-    for (const pose of armPoses) this.spriteTargets.set(`${pose.side}-grip`, {
-      x: pose.hand.x, y: pose.hand.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
-    });
+    for (const pose of armPoses) {
+      // Sprite grip attachments follow the shaft contact, not an anatomical rig's offset wrist.
+      this.spriteContact.set(this.gripDistances[pose.side], 0, 0).applyMatrix4(this.toolFrame);
+      this.spriteTargets.set(`${pose.side}-grip`, {
+        x: this.spriteContact.x, y: this.spriteContact.y, angle: Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x),
+      });
+    }
     this.spriteTargets.set('hammer-base', { x: shaftBase.x, y: shaftBase.y, angle: shaftAngle });
     this.spriteTargets.set('hammer-shaft', { ...shaftCenter, angle: shaftAngle });
     this.spriteTargets.set('hammer-head', { x: tip.x, y: tip.y, angle: tip.angle });
@@ -790,6 +977,20 @@ export class GameView {
   resetPresentation(): void {
     this.headAim.reset();
     for (const slot of this.slots) slot.rig.resetPresentation();
+    this.resetPoseHistory();
+  }
+
+  // Clears the arm-solver history so a newly activated avatar bends from its own bind rather than
+  // continuing the pose of the avatar that was showing before it.
+  private resetPoseHistory(): void {
+    for (const side of ARM_SIDES) {
+      const arm = this.arms.get(side);
+      if (arm !== undefined) arm.pose = null;
+    }
+    if (this.activeAvatar !== null) {
+      this.activeAvatar.previous.left = null;
+      this.activeAvatar.previous.right = null;
+    }
   }
 
   private snapCamera(): void {
@@ -1205,8 +1406,12 @@ export class GameView {
     const chains = this.armChains;
     const cos = Math.cos(options.shaftAngle);
     const sin = Math.sin(options.shaftAngle);
-    const butt = tool.elements;
+    const butt = this.gripButt.setFromMatrixPosition(tool);
+    const shaftAxis = this.gripAxis.set(cos, sin, 0);
     const slot = this.slots[this.activeSlot]!;
+    const prepared = this.activeAvatar;
+    // Phase 1: the prepared rig writes each side's wrist target track before grips are placed.
+    if (prepared !== null) this.frameAvatarRig(prepared, body, tool, cos, sin, shaftLength, options.dt);
     // Every arm reaches from the body's shoulders with the lengths it is drawn at. A 2D arm chain that targets
     // a hand's grip reaches in the drawing plane, at its authored lengths unless the profile has its own; every
     // other arm reaches forward to the tool's depth.
@@ -1214,16 +1419,13 @@ export class GameView {
     for (const side of ARM_SIDES) {
       const sprite = flat?.[side] ?? null;
       const local = chains[side].shoulder;
-      const shoulder = this.gripShoulder.set(local[0], local[1], local[2]).applyMatrix4(body);
-      const dx = shoulder.x - butt[12];
-      const dy = shoulder.y - butt[13];
-      const dz = sprite === null ? butt[14] - shoulder.z : 0;
-      const along = dx * cos + dy * sin;
-      const measured = this.gripShoulders[side];
-      measured.along = along;
-      measured.aside2 = Math.max(0, dx * dx + dy * dy + dz * dz - along * along);
+      const shoulder = this.gripShoulder.set(local[0], local[1], local[2]);
+      // Reach is measured to the wrist, which a rig may hold off the handle's contact point.
+      if (prepared !== null) shoulder.sub(prepared.plan[side].offset);
+      shoulder.applyMatrix4(body);
+      if (sprite !== null) shoulder.z = butt.z;
       const lengths = sprite !== null && slot.presentation.arms === null ? sprite : chains[side];
-      measured.arm = lengths.upper + lengths.forearm;
+      projectGripShoulder(shoulder, butt, shaftAxis, lengths.upper + lengths.forearm, this.gripShoulders[side]);
     }
     placeGrips(this.grips, this.gripShoulders, shaftLength, this.gripDistances);
     const poses: ArmPose[] = [];
@@ -1232,21 +1434,63 @@ export class GameView {
       if (!arm) throw new Error(`Missing visual arm: ${side}`);
       // An imported avatar supplies its own shoulders and bind-pose bone lengths; grips are shared.
       const chain = chains[side];
+      const grip = this.gripDistances[side];
+      const hand = new Vector3(grip, 0, 0).applyMatrix4(tool);
+      if (prepared !== null) {
+        // The IK reaches the wrist, not the contact point, so the palm and its grip can differ.
+        this.wristAvatar.copy(this.avatarButt).addScaledVector(this.avatarShaft, grip);
+        this.handAvatar.copy(this.wristAvatar).add(prepared.plan[side].offset).applyMatrix4(body);
+        hand.copy(this.handAvatar);
+      }
       const pose = solveArmPose(side, {
         shoulder: new Vector3(...chain.shoulder).applyMatrix4(body),
-        hand: new Vector3(this.gripDistances[side], 0, 0).applyMatrix4(tool),
+        hand,
         hint: new Vector3(settings[`${side}HintX`], settings[`${side}HintY`], settings[`${side}HintZ`]).applyMatrix4(body),
         shaftAxis: new Vector3(cos, sin, 0),
-      }, { previous: arm.pose, dt: options.dt, lengths: chain });
+      }, { previous: prepared === null ? arm.pose : prepared.previous[side], dt: options.dt, lengths: chain });
+      if (prepared === null) {
+        arm.pose = pose;
+      } else {
+        prepared.previous[side] = pose;
+        this.captureAvatarSolution(side, pose);
+      }
       placeLimb(arm.upper, pose.shoulder, pose.elbow, pose.normal);
       placeLimb(arm.lower, pose.elbow, pose.hand, pose.normal);
       arm.elbow.position.copy(pose.elbow);
       arm.hand.position.copy(pose.hand);
       arm.hand.rotation.set(0, 0, options.shaftAngle);
-      arm.pose = pose;
       poses.push(pose);
     }
+    // Phase 2: the prepared rig composes its mapped-joint matrices from the plan it wrote and these solutions.
+    if (prepared !== null) {
+      prepared.rig.writePose({
+        body, inverseBody: this.inverseBody, plan: prepared.plan, arms: this.solutions, dt: options.dt,
+      }, prepared.pose);
+    }
     return poses;
+  }
+
+  // Phase 1 inputs for a prepared rig: the tool frame and the standard hand directions, in avatar space.
+  private frameAvatarRig(prepared: PreparedAvatar, body: Matrix4, tool: Matrix4, cos: number, sin: number,
+    shaftLength: number, dt: number): void {
+    this.inverseBody.copy(body).invert();
+    this.avatarTool.copy(this.inverseBody).multiply(tool);
+    this.avatarButt.setFromMatrixPosition(this.avatarTool);
+    this.avatarShaft.set(cos, sin, 0).transformDirection(this.inverseBody);
+    this.avatarForward.set(0, 0, 1).transformDirection(this.inverseBody);
+    prepared.rig.writeFramePlan({
+      body, inverseBody: this.inverseBody, tool: this.avatarTool,
+      shaftAxis: this.avatarShaft, forward: this.avatarForward, shaftLength, dt,
+    }, prepared.plan);
+  }
+
+  // Phase 2 inputs: the solved arm in avatar space, with `wrist` the actual IK target.
+  private captureAvatarSolution(side: ArmSide, pose: ArmPose): void {
+    const solution = this.solutions[side];
+    solution.shoulder.copy(pose.shoulder).applyMatrix4(this.inverseBody);
+    solution.elbow.copy(pose.elbow).applyMatrix4(this.inverseBody);
+    solution.wrist.copy(pose.hand).applyMatrix4(this.inverseBody);
+    solution.normal.copy(pose.normal).transformDirection(this.inverseBody);
   }
 
   private addLabel(text: string, position: Point): void {

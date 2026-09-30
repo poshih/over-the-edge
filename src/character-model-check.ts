@@ -1,11 +1,15 @@
 import { characterModel, embeddedModel } from './character-profile';
-import { inspectCharacterModel, resolveAvatarJoints } from './character-model-inspect';
+import { inspectCharacterModel } from './character-model-inspect';
 import type { SpriteDocument } from './sprite-data';
 import { SpriteError } from './sprite-fields';
+import { checkAvatarRig } from './avatar-rig';
+import type { AvatarRigRegistry } from './avatar-rig';
 
-// Validates a profile's embedded GLBs against MODEL_LIMITS, their skins, bone maps and prop
-// conventions, exactly as the runtime loader will; used before bundling or storing a profile.
-export function checkCharacterModels(document: SpriteDocument, label: string): void {
+// Validates a profile's embedded GLBs against MODEL_LIMITS, their skins, bone maps, prop
+// conventions and avatar rigs, exactly as the runtime loader will; used before bundling or storing
+// a profile. The registry is the host's trusted rig strategies, passed in so the same custom
+// AVATAR_RIG_MODULE is applied to build, server and browser checks.
+export function checkCharacterModels(document: SpriteDocument, label: string, registry: AvatarRigRegistry): void {
   const profiles = [['avatar', document.avatar], ['hammer', document.hammer], ['pot', document.pot]] as const;
   for (const [usage, profile] of profiles) {
     if (profile === undefined) continue;
@@ -16,7 +20,9 @@ export function checkCharacterModels(document: SpriteDocument, label: string): v
     }
     try {
       const report = inspectCharacterModel(bytes.buffer, usage);
-      if (document.avatar !== undefined && usage === 'avatar') resolveAvatarJoints(report, document.avatar.boneMap);
+      if (usage === 'avatar' && document.avatar !== undefined) {
+        checkAvatarRig(report, document.avatar.boneMap, document.avatar.driver, registry);
+      }
     } catch (error) {
       if (error instanceof Error) error.message = `${label}: ${usage} model "${model.name}": ${error.message}`;
       throw error;

@@ -3,6 +3,8 @@
 import { MODEL_LIMITS } from './model-data.ts';
 import { decodeBase64, encodeBase64, number, record, SpriteError, text } from './sprite-fields.ts';
 import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
+import { sameAvatarDriver, validateAvatarDriver } from './avatar-driver.ts';
+import type { AvatarDriver } from './avatar-driver.ts';
 
 // Left and right are screen sides: the character faces the camera, so a rig's anatomical right
 // arm drives the left-* joints.
@@ -34,6 +36,8 @@ export interface CharacterModel {
 export interface AvatarModelProfile {
   readonly model: string;
   readonly boneMap: AvatarBoneMap;
+  // Which rig strategy interprets the bone map; its configuration is trusted host data.
+  readonly driver: AvatarDriver;
 }
 
 // A rigid prop that replaces the hammer or the pot; each role names its own model.
@@ -265,10 +269,11 @@ export function validateAvatarBoneMap(value: unknown): AvatarBoneMap {
 }
 
 export function validateAvatarModelProfile(value: unknown): AvatarModelProfile {
-  const avatar = record(value, ['model', 'boneMap'], 'The avatar model');
+  const avatar = record(value, ['model', 'boneMap', 'driver'], 'The avatar model');
   return Object.freeze({
     model: text(avatar.model, CHARACTER_MODEL_LIMITS.id, 'Avatar model ID'),
     boneMap: validateAvatarBoneMap(avatar.boneMap),
+    driver: validateAvatarDriver(avatar.driver),
   });
 }
 
@@ -334,7 +339,8 @@ export function sameCharacterAssets(left: CharacterAssets, right: CharacterAsset
     });
   return sameModels &&
     (left.avatar === right.avatar || left.avatar !== undefined && right.avatar !== undefined &&
-      left.avatar.model === right.avatar.model && sameBoneMap(left.avatar.boneMap, right.avatar.boneMap)) &&
+      left.avatar.model === right.avatar.model && sameBoneMap(left.avatar.boneMap, right.avatar.boneMap) &&
+      sameAvatarDriver(left.avatar.driver, right.avatar.driver)) &&
     sameProp(left.hammer, right.hammer) && sameProp(left.pot, right.pot) &&
     (left.shading === right.shading || left.shading !== undefined && right.shading !== undefined &&
       sameShading(left.shading, right.shading));

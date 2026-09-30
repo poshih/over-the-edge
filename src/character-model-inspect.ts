@@ -4,6 +4,7 @@ import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 import { ArtError } from './art-types';
 import { MODEL_LIMITS, ModelError } from './model-data';
 import { forEachModelImage } from './model-images';
+import { sha256HexSync } from './sha256';
 import { validateContainer } from './visual-model';
 import {
   AVATAR_JOINT_IDS, AVATAR_JOINT_PARENTS, CharacterModelError, missingAvatarJoints, validatePartialBoneMap,
@@ -27,6 +28,8 @@ export interface CharacterModelReport {
   readonly triangles: number;
   readonly textures: number;
   readonly skinnedVertices: number;
+  // Lowercase hex SHA-256 of the exact GLB bytes, available to rig configs that pin an asset.
+  readonly sha256: string;
   readonly joints: readonly CharacterModelJoint[];
   // Parent node index for every node; null for scene roots and nodes outside the scene.
   readonly parents: readonly (number | null)[];
@@ -452,6 +455,7 @@ function inspect(data: ArrayBuffer, usage: CharacterModelUsage): CharacterModelR
 
   return Object.freeze({
     usage, bytes: data.byteLength, nodes: nodes.length, meshes: meshCount, triangles, textures, skinnedVertices,
+    sha256: sha256HexSync(new Uint8Array(data)),
     joints: Object.freeze([...joints.values()].sort((left, right) => left.node - right.node)),
     parents: Object.freeze(parents.map((parent, node) => world.has(node) ? parent : null)),
     bounds: Object.freeze({

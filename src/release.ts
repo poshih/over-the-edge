@@ -19,6 +19,7 @@ import type { PhantomBuild, Phantoms } from './phantoms';
 import { readSelection, ReleaseModelLibrary } from './release-library';
 import { EMPTY_SELECTION } from './model-library';
 import type { ModelSelection } from './model-library';
+import avatarRigs from 'virtual:avatar-rigs';
 
 // Code the shell includes only when its content needs it, chosen at build time.
 export interface ReleaseCode {
@@ -179,7 +180,7 @@ export class Release {
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
       canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
-      characterModels, content, media, decorations: this.code.createDecorations,
+      characterModels, content, media, decorations: this.code.createDecorations, avatarRigs,
       theme: manifest.theme, enemyArt: manifest.enemies,
       onCue: audio === null ? undefined : (cue) => audio.handle(cue),
       onAction: (action, options) => game.perform(action, options),

@@ -23,6 +23,7 @@ import type { AudioCue, GameCue } from './audio-settings';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { EnemyEvent, EnemyPhase } from './enemy-types';
+import type { AvatarRigRegistry } from './avatar-rig';
 
 export class Game {
   readonly simulation: Simulation;
@@ -58,6 +59,8 @@ export class Game {
     level: LevelDefinition;
     settings?: Readonly<GameSettings>;
     characterModels?: CharacterModelLoader | null;
+    // The trusted rig strategies every profile and library avatar may select.
+    avatarRigs?: AvatarRigRegistry;
     // Loads a release's packaged sprite images.
     content?: ContentLoader;
     theme?: GameTheme;
@@ -83,7 +86,7 @@ export class Game {
     this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
     this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
       characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
-      decorations: options.decorations,
+      decorations: options.decorations, avatarRigs: options.avatarRigs,
     });
     if (this.onCue !== null) this.simulation.trackImpacts(true);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));

@@ -32,6 +32,7 @@ import { createDecorationView } from '../decoration-library';
 import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
 import serverModels from 'virtual:workshop-models';
+import avatarRigs from 'virtual:avatar-rigs';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
@@ -60,6 +61,7 @@ const game = new Game({
   characterModels: createCharacterModelLoader(),
   decorations: createDecorationView,
   media,
+  avatarRigs,
   onCue: (cue) => audio.handle(cue),
   onAction: perform,
   onNotice: (message) => ui.notice(message, 'error'),
@@ -154,6 +156,7 @@ const levelEditor = createLevelEditor({
 });
 const appearanceRestored = appearance.restore();
 const project = new ProjectSession({
+  avatarRigs,
   workspace: {
     level: {
       get: () => level.definition(),

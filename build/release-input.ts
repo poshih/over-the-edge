@@ -8,6 +8,7 @@ import { ART_LIMITS } from '../src/art-types';
 import type { ArtMode } from '../src/art-types';
 import { DEFAULT_AUDIO } from '../src/audio-settings';
 import type { AudioSettings } from '../src/audio-settings';
+import type { AvatarRigRegistry } from '../src/avatar-rig';
 import { checkCharacterModels } from '../src/character-model-check';
 import { levelMediaSources } from '../src/content';
 import { validateCourseModel } from '../src/course-art-model';
@@ -112,25 +113,26 @@ function artMode(selected: string | undefined, packaged: ArtMode): ArtMode {
   return selected;
 }
 
-function character(document: SpriteDocument, label: string): SpriteDocument {
+function character(document: SpriteDocument, label: string, registry: AvatarRigRegistry): SpriteDocument {
   try {
     validateSpriteAnchors(document, VISUAL_PART_IDS, SPRITE_TARGET_IDS);
-    checkCharacterModels(document, label);
+    checkCharacterModels(document, label, registry);
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : String(error), { cause: error });
   }
   return document;
 }
 
-function profile(path: string | null, variable: string): SpriteDocument | null {
+function profile(path: string | null, variable: string, registry: AvatarRigRegistry): SpriteDocument | null {
   if (path === null) return null;
   if (statSync(path).size > SPRITE_FILE_BYTES) throw new Error(`${variable} exceeds the profile size limit.`);
-  return character(parseSpriteDocument(readFileSync(path, 'utf8')), variable);
+  return character(parseSpriteDocument(readFileSync(path, 'utf8')), variable, registry);
 }
 
 // A build from the per-file inputs: a level or course package, settings and up to two profiles.
 // Its /media/ sources come from public/media/.
-export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode: string | undefined): ReleaseInput {
+export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode: string | undefined,
+  avatarRigs: AvatarRigRegistry): ReleaseInput {
   const watched = [files.level, files.settings, files.sprites, files.alternateSprites].filter((path): path is string => path !== null);
   let raw: unknown = DEFAULT_LEVEL;
   let bytes = 0;
@@ -170,16 +172,17 @@ export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode:
   });
   return {
     title: undefined, files: watched, level, art, settings,
-    primary: profile(files.sprites, 'GAME_SPRITES') ?? EMPTY_SPRITES,
-    alternate: profile(files.alternateSprites, 'GAME_ALTERNATE_SPRITES'),
+    primary: profile(files.sprites, 'GAME_SPRITES', avatarRigs) ?? EMPTY_SPRITES,
+    alternate: profile(files.alternateSprites, 'GAME_ALTERNATE_SPRITES', avatarRigs),
     theme: DEFAULT_THEME, hud: DEFAULT_HUD, enemies: DEFAULT_ENEMY_ART, armIk: DEFAULT_ARM_IK, audio: DEFAULT_AUDIO,
     appearance: [], media, library: withBytes(EMPTY_MODEL_LIBRARY, () => new Uint8Array()),
   };
 }
 
 // A build from GAME_PROJECT: the whole game, checked like every project, with GAME_ART_MODE applied.
-export function loadProjectRelease(root: string, requested: string, selectedMode: string | undefined): ReleaseInput {
-  const { content, files } = loadProjectInput(root, requested);
+export function loadProjectRelease(root: string, requested: string, selectedMode: string | undefined,
+  avatarRigs: AvatarRigRegistry): ReleaseInput {
+  const { content, files } = loadProjectInput(root, requested, avatarRigs);
   const { manifest } = content;
   const binary = (path: string): Uint8Array => {
     const bytes = content.files.get(path);
@@ -197,8 +200,8 @@ export function loadProjectRelease(root: string, requested: string, selectedMode
   const { primary, alternate } = content.characters;
   return {
     title: manifest.title, files, level: content.level, art, settings: manifest.settings,
-    primary: primary === null ? EMPTY_SPRITES : character(primary, 'GAME_PROJECT primary character'),
-    alternate: alternate === null ? null : character(alternate, 'GAME_PROJECT alternate character'),
+    primary: primary === null ? EMPTY_SPRITES : character(primary, 'GAME_PROJECT primary character', avatarRigs),
+    alternate: alternate === null ? null : character(alternate, 'GAME_PROJECT alternate character', avatarRigs),
     theme: manifest.theme, hud: manifest.hud, enemies: manifest.enemies, armIk: manifest.armIk, audio: manifest.audio,
     appearance: manifest.appearance.map(part => ({ ...part, bytes: binary(appearanceFile(part.part)) })),
     media: manifest.media.map(entry => ({ path: entry.path, bytes: binary(mediaFile(entry.path)) })),

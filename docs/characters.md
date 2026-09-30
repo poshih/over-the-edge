@@ -71,7 +71,7 @@ unmapped joint and what it follows.
 
 ### Motion
 
-The mapped joints receive exactly the frames that drive the built-in avatar:
+With the `standard` driver, mapped joints receive the frames that drive the built-in avatar:
 
 - **Arms.** The shared two-bone IK runs with the model's own shoulders and its
   bind-pose upper-arm and forearm lengths, or the profile's arm lengths, which stretch
@@ -248,7 +248,7 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 12**. Every profile has `grips`: the placement, each
+Profiles use **schema version 13**. Every profile has `grips`: the placement, each
 hand's distance from the butt (0-3 m) and the slide point `slideAt`, a share of each
 arm's length (0.4-1). It also has `arms`, `null` for each type's own arm lengths or each
 side's `upper` and `forearm` (0.1-2 m). The model and shading fields below are present
@@ -256,7 +256,7 @@ only while used.
 
 ```json
 {
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
   "grips": { "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85 },
@@ -273,7 +273,8 @@ only while used.
       "body": "Hips", "head": "Head",
       "left-upper-arm": "RightArm", "left-forearm": "RightForeArm", "left-hand": "RightHand",
       "right-upper-arm": "LeftArm", "right-forearm": "LeftForeArm", "right-hand": "LeftHand"
-    }
+    },
+    "driver": { "id": "standard", "config": null }
   },
   "hammer": { "model": "hammer" },
   "pot": { "model": "pot" },
@@ -288,6 +289,10 @@ only while used.
   models so they can validate them.
 - `avatar` is used in `avatar-3d` and dormant in other types; `hammer` and `pot`
   are used in every type. `characterRiggingType` still selects the type.
+- `avatar.driver` is `{ "id", "config" }`, the [rig strategy](#rig-strategies) that fits the
+  model and poses its arms. `standard` is the only built-in strategy and accepts a `null`
+  config; a profile whose driver no host registered fails to load with `unknown-strategy`
+  rather than falling back to another rig.
 - `shading` is absent for the default look (`pbr`, 3 bands, outline `#1f2428` at
   0.02 m). `outline` is `null` for none; colours are lowercase `#rrggbb`; widths
   are 0.002-0.1 m.
@@ -295,6 +300,47 @@ only while used.
   budget. Each model can be up to 20 MiB, and a profile file up to about 104 MiB.
 
 Profiles in any other schema version are rejected, not converted.
+
+## Rig strategies
+
+An imported avatar says how it is fitted and posed through its `driver`. The built-in
+`standard` strategy sizes the arms from the model's own shoulders and bind-pose arm lengths
+(or the profile's arm lengths) and places the hands on the physical grips, exactly as
+described above. A game can add strategies by naming a side-effect-free module with
+**`AVATAR_RIG_MODULE`**, a `.ts` or `.js` file inside the repository. The build imports it
+through its own resolver rather than the app's bundle, so it uses relative paths and bare
+package imports, not the app's aliases or `virtual:` modules.
+
+```ts
+import { AVATAR_RIG_API_VERSION, AvatarRigError } from '../../src/avatar-rig';
+import type { AvatarRigModule, AvatarRigStrategy } from '../../src/avatar-rig';
+
+const strategy: AvatarRigStrategy = {
+  id: 'my-rig',
+  prepare(config, binds) {
+    // Validate config here once; reject bad data with AvatarRigError('invalid-config', ...).
+    // Return { writeFramePlan(context, out), writePose(context, out) }.
+  },
+};
+
+export default { apiVersion: AVATAR_RIG_API_VERSION, strategies: [strategy] } satisfies AvatarRigModule;
+```
+
+The module's default export is an `apiVersion` and its strategies. A strategy is trusted host
+code, not content: it is pure numeric code that never sees a scene, material or renderer, and
+frame plans are passed explicitly between phases; scratch belongs to one avatar, never a global.
+A module that is not an object, declares another API version, has malformed strategies, or duplicates
+an ID (including `standard`) fails with a typed `AvatarRigError`. The factory always supplies the
+standard strategy. Only a direct registry constructor that omits it produces `missing-standard`.
+Configured modules exporting null are invalid, not an unconfigured-host fallback.
+
+The same registry is used by every check: importing or opening a project, the project server's
+writes, packaging a release and the running release, so a driver is accepted or rejected
+identically everywhere. It is built once when the dev server, build or project server starts,
+so changing the module needs a restart. A driver whose strategy is not registered, or whose
+`config` the strategy refuses, fails with an `AvatarRigError` and a `code`: `unknown-strategy`,
+`invalid-config`, `invalid-strategy`, `api-version`, `duplicate-strategy` or
+`missing-standard`. Callers branch on `code`, never on the message.
 
 ## Releases with two characters
 
@@ -342,8 +388,8 @@ did not select, and the release keeps nothing about the choice in the browser.
 part, and **Add server avatar / hammer / pot** does the same with one of the Workshop's
 [server models](#server-models). An avatar maps Mixamo-style joints automatically; otherwise its bone map opens
 and the avatar is added once all eight joints resolve. **Bone map** edits an avatar's
-map later. An avatar entry carries what depends on its proportions: its bone map,
-grips, arm lengths and arm forward distance. A new avatar takes those of the open
+map later. An avatar entry carries its rig `driver` and what depends on its proportions: its
+bone map, grips, arm lengths and arm forward distance. A new avatar takes those of the open
 character, and **Use character settings** takes them again, so tune them in
 Workshop / Character first. **Preview** shows a library model in the Workshop's game
 exactly as a release shows it; previews are not saved. The project server stores the
