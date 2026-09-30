@@ -221,10 +221,24 @@ export const UNIT = {
   circle: Array.from({ length: 32 }, (_, index) => [Math.cos(index * Math.PI / 16) / 2, Math.sin(index * Math.PI / 16) / 2]),
 };
 
+export class CourseShapeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CourseShapeError';
+  }
+}
+
+/**
+ * An object's outline in world space; a custom polygon uses its own normalized vertices. The checks assume
+ * convex outlines, as every built-in shape is: they measure a concave polygon's overlaps by its convex hull
+ * and may misjudge points in its notches, so give a concave polygon a clear space of its own.
+ */
 export function outline(object) {
   const cosine = Math.cos(object.angle);
   const sine = Math.sin(object.angle);
-  return UNIT[object.shape.type].map(([unitX, unitY]) => {
+  const unit = object.shape.type === 'polygon' ? object.shape.vertices.map((vertex) => [vertex.x, vertex.y]) : UNIT[object.shape.type];
+  if (unit === undefined) throw new CourseShapeError(`${object.id} has an unknown shape "${object.shape.type}".`);
+  return unit.map(([unitX, unitY]) => {
     const x = unitX * object.width;
     const y = unitY * object.height;
     return { x: object.x + x * cosine - y * sine, y: object.y + x * sine + y * cosine };
