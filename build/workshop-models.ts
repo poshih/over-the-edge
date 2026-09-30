@@ -21,6 +21,11 @@ import { contentDirectory, contentRequest, notFound } from './release';
 export const SERVER_MODELS = 'models';
 const SETTINGS_EXTENSION = '.json';
 const MODEL_FILE = /\.glb$/i;
+
+// Where the server avatar `name`'s model settings file is, relative to the repository root.
+export function serverAvatarSettingsFile(name: string): string {
+  return `${SERVER_MODELS}/avatar/${name}${SETTINGS_EXTENSION}`;
+}
 const MODEL_TYPE = 'model/gltf-binary';
 // Where a server model is under the Workshop's content URL: named by its SHA-256.
 const MODEL_PATH = /^models\/[0-9a-f]{64}\.glb$/;
@@ -95,8 +100,8 @@ export function loadServerModels(root: string, registry: AvatarRigRegistry): Ser
         models.push({ ...fields, role });
         continue;
       }
-      const settingsName = `${stem}${SETTINGS_EXTENSION}`;
-      const settings = avatarSettings(join(directory, settingsName), `${SERVER_MODELS}/${role}/${settingsName}`, report, registry);
+      const settingsFile = serverAvatarSettingsFile(stem);
+      const settings = avatarSettings(join(root, ...settingsFile.split('/')), settingsFile, report, registry);
       models.push({ ...fields, role, settings });
     }
   }
