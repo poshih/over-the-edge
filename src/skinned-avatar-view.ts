@@ -118,7 +118,7 @@ export class SkinnedAvatarView {
     const frames = (key: 'bind' | 'current') => Object.freeze(Object.fromEntries(AVATAR_JOINT_IDS.map(id => [id, joints[id][key]]))) as
       Readonly<Record<AvatarJointId, Matrix4>>;
     this.mapped = Object.freeze({ bind: frames('bind'), current: frames('current') });
-    this.hair = hair.chains.length === 0 ? null : new SkinnedHair(hair, model.nodes, avatarSpace, this.mapped.bind, bindings.scale);
+    this.hair = hair.chains.length === 0 ? null : new SkinnedHair(hair, model.nodes, avatarSpace, this.mapped.bind);
 
     const arms = {} as Record<'left' | 'right', DrivenArm>;
     const chains = {} as Record<'left' | 'right', ArmChain>;

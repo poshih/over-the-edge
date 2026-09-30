@@ -42,8 +42,8 @@ export interface AvatarHairChain extends HairParameters {
   readonly joints: readonly string[];
 }
 
-// A circle the hair slides around, riding on a mapped avatar joint; x and y are offsets in that joint's frame, and
-// every length is in fitted metres (avatar space).
+// A circle the hair slides around: its centre at bind in the avatar's fitted frame (metres, +Y up, the shoulders
+// 0.74 m above the player root), carried by the mapped avatar joint it rides on, and its radius in metres.
 export interface AvatarHairCollider {
   readonly id: string;
   readonly joint: AvatarJointId;
@@ -66,7 +66,7 @@ export const AVATAR_HAIR_LIMITS = Object.freeze({
   joints: 64,
   colliders: 32,
   id: 80,
-  offset: 4,
+  position: 4,
   colliderRadius: Object.freeze({ min: 0.01, max: 4 }),
 });
 
@@ -363,8 +363,8 @@ export function validateAvatarHair(value: unknown, boneMap: AvatarBoneMap): Avat
     }
     return Object.freeze({
       id, joint: collider.joint,
-      x: number(collider.x, -AVATAR_HAIR_LIMITS.offset, AVATAR_HAIR_LIMITS.offset, 'Hair collider X'),
-      y: number(collider.y, -AVATAR_HAIR_LIMITS.offset, AVATAR_HAIR_LIMITS.offset, 'Hair collider Y'),
+      x: number(collider.x, -AVATAR_HAIR_LIMITS.position, AVATAR_HAIR_LIMITS.position, 'Hair collider X'),
+      y: number(collider.y, -AVATAR_HAIR_LIMITS.position, AVATAR_HAIR_LIMITS.position, 'Hair collider Y'),
       radius: number(collider.radius, AVATAR_HAIR_LIMITS.colliderRadius.min, AVATAR_HAIR_LIMITS.colliderRadius.max,
         'Hair collider radius'),
     });

@@ -107,7 +107,7 @@ hair's geometry to a chain of joints in the GLB and list the chain in `avatar.ha
 "hair": {
   "chains": [{ "id": "braid", "joints": ["Braid0", "Braid1", "Braid2", "Braid3"],
                "stiffness": 0.05, "damping": 0.12, "gravity": 9.81, "radius": 0.03 }],
-  "colliders": [{ "id": "hips", "joint": "body", "x": 0, "y": -0.4, "radius": 0.2 }]
+  "colliders": [{ "id": "torso", "joint": "body", "x": 0, "y": 0.6, "radius": 0.25 }]
 }
 ```
 
@@ -115,18 +115,21 @@ hair's geometry to a chain of joints in the GLB and list the chain in `avatar.ha
   at least two. The root hangs from a joint that follows a mapped joint, usually
   under `head`, and stays where that joint carries it; the joints after it swing.
   Chains may not share joints, hang from another chain or carry a mapped joint.
-- Every frame, after the head and arms, the chain's rigid pose, as it would follow
-  its mapped joint, gives each joint its target. The solver moves the joints in the
-  game's X-Y plane with world-space inertia, `gravity` (m/s², positive down), a pull
-  toward the target (`stiffness`, 0-1), velocity lost on each 1/60 s step (`damping`,
-  0-1) and the rigid pose's segment lengths. Each joint keeps the depth of its rigid
-  pose and turns by the least rotation from its rigid segment to the simulated one,
-  so the skin bends along the chain and anything below its last joint follows it.
-  Hair in front of or behind the body therefore swings across the view, not into it.
-- `colliders` are circles in the X-Y plane riding on an avatar joint (`body`, `head`
-  or an arm joint): offset `x`, `y` in that joint's frame and `radius`, in fitted
-  metres. A chain keeps its joints its own `radius` clear of every collider; pinned
-  roots and segment lengths win where both cannot hold.
+- Every frame, after the head and arms, each chain gets its rest pose: the root rides
+  rigidly on its mapped joint, and every later joint rests at its bind-pose offset from
+  the root in the body's frame, so the hair keeps hanging as authored while the head
+  turns. The rest positions are the solver's targets. It moves the joints in the game's
+  X-Y plane with world-space inertia, `gravity` (m/s², positive down), a pull toward the
+  target (`stiffness`, 0-1), velocity lost on each 1/60 s step (`damping`, 0-1) and the
+  rest pose's segment lengths. Each joint keeps the depth of its rest position and turns
+  by the least rotation from its rest segment to the simulated one, so the skin bends
+  along the chain and anything below its last joint follows it. Hair in front of or
+  behind the body therefore swings across the view, not into it.
+- `colliders` are circles in the X-Y plane, each riding on an avatar joint (`body`,
+  `head` or an arm joint): `x` and `y` place its centre at bind in the avatar's fitted
+  frame (metres, +Y up, the shoulders 0.74 m above the player root), and the joint's
+  motion carries it; `radius` is in metres. A chain keeps its joints its own `radius`
+  clear of every collider; pinned roots and segment lengths win where both cannot hold.
 - The simulation freezes while time stands still, catches up at most 15 steps, and
   restarts from the rigid pose on a rewind, a restart or a new avatar. Hair never
   drives IK, gameplay or physics.

@@ -2,9 +2,11 @@
 
 **Date:** 2026-09-26 · **Baseline:** `a831e8a` · **Status:** implemented; see [hair on an imported
 avatar](docs/characters.md#hair). A profile's `avatar.hair` and a library avatar's `hair` hold `chains` (over skin
-joint names) and `colliders`; the sprite solver now lives in `src/hair-solver.ts`, shared by both. Chain segment lengths
-follow the rigid pose's projection each frame. Workshop controls and the collision overlay are not built yet:
-authors edit `hair` in the profile or project JSON.
+joint names) and `colliders`; the sprite solver now lives in `src/hair-solver.ts`, shared by both. A chain's root
+rides on its mapped joint and the joints after it rest at their bind offsets from the root in the body's frame, so
+long hair keeps hanging while the head turns; collider centres are avatar-space positions at bind, carried by their
+joint. Workshop controls and the collision overlay are not built yet: authors edit `hair` in the profile or project
+JSON.
 
 Follow-up to [imported skinned characters](FEATURE-REQUEST-skinned-character.md). Sprite
 skeletons already have cosmetic spring-bone hair (`HairChain` + `SkeletonCollider` in
