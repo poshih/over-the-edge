@@ -404,12 +404,12 @@ Use tileable left/right image edges.
 Keep the head and grip artwork on separate anchors/bones so their size stays
 fixed. Tiling changes artwork density, not the physics reach limit.
 
-The default hammer grip plane is 0.75 world units toward the camera: the
-configured chest front at 0.50 plus `armForwardDistance` at 0.25. The torso
-remains at 0.27. Both 3D renderers and the tool use the same depth calculation;
+The default hammer grip plane is 0.53 world units toward the camera: the
+configured chest front at 0.28 plus `armForwardDistance` at 0.25. The torso
+remains at 0.05. Both 3D renderers and the tool use the same depth calculation;
 changing clearance never separates the hand targets from the hammer.
-The pot stays at its separate
-0.22 depth. No Z depth is added to the Planck physics or authored level data.
+The pot stays on the [obstacle line](../README.md#obstacle-line) at z = 0, where
+every collider is drawn. No Z depth is added to the Planck physics or authored level data.
 A depth-isolated foreground pass keeps the hammer above opaque and transparent
 character art without disabling depth testing or altering shared materials.
 

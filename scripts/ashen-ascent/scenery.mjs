@@ -1,6 +1,8 @@
 // The scenery of Ashen Ascent: decorations that never collide, from the far horizon to the foreground.
 // Each zone's scenery is built right after the zone, so its IDs share the zone's prefix. The course kit
-// places distant scenery for the theme's camera (see scripts/course-kit/scenery.mjs).
+// places distant scenery for the theme's camera (see scripts/course-kit/scenery.mjs). A prop standing on
+// the course stands within its terrain, which reaches half its depth behind the obstacle line, and clear
+// of the pot, which reaches 0.5 m behind it.
 import { sceneryHelpers } from '../course-kit/scenery.mjs';
 import { THEME } from './project.mjs';
 
@@ -35,20 +37,20 @@ export const SCENERY = {
   z2(b) {
     landmark(b, 'cathedral', 30, -3.6, -400, 2.6, { tint: TINT.ash });
     shelves(b, 8, 66, 35.7, -14, 4, TINT.ash);
-    row(b, 'lantern-post', 22, 60, 35.7, -1.2, 3.4, 12.5);
+    row(b, 'lantern-post', 22, 60, 35.7, -0.75, 3.4, 12.5);
     row(b, 'broken-wall', 14, 58, 35.7, -7, 5.5, 11);
     b.decoration('dead-tree', 'dead-tree', 49, 35.7, -16, 10, { mirror: true });
-    b.decoration('banner', 'banner', 31.5, 35.7, -1.6, 5.2);
-    b.decoration('banner', 'banner', 42.5, 35.7, -1.6, 5.2, { mirror: true });
+    b.decoration('banner', 'banner', 31.5, 35.7, -1.2, 5.2);
+    b.decoration('banner', 'banner', 42.5, 35.7, -1.2, 5.2, { mirror: true });
     b.decoration('hanging-cage', 'hanging-cage', 3, 61.5, 1.8, 5.5);
   },
 
   // III · The Ossuary: a crypt wall, skulls and candles on the catacomb floor, cages hung in front.
   z3(b) {
-    row(b, 'broken-wall', -78, -30, 26, -3.5, 7, 9.5, { tint: 0x6a6470 });
-    row(b, 'skull-pile', -74, -34, 26, -1.2, 0.9, 8);
-    for (const x of [-70, -56, -43]) b.decoration('candelabra', 'candelabra', x, 26, -1.4, 2.3);
-    b.decoration('knight-statue', 'knight-statue', -50, 26, -2.8, 5.5);
+    row(b, 'broken-wall', -78, -30, 26, -3, 7, 9.5, { tint: 0x6a6470 });
+    row(b, 'skull-pile', -74, -34, 26, -0.95, 0.9, 8);
+    for (const x of [-70, -56, -43]) b.decoration('candelabra', 'candelabra', x, 26, -0.95, 2.3);
+    b.decoration('knight-statue', 'knight-statue', -50, 26, -1.45, 5.5);
     b.decoration('chains', 'chains', -62, 32.5, 2.6, 8);
     b.decoration('hanging-cage', 'hanging-cage', -41, 31, 2.2, 5);
     b.decoration('chains', 'chains', -78, 50, -1.6, 9, { mirror: true });
@@ -86,7 +88,7 @@ export const SCENERY = {
   z6(b) {
     far(b, 'mountain-ridge', [0, 150], [-6.5, -2.9], -1000, 3.8, { tint: TINT.frost });
     far(b, 'watchtower', [0, 150], [4.6, -0.9], -80, 3.2, { tint: TINT.frost });
-    for (const [x, y] of [[-41, 145.1], [-24, 145.1], [1, 157.1], [21, 157.1]]) b.decoration('banner', 'banner', x, y, -1.8, 5, { tint: TINT.frost });
+    for (const [x, y] of [[-41, 145.1], [-24, 145.1], [1, 157.1], [21, 157.1]]) b.decoration('banner', 'banner', x, y, -1.4, 5, { tint: TINT.frost });
     b.decoration('knight-statue', 'knight-statue', -30, 145.1, -3.5, 5.5, { tint: TINT.frost });
     b.decoration('knight-statue', 'knight-statue', 12, 157.1, -3.5, 5.5, { mirror: true, tint: TINT.frost });
   },
@@ -103,10 +105,10 @@ export const SCENERY = {
   // VIII · The Drifting Keep: candles and banners in the courtyard, knights at the gate; far below, the
   // golden tree of the graveyard's horizon.
   z8(b) {
-    for (const x of [-9, -19]) b.decoration('candelabra', 'candelabra', x, 367.1, -1.2, 2.2);
-    b.decoration('knight-statue', 'knight-statue', 3.5, 367.1, -2.6, 4.8);
-    b.decoration('knight-statue', 'knight-statue', -10.5, 367.1, -2.6, 4.8, { mirror: true });
-    for (const [x, y] of [[-27.1, 375.7], [-33.4, 375.7]]) b.decoration('lantern-post', 'lantern-post', x, y, -1.2, 3.2);
+    for (const x of [-9, -19]) b.decoration('candelabra', 'candelabra', x, 367.1, -0.95, 2.2);
+    b.decoration('knight-statue', 'knight-statue', 3.5, 367.1, -1.35, 4.8);
+    b.decoration('knight-statue', 'knight-statue', -10.5, 367.1, -1.35, 4.8, { mirror: true });
+    for (const [x, y] of [[-27.1, 375.7], [-33.4, 375.7]]) b.decoration('lantern-post', 'lantern-post', x, y, -0.75, 3.2);
     b.decoration('banner', 'banner', 8, 367.1, -1.6, 5.5);
     b.decoration('hanging-cage', 'hanging-cage', 12, 352, 1.8, 6);
     b.decoration('chains', 'chains', 20, 356, 2.8, 8, { mirror: true });

@@ -23,8 +23,9 @@ A terrain object in level JSON is defined by:
 - **Placement:** the outline is scaled by `width` × `height` (metres), rotated
   by `angle` (radians, counter-clockwise) and centred on `x`, `y` (Y is up).
   Circles are true circles with diameter `width`.
-- **Depth:** the default rendering extrudes the outline from its front face at
-  z = 0 back to z = -`depth`. Depth affects only the look, not collision.
+- **Depth:** the default rendering extrudes the outline `depth` deep, centred on the
+  [obstacle line](../README.md#obstacle-line) at z = 0: from z = `depth` / 2, toward the
+  camera, to z = -`depth` / 2. Depth affects only the look, not collision.
 
 An assigned mesh replaces that extrusion. The game measures the GLB's bounding
 box and maps it onto the object's box before rotating it:
@@ -33,17 +34,17 @@ box and maps it onto the object's box before rotating it:
 | --- | --- |
 | minimum/maximum X | `x - width / 2` to `x + width / 2` |
 | minimum/maximum Y | `y - height / 2` to `y + height / 2` |
-| maximum Z (front, toward the camera) | z = 0 |
-| minimum Z (back) | z = -`depth` |
+| maximum Z (front, toward the camera) | z = `depth` / 2 |
+| minimum Z (back) | z = -`depth` / 2 |
 
 glTF's axes are used as-is: +X is right, +Y is up, and +Z faces the camera.
 Mirror `x` reflects the mesh left to right. Mirror `diagonal` reflects it across
 the line y = -x, which matches how the set piece tool mirrors ramps.
 
 To match the collision silhouette exactly, build each mesh from the object's
-normalized outline extruded along -Z, and keep decoration inside that outline's
+normalized outline extruded along Z, and keep decoration inside that outline's
 bounding box. Anything that extends past the box squeezes the rest of the mesh
-to fit. One GLB can serve any number of objects, but each placement is stretched
+to fit, and in depth the box's middle is where the collision runs. One GLB can serve any number of objects, but each placement is stretched
 to its own object's box, so reuse meshes across objects with similar proportions.
 Compare the look with `GAME_ART_MODE=shapes` and `GAME_ART_MODE=meshes` in
 `npm run dev:game`.

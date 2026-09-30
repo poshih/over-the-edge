@@ -191,7 +191,7 @@ const ZONES = [
       // The old chapel at the lane's broken end, under the mire: crows dive from its gargoyles.
       t.go(1.2);
       const chapel = place(t, 'gargoyle-roof', { floor: false });
-      b.decoration('chapel-banner', 'banner', chapel.anchor.x + 7, lane, -1.6, 4.4, { mirror: true });
+      b.decoration('chapel-banner', 'banner', chapel.anchor.x + 7, lane, -1.1, 4.4, { mirror: true });
       b.zone.exit = { lane, laneEnd };
     },
   },
@@ -514,7 +514,8 @@ const ZONES = [
       t.turn();
       place(t, 'flying-buttress');
       const bridge = place(t, 'hollow-bridge');
-      [bridge.bounds.left + 1.2, bridge.bounds.right - 1.2].forEach((x) => banner(b, x, bridge.bounds.top, 3.6));
+      // The bridge is a thin set piece: its banners stand just behind the path.
+      [bridge.bounds.left + 1.2, bridge.bounds.right - 1.2].forEach((x) => banner(b, x, bridge.bounds.top, 3.6, -0.65));
       place(t, 'phantom-dare', { retune: say(TEXT.phantomDare) });
       // The Ember Spire: a gilded stair up from the far cliff to the summit.
       t.floor(3.2, { name: 'spire-foot', thickness: 1, tone: 'ivory', depth: 2.6 });

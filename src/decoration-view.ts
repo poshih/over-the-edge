@@ -3,6 +3,7 @@ import type { BufferGeometry, Material } from 'three';
 import { DECORATION_LIMITS } from './level';
 import type { DecorationObject, LevelChange, LevelObject } from './level';
 import { markInstanceSlot } from './instancing';
+import { OBSTACLE_LINE } from './obstacle-line';
 import { decorationAsset } from './decoration-art';
 import type { DecorationArt } from './decoration-art';
 import { mirroredGeometry } from './decoration-geometry';
@@ -40,6 +41,8 @@ interface Look {
 interface Batch {
   readonly key: string;
   readonly artwork: boolean;
+  // `root` or `front`, by the batch's side of the obstacle line.
+  readonly group: Group;
   readonly meshes: InstancedMesh[];
   readonly entries: Instance[];
 }
@@ -50,11 +53,16 @@ interface Instance {
   slot: number;
 }
 
+// Whether a decoration stands on or in front of the obstacle line, where it draws with the characters.
+function inFront(object: DecorationObject): boolean {
+  return object.z >= OBSTACLE_LINE;
+}
+
 function batchKey(object: DecorationObject, look: Look, model: DecorationMesh): string {
   const band = Math.floor(Math.log2(1 + Math.max(0, -object.z) / BAND_DEPTH));
   const size = CHUNK_SIZE * 2 ** band;
   const side = mirroredGeometryFor(object, model) ? 'mirrored' : 'plain';
-  return `${band}:${Math.floor(object.x / size)},${Math.floor(object.y / size)}:${look.key}:${side}`;
+  return `${inFront(object) ? 'front' : 'back'}:${band}:${Math.floor(object.x / size)},${Math.floor(object.y / size)}:${look.key}:${side}`;
 }
 
 // Whether a mirrored decoration draws mirrored geometry rather than a negative scale.
@@ -80,10 +88,13 @@ export function decorationMatrix(object: DecorationObject, model: DecorationMesh
  * Draws decorations: scenery only, never colliders. Instances are batched by 32 m chunk, model and
  * mirror side, so frustum culling skips distant chunks, and an edit rewrites only its own instances.
  * Idle frames do no work. A preview mesh shows a placement without changing the level. A mesh
- * release's course artwork can replace any model's placeholder with the game's own GLB.
+ * release's course artwork can replace any model's placeholder with the game's own GLB. Decorations
+ * behind the obstacle line draw in `root`, with the course; those on or in front of it in `front`,
+ * with the characters, which the course's colliders never hide.
  */
 export class DecorationView {
   readonly root = new Group();
+  readonly front = new Group();
   private readonly source: DecorationSource;
   private artwork: { readonly art: DecorationArt; readonly mesh: DecorationSource } | null = null;
   private readonly instances = new Map<string, Instance>();
@@ -107,6 +118,8 @@ export class DecorationView {
     this.source = source;
     this.root.name = 'decorations';
     this.root.matrixAutoUpdate = false;
+    this.front.name = 'decorations-front';
+    this.front.matrixAutoUpdate = false;
     this.preview.matrixAutoUpdate = false;
     this.root.add(this.preview);
   }
@@ -174,6 +187,8 @@ export class DecorationView {
     }
     decorationMatrix(object, model, this.preview.matrix);
     this.preview.matrixWorldNeedsUpdate = true;
+    const group = inFront(object) ? this.front : this.root;
+    if (this.preview.parent !== group) group.add(this.preview);
   }
 
   /** Recomputes the culling bounds of batches that changed since the last frame. */
@@ -208,6 +223,7 @@ export class DecorationView {
     this.preview.clear();
     this.previewKey = null;
     this.root.removeFromParent();
+    this.front.removeFromParent();
     this.disposed = true;
   }
 
@@ -274,10 +290,10 @@ export class DecorationView {
     if (existing !== undefined) return existing;
     const mirrored = mirroredGeometryFor(object, model);
     const batch: Batch = {
-      key, artwork: look.artwork, entries: [],
+      key, artwork: look.artwork, group: inFront(object) ? this.front : this.root, entries: [],
       meshes: model.parts.map((part) => this.mesh(mirrored ? this.mirror(part.geometry) : part.geometry, part.material, INITIAL_CAPACITY)),
     };
-    for (const mesh of batch.meshes) this.root.add(mesh);
+    for (const mesh of batch.meshes) batch.group.add(mesh);
     this.batches.set(key, batch);
     this.counters.batchesCreated++;
     return batch;
@@ -306,11 +322,11 @@ export class DecorationView {
       mesh.instanceMatrix.array.set(previous.instanceMatrix.array);
       mesh.instanceColor!.array.set(previous.instanceColor!.array);
       mesh.count = previous.count;
-      this.root.remove(previous);
+      batch.group.remove(previous);
       this.dirtyBounds.delete(previous);
       previous.dispose();
       batch.meshes[index] = mesh;
-      this.root.add(mesh);
+      batch.group.add(mesh);
     }
     this.counters.capacityGrowths++;
   }
@@ -338,7 +354,7 @@ export class DecorationView {
 
   private destroy(batch: Batch): void {
     for (const mesh of batch.meshes) {
-      this.root.remove(mesh);
+      batch.group.remove(mesh);
       this.dirtyBounds.delete(mesh);
       mesh.dispose();
     }

@@ -106,7 +106,13 @@ and the scree slope.
 `sceneryHelpers(theme.camera)` returns helpers for placing decorations by depth through a
 perspective camera. It throws `SceneryCameraError` for the orthographic camera, whose view
 does not shrink distant decorations. The camera frames the engine's course view height,
-read from [`src/view-frame.json`](../src/view-frame.json).
+read from [`src/view-frame.json`](../src/view-frame.json), on the
+[obstacle line](../README.md#obstacle-line) at z = 0.
+
+Every collider the builder makes is drawn centred on that line, reaching half its depth behind
+it. A prop placed to stand on the course therefore needs a depth within that half: behind the
+path, between `-depth / 2` of the terrain it stands on and -0.5 m, where the pot ends. Give
+terrain that carries such props enough depth; a 1.5 m-deep piece leaves only 0.25 m.
 
 - `far(builder, model, from, [dx, dy], z, size)` places a model so that it appears `dx`, `dy`
   from the centre of the view, `size` tall, while the camera looks at `from`. It barely

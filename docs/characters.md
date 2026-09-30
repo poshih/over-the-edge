@@ -195,9 +195,10 @@ Appearance's shaft and head imports are hidden while a hammer model is present.
 ## Pot model
 
 Pick a **Pot GLB** to replace the pot. The model follows the physical pot body
-rigidly, without stretching, in every character type, including 2D, at the pot's
-own depth. It draws in the main pass, so its front wall hides the lower part of a
-body inside it through the depth buffer, while the body shows above the rim.
+rigidly, without stretching, in every character type, including 2D, on the
+[obstacle line](../README.md#obstacle-line). It draws in the actors pass with the body, so its front
+wall hides the lower part of a body inside it through the depth buffer, while the body shows above
+the rim; neither is ever hidden by the course.
 **Use default pot** restores the procedural pot.
 
 Model it in metres with +Y up, its origin at the bottom-centre of the pot, and its

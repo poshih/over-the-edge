@@ -14,7 +14,8 @@ export function terrainGeometry(shape: LevelShape): ExtrudeGeometry {
     outline.closePath();
   }
   const geometry = new ExtrudeGeometry(outline, { depth: 1, steps: 1, bevelEnabled: false, curveSegments: 32 });
-  geometry.translate(0, 0, -1);
+  // Unit depth centred on z = 0: an object reaches half its depth each side of the obstacle line.
+  geometry.translate(0, 0, -0.5);
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;

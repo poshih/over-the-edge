@@ -29,7 +29,7 @@ the way of editing the course.
 | Property | Meaning |
 | --- | --- |
 | Position X / Y | The centre of the model's base, in metres |
-| Depth | Distance behind the course (negative, down to -1000 m) or toward the camera (positive, up to 15 m) |
+| Depth | Distance behind the [obstacle line](../README.md#obstacle-line) (negative, down to -1000 m) or toward the camera (positive, up to 15 m) |
 | Height | The model is scaled uniformly to this height, 0.1-1000 m |
 | Rotation | Turns the model in the view plane |
 | Mirror | Flips the model left to right |
@@ -43,7 +43,12 @@ drift slowly as the player climbs, while those in front of the course are larger
 quickly, which is what makes a far castle feel far. With the orthographic camera depth only
 decides what stands in front of what, so scale distant decorations down yourself.
 
-The course itself is a thin slab: nothing lies behind it unless you put something there. Seen
+The course itself is a slab around the [obstacle line](../README.md#obstacle-line): each terrain
+object reaches half its depth behind the line and half in front, and nothing lies beyond that unless
+you put something there. A prop standing on a collider must stand within that collider's depth, and
+one behind the path must also keep clear of the pot, which reaches 0.5 m behind the line. A
+decoration behind the line draws with the course; one on or in front of it draws with the
+characters, over the course. Seen
 through a perspective camera from above, a tree standing on empty ground behind the course
 seems to float as the player climbs past it. Give background scenery ground to stand on with
 **Rock shelf** models, whose tops reach 30 m back, or stand it on hills and crags of its own.

@@ -781,11 +781,37 @@ places any. The models are placeholders: [course artwork](docs/course-artwork.md
 replaces any model, by ID, with your own textured GLB in mesh releases. See the
 [decoration guide](docs/decorations.md) for every model, the level format and performance.
 
+### Obstacle line
+
+The physics is 2D and plays out on one plane, the **obstacle line** at z = 0 (`OBSTACLE_LINE` in
+`src/obstacle-line.ts`). The camera frames the course on it, the level editor picks on it and
+decoration depths are measured from it. Everything that collides is drawn centred on it, so with
+the perspective camera each collision outline runs through the middle of what it looks like. Each
+terrain object and its [course artwork](#course-artwork-from-your-own-pipeline) reach half their
+depth toward the camera and half behind, and the pot, enemies and phantoms stand on the line. The
+engine places them there, so no level can put a collider anywhere else. The collision overlay (**D**)
+draws on the line too. The hammer and hands are drawn in front of the chest (see
+[arm forward distance](#custom-visuals)), so in perspective the hammer model sits slightly off its
+outline while its contacts stay on the line.
+
+Colliders reach toward the camera, so the view draws in three passes, each over the last: the course
+(terrain, its artwork and the decorations behind the line), then the actors (the characters, phantoms,
+enemies, course labels and the decorations on or in front of the line), then the hammer. A character
+whose head or arms overlap a collider on screen, such as under a low roof, is never hidden by it. Glass
+(`KHR_materials_transmission`) in a model drawn with the actors or the hammer, such as a pot, an avatar
+or a decoration in front of the line, refracts only its own pass and the sky colour, not the course.
+
+Decorations never collide and may sit at any depth. A prop standing on a collider must stand within
+that collider's depth, and one behind the path must also keep clear of the pot, which reaches 0.5 m
+behind the line. A 1.5 m-deep block leaves only 0.25 m there, so give terrain that carries props
+behind the path more depth. Deep terrain also reaches further toward the camera: an 8 m-deep block
+comes 4 m in front of the line, which a wide field of view exaggerates.
+
 ### Course artwork from your own pipeline
 
 Terrain collision is always the authored 2D polygon outline. By default the game
-draws each terrain object as a 2.5D extrusion of that outline at the object's
-depth, so what you see matches what the hammer grips. For bespoke artwork, make
+draws each terrain object as a 2.5D extrusion of that outline, `depth` deep and centred
+on the [obstacle line](#obstacle-line), so what you see matches what the hammer grips. For bespoke artwork, make
 static GLB meshes with any pipeline you like and assign them to terrain objects
 when packing a course. Each mesh is fitted to its object's width, height, and
 depth, rotates with it, and replaces its extruded shape. Collision never comes

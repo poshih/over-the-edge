@@ -7,6 +7,7 @@ import type { ArtMirror, ArtMode, ArtResource } from './art-types';
 import { ILLUSION, LEVEL_LIMITS } from './level';
 import type { TerrainEvent, TerrainObject } from './level';
 import { markInstanceSlot } from './instancing';
+import { OBSTACLE_LINE } from './obstacle-line';
 import type { PhysicsFrame } from './simulation';
 import type { TerrainView } from './terrain-view';
 import { loadVisualModel } from './visual-model';
@@ -64,6 +65,8 @@ function disposeAsset(asset: Asset): void {
 
 export class CourseArtView {
   readonly root = new Group();
+  // Terrain artwork is the course's own look: it draws with the terrain it replaces.
+  readonly pass = 'course';
   private readonly terrain: TerrainView;
   private readonly missing: (message: string) => void;
   private readonly content: ContentLoader | null;
@@ -325,8 +328,9 @@ export class CourseArtView {
     if (cached) return cached;
     const size = asset.model.bounds.getSize(new Vector3());
     const center = asset.model.bounds.getCenter(new Vector3());
+    // A unit box centred on the origin, like the extruded shapes, so the mesh straddles the obstacle line.
     const normalize = new Matrix4().makeScale(1 / size.x, 1 / size.y, 1 / size.z)
-      .multiply(new Matrix4().makeTranslation(-center.x, -center.y, -asset.model.bounds.max.z));
+      .multiply(new Matrix4().makeTranslation(-center.x, -center.y, -center.z));
     const reflect = mirror === 'x' ? new Matrix4().makeScale(-1, 1, 1) :
       mirror === 'diagonal' ? new Matrix4().set(0, -1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1) : new Matrix4();
     const primitives: Primitive[] = [];
@@ -350,7 +354,7 @@ export class CourseArtView {
   private write(entry: Entry): void {
     const o = entry.object;
     const c = Math.cos(o.angle), s = Math.sin(o.angle);
-    this.matrix.set(c * o.width, -s * o.height, 0, o.x, s * o.width, c * o.height, 0, o.y, 0, 0, o.depth, 0, 0, 0, 0, 1);
+    this.matrix.set(c * o.width, -s * o.height, 0, o.x, s * o.width, c * o.height, 0, o.y, 0, 0, o.depth, OBSTACLE_LINE, 0, 0, 0, 1);
     for (const mesh of entry.batch.meshes) { mesh.setMatrixAt(entry.slot, this.matrix); markInstanceSlot(mesh.instanceMatrix, entry.slot); }
     this.matrixWrites++;
     this.dirty.add(entry.batch);

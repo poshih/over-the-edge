@@ -5,6 +5,7 @@ import {
 import { geometryKey, ILLUSION, LEVEL_LIMITS } from './level';
 import type { TerrainObject, LevelShape, TerrainEvent } from './level';
 import { markInstanceSlot } from './instancing';
+import { OBSTACLE_LINE } from './obstacle-line';
 import { terrainGeometry } from './terrain-geometry';
 
 const CHUNK_SIZE = 32;
@@ -291,6 +292,7 @@ export class TerrainView {
     this.counters.capacityGrowths++;
   }
 
+  // Terrain collides, so its depth is centred on the obstacle line.
   private writeMatrix(instance: Instance): void {
     const object = instance.object;
     const cosine = Math.cos(object.angle);
@@ -298,7 +300,7 @@ export class TerrainView {
     this.matrix.set(
       cosine * object.width, -sine * object.height, 0, object.x,
       sine * object.width, cosine * object.height, 0, object.y,
-      0, 0, object.depth, 0,
+      0, 0, object.depth, OBSTACLE_LINE,
       0, 0, 0, 1,
     );
     instance.batch.mesh.setMatrixAt(instance.slot, this.matrix);

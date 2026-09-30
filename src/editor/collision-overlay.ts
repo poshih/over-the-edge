@@ -1,19 +1,25 @@
 import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments } from 'three';
+import type { Vector3 } from 'three';
 import type { ArmPose } from '../arm-ik';
 import type { Point } from '../config';
 import { objectVertices } from '../level';
 import type { TerrainEvent } from '../level';
 import { transformPoint } from '../math';
+import { OBSTACLE_LINE } from '../obstacle-line';
 import type { PhysicsFrame } from '../simulation';
 import type { ViewLayer } from '../view';
 
-const DEPTH = 0.95;
 const MARKER_RADIUS = 0.07;
 const GUIDE_RADIUS = 0.09;
 const DYNAMIC_EDGES = 64;
 
+// Collision outlines draw on the obstacle line, where the physics is and every collider's visual is centred,
+// so in perspective each outline runs through the middle of what it shows. The arm guides draw at their own
+// 3D points, like the arms.
 export class CollisionOverlay implements ViewLayer {
   readonly root = new Group();
+  // Over the course and the characters; the tool still draws on top.
+  readonly pass = 'actors';
   private readonly material = new LineBasicMaterial({ color: 0x35ffbe, depthTest: false, transparent: true, opacity: 0.9 });
   private readonly fixed = new LineSegments(new BufferGeometry(), this.material);
   private readonly moving = new LineSegments(new BufferGeometry(), this.material);
@@ -59,7 +65,7 @@ export class CollisionOverlay implements ViewLayer {
         for (let index = 0; index < vertices.length; index++) {
           const a = vertices[index];
           const b = vertices[(index + 1) % vertices.length];
-          positions.push(a.x, a.y, DEPTH, b.x, b.y, DEPTH);
+          positions.push(a.x, a.y, OBSTACLE_LINE, b.x, b.y, OBSTACLE_LINE);
         }
       }
       this.fixed.geometry.dispose();
@@ -68,10 +74,12 @@ export class CollisionOverlay implements ViewLayer {
       this.dirty = false;
     }
     let offset = 0;
-    const line = (a: Point, b: Point): void => {
-      this.positions.set([a.x, a.y, DEPTH, b.x, b.y, DEPTH], offset);
+    const segment = (ax: number, ay: number, az: number, bx: number, by: number, bz: number): void => {
+      this.positions.set([ax, ay, az, bx, by, bz], offset);
       offset += 6;
     };
+    const line = (a: Point, b: Point): void => segment(a.x, a.y, OBSTACLE_LINE, b.x, b.y, OBSTACLE_LINE);
+    const guide = (a: Vector3, b: Vector3): void => segment(a.x, a.y, a.z, b.x, b.y, b.z);
     for (const part of frame.parts) {
       if (part.collides) {
         for (let index = 0; index < part.vertices.length; index++) {
@@ -85,11 +93,12 @@ export class CollisionOverlay implements ViewLayer {
       }
     }
     for (const arm of arms) {
-      line(arm.shoulder, arm.elbow);
-      line(arm.elbow, arm.hand);
-      line(arm.shoulder, arm.hint);
-      line({ x: arm.hint.x - MARKER_RADIUS, y: arm.hint.y }, { x: arm.hint.x + MARKER_RADIUS, y: arm.hint.y });
-      line({ x: arm.hint.x, y: arm.hint.y - MARKER_RADIUS }, { x: arm.hint.x, y: arm.hint.y + MARKER_RADIUS });
+      const { hint } = arm;
+      guide(arm.shoulder, arm.elbow);
+      guide(arm.elbow, arm.hand);
+      guide(arm.shoulder, hint);
+      segment(hint.x - MARKER_RADIUS, hint.y, hint.z, hint.x + MARKER_RADIUS, hint.y, hint.z);
+      segment(hint.x, hint.y - MARKER_RADIUS, hint.z, hint.x, hint.y + MARKER_RADIUS, hint.z);
     }
     this.moving.geometry.setDrawRange(0, offset / 3);
     this.moving.geometry.attributes.position.needsUpdate = true;

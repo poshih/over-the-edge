@@ -8,9 +8,10 @@ import type { EnemyArtSettings } from './enemy-art-data';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
 import type { EnemyEvent, EnemyPhase, EnemyPose, EnemySpecies } from './enemy-types';
 import { InstanceSlots, markInstanceSlot } from './instancing';
+import { OBSTACLE_LINE } from './obstacle-line';
 
 const VISUAL = {
-  depth: 0.04, alphaCutoff: 0.5, warningColor: 0xffae53,
+  alphaCutoff: 0.5, warningColor: 0xffae53,
   warningPulseHz: 5, warningMinimum: 0.3, warningAmplitude: 0.4, hurtFlash: 0.9,
 } as const;
 const FRAME_RATE: Readonly<Record<EnemySpecies, number>> = { bird: 8, 'hollow-soldier': 6 };
@@ -237,8 +238,8 @@ export class EnemyView {
 
   private writePose(slot: number, pose: EnemyPose): void {
     const spec = ENEMY_SPECS[pose.species];
-    // Terrain fronts are at z=0, below the player/tool anchors at z>0.2.
-    this.matrix.makeScale(spec.width, spec.height, 1).setPosition(pose.x, pose.y, VISUAL.depth);
+    // Enemies collide, so they stand on the obstacle line.
+    this.matrix.makeScale(spec.width, spec.height, 1).setPosition(pose.x, pose.y, OBSTACLE_LINE);
     const values = this.mesh.instanceMatrix.array;
     const offset = slot * this.mesh.instanceMatrix.itemSize;
     if (this.matrix.elements.some((value, index) => Math.fround(value) !== values[offset + index])) {

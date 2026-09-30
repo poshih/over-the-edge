@@ -117,6 +117,8 @@ function createFigure(geometry: FigureGeometry): Figure {
 
 export class PhantomView implements ViewLayer {
   readonly root = new Group();
+  // Phantoms are characters: the course's colliders never hide them.
+  readonly pass = 'actors';
   private readonly geometry = createFigureGeometry();
   private readonly figures: readonly Figure[];
   private readonly toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);

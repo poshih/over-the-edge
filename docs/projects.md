@@ -375,7 +375,8 @@ itself), so fog looks the same with either camera and at any zoom. `camera`
 chooses the projection: the default orthographic camera (`perspective: false`) shows
 depth flat, while `perspective: true` makes nearer objects look larger and pass faster
 than distant ones, with `fieldOfView` (10-90°) the vertical view angle. Both show the
-course plane, where the physics happens, exactly the same: the perspective camera stands
+course plane, the [obstacle line](../README.md#obstacle-line) where the physics happens, exactly
+the same: the perspective camera stands
 back until the plane fills the same view height, so aiming, editing and picking are
 unchanged. `exposure` is 0.2-3; light intensities are 0-10. `sunDisc` and `backdrop` can be hidden. `character` recolours the
 procedural Mesh parts character (pot, trim, dark details, suit, skin, handle);

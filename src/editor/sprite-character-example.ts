@@ -34,16 +34,17 @@ const ARM_END_OVERLAP = 0.08;
 const ELBOW_SIZE = 0.2;
 const GLOVE_SIZE = 0.25;
 const ARM_BEND: Readonly<Record<ArmSide, -1 | 1>> = { left: 1, right: -1 };
+// Each layer's depth, measured from the pot on the obstacle line, so the layering follows the player.
 const DEPTH = {
-  leftArm: 0.3,
-  leftElbow: 0.32,
-  torso: 0.38,
-  head: 0.4,
-  rightArm: 0.46,
-  rightElbow: 0.48,
-  leftHand: 0.57,
-  rightHand: 0.59,
-  pot: 0.62,
+  leftArm: PLAYER_DEPTH.pot + 0.08,
+  leftElbow: PLAYER_DEPTH.pot + 0.1,
+  torso: PLAYER_DEPTH.pot + 0.16,
+  head: PLAYER_DEPTH.pot + 0.18,
+  rightArm: PLAYER_DEPTH.pot + 0.24,
+  rightElbow: PLAYER_DEPTH.pot + 0.26,
+  leftHand: PLAYER_DEPTH.pot + 0.35,
+  rightHand: PLAYER_DEPTH.pot + 0.37,
+  pot: PLAYER_DEPTH.pot + 0.4,
 } as const;
 const TOOL_DEPTH_OFFSET = { shaft: 0, head: 0.02 } as const;
 

@@ -11,6 +11,7 @@ import { ARM_SIDES, HEAD_GEOMETRY, SHAFT_ARTWORK_LENGTH, SPRITE_TARGET_IDS } fro
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
 import { DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
+import { OBSTACLE_LINE } from './obstacle-line';
 import type { ArmChains, ArmPose } from './arm-ik';
 import type { ArmLengths, CharacterArms } from './character-arms';
 import { DEFAULT_GRIPS, NO_GRIP_ROTATION, placeGrips, sameGripRotation } from './grips';
@@ -113,8 +114,12 @@ export interface CameraFraming extends Point {
   worldHeight: number;
 }
 
+export type ViewPass = 'course' | 'actors';
+
 export interface ViewLayer {
   readonly root: Object3D;
+  // `course` draws with the terrain; `actors` draws over it, with the characters (see GameView's passes).
+  readonly pass: ViewPass;
   update: (frame: PhysicsFrame, arms: readonly ArmPose[]) => void;
   dispose: () => void;
 }
@@ -260,11 +265,16 @@ export class GameView {
   private readonly flags = new FlagView();
   private readonly updrafts = new UpdraftView();
   private readonly renderer: WebGLRenderer;
-  private readonly scene = new Scene();
+  // Three passes, each drawn over the last with depth cleared. The course: terrain, its artwork and the scenery
+  // behind the obstacle line. The actors: the characters, phantoms, enemies and everything on or in front of the
+  // line, which the course's colliders, reaching half their depth toward the camera, must never hide. The
+  // foreground: the tool.
+  private readonly course = new Scene();
+  private readonly actors = new Scene();
   private readonly foreground = new Scene();
   private readonly orthographic = new OrthographicCamera();
   private readonly perspective = new PerspectiveCamera();
-  // The theme's camera. Either looks along -z at the course plane (z = 0) from `distance`, and
+  // The theme's camera. Either looks along -z at the course plane, the obstacle line (z = 0), from `distance`, and
   // shows it `worldHeight` tall, so the plane maps to the screen the same way in both.
   private camera: OrthographicCamera | PerspectiveCamera;
   private distance: number = VISUAL.depth;
@@ -360,7 +370,7 @@ export class GameView {
   private readonly spriteTargets = new Map<string, RigTarget>();
   private theme: GameTheme;
   private readonly fog: Fog;
-  // Each light exists in both the scene and foreground passes.
+  // Each light exists in every pass.
   private readonly lights: {
     readonly hemisphere: HemisphereLight[]; readonly ambient: AmbientLight[];
     readonly sun: DirectionalLight[]; readonly rim: DirectionalLight[];
@@ -405,9 +415,10 @@ export class GameView {
     this.renderer.info.autoReset = false;
     this.renderer.setClearColor(theme.sky);
     this.fog = new Fog(theme.fog.color);
-    this.scene.fog = this.fog;
+    this.course.fog = this.fog;
+    this.actors.fog = this.fog;
     this.foreground.fog = this.fog;
-    for (const pass of [this.scene, this.foreground]) {
+    for (const pass of [this.course, this.actors, this.foreground]) {
       const hemisphere = new HemisphereLight(theme.hemisphere.sky, theme.hemisphere.ground, theme.hemisphere.intensity);
       const ambient = new AmbientLight(theme.ambient.color, theme.ambient.intensity);
       const sunlight = new DirectionalLight(theme.sun.color, theme.sun.intensity);
@@ -424,8 +435,12 @@ export class GameView {
     this.buildScenery();
     this.decorations = options.decorations?.() ?? null;
     this.decorations?.setObjects(level.objects);
-    this.scene.add(this.terrain.root, this.flags.root, this.updrafts.root, this.enemies.root, this.labels);
-    if (this.decorations !== null) this.scene.add(this.decorations.root);
+    this.course.add(this.terrain.root, this.flags.root, this.updrafts.root);
+    this.actors.add(this.enemies.root, this.labels);
+    if (this.decorations !== null) {
+      this.course.add(this.decorations.root);
+      this.actors.add(this.decorations.front);
+    }
     this.setLabels(level.labels);
     this.flags.setObjects(level.objects);
     this.updrafts.setObjects(level.objects);
@@ -437,7 +452,7 @@ export class GameView {
     this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
     this.cursor.add(new Mesh(new CircleGeometry(0.018, 12), cursorMaterial));
     this.cursor.renderOrder = 20;
-    this.scene.add(this.cursor);
+    this.actors.add(this.cursor);
     const targetGeometry = new BufferGeometry();
     targetGeometry.setAttribute('position', new BufferAttribute(this.targetPositions, 3));
     this.targetMaterial = new LineDashedMaterial({
@@ -445,7 +460,7 @@ export class GameView {
     });
     this.targetLine = new Line(targetGeometry, this.targetMaterial);
     this.targetLine.frustumCulled = false;
-    this.scene.add(this.targetLine);
+    this.actors.add(this.targetLine);
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(canvas);
@@ -497,7 +512,7 @@ export class GameView {
 
   addLayer(layer: ViewLayer): void {
     this.layers.add(layer);
-    this.scene.add(layer.root);
+    (layer.pass === 'course' ? this.course : this.actors).add(layer.root);
   }
 
   // Adds the release's second character profile; only the active profile renders and updates.
@@ -559,7 +574,7 @@ export class GameView {
     root.name = `character-${index}:sprites`;
     const foreground = new Group();
     foreground.name = `character-${index}:foreground-sprites`;
-    const mounts: { node: Group; parent: Object3D }[] = [{ node: root, parent: this.scene }, { node: foreground, parent: this.foreground }];
+    const mounts: { node: Group; parent: Object3D }[] = [{ node: root, parent: this.actors }, { node: foreground, parent: this.foreground }];
     const coverage = new Map<string, boolean>();
     const anchors = new Map<string, SpriteAnchor>();
     let slot: CharacterSlot;
@@ -882,21 +897,21 @@ export class GameView {
     this.activeAvatar = avatarMode ? partAvatar ?? slot?.avatar ?? null : null;
     // A newly activated avatar solves arms from its own bind, never the pose the previous avatar left.
     if (this.activeAvatar !== previousAvatar) this.resetPoseHistory();
-    if (this.avatar !== null) this.attach(this.avatar.root, this.scene, this.avatarRenderer === this.avatar);
+    if (this.avatar !== null) this.attach(this.avatar.root, this.actors, this.avatarRenderer === this.avatar);
     for (const other of this.slots) {
-      if (other.avatar !== null) this.attach(other.avatar.view.root, this.scene, other.avatar.view === imported);
+      if (other.avatar !== null) this.attach(other.avatar.view.root, this.actors, other.avatar.view === imported);
       // Prop models show in every character type. The hammer draws in the tool's foreground pass;
-      // the pot draws in the main pass, so its walls hide a body inside it through the depth buffer.
+      // the pot draws in the actors pass, so its walls hide a body inside it through the depth buffer.
       for (const role of PROP_MODEL_ROLES) {
         const prop = other.props[role];
-        if (prop !== null) this.attach(prop.view.root, role === 'hammer' ? this.foreground : this.scene, other === slot && this.parts[role] === null);
+        if (prop !== null) this.attach(prop.view.root, role === 'hammer' ? this.foreground : this.actors, other === slot && this.parts[role] === null);
       }
     }
     // Library models show for every character, the hammer and pot in every character type.
-    if (this.parts.avatar !== null) this.attach(this.parts.avatar.view.root, this.scene, this.parts.avatar.view === imported);
+    if (this.parts.avatar !== null) this.attach(this.parts.avatar.view.root, this.actors, this.parts.avatar.view === imported);
     for (const role of PROP_MODEL_ROLES) {
       const part = this.parts[role];
-      if (part !== null) this.attach(part.view.root, role === 'hammer' ? this.foreground : this.scene, true);
+      if (part !== null) this.attach(part.view.root, role === 'hammer' ? this.foreground : this.actors, true);
       this.propModels[role] = part?.view ?? slot?.props[role]?.view ?? null;
     }
     for (const [id, binding] of this.bindings) {
@@ -1015,7 +1030,10 @@ export class GameView {
     for (const layer of this.layers) layer.update(frame, armPoses);
     this.renderer.info.reset();
     this.renderer.clear();
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.course, this.camera);
+    // The course's colliders reach toward the camera, so the actors draw over them with depth of their own.
+    this.renderer.clearDepth();
+    this.renderer.render(this.actors, this.camera);
     // Isolate tool depth from character artwork, including transparent GLBs and skinned sprites.
     this.renderer.clearDepth();
     this.renderer.render(this.foreground, this.camera);
@@ -1066,7 +1084,7 @@ export class GameView {
 
   project(point: Point): Point {
     const rect = this.canvas.getBoundingClientRect();
-    this.projection.set(point.x, point.y, 0).project(this.camera);
+    this.projection.set(point.x, point.y, OBSTACLE_LINE).project(this.camera);
     return {
       x: rect.left + (this.projection.x + 1) * this.width / 2,
       y: rect.top + (1 - this.projection.y) * this.height / 2,
@@ -1184,7 +1202,7 @@ export class GameView {
     this.enemies.dispose();
     for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
     this.layers.clear();
-    disposeResources(this.scene, this.foreground);
+    disposeResources(this.course, this.actors, this.foreground);
     this.bindings.clear();
     this.renderer.dispose();
   }
@@ -1320,7 +1338,7 @@ export class GameView {
     this.sunDisc.position.set(-4.2, 8, -35);
     this.sunDisc.visible = this.theme.sunDisc.visible;
     this.scenery.add(this.sunDisc);
-    this.scene.add(this.scenery);
+    this.course.add(this.scenery);
   }
 
   private buildPlayer(): void {
@@ -1344,7 +1362,7 @@ export class GameView {
     pot.add(badge);
     const potAnchor = this.visualSlot('pot', pot);
     this.playerMeshes.set('pot', potAnchor);
-    this.scene.add(potAnchor);
+    this.actors.add(potAnchor);
 
     const { chest: chestShape, neck, helmet: helmetShape, upperArm, forearm } = PLAYER_FIGURE;
     const body = new Group();
@@ -1363,7 +1381,7 @@ export class GameView {
     const reflection = solid(new BoxGeometry(0.08, 0.018, 0.01), trim, [-0.05, 1.13, 0.243]);
     characterHead.add(reflection);
     this.torso.add(this.visualSlot('character-head', characterHead));
-    this.scene.add(this.torso);
+    this.actors.add(this.torso);
     for (const side of ARM_SIDES) {
       const arm: Arm = {
         upper: this.visualSlot(`${side}-upper-arm`, solid(new CylinderGeometry(upperArm.top, upperArm.bottom, 1, 10), side === 'left' ? dark : suit)),
@@ -1372,7 +1390,7 @@ export class GameView {
         hand: this.visualSlot(`${side}-hand`, solid(new SphereGeometry(PLAYER_FIGURE.hand, 12, 8), dark)),
         pose: null,
       };
-      this.scene.add(arm.upper, arm.lower, arm.elbow, arm.hand);
+      this.actors.add(arm.upper, arm.lower, arm.elbow, arm.hand);
       this.arms.set(side, arm);
     }
     const shaftSegments: Group[] = [];
