@@ -24,8 +24,9 @@ import type { RigGeometry } from '../rig';
 import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
 import { createRangeControl } from './range-control';
 import { createServerModelPicker } from './server-model-picker';
-import { ServerModelError } from './server-models';
-import type { ServerModels } from './server-models';
+import { serverModelSettings, ServerModelError } from './server-models';
+import type { ServerModel, ServerModels } from './server-models';
+import type { PartRole } from '../model-library';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import { sectionMarkup } from './workshop-section';
 import './character-editor.css';
@@ -548,14 +549,15 @@ export function createCharacterEditor(options: {
   // is used like a GLB chosen from the computer only if the character did not change while it
   // downloaded: whatever happened in between wins. One downloads at a time.
   let downloading = false;
+  // An avatar comes with its own bone map, driver and hair when the server model carries them.
   const serverPickers = ([
-    ['avatar', (file: File) => options.state.importAvatarModel(file)],
+    ['avatar', (file: File, model: ServerModel) => options.state.importAvatarModel(file, serverModelSettings(model))],
     ['hammer', (file: File) => options.state.importPropModel('hammer', file)],
     ['pot', (file: File) => options.state.importPropModel('pot', file)],
-  ] as const).map(([role, use]) => {
+  ] as const).map(([role, use]: readonly [PartRole, (file: File, model: ServerModel) => Promise<void>]) => {
     const picker = createServerModelPicker({
       role, id: `character-${role}-server`, action: 'Use', served: options.serverModels, signal: events.signal,
-      take: async (download) => {
+      take: async (download, model) => {
         const before = options.state.snapshot();
         downloading = true;
         render();
@@ -575,7 +577,7 @@ export function createCharacterEditor(options: {
           options.onNotice(`"${file.name.replace(/\.glb$/i, '')}" was not used because the character changed while it downloaded. Choose it again to use it.`, 'error');
           return;
         }
-        await use(file);
+        await use(file, model);
       },
     });
     element(root, `.character-${role}-server`).append(picker.root);

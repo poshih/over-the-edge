@@ -23,7 +23,7 @@ export default defineConfig(async ({ mode, isPreview }) => {
   const rigRegistry = await loadAvatarRigRegistry(rigModule, mode);
   const input = requested === undefined ? null : loadProjectInput(project, requested, rigRegistry);
   const levels = isPreview === true ? [] : loadServerLevels(project);
-  const models = isPreview === true ? [] : loadServerModels(project);
+  const models = isPreview === true ? [] : loadServerModels(project, rigRegistry);
   const contentUrl = locationUrl('WORKSHOP_CONTENT_URL', process.env.WORKSHOP_CONTENT_URL ?? DEFAULT_CONTENT_URL);
   return {
     envDir: project,

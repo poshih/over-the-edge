@@ -381,6 +381,14 @@ export function validateAvatarHair(value: unknown, boneMap: AvatarBoneMap): Avat
 // The settings bound to an avatar's model: they change together with it, while hold settings (grips, arms) do not.
 export type AvatarModelSettings = Pick<AvatarModelProfile, 'boneMap' | 'driver' | 'hair'>;
 
+// An avatar model's settings as a file carries them, for example beside a server model: its bone map, driver and hair,
+// each validated as a profile's are. Whether they fit the model is checkAvatarModelSettings' (model-library.ts).
+export function validateAvatarModelSettings(value: unknown): AvatarModelSettings {
+  const settings = record(value, ['boneMap', 'driver', 'hair'], 'Avatar model settings');
+  const boneMap = validateAvatarBoneMap(settings.boneMap);
+  return Object.freeze({ boneMap, driver: validateAvatarDriver(settings.driver), hair: validateAvatarHair(settings.hair, boneMap) });
+}
+
 export function sameAvatarModelSettings(left: AvatarModelSettings, right: AvatarModelSettings): boolean {
   return sameBoneMap(left.boneMap, right.boneMap) && sameAvatarDriver(left.driver, right.driver) && sameAvatarHair(left.hair, right.hair);
 }

@@ -10,6 +10,7 @@ import type { AvatarRigRegistry } from './avatar-rig';
 import type { CharacterArms } from './character-arms';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
 import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestAvatarBoneMap } from './character-model-inspect';
+import type { CharacterModelReport } from './character-model-inspect';
 import { DEFAULT_GRIPS } from './grips';
 import type { Grips } from './grips';
 import { exactRecord, ProjectError, textValue } from './project-fields';
@@ -158,6 +159,19 @@ function entryLabel(role: PartRole, entry: LibraryEntry): string {
   return `Library ${role} "${entry.name}" (${entry.id})`;
 }
 
+// The model settings of an avatar known only by its bone map: the standard driver and no hair.
+export function mappedAvatarModel(boneMap: AvatarBoneMap): AvatarModelSettings {
+  return Object.freeze({ boneMap, driver: STANDARD_AVATAR_DRIVER, hair: NO_AVATAR_HAIR });
+}
+
+// Checks an avatar's model settings against its GLB's report as releases do: the bone map resolves against its skin,
+// the driver prepares for this exact model, and the hair's chains name its skin joints.
+export function checkAvatarModelSettings(report: CharacterModelReport, settings: AvatarModelSettings,
+  registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS): void {
+  checkAvatarRig(report, settings.boneMap, settings.driver, registry);
+  resolveAvatarHair(report, resolveAvatarJoints(report, settings.boneMap), settings.hair);
+}
+
 // Checks a library GLB exactly as release builds and loads do: MODEL_LIMITS, the typed character
 // model checks, the part's conventions, and an avatar's bone map against its skin.
 export function checkLibraryModel(
@@ -168,11 +182,7 @@ export function checkLibraryModel(
 ): void {
   try {
     const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, role);
-    if (role === 'avatar') {
-      const avatar = entry as LibraryAvatarEntry;
-      checkAvatarRig(report, avatar.boneMap, avatar.driver, registry);
-      resolveAvatarHair(report, resolveAvatarJoints(report, avatar.boneMap), avatar.hair);
-    }
+    if (role === 'avatar') checkAvatarModelSettings(report, entry as LibraryAvatarEntry, registry);
   } catch (error) {
     if (error instanceof Error) error.message = `${entryLabel(role, entry)}: ${error.message}`;
     throw error;
@@ -193,7 +203,7 @@ export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings:
   const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'avatar');
   const suggested: PartialAvatarBoneMap = suggestAvatarBoneMap(report);
   const boneMap = validateAvatarBoneMap(Object.fromEntries(AVATAR_JOINT_IDS.map((joint) => [joint, suggested[joint] ?? null])));
-  const avatar: LibraryAvatarEntry = Object.freeze({ ...entry, boneMap, driver: STANDARD_AVATAR_DRIVER, hair: NO_AVATAR_HAIR, ...settings });
+  const avatar: LibraryAvatarEntry = Object.freeze({ ...entry, ...mappedAvatarModel(boneMap), ...settings });
   checkLibraryModel('avatar', avatar, bytes);
   return avatar;
 }

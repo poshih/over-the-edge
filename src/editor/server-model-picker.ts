@@ -1,6 +1,6 @@
 import type { PartRole } from '../model-library';
 import { downloadServerModel } from './server-models';
-import type { ServerModels } from './server-models';
+import type { ServerModel, ServerModels } from './server-models';
 
 const PART_NAMES: Readonly<Record<PartRole, { readonly one: string; readonly many: string }>> = {
   avatar: { one: 'avatar', many: 'avatars' },
@@ -16,8 +16,8 @@ export interface ServerModelPicker {
 
 /**
  * Picks one of the server's models for a part. Its button hands the chosen model's download to `take`,
- * which keeps the model's destination consistent while it arrives, uses the GLB exactly like one chosen
- * from the computer, and reports failures.
+ * which keeps the model's destination consistent while it arrives, uses the GLB like one chosen from the
+ * computer, with the model's own settings when it carries them, and reports failures.
  */
 export function createServerModelPicker(options: {
   readonly role: PartRole;
@@ -26,7 +26,7 @@ export function createServerModelPicker(options: {
   // What the button does with the model: "Use" or "Add".
   readonly action: string;
   readonly served: ServerModels;
-  readonly take: (download: () => Promise<File>) => Promise<unknown>;
+  readonly take: (download: () => Promise<File>, model: ServerModel) => Promise<unknown>;
   readonly signal: AbortSignal;
 }): ServerModelPicker {
   const { role, signal } = options;
@@ -69,7 +69,7 @@ export function createServerModelPicker(options: {
     busy = true;
     render();
     try {
-      await options.take(() => downloadServerModel(options.served, model, signal));
+      await options.take(() => downloadServerModel(options.served, model, signal), model);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) throw error;
     } finally {

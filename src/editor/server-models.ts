@@ -1,9 +1,8 @@
+import type { AvatarModelSettings } from '../character-profile';
 import type { PartRole } from '../model-library';
 import { sha256Hex } from '../sha256';
 
-/** A character model this Workshop's server shares: an avatar, hammer or pot GLB. */
-export interface ServerModel {
-  readonly role: PartRole;
+interface ServerModelFields {
   // The file's name, without .glb.
   readonly name: string;
   // Where it is under the content URL: named by its SHA-256.
@@ -11,6 +10,19 @@ export interface ServerModel {
   // Known from the build: a file of any other size or digest belongs to another deployment.
   readonly bytes: number;
   readonly sha256: string;
+}
+
+/**
+ * A character model this Workshop's server shares: an avatar, hammer or pot GLB. An avatar may carry its model
+ * settings (bone map, driver and hair), checked against it when the Workshop was built; null maps its joints on use.
+ */
+export type ServerModel =
+  | ServerModelFields & { readonly role: 'avatar'; readonly settings: AvatarModelSettings | null }
+  | ServerModelFields & { readonly role: Exclude<PartRole, 'avatar'> };
+
+// The model settings a server model carries: an avatar's own, or undefined for one without them and for a hammer or pot.
+export function serverModelSettings(model: ServerModel): AvatarModelSettings | undefined {
+  return model.role === 'avatar' ? model.settings ?? undefined : undefined;
 }
 
 export interface ServerModels {

@@ -4,8 +4,8 @@ import type { VisualAlignment } from '../appearance-profile';
 import { audioSources, DEFAULT_AUDIO, validateAudio } from '../audio-settings';
 import type { AudioSettings } from '../audio-settings';
 import type { ArmIkSettings, VisualPartId } from '../character';
-import type { AvatarBoneMap } from '../character-profile';
-import { embeddedModel, NO_AVATAR_HAIR } from '../character-profile';
+import type { AvatarModelSettings } from '../character-profile';
+import { embeddedModel } from '../character-profile';
 import { checkCharacterModels } from '../character-model-check';
 import { ArtError } from '../art-types';
 import type { ArtMode } from '../art-types';
@@ -39,7 +39,6 @@ import {
 import type {
   AvatarHoldSettings, LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, ModelLibrary, PartRole,
 } from '../model-library';
-import { STANDARD_AVATAR_DRIVER } from '../avatar-driver';
 import type { AvatarRigRegistry } from '../avatar-rig';
 import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
@@ -473,10 +472,10 @@ export class ProjectSession {
     return result.file;
   }
 
-  // Adds a GLB to the model library for one part, checked like releases check it. A new avatar uses
-  // `boneMap` or maps its joints automatically, and takes the open character's grips, arm lengths
-  // and arm forward distance.
-  async addLibraryModel(role: PartRole, file: File, boneMap?: AvatarBoneMap): Promise<LibraryModel | null> {
+  // Adds a GLB to the model library for one part, checked like releases check it. A new avatar uses `model` (its bone
+  // map, driver and hair) or maps its joints automatically, and takes the open character's grips, arm lengths and arm
+  // forward distance.
+  async addLibraryModel(role: PartRole, file: File, model?: AvatarModelSettings): Promise<LibraryModel | null> {
     try {
       if (file.size === 0 || file.size > MODEL_LIMITS.bytes) {
         throw new ProjectError(`Choose a GLB file no larger than ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'models' });
@@ -492,9 +491,9 @@ export class ProjectSession {
       for (let suffix = 2; taken.has(id); suffix++) id = `${stem.slice(0, MODEL_LIBRARY_LIMITS.id - String(suffix).length - 1)}-${suffix}`;
       const base = { id, name: file.name.replace(/\.glb$/i, '').trim().slice(0, MODEL_LIBRARY_LIMITS.name) || id };
       const settings = this.characterAvatarSettings();
-      const entry = role !== 'avatar' ? base : boneMap === undefined
+      const entry = role !== 'avatar' ? base : model === undefined
         ? inSection('models', () => newAvatarEntry(bytes, base, settings))
-        : { ...base, boneMap, driver: STANDARD_AVATAR_DRIVER, hair: NO_AVATAR_HAIR, ...settings };
+        : { ...base, ...model, ...settings };
       inSection('models', () => checkLibraryModel(role, entry, bytes, this.avatarRigs));
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
       const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, bytes: blob.size, uploaded: false }];

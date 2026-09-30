@@ -21,8 +21,8 @@ import {
   validateCharacterShading,
 } from '../character-profile';
 import type {
-  AvatarBoneMap, AvatarHair, AvatarJointId, CharacterAssets, CharacterModel, CharacterModelErrorCode, CharacterShading,
-  PartialAvatarBoneMap, PropModelRole,
+  AvatarBoneMap, AvatarHair, AvatarJointId, AvatarModelSettings, CharacterAssets, CharacterModel, CharacterModelErrorCode,
+  CharacterShading, PartialAvatarBoneMap, PropModelRole,
 } from '../character-profile';
 import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
@@ -363,21 +363,25 @@ export class SpriteEditorState {
   }
 
   // Validates an imported skinned GLB, suggests a bone map and applies it when complete and valid.
-  async importAvatarModel(file: File): Promise<void> {
+  // Imports a skinned avatar GLB. `settings`, a server model's own, give it its bone map, driver and hair. Otherwise its
+  // joints map automatically: re-importing the avatar's own GLB keeps its trusted driver and its hair, and a different
+  // model starts standard, without hair, whose chains name another model's joints.
+  async importAvatarModel(file: File, settings?: AvatarModelSettings): Promise<void> {
     if (!this.canEdit()) return;
     await this.run(async () => {
       const bytes = await this.readModel(file);
       if (this.disposed) return;
       const report = inspectCharacterModel(bytes.buffer, 'avatar');
       const source = encodeModel(bytes);
-      // Re-importing the avatar's own GLB keeps its trusted driver and its hair; a different model starts standard,
-      // without hair, whose chains name another model's joints.
       const avatar = this.draft.avatar;
       const current = avatar === undefined ? null : this.model(avatar.model);
       const same = avatar !== undefined && current !== null && current.source === source;
       await this.applyAvatar({
-        name: modelName(file), source, report, boneMap: suggestAvatarBoneMap(report),
-        driver: same ? avatar.driver : STANDARD_AVATAR_DRIVER, hair: same ? avatar.hair : NO_AVATAR_HAIR,
+        name: modelName(file), source, report,
+        ...settings ?? {
+          boneMap: suggestAvatarBoneMap(report),
+          driver: same ? avatar.driver : STANDARD_AVATAR_DRIVER, hair: same ? avatar.hair : NO_AVATAR_HAIR,
+        },
       });
     });
   }

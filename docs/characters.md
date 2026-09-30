@@ -240,18 +240,29 @@ Each file is checked like a GLB imported for that part when the Workshop builds 
 development server starts, and one that fails stops it, naming the file. A model shows
 under its file name without `.glb`.
 
+**Avatar settings.** An avatar can carry its model settings in a JSON file beside it, `models/avatar/knight.json`:
+`{ "boneMap", "driver", "hair" }`, exactly as a profile's `avatar` has them.
+
+- They travel with the model, so a trusted rig strategy's calibration for those exact bytes and its
+  [hair](#hair) chains are not lost when someone picks it.
+- The file is validated and checked against its model with the Workshop's rig strategies, like a profile's avatar;
+  one that does not fit stops the build or the server, naming the file.
+- Settings beside a hammer or pot, or without a model, stop it too.
+- An avatar without the file maps its joints when picked, as before.
+
 **Picking.** Workshop / Character's **Skinned avatar (GLB)**, **One-model hammer (GLB)**
 and **Pot model (GLB)** sections list the server's models of their part. **Use server
-avatar** (hammer, pot) applies the chosen one exactly as if that file were chosen from the
-computer: an avatar maps Mixamo-style joints or opens its bone map, and the model is stored
-in the character profile. Workshop / Project / Model library offers the same models with
-**Add server avatar** (hammer, pot). The character downloads one model at a time and is not
+avatar** (hammer, pot) applies the chosen one as if that file were chosen from the computer, and the model is stored
+in the character profile. An avatar takes its settings file's bone map, driver and hair; without one, it maps
+Mixamo-style joints or opens its bone map. Workshop / Project / Model library offers the same models with
+**Add server avatar** (hammer, pot), an avatar with its settings file's bone map, driver and hair and the open
+character's hold settings. The character downloads one model at a time and is not
 held meanwhile: if it changes before the model arrives, for example through another import,
 Revert or opening a project, that change wins and the model is not used. The model library
 holds the open project while a model downloads for it, so the project cannot change first.
 
 **Delivery.** The models never ship with the Workshop. A build lists only their names,
-sizes and SHA-256 digests, and writes the files to `dist-content/models/<sha256>.glb` for a
+sizes, SHA-256 digests and avatars' settings, and writes the files to `dist-content/models/<sha256>.glb` for a
 CDN. The Workshop downloads a model only when one is picked, from `WORKSHOP_CONTENT_URL`,
 and refuses one whose size or digest differs from the build's.
 

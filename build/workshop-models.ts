@@ -2,57 +2,102 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import type { AvatarRigRegistry } from '../src/avatar-rig';
 import { inspectCharacterModel } from '../src/character-model-inspect';
-import { CharacterModelError } from '../src/character-profile';
+import type { CharacterModelReport } from '../src/character-model-inspect';
+import { CharacterModelError, validateAvatarModelSettings } from '../src/character-profile';
+import type { AvatarModelSettings } from '../src/character-profile';
 import { MODEL_LIMITS, ModelError } from '../src/model-data';
-import { PART_ROLES } from '../src/model-library';
+import { SpriteError } from '../src/sprite-fields';
+import { checkAvatarModelSettings, PART_ROLES } from '../src/model-library';
 import type { PartRole } from '../src/model-library';
 import { sendBytes, sendFile } from '../server/http';
 import { contentDirectory, contentRequest, notFound } from './release';
 
-/** The folder, relative to the repository root, whose GLBs a Workshop offers: `models/<part>/<name>.glb`. */
+/**
+ * The folder, relative to the repository root, whose GLBs a Workshop offers: `models/<part>/<name>.glb`. An avatar may
+ * carry its model settings beside it in `<name>.json`: `{ "boneMap", "driver", "hair" }`, as a profile's avatar has them.
+ */
 export const SERVER_MODELS = 'models';
+const SETTINGS_EXTENSION = '.json';
+const MODEL_FILE = /\.glb$/i;
 const MODEL_TYPE = 'model/gltf-binary';
 // Where a server model is under the Workshop's content URL: named by its SHA-256.
 const MODEL_PATH = /^models\/[0-9a-f]{64}\.glb$/;
 
-export interface ServerModelFile {
-  readonly role: PartRole;
+interface ServerModelFields {
   readonly name: string;
   readonly path: string;
   readonly sha256: string;
   readonly bytes: Uint8Array<ArrayBuffer>;
 }
 
+// Only an avatar has model settings: its own, or null to map its joints when it is used.
+export type ServerModelFile =
+  | ServerModelFields & { readonly role: 'avatar'; readonly settings: AvatarModelSettings | null }
+  | ServerModelFields & { readonly role: Exclude<PartRole, 'avatar'> };
+
+// An avatar's settings file, validated and checked against its model like a profile's avatar; null without one.
+function avatarSettings(path: string, file: string, report: CharacterModelReport, registry: AvatarRigRegistry): AvatarModelSettings | null {
+  if (!existsSync(path)) return null;
+  try {
+    const settings = validateAvatarModelSettings(JSON.parse(readFileSync(path, 'utf8')));
+    checkAvatarModelSettings(report, settings, registry);
+    return settings;
+  } catch (error) {
+    // SpriteError covers the profile validators, the rig strategies' refusals and the skin's CharacterModelError.
+    if (error instanceof SyntaxError || error instanceof SpriteError) {
+      throw new Error(`${file}: ${error.message}`, { cause: error });
+    }
+    throw error;
+  }
+}
+
 /**
  * The server models: every `.glb` in the avatar, hammer and pot folders of the models folder, in name
- * order, each checked like a GLB imported for that part. None without the folder.
+ * order, each checked like a GLB imported for that part, and an avatar's settings file with the
+ * Workshop's rig strategies (`registry`). None without the folder.
  */
-export function loadServerModels(root: string): ServerModelFile[] {
+export function loadServerModels(root: string, registry: AvatarRigRegistry): ServerModelFile[] {
   const models: ServerModelFile[] = [];
   for (const role of PART_ROLES) {
     const directory = join(root, SERVER_MODELS, role);
-    let names: string[];
+    let files: string[];
     try {
-      names = readdirSync(directory, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && /\.glb$/i.test(entry.name)).map((entry) => entry.name).sort();
+      files = readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
       throw error;
     }
+    const names = files.filter((name) => MODEL_FILE.test(name));
+    const stems = new Set(names.map((name) => name.replace(MODEL_FILE, '')));
+    for (const name of files.filter((entry) => entry.endsWith(SETTINGS_EXTENSION))) {
+      const file = `${SERVER_MODELS}/${role}/${name}`;
+      if (role !== 'avatar') throw new Error(`${file}: only avatars carry model settings.`);
+      if (!stems.has(name.slice(0, -SETTINGS_EXTENSION.length))) throw new Error(`${file} has no model: add its .glb or remove it.`);
+    }
     for (const name of names) {
+      const stem = name.replace(MODEL_FILE, '');
       const file = `${SERVER_MODELS}/${role}/${name}`;
       const path = join(directory, name);
       if (statSync(path).size > MODEL_LIMITS.bytes) throw new Error(`${file} exceeds ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`);
       const bytes = new Uint8Array(readFileSync(path));
+      let report: CharacterModelReport;
       try {
-        inspectCharacterModel(bytes.buffer, role);
+        report = inspectCharacterModel(bytes.buffer, role);
       } catch (error) {
         if (error instanceof CharacterModelError || error instanceof ModelError) throw new Error(`${file}: ${error.message}`, { cause: error });
         throw error;
       }
       const sha256 = createHash('sha256').update(bytes).digest('hex');
-      models.push({ role, name: name.replace(/\.glb$/i, ''), path: `models/${sha256}.glb`, sha256, bytes });
+      const fields = { name: stem, path: `models/${sha256}.glb`, sha256, bytes };
+      if (role !== 'avatar') {
+        models.push({ ...fields, role });
+        continue;
+      }
+      const settingsName = `${stem}${SETTINGS_EXTENSION}`;
+      const settings = avatarSettings(join(directory, settingsName), `${SERVER_MODELS}/${role}/${settingsName}`, report, registry);
+      models.push({ ...fields, role, settings });
     }
   }
   return models;
@@ -74,7 +119,10 @@ export function workshopModels(options: { readonly models: readonly ServerModelF
     resolveId(id) { if (id === module) return resolved; },
     load(id) {
       if (id !== resolved) return;
-      const models = options.models.map(({ role, name, path, sha256, bytes }) => ({ role, name, path, sha256, bytes: bytes.byteLength }));
+      const models = options.models.map((model) => ({
+        role: model.role, name: model.name, path: model.path, sha256: model.sha256, bytes: model.bytes.byteLength,
+        ...(model.role === 'avatar' ? { settings: model.settings } : {}),
+      }));
       return `export default ${JSON.stringify({ contentUrl: options.contentUrl, models })};`;
     },
     writeBundle(output) {

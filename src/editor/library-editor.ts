@@ -1,16 +1,17 @@
 import { inspectCharacterModel, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
 import type { CharacterModelReport } from '../character-model-inspect';
 import { AVATAR_JOINT_IDS, CharacterModelError } from '../character-profile';
-import type { AvatarBoneMap, AvatarJointId } from '../character-profile';
+import type { AvatarBoneMap, AvatarJointId, AvatarModelSettings } from '../character-profile';
 import { element, setText } from '../dom';
 import { MODEL_LIMITS } from '../model-data';
-import { MODEL_LIBRARY_LIMITS, PART_ROLES } from '../model-library';
+import { mappedAvatarModel, MODEL_LIBRARY_LIMITS, PART_ROLES } from '../model-library';
 import type { PartRole } from '../model-library';
 import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
 import { LibraryPreview } from './library-preview';
 import type { PartModelHost } from './library-preview';
 import type { LibraryModel, ProjectSession } from './project-session';
 import { createServerModelPicker } from './server-model-picker';
+import { serverModelSettings } from './server-models';
 import type { ServerModels } from './server-models';
 
 const ROLE_LABELS: Readonly<Record<PartRole, { one: string; many: string }>> = {
@@ -123,7 +124,12 @@ export function createLibraryEditor(options: {
 
   const library = (): readonly LibraryModel[] => session.snapshot().library;
 
-  async function add(role: PartRole, file: File): Promise<void> {
+  // `model`, a server avatar's own settings, adds it as it is; otherwise an avatar maps its joints.
+  async function add(role: PartRole, file: File, model?: AvatarModelSettings): Promise<void> {
+    if (model !== undefined) {
+      await commitAdd(file, model);
+      return;
+    }
     if (role === 'avatar') {
       let report: CharacterModelReport;
       try {
@@ -142,15 +148,15 @@ export function createLibraryEditor(options: {
         render();
         return;
       }
-      await commitAdd(file, boneMap as AvatarBoneMap);
+      await commitAdd(file, mappedAvatarModel(boneMap as AvatarBoneMap));
       return;
     }
     const added = await session.addLibraryModel(role, file);
     if (added !== null) options.onNotice(`Added ${role} "${added.name}" (${added.id}) to the model library.`, 'info');
   }
 
-  async function commitAdd(file: File, boneMap: AvatarBoneMap): Promise<LibraryModel | null> {
-    const added = await session.addLibraryModel('avatar', file, boneMap);
+  async function commitAdd(file: File, model: AvatarModelSettings): Promise<LibraryModel | null> {
+    const added = await session.addLibraryModel('avatar', file, model);
     if (added !== null) options.onNotice(`Added avatar "${added.name}" (${added.id}) to the model library.`, 'info');
     return added;
   }
@@ -180,7 +186,7 @@ export function createLibraryEditor(options: {
     render();
     if (next.issue !== null) return;
     if (next.target.kind === 'add') {
-      const added = await commitAdd(next.target.file, boneMap as AvatarBoneMap);
+      const added = await commitAdd(next.target.file, mappedAvatarModel(boneMap as AvatarBoneMap));
       if (added !== null && editing === next) editing = { ...next, target: { kind: 'entry', key: added.key } };
     } else {
       const key = next.target.key;
@@ -298,9 +304,9 @@ export function createLibraryEditor(options: {
     // A server model downloads while the open project is held, then is added like a GLB chosen from the computer.
     element(root, `.project-library-part[data-role="${role}"] .project-library-server`).append(createServerModelPicker({
       role, id: `project-library-${role}-server`, action: 'Add', served: options.serverModels, signal: events.signal,
-      take: async (download) => {
+      take: async (download, model) => {
         const file = await session.download(`Downloading a server ${ROLE_LABELS[role].one}`, download);
-        if (file !== null) await add(role, file);
+        if (file !== null) await add(role, file, serverModelSettings(model));
       },
     }).root);
     const file = element<HTMLInputElement>(root, `#project-library-${role}-file`);
