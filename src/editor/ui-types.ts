@@ -1,18 +1,16 @@
 import type { InputMode, UiAction, UiActionOptions } from '../config';
 import type { GameSettings } from '../game-settings';
 import type { HudSettings } from '../hud';
-import type { VideoPlayback } from '../trigger-events';
 import type { GameHudState } from './game-ui';
 import type { ProjectSaveTarget } from './project-save';
 import type { ServerCopies } from './server-copies';
 
 export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
-export type EditorAction = UiAction | 'debug' | 'videos';
+export type EditorAction = UiAction | 'debug';
 export type WorkshopTab = 'project' | 'physics' | 'character' | 'appearance' | 'sprites' | 'level';
 
 export interface HudState extends GameHudState {
   debug: boolean;
-  videos: VideoPlayback;
   // Null while attempts start where the designer placed the player.
   practice: PracticeId | null;
   contacts: number;

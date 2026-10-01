@@ -182,7 +182,7 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
       sourceHelp.className = 'level-help';
       sourceHelp.textContent = 'This URL is saved and exported with the level, in plain text. Use a public HTTP(S) '
         + 'video URL or a /site-relative path that anyone with the level can reach — not a private upload or a '
-        + 'URL that embeds a login/credential.';
+        + 'URL that embeds a login/credential. The video plays in the game; the Workshop skips it while you test.';
       item.append(source, sourceHelp);
     } else if (action.type === 'play-sound') {
       const source = document.createElement('label');

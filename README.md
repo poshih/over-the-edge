@@ -335,11 +335,12 @@ is not captured), type part of a name, then choose a result with Enter or a clic
 its tab, opens its sections, scrolls to it and focuses it. Results show where each
 control lives, for example **Physics › Materials**; controls that are currently
 disabled are marked **unavailable now**. Escape clears the search; a second Escape
-closes the Workshop. **Overlay** (D), **Videos** and **Recenter camera** (C) stay in the
-Workshop header on every tab. **Videos** chooses whether trigger videos play while you
-test: switched off, a **Play video** event is skipped at once and its trigger goes on, so
-an intro film does not interrupt every attempt. The Workshop remembers the choice in this
-browser; a game-only release always plays videos.
+closes the Workshop. **Overlay** (D) and **Recenter camera** (C) stay in the
+Workshop header on every tab.
+
+The Workshop never plays trigger videos: a **Play video** event is skipped at once and its
+trigger goes on, so an intro film never interrupts testing. A game-only release plays them
+(`npm run dev:game`).
 
 ## Physics architecture
 
@@ -644,8 +645,9 @@ For bundled media, put the file in `public/media/` and use a path such as
 uploading them. The browser must support the file's codec.
 Autoplay with sound may require a user gesture: the overlay offers **Play video**
 when blocked. It always fills the game window; native browser fullscreen is
-requested through a user-operated fullscreen control. In the Workshop, the header's
-**Videos** toggle skips every video while you test (see [Finding Workshop controls](#finding-workshop-controls)).
+requested through a user-operated fullscreen control. The Workshop skips every video while
+you test (see [Finding Workshop controls](#finding-workshop-controls)); videos play in the
+game-only release.
 
 Level JSON uses **schema version 4**, with typed terrain, start, trigger and enemy
 objects. A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.

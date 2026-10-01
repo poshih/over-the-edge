@@ -241,7 +241,7 @@ export function createUI(options: UiOptions): GameUi {
   }, listen);
   workshopClose.addEventListener('click', () => setWorkshop('closed'), listen);
   desktop.addEventListener('change', () => options.onWorkshopChange(workshopState()), listen);
-  for (const action of ['debug', 'videos', 'recenter'] as const) {
+  for (const action of ['debug', 'recenter'] as const) {
     element<HTMLButtonElement>(root, `[data-action="${action}"]`).addEventListener('click', (event) => {
       options.onAction(action, { inputMode: event instanceof PointerEvent ? inputModeForPointer(event.pointerType) : undefined });
     }, listen);
@@ -262,7 +262,6 @@ export function createUI(options: UiOptions): GameUi {
   const hingeMeter = element<HTMLMeterElement>(root, '#hinge-effort');
   const sliderMeter = element<HTMLMeterElement>(root, '#slider-effort');
   const debugButton = element<HTMLButtonElement>(root, '[data-action="debug"]');
-  const videosButton = element<HTMLButtonElement>(root, '[data-action="videos"]');
   function update(state: HudState): void {
     hud.update(state);
     setText(contacts, `${state.contacts} ${state.contacts === 1 ? 'contact' : 'contacts'}`);
@@ -271,7 +270,6 @@ export function createUI(options: UiOptions): GameUi {
     if (hingeMeter.value !== state.hingeLoad) hingeMeter.value = state.hingeLoad;
     if (sliderMeter.value !== state.sliderLoad) sliderMeter.value = state.sliderLoad;
     setPressed(debugButton, state.debug);
-    setPressed(videosButton, state.videos === 'play');
     for (const practice of PRACTICES) {
       const button = practiceButtons.get(practice.id);
       if (!button) throw new Error(`Missing practice button: ${practice.id}`);

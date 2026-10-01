@@ -46,7 +46,7 @@ export class Game {
   private readonly enemyPhases = new Map<string, EnemyPhase>();
   private character: CharacterState = { armIk: DEFAULT_ARM_IK };
   private messageStyle: MessageStyle;
-  private videos: VideoPlayback;
+  private readonly videos: VideoPlayback;
   private stopped = false;
   private started = false;
   private animationFrame = 0;
@@ -72,7 +72,7 @@ export class Game {
     decorations?: (() => DecorationView) | null;
     // How message events appear; toasts by default.
     messageStyle?: MessageStyle;
-    // Whether play-video events play or are skipped; they play by default.
+    // Whether play-video events play or are skipped; they play by default. The Workshop skips them.
     videos?: VideoPlayback;
     // Streams authored video sources; by default sources are URLs.
     media?: MediaHost;
@@ -243,9 +243,6 @@ export class Game {
 
   // Applies to future message events; toasts already showing or queued finish as toasts.
   setMessageStyle(style: MessageStyle): void { this.messageStyle = style; }
-
-  // Applies to future play-video events; a video already showing plays on.
-  setVideos(videos: VideoPlayback): void { this.videos = videos; }
 
   setPause(options: { reason: string; paused: boolean }): void {
     if (options.paused) this.pauseReasons.add(options.reason);

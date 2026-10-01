@@ -19,7 +19,6 @@ import { createLevelEditor } from './level-editor';
 import { LevelState } from './level-state';
 import { PRACTICES, practiceById } from './practices';
 import { createUI } from './ui';
-import { rememberedVideos, rememberVideos } from './workshop-videos';
 import { createSpriteEditor } from './sprite-editor';
 import type { EditorAction, PracticeId, WorkshopState } from './ui-types';
 import { AudioDirector } from '../audio';
@@ -48,8 +47,6 @@ const opensProject = publishedProject !== null;
 const client = new ProjectClient();
 const level = new LevelState(DEFAULT_LEVEL);
 let debug = false;
-// Whether trigger videos play while the designer tests, as the designer last chose in this browser.
-let videos = rememberedVideos();
 // Where attempts start: a starting point, or where the designer placed the player in the Level tab to
 // test part of the course. Placing the player never moves the level's own start.
 let origin: PracticeId | PlayerSpawn = 'start';
@@ -67,7 +64,9 @@ const game = new Game({
   characterModels: createCharacterModelLoader(),
   decorations: createDecorationView,
   media,
-  videos,
+  // The Workshop never plays trigger videos: each is skipped at once and its trigger goes on, so testing
+  // is never interrupted. Releases play them.
+  videos: 'skip',
   avatarRigs,
   onCue: (cue) => audio.handle(cue),
   onAction: perform,
@@ -261,12 +260,6 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
     collisionOverlay.setMode(debug ? 'visible' : 'hidden');
     return;
   }
-  if (action === 'videos') {
-    videos = videos === 'play' ? 'skip' : 'play';
-    rememberVideos(videos);
-    game.setVideos(videos);
-    return;
-  }
   if (action === 'reset') {
     restart();
     return;
@@ -326,7 +319,7 @@ window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
 void project.start();
 game.start((state) => {
-  ui.update({ ...state, debug, videos, practice: practice() });
+  ui.update({ ...state, debug, practice: practice() });
   spriteEditor.updatePreview();
   audio.setPaused(state.paused);
 });
