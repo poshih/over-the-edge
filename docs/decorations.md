@@ -47,8 +47,9 @@ The course itself is a slab around the [obstacle line](../README.md#obstacle-lin
 object reaches half its depth behind the line and half in front, and nothing lies beyond that unless
 you put something there. A prop standing on a collider must stand within that collider's depth, and
 one behind the path must also keep clear of the pot, which reaches 0.5 m behind the line. A
-decoration behind the line draws with the course; one on or in front of it draws with the
-characters, over the course. Seen
+decoration behind the line draws with the course; one on or in front of it draws after the
+characters and their arms, hiding an arm only where it is nearer but always covering the body, so
+keep it clear of the jar, which reaches 0.5 m toward the camera. Seen
 through a perspective camera from above, a tree standing on empty ground behind the course
 seems to float as the player climbs past it. Give background scenery ground to stand on with
 **Rock shelf** models, whose tops reach 30 m back, or stand it on hills and crags of its own.

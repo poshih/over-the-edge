@@ -296,6 +296,8 @@ export class CharacterShadingView {
     hull.name = `${mesh.name || 'mesh'}:outline`;
     hull.userData.characterOutline = true;
     hull.frustumCulled = mesh.frustumCulled;
+    // An arm's outline draws in the arms' pass, with the arm.
+    hull.layers.mask = mesh.layers.mask;
     hull.morphTargetInfluences = mesh.morphTargetInfluences;
     hull.morphTargetDictionary = mesh.morphTargetDictionary;
     hull.raycast = () => {};

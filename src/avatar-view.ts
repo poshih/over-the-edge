@@ -3,6 +3,7 @@ import type { Quaternion } from 'three';
 import { ARM_GEOMETRY, ARM_LENGTH } from './arm-ik';
 import type { ArmPose } from './arm-ik';
 import { AVATAR_BIND, AVATAR_JOINTS, createAvatarGeometry } from './avatar-geometry';
+import { ARM_LAYER } from './arm-layer';
 import { handFrame, limbFrame } from './avatar-rig-math';
 import { ARM_SIDES } from './character';
 import type { ArmSide } from './character';
@@ -48,7 +49,10 @@ function armBones(side: ArmSide): AvatarArm {
 export class AvatarView {
   readonly root = new Group();
   private readonly material = new MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
-  private readonly mesh = new SkinnedMesh(createAvatarGeometry(), this.material);
+  private readonly geometry = createAvatarGeometry();
+  private readonly mesh = new SkinnedMesh(this.geometry.body, this.material);
+  // The arms' surface, on the same skeleton, drawn over the body (see ARM_LAYER).
+  private readonly armMesh = new SkinnedMesh(this.geometry.arms, this.material);
   private readonly skeleton: Skeleton;
   private readonly head = bone('avatar-head');
   private readonly arms: Record<ArmSide, AvatarArm> = { left: armBones('left'), right: armBones('right') };
@@ -69,6 +73,9 @@ export class AvatarView {
     this.root.matrixAutoUpdate = false;
     this.mesh.name = 'workwear-avatar-surface';
     this.mesh.frustumCulled = false;
+    this.armMesh.name = 'workwear-avatar-arms';
+    this.armMesh.frustumCulled = false;
+    this.armMesh.layers.set(ARM_LAYER);
     const body = bone('avatar-body');
     this.head.matrix.makeTranslation(0, AVATAR_BIND.headY, 0);
     body.add(this.head);
@@ -84,11 +91,12 @@ export class AvatarView {
       bones[indices.hand] = arm.hand;
     }
     this.mesh.add(body);
-    this.root.add(this.mesh);
+    this.root.add(this.mesh, this.armMesh);
     // Capture inverse bind transforms from the complete rest hierarchy, once.
     this.root.updateMatrixWorld(true);
     this.skeleton = new Skeleton(bones);
     this.mesh.bind(this.skeleton, this.mesh.matrixWorld);
+    this.armMesh.bind(this.skeleton, this.mesh.bindMatrix);
   }
 
   // `turns` rotates each glove about its grip in world space, or is null for a glove that keeps the tool's frame.
@@ -133,12 +141,16 @@ export class AvatarView {
     }
   }
 
-  inspect(): { kind: 'skinned-upper-body'; meshes: number; triangles: number; vertices: number; bones: number; materials: number } {
+  inspect(): {
+    kind: 'skinned-upper-body'; meshes: number; triangles: number; armTriangles: number; vertices: number; bones: number; materials: number;
+  } {
+    const armTriangles = this.geometry.arms.index!.count / 3;
     return {
       kind: 'skinned-upper-body',
-      meshes: 1,
-      triangles: this.mesh.geometry.index!.count / 3,
-      vertices: this.mesh.geometry.getAttribute('position').count,
+      meshes: 2,
+      triangles: this.geometry.body.index!.count / 3 + armTriangles,
+      armTriangles,
+      vertices: this.geometry.body.getAttribute('position').count,
       bones: this.skeleton.bones.length,
       materials: 1,
     };
@@ -147,7 +159,9 @@ export class AvatarView {
   dispose(): void {
     this.root.removeFromParent();
     this.root.clear();
-    this.mesh.geometry.dispose();
+    // The parts share their vertex buffers; disposing both frees them and each part's index.
+    this.geometry.body.dispose();
+    this.geometry.arms.dispose();
     this.material.dispose();
     this.skeleton.dispose();
   }

@@ -97,6 +97,14 @@ clip it. The pot's bottom is 1.22 m below the fitted shoulders; anything lower,
 such as long legs, shows beneath it. A [pot model](#pot-model) can be shaped to
 suit the body.
 
+The arms draw over the rest of the avatar and the pot, so they never clip into the
+body, jar or head (see [arms over the body](../README.md#custom-visuals)). A
+triangle is the arms' when at least two of its vertices are skinned mostly to the
+arm joints or to joints that follow them, such as fingers and twist bones; a rigid
+mesh attached below an arm joint is the arms' too. A clavicle follows the body, so
+the shoulder stays with the torso. The arms keep the model's materials and vertex
+buffers, and the model is restored when the avatar is replaced.
+
 ### Hair
 
 An imported avatar can swing chains of its own skin joints as spring-bone hair, with the
@@ -198,7 +206,7 @@ Pick a **Pot GLB** to replace the pot. The model follows the physical pot body
 rigidly, without stretching, in every character type, including 2D, on the
 [obstacle line](../README.md#obstacle-line). It draws in the actors pass with the body, so its front
 wall hides the lower part of a body inside it through the depth buffer, while the body shows above
-the rim; neither is ever hidden by the course.
+the rim; neither is ever hidden by the course, and a 3D character's arms draw over both.
 **Use default pot** restores the procedural pot.
 
 Model it in metres with +Y up, its origin at the bottom-centre of the pot, and its

@@ -794,12 +794,16 @@ draws on the line too. The hammer and hands are drawn in front of the chest (see
 [arm forward distance](#custom-visuals)), so in perspective the hammer model sits slightly off its
 outline while its contacts stay on the line.
 
-Colliders reach toward the camera, so the view draws in three passes, each over the last: the course
-(terrain, its artwork and the decorations behind the line), then the actors (the characters, phantoms,
-enemies, course labels and the decorations on or in front of the line), then the hammer. A character
-whose head or arms overlap a collider on screen, such as under a low roof, is never hidden by it. Glass
-(`KHR_materials_transmission`) in a model drawn with the actors or the hammer, such as a pot, an avatar
-or a decoration in front of the line, refracts only its own pass and the sky colour, not the course.
+Colliders reach toward the camera, so the view draws in passes, each over the last: the course
+(terrain, its artwork and the decorations behind the line); then the actors (the characters, phantoms
+and enemies); then a 3D character's [arms over its body](#custom-visuals); then the front (the
+decorations on or in front of the line, the aim cursor and line, course labels and the collision
+overlay); and last the hammer. A character whose head or arms overlap a collider on screen, such as
+under a low roof, is never hidden by it. A decoration in front of the line hides the arms only where
+it is nearer, but always draws over the body and the other actors, so keep it clear of the jar, which
+reaches 0.5 m toward the camera. Glass (`KHR_materials_transmission`) in a model drawn after the
+course, such as a pot, an avatar or a decoration in front of the line, refracts only its own pass and
+the sky colour, not the course.
 
 Decorations never collide and may sit at any depth. A prop standing on a collider must stand within
 that collider's depth, and one behind the path must also keep clear of the pot, which reaches 0.5 m
@@ -911,6 +915,15 @@ jar's rim, with the arms and head following; see [waist lean](docs/sprites.md#wa
 The pot keeps its own depth. This affects only presentation, not hammer length,
 aim, contacts, or physics. Imported models and all hammer sprite bindings use
 the same foreground pass.
+
+A 3D character's arms and hands always draw over its own body, jar and head. The camera sees the
+character from the front, where arms reaching for a hammer held in front of the chest would otherwise
+clip into them, so the view draws the body first and then the arms over it, with depth of their own.
+That covers the mesh-part arms and their Appearance imports, the built-in avatar's arms, and an
+imported avatar's arm surfaces: its triangles skinned mostly to the arm joints or to joints that follow
+them, such as fingers and twist bones, and any rigid mesh attached below an arm joint (see
+[avatar motion](docs/characters.md#motion)). The hammer still draws over the hands. 2D characters
+keep their authored layer depths.
 
 For a complete starting point, choose **Load complete 2D example** in Character.
 **Paper Climber** supplies custom PNG artwork for the body, pot, arms, hands,

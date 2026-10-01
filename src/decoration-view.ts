@@ -53,7 +53,7 @@ interface Instance {
   slot: number;
 }
 
-// Whether a decoration stands on or in front of the obstacle line, where it draws with the characters.
+// Whether a decoration stands on or in front of the obstacle line, where it draws after the characters.
 function inFront(object: DecorationObject): boolean {
   return object.z >= OBSTACLE_LINE;
 }
@@ -90,7 +90,7 @@ export function decorationMatrix(object: DecorationObject, model: DecorationMesh
  * Idle frames do no work. A preview mesh shows a placement without changing the level. A mesh
  * release's course artwork can replace any model's placeholder with the game's own GLB. Decorations
  * behind the obstacle line draw in `root`, with the course; those on or in front of it in `front`,
- * with the characters, which the course's colliders never hide.
+ * after the characters and their arms, which the course's colliders never hide.
  */
 export class DecorationView {
   readonly root = new Group();

@@ -18,8 +18,8 @@ const DYNAMIC_EDGES = 64;
 // 3D points, like the arms.
 export class CollisionOverlay implements ViewLayer {
   readonly root = new Group();
-  // Over the course and the characters; the tool still draws on top.
-  readonly pass = 'actors';
+  // Over the course, the characters and their arms; the tool still draws on top.
+  readonly pass = 'front';
   private readonly material = new LineBasicMaterial({ color: 0x35ffbe, depthTest: false, transparent: true, opacity: 0.9 });
   private readonly fixed = new LineSegments(new BufferGeometry(), this.material);
   private readonly moving = new LineSegments(new BufferGeometry(), this.material);

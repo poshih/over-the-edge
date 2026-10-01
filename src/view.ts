@@ -11,6 +11,7 @@ import { ARM_SIDES, HEAD_GEOMETRY, SHAFT_ARTWORK_LENGTH, SPRITE_TARGET_IDS } fro
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
 import { DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
+import { ARM_LAYER } from './arm-layer';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { ArmChains, ArmPose } from './arm-ik';
 import type { ArmLengths, CharacterArms } from './character-arms';
@@ -114,11 +115,12 @@ export interface CameraFraming extends Point {
   worldHeight: number;
 }
 
-export type ViewPass = 'course' | 'actors';
+export type ViewPass = 'course' | 'actors' | 'front';
 
 export interface ViewLayer {
   readonly root: Object3D;
-  // `course` draws with the terrain; `actors` draws over it, with the characters (see GameView's passes).
+  // `course` draws with the terrain; `actors` over it, with the characters; `front` over the characters and
+  // their arms, with the marks (see GameView's passes).
   readonly pass: ViewPass;
   update: (frame: PhysicsFrame, arms: readonly ArmPose[]) => void;
   dispose: () => void;
@@ -207,6 +209,15 @@ interface ModelHolding {
 export const MAX_CHARACTER_PROFILES = 2;
 const PROP_PARTS: ReadonlySet<VisualPartId> = new Set(['pot', 'hammer-shaft', 'hammer-head']);
 const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer-head']);
+const ARM_PARTS: ReadonlySet<VisualPartId> = new Set(ARM_SIDES.flatMap((side) =>
+  [`${side}-upper-arm`, `${side}-forearm`, `${side}-elbow`, `${side}-hand`] as const));
+// three.js's default render layer, which everything but a 3D character's arms is on.
+const DEFAULT_LAYER = 0;
+
+// Puts a mesh-part arm visual, the built-in one or an Appearance import, on the arms' render layer.
+function onArmLayer(root: Object3D): void {
+  root.traverse((object) => { object.layers.set(ARM_LAYER); });
+}
 const PROP_VIEW_NAMES: Readonly<Record<PropModelRole, string>> = { hammer: 'one-model-hammer', pot: 'profile-pot-model' };
 const DEFAULT_PRESENTATION: CharacterPresentation = Object.freeze({
   characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
@@ -265,13 +276,18 @@ export class GameView {
   private readonly flags = new FlagView();
   private readonly updrafts = new UpdraftView();
   private readonly renderer: WebGLRenderer;
-  // Three passes, each drawn over the last with depth cleared. The course: terrain, its artwork and the scenery
-  // behind the obstacle line. The actors: the characters, phantoms, enemies and everything on or in front of the
-  // line, which the course's colliders, reaching half their depth toward the camera, must never hide. The
-  // foreground: the tool.
+  // Passes, each drawn over the last. The course: terrain, its artwork and the scenery behind the obstacle line.
+  // Then, with depth cleared, the actors: the characters, phantoms and enemies, which the course's colliders,
+  // reaching half their depth toward the camera, must never hide; a 3D character's arms (ARM_LAYER) are left out.
+  // Then, with depth cleared again, those arms, so they never clip into the body, jar or head, and the front:
+  // decorations on or in front of the line, hidden only by the arms, and the marks that ignore depth (aim cursor
+  // and line, course labels, editor overlays). Last, with depth cleared, the foreground: the tool.
   private readonly course = new Scene();
   private readonly actors = new Scene();
+  private readonly front = new Scene();
   private readonly foreground = new Scene();
+  // Whether the actors' arms pass runs: the active character has 3D arms. 2D characters keep their authored depths.
+  private armsOverBody = UPPER_BODY_3D[DEFAULT_PRESENTATION.characterRiggingType];
   private readonly orthographic = new OrthographicCamera();
   private readonly perspective = new PerspectiveCamera();
   // The theme's camera. Either looks along -z at the course plane, the obstacle line (z = 0), from `distance`, and
@@ -415,16 +431,16 @@ export class GameView {
     this.renderer.info.autoReset = false;
     this.renderer.setClearColor(theme.sky);
     this.fog = new Fog(theme.fog.color);
-    this.course.fog = this.fog;
-    this.actors.fog = this.fog;
-    this.foreground.fog = this.fog;
-    for (const pass of [this.course, this.actors, this.foreground]) {
+    for (const pass of [this.course, this.actors, this.front, this.foreground]) {
+      pass.fog = this.fog;
       const hemisphere = new HemisphereLight(theme.hemisphere.sky, theme.hemisphere.ground, theme.hemisphere.intensity);
       const ambient = new AmbientLight(theme.ambient.color, theme.ambient.intensity);
       const sunlight = new DirectionalLight(theme.sun.color, theme.sun.intensity);
       sunlight.position.set(-5, 12, 10);
       const rimLight = new DirectionalLight(theme.rim.color, theme.rim.intensity);
       rimLight.position.set(8, 3, -4);
+      // The actors' lights also light their arms, which draw in a pass of their own.
+      if (pass === this.actors) for (const light of [hemisphere, ambient, sunlight, rimLight]) light.layers.enable(ARM_LAYER);
       pass.add(hemisphere, ambient, sunlight, rimLight);
       this.lights.hemisphere.push(hemisphere);
       this.lights.ambient.push(ambient);
@@ -436,10 +452,11 @@ export class GameView {
     this.decorations = options.decorations?.() ?? null;
     this.decorations?.setObjects(level.objects);
     this.course.add(this.terrain.root, this.flags.root, this.updrafts.root);
-    this.actors.add(this.enemies.root, this.labels);
+    this.actors.add(this.enemies.root);
+    this.front.add(this.labels);
     if (this.decorations !== null) {
       this.course.add(this.decorations.root);
-      this.actors.add(this.decorations.front);
+      this.front.add(this.decorations.front);
     }
     this.setLabels(level.labels);
     this.flags.setObjects(level.objects);
@@ -452,7 +469,7 @@ export class GameView {
     this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
     this.cursor.add(new Mesh(new CircleGeometry(0.018, 12), cursorMaterial));
     this.cursor.renderOrder = 20;
-    this.actors.add(this.cursor);
+    this.front.add(this.cursor);
     const targetGeometry = new BufferGeometry();
     targetGeometry.setAttribute('position', new BufferAttribute(this.targetPositions, 3));
     this.targetMaterial = new LineDashedMaterial({
@@ -460,7 +477,7 @@ export class GameView {
     });
     this.targetLine = new Line(targetGeometry, this.targetMaterial);
     this.targetLine.frustumCulled = false;
-    this.actors.add(this.targetLine);
+    this.front.add(this.targetLine);
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(canvas);
@@ -512,7 +529,8 @@ export class GameView {
 
   addLayer(layer: ViewLayer): void {
     this.layers.add(layer);
-    (layer.pass === 'course' ? this.course : this.actors).add(layer.root);
+    const passes: Readonly<Record<ViewPass, Scene>> = { course: this.course, actors: this.actors, front: this.front };
+    passes[layer.pass].add(layer.root);
   }
 
   // Adds the release's second character profile; only the active profile renders and updates.
@@ -881,6 +899,7 @@ export class GameView {
     const partAvatar = avatarMode ? this.parts.avatar : null;
     const presentation = partAvatar === null ? character : { ...character, ...partAvatar.settings };
     const upperBody3d = UPPER_BODY_3D[type];
+    this.armsOverBody = upperBody3d;
     this.toolDepth = getToolDepth(upperBody3d ? presentation.armForwardDistance : DEFAULT_ARM_FORWARD_DISTANCE);
     const maxWaistLean = upperBody3d ? presentation.waistLean : 0;
     // A new lean applies at once, also while time stands still, rather than easing in from the previous one.
@@ -1034,6 +1053,21 @@ export class GameView {
     // The course's colliders reach toward the camera, so the actors draw over them with depth of their own.
     this.renderer.clearDepth();
     this.renderer.render(this.actors, this.camera);
+    // The arms and the front draw over the actors, with depth of their own: the front's decorations are hidden by
+    // nothing but the arms, and never by a phantom's translucent depth.
+    this.renderer.clearDepth();
+    if (this.armsOverBody) {
+      // The arms draw over the body, jar and head they would clip into; the actors' matrices are already current.
+      this.camera.layers.set(ARM_LAYER);
+      this.actors.matrixWorldAutoUpdate = false;
+      try {
+        this.renderer.render(this.actors, this.camera);
+      } finally {
+        this.actors.matrixWorldAutoUpdate = true;
+        this.camera.layers.set(DEFAULT_LAYER);
+      }
+    }
+    this.renderer.render(this.front, this.camera);
     // Isolate tool depth from character artwork, including transparent GLBs and skinned sprites.
     this.renderer.clearDepth();
     this.renderer.render(this.foreground, this.camera);
@@ -1202,7 +1236,7 @@ export class GameView {
     this.enemies.dispose();
     for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
     this.layers.clear();
-    disposeResources(this.course, this.actors, this.foreground);
+    disposeResources(this.course, this.actors, this.front, this.foreground);
     this.bindings.clear();
     this.renderer.dispose();
   }
@@ -1448,11 +1482,14 @@ export class GameView {
       visibility: this.visibility(slot, defaults),
     });
     if (PROP_PARTS.has(slot)) this.shading.register(model);
+    if (ARM_PARTS.has(slot)) onArmLayer(model);
     return anchor;
   }
 
-  // Pot and hammer replacements from authoring tools follow the Avatar-mode shading too.
+  // Pot and hammer replacements from authoring tools follow the Avatar-mode shading too; arm
+  // replacements draw over the body like the built-in arms.
   private visibility(slot: VisualPartId, defaults: readonly Object3D[]): VisualVisibility {
+    if (ARM_PARTS.has(slot)) return new VisualVisibility(defaults, { onReplacement: (next) => { if (next !== null) onArmLayer(next); } });
     return new VisualVisibility(defaults, PROP_PARTS.has(slot)
       ? { onReplacement: (next, previous) => this.propReplacementChanged(next, previous) } : {});
   }

@@ -127,7 +127,13 @@ function shoulderWeight(side: ArmSide, x: number, y: number): number {
     * (1 - MathUtils.smoothstep(Math.abs(y - shoulder[1]), SKINNING.shoulderInnerHeight, SKINNING.shoulderOuterHeight));
 }
 
-export function createAvatarGeometry(): BufferGeometry {
+// The built-in avatar's surface in two parts sharing one set of vertices: its body, and its arms.
+export interface AvatarGeometry {
+  readonly body: BufferGeometry;
+  readonly arms: BufferGeometry;
+}
+
+export function createAvatarGeometry(): AvatarGeometry {
   const positions: number[] = [];
   const colors: number[] = [];
   const skinIndices: number[] = [];
@@ -196,6 +202,8 @@ export function createAvatarGeometry(): BufferGeometry {
   }
   capEnd(bodyRings[bodyRings.length - 1], vertex(0, HEAD.top, 0, COLORS.hair, AVATAR_JOINTS.head, AVATAR_JOINTS.head, 0));
 
+  // Everything from here on is the arms, which draw over the body (see ARM_LAYER).
+  const armStart = indices.length;
   for (const side of ARM_SIDES) {
     const start = SHOULDER_COLUMNS[side];
     const end = start + SHOULDER_PATCH_WIDTH;
@@ -252,6 +260,13 @@ export function createAvatarGeometry(): BufferGeometry {
   geometry.setAttribute('skinIndex', new Uint16BufferAttribute(skinIndices, 4));
   geometry.setAttribute('skinWeight', new Float32BufferAttribute(skinWeights, 4));
   geometry.setIndex(indices);
+  // Normals come from the whole surface, so the shoulder seams stay smooth across the split.
   geometry.computeVertexNormals();
-  return geometry;
+  const part = (range: number[]): BufferGeometry => {
+    const subset = new BufferGeometry();
+    for (const [name, attribute] of Object.entries(geometry.attributes)) subset.setAttribute(name, attribute);
+    subset.setIndex(range);
+    return subset;
+  };
+  return { body: part(indices.slice(0, armStart)), arms: part(indices.slice(armStart)) };
 }

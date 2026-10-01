@@ -7,6 +7,7 @@ import { AVATAR_JOINT_IDS, AVATAR_JOINT_PARENTS } from './character-profile';
 import type { AvatarBoneMap, AvatarJointId } from './character-profile';
 import type { ResolvedAvatarHair, ResolvedAvatarJoints, UnmappedAvatarJoint } from './character-model-inspect';
 import type { LoadedCharacterModel } from './character-model-types';
+import { AvatarArmSplit } from './avatar-arm-split';
 import { SkinnedHair } from './skinned-hair';
 import type { MappedJointFrames } from './skinned-hair';
 
@@ -51,6 +52,8 @@ export class SkinnedAvatarView {
   private readonly headPivot = new Vector3();
   private readonly scale: number;
   private readonly statistics: { meshes: number; skinnedMeshes: number; vertices: number; materials: number };
+  // The model's arm surfaces, moved to draw over its body while this view shows it.
+  private readonly armSplit: AvatarArmSplit;
   private readonly frame = new Matrix4();
   private readonly parentNow = new Matrix4();
   private readonly rotated = new Vector3();
@@ -147,6 +150,7 @@ export class SkinnedAvatarView {
       }
     });
     this.statistics = { meshes, skinnedMeshes, vertices, materials: materials.size };
+    this.armSplit = new AvatarArmSplit(scene, new Map(AVATAR_JOINT_IDS.map(id => [joints[id].bone, id] as const)));
   }
 
   // Applies the prepared rig's avatar-space pose, which the engine wrote this frame from the plan
@@ -194,6 +198,7 @@ export class SkinnedAvatarView {
       name: this.model.name,
       ...this.statistics,
       triangles: this.model.triangles,
+      armTriangles: this.armSplit.triangles,
       bones: this.model.report.joints.length,
       fitScale: this.scale,
       boneMap: { ...this.boneMap },
@@ -208,6 +213,7 @@ export class SkinnedAvatarView {
 
   dispose(): void {
     this.root.removeFromParent();
+    this.armSplit.restore();
     // A replacement view may already own the same model; leaving its scene alone keeps it rendering.
     if (this.model.scene.parent === this.fit) this.model.scene.removeFromParent();
   }
