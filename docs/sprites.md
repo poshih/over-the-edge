@@ -411,7 +411,8 @@ changing clearance never separates the hand targets from the hammer.
 The pot stays on the [obstacle line](../README.md#obstacle-line) at z = 0, where
 every collider is drawn. No Z depth is added to the Planck physics or authored level data.
 A depth-isolated foreground pass keeps the hammer above opaque and transparent
-character art without disabling depth testing or altering shared materials.
+character art without disabling depth testing or altering shared materials. A 3D
+character's arms share that depth, so its hands hold the handle; 2D artwork does not.
 
 ### Spring-bone hair
 

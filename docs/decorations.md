@@ -48,7 +48,7 @@ object reaches half its depth behind the line and half in front, and nothing lie
 you put something there. A prop standing on a collider must stand within that collider's depth, and
 one behind the path must also keep clear of the pot, which reaches 0.5 m behind the line. A
 decoration behind the line draws with the course; one on or in front of it draws after the
-characters and their arms, hiding an arm only where it is nearer but always covering the body, so
+characters, always covering the body but never a 3D character's arms or the hammer, so
 keep it clear of the jar, which reaches 0.5 m toward the camera. Seen
 through a perspective camera from above, a tree standing on empty ground behind the course
 seems to float as the player climbs past it. Give background scenery ground to stand on with

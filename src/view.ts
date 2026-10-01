@@ -115,12 +115,12 @@ export interface CameraFraming extends Point {
   worldHeight: number;
 }
 
-export type ViewPass = 'course' | 'actors' | 'front';
+export type ViewPass = 'course' | 'actors' | 'marks';
 
 export interface ViewLayer {
   readonly root: Object3D;
-  // `course` draws with the terrain; `actors` over it, with the characters; `front` over the characters and
-  // their arms, with the marks (see GameView's passes).
+  // `course` draws with the terrain; `actors` over it, with the characters; `marks` ignores depth and draws over
+  // the characters and their arms, under the tool (see GameView's passes).
   readonly pass: ViewPass;
   update: (frame: PhysicsFrame, arms: readonly ArmPose[]) => void;
   dispose: () => void;
@@ -279,14 +279,17 @@ export class GameView {
   // Passes, each drawn over the last. The course: terrain, its artwork and the scenery behind the obstacle line.
   // Then, with depth cleared, the actors: the characters, phantoms and enemies, which the course's colliders,
   // reaching half their depth toward the camera, must never hide; a 3D character's arms (ARM_LAYER) are left out.
-  // Then, with depth cleared again, those arms, so they never clip into the body, jar or head, and the front:
-  // decorations on or in front of the line, hidden only by the arms, and the marks that ignore depth (aim cursor
-  // and line, course labels, editor overlays). Last, with depth cleared, the foreground: the tool.
+  // Then, with depth cleared, the front: decorations on or in front of the line. Then, with depth cleared again,
+  // a 3D character's arms, so they never clip into its body, jar or head; the marks, which ignore depth and write
+  // none (aim cursor and line, course labels, editor overlays); and last the foreground, the tool, which shares the
+  // arms' depth so the hands hold it.
   private readonly course = new Scene();
   private readonly actors = new Scene();
   private readonly front = new Scene();
+  private readonly marks = new Scene();
   private readonly foreground = new Scene();
-  // Whether the actors' arms pass runs: the active character has 3D arms. 2D characters keep their authored depths.
+  // Whether the actors' arms pass runs: the active character has 3D arms, which hold the tool. 2D characters keep
+  // their authored depths.
   private armsOverBody = UPPER_BODY_3D[DEFAULT_PRESENTATION.characterRiggingType];
   private readonly orthographic = new OrthographicCamera();
   private readonly perspective = new PerspectiveCamera();
@@ -386,7 +389,7 @@ export class GameView {
   private readonly spriteTargets = new Map<string, RigTarget>();
   private theme: GameTheme;
   private readonly fog: Fog;
-  // Each light exists in every pass.
+  // Each light exists in every lit pass: all but the marks.
   private readonly lights: {
     readonly hemisphere: HemisphereLight[]; readonly ambient: AmbientLight[];
     readonly sun: DirectionalLight[]; readonly rim: DirectionalLight[];
@@ -431,6 +434,8 @@ export class GameView {
     this.renderer.info.autoReset = false;
     this.renderer.setClearColor(theme.sky);
     this.fog = new Fog(theme.fog.color);
+    // The marks are unlit; they only take the fog.
+    this.marks.fog = this.fog;
     for (const pass of [this.course, this.actors, this.front, this.foreground]) {
       pass.fog = this.fog;
       const hemisphere = new HemisphereLight(theme.hemisphere.sky, theme.hemisphere.ground, theme.hemisphere.intensity);
@@ -453,7 +458,7 @@ export class GameView {
     this.decorations?.setObjects(level.objects);
     this.course.add(this.terrain.root, this.flags.root, this.updrafts.root);
     this.actors.add(this.enemies.root);
-    this.front.add(this.labels);
+    this.marks.add(this.labels);
     if (this.decorations !== null) {
       this.course.add(this.decorations.root);
       this.front.add(this.decorations.front);
@@ -469,7 +474,7 @@ export class GameView {
     this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
     this.cursor.add(new Mesh(new CircleGeometry(0.018, 12), cursorMaterial));
     this.cursor.renderOrder = 20;
-    this.front.add(this.cursor);
+    this.marks.add(this.cursor);
     const targetGeometry = new BufferGeometry();
     targetGeometry.setAttribute('position', new BufferAttribute(this.targetPositions, 3));
     this.targetMaterial = new LineDashedMaterial({
@@ -477,7 +482,7 @@ export class GameView {
     });
     this.targetLine = new Line(targetGeometry, this.targetMaterial);
     this.targetLine.frustumCulled = false;
-    this.front.add(this.targetLine);
+    this.marks.add(this.targetLine);
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(canvas);
@@ -529,7 +534,7 @@ export class GameView {
 
   addLayer(layer: ViewLayer): void {
     this.layers.add(layer);
-    const passes: Readonly<Record<ViewPass, Scene>> = { course: this.course, actors: this.actors, front: this.front };
+    const passes: Readonly<Record<ViewPass, Scene>> = { course: this.course, actors: this.actors, marks: this.marks };
     passes[layer.pass].add(layer.root);
   }
 
@@ -1053,11 +1058,18 @@ export class GameView {
     // The course's colliders reach toward the camera, so the actors draw over them with depth of their own.
     this.renderer.clearDepth();
     this.renderer.render(this.actors, this.camera);
-    // The arms and the front draw over the actors, with depth of their own: the front's decorations are hidden by
-    // nothing but the arms, and never by a phantom's translucent depth.
+    // Decorations on or in front of the line draw over the actors, never hidden by a phantom's translucent depth.
+    // The front holds nothing else, so a course without them skips the pass and its depth clear.
+    if (this.decorations !== null && this.decorations.front.children.length > 0) {
+      this.renderer.clearDepth();
+      this.renderer.render(this.front, this.camera);
+    }
+    // The hands hold the tool: a 3D character's arms and the tool share one depth, isolated from all other character
+    // artwork (the body, jar and head the arms would clip into, transparent GLBs and skinned sprites) and from the
+    // decorations.
     this.renderer.clearDepth();
     if (this.armsOverBody) {
-      // The arms draw over the body, jar and head they would clip into; the actors' matrices are already current.
+      // The actors' matrices are already current.
       this.camera.layers.set(ARM_LAYER);
       this.actors.matrixWorldAutoUpdate = false;
       try {
@@ -1067,9 +1079,8 @@ export class GameView {
         this.camera.layers.set(DEFAULT_LAYER);
       }
     }
-    this.renderer.render(this.front, this.camera);
-    // Isolate tool depth from character artwork, including transparent GLBs and skinned sprites.
-    this.renderer.clearDepth();
+    // The marks ignore depth and write none, so they show over the arms and the tool still tests against the arms.
+    this.renderer.render(this.marks, this.camera);
     this.renderer.render(this.foreground, this.camera);
   }
 
@@ -1236,7 +1247,7 @@ export class GameView {
     this.enemies.dispose();
     for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
     this.layers.clear();
-    disposeResources(this.course, this.actors, this.front, this.foreground);
+    disposeResources(this.course, this.actors, this.front, this.marks, this.foreground);
     this.bindings.clear();
     this.renderer.dispose();
   }

@@ -127,7 +127,7 @@ export function createCharacterEditor(options: {
           <button type="button" class="button character-arm-forward-reset">Reset arm forward distance</button>
           <p class="appearance-format">Moves the hand and hammer plane toward the camera, measured from the
             configured chest front. The default is ${DEFAULT_ARM_FORWARD_DISTANCE} m.
-            This is visual only: the hammer still draws on top and gameplay physics stay unchanged.
+            This is visual only: the arms and hammer still draw over the body and gameplay physics stay unchanged.
             It is part of the character profile.</p>
           <div class="character-waist-lean-control"></div>
           <button type="button" class="button character-waist-lean-reset">Reset waist lean</button>

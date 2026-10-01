@@ -90,7 +90,7 @@ export function decorationMatrix(object: DecorationObject, model: DecorationMesh
  * Idle frames do no work. A preview mesh shows a placement without changing the level. A mesh
  * release's course artwork can replace any model's placeholder with the game's own GLB. Decorations
  * behind the obstacle line draw in `root`, with the course; those on or in front of it in `front`,
- * after the characters and their arms, which the course's colliders never hide.
+ * over the characters but under a 3D character's arms and the tool.
  */
 export class DecorationView {
   readonly root = new Group();

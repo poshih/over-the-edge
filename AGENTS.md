@@ -19,9 +19,10 @@
   looks right in perspective: terrain and its artwork reach half their depth each
   side of it, and the pot and enemies stand on it. Keep new collider visuals on it.
   Characters and enemies draw in the actors pass, over the course, so colliders
-  never hide them. A 3D character's arms (`ARM_LAYER`) draw in a pass of their own
-  over its body, jar and head; keep new arm visuals on that layer. Decorations on
-  or in front of the line, and marks that ignore depth, draw after the arms.
+  never hide them. Decorations on or in front of the line draw over the actors.
+  A 3D character's arms (`ARM_LAYER`) then draw over its body, jar and head,
+  sharing one depth with the hammer so the hands hold it; keep new arm visuals on
+  that layer. Marks that ignore depth draw over the arms and under the hammer.
   Decorations never collide and may sit at any depth, but a prop standing on a
   collider stays within that collider's depth.
 - Always do what is best for the project: choose the cleanest correct design,

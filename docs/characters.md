@@ -98,7 +98,8 @@ such as long legs, shows beneath it. A [pot model](#pot-model) can be shaped to
 suit the body.
 
 The arms draw over the rest of the avatar and the pot, so they never clip into the
-body, jar or head (see [arms over the body](../README.md#custom-visuals)). A
+body, jar or head, and share the hammer's depth, so the hands close around the
+handle (see [arms over the body](../README.md#custom-visuals)). A
 triangle is the arms' when at least two of its vertices are skinned mostly to the
 arm joints or to joints that follow them, such as fingers and twist bones; a rigid
 mesh attached below an arm joint is the arms' too. A clavicle follows the body, so
