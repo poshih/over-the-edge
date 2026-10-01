@@ -60,10 +60,11 @@ export class CharacterModelPool {
     return this.binding(entry, signal);
   }
 
-  // Commit retains a non-aborting lease before its preparation releases the operation lease.
-  hold(model: CharacterModel, usage: CharacterModelUsage): CharacterModelLease {
+  // Commit retains a non-aborting lease on a model this pool loaded, for the usage it was loaded for,
+  // before its preparation releases the operation lease.
+  hold(model: LoadedCharacterModel): CharacterModelLease {
     this.assertOpen();
-    const entry = this.entries[usage].get(model.source);
+    const entry = this.entries[model.usage].get(model.source);
     if (entry === undefined || entry.value === null) {
       throw new ModelPoolInvariantError(`Character model "${model.name}" was not loaded before commit.`);
     }

@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import type { Plugin } from 'vite';
+import type { Plugin, UserConfig } from 'vite';
 import { avatarRigModulePath, avatarRigs, loadAvatarRigRegistry } from './build/avatar-rig-module.ts';
 import { gameTitle } from './build/game-title.ts';
 import { locationUrl } from './build/location-url.ts';
@@ -60,7 +60,8 @@ function gameOnlyBoundary(): Plugin {
   };
 }
 
-export default defineConfig(async ({ mode }) => {
+// Typed, so the returned literal keeps its narrow types (`publicDir: false`) through the Promise.
+export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   // GAME_PROJECT is a complete game; its parts cannot also come from the per-file inputs.
   const requested = process.env.GAME_PROJECT;
   if (requested !== undefined) {

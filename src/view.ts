@@ -842,7 +842,7 @@ export class GameView {
       current.model !== avatarModel || !sameAvatarModelSettings(current, avatar));
     // Take the replacement reference before dropping the old one, so a model shared by both views
     // never reaches zero references in the middle of the commit.
-    const avatarLease = preparedAvatar === null ? null : slot.pool.hold(preparedAvatar.model, 'avatar');
+    const avatarLease = preparedAvatar === null ? null : slot.pool.hold(preparedAvatar.model);
     if (replaceAvatar) {
       this.shading.unregister(current.view.root);
       current.view.dispose();
@@ -868,7 +868,7 @@ export class GameView {
         this.releaseProp(slot, role);
         continue;
       }
-      const lease = slot.pool.hold(model, role);
+      const lease = slot.pool.hold(model);
       this.releaseProp(slot, role);
       slot.props[role] = this.mountProp(role, model, lease);
     }
