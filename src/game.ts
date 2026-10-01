@@ -12,8 +12,8 @@ import { clamp } from './math';
 import { Simulation } from './simulation';
 import { GameView } from './view';
 import { TriggerRuntime } from './triggers';
-import { DEFAULT_MESSAGE_STYLE } from './trigger-events';
-import type { EventOutcome, MessageStyle, TriggerAction } from './trigger-events';
+import { DEFAULT_MESSAGE_STYLE, DEFAULT_VIDEO_PLAYBACK } from './trigger-events';
+import type { EventOutcome, MessageStyle, TriggerAction, VideoPlayback } from './trigger-events';
 import { EventPresenter } from './event-presenter';
 import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
@@ -46,6 +46,7 @@ export class Game {
   private readonly enemyPhases = new Map<string, EnemyPhase>();
   private character: CharacterState = { armIk: DEFAULT_ARM_IK };
   private messageStyle: MessageStyle;
+  private videos: VideoPlayback;
   private stopped = false;
   private started = false;
   private animationFrame = 0;
@@ -71,6 +72,8 @@ export class Game {
     decorations?: (() => DecorationView) | null;
     // How message events appear; toasts by default.
     messageStyle?: MessageStyle;
+    // Whether play-video events play or are skipped; they play by default.
+    videos?: VideoPlayback;
     // Streams authored video sources; by default sources are URLs.
     media?: MediaHost;
     // Receives sound cues and play-sound events; without it the game tracks no impacts.
@@ -84,6 +87,7 @@ export class Game {
     this.onAction = options.onAction;
     this.onCue = options.onCue ?? null;
     this.messageStyle = options.messageStyle ?? DEFAULT_MESSAGE_STYLE;
+    this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     const listen = { signal: this.lifecycle.signal };
     window.addEventListener('error', (event) => this.stop(event.message), listen);
     window.addEventListener('unhandledrejection', (event) =>
@@ -240,6 +244,9 @@ export class Game {
   // Applies to future message events; toasts already showing or queued finish as toasts.
   setMessageStyle(style: MessageStyle): void { this.messageStyle = style; }
 
+  // Applies to future play-video events; a video already showing plays on.
+  setVideos(videos: VideoPlayback): void { this.videos = videos; }
+
   setPause(options: { reason: string; paused: boolean }): void {
     if (options.paused) this.pauseReasons.add(options.reason);
     else this.pauseReasons.delete(options.reason);
@@ -360,6 +367,8 @@ export class Game {
       this.presenter.toast(action);
       return 'completed';
     }
+    // A skipped video never shows: the trigger goes on to its next event, as after the player skips one.
+    if (action.type === 'play-video' && this.videos === 'skip') return 'skipped';
     return this.presenter.present(action, signal);
   }
 

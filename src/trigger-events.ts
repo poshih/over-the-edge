@@ -27,6 +27,10 @@ export type MessageAction = Extract<TriggerAction, { readonly type: 'message' }>
 export const MESSAGE_STYLES = ['toast', 'popup'] as const;
 export type MessageStyle = (typeof MESSAGE_STYLES)[number];
 export const DEFAULT_MESSAGE_STYLE: MessageStyle = 'toast';
+// Whether play-video events play, or are skipped at once so the trigger goes on: a release plays them, and
+// the Workshop can skip them while a designer tests.
+export type VideoPlayback = 'play' | 'skip';
+export const DEFAULT_VIDEO_PLAYBACK: VideoPlayback = 'play';
 export type EventOutcome = 'completed' | 'skipped' | 'cancelled';
 export type TriggerExecutor = (action: TriggerAction, signal: AbortSignal) => EventOutcome | Promise<EventOutcome>;
 
