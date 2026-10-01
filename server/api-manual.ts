@@ -14,17 +14,27 @@ import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGE
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
 import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
+import { SHARED_FORMATS, SHARED_KINDS, SHARED_NAME_LIMIT } from '../src/shared-copies';
+import type { SharedKind } from '../src/shared-copies';
 import { THEME_FIELDS } from '../src/theme';
 import { LAUNCH_FIELDS, SOUND_VOLUME } from '../src/trigger-events';
 
 const endpoint = (method: string, path: string, description: string, body?: string) => ({ method, path, description, ...(body ? { body } : {}) });
+
+// What a shared copy of each kind holds: the value of the project section it matches.
+const SHARED_VALUES: Readonly<Record<SharedKind, string>> = {
+  levels: 'level JSON, as the level section',
+  characters: 'character profile JSON, as the characters/primary section',
+  'game-settings': 'game settings JSON, as the settings section',
+  'arm-ik': 'body-relative elbow hints, as the arm-ik section',
+};
 
 // A self-describing guide for tools and language models; generated from the validators' own limits.
 export function apiManual(auth: 'token' | 'loopback') {
   return {
     name: 'Over the Edge project API',
     version: 1,
-    purpose: 'Create and edit complete game projects (level, physics, characters, look, HUD, audio, enemies, media), then publish each as a standalone, editor-free release.',
+    purpose: 'Create and edit complete game projects (level, physics, characters, look, HUD, audio, enemies, media), then publish each as a standalone, editor-free release. Share named levels, character profiles, game settings and arm IK profiles with every Workshop page.',
     auth: auth === 'token'
       ? 'Send Authorization: Bearer <STUDIO_TOKEN> with every request.'
       : 'Requests from this computer through localhost need no token. Set STUDIO_TOKEN to allow other machines.',
@@ -34,7 +44,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       patch: 'PATCH applies a JSON merge patch (RFC 7386): objects merge, arrays and other values replace. Unlike RFC 7386, null sets a field to null, because sections have fixed keys.',
       concurrency: 'GET section responses carry ETag: "<section revision>". Send If-Match with that value on a change to fail with 412 if someone else changed the section first. Editing the project\'s files directly also counts: reads bump the revision of every section whose files changed. GET /api/projects/{id}/revision is a cheap poll.',
       references: 'Levels and audio may only use /media/ paths that exist in the project media library, and terrain artwork that exists in the course artwork, so every project always builds. Every decoration model must be built in or drawn by course artwork. Upload files before referencing them.',
-      ids: 'Project IDs use lowercase letters, digits and inner hyphens.',
+      ids: 'Project IDs and shared copy names use lowercase letters, digits and inner hyphens.',
     },
     endpoints: [
       endpoint('GET', '/api', 'This guide.'),
@@ -62,7 +72,15 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/models/{role}/{model}', 'A library entry: its name, and an avatar\'s bone map and settings.', '{ "name"?: "...", "boneMap"?: {...}, ... }'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/media/{file}', 'Media library files, referenced as /media/{file}.', 'file bytes'),
       endpoint('GET', '/play/{id}/', 'The latest published release of a project; its content is under /play/{id}/content/.'),
+      endpoint('GET', '/api/shared/{kind}', `The copies of one kind this server shares with every Workshop page, by name: { "copies": [{ "name", "bytes", "updatedAt" }] }. Kinds: ${SHARED_KINDS.join(', ')}.`),
+      endpoint('GET|PUT|DELETE', '/api/shared/{kind}/{name}', 'Read, store or delete one shared copy. PUT validates it as the project section of its kind and replaces any copy with that name.', 'the copy: a level, character profile, game settings or arm IK profile'),
     ],
+    shared: {
+      description: 'Named copies every Workshop page can load and save: levels, character profiles, game settings and arm IK profiles. '
+        + 'Each kind is a folder of the repository named like it, one JSON file per copy, e.g. levels/quiet-ascent.json; a Workshop build also serves its levels folder.',
+      names: `1-${SHARED_NAME_LIMIT} lowercase letters, digits and inner hyphens`,
+      kinds: Object.fromEntries(SHARED_KINDS.map((kind) => [kind, { maxBytes: SHARED_FORMATS[kind].maxBytes, value: SHARED_VALUES[kind] }])),
+    },
     project: {
       files: PROJECT_FILES,
       layout: 'project.json (manifest), level.json, characters/primary.json and characters/alternate.json (character profiles), art/<assetId>.glb, appearance/<part>.glb, media/<file>.',

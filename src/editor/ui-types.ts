@@ -2,6 +2,8 @@ import type { InputMode, UiAction, UiActionOptions } from '../config';
 import type { GameSettings } from '../game-settings';
 import type { HudSettings } from '../hud';
 import type { GameHudState } from './game-ui';
+import type { ProjectSaveTarget } from './project-save';
+import type { ServerCopies } from './server-copies';
 
 export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
 export type EditorAction = UiAction | 'debug';
@@ -29,6 +31,9 @@ export interface UiOptions {
   onWorkshopChange: (state: WorkshopState) => void;
   onPractice: (practice: PracticeId) => void;
   onSettingsChange: (settings: GameSettings) => void;
+  // The open server project, for Physics' Save to project, and the copies shared on the server.
+  projectSave: ProjectSaveTarget;
+  serverCopies: ServerCopies;
 }
 
 export interface GameUi {

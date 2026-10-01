@@ -1,5 +1,6 @@
 import type { LibraryAvatarEntry, LibraryEntry, PartRole } from '../model-library';
 import type { ProjectBundle, ProjectManifest } from '../project';
+import type { SharedCopySummary, SharedKind } from '../shared-copies';
 
 export class ProjectApiError extends Error {
   readonly status: number;
@@ -163,6 +164,19 @@ export class ProjectClient {
 
   async publishStatus(id: string): Promise<{ running: boolean; release: PublishRecord | null }> {
     return this.json('GET', `/projects/${encodeURIComponent(id)}/publish`);
+  }
+
+  async sharedCopies(kind: SharedKind): Promise<readonly SharedCopySummary[]> {
+    return (await this.json<{ copies: SharedCopySummary[] }>('GET', `/shared/${kind}`)).copies;
+  }
+
+  sharedCopy(kind: SharedKind, name: string): Promise<unknown> {
+    return this.json('GET', `/shared/${kind}/${encodeURIComponent(name)}`);
+  }
+
+  // Stores a copy every Workshop page can load, replacing any copy with that name.
+  putSharedCopy(kind: SharedKind, name: string, value: unknown): Promise<SharedCopySummary> {
+    return this.json('PUT', `/shared/${kind}/${encodeURIComponent(name)}`, { body: JSON.stringify(value), type: JSON_TYPE });
   }
 
   private async json<T>(method: string, path: string, options: { body?: BodyInit; type?: string; revision?: number } = {}): Promise<T> {

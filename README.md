@@ -482,7 +482,9 @@ newer edits. Use this same JSON with the `GAME_SETTINGS` build input above.
 
 Snapshots are stored independently in this browser's localStorage, on this site,
 so saves from different tabs do not overwrite one shared record. Nothing is
-uploaded unless you save a [project](docs/projects.md) to your own project server. Settings use
+uploaded unless you save to your own project server: **Save to project** writes the
+settings into the open [project](docs/projects.md), and **Server game settings** shares
+named [copies](docs/projects.md#server-copies). Settings use
 **schema version 4**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
@@ -528,13 +530,17 @@ explicit. **Save level** stays at the top of the Level tab; load past saves from
 game-only build. Imports are validated before replacing the current level;
 malformed files and unavailable storage produce visible errors.
 
-**Server levels** lists the levels the Workshop itself serves, the same for everyone
-who opens it: every level JSON file in this repository's `levels/` folder, named by
-its file name, and first, in a Workshop built with `GAME_PROJECT`, that project's
-level. Builds validate each file and fail, naming it, when one is not a valid level;
-`npm run dev` reads the folder when it starts. The page lists only names and sizes:
-a level downloads when you load it, and replaces the current level like an import,
-asking first when there are unsaved changes.
+**Server levels** lists the levels the Workshop shares with everyone who opens it:
+every level JSON file in this repository's `levels/` folder, named by its file name,
+and first, in a Workshop built with `GAME_PROJECT`, that project's level. With the
+project server (`npm run dev` or `npm run studio`) the list is live, and **Save to
+server** stores the current level in the folder under a name of your choosing; see
+[server copies](docs/projects.md#server-copies). A static deployment lists the folder as
+it was built: builds validate each file and fail, naming it, when one is not a valid
+level or its file name is not a valid copy name. A level downloads when you load it,
+and replaces the current level like an import, asking first when there are unsaved
+changes. **Save to project**, under **Save level**, writes the level into the open
+[server project](docs/projects.md#working-in-the-workshop) at once.
 
 ### Drawing terrain
 
@@ -870,7 +876,9 @@ profile's [grips](#hand-grips) on the physical tool, with its [arm lengths](#arm
 
 The choice is stored as `characterRiggingType` in the character/sprite profile.
 Changing it retains the other artwork, but does not silently save it. Use the
-profile's **Save**, **Revert**, and JSON controls. Profiles use **schema version
+profile's **Save**, **Revert**, and JSON controls; **Save to project** writes it into
+the open [server project](docs/projects.md#working-in-the-workshop), and **Server character
+profiles** shares named [copies](docs/projects.md#server-copies). Profiles use **schema version
 14**; profiles in any other version are rejected, not converted.
 
 Choose **Use Avatar** for a built-in skinned character, included
@@ -1067,7 +1075,10 @@ save creates a timestamped snapshot of all six coordinates; reusing a name
 keeps earlier versions. Choose **Past IK profiles**, then **Load IK profile**
 to apply one. Selecting an entry alone does not change the preview. The last
 successfully saved or loaded profile restores on reload. **Reset arm IK** only
-previews the defaults; save a profile afterward to keep the reset.
+previews the defaults; save a profile afterward to keep the reset. **Save to project**
+writes the hints into the open [server project](docs/projects.md#working-in-the-workshop),
+and **Server IK profiles** shares named [copies](docs/projects.md#server-copies); loading
+one only previews it.
 
 Profiles use independent localStorage keys and a separate active-profile
 reference. Other tabs refresh the history without replacing the current draft.

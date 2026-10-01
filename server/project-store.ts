@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   loadProjectContent, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, validateProjectId,
   validateProjectManifest,
 } from '../src/project';
 import type { ProjectContent, ProjectFileKind, ProjectFileRef, ProjectManifest } from '../src/project';
+import { atomicWrite, missing } from './files';
 import { HttpError } from './http';
 
 // API sections; each has its own revision so concurrent editors only conflict on what they share.
@@ -92,22 +93,6 @@ async function signatures(directory: string, manifest: ProjectManifest): Promise
   }
   return Object.fromEntries(SECTION_NAMES.map((name) =>
     [name, createHash('sha256').update(JSON.stringify(parts[name])).digest('hex')])) as Record<SectionName, string>;
-}
-
-function missing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
-}
-
-async function atomicWrite(path: string, data: string | Uint8Array): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp-${randomBytes(6).toString('hex')}`;
-  try {
-    await writeFile(temporary, data);
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
 }
 
 /**

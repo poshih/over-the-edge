@@ -14,6 +14,9 @@ import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
 import { createCharacterEditor } from './character-editor';
+import { createProjectSaveButton } from './project-save';
+import type { ProjectSaveTarget } from './project-save';
+import type { ServerCopies } from './server-copies';
 import type { ServerModels } from './server-models';
 import { sectionMarkup } from './workshop-section';
 import './sprite-editor.css';
@@ -50,6 +53,9 @@ export interface SpriteEditorOptions {
   serverModels: ServerModels;
   // False when the page opens a project instead: the saved profile is then only the Revert target.
   applySavedProfile?: boolean;
+  // The open server project, for Save to project, and the character profiles shared on the server.
+  projectSave: ProjectSaveTarget;
+  serverCopies: ServerCopies;
 }
 
 export interface SpriteEditorHandle {
@@ -454,10 +460,14 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   }
 
   options.mount.append(root);
+  element(root, '.sprite-footer .persistence-actions').append(createProjectSaveButton({
+    target: options.projectSave, sections: ['characters/primary'], label: 'the character profile', signal: events.signal,
+  }));
   const characterEditor = createCharacterEditor({
     mount: options.characterMount, state, hammerRig: options.hammerRig,
     naturalArms: options.naturalArms, onHandleLength: options.onHandleLength, actions: documentActions,
     serverModels: options.serverModels, onNotice: options.onNotice, signal: events.signal,
+    projectSave: options.projectSave, serverCopies: options.serverCopies,
   });
   const skeletonEditor = createSkeletonEditor({
     mount: element<HTMLDivElement>(root, '.sprite-skeleton-mount'),

@@ -4,8 +4,12 @@ import {
 } from './appearance-types';
 import type { ArmIkSettings, VisualAlignment, VisualPartId } from './appearance-types';
 import { armIkProfiles } from './arm-ik-store';
+import { createProjectSaveButton } from './project-save';
+import type { ProjectSaveTarget } from './project-save';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
+import type { ServerCopies } from './server-copies';
+import { createServerCopyPicker } from './server-copy-picker';
 import { createSnapshotPicker } from './snapshot-picker';
 import { sectionMarkup } from './workshop-section';
 
@@ -13,6 +17,9 @@ interface AppearanceUiOptions {
   mount: HTMLElement;
   appearance: Appearance;
   onNotice: (message: string, kind: 'info' | 'error') => void;
+  // The open server project, for Save to project, and the IK profiles shared on the server.
+  projectSave: ProjectSaveTarget;
+  serverCopies: ServerCopies;
 }
 
 export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () => void } {
@@ -60,6 +67,8 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
         <p class="appearance-format">The last saved or loaded IK profile restores on reload.
           Reset changes only the preview. Physics presets and model alignment are separate.</p>
       `)}
+      ${sectionMarkup({ id: 'appearance-arm-ik-server', title: 'Server IK profiles', hint: 'Load or save elbow hints shared on this server' },
+    '<div class="arm-ik-server"></div>')}
       ${sectionMarkup({ id: 'appearance-about', title: 'About 3D parts', hint: 'What imports change' }, `
         <section class="appearance-intro" aria-label="About 3D parts">
           <p>Mesh parts mode uses separate Three.js objects for the body and limbs. Avatar mode uses one
@@ -111,12 +120,23 @@ export function createAppearanceUI(options: AppearanceUiOptions): { dispose: () 
   const profiles = createSnapshotPicker({
     mount: get('.arm-ik-profiles'), signal: events.signal, id: 'arm-ik', noun: 'IK profile', plural: 'IK profiles',
     placeholder: 'e.g. Elbows down and out',
+    actions: [createProjectSaveButton({ target: options.projectSave, sections: ['arm-ik'], label: 'the arm IK', signal: events.signal })],
     list: () => armIkProfiles.list(localStorage),
     save: (name) => options.appearance.saveArmIk(name),
     load: (key) => options.appearance.loadArmIk(key),
     isStorageKey: (key) => armIkProfiles.isStorageKey(key),
     onNotice: options.onNotice,
   });
+  createServerCopyPicker({
+    mount: get('.arm-ik-server'), signal: events.signal, copies: options.serverCopies, kind: 'arm-ik',
+    id: 'arm-ik', noun: 'IK profile', plural: 'IK profiles', placeholder: 'e.g. elbows-out', onNotice: options.onNotice,
+    capture: () => options.appearance.armIkSettings(),
+    apply: (value) => options.appearance.previewArmIk(value),
+    afterLoad: 'Save it as a named IK profile to keep it in this browser.',
+  });
+  get('.appearance-footer .persistence-actions').append(createProjectSaveButton({
+    target: options.projectSave, sections: ['appearance'], label: 'the appearance models and alignment', signal: events.signal,
+  }));
   const changeArmIk = (key: keyof ArmIkSettings, value: number): void => {
     try {
       options.appearance.previewArmIk({ ...options.appearance.armIkSettings(), [key]: value });

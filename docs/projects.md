@@ -178,6 +178,14 @@ and the browser warns if something could not be saved yet.
   level, so they save once finished or applied.
 - If the server cannot be reached, saving tries again every few seconds.
 
+Each editor's own Save also has **Save to project** under it: Level's **Save level**,
+Physics' **Save game settings**, Appearance's **Save alignment** (models and alignment)
+and **Save IK profile**, and the character profile's **Save** in Character and Sprites.
+It writes that part into the open server project at once and says so, instead of waiting
+for the automatic save; a level takes along the media and course artwork it names. It is
+disabled until a server project is open, and a part that also changed in the project waits
+for **Keep my version** or **Use the project's**.
+
 - **Open project** loads a server project into every editor at once: the level,
   physics, character profile, appearance models, arm IK and all project sections.
   The page remembers it and reopens it after a reload. A Workshop started with a
@@ -268,6 +276,22 @@ it or another local project, and whether it is kept in this browser. A site has 
 shared by its tabs: the tab that stores last wins, and the copy always holds one tab's whole
 project. `npm run dev` reads the project once, when the server starts.
 
+## Server copies
+
+Besides projects, the project server shares named copies with everyone who opens the
+Workshop: **Server levels** in Level, **Server game settings** in Physics, **Server IK
+profiles** in Appearance and **Server character profiles** in Character. Type a name of
+1-64 lowercase letters, digits and inner hyphens, then choose **Save to server**; saving
+under a listed name replaces that copy, after asking. Choose a copy and load it to replace
+the editor's current one, as an import does: a character profile loads as a draft, and the
+editor's browser saves stay as they were. **Refresh** picks up copies saved since.
+
+Each kind is a folder of this repository, one JSON file per copy, named by the copy:
+`levels/`, `characters/`, `game-settings/` and `arm-ik/`. A copy is checked like the
+project section of its kind before it is written, and replaced whole. Commit the folders
+to share copies through version control. A static Workshop deployment has no project
+server: it lists the `levels/` folder's levels as it was built, and can save none.
+
 ## The project server
 
 The project server is part of the Workshop's Vite server, so there is nothing
@@ -279,7 +303,9 @@ npm run studio   # builds the Workshop, then serves it with the project server a
 ```
 
 It stores projects in `projects/<id>/` and published releases in `releases/<id>/`,
-with each release's content beside it in `releases/<id>.content/`, all ignored by Git. Settings, from the environment or `.env.local`:
+with each release's content beside it in `releases/<id>.content/`, all ignored by Git;
+[server copies](#server-copies) go in their own folders, which Git does not ignore. Settings, from the
+environment or `.env.local`:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -294,8 +320,8 @@ rebinding. With a token, every request needs `Authorization: Bearer <token>`; th
 Workshop asks for it once and keeps an HttpOnly session cookie. Every change must
 also send `X-Studio-Request: 1`, which browsers cannot add to cross-site requests,
 and requests with a foreign `Origin` are refused. The dev server never serves the
-project and release folders as plain files, so they are only reachable through these
-checks. Serve it over HTTPS if you expose it beyond a trusted network.
+project, release and server copy folders as plain files, so they are only reachable
+through these checks. Serve it over HTTPS if you expose it beyond a trusted network.
 
 A static Workshop deployment has no project server; its Project tab still opens,
 edits and exports project files, and a Workshop built with `GAME_PROJECT` opens its own
@@ -347,6 +373,8 @@ Conventions:
 | POST | `/api/projects/{id}/validate` | Every release check, reported as problems |
 | POST, GET | `/api/projects/{id}/publish` | Build the release; latest publish record |
 | GET | `/play/{id}/` | The published release; its content is under `/play/{id}/content/` |
+| GET | `/api/shared/{kind}` | List the [server copies](#server-copies) of `levels`, `characters`, `game-settings` or `arm-ik` |
+| GET, PUT, DELETE | `/api/shared/{kind}/{name}` | One server copy; `PUT` replaces any copy with that name |
 
 For example, starting a new game and shaping it from a shell:
 

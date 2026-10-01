@@ -752,6 +752,42 @@ export class ProjectSession {
     });
   }
 
+  // The open server project's ID, or null when none is open.
+  openProject(): string | null {
+    return this.binding?.id ?? null;
+  }
+
+  // The project server as this page last found it; null before the first check.
+  serverHealth(): ServerHealth | null {
+    return this.server;
+  }
+
+  // Saves `names`, one editor's sections, into the open server project now instead of at the next automatic save; a
+  // level takes along the media and course artwork it may name. `label` names them in the notice, e.g. "the level".
+  async saveToProject(names: readonly ProjectSectionName[], label: string): Promise<boolean> {
+    const binding = this.binding;
+    if (binding === null) {
+      this.report(new ProjectError('Open or save a server project in Project to save into it.'));
+      return false;
+    }
+    if (names.includes('level') && !this.workspace.level.prepare()) return false;
+    return this.run('Saving to the project', async () => {
+      if (this.binding !== binding) throw new ProjectError('The server project was closed; open it again in Project.');
+      const conflicts = names.filter((name) => this.conflicts.has(name));
+      if (conflicts.length > 0) {
+        throw new ProjectError(`${conflicts.join(', ')} also changed in the project; keep your version or use the project's in Project first.`);
+      }
+      const dirty = new Set(this.dirtySections());
+      const wanted = new Set(names.filter((name) => dirty.has(name)));
+      if (wanted.has('level')) {
+        for (const name of ['media', 'art'] as const) if (dirty.has(name) && !this.conflicts.has(name)) wanted.add(name);
+      }
+      if (wanted.size > 0) this.requireSaved(await this.write(binding, wanted, new Set()));
+      this.workspace.notice(wanted.size > 0 ? `Saved ${label} to project "${binding.id}".`
+        : `${label[0]!.toUpperCase()}${label.slice(1)} was already saved in project "${binding.id}".`, 'info');
+    });
+  }
+
   // Stores the whole project on the server under `id`, replacing any project with that ID.
   async saveAs(id: string): Promise<boolean> {
     return this.run('Saving to the server', async () => {

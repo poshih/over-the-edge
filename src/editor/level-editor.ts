@@ -26,7 +26,8 @@ import { placeSetPiece, SET_PIECE_CATALOG, SET_PIECE_CATEGORIES, SET_PIECES, set
 import type { SetPiece, SetPieceCategory, SetPieceCounts } from './set-pieces';
 import { SurfaceIndex } from './surface-snap';
 import { NamedSnapshots, SnapshotError } from './named-snapshots';
-import { downloadServerLevel } from './server-levels';
+import { createProjectSaveButton } from './project-save';
+import { createServerCopyPicker } from './server-copy-picker';
 import { createSnapshotPicker } from './snapshot-picker';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import { DRAWING, PolygonDraft } from './polygon-draft';
@@ -371,17 +372,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <p class="level-help level-decoration-detail"></p>
       </fieldset>
       `)}
-      ${sectionMarkup({ id: 'level-server', title: 'Server levels', hint: 'Load a level shared on this server' }, `
-      <div class="snapshot-history level-server">
-        <label for="level-server-list">Server level</label>
-        <div class="tuning-profile-row">
-          <select id="level-server-list"></select>
-          <button type="button" class="button level-server-load">Load server level</button>
-        </div>
-        <p class="snapshot-history-help">${options.serverLevels.length === 0
-    ? 'This Workshop serves no levels. Put level JSON files in the levels folder of its repository, then build and deploy it again.'
-    : 'The same for everyone who opens this Workshop. Loading one replaces the current level; saved snapshots are kept.'}</p>
-      </div>
+      ${sectionMarkup({ id: 'level-server', title: 'Server levels', hint: 'Load or save a level shared on this server' }, `
+      <div class="level-server"></div>
       `)}
       ${sectionMarkup({ id: 'level-saved', title: 'Saved levels', hint: 'Load a named snapshot' }, `
       <div class="level-history"></div>
@@ -452,8 +444,6 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const saveStatus = element<HTMLParagraphElement>(root, '.level-save-status');
   const importButton = element<HTMLButtonElement>(root, '.level-import');
   const fileInput = element<HTMLInputElement>(root, '.level-file');
-  const serverList = select('server-list');
-  const serverLoad = element<HTMLButtonElement>(root, '.level-server-load');
   const bounds = new Map(level.definition().objects.map((object) => [object.id, objectBounds(object)]));
   entityGizmos.sync(level.definition().objects, []);
   const downloadJson = createJsonDownload({ mount: root, signal: events.signal });
@@ -483,6 +473,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let savedDefinition: LevelDefinition | null = level.definition();
   let savedCamera: EditorCamera | null = null;
   let importGeneration = 0;
+  // The import generation a server level download started in.
+  let serverGeneration = 0;
   // A level file being read, or a server level being downloaded; either blocks other loads.
   let loading: 'file' | 'server' | null = null;
   let rect = options.canvas.getBoundingClientRect();
@@ -1153,6 +1145,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
   const picker = createSnapshotPicker({
     mount: element(root, '.level-history'), signal: events.signal, id: 'level', noun: 'level', plural: 'levels',
     placeholder: 'e.g. The quiet ascent', heading: false, isStorageKey: (key) => history.isStorageKey(key), onNotice,
+    actions: [createProjectSaveButton({ target: options.projectSave, sections: ['level'], label: 'the level', signal: events.signal })],
     list: () => {
       try {
         return history.list(localStorage);
@@ -1191,14 +1184,37 @@ Save a named snapshot or export first if you want to keep them. Continue without
     },
   });
   element(root, '.level-save-dock').append(element(root, '.tuning-save-form'));
-  serverList.replaceChildren(...(options.serverLevels.length === 0 ? [new Option('No server levels', '')]
-    : options.serverLevels.map((entry, index) => new Option(entry.name, String(index)))));
+  const serverPicker = createServerCopyPicker({
+    mount: element(root, '.level-server'), signal: events.signal, copies: options.serverCopies, kind: 'levels',
+    id: 'level', noun: 'level', plural: 'levels', placeholder: 'e.g. quiet-ascent', onNotice,
+    capture: () => active && prepareLevel() ? level.definition() : null,
+    apply: (value) => {
+      const definition = validateLevel(value);
+      // Leaving the Level tab cancels the load, as it cancels a file import.
+      if (disposed || !active || serverGeneration !== importGeneration || !confirmReplacement('Loading this server level')) return false;
+      resetSelection();
+      level.replace(definition);
+      markSaved();
+      fitCourse();
+      return true;
+    },
+    afterLoad: 'Existing named snapshots were kept; save a snapshot to keep it in this browser.',
+    // Edits made while the copy uploads stay unsaved.
+    onSaved: (saved) => markSaved(saved),
+    onLoading: (downloading) => {
+      if (downloading) {
+        serverGeneration = ++importGeneration;
+        setLoading('server');
+      } else if (serverGeneration === importGeneration) {
+        setLoading(null);
+      }
+    },
+  });
 
   function renderLoadControls(): void {
     importButton.disabled = loading !== null;
     picker.setDisabled(!active || loading !== null);
-    serverList.disabled = !active || loading !== null || options.serverLevels.length === 0;
-    serverLoad.disabled = serverList.disabled;
+    serverPicker.setDisabled(!active || loading !== null);
   }
 
   function setLoading(next: typeof loading): void {
@@ -1564,29 +1580,6 @@ This restores the default ground and start location, removes all other objects a
     if (active && file !== undefined) void importFile(file);
   }, listen);
 
-  async function loadServerLevel(): Promise<void> {
-    const entry = options.serverLevels[Number(serverList.value)];
-    if (entry === undefined || loading !== null) return;
-    const generation = ++importGeneration;
-    setLoading('server');
-    let definition: LevelDefinition;
-    try {
-      definition = await downloadServerLevel(entry, events.signal);
-    } catch (error) {
-      if (!disposed && generation === importGeneration) report(error);
-      else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
-      return;
-    } finally {
-      if (!disposed && generation === importGeneration) setLoading(null);
-    }
-    if (disposed || !active || generation !== importGeneration || !confirmReplacement('Loading this server level')) return;
-    resetSelection();
-    level.replace(definition);
-    markSaved();
-    fitCourse();
-    onNotice(`Loaded "${entry.name}" from the server. Existing named snapshots were kept; save a snapshot to keep it in this browser.`, 'info');
-  }
-  action('.level-server-load', () => { void loadServerLevel(); });
 
   function hitTest(world: Point): LevelObject | null {
     hitTestCount++;

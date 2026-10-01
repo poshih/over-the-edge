@@ -216,6 +216,13 @@ export function createUI(options: UiOptions): GameUi {
   savedSettingsMount.setAttribute('aria-label', 'Saved game settings');
   savedSettings.body.append(savedSettingsMount);
   tuningGroups.append(savedSettings.root);
+  const serverSettings = createSection({
+    id: 'physics-server', title: 'Server game settings', hint: 'Load or save settings shared on this server',
+  });
+  const serverSettingsMount = document.createElement('section');
+  serverSettingsMount.setAttribute('aria-label', 'Server game settings');
+  serverSettings.body.append(serverSettingsMount);
+  tuningGroups.append(serverSettings.root);
   function renderWorkshop(mode: 'open' | 'closed'): void {
     const open = mode === 'open';
     const focusInPanel = panel.contains(document.activeElement);
@@ -274,7 +281,8 @@ export function createUI(options: UiOptions): GameUi {
   }
   renderSettings(settings);
   createGameSettingsUI({
-    mount: savedSettingsMount, signal: events.signal,
+    mount: savedSettingsMount, serverMount: serverSettingsMount, signal: events.signal,
+    projectSave: options.projectSave, serverCopies: options.serverCopies,
     getSettings: () => settings, onLoad: commitSettings, onNotice: notice,
   });
   rememberSections(panel, events.signal);

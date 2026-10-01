@@ -1,7 +1,8 @@
 import type { Point } from '../config';
 import type { DecorationObject } from '../level';
 import type { LevelState } from './level-state';
-import type { ServerLevel } from './server-levels';
+import type { ProjectSaveTarget } from './project-save';
+import type { ServerCopies } from './server-copies';
 
 export interface EditorCamera {
   x: number;
@@ -37,8 +38,10 @@ export interface LevelEditorOptions {
     placed: () => boolean;
   };
   onNotice: (message: string, kind: 'info' | 'error') => void;
-  // The levels served with this Workshop, listed under Server levels.
-  serverLevels: readonly ServerLevel[];
+  // The levels shared with everyone who opens this Workshop, listed and saved under Server levels.
+  serverCopies: ServerCopies;
+  // The open server project, which Save to project writes the level into.
+  projectSave: ProjectSaveTarget;
   // False when the project warns about leaving instead (a Workshop built with GAME_PROJECT, which
   // keeps its project, level included, in the browser).
   warnBeforeUnload?: boolean;

@@ -15,6 +15,8 @@ export function createSnapshotPicker(options: {
   load: (key: string) => { name: string } | null;
   isStorageKey: (key: string | null) => boolean;
   onNotice: (message: string, kind: 'info' | 'error') => void;
+  /** More buttons for the save row, after Save, e.g. Save to project. */
+  actions?: readonly HTMLElement[];
 }): { setDisabled: (disabled: boolean) => void; select: (key: string) => void } {
   const { id, noun, plural, mount } = options;
   const listen = { signal: options.signal };
@@ -47,6 +49,7 @@ export function createSnapshotPicker(options: {
   const save = get<HTMLButtonElement>(`.save-${id}`);
   const load = get<HTMLButtonElement>(`.load-${id}`);
   const errorBox = get<HTMLParagraphElement>('.snapshot-history-error');
+  save.after(...options.actions ?? []);
   name.placeholder = options.placeholder;
   let disabled = false;
   let entries: SnapshotEntry[] = [];

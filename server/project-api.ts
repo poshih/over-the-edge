@@ -28,7 +28,10 @@ import {
 } from '../src/project';
 import type { ProjectContent, ProjectManifest } from '../src/project';
 import { mergePatch } from '../src/project-fields';
+import { isSharedKind, SHARED_FORMATS, SHARED_KINDS, sharedText } from '../src/shared-copies';
+import type { SharedKind } from '../src/shared-copies';
 import { EMPTY_SPRITES, SPRITE_FILE_BYTES } from '../src/sprite-data';
+import type { SpriteDocument } from '../src/sprite-data';
 import { validateTheme } from '../src/theme';
 import { checkAppearanceModel } from '../src/appearance-model';
 import {
@@ -41,6 +44,7 @@ import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendError, sen
 import { ProjectStore, SECTION_NAMES } from './project-store';
 import type { ProjectChange, ProjectState, SectionName } from './project-store';
 import { Publisher } from './publish';
+import { SharedStore } from './shared-store';
 
 export interface StudioConfig {
   readonly root: string;
@@ -125,6 +129,7 @@ function withManifest(manifest: ProjectManifest, changes: Partial<ProjectManifes
 
 export function createStudioHandler(config: StudioConfig) {
   const store = new ProjectStore(config.projects);
+  const shared = new SharedStore(config.root);
   const publisher = new Publisher({ root: config.root, releases: config.releases });
   const tokenDigest = config.token === null ? null : digest(config.token);
   const routes: Route[] = [];
@@ -702,6 +707,40 @@ export function createStudioHandler(config: StudioConfig) {
     });
   });
 
+  // Shared copies --------------------------------------------------------------------------------
+  const sharedKind = (context: Context): SharedKind => {
+    const kind = context.params.kind!;
+    if (!isSharedKind(kind)) throw new HttpError(404, 'not-found', `Unknown shared kind "${kind}"; use ${SHARED_KINDS.join(', ')}.`);
+    return kind;
+  };
+  route('GET', '/api/shared/:kind', async (context) => {
+    sendJson(context.response, 200, { copies: await shared.list(sharedKind(context)) });
+  });
+  route('GET', '/api/shared/:kind/:name', async (context) => {
+    const kind = sharedKind(context);
+    const name = context.params.name!;
+    const { maxBytes } = SHARED_FORMATS[kind];
+    if (await shared.size(kind, name) > maxBytes) throw new HttpError(413, 'too-large', `${kind}/${name}.json exceeds ${formatBytes(maxBytes)}.`);
+    sendFile(context.request, context.response, shared.path(kind, name), 'application/json; charset=utf-8', { 'Cache-Control': 'no-store' });
+  });
+  route('PUT', '/api/shared/:kind/:name', async (context) => {
+    const kind = sharedKind(context);
+    const name = context.params.name!;
+    // A bad name fails before the body is read.
+    shared.path(kind, name);
+    const format = SHARED_FORMATS[kind];
+    const body = await readJson(context.request, format.maxBytes);
+    const value = inSection(kind, () => format.validate(body));
+    if (kind === 'characters') inSection(kind, () => checkCharacterModels(value as SpriteDocument, 'character', config.avatarRigs));
+    const text = sharedText(kind, value);
+    if (Buffer.byteLength(text) > format.maxBytes) throw new HttpError(413, 'too-large', `${kind}/${name}.json would exceed ${formatBytes(format.maxBytes)}.`);
+    sendJson(context.response, 200, await shared.write(kind, name, text));
+  });
+  route('DELETE', '/api/shared/:kind/:name', async (context) => {
+    await shared.remove(sharedKind(context), context.params.name!);
+    sendJson(context.response, 200, { deleted: context.params.name });
+  });
+
   // Generic sections, registered last so the specific routes above win.
   for (const name of SECTION_NAMES) {
     const spec = sections[name];
@@ -857,6 +896,7 @@ export function projectStudio(options: { root: string; mode: string; avatarRigs:
   if (token !== null && token.length < MIN_TOKEN) throw new Error(`STUDIO_TOKEN must contain at least ${MIN_TOKEN} characters.`);
   const projects = env.STUDIO_PROJECTS ? resolve(options.root, env.STUDIO_PROJECTS) : resolve(options.root, 'projects');
   const releases = insideRoot(options.root, env.STUDIO_RELEASES ?? 'releases', 'STUDIO_RELEASES');
+  const shared = SHARED_KINDS.map((kind) => resolve(options.root, kind));
   const handler = createStudioHandler({
     root: options.root, projects, releases, token, avatarRigs: options.avatarRigs,
     workshopProject: studioProjectId(options.root, projects, options.workshopProject),
@@ -867,9 +907,9 @@ export function projectStudio(options: { root: string; mode: string; avatarRigs:
   };
   return {
     name: 'project-studio',
-    // The dev server serves every file under its root; stored projects and releases must only be
+    // The dev server serves every file under its root; stored projects, releases and shared copies must only be
     // reachable through the checked /api and /play routes.
-    config: () => ({ server: { fs: { deny: [...VITE_FS_DENY, ...[projects, releases].map((folder) => `${folder.replaceAll('\\', '/')}/**`)] } } }),
+    config: () => ({ server: { fs: { deny: [...VITE_FS_DENY, ...[projects, releases, ...shared].map((folder) => `${folder.replaceAll('\\', '/')}/**`)] } } }),
     configureServer(server) { use(server); },
     configurePreviewServer(server) { use(server); },
   };

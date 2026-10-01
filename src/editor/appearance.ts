@@ -81,11 +81,13 @@ export class Appearance {
     return { ...this.armIk };
   }
 
-  previewArmIk(value: unknown): void {
-    if (!this.canEdit()) return;
+  // Previews `value`; false while the appearance cannot change.
+  previewArmIk(value: unknown): boolean {
+    if (!this.canEdit()) return false;
     this.armIk = validateArmIk(value);
     this.armIkIssue = null;
     this.changed();
+    return true;
   }
 
   resetArmIk(): void {

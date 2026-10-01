@@ -120,8 +120,10 @@ failed imports leave the previous rendering and draft intact.
 
 Sprite storage is a separate IndexedDB database, `over-the-edge:sprites`.
 Existing GLB, level, tuning, and IK records are unchanged. Saves are local to the
-site/origin and are not uploaded unless you save a [game project](projects.md) to
-your own project server. Different tabs do not synchronize live edits;
+site/origin and are not uploaded unless you save to your own project server:
+**Save to project** writes the profile into the open [game project](projects.md),
+and **Workshop / Character / Server character profiles** shares named
+[copies](projects.md#server-copies). Different tabs do not synchronize live edits;
 the last successful explicit Save becomes the next startup layout.
 
 ## 2D skeletal rigging

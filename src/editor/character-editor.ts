@@ -22,7 +22,12 @@ import { clamp } from '../math';
 import { RIG_LIMITS } from '../rig';
 import type { RigGeometry } from '../rig';
 import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
+import { validateProjectCharacter } from '../project';
+import { createProjectSaveButton } from './project-save';
+import type { ProjectSaveTarget } from './project-save';
 import { createRangeControl } from './range-control';
+import type { ServerCopies } from './server-copies';
+import { createServerCopyPicker } from './server-copy-picker';
 import { createServerModelPicker } from './server-model-picker';
 import { serverModelSettings, ServerModelError } from './server-models';
 import type { ServerModel, ServerModels } from './server-models';
@@ -95,6 +100,9 @@ export function createCharacterEditor(options: {
   readonly serverModels: ServerModels;
   readonly onNotice: (message: string, kind: 'info' | 'error') => void;
   readonly signal: AbortSignal;
+  // The open server project, for Save to project, and the character profiles shared on the server.
+  readonly projectSave: ProjectSaveTarget;
+  readonly serverCopies: ServerCopies;
 }): { setHammerRig(rig: RigGeometry): void; dispose(): void } {
   const events = new AbortController();
   const listen = { signal: events.signal };
@@ -284,6 +292,9 @@ export function createCharacterEditor(options: {
         </section>
       `)}
 
+      ${sectionMarkup({ id: 'character-server', title: 'Server character profiles', hint: 'Load or save a profile shared on this server' },
+    '<div class="character-server"></div>')}
+
       ${sectionMarkup({ id: 'character-file', title: 'Profile JSON', hint: 'Import or export the whole profile' }, `
         <fieldset class="tuning-group character-files">
           <legend class="visually-hidden">Whole character / sprite profile</legend>
@@ -349,6 +360,17 @@ export function createCharacterEditor(options: {
   const exportButton = element<HTMLButtonElement>(root, '.character-export');
   const saveButton = element<HTMLButtonElement>(root, '.character-save');
   const revertButton = element<HTMLButtonElement>(root, '.character-revert');
+  element(root, '.character-footer .character-action-row').append(createProjectSaveButton({
+    target: options.projectSave, sections: ['characters/primary'], label: 'the character profile', signal: events.signal,
+  }));
+  createServerCopyPicker({
+    mount: element(root, '.character-server'), signal: events.signal, copies: options.serverCopies, kind: 'characters',
+    id: 'character', noun: 'character profile', plural: 'character profiles', placeholder: 'e.g. hooded-climber',
+    onNotice: options.onNotice,
+    capture: () => options.state.validatedDraft(),
+    apply: (value) => options.state.loadDocument(validateProjectCharacter(value)),
+    afterLoad: 'It is a draft: Save keeps it in this browser.',
+  });
   const externalWarning = element<HTMLParagraphElement>(root, '.character-external-warning');
   const forwardReset = element<HTMLButtonElement>(root, '.character-arm-forward-reset');
   const forwardInactive = element<HTMLParagraphElement>(root, '.character-arm-forward-inactive');

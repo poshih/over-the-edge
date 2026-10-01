@@ -25,9 +25,11 @@ import { AudioDirector } from '../audio';
 import { urlMediaHost } from '../media-host';
 import { DEFAULT_AUDIO } from '../audio-settings';
 import { isDarkSky } from '../theme';
+import { ProjectClient } from './project-client';
 import { ProjectSession } from './project-session';
 import { createProjectEditor } from './project-editor';
-import { serverLevels } from './server-levels';
+import { ServerCopies } from './server-copies';
+import { publishedLevel } from './server-levels';
 import { createDecorationView } from '../decoration-library';
 import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
@@ -42,13 +44,14 @@ if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface 
 // A Workshop built with GAME_PROJECT opens that game and keeps it, with its changes, in this
 // browser's copy of the project; the editors' own browser saves do not open at start.
 const opensProject = publishedProject !== null;
+const client = new ProjectClient();
 const level = new LevelState(DEFAULT_LEVEL);
 let debug = false;
 // Where attempts start: a starting point, or where the designer placed the player in the Level tab to
 // test part of the course. Placing the player never moves the level's own start.
 let origin: PracticeId | PlayerSpawn = 'start';
 let editing = false;
-// Media resolve through the open project, which is created once the editors exist.
+// Media resolve through the open project once it starts.
 let resolveMedia = (source: string): string => source;
 let mediaVersion = 0;
 // The Workshop plays media from the open project's files, or from the URLs a level names.
@@ -80,6 +83,53 @@ const unsubscribeLevel = level.subscribe((change) => {
   game.applyLevel(change);
   if (change.kind === 'replace') origin = 'start';
 });
+// The open project, created before the editors so each can save into it; it reads them only once started.
+const project = new ProjectSession({
+  avatarRigs, client,
+  workspace: {
+    level: {
+      get: () => level.definition(),
+      load: (definition) => levelEditor.loadLevel(definition),
+      sync: (definition) => levelEditor.syncLevel(definition),
+      prepare: () => levelEditor.preparePlay(),
+      markSaved: (definition) => levelEditor.markSaved(definition),
+    },
+    settings: { get: () => ui.settings(), load: (settings) => ui.applySettings(settings) },
+    character: {
+      draft: () => spriteEditor.snapshot().document,
+      hasContent: () => spriteEditor.snapshot().hasContent,
+      validated: () => spriteEditor.validatedDocument(),
+      load: (document, options) => spriteEditor.loadDocument(document, options),
+    },
+    appearance: {
+      armIk: () => appearance.armIkSettings(),
+      loadArmIk: (settings) => appearance.previewArmIk(settings),
+      parts: () => appearance.exportParts(),
+      load: (parts) => appearance.replaceParts(parts),
+    },
+    get ready() { return Promise.all([appearanceRestored, spriteEditor.ready]); },
+    onLook: (look) => {
+      resolveMedia = look.resolveMedia;
+      // Replaced or re-added files keep their paths, so drop sounds cached for the old files.
+      if (look.mediaVersion !== mediaVersion) {
+        mediaVersion = look.mediaVersion;
+        audio.setMedia(urlMediaHost(look.resolveMedia));
+      }
+      game.setTheme(look.theme);
+      ui.setSceneTone(isDarkSky(look.theme));
+      game.setEnemyArt(look.enemies);
+      ui.setHud(look.hud);
+      game.setMessageStyle(look.hud.messages.style);
+      audio.setSettings(look.audio);
+    },
+    notice: (message, kind) => ui.notice(message, kind),
+  },
+  published: publishedProject,
+});
+const serverCopies = new ServerCopies({
+  client, health: () => project.serverHealth(), watch: (listener) => project.subscribe(listener),
+  levels: { published: publishedLevel(publishedProject), folder: folderLevels },
+});
 const ui = createUI({
   mount,
   initialSettings: game.settings(),
@@ -91,10 +141,11 @@ const ui = createUI({
     game.setSettings(settings);
     spriteEditor.setHammerRig(game.simulation.rigGeometry);
   },
+  projectSave: project, serverCopies,
 });
 const rig = new AppearanceRig(game.view.visuals);
 const appearance = new Appearance(rig, ui.notice, { browserStore: !opensProject });
-const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice });
+const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice, projectSave: project, serverCopies });
 const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
 }));
@@ -117,6 +168,7 @@ const spriteEditor = createSpriteEditor({
     }
   },
   applySavedProfile: !opensProject,
+  projectSave: project, serverCopies,
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);
     if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);
@@ -152,51 +204,9 @@ const levelEditor = createLevelEditor({
   },
   onNotice: ui.notice,
   warnBeforeUnload: !opensProject,
-  serverLevels: serverLevels(publishedProject, folderLevels),
+  serverCopies, projectSave: project,
 });
 const appearanceRestored = appearance.restore();
-const project = new ProjectSession({
-  avatarRigs,
-  workspace: {
-    level: {
-      get: () => level.definition(),
-      load: (definition) => levelEditor.loadLevel(definition),
-      sync: (definition) => levelEditor.syncLevel(definition),
-      prepare: () => levelEditor.preparePlay(),
-      markSaved: (definition) => levelEditor.markSaved(definition),
-    },
-    settings: { get: () => ui.settings(), load: (settings) => ui.applySettings(settings) },
-    character: {
-      draft: () => spriteEditor.snapshot().document,
-      hasContent: () => spriteEditor.snapshot().hasContent,
-      validated: () => spriteEditor.validatedDocument(),
-      load: (document, options) => spriteEditor.loadDocument(document, options),
-    },
-    appearance: {
-      armIk: () => appearance.armIkSettings(),
-      loadArmIk: (settings) => appearance.previewArmIk(settings),
-      parts: () => appearance.exportParts(),
-      load: (parts) => appearance.replaceParts(parts),
-    },
-    ready: Promise.all([appearanceRestored, spriteEditor.ready]),
-    onLook: (look) => {
-      resolveMedia = look.resolveMedia;
-      // Replaced or re-added files keep their paths, so drop sounds cached for the old files.
-      if (look.mediaVersion !== mediaVersion) {
-        mediaVersion = look.mediaVersion;
-        audio.setMedia(urlMediaHost(look.resolveMedia));
-      }
-      game.setTheme(look.theme);
-      ui.setSceneTone(isDarkSky(look.theme));
-      game.setEnemyArt(look.enemies);
-      ui.setHud(look.hud);
-      game.setMessageStyle(look.hud.messages.style);
-      audio.setSettings(look.audio);
-    },
-    notice: ui.notice,
-  },
-  published: publishedProject,
-});
 const projectEditor = createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,
   onTestCue: (cue) => audio.handle({ type: 'cue', cue, strength: 1 }),
@@ -315,6 +325,7 @@ if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
     projectEditor.dispose();
+    serverCopies.dispose();
     project.dispose();
     audio.dispose();
     unsubscribeLevel();

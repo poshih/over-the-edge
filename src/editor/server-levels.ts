@@ -11,11 +11,10 @@ export interface ServerLevel {
   readonly bytes: number;
 }
 
-/** The Workshop's server levels: the published project's level first, then the levels folder's. */
-export function serverLevels(project: PublishedProject | null, folder: readonly ServerLevel[]): readonly ServerLevel[] {
+/** The published project's level, served with a Workshop built with GAME_PROJECT; null without one. */
+export function publishedLevel(project: PublishedProject | null): ServerLevel | null {
   const file = project?.files.find((candidate) => candidate.path === PROJECT_FILES.level);
-  return project === null || file === undefined ? folder
-    : [{ name: `${project.title} (published project)`, url: file.url, bytes: file.bytes }, ...folder];
+  return project === null || file === undefined ? null : { name: `${project.title} (published project)`, url: file.url, bytes: file.bytes };
 }
 
 /** Downloads a server level and validates it like an imported level file. */

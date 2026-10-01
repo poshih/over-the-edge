@@ -246,7 +246,8 @@
   margin-top: 12px;
 }
 
-.level-editor .tuning-profile-row {
+.level-editor .tuning-profile-row,
+.level-editor .snapshot-history .server-copies-list {
   grid-template-columns: minmax(0, 1fr);
 }
 

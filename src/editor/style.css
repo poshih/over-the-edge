@@ -481,6 +481,15 @@ body[data-input-mode="touch"] .workshop-search-key {
   font-size: 10px;
 }
 
+.snapshot-history .server-copies-list {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+/* Save to project takes a row of its own under the Save buttons it joins. */
+.project-save {
+  grid-column: 1 / -1;
+}
+
 .snapshot-history select:focus-visible {
   outline: 3px solid #94662b;
   outline-offset: 4px;

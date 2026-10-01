@@ -3,6 +3,10 @@ import type { GameSettings } from '../game-settings';
 import { element } from '../dom';
 import { createJsonDownload } from './json-download';
 import { SnapshotError } from './named-snapshots';
+import { createProjectSaveButton } from './project-save';
+import type { ProjectSaveTarget } from './project-save';
+import type { ServerCopies } from './server-copies';
+import { createServerCopyPicker } from './server-copy-picker';
 import { createSnapshotPicker } from './snapshot-picker';
 import {
   isGameSettingsStorageKey, listGameSettingsProfiles, loadGameSettingsProfile, saveGameSettingsProfile,
@@ -11,10 +15,14 @@ import type { SavedGameSettings } from './game-settings-store';
 
 interface GameSettingsUiOptions {
   mount: HTMLElement;
+  // Where the settings shared on the server are listed.
+  serverMount: HTMLElement;
   signal: AbortSignal;
   getSettings: () => GameSettings;
   onLoad: (settings: GameSettings) => void;
   onNotice: (message: string, kind: 'info' | 'error') => void;
+  projectSave: ProjectSaveTarget;
+  serverCopies: ServerCopies;
 }
 
 export function createGameSettingsUI(options: GameSettingsUiOptions): void {
@@ -33,6 +41,7 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
   const picker = createSnapshotPicker({
     mount: options.mount, signal: options.signal, id: 'game-settings', noun: 'game settings', plural: 'game settings',
     placeholder: 'e.g. Steady hammer', heading: false, isStorageKey: isGameSettingsStorageKey, onNotice: options.onNotice,
+    actions: [createProjectSaveButton({ target: options.projectSave, sections: ['settings'], label: 'the game settings', signal: options.signal })],
     list: () => listGameSettingsProfiles(localStorage),
     save: (name) => {
       try {
@@ -74,6 +83,7 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
 
   function setImporting(busy: boolean): void {
     picker.setDisabled(busy);
+    serverPicker.setDisabled(busy);
     importButton.disabled = busy;
     exportButton.disabled = busy;
   }
@@ -126,4 +136,27 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
       report(error, 'export');
     }
   }, listen);
+
+  // The settings a server copy's download started from: a newer edit cancels the load, as it cancels an import.
+  let downloadedOver: GameSettings | null = null;
+  const serverPicker = createServerCopyPicker({
+    mount: options.serverMount, signal: options.signal, copies: options.serverCopies, kind: 'game-settings',
+    id: 'game-settings', noun: 'game settings', plural: 'game settings', placeholder: 'e.g. steady-hammer',
+    onNotice: options.onNotice,
+    capture: () => options.getSettings(),
+    apply: (value) => {
+      const settings = validateGameSettings(value);
+      if (options.getSettings() !== downloadedOver) {
+        options.onNotice('Settings changed while the server copy was downloading. The load was canceled; load it again to replace them.', 'info');
+        return false;
+      }
+      options.onLoad(settings);
+      return true;
+    },
+    afterLoad: 'Saved profiles were kept; save a named profile to keep these settings in this browser.',
+    onLoading: (busy) => {
+      if (busy) downloadedOver = options.getSettings();
+      setImporting(busy);
+    },
+  });
 }
