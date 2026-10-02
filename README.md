@@ -546,6 +546,23 @@ and replaces the current level like an import, asking first when there are unsav
 changes. **Save to project**, under **Save level**, writes the level into the open
 [server project](docs/projects.md#working-in-the-workshop) at once.
 
+### Level board
+
+**Board**, on until you turn it off, lays a chessboard over the course so you can name an
+area in one word, for example when asking a person or a language model for a fix: "the gap
+in D7 is too wide". Squares are 10 m. Rows count up from the ground at y = 0: row 1 is
+0-10 m high, row 7 is 60-70 m and row 0 is the band just below the ground. Columns are
+lettered A, B, ... Z, AA, AB, ... from the left: column A is the 10 m band, on multiples of
+10 m, that holds the level's leftmost terrain point (for terrain that is not rotated, the
+smallest `x - width/2`). The letters shift when that point moves into another 10 m band:
+when terrain is added or moved left of column A, or the leftmost piece is moved right or
+removed.
+
+Squares show their names; zoomed out, only every 2nd, 5th, 10th, 20th, ... column and row
+is named. Pointing at the course names the square and the position under the pointer. Type
+a square such as `D7` and choose **Go to** to centre the view on it, for example one a
+language model names in its answer.
+
 ### Drawing terrain
 
 Choose **Workshop / Level / Draw shape**. Click or tap individual corners, or

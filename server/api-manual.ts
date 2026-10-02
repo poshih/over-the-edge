@@ -11,6 +11,7 @@ import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
 import { CURSOR_FIELDS, RIG_FIELDS, TUNING_FIELDS } from '../src/game-settings';
 import { HUD_FIELDS } from '../src/hud';
 import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
+import { BOARD_CELL } from '../src/level-board';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
 import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
@@ -110,6 +111,7 @@ export function apiManual(auth: 'token' | 'loopback') {
           'stop-timer': { type: 'stop-timer' },
           'launch-player': { type: 'launch-player', height: `${LAUNCH_FIELDS.height.min}-${LAUNCH_FIELDS.height.max} m`, strength: `${LAUNCH_FIELDS.strength.min}-${LAUNCH_FIELDS.strength.max}` },
         },
+        board: `Designers name areas by the Workshop's level board, like a chessboard: ${BOARD_CELL} m squares such as D7. Rows count up from y = 0 (row n spans y ${BOARD_CELL}(n-1) to ${BOARD_CELL}n m; row 0 lies just below 0). Columns are lettered A, B, ... Z, AA, ... rightward from column A, the ${BOARD_CELL} m band, on multiples of ${BOARD_CELL} m, that holds the leftmost terrain point.`,
         notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {

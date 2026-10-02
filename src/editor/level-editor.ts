@@ -17,7 +17,11 @@ import { decorationThumbnail } from './decoration-thumbnail';
 import { MAX_RIG_REACH } from '../rig';
 import { ENDING_EVENTS, UPDRAFT_EVENTS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
-import { element } from '../dom';
+import { element, setText } from '../dom';
+import { BOARD_CELL, boardLeft, boardSquareAt, boardSquareBounds, boardSquareName, parseBoardSquare } from '../level-board';
+import type { BoardSquare } from '../level-board';
+import { LevelBoardView, niceStep } from './level-board-view';
+import type { BoardViewport } from './level-board-view';
 import { createJsonDownload } from './json-download';
 import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
 import { EntityGizmos, enemyGlyph, objectGizmoBounds, updraftGlyph } from './object-gizmos';
@@ -144,6 +148,24 @@ function boundsContain(bounds: Bounds, point: Point): boolean {
   return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.bottom && point.y <= bounds.top;
 }
 
+const BOARD_KEY = 'over-the-edge:level-board:v1';
+
+function leastOf(values: Iterable<number>): number | null {
+  let least: number | null = null;
+  for (const value of values) if (least === null || value < least) least = value;
+  return least;
+}
+
+// Whether the level board shows; it does until the designer hides it.
+function readBoardShown(): boolean {
+  try {
+    return localStorage.getItem(BOARD_KEY) !== 'hidden';
+  } catch (error) {
+    if (error instanceof DOMException) return true;
+    throw error;
+  }
+}
+
 function anchorTrigger(object: TriggerObject, preset: TriggerPreset): TriggerObject {
   if (!preset.anchorBottom || object.region.type !== 'box') return object;
   return { ...object, y: object.y + object.region.height / 2 };
@@ -205,6 +227,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <button type="button" class="button level-player-clear">Use the level start</button></p>
       <div class="level-save-dock"></div>
       <p class="level-save-status" role="status" aria-live="polite"></p>
+      <p class="level-board-readout"></p>
     </div>
     <div class="workshop-scroll level-scroll">
       <fieldset class="tuning-group level-tools">
@@ -221,6 +244,13 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button level-fit">Fit course</button>
           <button type="button" class="button level-go-start">View start</button>
         </div>
+        <form class="level-board-controls" aria-label="Level board">
+          <button type="button" class="button level-board-toggle" aria-pressed="true"
+            title="Name 10 m squares like a chessboard: columns A, B… from the left, rows 1, 2… up from the ground">Board</button>
+          <input id="level-board-square" type="text" maxlength="8" placeholder="Square, e.g. D7" aria-label="Board square to go to"
+            autocomplete="off" spellcheck="false" />
+          <button type="submit" class="button">Go to</button>
+        </form>
         <p class="level-help level-palette-label">Terrain</p>
         <div class="level-palette" aria-label="Shape palette">
           <button type="button" class="button level-preset level-draw-tool" data-level-tool="draw" aria-pressed="false">
@@ -437,6 +467,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const drawingNodes = graphic<SVGPathElement>('.level-drawing-nodes');
   const drawingFirst = graphic<SVGCircleElement>('.level-drawing-first');
   const drawing = new PolygonDraft();
+  const board = new LevelBoardView();
+  svg.insertBefore(board.root, cameraGroup);
   const entityGizmos = new EntityGizmos(cameraGroup);
   const inspector = element<HTMLFieldSetElement>(root, '.level-inspector');
   const input = (name: string) => element<HTMLInputElement>(root, `#level-${name}`);
@@ -445,6 +477,16 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const importButton = element<HTMLButtonElement>(root, '.level-import');
   const fileInput = element<HTMLInputElement>(root, '.level-file');
   const bounds = new Map(level.definition().objects.map((object) => [object.id, objectBounds(object)]));
+  // Each terrain object's leftmost point, and the least of them, which places the board's column A.
+  const terrainLefts = new Map(level.definition().objects.filter(isTerrainObject).map((object) => [object.id, bounds.get(object.id)!.left]));
+  let terrainLeft = leastOf(terrainLefts.values());
+  board.setLeft(boardLeft(terrainLeft));
+  const boardReadout = element<HTMLParagraphElement>(root, '.level-board-readout');
+  const boardToggle = element<HTMLButtonElement>(root, '.level-board-toggle');
+  const boardInput = input('board-square');
+  let boardShown = readBoardShown();
+  // The square under the pointer, or the one Go to chose; null for none.
+  let boardSquare: BoardSquare | null = null;
   entityGizmos.sync(level.definition().objects, []);
   const downloadJson = createJsonDownload({ mount: root, signal: events.signal });
   const triggerEvents = createTriggerEventEditor({
@@ -957,11 +999,107 @@ Save a named snapshot or export first if you want to keep them. Continue without
       `matrix(${unitX.x - origin.x} ${unitX.y - origin.y} ${unitY.x - origin.x} ${unitY.y - origin.y} ${origin.x} ${origin.y})`);
     const pixelsPerUnit = Math.hypot(unitX.x - origin.x, unitX.y - origin.y);
     if (pixelsPerUnit > 0) {
-      const spacing = 2 ** Math.ceil(Math.log2(GRID_TARGET_PIXELS / pixelsPerUnit)) * pixelsPerUnit;
+      // 1, 2 or 5 times a power of ten metres, so the fine grid meets the board's 10 m lines.
+      const spacing = niceStep(GRID_TARGET_PIXELS / pixelsPerUnit) * pixelsPerUnit;
       overlay.style.backgroundSize = `${spacing}px ${spacing}px`;
       overlay.style.backgroundPosition = `${origin.x % spacing}px ${origin.y % spacing}px`;
     }
+    drawBoard();
     draw();
+  }
+
+  // The course plane maps to the overlay by one affine matrix, the camera group's, projected once per draw so placing
+  // the board's names never reads layout again.
+  function boardViewport(): BoardViewport {
+    const origin = local({ x: 0, y: 0 });
+    const unitX = local({ x: 1, y: 0 });
+    const unitY = local({ x: 0, y: 1 });
+    const ax = unitX.x - origin.x;
+    const ay = unitX.y - origin.y;
+    const bx = unitY.x - origin.x;
+    const by = unitY.y - origin.y;
+    const determinant = ax * by - ay * bx;
+    return {
+      width: rect.width, height: rect.height,
+      toScreen: (point) => ({ x: origin.x + point.x * ax + point.y * bx, y: origin.y + point.x * ay + point.y * by }),
+      toWorld: (screen) => {
+        const dx = screen.x - origin.x;
+        const dy = screen.y - origin.y;
+        return { x: (dx * by - dy * bx) / determinant, y: (ax * dy - ay * dx) / determinant };
+      },
+    };
+  }
+
+  function drawBoard(): void {
+    if (!active || disposed) return;
+    board.root.toggleAttribute('hidden', !boardShown);
+    if (boardShown) board.draw(boardViewport());
+  }
+
+  // Names the square and position at `world`, or says how the board names squares.
+  function renderBoardReadout(world: Point | null): void {
+    boardReadout.hidden = !boardShown;
+    setText(boardReadout, world === null ? 'Board: 10 m squares, columns A, B… from the left, rows 1, 2… up from the ground.'
+      : `${boardSquareName(boardSquareAt(boardLeft(terrainLeft), world)) ?? 'Left of column A'} · x ${world.x.toFixed(1)} m, y ${world.y.toFixed(1)} m`);
+  }
+
+  function hoverBoard(square: BoardSquare | null): void {
+    if (square?.column === boardSquare?.column && square?.row === boardSquare?.row) return;
+    boardSquare = square;
+    board.setHover(square);
+    if (active && boardShown) board.drawHover(boardViewport());
+  }
+
+  function pointBoard(event: PointerEvent): void {
+    if (!boardShown) return;
+    const world = camera.unproject(pointFromEvent(event));
+    hoverBoard(boardSquareAt(boardLeft(terrainLeft), world));
+    renderBoardReadout(world);
+  }
+
+  function setBoardShown(shown: boolean): void {
+    boardShown = shown;
+    boardToggle.setAttribute('aria-pressed', String(shown));
+    try {
+      localStorage.setItem(BOARD_KEY, shown ? 'shown' : 'hidden');
+    } catch (error) {
+      if (!(error instanceof DOMException)) throw error;
+    }
+    hoverBoard(null);
+    renderBoardReadout(null);
+    drawBoard();
+  }
+
+  // Keeps the leftmost terrain point, and so column A, current from an edit's changed objects; the terrain is scanned
+  // again only when its leftmost point moved right or went.
+  function trackTerrainLeft(upsert: readonly LevelObject[], remove: readonly string[]): void {
+    const before = boardLeft(terrainLeft);
+    let rescan = false;
+    for (const id of remove) {
+      const left = terrainLefts.get(id);
+      if (left === undefined) continue;
+      terrainLefts.delete(id);
+      if (left === terrainLeft) rescan = true;
+    }
+    for (const object of upsert) {
+      const previous = terrainLefts.get(object.id);
+      if (isTerrainObject(object)) {
+        const left = bounds.get(object.id)!.left;
+        terrainLefts.set(object.id, left);
+        if (previous === terrainLeft && left > previous) rescan = true;
+        else if (terrainLeft === null || left < terrainLeft) terrainLeft = left;
+      } else if (previous !== undefined) {
+        terrainLefts.delete(object.id);
+        if (previous === terrainLeft) rescan = true;
+      }
+    }
+    if (rescan) terrainLeft = leastOf(terrainLefts.values());
+    if (boardLeft(terrainLeft) === before) return;
+    // The columns were lettered again, so the highlighted square's name no longer matches its place.
+    hoverBoard(null);
+    renderBoardReadout(null);
+    board.setLeft(boardLeft(terrainLeft));
+    drawBoard();
   }
 
   function alignOverlay(): void {
@@ -1517,6 +1655,27 @@ Save a named snapshot or export first if you want to keep them. Continue without
     const { x, y } = level.start();
     setCamera({ ...camera.state(), x, y });
   });
+  boardToggle.setAttribute('aria-pressed', String(boardShown));
+  renderBoardReadout(null);
+  action('.level-board-toggle', () => setBoardShown(!boardShown));
+  element<HTMLFormElement>(root, '.level-board-controls').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!active) return;
+    const square = parseBoardSquare(boardInput.value);
+    const name = square === null ? null : boardSquareName(square);
+    if (square === null || name === null) {
+      onNotice('Name a board square like D7: its column letters, then its row number.', 'error');
+      boardInput.focus();
+      return;
+    }
+    cancelGesture();
+    boardInput.value = name;
+    if (!boardShown) setBoardShown(true);
+    const area = boardSquareBounds(boardLeft(terrainLeft), square);
+    hoverBoard(square);
+    setText(boardReadout, `${name} · x ${area.left} to ${area.right} m, y ${area.bottom} to ${area.top} m`);
+    setCamera({ x: (area.left + area.right) / 2, y: (area.bottom + area.top) / 2, worldHeight: Math.min(camera.state().worldHeight, BOARD_CELL * 4) });
+  }, listen);
   action('.level-clear-labels', () => {
     const { labels } = level.definition();
     if (labels.length === 0 || !window.confirm(`Remove all ${labels.length} course labels? Saved snapshots are not changed.`)) return;
@@ -1694,6 +1853,7 @@ This restores the default ground and start location, removes all other objects a
   }, listen);
   overlay.addEventListener('pointermove', (event) => {
     if (!active || (gesture !== null && gesture.pointerId !== event.pointerId)) return;
+    pointBoard(event);
     if (gesture === null && !isPlacementTool(tool) && tool !== 'draw') return;
     applyEdit(() => movePreview(event));
   }, listen);
@@ -1756,7 +1916,11 @@ This restores the default ground and start location, removes all other objects a
   overlay.addEventListener('pointercancel', cancelPointer, listen);
   overlay.addEventListener('lostpointercapture', cancelPointer, listen);
   overlay.addEventListener('pointerleave', () => {
-    if (gesture === null) { drawingCursor = null; draw(); }
+    if (gesture !== null) return;
+    drawingCursor = null;
+    draw();
+    hoverBoard(null);
+    renderBoardReadout(null);
   }, listen);
   overlay.addEventListener('wheel', (event) => {
     if (!active) return;
@@ -1828,6 +1992,7 @@ This restores the default ground and start location, removes all other objects a
       bounds.set(object.id, objectBounds(object));
       if (object.kind !== 'trigger') triggerEvents.forget(object.id);
     }
+    trackTerrainLeft(change.upsert, change.remove);
     entityGizmos.sync(change.upsert, change.remove);
     if (change.kind === 'replace') {
       triggerEvents.clear();

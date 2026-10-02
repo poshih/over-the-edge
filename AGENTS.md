@@ -14,6 +14,11 @@
   hammer head wedge between them. Dress levels with decorations, which never
   collide, not with terrain props. Only a library set piece's own parts, designed
   and tested together, may sit closer.
+- Level callouts such as "D7" name squares of the Workshop's level board
+  (`src/level-board.ts`): 10 m squares whose rows count up from y = 0 (row 7 spans
+  y 60-70 m, row 0 lies just below it) and whose columns are lettered A, B, ...
+  rightward from column A, the 10 m band, on multiples of 10 m, holding the
+  level's leftmost terrain point.
 - Everything that collides is drawn centred on the obstacle line (`OBSTACLE_LINE`,
   z = 0, in `src/obstacle-line.ts`), where the 2D physics plays out, so collision
   looks right in perspective: terrain and its artwork reach half their depth each
