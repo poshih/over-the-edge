@@ -23,8 +23,8 @@ braziers sit on the ground.
 After placing, the Workshop switches to **Select decorations**, with the new decoration
 selected. This tool picks the nearest decoration under the pointer and drags it in its own
 depth plane, so it stays under the pointer however deep it is; **Delete selected object** or
-the Delete key removes it. **Select / move** never picks decorations, so scenery never gets in
-the way of editing the course.
+the Delete key removes it. Ordinary selecting never picks decorations, so scenery never gets in
+the way of editing the course; click **Select decorations** again to go back to it.
 
 | Property | Meaning |
 | --- | --- |

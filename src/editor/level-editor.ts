@@ -43,7 +43,7 @@ export type { LevelEditorOptions } from './level-editor-host';
 // 'player' moves the live player without editing the level; it previews in the start's pose.
 type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piece' | 'place-decoration' | 'start' | 'player';
 // 'decorate' selects and moves decorations; 'select' never picks them, so scenery cannot get in the way of the course.
-type Tool = 'select' | 'decorate' | 'pan' | 'draw' | PlacementTool;
+type Tool = 'select' | 'decorate' | 'draw' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
 interface TerrainPreset { id: string; label: string; shape: LevelShape; width: number; height: number }
 interface TriggerPreset {
@@ -52,8 +52,13 @@ interface TriggerPreset {
   events: readonly TriggerAction[]; anchorBottom: boolean;
 }
 type Gesture =
-  | { kind: 'move'; pointerId: number; start: Point; world: Point; original: LevelObject; preview: LevelObject }
-  | { kind: 'pan'; pointerId: number; start: Point; camera: EditorCamera; unitsPerPixel: number }
+  // `selected` is the selection the press replaced, restored if a second finger turns the press into a pinch.
+  | { kind: 'move'; pointerId: number; start: Point; world: Point; original: LevelObject; preview: LevelObject; selected: string | null }
+  // Drags the view: with the middle button from anywhere, or from empty space while selecting, where a click that never
+  // moved selects nothing instead.
+  | { kind: 'pan'; pointerId: number; start: Point; last: Point; camera: EditorCamera; unitsPerPixel: number; moved: boolean; deselects: boolean }
+  // Two fingers: their midpoint pans the view and their spread zooms it about where they first touched.
+  | { kind: 'pinch'; pointerId: number; other: number; starts: readonly [Point, Point]; anchor: Point; camera: EditorCamera }
   | { kind: 'draw'; pointerId: number; start: Point; samples: Point[]; unitsPerPixel: number }
   | { kind: PlacementTool; pointerId: number };
 
@@ -150,6 +155,10 @@ function boundsContain(bounds: Bounds, point: Point): boolean {
 
 const BOARD_KEY = 'over-the-edge:level-board:v1';
 
+function midpoint(a: Point, b: Point): Point {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
 function leastOf(values: Iterable<number>): number | null {
   let least: number | null = null;
   for (const value of values) if (least === null || value < least) least = value;
@@ -233,8 +242,6 @@ export function createLevelEditor(options: LevelEditorOptions) {
       <fieldset class="tuning-group level-tools">
         <legend class="visually-hidden">Build the course</legend>
         <div class="level-action-row">
-          <button type="button" class="button" data-level-tool="select" aria-pressed="true">Select / move</button>
-          <button type="button" class="button" data-level-tool="pan" aria-pressed="false">Pan view</button>
           <button type="button" class="button" data-level-tool="decorate" aria-pressed="false">Select decorations</button>
           <button type="button" class="button" data-level-tool="player" aria-pressed="false">Place player</button>
         </div>
@@ -437,7 +444,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   overlay.className = 'level-overlay';
   overlay.hidden = true;
   overlay.tabIndex = 0;
-  overlay.setAttribute('aria-label', 'Level canvas. V selects, H pans, plus and minus zoom. Enter finishes a drawing; Backspace undoes a stroke. Escape cancels; Delete removes selection.');
+  overlay.setAttribute('aria-label', 'Level canvas. Drag a shape to move it, or empty space to pan; the middle button pans from anywhere. Plus and minus zoom. V returns to selecting. Enter finishes a drawing; Backspace undoes a stroke. Escape cancels; Delete removes selection.');
   overlay.innerHTML = `<svg class="level-guides" aria-hidden="true">
     <g class="level-camera-group">
       <polygon class="level-selection" vector-effect="non-scaling-stroke" hidden />
@@ -511,6 +518,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let presetId: string | null = null;
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
+  // Fingers on the canvas, so a second one turns the first's gesture into a pinch.
+  const touches = new Map<number, Point>();
   let drawingCursor: Point | null = null;
   let savedDefinition: LevelDefinition | null = level.definition();
   let savedCamera: EditorCamera | null = null;
@@ -741,13 +750,14 @@ Save a named snapshot or export first if you want to keep them. Continue without
       }
     }
     const help: Record<Tool, string> = {
-      select: 'Click / tap to select; drag to move. Pick enemies on their bodies, starts and triggers near their center handle. ' +
-        'V selects, H pans. Escape cancels a drag without changing the level. Decorations are picked with Select decorations.',
-      decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth. The course cannot be ' +
-        'picked in this mode. Delete removes the selection.',
-      pan: 'Drag the canvas to pan anywhere in the course. Use + / − or the mouse wheel to zoom.',
+      select: 'Click / tap to select; drag to move. Drag empty space, or drag with the middle button from anywhere, to pan; the ' +
+        'wheel and + / − zoom. On a touch screen, drag with two fingers to pan and pinch to zoom. Pick enemies on their bodies, ' +
+        'starts and triggers near their center handle. Escape cancels a drag without changing the level. Decorations are picked ' +
+        'with Select decorations.',
+      decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth, or drag empty space to ' +
+        'pan. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
-        'Escape cancels. Pan and zoom keep your unfinished outline.',
+        'Escape cancels. Pan with the middle button or two fingers and zoom as usual; your unfinished outline is kept.',
       place: 'Click / tap to place this shape. Adjust its properties first if needed. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
@@ -784,7 +794,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     button.title = model.description;
     button.setAttribute('aria-pressed', 'false');
     button.append(decorationThumbnail(builtInGeometry(model)), document.createTextNode(model.name));
-    button.addEventListener('click', () => { if (active) armDecoration(model); }, listen);
+    button.addEventListener('click', () => { if (active && !released(button)) armDecoration(model); }, listen);
     decorationButtons.set(model.id, button);
     return button;
   }
@@ -877,7 +887,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     button.title = piece.skill;
     button.setAttribute('aria-pressed', 'false');
     button.append(createSetPieceThumbnail(piece), document.createTextNode(piece.name));
-    button.addEventListener('click', () => { if (active) armSetPiece(piece); }, listen);
+    button.addEventListener('click', () => { if (active && !released(button)) armSetPiece(piece); }, listen);
     setPieceButtons.set(piece.id, button);
     return button;
   }
@@ -1129,13 +1139,31 @@ Save a named snapshot or export first if you want to keep them. Continue without
   function cancelGesture(): void {
     const previous = gesture;
     gesture = null;
-    if (previous?.kind === 'draw') drawingCursor = null;
-    if (previous !== null && overlay.hasPointerCapture(previous.pointerId)) overlay.releasePointerCapture(previous.pointerId);
-    if (previous?.kind === 'pan' && active) setCamera(previous.camera);
+    if (previous === null) {
+      draw();
+      return;
+    }
+    if (previous.kind === 'draw') drawingCursor = null;
+    release(previous);
+    if (previous.kind === 'pan' && active) setCamera(previous.camera);
     draw();
   }
 
-  function chooseTool(next: 'select' | 'decorate' | 'pan' | 'start' | 'player' | 'draw'): void {
+  function release(finished: Gesture): void {
+    for (const id of finished.kind === 'pinch' ? [finished.pointerId, finished.other] : [finished.pointerId]) {
+      if (overlay.hasPointerCapture(id)) overlay.releasePointerCapture(id);
+    }
+    if (finished.kind === 'pan') delete overlay.dataset.panning;
+  }
+
+  // A pressed tool or palette button switches off on a second click, back to selecting.
+  function released(button: HTMLButtonElement): boolean {
+    if (button.getAttribute('aria-pressed') !== 'true') return false;
+    chooseTool('select');
+    return true;
+  }
+
+  function chooseTool(next: 'select' | 'decorate' | 'start' | 'player' | 'draw'): void {
     cancelGesture();
     tool = next;
     drawingCursor = null;
@@ -1165,12 +1193,18 @@ Save a named snapshot or export first if you want to keep them. Continue without
   }
 
   function zoom(factor: number, anchor: Point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }): void {
-    cancelGesture();
+    // A view drag carries on from the zoomed view; any other gesture ends.
+    const pan = gesture?.kind === 'pan' ? gesture : null;
+    if (pan === null) cancelGesture();
     const before = camera.unproject(anchor);
     const state = camera.state();
     const height = Math.max(MIN_VIEW_HEIGHT, Math.min(MAX_VIEW_HEIGHT, state.worldHeight * factor));
     const ratio = height / state.worldHeight;
     setCamera({ x: before.x + (state.x - before.x) * ratio, y: before.y + (state.y - before.y) * ratio, worldHeight: height });
+    if (pan === null) return;
+    pan.start = pan.last;
+    pan.camera = { ...camera.state() };
+    pan.unitsPerPixel = camera.state().worldHeight / Math.max(1, rect.height);
   }
 
   function resetSelection(): void {
@@ -1378,7 +1412,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     icon.append(polygon);
     button.append(icon, document.createTextNode(preset.label));
     button.addEventListener('click', () => {
-      if (!active) return;
+      if (!active || released(button)) return;
       cancelGesture();
       const view = camera.state();
       tool = 'place'; presetId = preset.id; selectedId = null;
@@ -1414,7 +1448,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     }
     button.append(icon, document.createTextNode(preset.label));
     button.addEventListener('click', () => {
-      if (!active) return;
+      if (!active || released(button)) return;
       cancelGesture();
       const view = camera.state();
       tool = 'place-trigger'; presetId = preset.id; selectedId = null;
@@ -1441,7 +1475,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     icon.append(upright);
     button.append(icon, document.createTextNode(spec.label));
     button.addEventListener('click', () => {
-      if (!active) return;
+      if (!active || released(button)) return;
       cancelGesture();
       tool = 'place-enemy'; presetId = species; selectedId = null;
       placement = enemyPlacement(species, camera.state());
@@ -1453,11 +1487,9 @@ Save a named snapshot or export first if you want to keep them. Continue without
 
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-tool]')) {
     button.addEventListener('click', () => {
-      if (!active) return;
+      if (!active || released(button)) return;
       const next = button.dataset.levelTool;
-      if (next !== 'select' && next !== 'decorate' && next !== 'pan' && next !== 'start' && next !== 'player' && next !== 'draw') {
-        throw new Error('Unknown level tool.');
-      }
+      if (next !== 'decorate' && next !== 'start' && next !== 'player' && next !== 'draw') throw new Error('Unknown level tool.');
       chooseTool(next);
     }, listen);
   }
@@ -1769,6 +1801,12 @@ This restores the default ground and start location, removes all other objects a
     const client = pointFromEvent(event);
     const world = camera.unproject(client);
     if (gesture?.kind === 'pan') {
+      gesture.last = client;
+      if (!gesture.moved) {
+        if (Math.hypot(client.x - gesture.start.x, client.y - gesture.start.y) < DRAG_DISTANCE) return;
+        gesture.moved = true;
+        overlay.dataset.panning = '';
+      }
       setCamera({
         ...gesture.camera,
         x: gesture.camera.x - (client.x - gesture.start.x) * gesture.unitsPerPixel,
@@ -1776,6 +1814,7 @@ This restores the default ground and start location, removes all other objects a
       });
       return;
     }
+    if (gesture?.kind === 'pinch') return;
     if (gesture?.kind === 'draw') {
       const previous = gesture.samples[gesture.samples.length - 1];
       if (Math.hypot(world.x - previous.x, world.y - previous.y) >= DRAWING.samplePixels * gesture.unitsPerPixel) {
@@ -1814,31 +1853,90 @@ This restores the default ground and start location, removes all other objects a
     draw();
   }
 
+  // The view drag a pointer starts here: the middle button's from anywhere, or one from empty space while selecting.
+  function panFrom(event: PointerEvent, deselects: boolean): Gesture {
+    const client = pointFromEvent(event);
+    return {
+      kind: 'pan', pointerId: event.pointerId, start: client, last: client, camera: { ...camera.state() },
+      unitsPerPixel: camera.state().worldHeight / Math.max(1, rect.height), moved: false, deselects,
+    };
+  }
+
+  // A second finger takes over from whatever the first began, none of which is committed before it lifts, and moves the
+  // view with both.
+  function startPinch(): void {
+    const [first, second] = [...touches.keys()] as [number, number];
+    for (const id of [first, second]) {
+      try {
+        overlay.setPointerCapture(id);
+      } catch (error) {
+        // A finger the browser no longer tracks; the finger that just came down acts alone instead.
+        if (!(error instanceof DOMException)) throw error;
+        touches.delete(id);
+        return;
+      }
+    }
+    const a = touches.get(first)!;
+    const b = touches.get(second)!;
+    if (gesture?.kind === 'draw') drawingCursor = null;
+    if (gesture?.kind === 'pan') delete overlay.dataset.panning;
+    if (gesture?.kind === 'move') {
+      selectedId = gesture.selected;
+      renderControls();
+    }
+    gesture = { kind: 'pinch', pointerId: first, other: second, starts: [a, b], anchor: camera.unproject(midpoint(a, b)), camera: { ...camera.state() } };
+    draw();
+  }
+
+  function pinchView(pinch: Extract<Gesture, { kind: 'pinch' }>): void {
+    const a = touches.get(pinch.pointerId);
+    const b = touches.get(pinch.other);
+    if (a === undefined || b === undefined) return;
+    const [a0, b0] = pinch.starts;
+    const start = pinch.camera;
+    // Fingers spreading apart zoom in; closing together zoom out.
+    const spread = Math.max(1, Math.hypot(b0.x - a0.x, b0.y - a0.y)) / Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+    const height = Math.max(MIN_VIEW_HEIGHT, Math.min(MAX_VIEW_HEIGHT, start.worldHeight * spread));
+    const ratio = height / start.worldHeight;
+    const unitsPerPixel = height / Math.max(1, rect.height);
+    const from = midpoint(a0, b0);
+    const to = midpoint(a, b);
+    setCamera({
+      x: pinch.anchor.x + (start.x - pinch.anchor.x) * ratio - (to.x - from.x) * unitsPerPixel,
+      y: pinch.anchor.y + (start.y - pinch.anchor.y) * ratio + (to.y - from.y) * unitsPerPixel,
+      worldHeight: height,
+    });
+  }
+
   overlay.addEventListener('pointerdown', (event) => {
-    if (!active || gesture !== null || event.button !== 0) return;
+    if (!active) return;
+    if (event.pointerType === 'touch') {
+      touches.set(event.pointerId, pointFromEvent(event));
+      if (touches.size === 2) startPinch();
+      if (touches.size > 1) return;
+    }
+    if (gesture !== null || (event.button !== 0 && event.button !== 1)) return;
+    // Also keeps the middle button from starting the browser's autoscroll.
     event.preventDefault();
-    overlay.focus({ preventScroll: true });
     const client = pointFromEvent(event);
     const world = camera.unproject(client);
-    if (tool === 'select') {
-      const object = hitTest(world);
-      selectedId = object?.id ?? null;
-      if (object !== null) gesture = { kind: 'move', pointerId: event.pointerId, start: client, world, original: object, preview: object };
-      renderControls(); draw();
-    } else if (tool === 'decorate') {
-      const object = hitDecoration(client);
-      const grab = object === null ? null : camera.unprojectDepth(client, object.z);
-      selectedId = object?.id ?? null;
-      if (object !== null && grab !== null) {
-        gesture = { kind: 'move', pointerId: event.pointerId, start: client, world: grab, original: object, preview: object };
+    if (event.button === 1) {
+      gesture = panFrom(event, false);
+    } else if (tool === 'select' || tool === 'decorate') {
+      overlay.focus({ preventScroll: true });
+      const decoration = tool === 'decorate' ? hitDecoration(client) : null;
+      const object = tool === 'decorate' ? decoration : hitTest(world);
+      if (object === null) {
+        gesture = panFrom(event, true);
+      } else {
+        const grab = decoration === null ? world : camera.unprojectDepth(client, decoration.z);
+        const selected = selectedId;
+        selectedId = object.id;
+        if (grab !== null) gesture = { kind: 'move', pointerId: event.pointerId, start: client, world: grab, original: object, preview: object, selected };
+        renderControls(); draw();
       }
-      renderControls(); draw();
-    } else if (tool === 'pan') {
-      gesture = {
-        kind: 'pan', pointerId: event.pointerId, start: client, camera: { ...camera.state() },
-        unitsPerPixel: camera.state().worldHeight / Math.max(1, rect.height),
-      };
     } else if (tool === 'draw') {
+      overlay.focus({ preventScroll: true });
       gesture = {
         kind: 'draw', pointerId: event.pointerId, start: client, samples: [world],
         unitsPerPixel: camera.state().worldHeight / Math.max(1, rect.height),
@@ -1846,28 +1944,46 @@ This restores the default ground and start location, removes all other objects a
       drawingCursor = world;
       draw();
     } else {
+      overlay.focus({ preventScroll: true });
       gesture = { kind: tool, pointerId: event.pointerId };
       movePreview(event);
     }
     if (gesture !== null) overlay.setPointerCapture(event.pointerId);
   }, listen);
   overlay.addEventListener('pointermove', (event) => {
-    if (!active || (gesture !== null && gesture.pointerId !== event.pointerId)) return;
+    if (!active) return;
+    if (touches.has(event.pointerId)) touches.set(event.pointerId, pointFromEvent(event));
+    if (gesture?.kind === 'pinch') {
+      if (event.pointerId === gesture.pointerId || event.pointerId === gesture.other) pinchView(gesture);
+      return;
+    }
+    if (gesture !== null && gesture.pointerId !== event.pointerId) return;
     pointBoard(event);
     if (gesture === null && !isPlacementTool(tool) && tool !== 'draw') return;
     applyEdit(() => movePreview(event));
   }, listen);
   overlay.addEventListener('pointerup', (event) => {
-    if (!active || gesture === null || gesture.pointerId !== event.pointerId) return;
+    if (!active || gesture === null) return;
+    if (gesture.kind === 'pinch') {
+      // Lifting either finger ends the pinch. The other stays captured, so its lifting is heard, and starts nothing on
+      // its own; another finger pinches again with it.
+      if (event.pointerId !== gesture.pointerId && event.pointerId !== gesture.other) return;
+      gesture = null;
+      if (overlay.hasPointerCapture(event.pointerId)) overlay.releasePointerCapture(event.pointerId);
+      return;
+    }
+    if (gesture.pointerId !== event.pointerId) return;
     applyEdit(() => movePreview(event));
     if (gesture === null) return;
     const finished = gesture;
     gesture = null;
-    if (overlay.hasPointerCapture(event.pointerId)) overlay.releasePointerCapture(event.pointerId);
+    release(finished);
     const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
     applyEdit(() => {
       if (finished.kind === 'move') {
         if (finished.preview !== finished.original) level.upsert(finished.preview);
+      } else if (finished.kind === 'pan') {
+        if (finished.deselects && !finished.moved) selectedId = null;
       } else if (finished.kind === 'draw' && inside) {
         const client = pointFromEvent(event);
         const moved = finished.samples.length > 1 || Math.hypot(client.x - finished.start.x, client.y - finished.start.y) >= DRAG_DISTANCE;
@@ -1911,10 +2027,15 @@ This restores the default ground and start location, removes all other objects a
     renderControls(); draw();
   }, listen);
   const cancelPointer = (event: PointerEvent): void => {
-    if (gesture?.pointerId === event.pointerId) cancelGesture();
+    if (gesture === null) return;
+    if (event.pointerId === gesture.pointerId || (gesture.kind === 'pinch' && event.pointerId === gesture.other)) cancelGesture();
   };
   overlay.addEventListener('pointercancel', cancelPointer, listen);
   overlay.addEventListener('lostpointercapture', cancelPointer, listen);
+  // Fingers lift anywhere, even off the canvas, so the window hears it first.
+  const forgetTouch = (event: PointerEvent): void => { touches.delete(event.pointerId); };
+  window.addEventListener('pointerup', forgetTouch, { ...listen, capture: true });
+  window.addEventListener('pointercancel', forgetTouch, { ...listen, capture: true });
   overlay.addEventListener('pointerleave', () => {
     if (gesture !== null) return;
     drawingCursor = null;
@@ -1943,7 +2064,6 @@ This restores the default ground and start location, removes all other objects a
     switch (event.key.toLowerCase()) {
       case 'escape': selectedId = null; cancelDrawing(); break;
       case 'v': chooseTool('select'); break;
-      case 'h': chooseTool('pan'); break;
       case 'm':
         if (tool === 'place-set-piece') toggleSetPieceMirror();
         else if (tool === 'place-decoration' && placement !== null && placement.kind === 'decoration') {
@@ -2000,7 +2120,8 @@ This restores the default ground and start location, removes all other objects a
       setPieceStatus = '';
     }
     if (selectedId !== null && !bounds.has(selectedId)) selectedId = null;
-    if (gesture !== null) cancelGesture();
+    // An edit ends gestures on objects; dragging the view goes on.
+    if (gesture !== null && gesture.kind !== 'pan' && gesture.kind !== 'pinch') cancelGesture();
     renderControls();
     draw();
   });
@@ -2043,6 +2164,8 @@ This restores the default ground and start location, removes all other objects a
         }
         active = false;
         importGeneration++;
+        // The hidden canvas never hears these fingers lift.
+        touches.clear();
         root.hidden = true; root.inert = true; overlay.hidden = true;
         setLoading(null);
         decorationPreview = null;

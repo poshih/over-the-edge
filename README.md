@@ -510,8 +510,11 @@ Open **Workshop / Level** to edit the course. Editing pauses gameplay and
 separates placement gestures from hammer input. Choose a block, thin platform,
 ramp, triangle, circle, or hexagon, then click/tap the game preview to place it.
 Select an object to move it or adjust its position, dimensions, rotation, and
-illusion property. Dragging previews the change; releasing commits it.
-Pan and zoom let you work beyond the player's current camera view.
+illusion property. Dragging previews the change; releasing commits it. Drag empty
+space, or drag with the middle button from anywhere, to pan; the wheel and + / - zoom.
+On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
+separate select and pan modes: a pressed tool, such as a shape to place, goes back to
+selecting when you click it again or press Escape.
 
 The start location and trigger zones are map objects, not special summit
 settings. Place or drag **Start location** to choose the spawn and adjust its
@@ -795,7 +798,7 @@ fences) and fire & light (an ember cairn, a brazier, a candelabra, a lantern pos
 one, tune its depth, height, tint and mirror under **Object properties**, then click/tap
 where its base should stand. Near the course its base rests on the terrain top under the
 pointer. **Select decorations** picks and drags them, nearest first, at their own depth;
-**Select / move** never picks them, so scenery cannot get in the way of editing the course.
+ordinary selecting never picks them, so scenery cannot get in the way of editing the course.
 
 Dress levels with decorations, not small terrain. Small colliders close together, such
 as headstones, fence posts or rubble within about 1.2 m of each other, leave slots that
