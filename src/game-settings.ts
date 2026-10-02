@@ -11,7 +11,7 @@ export interface CursorSettings {
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 5;
+  readonly schemaVersion: 6;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
@@ -24,7 +24,7 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   deadZone: 0.1,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 5, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 6, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -74,6 +74,13 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'extensionDamping', label: 'Extension damping', group: 'Response', min: 0, max: 0.8, step: 0.02, unit: '', description: 'Measured slider speed opposes the extension command.' },
   { key: 'bodyDamping', label: 'Body damping', group: 'Materials', min: 0, max: 1, step: 0.02, unit: '/s', description: 'Passive linear and angular drag on moving bodies.' },
   { key: 'gripFriction', label: 'Hammer friction', group: 'Materials', min: 0.2, max: 10, step: 0.05, unit: '', description: 'Contact friction on the hammer head, not an artificial grip. The shaft does not collide.' },
+  { key: 'potBounciness', label: 'Jar bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much the pot, the jar, bounces off what it hits: 0% stops dead and 100% bounces back as fast as it came. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
+  { key: 'hammerBounciness', label: 'Hammer bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much the hammer head bounces off what it hits: 0% stops dead and 100% bounces back as fast as it came. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
+  { key: 'rockBounciness', label: 'Rock bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much terrain with the Rock surface, the default, bounces what hits it. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
+  { key: 'woodBounciness', label: 'Wood bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much terrain with the Wood surface bounces what hits it. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
+  { key: 'metalBounciness', label: 'Metal bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much terrain with the Metal surface bounces what hits it. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
+  { key: 'iceBounciness', label: 'Ice bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much terrain with the Ice surface bounces what hits it. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
+  { key: 'rubberBounciness', label: 'Rubber bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much terrain with the Rubber surface bounces what hits it. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
   { key: 'handleFrequency', label: 'Handle compliance', group: 'Materials', min: 0, max: 30, step: 1, unit: 'Hz', description: 'Zero uses rigid welds. Positive values enable rotational spring compliance.' },
   { key: 'handleDamping', label: 'Handle damping', group: 'Materials', min: 0.1, max: 1, step: 0.05, unit: '', description: 'Damping ratio of compliant handle welds; only active above zero Hz.' },
   { key: 'mouseSensitivity', label: 'Control sensitivity', group: 'Input', min: 0.3, max: 2.5, step: 0.05, unit: 'x', description: 'Relative pointer movement. Touch uses the same CSS-pixel gain in either orientation; mouse follows the scene scale.' },
@@ -132,7 +139,7 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 5) throw new GameSettingsError('Game settings require schema version 5.');
+  if (value.schemaVersion !== 6) throw new GameSettingsError('Game settings require schema version 6.');
   const rig = validateRig(value.rig);
   settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
   const cursor = { ...DEFAULT_CURSOR_SETTINGS };
@@ -141,5 +148,5 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 5, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 6, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

@@ -15,6 +15,7 @@ import { builtInDecoration, builtInGeometry, DECORATION_CATEGORIES, DECORATION_M
 import type { DecorationCategory, DecorationModel } from '../decoration-models';
 import { decorationThumbnail } from './decoration-thumbnail';
 import { MAX_RIG_REACH } from '../rig';
+import { DEFAULT_SURFACE, isSurface, SURFACE_LABELS, SURFACES } from '../surfaces';
 import { ENDING_EVENTS, UPDRAFT_EVENTS } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 import { element, setText } from '../dom';
@@ -302,6 +303,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
             ${numericField('depth', 'Depth', LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth)}
           </div>
           <p class="level-help level-circle-help" hidden>Circle width is its diameter. Height is linked to width.</p>
+          ${selectField('surface', 'Surface', SURFACES.map((surface) => ({ value: surface, label: SURFACE_LABELS[surface] })))}
+          <p class="level-help">What it is made of. Each surface's bounciness is set once for the game in Physics /
+            Materials; a contact bounces as much as the bouncier of its two sides.</p>
           <label class="level-checkbox" for="level-illusion">
             <input id="level-illusion" type="checkbox" aria-describedby="level-illusion-help" /> Illusion
           </label>
@@ -670,6 +674,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       input('depth').value = String(Number(terrain.depth.toFixed(4)));
       input('height').disabled = terrain.shape.type === 'circle';
       input('illusion').checked = terrain.illusion;
+      select('surface').value = terrain.surface;
       element(root, '.level-circle-help').hidden = terrain.shape.type !== 'circle';
     } else if (start !== null) {
       input('angle').value = String(Number((start.angle * DEGREES).toFixed(4)));
@@ -1233,7 +1238,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
     if (gesture?.kind === 'draw') throw new LevelError('Release the current stroke before finishing the outline.');
     const object = terrainFromOutline({
       id: `shape-${crypto.randomUUID()}`, vertices: drawing.vertices,
-      color: ROCK_COLOR, depth: DEFAULT_OBJECT_DEPTH,
+      color: ROCK_COLOR, depth: DEFAULT_OBJECT_DEPTH, surface: DEFAULT_SURFACE,
     });
     level.upsert(object);
     drawing.clear();
@@ -1419,7 +1424,7 @@ Save a named snapshot or export first if you want to keep them. Continue without
       placement = {
         kind: 'terrain', id: 'placement-preview', shape: preset.shape, x: view.x, y: view.y,
         width: preset.width, height: preset.height, angle: 0,
-        depth: DEFAULT_OBJECT_DEPTH, color: ROCK_COLOR, illusion: false,
+        depth: DEFAULT_OBJECT_DEPTH, color: ROCK_COLOR, illusion: false, surface: DEFAULT_SURFACE,
       };
       renderControls();
       draw();
@@ -1528,6 +1533,14 @@ Save a named snapshot or export first if you want to keep them. Continue without
     if (object === null) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, illusion: input('illusion').checked }));
+  }, listen);
+  select('surface').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTerrain(inspectorObject());
+    const surface = select('surface').value;
+    if (object === null || !isSurface(surface)) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, surface }));
   }, listen);
   const editDecoration = (change: (object: DecorationObject) => Partial<DecorationObject>): void => {
     if (!active) return;

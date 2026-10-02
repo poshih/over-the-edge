@@ -7,12 +7,14 @@ import { LAUNCH_FIELDS, SOUND_VOLUME } from './trigger-events';
 import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
 import type { EnemyFacing, EnemySpecies } from './enemy-types';
 import { ArtError, validateTerrainArt } from './art-types';
+import { isSurface, SURFACES } from './surfaces';
+import type { Surface } from './surfaces';
 import type { TerrainArt } from './art-types';
 
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
-export const LEVEL_SCHEMA_VERSION = 4;
+export const LEVEL_SCHEMA_VERSION = 5;
 export const LEVEL_LIMITS = {
   objects: 1000,
   geometryKinds: 32,
@@ -71,6 +73,8 @@ export interface TerrainObject {
   readonly depth: number;
   readonly color: number;
   readonly illusion: boolean;
+  // What it is made of, which sets how bouncy it is (src/surfaces.ts).
+  readonly surface: Surface;
   readonly art?: TerrainArt;
 }
 
@@ -221,7 +225,7 @@ export function isSimplePolygon(vertices: readonly Readonly<Point>[]): boolean {
 }
 
 export function terrainFromOutline(
-  outline: Pick<TerrainObject, 'id' | 'color' | 'depth'> & { readonly vertices: readonly Readonly<Point>[] },
+  outline: Pick<TerrainObject, 'id' | 'color' | 'depth' | 'surface'> & { readonly vertices: readonly Readonly<Point>[] },
 ): TerrainObject {
   if (outline.vertices.length < 3 || outline.vertices.length > LEVEL_LIMITS.polygonVertices) {
     throw new LevelError(`An outline needs 3 to ${LEVEL_LIMITS.polygonVertices} points.`);
@@ -240,7 +244,7 @@ export function terrainFromOutline(
   return validateTerrain({
     kind: 'terrain', id: outline.id, shape: { type: 'polygon', vertices },
     x: (minX + maxX) / 2, y: (minY + maxY) / 2, width, height, angle: 0,
-    color: outline.color, depth: outline.depth, illusion: false,
+    color: outline.color, depth: outline.depth, illusion: false, surface: outline.surface,
   });
 }
 
@@ -342,7 +346,7 @@ function validateEnemy(value: unknown): EnemyObject {
 
 function validateTerrain(value: unknown): TerrainObject {
   const hasArt = typeof value === 'object' && value !== null && Object.hasOwn(value, 'art');
-  fields(value, ['kind', 'id', 'shape', 'x', 'y', 'width', 'height', 'angle', 'depth', 'color', 'illusion',
+  fields(value, ['kind', 'id', 'shape', 'x', 'y', 'width', 'height', 'angle', 'depth', 'color', 'illusion', 'surface',
     ...(hasArt ? ['art'] : [])], 'Terrain object');
   let art: TerrainArt | undefined;
   if (hasArt) {
@@ -370,6 +374,7 @@ function validateTerrain(value: unknown): TerrainObject {
   const height = number(value.height, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Height');
   if (shape.type === 'circle' && width !== height) throw new LevelError('A circle must have equal width and height.');
   if (typeof value.illusion !== 'boolean') throw new LevelError('Illusion must be enabled or disabled.');
+  if (!isSurface(value.surface)) throw new LevelError(`Surface must be one of ${SURFACES.join(', ')}.`);
   const color = number(value.color, 0, 0xffffff, 'Rock color');
   if (!Number.isInteger(color)) throw new LevelError('Rock color must be a whole RGB value.');
   return Object.freeze({
@@ -378,7 +383,7 @@ function validateTerrain(value: unknown): TerrainObject {
     y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Position Y'),
     width, height, angle: number(value.angle, -Math.PI, Math.PI, 'Rotation'),
     depth: number(value.depth, LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth, 'Depth'),
-    color, illusion: value.illusion, ...(art === undefined ? {} : { art }),
+    color, illusion: value.illusion, surface: value.surface, ...(art === undefined ? {} : { art }),
   });
 }
 

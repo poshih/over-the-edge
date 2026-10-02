@@ -22,7 +22,7 @@ const flags = new Set(process.argv.slice(2));
 const server = await createServer({ configFile: false, root, logLevel: 'silent', server: { middlewareMode: true }, appType: 'custom' });
 try {
   const library = await server.ssrLoadModule('/src/editor/set-pieces.ts');
-  const { validateLevel, validateLevelObject } = await server.ssrLoadModule('/src/level.ts');
+  const { LEVEL_SCHEMA_VERSION, validateLevel, validateLevelObject } = await server.ssrLoadModule('/src/level.ts');
   const project = await server.ssrLoadModule('/src/project.ts');
   const builder = new CourseBuilder(library);
   const trail = buildCourse(builder);
@@ -33,7 +33,7 @@ try {
       throw new Error(`${object.id}: ${error.message} ${JSON.stringify(object)}`);
     }
   }
-  const level = validateLevel(builder.level());
+  const level = validateLevel(builder.level(LEVEL_SCHEMA_VERSION));
   const problems = [];
   const used = new Set(builder.pieces.map((piece) => piece.id));
   const missing = library.SET_PIECES.filter((piece) => !used.has(piece.id)).map((piece) => piece.id);

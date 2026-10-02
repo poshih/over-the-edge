@@ -9,6 +9,8 @@ import {
   objectVertices, ROCK_COLOR, TRIGGER_LIMITS, triggerBounds, validateLevelMetadata, validateLevelObject,
 } from '../level';
 import type { EnemyObject, LevelLabel, LevelObject, ShapeKind, TerrainObject, TriggerObject } from '../level';
+import { DEFAULT_SURFACE } from '../surfaces';
+import type { Surface } from '../surfaces';
 import { ENDING_EVENTS } from '../trigger-events';
 
 export type TerrainPart = Omit<TerrainObject, 'id'>;
@@ -63,12 +65,13 @@ export const SET_PIECE_COLORS = Object.freeze({
 } as const);
 const COLOR = SET_PIECE_COLORS;
 
-interface Style { readonly color?: number; readonly depth?: number; readonly illusion?: boolean }
+interface Style { readonly color?: number; readonly depth?: number; readonly illusion?: boolean; readonly surface?: Surface }
 
 function shape(type: ShapeKind, x: number, y: number, width: number, height: number, angle: number, style: Style): TerrainPart {
   return {
     kind: 'terrain', shape: { type }, x, y, width, height, angle,
     depth: style.depth ?? DEPTH, color: style.color ?? COLOR.rock, illusion: style.illusion ?? false,
+    surface: style.surface ?? DEFAULT_SURFACE,
   };
 }
 const block = (left: number, bottom: number, width: number, height: number, style: Style = {}) =>

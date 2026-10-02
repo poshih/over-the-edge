@@ -70,6 +70,7 @@ export class CourseBuilder {
       angle: Math.max(-Math.PI, Math.min(Math.PI, tidy(options.angle ?? 0, 6))), depth: options.depth ?? 1.5,
       color: this.color(options.tone ?? 'rock', options.color),
       illusion: options.illusion ?? false,
+      surface: options.surface ?? 'rock',
     };
     if (options.allowIn) this.allowed.add(`${object.id}|${options.allowIn}`);
     if (options.support) this.supports.add(object.id);
@@ -207,8 +208,9 @@ export class CourseBuilder {
     return record;
   }
 
-  level() {
-    return { schemaVersion: 4, labels: this.labels, objects: this.objects };
+  // The level in the engine's current format, `schemaVersion` (src/level.ts LEVEL_SCHEMA_VERSION).
+  level(schemaVersion) {
+    return { schemaVersion, labels: this.labels, objects: this.objects };
   }
 }
 

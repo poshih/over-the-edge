@@ -9,6 +9,7 @@ import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchP
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { rigGeometry, sameRig } from './rig';
 import type { RigGeometry } from './rig';
+import { surfaceRestitution } from './surfaces';
 import type { LaunchSettings } from './trigger-events';
 import { angleDifference } from './math';
 import { aimAt, limitAim, moveAim } from './aim';
@@ -89,7 +90,8 @@ export class Simulation {
     this.voidY = this.outOfBoundsY(level);
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
-    this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot);
+    this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot,
+      surfaceRestitution(this.settings.physics));
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig));
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
@@ -113,6 +115,16 @@ export class Simulation {
     const next = validateGameSettings(settings);
     const previous = this.settings;
     this.settings = next;
+    const tuned = TUNING_FIELDS.some((field) => next.physics[field.key] !== previous.physics[field.key]);
+    if (tuned) {
+      // The terrain outlives a rebuilt player, so it takes new surfaces either way.
+      this.terrain.setRestitution(surfaceRestitution(next.physics));
+      // Existing contacts cache mixed material values independently of fixtures.
+      for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
+        contact.resetFriction();
+        contact.resetRestitution();
+      }
+    }
     if (!sameRig(next.rig, previous.rig)) {
       this.reset(this.spawn);
       return 'restarted';
@@ -123,10 +135,12 @@ export class Simulation {
       this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
       this.current = { ...this.current, cursorOffset: { ...this.aim.cursor } };
     }
-    if (TUNING_FIELDS.some((field) => next.physics[field.key] !== previous.physics[field.key])) {
+    if (tuned) {
       tunePlayer(this.rig, next.physics);
-      // Existing contacts cache mixed material values independently of fixtures.
-      for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) contact.resetFriction();
+      for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
+        contact.resetFriction();
+        contact.resetRestitution();
+      }
     }
     return 'applied';
   }

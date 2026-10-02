@@ -3,6 +3,8 @@ import type { Body, Contact, ContactImpulse, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
 import { geometryKey, ILLUSION, isSimplePolygon, isTerrainObject, objectContains, polygonArea, shapeVertices } from './level';
 import type { LevelChange, TerrainObject, TerrainEvent } from './level';
+import { sameSurfaceRestitution } from './surfaces';
+import type { SurfaceRestitution } from './surfaces';
 
 // Planck needs chain vertices farther apart than linearSlop, so near-duplicate authored points are welded.
 // Degenerate slivers that cannot form a valid loop keep their authored vertices.
@@ -29,11 +31,14 @@ export class TerrainWorld {
   private readonly disappeared = new Set<string>();
   private readonly listeners = new Set<(event: TerrainEvent) => void>();
   private readonly manifold = new WorldManifold();
+  // Each surface's restitution, from the game settings.
+  private restitution: SurfaceRestitution;
   private disposed = false;
 
-  constructor(world: World, objects: readonly TerrainObject[], getPot: () => Body) {
+  constructor(world: World, objects: readonly TerrainObject[], getPot: () => Body, restitution: SurfaceRestitution) {
     this.world = world;
     this.getPot = getPot;
+    this.restitution = restitution;
     this.ensureMutable();
     for (const object of objects) {
       if (this.objects.has(object.id)) throw new Error(`Duplicate terrain ID: ${object.id}.`);
@@ -134,6 +139,14 @@ export class TerrainWorld {
     return id !== undefined && objectContains(this.object(id), point);
   }
 
+  // Gives each surface its new bounciness, for settings changed during play. Contacts already touching keep their mixed
+  // value until the caller resets them.
+  setRestitution(restitution: SurfaceRestitution): void {
+    if (sameSurfaceRestitution(restitution, this.restitution)) return;
+    this.restitution = restitution;
+    for (const [id, body] of this.bodies) body.getFixtureList()?.setRestitution(restitution[this.object(id).surface]);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.ensureMutable();
@@ -193,6 +206,10 @@ export class TerrainWorld {
         if (!fixture) throw new Error(`Terrain body has no fixture: ${object.id}.`);
         body.destroyFixture(fixture);
         this.createFixture(body, object);
+      } else if (previous.surface !== object.surface) {
+        body.getFixtureList()?.setRestitution(this.restitution[object.surface]);
+        // Contacts already touching keep the bounciness they mixed when they began.
+        for (let edge = body.getContactList(); edge; edge = edge.next) edge.contact.resetRestitution();
       }
     } else {
       this.createBody(object);
@@ -225,7 +242,7 @@ export class TerrainWorld {
         new Vec2(vertex.x * object.width, vertex.y * object.height))), true);
     body.createFixture(shape, {
       friction: PHYSICS.terrainFriction,
-      restitution: 0,
+      restitution: this.restitution[object.surface],
       filterCategoryBits: PHYSICS.terrainCategory,
       filterMaskBits: PHYSICS.playerCategory | PHYSICS.toolCategory | PHYSICS.enemyCategory,
     });

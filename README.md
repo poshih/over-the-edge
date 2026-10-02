@@ -446,6 +446,16 @@ giving a contact coefficient of about **2.74**. This is ordinary contact
 friction, not a sticky constraint: the head must still press against a surface
 to hold. The pot's own friction coefficient remains **0.45**.
 
+**Physics › Materials** also sets bounciness, from 0% (stops dead) to 100% (bounces
+back as fast as it came): **Jar bounciness** (default **10%**), **Hammer bounciness**
+(default **0%**), and one setting for each terrain surface: **Rock** (**10%**, every
+obstacle's default), **Wood** (**20%**), **Metal** (**30%**), **Ice** (**5%**) and
+**Rubber** (**80%**). Each terrain object has a **Surface**, set under **Object
+properties** in Level. A contact bounces as much as the bouncier of its two sides,
+Planck's rule, so a rubber block bounces even a dead jar, and only when they meet
+faster than 1 m/s, so resting contacts stay still. Enemies take each surface's
+bounciness too. Changes apply at once, also to contacts already touching.
+
 The **Hammer rig** section sets the tool's geometry. **Handle length** (0.75-3 m,
 default **1.5 m**) runs from the butt to the centre of the head. **Maximum
 extension** (0-2 m, default **1.15 m**) is how far the butt can slide past the
@@ -494,7 +504,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 5**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 6**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 
@@ -514,8 +524,8 @@ It's exact tuning.
 Open **Workshop / Level** to edit the course. Editing pauses gameplay and
 separates placement gestures from hammer input. Choose a block, thin platform,
 ramp, triangle, circle, or hexagon, then click/tap the game preview to place it.
-Select an object to move it or adjust its position, dimensions, rotation, and
-illusion property. Dragging previews the change; releasing commits it. Drag empty
+Select an object to move it or adjust its position, dimensions, rotation,
+surface and illusion property. Dragging previews the change; releasing commits it. Drag empty
 space, or drag with the middle button from anywhere, to pan; the wheel and + / - zoom.
 On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
@@ -675,8 +685,9 @@ requested through a user-operated fullscreen control. The Workshop skips every v
 you test (see [Finding Workshop controls](#finding-workshop-controls)); videos play in the
 game-only release.
 
-Level JSON uses **schema version 4**, with typed terrain, start, trigger and enemy
-objects. A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
+Level JSON uses **schema version 5**, with typed terrain, start, trigger and enemy
+objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`, `ice` and `rubber`.
+A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
 Files and saved snapshots in any other version are rejected, not converted.
 
 ### Updrafts

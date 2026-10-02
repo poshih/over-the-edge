@@ -29,6 +29,14 @@ export interface Tuning {
   sliderCarriageMass: number;
   bodyDamping: number;
   gripFriction: number;
+  // Bounciness, in percent: the pot's, the hammer head's and each terrain surface's (src/surfaces.ts).
+  potBounciness: number;
+  hammerBounciness: number;
+  rockBounciness: number;
+  woodBounciness: number;
+  metalBounciness: number;
+  iceBounciness: number;
+  rubberBounciness: number;
   handleFrequency: number;
   handleDamping: number;
   mouseSensitivity: number;
@@ -52,6 +60,13 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   sliderCarriageMass: 0.5,
   bodyDamping: 0.12,
   gripFriction: 2.5,
+  potBounciness: 10,
+  hammerBounciness: 0,
+  rockBounciness: 10,
+  woodBounciness: 20,
+  metalBounciness: 30,
+  iceBounciness: 5,
+  rubberBounciness: 80,
   handleFrequency: 0,
   handleDamping: 0.9,
   mouseSensitivity: 1,

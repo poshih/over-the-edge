@@ -119,7 +119,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
   pot.createFixture(new Polygon(RIG.potVertices.map((point) => new Vec2(point.x, point.y))), {
     density: 1,
     friction: PHYSICS.potFriction,
-    restitution: 0,
+    restitution: tuning.potBounciness / 100,
     filterCategoryBits: PHYSICS.playerCategory,
     filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
   });
@@ -205,7 +205,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
   head.createFixture(new Polygon(RIG.headVertices.map((point) => new Vec2(point.x, point.y))), {
     density: 1,
     friction: tuning.gripFriction,
-    restitution: 0,
+    restitution: tuning.hammerBounciness / 100,
     filterCategoryBits: PHYSICS.toolCategory,
     filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
   });
@@ -242,8 +242,10 @@ export function tunePlayer(rig: PlayerRig, tuning: Readonly<Tuning>): void {
     part.body.setAngularDamping(tuning.bodyDamping);
     part.body.setAwake(true);
     for (let fixture = part.body.getFixtureList(); fixture; fixture = fixture.getNext()) {
+      // Only the pot and the hammer head collide.
       if (fixture.getFilterMaskBits() !== 0) {
         fixture.setFriction(part.kind === 'pot' ? PHYSICS.potFriction : tuning.gripFriction);
+        fixture.setRestitution((part.kind === 'pot' ? tuning.potBounciness : tuning.hammerBounciness) / 100);
       }
     }
   }

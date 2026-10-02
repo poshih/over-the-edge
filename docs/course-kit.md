@@ -23,6 +23,7 @@ import { CourseBuilder, random } from '../course-kit/course.mjs';
 import { Trail } from '../course-kit/trail.mjs';
 
 const library = await server.ssrLoadModule('/src/editor/set-pieces.ts');
+const { LEVEL_SCHEMA_VERSION } = await server.ssrLoadModule('/src/level.ts');
 const builder = new CourseBuilder(library);
 builder.beginZone({ code: 'z1', palette: { rock: 0x5b5f5a, stone: 0x7b7d76 } });
 builder.add({ kind: 'start', id: 'start', x: 1, y: 0.65, angle: 0, reach: 1.7 }, 'z1:start');
@@ -30,11 +31,14 @@ const trail = new Trail(builder, random(1), 0, 0);
 trail.floor(6, { tone: 'stone' });
 trail.piece('first-boulder', { tone: 'rock' });
 trail.stairs(8, 6, { shapes: ['shelf', 'slab'], tones: ['rock', 'stone'] });
-const level = builder.level();
+const level = builder.level(LEVEL_SCHEMA_VERSION);
 ```
 
 - **Zones.** `beginZone` starts a zone: its `code` prefixes every ID built in it, and a
-  `tone` such as `'stone'` picks a colour from its `palette`.
+  `tone` such as `'stone'` picks a colour from its `palette`. Terrain is Rock unless given
+  another `surface` (`wood`, `metal`, `ice` or `rubber`): in the options of `terrain`,
+  `block`, `floor` and `step`, a stairs motif's `surface`, or a piece's `floorSurface` for
+  the ground it stands on. A set piece's own parts keep the surfaces it was designed with.
 - **The trail.** `floor`, `step` and `stairs` build from the cursor and move it. Stairs stay
   within connector reach, switching back when the run is too short for the rise. `at`,
   `go`, `turn` and `edge` move the cursor without building.

@@ -116,7 +116,7 @@ export class Trail {
     const b = this.b;
     const name = motif.name ?? 'stair';
     const tone = motif.tones ? motif.tones[Math.floor(this.rng() * motif.tones.length)] : motif.tone;
-    const style = { tone, depth: motif.depth ?? this.between([1.2, 2]) };
+    const style = { tone, depth: motif.depth ?? this.between([1.2, 2]), surface: motif.surface };
     if (shape === 'column' && placement === 'inline' && motif.floor !== undefined && top - motif.floor <= 12) {
       b.block(name, center - width / 2, motif.floor, width, top - motif.floor, style);
     } else if (shape === 'slab') {
@@ -153,7 +153,7 @@ export class Trail {
       const right = x + Math.max(from * flip, to * flip);
       // The ground a piece stands on is part of its design, so it shares the piece's group.
       this.b.block(options.floorName ?? 'ground', left, y - (options.floorThickness ?? 1), right - left, options.floorThickness ?? 1,
-        { tone: options.floorTone ?? 'rock', depth: options.floorDepth ?? 1.6, group: this.b.pieceGroup(id), support: true });
+        { tone: options.floorTone ?? 'rock', depth: options.floorDepth ?? 1.6, surface: options.floorSurface, group: this.b.pieceGroup(id), support: true });
     }
     const record = this.b.piece(id, x, y, { ...options, mirror, direction: path.down ? 'down' : 'any' });
     const exit = options.exit ?? path.exit;

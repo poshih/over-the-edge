@@ -1,4 +1,5 @@
 import { COURSE, COURSE_LABELS, START_SPAWN, ENDING_ZONE } from './course';
+import { DEFAULT_SURFACE } from './surfaces';
 import { LEVEL_SCHEMA_VERSION, terrainFromOutline, TRIGGER_LIMITS, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 import { ENDING_EVENTS } from './trigger-events';
@@ -6,7 +7,7 @@ import { ENDING_EVENTS } from './trigger-events';
 export const DEFAULT_LEVEL: LevelDefinition = validateLevel({
   schemaVersion: LEVEL_SCHEMA_VERSION,
   labels: COURSE_LABELS,
-  objects: [...COURSE.map(terrainFromOutline),
+  objects: [...COURSE.map((terrain) => terrainFromOutline({ ...terrain, surface: DEFAULT_SURFACE })),
   {
     kind: 'start', id: 'player-start', ...START_SPAWN.position,
     angle: START_SPAWN.angle, reach: START_SPAWN.reach,

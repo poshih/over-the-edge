@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "labels": [
     {
       "x": 1.575,
@@ -61,7 +61,8 @@
       "angle": 0,
       "depth": 3,
       "color": 5399646,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "start",
@@ -84,7 +85,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -99,7 +101,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -114,7 +117,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -129,7 +133,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -144,7 +149,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -159,7 +165,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -174,7 +181,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -189,7 +197,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -204,7 +213,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -219,7 +229,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -234,7 +245,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -249,7 +261,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -264,7 +277,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -279,7 +293,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -294,7 +309,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -309,7 +325,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -324,7 +341,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -339,7 +357,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -354,7 +373,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -369,7 +389,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -384,7 +405,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -399,7 +421,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -414,7 +437,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -429,7 +453,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -444,7 +469,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -459,7 +485,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -474,7 +501,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -489,7 +517,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -504,7 +533,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -519,7 +549,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -534,7 +565,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -549,7 +581,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -564,7 +597,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -579,7 +613,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -594,7 +629,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -609,7 +645,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -624,7 +661,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -639,7 +677,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -654,7 +693,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -669,7 +709,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -684,7 +725,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -699,7 +741,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -714,7 +757,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -729,7 +773,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -744,7 +789,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -759,7 +805,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -774,7 +821,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -789,7 +837,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -804,7 +853,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -819,7 +869,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -834,7 +885,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -849,7 +901,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -864,7 +917,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -879,7 +933,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -894,7 +949,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -909,7 +965,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -924,7 +981,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -939,7 +997,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -954,7 +1013,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -969,7 +1029,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -984,7 +1045,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -999,7 +1061,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1014,7 +1077,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1029,7 +1093,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1044,7 +1109,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1059,7 +1125,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1074,7 +1141,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1089,7 +1157,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1104,7 +1173,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1119,7 +1189,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1134,7 +1205,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1149,7 +1221,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1164,7 +1237,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1179,7 +1253,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1194,7 +1269,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1209,7 +1285,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1224,7 +1301,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1239,7 +1317,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1254,7 +1333,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1269,7 +1349,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1284,7 +1365,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1299,7 +1381,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1314,7 +1397,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1329,7 +1413,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1344,7 +1429,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1359,7 +1445,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1374,7 +1461,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1389,7 +1477,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1404,7 +1493,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1419,7 +1509,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1434,7 +1525,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1449,7 +1541,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1464,7 +1557,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1479,7 +1573,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1494,7 +1589,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1509,7 +1605,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1524,7 +1621,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1539,7 +1637,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1588,7 +1687,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1637,7 +1737,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1652,7 +1753,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1701,7 +1803,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1716,7 +1819,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1765,7 +1869,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1814,7 +1919,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1863,7 +1969,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1912,7 +2019,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1961,7 +2069,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1976,7 +2085,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -1991,7 +2101,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2040,7 +2151,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2089,7 +2201,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2104,7 +2217,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2153,7 +2267,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2168,7 +2283,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2217,7 +2333,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2266,7 +2383,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2315,7 +2433,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2364,7 +2483,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2379,7 +2499,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2428,7 +2549,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2477,7 +2599,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2492,7 +2615,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2507,7 +2631,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2556,7 +2681,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2571,7 +2697,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2620,7 +2747,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2669,7 +2797,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2718,7 +2847,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2767,7 +2897,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2782,7 +2913,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2797,7 +2929,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2812,7 +2945,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2827,7 +2961,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2842,7 +2977,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2857,7 +2993,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2872,7 +3009,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2887,7 +3025,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2902,7 +3041,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2917,7 +3057,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2932,7 +3073,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2947,7 +3089,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2962,7 +3105,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2977,7 +3121,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -2992,7 +3137,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3007,7 +3153,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3022,7 +3169,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3037,7 +3185,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3052,7 +3201,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3067,7 +3217,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3082,7 +3233,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3097,7 +3249,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3112,7 +3265,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3127,7 +3281,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3142,7 +3297,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3157,7 +3313,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3172,7 +3329,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3187,7 +3345,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3202,7 +3361,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3217,7 +3377,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3232,7 +3393,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3247,7 +3409,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3262,7 +3425,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3277,7 +3441,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3292,7 +3457,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3307,7 +3473,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3322,7 +3489,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3337,7 +3505,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3352,7 +3521,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3367,7 +3537,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3382,7 +3553,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3397,7 +3569,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3412,7 +3585,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3427,7 +3601,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3442,7 +3617,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3457,7 +3633,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3472,7 +3649,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3487,7 +3665,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3502,7 +3681,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3517,7 +3697,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3532,7 +3713,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3547,7 +3729,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3562,7 +3745,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3577,7 +3761,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3592,7 +3777,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3607,7 +3793,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3622,7 +3809,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3637,7 +3825,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3652,7 +3841,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3667,7 +3857,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3682,7 +3873,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3697,7 +3889,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3712,7 +3905,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3727,7 +3921,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3742,7 +3937,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3757,7 +3953,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3772,7 +3969,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3821,7 +4019,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3870,7 +4069,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3885,7 +4085,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3934,7 +4135,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3949,7 +4151,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -3998,7 +4201,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4013,7 +4217,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4062,7 +4267,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4111,7 +4317,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4160,7 +4367,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4175,7 +4383,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4190,7 +4399,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4239,7 +4449,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4254,7 +4465,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4269,7 +4481,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4318,7 +4531,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4333,7 +4547,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4382,7 +4597,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4431,7 +4647,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4480,7 +4697,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4495,7 +4713,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4510,7 +4729,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4559,7 +4779,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4608,7 +4829,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4623,7 +4845,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4638,7 +4861,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4687,7 +4911,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4702,7 +4927,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4751,7 +4977,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4800,7 +5027,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4849,7 +5077,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4898,7 +5127,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4913,7 +5143,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4928,7 +5159,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4943,7 +5175,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4958,7 +5191,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4973,7 +5207,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -4988,7 +5223,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5003,7 +5239,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5018,7 +5255,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5033,7 +5271,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5048,7 +5287,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5063,7 +5303,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5078,7 +5319,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5093,7 +5335,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5108,7 +5351,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5123,7 +5367,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5138,7 +5383,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5153,7 +5399,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5168,7 +5415,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5183,7 +5431,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5198,7 +5447,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5213,7 +5463,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5228,7 +5479,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5243,7 +5495,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5258,7 +5511,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5273,7 +5527,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5288,7 +5543,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5303,7 +5559,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5318,7 +5575,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5333,7 +5591,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5348,7 +5607,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5363,7 +5623,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5378,7 +5639,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5393,7 +5655,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5408,7 +5671,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 4150617,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5423,7 +5687,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5459,7 +5724,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5495,7 +5761,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7899521,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5531,7 +5798,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5546,7 +5814,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5561,7 +5830,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5576,7 +5846,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",
@@ -5631,7 +5902,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5667,7 +5939,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5703,7 +5976,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 9797996,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5739,7 +6013,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5754,7 +6029,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5769,7 +6045,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5784,7 +6061,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",
@@ -5839,7 +6117,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5875,7 +6154,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5911,7 +6191,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 7049880,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -5947,7 +6228,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5962,7 +6244,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5977,7 +6260,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -5992,7 +6276,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",
@@ -6047,7 +6332,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6083,7 +6369,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6119,7 +6406,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10065580,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6155,7 +6443,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6170,7 +6459,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6185,7 +6475,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6200,7 +6491,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",
@@ -6255,7 +6547,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6291,7 +6584,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6327,7 +6621,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 6789261,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6363,7 +6658,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6378,7 +6674,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6393,7 +6690,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6408,7 +6706,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",
@@ -6463,7 +6762,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6499,7 +6799,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6535,7 +6836,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10060152,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6571,7 +6873,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6586,7 +6889,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6601,7 +6905,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6616,7 +6921,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",
@@ -6671,7 +6977,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6707,7 +7014,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6743,7 +7051,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 8622508,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6779,7 +7088,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6794,7 +7104,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6809,7 +7120,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -6824,7 +7136,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",
@@ -6879,7 +7192,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6915,7 +7229,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6951,7 +7266,8 @@
       "angle": 0,
       "depth": 1.5,
       "color": 10923417,
-      "illusion": false
+      "illusion": false,
+      "surface": "rock"
     },
     {
       "kind": "trigger",
@@ -6987,7 +7303,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -7002,7 +7319,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -7017,7 +7335,8 @@
       "angle": -0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "terrain",
@@ -7032,7 +7351,8 @@
       "angle": 0.10471975511965977,
       "depth": 1.5,
       "color": 12696496,
-      "illusion": true
+      "illusion": true,
+      "surface": "rock"
     },
     {
       "kind": "enemy",

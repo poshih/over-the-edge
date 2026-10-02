@@ -29,7 +29,7 @@ const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title
   Motors: { id: 'physics-motors', hint: 'Strength and speed caps', open: true },
   Downswing: { id: 'physics-downswing', hint: 'Extra strength swinging the hammer down' },
   Response: { id: 'physics-response', hint: 'How closely the hammer follows aim' },
-  Materials: { id: 'physics-materials', hint: 'Friction, damping and handle flex' },
+  Materials: { id: 'physics-materials', hint: 'Friction, bounciness, damping and handle flex' },
   Input: { id: 'physics-input', hint: 'Control sensitivity' },
 };
 

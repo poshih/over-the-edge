@@ -17,6 +17,7 @@ import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
 import { SHARED_FORMATS, SHARED_KINDS, SHARED_NAME_LIMIT } from '../src/shared-copies';
 import type { SharedKind } from '../src/shared-copies';
+import { SURFACES } from '../src/surfaces';
 import { THEME_FIELDS } from '../src/theme';
 import { LAUNCH_FIELDS, SOUND_VOLUME } from '../src/trigger-events';
 
@@ -94,7 +95,7 @@ export function apiManual(auth: 'token' | 'loopback') {
         description: 'The course. Prefer the level/objects endpoints for small edits.',
         limits: { ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects },
         objects: {
-          terrain: { kind: 'terrain', id: 'ledge-1', shape: { type: `one of ${SHAPE_KINDS.join(', ')}; or { "type": "polygon", "vertices": [{ "x", "y" }] }` }, x: 4, y: 2, width: 3, height: 1, angle: 0, depth: 2, color: 7438714, illusion: false },
+          terrain: { kind: 'terrain', id: 'ledge-1', shape: { type: `one of ${SHAPE_KINDS.join(', ')}; or { "type": "polygon", "vertices": [{ "x", "y" }] }` }, x: 4, y: 2, width: 3, height: 1, angle: 0, depth: 2, color: 7438714, illusion: false, surface: SURFACES.join(' | ') },
           start: { kind: 'start', id: 'start', x: 0, y: 0.53, angle: 0.4, reach: 2.3 },
           trigger: {
             kind: 'trigger', id: 'summit', name: 'Summit', x: 0, y: 40, region: { type: 'circle', radius: 2 },
@@ -112,12 +113,12 @@ export function apiManual(auth: 'token' | 'loopback') {
           'launch-player': { type: 'launch-player', height: `${LAUNCH_FIELDS.height.min}-${LAUNCH_FIELDS.height.max} m`, strength: `${LAUNCH_FIELDS.strength.min}-${LAUNCH_FIELDS.strength.max}` },
         },
         board: `Designers name areas by the Workshop's level board, like a chessboard: ${BOARD_CELL} m squares such as D7. Rows count up from y = 0 (row n spans y ${BOARD_CELL}(n-1) to ${BOARD_CELL}n m; row 0 lies just below 0). Columns are lettered A, B, ... Z, AA, ... rightward from column A, the ${BOARD_CELL} m band, on multiples of ${BOARD_CELL} m, that holds the leftmost terrain point.`,
-        notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
+        notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer; terrain surface is required, one of ' + SURFACES.join(', ') + ' (the Workshop starts new terrain as rock), and takes that surface\'s bounciness from the game settings. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {
-        value: '{ schemaVersion: 5, physics: {...}, rig: { handleLength, maxExtension, minReach }, cursor: { maxTargetRadius, deadZone } }', patch: true,
+        value: '{ schemaVersion: 6, physics: {...}, rig: { handleLength, maxExtension, minReach }, cursor: { maxTargetRadius, deadZone } }', patch: true,
         fields: { physics: TUNING_FIELDS, rig: RIG_FIELDS, cursor: CURSOR_FIELDS },
-        notes: 'The reach is rig.handleLength + rig.maxExtension; rig.minReach, the closest the head comes to the shoulder hinge (0 lets it reach the hinge), must stay at least 0.05 m short of it so the slider can move, and cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run.',
+        notes: 'The reach is rig.handleLength + rig.maxExtension; rig.minReach, the closest the head comes to the shoulder hinge (0 lets it reach the hinge), must stay at least 0.05 m short of it so the slider can move, and cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The physics *Bounciness fields are percentages: potBounciness the pot\'s, hammerBounciness the hammer head\'s and rockBounciness, woodBounciness, metalBounciness, iceBounciness and rubberBounciness each terrain surface\'s; a contact bounces as much as its bouncier side, and only above 1 m/s. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run.',
       },
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',

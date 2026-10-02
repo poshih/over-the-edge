@@ -146,7 +146,7 @@ see [content delivery](content-delivery.md) for how their content is served.
   "format": "over-the-edge-course",
   "schemaVersion": 2,
   "mode": "meshes",
-  "level": { "schemaVersion": 4, "labels": [], "objects": [] },
+  "level": { "schemaVersion": 5, "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "stone.glb", "source": "data:model/gltf-binary;base64,..." }
   ],

@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 5,
+    "schemaVersion": 6,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -28,6 +28,13 @@
       "sliderCarriageMass": 0.5,
       "bodyDamping": 0.12,
       "gripFriction": 2.5,
+      "potBounciness": 10,
+      "hammerBounciness": 0,
+      "rockBounciness": 10,
+      "woodBounciness": 20,
+      "metalBounciness": 30,
+      "iceBounciness": 5,
+      "rubberBounciness": 80,
       "handleFrequency": 0,
       "handleDamping": 0.9,
       "mouseSensitivity": 1
