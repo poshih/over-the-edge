@@ -34,7 +34,7 @@ import { libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSetting
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
-export const CONTENT_SCHEMA_VERSION = 5;
+export const CONTENT_SCHEMA_VERSION = 6;
 // The group holding everything the release itself uses; other groups are granted separately.
 export const GAME_GROUP = 'game';
 export const CONTENT_TYPES: Readonly<Record<ContentExtension, string>> = {

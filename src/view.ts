@@ -1220,7 +1220,7 @@ export class GameView {
       armChains: { left: { ...this.armChains.left }, right: { ...this.armChains.right } },
       rig: this.rig,
       grips: {
-        placement: this.grips.placement, slideAt: this.grips.slideAt,
+        placement: this.grips.placement, slideAt: this.grips.slideAt, slideRange: { ...this.grips.slideRange },
         left: this.gripDistances.left, right: this.gripDistances.right,
       },
     };

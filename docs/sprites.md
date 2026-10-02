@@ -383,7 +383,8 @@ profile's `grips`: with `"fixed"` placement, reach slides the fixed-length hamme
 both grips outward or inward; with `"sliding"`, the hands ride with the handle, extending or
 retracting, until one would be farther from its shoulder, ahead or behind, than the slide point
 share of its arm, then the handle slides through them just enough to bring them back and they
-hold on there. A chain that targets a grip reaches in the
+hold on there, keeping to the slide range (straddling its middle when the hands are farther apart
+than it is long). A chain that targets a grip reaches in the
 drawing plane with its own lengths from the built-in shoulder, so start its upper arm there,
 as the example does; a hand without one has the built-in arm, which reaches forward to the
 tool's depth. See [hand grips](../README.md#hand-grips).
@@ -491,12 +492,12 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 16,
+  "schemaVersion": 17,
   "characterRiggingType": "sprite-2d",
   "armForwardDistance": 0.25,
   "waistLean": 0,
   "grips": {
-    "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85,
+    "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85, "slideRange": { "from": 0, "to": 1 },
     "rotation": { "left": { "x": 0, "y": 0, "z": 0 }, "right": { "x": 0, "y": 0, "z": 0 } }
   },
   "arms": null,
@@ -546,11 +547,14 @@ Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
-Profiles use **schema version 16**; any other version is rejected, not converted.
+Profiles use **schema version 17**; any other version is rejected, not converted.
 `characterRiggingType` is `sprite-2d`, `model-3d` or `avatar-3d`;
-`armForwardDistance` is 0-2 m; `waistLean` is 0-45°; `grips` is `{ "placement", "left", "right", "slideAt", "rotation" }`, the
+`armForwardDistance` is 0-2 m; `waistLean` is 0-45°; `grips` is
+`{ "placement", "left", "right", "slideAt", "slideRange", "rotation" }`, the
 placement (`fixed` or `sliding`), each hand's distance from the butt (0-3 m), the share of
-each arm's length a sliding hand may be from its shoulder before the handle slides (0.4-1) and each
+each arm's length a sliding hand may be from its shoulder before the handle slides (0-1), the
+stretch sliding hands keep to, `{ "from", "to" }` as shares of the handle a hand can hold (0-1,
+`from` no greater than `to`), and each
 3D hand's turn on its grip, `{ "left": { "x", "y", "z" }, "right": {...} }` in degrees (-180 to 180),
 which 2D grip targets ignore;
 `arms` is `null` or each side's `upper` and `forearm` length (0.1-2 m). The optional

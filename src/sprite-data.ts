@@ -13,7 +13,7 @@ import {
 import type { CharacterAssets, CharacterModel } from './character-profile.ts';
 import { ARM_LENGTH_LIMITS } from './character-arms.ts';
 import type { ArmLengths, CharacterArms } from './character-arms.ts';
-import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_ROTATION_LIMITS, SLIDE_AT_LIMITS } from './grips.ts';
+import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_RANGE_LIMITS, GRIP_ROTATION_LIMITS, SLIDE_AT_LIMITS } from './grips.ts';
 import type { GripRotation, Grips } from './grips.ts';
 import { number, record, SpriteError, text } from './sprite-fields.ts';
 import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
@@ -76,7 +76,7 @@ export interface CharacterPresentation extends CharacterAssets {
   readonly arms: CharacterArms | null;
 }
 
-export const SPRITE_SCHEMA_VERSION = 16;
+export const SPRITE_SCHEMA_VERSION = 17;
 
 export interface SpriteDocument extends CharacterPresentation {
   readonly schemaVersion: typeof SPRITE_SCHEMA_VERSION;
@@ -148,15 +148,20 @@ export function validateWaistLean(value: unknown): number {
 }
 
 export function validateGrips(value: unknown): Grips {
-  const grips = record(value, ['placement', 'left', 'right', 'slideAt', 'rotation'], 'Hand grips');
+  const grips = record(value, ['placement', 'left', 'right', 'slideAt', 'slideRange', 'rotation'], 'Hand grips');
   const placement = GRIP_PLACEMENTS.find(candidate => candidate === grips.placement);
   if (placement === undefined) throw new SpriteError(`Grip placement must be ${GRIP_PLACEMENTS.join(' or ')}.`);
+  const range = record(grips.slideRange, ['from', 'to'], 'Grip slide range');
+  const from = number(range.from, GRIP_RANGE_LIMITS.min, GRIP_RANGE_LIMITS.max, 'Butt-end limit');
+  const to = number(range.to, GRIP_RANGE_LIMITS.min, GRIP_RANGE_LIMITS.max, 'Head-end limit');
+  if (from > to) throw new SpriteError('The butt-end limit must not be nearer the head than the head-end limit.');
   const rotation = record(grips.rotation, ['left', 'right'], 'Hand rotation');
   return Object.freeze({
     placement,
     left: number(grips.left, GRIP_LIMITS.min, GRIP_LIMITS.max, 'Left hand grip'),
     right: number(grips.right, GRIP_LIMITS.min, GRIP_LIMITS.max, 'Right hand grip'),
     slideAt: number(grips.slideAt, SLIDE_AT_LIMITS.min, SLIDE_AT_LIMITS.max, 'Grip slide point'),
+    slideRange: Object.freeze({ from, to }),
     rotation: Object.freeze({
       left: validateGripRotation(rotation.left, 'Left hand rotation'),
       right: validateGripRotation(rotation.right, 'Right hand rotation'),

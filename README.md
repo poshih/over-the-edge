@@ -905,7 +905,7 @@ Changing it retains the other artwork, but does not silently save it. Use the
 profile's **Save**, **Revert**, and JSON controls; **Save to project** writes it into
 the open [server project](docs/projects.md#working-in-the-workshop), and **Server character
 profiles** shares named [copies](docs/projects.md#server-copies). Profiles use **schema version
-14**; profiles in any other version are rejected, not converted.
+17**; profiles in any other version are rejected, not converted.
 
 Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend
@@ -1019,16 +1019,26 @@ Each hand's grip is a distance from the butt, **0.04 m** and **0.22 m** by defau
 **Fixed** hands stay on their grips and travel with the butt, so arms must reach as far as
 the handle slides. **Slide along the handle**, the default, starts the hands on their grips, and
 they hold on as the handle extends or retracts, riding with it, until a hand would be farther from
-its shoulder, ahead of it or behind, than **Slide beyond**, a share of that arm's length (40-100%,
+its shoulder, ahead of it or behind, than **Slide beyond**, a share of that arm's length (0-100%,
 default **85%**). Then the handle slides through both hands together by the least amount that
 brings them back within it, and they hold on where they are: reversing the handle carries the hands
 with it again until one reaches the slide point on the other side, as in Getting Over It. A hand
 that cannot come that close to the handle's line holds the point nearest its shoulder, and when no
 shared slide suits both hands they split the difference. The hands never leave the handle or come
 within 0.2 m of the head's centre, so near full extension or retraction they may hold beyond the
-slide point. Lower slide points keep the hands nearer the shoulders; at 100% they slide only when an
-arm would otherwise be stretched straight. The hands go back to their grips when the run restarts
-or the grips change.
+slide point. Lower slide points keep the hands nearer the shoulders: at 0% each hand heads for the
+point nearest its shoulder, and as both rarely can, they split the difference, so the handle slides
+through them all the time; at 100% they slide only when an arm would otherwise be stretched straight. The hands go back to their grips when the run
+restarts or the grips change.
+
+**Butt-end limit** and **Head-end limit** keep sliding hands on a stretch of the handle, as shares of
+the part a hand can hold: 0% is the butt and 100% is 0.2 m short of the head's centre, as near the
+head as a hand may come. They are 0% and 100% by default, so the hands may slide along all of it.
+Raise the butt-end limit to keep the hands off the butt, or lower the head-end limit to keep them
+off the head end. At a limit the hands hold on even past **Slide beyond**, and the arms reach
+farther, stretching if the limit is out of their reach. Both hands stay within the limits, so when
+they are farther apart than the stretch is long, they straddle its middle. Moving one limit past the
+other carries the other along. Fixed hands ignore both, like **Slide beyond**.
 
 Reach is measured in the course plane, as the camera sees it, from the body's shoulders, the
 built-in ones or an imported avatar's, with the arm lengths the character draws; a 2D arm chain
@@ -1052,8 +1062,9 @@ off the handle, that wrist swings about the grip too and the arm follows it. 2D 
 wrist rotation authored on their IK chains in Sprites. **Reset hand rotation** returns both hands
 to 0, and **Reset hand grips** leaves them. An unrotated hand does no extra work per frame.
 
-Grips are saved as `grips: { "placement", "left", "right", "slideAt", "rotation" }` in the character
-profile, with `slideAt` a fraction (0.4-1) and `rotation` each hand's `{ "x", "y", "z" }` in degrees
+Grips are saved as `grips: { "placement", "left", "right", "slideAt", "slideRange", "rotation" }` in the
+character profile, with `slideAt` a fraction (0-1), `slideRange` the butt-end and head-end limits as
+`{ "from", "to" }` fractions (0-1) and `rotation` each hand's `{ "x", "y", "z" }` in degrees
 (`{ "left": {...}, "right": {...} }`), so each character keeps its own; Mesh parts, both avatars and
 the 2D `left-grip` and `right-grip` targets share the grip positions, and the 2D targets ignore
 `rotation`. Grips are presentation: physics, input and the hammer models never read them.

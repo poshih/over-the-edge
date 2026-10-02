@@ -13,8 +13,8 @@ import { RIG } from '../config';
 import { ARM_LENGTH_LIMITS } from '../character-arms';
 import type { ArmLengths, CharacterArms } from '../character-arms';
 import {
-  DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_ROTATION_LIMITS, HEAD_GRIP_MARGIN, NO_GRIP_ROTATION, sameGripRotation,
-  SLIDE_AT_LIMITS,
+  DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_RANGE_LIMITS, GRIP_ROTATION_LIMITS, HEAD_GRIP_MARGIN, NO_GRIP_ROTATION,
+  sameGripRotation, SLIDE_AT_LIMITS,
 } from '../grips';
 import type { GripPlacement } from '../grips';
 import { HAMMER_MODEL_HANDLE, HAMMER_MODEL_HEAD_END } from '../hammer-handle-fit';
@@ -79,6 +79,11 @@ const GRIP_ROTATION_AXES = [
   { axis: 'x', about: 'the handle' },
   { axis: 'y', about: 'the axis across the handle in the course plane' },
   { axis: 'z', about: 'the axis toward the camera' },
+] as const;
+// The ends of the stretch sliding hands keep to, as shares of the handle a hand can hold.
+const GRIP_RANGE_ENDS = [
+  { end: 'from', label: 'Butt-end limit', toward: 'the butt' },
+  { end: 'to', label: 'Head-end limit', toward: 'the head' },
 ] as const;
 
 export function createCharacterEditor(options: {
@@ -169,17 +174,20 @@ export function createCharacterEditor(options: {
               ${GRIP_LABELS[placement]}</label>`).join('')}
           </div>
           <div class="character-grip-slide-control"></div>
+          <div class="character-grip-range-controls"></div>
           <div class="character-grip-controls"></div>
           <button type="button" class="button character-grip-reset">Reset hand grips</button>
           <p class="appearance-format">Each grip is that hand's distance from the butt, up to
             ${metres(HEAD_GRIP_MARGIN)} short of the head's centre. Fixed hands stay there and travel with the
             whole slide, so arms must reach that far. Sliding hands start there and hold on as the handle extends
-            or retracts until one would be farther from its shoulder, ahead or behind, than the slide point, a
-            share of its arm's length as the camera sees it; then the handle slides through both hands just enough
-            to bring them back within it, and they hold on there. Lower slide points keep the hands nearer the
-            shoulders; at 100% they slide only when an arm would otherwise be stretched straight. Avatars, mesh
-            parts and 2D grip targets use the same grips. Physics is unchanged. Save the character profile to keep
-            them.</p>
+            or retracts until one would be farther from its shoulder, ahead or behind, than Slide beyond, a share
+            of its arm's length as the camera sees it; then the handle slides through both hands just enough to
+            bring them back within it, and they hold on there. Lower values keep the hands nearer the shoulders:
+            at 0% the handle slides through them all the time, and at 100% only when an arm would otherwise be
+            stretched straight. The butt-end and head-end limits keep sliding hands on a stretch of the handle,
+            from the butt (0%) to as near the head as a hand may come (100%); at them the hands hold on and the
+            arms reach farther, stretching if a limit is out of their reach. Avatars, mesh parts and 2D grip targets use the same grips. Physics is
+            unchanged. Save the character profile to keep them.</p>
           <fieldset class="tuning-group character-grip-rotation">
             <legend>Hand rotation</legend>
             <div class="character-grip-rotation-controls"></div>
@@ -485,6 +493,25 @@ export function createCharacterEditor(options: {
     },
   });
   element(root, '.character-grip-slide-control').append(slidePoint.row);
+  const gripRangeControls = GRIP_RANGE_ENDS.map(({ end, label, toward }) => {
+    const control = createRangeControl({
+      min: GRIP_RANGE_LIMITS.min * 100, max: GRIP_RANGE_LIMITS.max * 100, step: GRIP_RANGE_LIMITS.step * 100, label, unit: '%',
+      description: `How near ${toward} sliding hands may hold, as a share of the handle a hand can hold: 0% is the butt and ` +
+        `100% is ${metres(HEAD_GRIP_MARGIN)} short of the head's centre, the nearest a hand may come to it.`,
+    }, {
+      id: `character-grip-range-${end}`, name: end === 'from' ? 'gripRangeFrom' : 'gripRangeTo', signal: events.signal,
+      onInput: value => {
+        const grips = options.state.snapshot().document.grips;
+        const share = value / 100;
+        // Moving one end past the other carries the other along.
+        const slideRange = end === 'from' ? { from: share, to: Math.max(share, grips.slideRange.to) }
+          : { from: Math.min(share, grips.slideRange.from), to: share };
+        if (!options.state.setGrips({ ...grips, slideRange })) render();
+      },
+    });
+    element(root, '.character-grip-range-controls').append(control.row);
+    return { end, control };
+  });
   const handleLength = createRangeControl({
     ...RIG_LIMITS.handleLength, step: 0.05, label: 'Handle length', unit: 'm',
     description: 'The game\'s handle length, shared by every character. Changing it rebuilds the player and restarts the run.',
@@ -667,9 +694,14 @@ export function createCharacterEditor(options: {
       input.disabled = disabled;
     }
     for (const { side, control } of gripControls) control.setValue(profile.grips[side], { disabled });
-    slidePoint.setValue(Math.round(profile.grips.slideAt * 100), { disabled: disabled || profile.grips.placement === 'fixed' });
+    const fixed = profile.grips.placement === 'fixed';
+    slidePoint.setValue(Math.round(profile.grips.slideAt * 100), { disabled: disabled || fixed });
+    for (const { end, control } of gripRangeControls) {
+      control.setValue(Math.round(profile.grips.slideRange[end] * 100), { disabled: disabled || fixed });
+    }
     gripReset.disabled = disabled || profile.grips.left === DEFAULT_GRIPS.left && profile.grips.right === DEFAULT_GRIPS.right &&
-      profile.grips.slideAt === DEFAULT_GRIPS.slideAt;
+      profile.grips.slideAt === DEFAULT_GRIPS.slideAt && profile.grips.slideRange.from === DEFAULT_GRIPS.slideRange.from &&
+      profile.grips.slideRange.to === DEFAULT_GRIPS.slideRange.to;
     // 2D characters keep their authored wrist rotation, like their authored sprite depths.
     const rotationInactive = profile.characterRiggingType === 'sprite-2d';
     const { rotation } = profile.grips;

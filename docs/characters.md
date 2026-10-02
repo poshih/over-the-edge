@@ -319,23 +319,25 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 16**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
+Profiles use **schema version 17**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
 the hammer in degrees (0-45; see [waist lean](sprites.md#waist-lean)), and `grips`: the placement, each
 hand's distance from the butt (0-3 m) where it starts, the slide point `slideAt`, a share of each
 arm's length in the course plane that a sliding hand may ride from its shoulder, either way along the
-handle, before the handle slides through it (0.4-1), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
+handle, before the handle slides through it (0-1), `slideRange`, the stretch sliding hands keep to, `from`
+and `to` as shares of the handle a hand can hold (0 the butt, 1 the nearest a hand may come to the head;
+`from` no greater than `to`), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
 and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It also has
 `arms`, `null` for each type's own arm lengths or each side's `upper` and `forearm`
 (0.1-2 m). The model and shading fields below are present only while used.
 
 ```json
 {
-  "schemaVersion": 16,
+  "schemaVersion": 17,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
   "waistLean": 20,
   "grips": {
-    "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85,
+    "placement": "sliding", "left": 0.04, "right": 0.22, "slideAt": 0.85, "slideRange": { "from": 0, "to": 1 },
     "rotation": { "left": { "x": 0, "y": 0, "z": 0 }, "right": { "x": 20, "y": 0, "z": -10 } }
   },
   "arms": { "left": { "upper": 0.5, "forearm": 0.48 }, "right": { "upper": 0.5, "forearm": 0.48 } },

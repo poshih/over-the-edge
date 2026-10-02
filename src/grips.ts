@@ -14,26 +14,38 @@ export interface GripRotation {
   readonly z: number;
 }
 
+// Where on the handle sliding hands may hold: shares of the stretch a hand can hold, from the butt (0) to as near
+// the head as a hand may come (1, HEAD_GRIP_MARGIN short of its centre), `from` never past `to`.
+export interface GripRange {
+  readonly from: number;
+  readonly to: number;
+}
+
 // Each hand's distance from the butt, where fixed hands stay and sliding hands start. Sliding hands ride
 // with the handle, extending or retracting, until one would be farther from its shoulder in the course
-// plane than `slideAt` times its arm's length. `rotation` turns each 3D hand on its grip.
+// plane than `slideAt` times its arm's length, and keep to `slideRange`, straddling its middle when they are
+// farther apart than it is long. `rotation` turns each 3D hand on its grip.
 export interface Grips {
   readonly placement: GripPlacement;
   readonly left: number;
   readonly right: number;
   readonly slideAt: number;
+  readonly slideRange: GripRange;
   readonly rotation: Readonly<Record<'left' | 'right', GripRotation>>;
 }
 
 export const NO_GRIP_ROTATION: GripRotation = Object.freeze({ x: 0, y: 0, z: 0 });
+export const FULL_GRIP_RANGE: GripRange = Object.freeze({ from: 0, to: 1 });
 export const DEFAULT_GRIPS: Grips = Object.freeze({
-  placement: 'sliding', left: 0.04, right: 0.22, slideAt: 0.85,
+  placement: 'sliding', left: 0.04, right: 0.22, slideAt: 0.85, slideRange: FULL_GRIP_RANGE,
   rotation: Object.freeze({ left: NO_GRIP_ROTATION, right: NO_GRIP_ROTATION }),
 });
 export const GRIP_LIMITS = { min: 0, max: RIG_LIMITS.handleLength.max, step: 0.01 } as const;
 export const GRIP_ROTATION_LIMITS = { min: -180, max: 180, step: 1 } as const;
-// Below 40% a shoulder is often farther than that from the handle's line, where hands can only hold its nearest point.
-export const SLIDE_AT_LIMITS = { min: 0.4, max: 1, step: 0.05 } as const;
+// At 0 each hand heads for the point nearest its shoulder; as both rarely can, they split the difference, so the
+// handle slides through them all the time.
+export const SLIDE_AT_LIMITS = { min: 0, max: 1, step: 0.05 } as const;
+export const GRIP_RANGE_LIMITS = { min: 0, max: 1, step: 0.01 } as const;
 // Space kept between the leading hand and the head's collision block.
 export const HEAD_GRIP_CLEARANCE = 0.1;
 // No hand holds nearer the head's centre than this, so none enters its collision block.
@@ -60,8 +72,9 @@ export interface GripShoulder {
  * hands hold their grips. Sliding hands start on their grips and ride with the handle, extending or
  * retracting, while each stays within `slideAt` of its arm's length from its shoulder; past that, the
  * handle slides through both hands, together, by the least amount that brings them back, and they ride on
- * from there. Hands stay on the handle and short of the head. The placement is continuous in aim and
- * extension and costs the same every frame.
+ * from there. Sliding hands keep to `slideRange` even when an arm must stretch for it; fixed and sliding
+ * hands alike stay on the handle and short of the head. The placement is continuous in aim and extension
+ * and costs the same every frame.
  */
 export class GripHold {
   // How far the hands have slid from their grips: toward the head when positive.
@@ -91,7 +104,13 @@ export class GripHold {
     const high = Math.min(shoulders.left.along + leftChord - left, shoulders.right.along + rightChord - right);
     // The hands keep their hold while it is within reach; when no shared slide suits both, they split the difference.
     const wanted = low <= high ? Math.min(Math.max(this.offset, low), high) : (low + high) / 2;
-    this.offset = Math.min(Math.max(wanted, -Math.min(left, right)), farthest - Math.max(left, right));
+    // Both hands keep to the slide range; when they are farther apart than it is long, they straddle its middle.
+    const butt = Math.min(left, right);
+    const head = Math.max(left, right);
+    const lowest = grips.slideRange.from * farthest - butt;
+    const highest = grips.slideRange.to * farthest - head;
+    this.offset = lowest <= highest ? Math.min(Math.max(wanted, lowest), highest)
+      : Math.min(Math.max((lowest + highest) / 2, -butt), farthest - head);
     out.left = left + this.offset;
     out.right = right + this.offset;
     return out;
@@ -110,6 +129,7 @@ export function sameGripRotation(left: GripRotation, right: GripRotation): boole
 
 export function sameGrips(left: Grips, right: Grips): boolean {
   return left.placement === right.placement && left.left === right.left && left.right === right.right &&
-    left.slideAt === right.slideAt && sameGripRotation(left.rotation.left, right.rotation.left) &&
+    left.slideAt === right.slideAt && left.slideRange.from === right.slideRange.from &&
+    left.slideRange.to === right.slideRange.to && sameGripRotation(left.rotation.left, right.rotation.left) &&
     sameGripRotation(left.rotation.right, right.rotation.right);
 }
