@@ -96,7 +96,7 @@ export class Release {
           return;
         }
         if (this.module?.phantoms !== undefined && this.code.phantoms === null) {
-          throw new Error('The game\'s module supplies phantoms, but this release was built without GAME_PHANTOMS_URL.');
+          throw new Error('The game\'s module supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL.');
         }
       }
       const access = this.module?.access ?? publicAccess(contentUrl);
@@ -218,7 +218,8 @@ export class Release {
   }
 
   private phantomsUrl(): string | null {
-    return this.code.phantoms === null ? null : new URL(this.code.phantoms.url, document.baseURI).href;
+    const url = this.code.phantoms?.url ?? null;
+    return url === null ? null : new URL(url, document.baseURI).href;
   }
 
   private modelFailed(error: unknown): void {
@@ -247,7 +248,10 @@ export class Release {
     this.module?.ready?.(api);
     const phantoms = this.code.phantoms;
     if (phantoms !== null) {
-      this.phantoms = phantoms.start({ game, course: phantoms.course, url: this.phantomsUrl()!, service: this.module?.phantoms ?? null });
+      this.phantoms = phantoms.start({
+        game, course: phantoms.course, url: this.phantomsUrl(), service: this.module?.phantoms ?? null,
+        packs: manifest.phantoms, content: (source, request) => loaded.session.bytes(source, request),
+      });
     }
     game.start((state) => {
       this.ui.update(state);

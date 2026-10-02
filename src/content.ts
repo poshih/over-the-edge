@@ -21,6 +21,8 @@ import { LEVEL_LIMITS, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 import { MEDIA_LIMITS, MEDIA_TYPES, mediaExtension, mediaPath } from './media';
 import { MODEL_LIMITS } from './model-data';
+import { PHANTOM_LIMITS, PHANTOM_PACK_BYTES } from './phantom-format';
+import type { PhantomBounds } from './phantom-format';
 import { exactRecord } from './project-fields';
 import { SPRITE_LIMITS, validateSpriteAnchors, validateSpriteMetadata } from './sprite-data';
 import type { SpriteDocument } from './sprite-data';
@@ -34,24 +36,26 @@ import { libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSetting
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
-export const CONTENT_SCHEMA_VERSION = 6;
+export const CONTENT_SCHEMA_VERSION = 7;
 // The group holding everything the release itself uses; other groups are granted separately.
 export const GAME_GROUP = 'game';
 export const CONTENT_TYPES: Readonly<Record<ContentExtension, string>> = {
-  json: 'application/json', png: 'image/png', glb: 'model/gltf-binary', ...MEDIA_TYPES,
+  json: 'application/json', png: 'image/png', glb: 'model/gltf-binary', ...MEDIA_TYPES, phantoms: 'application/octet-stream',
 };
 
 // Largest file of each kind; a manifest listing a larger one is invalid.
 const TYPE_BYTES: Readonly<Record<ContentExtension, number>> = {
   json: 0, png: SPRITE_LIMITS.imageBytes, glb: Math.max(MODEL_LIMITS.bytes, ART_LIMITS.bytes),
   webm: MEDIA_LIMITS.bytes, mp4: MEDIA_LIMITS.bytes, mp3: MEDIA_LIMITS.bytes, ogg: MEDIA_LIMITS.bytes,
-  wav: MEDIA_LIMITS.bytes, m4a: MEDIA_LIMITS.bytes,
+  wav: MEDIA_LIMITS.bytes, m4a: MEDIA_LIMITS.bytes, phantoms: PHANTOM_PACK_BYTES,
 };
 
 export const CONTENT_LIMITS = {
   files: 2048,
   // A level, two character profiles' metadata and the release's settings.
   manifestBytes: LEVEL_LIMITS.fileBytes + 2 * SPRITE_LIMITS.documentBytes + 4 * 1024 * 1024,
+  // Packs of bundled phantom recordings: enough for one per 10 m band of the phantom range.
+  phantomPacks: 1024,
 } as const;
 
 export class ContentManifestError extends Error {}
@@ -122,6 +126,13 @@ export interface ContentLibrary {
   readonly pot: readonly ContentLibraryEntry[];
 }
 
+// A pack of phantom recordings the release replays without a backend, and where their characters went: the release
+// loads a pack once the player comes near.
+export interface ContentPhantomPack {
+  readonly source: string;
+  readonly bounds: PhantomBounds;
+}
+
 // The content group of one library entry.
 export function libraryGroup(role: PartRole, id: string): string {
   return contentGroup(`library/${role}/${libraryModelId(id)}`);
@@ -143,13 +154,15 @@ export interface ContentManifest {
   // Authored /media/ paths and the packaged file each one plays.
   readonly media: Readonly<Record<string, string>>;
   readonly library: ContentLibrary;
+  // Recordings made on this level's play layout; see docs/phantoms.md.
+  readonly phantoms: readonly ContentPhantomPack[];
   // Every file the manifest references, by path, with its size in bytes.
   readonly files: Readonly<Record<string, number>>;
 }
 
 const MANIFEST_KEYS = [
   'format', 'schemaVersion', 'level', 'settings', 'theme', 'hud', 'enemies', 'armIk', 'audio', 'characters',
-  'appearance', 'art', 'media', 'library', 'files',
+  'appearance', 'art', 'media', 'library', 'phantoms', 'files',
 ] as const;
 
 // Sources a level's trigger events play: videos and sounds.
@@ -181,6 +194,7 @@ function manifestSources(manifest: Omit<ContentManifest, 'files'>): string[] {
     ...manifest.art.assets.map(asset => asset.source),
     ...Object.values(manifest.media),
     ...librarySources(manifest.library),
+    ...manifest.phantoms.map(pack => pack.source),
   ];
 }
 
@@ -277,6 +291,28 @@ function validateLibrary(value: unknown): ContentLibrary {
   });
 }
 
+function validatePhantomPacks(value: unknown): readonly ContentPhantomPack[] {
+  if (!Array.isArray(value) || value.length > CONTENT_LIMITS.phantomPacks) {
+    throw new ContentManifestError(`Phantoms are a list of at most ${CONTENT_LIMITS.phantomPacks} packs.`);
+  }
+  const coordinate = (data: Record<string, unknown>, key: string): number => {
+    const number = data[key];
+    if (typeof number !== 'number' || !Number.isFinite(number) || Math.abs(number) > PHANTOM_LIMITS.coordinate) {
+      throw new ContentManifestError('A phantom pack\'s bounds must be coordinates within the phantom range.');
+    }
+    return number;
+  };
+  return Object.freeze(value.map((entry: unknown) => {
+    const pack = exactRecord(entry, ['source', 'bounds'], 'A phantom pack');
+    const source = packaged(String(pack.source), 'A phantom pack');
+    if (pathExtension(refPath(source)) !== 'phantoms') throw new ContentManifestError('Phantom packs are packaged as .phantoms files.');
+    const data = exactRecord(pack.bounds, ['minX', 'minY', 'maxX', 'maxY'], 'A phantom pack\'s bounds');
+    const bounds = { minX: coordinate(data, 'minX'), minY: coordinate(data, 'minY'), maxX: coordinate(data, 'maxX'), maxY: coordinate(data, 'maxY') };
+    if (bounds.minX > bounds.maxX || bounds.minY > bounds.maxY) throw new ContentManifestError('A phantom pack\'s bounds are inverted.');
+    return Object.freeze({ source, bounds: Object.freeze(bounds) });
+  }));
+}
+
 function validateFiles(value: unknown, sources: readonly string[]): Readonly<Record<string, number>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new ContentManifestError('Files must map content paths to sizes.');
   const entries = Object.entries(value);
@@ -328,6 +364,7 @@ function validateSections(data: Record<string, unknown>): Omit<ContentManifest, 
     art: validateContentArt(data.art, level),
     media,
     library: validateLibrary(data.library),
+    phantoms: validatePhantomPacks(data.phantoms),
   };
 }
 

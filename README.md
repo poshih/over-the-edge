@@ -104,13 +104,15 @@ A game that ships custom avatars adds its own rig strategies with
 **`AVATAR_RIG_MODULE`**, and its profiles then name them in each avatar's `driver`.
 See [rig strategies](docs/characters.md#rig-strategies).
 
-A release built with **`GAME_PHANTOMS_URL`** records a random 10 seconds of the player now and
-then, sends it to the game's backend, and replays other players' recordings near the player as
-translucent white phantoms. Ten seconds take under 4 KB and reproduce every physics step within
-1.5 cm; arms are placed by the game's own IK rather than recorded. The backend decides what it
-keeps and whom it sends what. `GAME_PHANTOMS_URL=phantoms/ npm run dev:game` tries it locally
-with the development server's own store. Without the variable a release carries no phantom
-code. See [phantoms](docs/phantoms.md).
+Releases replay recordings of players near the player as translucent white phantoms. While
+**Record** is on, the Workshop records your play on each saved version of a server project's
+level, marked by a pulsing red **REC**, and a release built from the project bundles the
+recordings made on its level's layout. A release built with **`GAME_PHANTOMS_URL`** also records
+a random 10 seconds of its player now and then, sends it to the game's backend and replays what
+the backend sends. Ten seconds take under 4 KB and reproduce every physics step within 1.5 cm;
+arms are placed by the game's own IK rather than recorded. `GAME_PHANTOMS_URL=phantoms/ npm run
+dev:game` tries a backend locally with the development server's own store. A release with
+neither carries no phantom code. See [phantoms](docs/phantoms.md).
 
 Set **`GAME_TITLE`** to use your own game name:
 
@@ -546,24 +548,19 @@ pose, and the level is not edited. Playtests, Reset and falls out of the level t
 start from the placed player until you choose **Use the level start** in the Level
 tab, pick a starting point in **Physics**, or load another level.
 
-Named level saves use the existing snapshot-history mechanism: repeated names
-keep separate versions, choosing an entry does not apply it, and loading is
-explicit. **Save level** stays at the top of the Level tab; load past saves from
-**Saved levels**. Use **Level JSON** to export/import level data between browsers or feed the
-game-only build. Imports are validated before replacing the current level;
-malformed files and unavailable storage produce visible errors.
+Levels are saved in the open [server project](docs/projects.md#working-in-the-workshop):
+it saves the level a moment after you stop editing, and **Save to project**, at the top of
+the Level tab, saves it at once. Every save becomes the project's next numbered
+[level version](docs/projects.md#level-versions), and the status line shows the one the page
+holds. Without a server project, use **Level JSON** to export/import level data between
+browsers or feed the game-only build. Imports are validated before replacing the current
+level; malformed files produce visible errors.
 
-**Server levels** lists the levels the Workshop shares with everyone who opens it:
-every level JSON file in this repository's `levels/` folder, named by its file name,
-and first, in a Workshop built with `GAME_PROJECT`, that project's level. With the
-project server (`npm run dev` or `npm run studio`) the list is live, and **Save to
-server** stores the current level in the folder under a name of your choosing; see
-[server copies](docs/projects.md#server-copies). A static deployment lists the folder as
-it was built: builds validate each file and fail, naming it, when one is not a valid
-level or its file name is not a valid copy name. A level downloads when you load it,
-and replaces the current level like an import, asking first when there are unsaved
-changes. **Save to project**, under **Save level**, writes the level into the open
-[server project](docs/projects.md#working-in-the-workshop) at once.
+**Server levels** loads the levels served with the Workshop: every level JSON file in this
+repository's `levels/` folder, named by its file name, and first, in a Workshop built with
+`GAME_PROJECT`, that project's level. Builds validate each file and fail, naming it, when one
+is not a valid level. A level downloads when you load it, and replaces the current level like
+an import, asking first when there are unsaved changes.
 
 ### Level board
 
@@ -688,7 +685,7 @@ game-only release.
 Level JSON uses **schema version 5**, with typed terrain, start, trigger and enemy
 objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`, `ice` and `rubber`.
 A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
-Files and saved snapshots in any other version are rejected, not converted.
+Files in any other version are rejected, not converted.
 
 ### Updrafts
 

@@ -17,8 +17,9 @@ export const PHANTOM_LIMITS = {
   maxTicks: 10 * PHANTOM_TICK_RATE,
   maxGapTicks: PHANTOM_TICK_RATE,
   bytes: 32 * 1024,
-  // Recordings in one response from a phantom service.
+  // Recordings in one response from a phantom service, and in one pack a release bundles.
   batch: 16,
+  pack: 64,
   // Metres from the origin, in x and y: twice the level limit, room for flights above the course.
   coordinate: 4096,
   potAngle: 0.5,
@@ -44,7 +45,8 @@ const RANGE: readonly (readonly [number, number])[] = [
 
 export class PhantomError extends Error {}
 
-// A course is its level's SHA-256 in lowercase hex: recordings replay only on the level they were made on.
+// A course is the SHA-256, in lowercase hex, of its level's play layout (src/phantom-layout.ts): recordings replay
+// only where everything that moves the player is as it was when they were made.
 export function isPhantomCourse(value: string): boolean {
   return /^[0-9a-f]{64}$/.test(value);
 }
@@ -280,9 +282,9 @@ export function decodePhantom(bytes: Uint8Array): PhantomTrack {
   return checked(handle, ticks, values);
 }
 
-// A service's answer: a count, then each recording's length and bytes.
-export function encodePhantomBatch(recordings: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
-  if (recordings.length > PHANTOM_LIMITS.batch) throw new PhantomError(`A phantom batch holds at most ${PHANTOM_LIMITS.batch} recordings.`);
+// A count, then each recording's length and bytes: a service's answer (a batch) or a release's pack.
+function encodeRecordings(recordings: readonly Uint8Array[], limit: number, name: string): Uint8Array<ArrayBuffer> {
+  if (recordings.length > limit) throw new PhantomError(`A phantom ${name} holds at most ${limit} recordings.`);
   const writer = new Writer();
   writer.unsigned(recordings.length);
   for (const recording of recordings) {
@@ -293,19 +295,40 @@ export function encodePhantomBatch(recordings: readonly Uint8Array[]): Uint8Arra
   return writer.finish();
 }
 
-// Splits a batch into its recordings, which still need decoding.
-export function decodePhantomBatch(bytes: Uint8Array): Uint8Array<ArrayBuffer>[] {
+function decodeRecordings(bytes: Uint8Array, limit: number, name: string): Uint8Array<ArrayBuffer>[] {
   const reader = new Reader(bytes);
   const count = reader.unsigned();
-  if (count > PHANTOM_LIMITS.batch) throw new PhantomError(`A phantom batch holds at most ${PHANTOM_LIMITS.batch} recordings.`);
+  if (count > limit) throw new PhantomError(`A phantom ${name} holds at most ${limit} recordings.`);
   const recordings: Uint8Array<ArrayBuffer>[] = [];
   for (let index = 0; index < count; index++) {
     const length = reader.unsigned();
     if (length > PHANTOM_LIMITS.bytes) throw new PhantomError('The phantom is larger than a recording may be.');
     recordings.push(reader.raw(length));
   }
-  if (!reader.done) throw new PhantomError('The phantom batch has bytes after its last recording.');
+  if (!reader.done) throw new PhantomError(`The phantom ${name} has bytes after its last recording.`);
   return recordings;
+}
+
+// A service's answer.
+export function encodePhantomBatch(recordings: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
+  return encodeRecordings(recordings, PHANTOM_LIMITS.batch, 'batch');
+}
+
+// Splits a batch into its recordings, which still need decoding.
+export function decodePhantomBatch(bytes: Uint8Array): Uint8Array<ArrayBuffer>[] {
+  return decodeRecordings(bytes, PHANTOM_LIMITS.batch, 'batch');
+}
+
+// The largest pack: its count, and each recording's length (at most three bytes) and bytes.
+export const PHANTOM_PACK_BYTES = 1 + PHANTOM_LIMITS.pack * (3 + PHANTOM_LIMITS.bytes);
+
+// Recordings a release bundles, packed as a batch is, up to PHANTOM_LIMITS.pack of them.
+export function encodePhantomPack(recordings: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
+  return encodeRecordings(recordings, PHANTOM_LIMITS.pack, 'pack');
+}
+
+export function decodePhantomPack(bytes: Uint8Array): Uint8Array<ArrayBuffer>[] {
+  return decodeRecordings(bytes, PHANTOM_LIMITS.pack, 'pack');
 }
 
 /**

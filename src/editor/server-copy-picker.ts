@@ -2,7 +2,7 @@ import { isProjectDataError } from '../project';
 import { SHARED_NAME_LIMIT, validateSharedName } from '../shared-copies';
 import type { SharedKind } from '../shared-copies';
 import { ProjectApiError } from './project-client';
-import type { ServerCopies, ServerCopy } from './server-copies';
+import type { ServerCopies } from './server-copies';
 
 function expected(error: unknown): error is Error {
   return error instanceof ProjectApiError || isProjectDataError(error);
@@ -70,20 +70,18 @@ export function createServerCopyPicker<T>(options: {
   let disabled = false;
   let busy = false;
   let listing = false;
-  let entries: readonly ServerCopy[] = [];
+  let entries: readonly string[] = [];
   let problem: string | null = null;
   let generation = 0;
 
-  const selected = (): ServerCopy | undefined => list.value === '' ? undefined : entries[Number(list.value)];
+  const selected = (): string | undefined => list.value === '' ? undefined : entries[Number(list.value)];
 
   function describe(): string {
     if (problem !== null) return problem;
     switch (copies.state()) {
       case 'checking': return 'Looking for the project server…';
       case 'signed-out': return `Sign in to the project server in Project to list and save server ${plural}.`;
-      case 'offline': return entries.length > 0
-        ? `This Workshop serves these ${plural}. Run npm run dev or npm run studio to save ${plural} to a server.`
-        : `No project server: this Workshop is a static site. Run npm run dev or npm run studio to share ${plural} on a server.`;
+      case 'offline': return `No project server: this Workshop is a static site. Run npm run dev or npm run studio to share ${plural} on a server.`;
       case 'connected': return `Shared with everyone who opens this Workshop, as files in its repository's ${kind}/ folder. `
         + `Saving under a listed name replaces that copy; loading one replaces the current ${noun}.`;
     }
@@ -99,14 +97,14 @@ export function createServerCopyPicker<T>(options: {
   }
 
   function fill(keep: string | null): void {
-    const items = entries.map((entry, index) => new Option(entry.label, String(index)));
+    const items = entries.map((entry, index) => new Option(entry, String(index)));
     if (items.length === 0) items.push(new Option(listing ? 'Loading…' : `No server ${plural} yet`, ''));
     list.replaceChildren(...items);
-    const index = keep === null ? -1 : entries.findIndex((entry) => entry.name === keep);
+    const index = keep === null ? -1 : entries.indexOf(keep);
     list.value = entries.length === 0 ? '' : String(Math.max(0, index));
   }
 
-  async function refresh(keep: string | null = selected()?.name ?? null): Promise<void> {
+  async function refresh(keep: string | null = selected() ?? null): Promise<void> {
     const current = ++generation;
     listing = true;
     if (entries.length === 0) fill(keep);
@@ -140,7 +138,7 @@ export function createServerCopyPicker<T>(options: {
     }
     const value = options.capture();
     if (value === null) return;
-    if (entries.some((entry) => entry.source === 'server' && entry.name === name) &&
+    if (entries.includes(name) &&
       !window.confirm(`Replace the server ${noun} "${name}"? Everyone who opens this Workshop gets this version instead.`)) return;
     busy = true;
     render();
@@ -162,14 +160,14 @@ export function createServerCopyPicker<T>(options: {
   }
 
   async function loadSelected(): Promise<void> {
-    const copy = selected();
-    if (copy === undefined || disabled || busy) return;
+    const name = selected();
+    if (name === undefined || disabled || busy) return;
     busy = true;
     options.onLoading?.(true);
     render();
     let value: unknown;
     try {
-      value = await copies.read(kind, copy, signal);
+      value = await copies.read(kind, name);
     } catch (error) {
       if (signal.aborted) return;
       if (!expected(error)) throw error;
@@ -188,12 +186,12 @@ export function createServerCopyPicker<T>(options: {
       applied = await options.apply(value);
     } catch (error) {
       if (!isProjectDataError(error)) throw error;
-      options.onNotice(`"${copy.label}" on the server is not a valid ${noun}: ${error.message}`, 'error');
+      options.onNotice(`"${name}" on the server is not a valid ${noun}: ${error.message}`, 'error');
       return;
     }
     if (!applied || signal.aborted) return;
-    if (copy.name !== null) nameInput.value = copy.name;
-    options.onNotice(`Loaded "${copy.label}" from the server. ${options.afterLoad}`, 'info');
+    nameInput.value = name;
+    options.onNotice(`Loaded "${name}" from the server. ${options.afterLoad}`, 'info');
   }
 
   form.addEventListener('submit', (event) => {
@@ -203,8 +201,8 @@ export function createServerCopyPicker<T>(options: {
   load.addEventListener('click', () => { void loadSelected(); }, listen);
   refreshButton.addEventListener('click', () => { void refresh(); }, listen);
   list.addEventListener('change', () => {
-    const copy = selected();
-    if (copy?.source === 'server') nameInput.value = copy.name;
+    const name = selected();
+    if (name !== undefined) nameInput.value = name;
     render();
   }, listen);
   const unsubscribe = copies.subscribe(() => { void refresh(); });

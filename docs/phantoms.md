@@ -1,13 +1,52 @@
 # Phantoms
 
-A release can record short stretches of each player's movement, keep them with the game's
-backend, and replay other players' recordings as translucent white **phantoms** that climb
-beside the player. Phantoms are drawn only: they never collide, block or touch anything.
+Recordings of players' movement replay as translucent white **phantoms** that climb beside the
+player. Phantoms are drawn only: they never collide, block or touch anything. A release gets
+them from two places:
 
-Phantoms are off unless a release is built with **`GAME_PHANTOMS_URL`**, and a release built
-without it contains no phantom code.
+- **its own content**: the Workshop records your play on each saved version of a project's
+  level, and a release [bundles](#bundled-recordings) the recordings made on its level;
+- **the game's backend** (`GAME_PHANTOMS_URL`), which also receives recordings of the release's
+  players.
 
-## Turning phantoms on
+A release with neither contains no phantom code.
+
+## Recording in the Workshop
+
+While **Record** is on in the Workshop header, on until you turn it off in that browser, the
+Workshop records every run you play on a saved version of the open server project's level. A
+pulsing red **REC** beside the game's controls shows when it is recording. Each run is a
+session of clips of up to 10 seconds, each starting with the previous clip's last pose, so a run
+replays as one; a restart, Reset or fall starts the next session. A clip also ends when the
+handle length changes or the level stops being that saved version. Clips shorter than a second,
+or in which the character moved less than 0.5 m and the hammer head less than 3 m, are dropped.
+
+Recording waits while the level has changes no save has numbered yet: the project saves them a
+moment after you stop editing, as its next [level version](projects.md#level-versions). Without
+a server project nothing is recorded. Clips upload as they end, to
+`POST /api/projects/{id}/level/versions/{version}/phantoms`, and the project keeps them in
+`phantoms/<course>/` beside its files.
+
+## Bundled recordings
+
+A game build bundles the recordings of its level's [course](#courses) from a folder of
+recordings by course:
+
+- a `GAME_PROJECT` folder's own `phantoms/` folder;
+- or **`GAME_PHANTOM_RECORDINGS`**, a folder holding `<course>/*.phantom` files; set it empty to
+  bundle none;
+- publishing from the Workshop bundles the project's.
+
+The build reads the folder once, so a running `npm run dev:game` takes new recordings when it
+restarts. Every recording is validated and a file that is not one fails the build, naming it.
+Recordings are grouped by the 10 m height band their character's path is centred in; each band
+keeps up to 32, chosen by their SHA-256 so the choice spreads across sessions and stays the
+same from build to build. Each band becomes one **pack**, a content file named by its SHA-256
+like every other, and the content manifest lists the packs with the area their recordings
+cover. The release loads a pack the first time the player comes within 25 m of that area,
+through the same [content access](content-delivery.md) as everything else, and keeps it.
+
+## Turning on a backend
 
 ```sh
 GAME_PROJECT=projects/my-game GAME_PHANTOMS_URL=https://api.example.com/phantoms/ npm run build:game
@@ -15,7 +54,8 @@ GAME_PROJECT=projects/my-game GAME_PHANTOMS_URL=https://api.example.com/phantoms
 
 `GAME_PHANTOMS_URL` says where recordings go and come from. Like `GAME_CONTENT_URL`, it is an
 HTTP(S) URL or a path relative to the page, ending in `/`, without credentials, query or
-fragment. Publishing from the Workshop ignores it: a studio preview has no phantom service.
+fragment. Publishing from the Workshop ignores it: a studio preview has no phantom service, and
+replays only the project's bundled recordings.
 
 To try phantoms locally, point it at a path on the local server:
 
@@ -29,7 +69,8 @@ game in another browser or a private window: a player is never sent their own re
 
 ## What a release does
 
-**Recording.** After a random 5 to 30 seconds of play, the release records the next 10
+**Recording.** Only a release with a backend records. After a random 5 to 30 seconds of play,
+the release records the next 10
 seconds, hands the recording to the backend, then waits another 30 to 90 seconds. A restart
 discards the recording in progress, and the next one starts 3 to 10 seconds later. A recording
 in which the character moved less than 0.5 m and the hammer head less than 3 m is not sent, and
@@ -37,13 +78,15 @@ neither is one the format cannot hold, such as an endless fall past its ±4096 m
 Recording runs on the game's time, so pauses neither record nor count toward a wait.
 
 **Playback.** When play starts, and every 20 seconds while none are waiting, the release asks
-the backend for up to 6 recordings near the player. It plays up to 3 at once, 1 to 6 seconds
+each source, its bundled packs and its backend, for up to 6 recordings near the player. It
+plays up to 3 at once, 1 to 6 seconds
 apart, where they were recorded. Each fades in over half a second and out over 0.8 seconds, and
 playback follows the game's time, so pausing the game pauses its phantoms. A waiting recording
 the player has left behind, one whose path stays more than 25 m away, is dropped.
 
 The release validates every recording it receives, whoever sent it. Anything invalid is
-skipped. A backend that fails is retried at growing intervals up to 5 minutes, with one warning
+skipped. A source that fails, a backend or a pack that will not load, is retried at growing
+intervals up to 5 minutes, with one warning
 in the browser console starting `Phantoms:`. The game plays on: nothing a service does, including
 throwing, answering with garbage or streaming without end, stops it. The reference client reads
 at most one batch's worth of an answer.
@@ -121,11 +164,24 @@ butt     = head − handleLength·(cos angle, sin angle)
 ```
 
 A **batch**, a service's answer, is a varint count of 0 to 16, then each recording as a varint
-length and its bytes.
+length and its bytes. A **pack**, a release's bundled recordings, is laid out the same way with
+0 to 64 recordings.
 
-**Courses.** Recordings belong to a **course**: the SHA-256 of the level definition's JSON, in
-lowercase hex, which the build computes. A recording replays only on the level it was made on,
-so changing the level starts a new course with no phantoms.
+### Courses
+
+Recordings belong to a **course**, which the build and the project server compute: the SHA-256,
+in lowercase hex, of the level's **play layout** (`src/phantom-layout.ts`). The layout holds only
+what moves the player, without object IDs and in a fixed order:
+
+- each terrain object's shape, position, size, angle, illusion and surface;
+- each enemy's species, position, facing, patrol distance and speed;
+- each updraft: a trigger with launch events, its region, position, activation and launches;
+- the start's position, angle and reach.
+
+Decorations, labels, colours, depth, course artwork and other trigger events are left out. A
+recording replays only where its course's layout holds, so editing any of those keeps a
+level's recordings, while moving terrain, changing a surface, an enemy, an updraft or the start
+starts a new course with none.
 
 `src/phantom-format.ts` implements all of this. It imports no DOM or three.js, and its imports
 carry extensions, so a JavaScript backend can validate recordings with `decodePhantom`, which
@@ -161,7 +217,7 @@ a backend that wants players' identities takes them from its own session, like
 
 A game's [module](content-delivery.md#protected-games-the-games-module) may carry phantoms its
 own way: `ReleaseModule.phantoms` replaces the reference client. `ReleaseHost.phantomsUrl` is the
-build's phantom URL, absolute, or `null` without phantoms.
+build's phantom URL, absolute, or `null` without a backend.
 
 ```ts
 import { httpPhantoms } from '../../src/release-module';
@@ -185,8 +241,8 @@ implement `PhantomService` itself, over any transport:
 - `submit(course, recording, signal)` hands over one recording;
 - `nearby(course, { x, y, limit }, signal)` resolves to recordings in the phantom format.
 
-A module that supplies phantoms to a release built without `GAME_PHANTOMS_URL` stops the
-release with an error.
+A module may supply phantoms to a release with a phantom URL or bundled recordings; one that
+supplies them to a release without either stops it with an error.
 
 ## The reference store
 
@@ -212,5 +268,9 @@ trusts any browser. It is for development, not production.
 - each phantom draws 12 meshes;
 - all phantoms share one set of geometry.
 
-**The network** carries one small `POST` per 40 to 120 seconds of play, and at most one `GET`
-every 20 seconds.
+**The network** carries, with a backend, one small `POST` per 40 to 120 seconds of play, and
+at most one `GET` every 20 seconds. Bundled packs, at most about 32 recordings each, load once
+each, as the player reaches their height.
+
+**The Workshop** records with the same per-step capture and uploads one clip, typically 1 to
+4 KB, per 10 seconds of play.

@@ -74,9 +74,10 @@ export class Publisher {
     }
   }
 
-  // `content` is a validated snapshot, so later edits cannot change a build that is in progress.
-  publish(id: string, revision: number, content: ProjectContent): Promise<PublishRecord> {
-    const task = this.queue.then(() => this.build(id, revision, content));
+  // `content` is a validated snapshot, so later edits cannot change a build that is in progress; `recordings` is the
+  // project's folder of phantom recordings, which the release bundles for its level.
+  publish(id: string, revision: number, content: ProjectContent, recordings: string): Promise<PublishRecord> {
+    const task = this.queue.then(() => this.build(id, revision, content, recordings));
     this.queue = task.catch(() => undefined);
     return task;
   }
@@ -117,7 +118,7 @@ export class Publisher {
     });
   }
 
-  private async build(id: string, revision: number, content: ProjectContent): Promise<PublishRecord> {
+  private async build(id: string, revision: number, content: ProjectContent, recordings: string): Promise<PublishRecord> {
     this.running.add(id);
     const started = Date.now();
     const work = join(this.releases, `.build-${id}-${randomBytes(6).toString('hex')}`);
@@ -127,7 +128,7 @@ export class Publisher {
       const bundlePath = join(work, 'project.bundle.json');
       await writeFile(bundlePath, JSON.stringify(packProjectBundle(content)));
       const output = join(work, 'release');
-      await this.runBuild(relative(this.root, bundlePath), output);
+      await this.runBuild(relative(this.root, bundlePath), recordings, output);
       // The release build writes the content beside its output folder.
       const outputs = [[output, join(this.releases, id)], [contentDirectory(output), join(this.releases, `${id}.content`)]] as const;
       const previous = outputs.map(([, target]) =>
@@ -149,11 +150,13 @@ export class Publisher {
     }
   }
 
-  private runBuild(project: string, output: string): Promise<void> {
-    const env: NodeJS.ProcessEnv = { ...process.env, GAME_PROJECT: project, VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true' };
+  private runBuild(project: string, recordings: string, output: string): Promise<void> {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env, GAME_PROJECT: project, GAME_PHANTOM_RECORDINGS: recordings, VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true',
+    };
     // The project is the whole game; per-file inputs from the studio's own environment must not leak in.
     // A studio preview serves its own content, so it keeps the default content URL and public access, and
-    // it has no phantom service.
+    // it has no phantom service: it replays the project's own recordings.
     for (const variable of [
       'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE', 'GAME_CONTENT_URL', 'GAME_MODULE',
       'GAME_PHANTOMS_URL',

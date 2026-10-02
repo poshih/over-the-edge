@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
@@ -8,9 +7,11 @@ import { pathType } from '../src/content';
 import { isContentPath } from '../src/content-ref';
 import { sendBytes, sendFile } from '../server/http';
 import { phantomMiddleware, PhantomStore } from '../server/phantom-store';
+import { levelCourse } from './level-hash';
 import { packReleaseContent } from './release-content';
 import type { ReleaseContent } from './release-content';
 import type { ReleaseInput } from './release-input';
+import { loadReleaseRecordings } from './release-phantoms';
 
 const MODULES = {
   content: 'virtual:game-content',
@@ -55,11 +56,6 @@ function phantomPrefix(url: string | null, base: string): string | null {
   return resolved.origin === local ? resolved.pathname : null;
 }
 
-// The level's SHA-256, which names the course its phantoms belong to.
-function courseOf(input: ReleaseInput): string {
-  return createHash('sha256').update(JSON.stringify(input.level)).digest('hex');
-}
-
 // The path under /content/ that a request names, or null when it is not a content request.
 export function contentRequest(request: IncomingMessage, base: string): string | null {
   const pathname = new URL(request.url ?? '/', 'http://content.invalid').pathname;
@@ -76,20 +72,25 @@ export function contentRequest(request: IncomingMessage, base: string): string |
 export function gameRelease(options: {
   readonly load: () => ReleaseInput;
   readonly contentUrl: string;
-  // GAME_PHANTOMS_URL: where phantoms go and come from, or null without phantoms.
+  // GAME_PHANTOMS_URL: where phantoms go and come from, or null without a phantom backend.
   readonly phantomsUrl: string | null;
+  // A folder of phantom recordings by course, whose recordings of the level the release bundles; null for none. Read
+  // once: new recordings join the next build or server start.
+  readonly recordings: string | null;
   readonly module: string | null;
   // Input files known before loading; a change reloads the page, or restarts the server for a project.
   readonly watch: readonly string[];
   readonly restartOnChange: boolean;
 }): Plugin {
-  let packed: { readonly input: ReleaseInput; readonly content: ReleaseContent } | null = null;
+  type Packed = { readonly input: ReleaseInput; readonly course: string; readonly content: ReleaseContent };
+  let packed: Packed | null = null;
   let development: ViteDevServer | null = null;
   const watched = new Set(options.watch);
-  const current = (): { readonly input: ReleaseInput; readonly content: ReleaseContent } => {
+  const current = (): Packed => {
     if (packed === null) {
       const input = options.load();
-      packed = { input, content: packReleaseContent(input) };
+      const course = levelCourse(input.level);
+      packed = { input, course, content: packReleaseContent(input, loadReleaseRecordings(options.recordings, course)) };
       // Files found while loading, such as a level's public/media/ files, join the watch.
       for (const file of input.files) {
         if (watched.has(file)) continue;
@@ -103,12 +104,13 @@ export function gameRelease(options: {
     if (name === 'module') {
       return options.module === null ? 'export default null;' : `export { start as default } from ${JSON.stringify(options.module)};`;
     }
-    const { input, content } = current();
+    const { course, content } = current();
     if (name === 'content') return `export default ${JSON.stringify({ contentUrl: options.contentUrl, ...content.pins })};`;
     if (name === 'phantoms') {
-      if (options.phantomsUrl === null) return 'export default null;';
+      // Phantoms run with a backend, bundled recordings, or both.
+      if (options.phantomsUrl === null && !content.uses.phantoms) return 'export default null;';
       return `import { startPhantoms } from ${JSON.stringify(runtime('phantoms.ts'))};\n` +
-        `export default { url: ${JSON.stringify(options.phantomsUrl)}, course: ${JSON.stringify(courseOf(input))}, start: startPhantoms };`;
+        `export default { url: ${JSON.stringify(options.phantomsUrl)}, course: ${JSON.stringify(course)}, start: startPhantoms };`;
     }
     return content.uses[name] ? LOADERS[name] : 'export default null;';
   };

@@ -1,5 +1,5 @@
-import { realpathSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
@@ -9,6 +9,7 @@ import { locationUrl } from './build/location-url.ts';
 import { projectModulePath } from './build/module-path.ts';
 import { DEFAULT_CONTENT_URL, gameRelease } from './build/release';
 import { loadFileRelease, loadProjectRelease } from './build/release-input';
+import { RECORDINGS_FOLDER } from './build/release-phantoms';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 const FILE_INPUTS = ['GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES'] as const;
@@ -31,6 +32,18 @@ function contentUrl(): string {
 function phantomsUrl(): string | null {
   const value = process.env.GAME_PHANTOMS_URL;
   return value === undefined ? null : locationUrl('GAME_PHANTOMS_URL', value);
+}
+
+// The phantom recordings the release bundles: GAME_PHANTOM_RECORDINGS, a folder of <course>/*.phantom files, or else
+// the phantoms/ folder of a GAME_PROJECT folder. Empty bundles none.
+function phantomRecordings(requested: string | undefined): string | null {
+  const value = process.env.GAME_PHANTOM_RECORDINGS;
+  if (value !== undefined) return value === '' ? null : resolve(project, value);
+  if (requested === undefined) return null;
+  // GAME_PROJECT is relative to this project, as the release loader reads it.
+  const target = join(project, requested);
+  const folder = basename(target) === 'project.json' ? dirname(target) : target;
+  return existsSync(folder) && statSync(folder).isDirectory() ? join(folder, RECORDINGS_FOLDER) : null;
 }
 
 // The game's own module, bundled into the shell and started before content loads.
@@ -92,6 +105,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
         load: release === null ? () => loadFileRelease(project, files, selectedMode, rigRegistry) : () => release,
         contentUrl: contentUrl(),
         phantomsUrl: phantomsUrl(),
+        recordings: phantomRecordings(requested),
         module: gameModule(),
         watch: release === null ? Object.values(files).filter((path): path is string => path !== null) : release.files,
         restartOnChange: release !== null,

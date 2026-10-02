@@ -1,13 +1,20 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { LEVEL_LIMITS, validateLevel } from '../src/level';
+import type { LevelDefinition } from '../src/level';
 import {
-  loadProjectContent, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, validateProjectId,
+  inSection, loadProjectContent, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, validateProjectId,
   validateProjectManifest,
 } from '../src/project';
 import type { ProjectContent, ProjectFileKind, ProjectFileRef, ProjectManifest } from '../src/project';
 import { atomicWrite, missing } from './files';
 import { HttpError } from './http';
+import {
+  addRecording, countRecordings, findLevelVersion, LEVEL_HISTORY_FOLDERS, listLevelVersions, listRecordings, readLevelVersion,
+  readRecording, recordingName, recordLevelVersion, removeRecording,
+} from './level-history';
+import type { LevelVersion, PhantomRecording } from './level-history';
 
 // API sections; each has its own revision so concurrent editors only conflict on what they share.
 export const SECTION_NAMES = [
@@ -72,6 +79,7 @@ export interface ProjectSummary {
 }
 
 const STATE_FILE = '.studio.json';
+const LEVEL_REF = { path: PROJECT_FILES.level, maxBytes: LEVEL_LIMITS.fileBytes } as const;
 const FILE_PATTERN = /^(?:project\.json|level\.json|characters\/(?:primary|alternate)\.json|art\/asset-[a-f0-9]{64}\.glb|appearance\/[a-z-]+\.glb|models\/(?:avatar|hammer|pot)\/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.glb|media\/[a-z0-9][a-z0-9._-]*)$/;
 
 function initialState(): StoredState {
@@ -97,7 +105,8 @@ async function signatures(directory: string, manifest: ProjectManifest): Promise
 
 /**
  * Projects stored as directories: project.json, its referenced files, and revision state. Every read counts sections
- * whose files changed outside the API as changed, so pages reload them instead of overwriting them.
+ * whose files changed outside the API as changed, so pages reload them instead of overwriting them. Every level that
+ * is stored becomes a numbered version, kept with the recordings played on it (server/level-history.ts).
  */
 export class ProjectStore {
   readonly root: string;
@@ -238,19 +247,21 @@ export class ProjectStore {
     });
   }
 
-  // Serializes changes per project; `change` sees the current manifest and state under the lock.
+  // Serializes changes per project; `change` sees the current manifest and state under the lock. `level` is the version
+  // a change to the level stored it as.
   async mutate<T>(id: string, change: (current: { manifest: ProjectManifest; state: ProjectState }) =>
-    Promise<ProjectChange & { readonly result?: T }>): Promise<{ state: ProjectState; result: T | undefined }> {
+    Promise<ProjectChange & { readonly result?: T }>): Promise<{ state: ProjectState; result: T | undefined; level: LevelVersion | null }> {
     return this.locked(id, async () => {
       const current = await this.current(id);
       const next = await change(current);
-      const state = await this.commit(id, current, next);
-      return { state, result: next.result };
+      const { state, level } = await this.commit(id, current, next);
+      return { state, result: next.result, level };
     });
   }
 
-  // Writes a complete project, replacing any existing one only when asked.
-  async write(id: string, content: ProjectContent, options: { replace: boolean }): Promise<ProjectState> {
+  // Writes a complete project, replacing any existing one only when asked; a replaced project's level versions and
+  // recordings stay. Returns the version its level is stored as.
+  async write(id: string, content: ProjectContent, options: { replace: boolean }): Promise<{ state: ProjectState; level: LevelVersion }> {
     return this.locked(id, async () => {
       const directory = this.directory(id);
       let previous: ProjectState | null = null;
@@ -284,8 +295,13 @@ export class ProjectStore {
         const trash = join(this.root, `.trash-${id}-${randomBytes(6).toString('hex')}`);
         if (exists) await rename(directory, trash);
         await rename(staging, directory);
-        if (exists) await rm(trash, { recursive: true, force: true });
-        return state;
+        if (exists) {
+          for (const folder of LEVEL_HISTORY_FOLDERS) {
+            await rename(join(trash, folder), join(directory, folder)).catch((error: unknown) => { if (!missing(error)) throw error; });
+          }
+          await rm(trash, { recursive: true, force: true });
+        }
+        return { state, level: await recordLevelVersion(directory, content.level) };
       } catch (error) {
         await rm(staging, { recursive: true, force: true });
         throw error;
@@ -325,9 +341,10 @@ export class ProjectStore {
     return initialState();
   }
 
-  private async commit(id: string, current: { manifest: ProjectManifest; state: StoredState }, change: ProjectChange): Promise<ProjectState> {
+  private async commit(id: string, current: { manifest: ProjectManifest; state: StoredState }, change: ProjectChange):
+    Promise<{ state: ProjectState; level: LevelVersion | null }> {
     const { state } = current;
-    if (change.sections.length === 0) return state;
+    if (change.sections.length === 0) return { state, level: null };
     for (const [path, value] of change.json ?? []) {
       await atomicWrite(this.filePath(id, path), path === PROJECT_FILES.level ? `${JSON.stringify(value, null, 2)}\n` : JSON.stringify(value));
     }
@@ -343,7 +360,73 @@ export class ProjectStore {
       observed: await signatures(this.directory(id), change.manifest ?? current.manifest),
     };
     await atomicWrite(join(this.directory(id), STATE_FILE), `${JSON.stringify(next)}\n`);
-    return next;
+    // Levels reach the store validated.
+    const level = change.json?.get(PROJECT_FILES.level) as LevelDefinition | undefined;
+    return { state: next, level: level === undefined ? null : await recordLevelVersion(this.directory(id), level) };
+  }
+
+  // The stored level and the version it is, read together under the lock. A level changed outside the API, or stored
+  // before versions were kept, becomes a new version here.
+  async readLevel(id: string): Promise<{ level: LevelDefinition; version: LevelVersion; state: ProjectState }> {
+    return this.locked(id, async () => {
+      const { state } = await this.current(id);
+      const value = await this.readJson(id, LEVEL_REF);
+      const level = inSection('level', () => validateLevel(value));
+      return { level, version: await recordLevelVersion(this.directory(id), level), state };
+    });
+  }
+
+  // Every version of the level, oldest first, with the number of recordings made on each.
+  async levelVersions(id: string): Promise<(LevelVersion & { readonly recordings: number })[]> {
+    return this.history(id, async (directory) => {
+      const list = await listLevelVersions(directory);
+      const counts = await countRecordings(directory, list);
+      return list.map((entry) => ({ ...entry, recordings: counts.get(entry.version) ?? 0 }));
+    });
+  }
+
+  // A version and its level's compact JSON.
+  async levelVersion(id: string, version: number): Promise<{ version: LevelVersion; json: Buffer }> {
+    return this.history(id, async (directory) => {
+      const entry = await findLevelVersion(directory, version);
+      return { version: entry, json: await readLevelVersion(directory, entry) };
+    });
+  }
+
+  // Stores a phantom recording of `version` under a name made of its session and clip, which the same clip sent again
+  // keeps.
+  async addRecording(id: string, version: number, clip: { session: string; clip: number }, bytes: Uint8Array): Promise<{ name: string; version: LevelVersion }> {
+    return this.history(id, async (directory) => {
+      const entry = await findLevelVersion(directory, version);
+      const name = recordingName(version, clip.session, clip.clip);
+      await addRecording(directory, entry, name, bytes);
+      return { name, version: entry };
+    });
+  }
+
+  async recordings(id: string, version: number): Promise<PhantomRecording[]> {
+    return this.history(id, async (directory) => listRecordings(directory, await findLevelVersion(directory, version)));
+  }
+
+  async recording(id: string, version: number, name: string): Promise<Buffer> {
+    return this.history(id, async (directory) => readRecording(directory, await findLevelVersion(directory, version), name));
+  }
+
+  async removeRecording(id: string, version: number, name: string): Promise<void> {
+    await this.history(id, async (directory) => removeRecording(directory, await findLevelVersion(directory, version), name));
+  }
+
+  // Where a project keeps its recordings, by course; release builds bundle from it.
+  recordingsDirectory(id: string): string {
+    return join(this.directory(id), LEVEL_HISTORY_FOLDERS[1]);
+  }
+
+  // Runs `task` on an existing project's folder under its lock, so a replacement never moves the history mid-task.
+  private async history<T>(id: string, task: (directory: string) => Promise<T>): Promise<T> {
+    return this.locked(id, async () => {
+      await this.manifest(id);
+      return task(this.directory(id));
+    });
   }
 
   private async locked<T>(id: string, task: () => Promise<T>): Promise<T> {

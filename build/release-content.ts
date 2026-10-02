@@ -14,6 +14,8 @@ import { mediaExtension } from '../src/media';
 import { embeddedPng } from '../src/sprite-data';
 import type { SpriteDocument } from '../src/sprite-data';
 import type { ReleaseInput } from './release-input';
+import { packReleaseRecordings } from './release-phantoms';
+import type { ReleaseRecording } from './release-phantoms';
 
 // A game build's content output: every file by path, including the manifest, and what the shell pins.
 export interface ReleaseContent {
@@ -22,17 +24,19 @@ export interface ReleaseContent {
   // Which runtime loaders the shell needs; a release that uses none of a kind omits its code.
   readonly uses: {
     readonly models: boolean; readonly art: boolean; readonly appearance: boolean; readonly audio: boolean; readonly decorations: boolean;
+    readonly phantoms: boolean;
   };
 }
 
 const PACKAGED = 'A game build packages every asset';
 
 /**
- * Packages a validated release: every image, model and media file becomes one content file named
- * by its SHA-256, and the manifest names them with content: sources. The output depends only on
- * the input, so two builds of the same game write identical content wherever it is served.
+ * Packages a validated release and the phantom recordings it bundles: every image, model and media file, and every
+ * pack of recordings, becomes one content file named by its SHA-256, and the manifest names them with content:
+ * sources. The output depends only on the input, so two builds of the same game write identical content wherever it
+ * is served.
  */
-export function packReleaseContent(input: ReleaseInput): ReleaseContent {
+export function packReleaseContent(input: ReleaseInput, recordings: readonly ReleaseRecording[]): ReleaseContent {
   const files = new Map<string, Uint8Array>();
   const add = (bytes: Uint8Array, extension: ContentExtension, group = GAME_GROUP): string => {
     const path = contentFilePath(group, createHash('sha256').update(bytes).digest('hex'), extension);
@@ -79,6 +83,7 @@ export function packReleaseContent(input: ReleaseInput): ReleaseContent {
     media,
     library: Object.fromEntries(PART_ROLES.map(role => [role, input.library[role].map(({ bytes, ...entry }) =>
       ({ ...entry, source: add(bytes, 'glb', libraryGroup(role, entry.id)) }))])),
+    phantoms: packReleaseRecordings(recordings).map(pack => ({ source: add(pack.bytes, 'phantoms'), bounds: pack.bounds })),
     files: {} as Record<string, number>,
   };
   draft.files = Object.fromEntries([...files].map(([path, bytes]) => [path, bytes.byteLength]));
@@ -98,6 +103,7 @@ export function packReleaseContent(input: ReleaseInput): ReleaseContent {
       appearance: draft.appearance.length > 0,
       audio: hasAudio(input.audio) || levelSoundSources(input.level).length > 0,
       decorations: input.level.objects.some(object => object.kind === 'decoration'),
+      phantoms: draft.phantoms.length > 0,
     },
   };
 }

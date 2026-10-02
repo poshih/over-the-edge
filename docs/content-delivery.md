@@ -30,6 +30,7 @@ dist-game-content/
   game/<sha256>.png               sprite images
   game/<sha256>.glb               character, appearance and course models
   game/<sha256>.wav               media, by extension
+  game/<sha256>.phantoms          bundled phantom recordings, one pack per height band
   library/<part>/<id>/<sha256>.glb  one model library entry, for runtime swaps
 ```
 
@@ -131,7 +132,7 @@ export async function start(host: ReleaseHost): Promise<ReleaseModule> {
 | --- | --- |
 | `mount` | The element the release mounts its interface in |
 | `contentUrl` | The build's content URL, absolute |
-| `phantomsUrl` | The build's [phantom](phantoms.md) URL (`GAME_PHANTOMS_URL`), absolute; `null` without phantoms |
+| `phantomsUrl` | The build's [phantom](phantoms.md) URL (`GAME_PHANTOMS_URL`), absolute; `null` without a phantom backend |
 | `notice(message, kind?)` | The release's notice, `info` or `error` |
 
 **`ReleaseModule`** (what `start` returns; every member is optional):

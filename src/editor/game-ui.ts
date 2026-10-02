@@ -16,6 +16,8 @@ export interface GameHudState {
   pointerLocked: boolean;
   inputMode: InputMode;
   timerRunning: boolean;
+  // Whether play is being recorded right now.
+  capturing: boolean;
 }
 
 export function createGameUI(options: {
@@ -44,7 +46,9 @@ export function createGameUI(options: {
             <button type="button" class="button" data-action="pause"><span class="pause-label">Pause</span></button>
             <button type="button" class="button" data-action="reset">Reset</button>
           </div>
-          <p class="input-state"><span class="state-dot" aria-hidden="true"></span><span class="input-state-text"></span></p>
+          <p class="input-state"><span class="recording-state" title="Recording your play for phantoms" hidden><span
+            class="recording-dot" aria-hidden="true"></span>REC</span><span class="state-dot" aria-hidden="true"></span><span
+            class="input-state-text"></span></p>
         </div>
       </header>
       <section class="climb-hud" aria-label="Climb statistics">
@@ -81,6 +85,7 @@ export function createGameUI(options: {
   const pauseLabel = element<HTMLElement>(root, '.pause-label');
   const inputState = element<HTMLElement>(root, '.input-state');
   const inputStateText = element<HTMLElement>(root, '.input-state-text');
+  const recording = element<HTMLElement>(root, '.recording-state');
   const height = element<HTMLElement>(root, '.height-value');
   const peak = element<HTMLElement>(root, '.peak-value');
   const elapsed = element<HTMLElement>(root, '.elapsed-value');
@@ -148,6 +153,7 @@ export function createGameUI(options: {
       const touch = state.inputMode === 'touch';
       const mode = state.paused ? 'paused' : touch ? 'touch' : state.pointerLocked ? 'captured' : 'free';
       if (inputState.dataset.mode !== mode) inputState.dataset.mode = mode;
+      if (recording.hidden === state.capturing) recording.hidden = !state.capturing;
       const pausedHint = touch ? 'tap Play to continue' : state.pointerLocked ? 'Esc to release mouse' : 'take your time';
       setText(inputStateText, state.paused ? `Paused - ${pausedHint}` :
         touch ? 'Touch controls - drag anywhere' :

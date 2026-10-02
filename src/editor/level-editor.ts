@@ -30,10 +30,8 @@ import { createSetPieceGhost, createSetPieceThumbnail } from './set-piece-view';
 import { placeSetPiece, SET_PIECE_CATALOG, SET_PIECE_CATEGORIES, SET_PIECES, setPieceById } from './set-pieces';
 import type { SetPiece, SetPieceCategory, SetPieceCounts } from './set-pieces';
 import { SurfaceIndex } from './surface-snap';
-import { NamedSnapshots, SnapshotError } from './named-snapshots';
 import { createProjectSaveButton } from './project-save';
-import { createServerCopyPicker } from './server-copy-picker';
-import { createSnapshotPicker } from './snapshot-picker';
+import { downloadServerLevel } from './server-levels';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import { DRAWING, PolygonDraft } from './polygon-draft';
 import { sectionMarkup } from './workshop-section';
@@ -110,11 +108,6 @@ const TRIGGER_PRESETS: readonly TriggerPreset[] = [
     events: UPDRAFT_EVENTS,
   },
 ];
-const history = new NamedSnapshots<LevelDefinition>({
-  prefix: 'over-the-edge:level:snapshot:v1:', version: 1, field: 'level',
-  label: 'level', namePrompt: 'Enter a level name',
-  validate: validateLevel, isDataError: (error) => error instanceof LevelError,
-});
 
 function asTerrain(object: LevelObject | null): TerrainObject | null {
   return object !== null && isTerrainObject(object) ? object : null;
@@ -413,11 +406,17 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <p class="level-help level-decoration-detail"></p>
       </fieldset>
       `)}
-      ${sectionMarkup({ id: 'level-server', title: 'Server levels', hint: 'Load or save a level shared on this server' }, `
-      <div class="level-server"></div>
-      `)}
-      ${sectionMarkup({ id: 'level-saved', title: 'Saved levels', hint: 'Load a named snapshot' }, `
-      <div class="level-history"></div>
+      ${sectionMarkup({ id: 'level-server', title: 'Server levels', hint: 'Load a level served with this Workshop' }, `
+      <div class="snapshot-history level-server">
+        <label for="level-server-list">Server level</label>
+        <div class="tuning-profile-row">
+          <select id="level-server-list"></select>
+          <button type="button" class="button level-server-load">Load server level</button>
+        </div>
+        <p class="snapshot-history-help">${options.serverLevels.length === 0
+    ? 'This Workshop serves no levels. Put level JSON files in the levels folder of its repository, then build or start it again.'
+    : 'The same for everyone who opens this Workshop. Loading one replaces the current level.'}</p>
+      </div>
       `)}
       ${sectionMarkup({ id: 'level-file', title: 'Level JSON', hint: 'Import or export, e.g. for releases' }, `
       <fieldset class="tuning-group level-files">
@@ -430,8 +429,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <p class="level-help">Exports level.json: terrain, start, triggers, enemies and labels only.
           Models, appearance, tuning and browser settings are never included. Import limit:
           ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Enemy motion/deaths are not saved.
-          New enemy kinds and trigger actions need an updated game runtime.
-          Saved history loads only when you choose Load level.</p>
+          New enemy kinds and trigger actions need an updated game runtime.</p>
       </fieldset>
       `)}
       ${sectionMarkup({ id: 'level-labels', title: 'Course labels', hint: 'Signs painted on the course' }, `
@@ -487,6 +485,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const saveStatus = element<HTMLParagraphElement>(root, '.level-save-status');
   const importButton = element<HTMLButtonElement>(root, '.level-import');
   const fileInput = element<HTMLInputElement>(root, '.level-file');
+  const serverList = select('server-list');
+  const serverLoad = element<HTMLButtonElement>(root, '.level-server-load');
   const bounds = new Map(level.definition().objects.map((object) => [object.id, objectBounds(object)]));
   // Each terrain object's leftmost point, and the least of them, which places the board's column A.
   const terrainLefts = new Map(level.definition().objects.filter(isTerrainObject).map((object) => [object.id, bounds.get(object.id)!.left]));
@@ -528,8 +528,6 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let savedDefinition: LevelDefinition | null = level.definition();
   let savedCamera: EditorCamera | null = null;
   let importGeneration = 0;
-  // The import generation a server level download started in.
-  let serverGeneration = 0;
   // A level file being read, or a server level being downloaded; either blocks other loads.
   let loading: 'file' | 'server' | null = null;
   let rect = options.canvas.getBoundingClientRect();
@@ -580,10 +578,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const handleRadius = (): number => HANDLE_PIXELS * camera.state().worldHeight / Math.max(1, rect.height);
 
   function report(error: unknown): void {
-    if (error instanceof LevelError || error instanceof SnapshotError) {
-      onNotice(`${error.message} Your current level and existing snapshots were left unchanged.`, 'error');
+    if (error instanceof LevelError) {
+      onNotice(`${error.message} Your current level was left unchanged.`, 'error');
     } else if (error instanceof DOMException) {
-      onNotice('The file or device storage is unavailable or full. Your current level and existing snapshots were left unchanged.', 'error');
+      onNotice('The file could not be read. Your current level was left unchanged.', 'error');
     } else {
       throw error;
     }
@@ -612,16 +610,26 @@ export function createLevelEditor(options: LevelEditorOptions) {
 
   function confirmReplacement(action: string): boolean {
     return !dirty() || window.confirm(`${action} replaces your unsaved level changes.
-Save a named snapshot or export first if you want to keep them. Continue without saving?`);
+Export the level first if you want to keep them. Continue without saving?`);
+  }
+
+  // Where the level is kept: as a numbered version in the open server project, which saves it a moment after each
+  // change, or nowhere until it is exported.
+  function saveState(): string {
+    if (loading === 'file') return 'Reading level file…';
+    if (loading === 'server') return 'Downloading server level…';
+    if (drawing.vertices.length > 0) return 'Unfinished outline - finish or cancel before saving';
+    const project = options.projectSave.openProject();
+    if (project === null) return dirty() ? 'Unsaved changes — export, or open a server project in Project, to keep them' : 'No unsaved changes';
+    const played = options.projectSave.playedLevel();
+    return played !== null && !dirty() ? `Saved as version ${played.version} in project "${project}"`
+      : `Unsaved changes — they save to project "${project}" a moment after you stop`;
   }
 
   function renderStatus(): void {
     const counts = level.counts();
     saveStatus.textContent = `${counts.terrain} / ${LEVEL_LIMITS.objects} terrain · ${counts.triggers} / ${TRIGGER_LIMITS.objects} triggers · ${
-      counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${counts.decorations} / ${DECORATION_LIMITS.objects} decorations · ${
-      loading === 'file' ? 'Reading level file…' : loading === 'server' ? 'Downloading server level…' :
-        drawing.vertices.length > 0 ? 'Unfinished outline - finish or cancel before saving' :
-        dirty() ? 'Unsaved changes — save or export to keep them' : 'No unsaved changes'}`;
+      counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${counts.decorations} / ${DECORATION_LIMITS.objects} decorations · ${saveState()}`;
     saveStatus.dataset.dirty = String(dirty());
   }
 
@@ -1319,79 +1327,18 @@ Save a named snapshot or export first if you want to keep them. Continue without
     renderControls();
   }
 
-  const picker = createSnapshotPicker({
-    mount: element(root, '.level-history'), signal: events.signal, id: 'level', noun: 'level', plural: 'levels',
-    placeholder: 'e.g. The quiet ascent', heading: false, isStorageKey: (key) => history.isStorageKey(key), onNotice,
-    actions: [createProjectSaveButton({ target: options.projectSave, sections: ['level'], label: 'the level', signal: events.signal })],
-    list: () => {
-      try {
-        return history.list(localStorage);
-      } catch (error) {
-        if (!(error instanceof DOMException)) throw error;
-        report(error);
-        throw error;
-      }
-    },
-    save: (name) => {
-      if (!active || !prepareLevel()) return null;
-      try {
-        const entry = history.save(localStorage, name, level.definition());
-        markSaved();
-        return entry;
-      } catch (error) {
-        report(error);
-        return null;
-      }
-    },
-    load: (key) => {
-      if (!active) return null;
-      let saved;
-      try {
-        saved = history.read(localStorage, key);
-      } catch (error) {
-        report(error);
-        return null;
-      }
-      if (!confirmReplacement('Loading this snapshot')) return null;
-      resetSelection();
-      level.replace(saved.settings);
-      markSaved();
-      fitCourse();
-      return saved;
-    },
-  });
-  element(root, '.level-save-dock').append(element(root, '.tuning-save-form'));
-  const serverPicker = createServerCopyPicker({
-    mount: element(root, '.level-server'), signal: events.signal, copies: options.serverCopies, kind: 'levels',
-    id: 'level', noun: 'level', plural: 'levels', placeholder: 'e.g. quiet-ascent', onNotice,
-    capture: () => active && prepareLevel() ? level.definition() : null,
-    apply: (value) => {
-      const definition = validateLevel(value);
-      // Leaving the Level tab cancels the load, as it cancels a file import.
-      if (disposed || !active || serverGeneration !== importGeneration || !confirmReplacement('Loading this server level')) return false;
-      resetSelection();
-      level.replace(definition);
-      markSaved();
-      fitCourse();
-      return true;
-    },
-    afterLoad: 'Existing named snapshots were kept; save a snapshot to keep it in this browser.',
-    // Edits made while the copy uploads stay unsaved.
-    onSaved: (saved) => markSaved(saved),
-    onLoading: (downloading) => {
-      if (downloading) {
-        serverGeneration = ++importGeneration;
-        setLoading('server');
-      } else if (serverGeneration === importGeneration) {
-        setLoading(null);
-      }
-    },
-  });
+  // Saving keeps the level as the open project's next version; each change also saves itself a moment later.
+  element(root, '.level-save-dock').append(
+    createProjectSaveButton({ target: options.projectSave, sections: ['level'], label: 'the level', signal: events.signal }));
+  const unsubscribeProject = options.projectSave.subscribe(() => renderStatus());
+  events.signal.addEventListener('abort', unsubscribeProject, { once: true });
+  serverList.replaceChildren(...(options.serverLevels.length === 0 ? [new Option('No server levels', '')]
+    : options.serverLevels.map((entry, index) => new Option(entry.name, String(index)))));
 
   function renderLoadControls(): void {
     importButton.disabled = loading !== null;
-    picker.setDisabled(!active || loading !== null);
-    serverPicker.setDisabled(!active || loading !== null);
+    serverList.disabled = !active || loading !== null || options.serverLevels.length === 0;
+    serverLoad.disabled = serverList.disabled;
   }
 
   function setLoading(next: typeof loading): void {
@@ -1723,19 +1670,21 @@ Save a named snapshot or export first if you want to keep them. Continue without
   }, listen);
   action('.level-clear-labels', () => {
     const { labels } = level.definition();
-    if (labels.length === 0 || !window.confirm(`Remove all ${labels.length} course labels? Saved snapshots are not changed.`)) return;
+    if (labels.length === 0 || !window.confirm(`Remove all ${labels.length} course labels?`)) return;
     level.metadata({ labels: [] });
   });
   action('.level-new', () => {
-    if (!window.confirm(`Start a new level? ${dirty() ? 'Your unsaved changes will be discarded. Save or export first to keep them. ' : ''}
-This restores the default ground and start location, removes all other objects and labels. Saved snapshots are kept.`)) return;
+    const project = options.projectSave.openProject();
+    if (!window.confirm(`Start a new level? This restores the default ground and start location, and removes all other objects and labels. ${
+      project === null ? '' : `Project "${project}" keeps every saved version. `}${
+      dirty() ? 'Your unsaved changes will be discarded; export first to keep them.' : ''}`)) return;
     const ground = DEFAULT_LEVEL.objects.find((object) => object.kind === 'terrain' && object.id === 'ground');
     const start = DEFAULT_LEVEL.objects.find((object) => object.kind === 'start');
     if (ground === undefined || start === undefined) throw new Error('The starter level needs its authored ground and start.');
     resetSelection();
     level.replace({ schemaVersion: LEVEL_SCHEMA_VERSION, labels: [], objects: [ground, start] });
     fitCourse();
-    onNotice('New level started. Add terrain and place an ending trigger, then save or export before leaving.', 'info');
+    onNotice(`New level started. Add terrain and place an ending trigger. ${keptNote()}`, 'info');
   });
   action('.level-export', () => {
     if (!prepareLevel()) return;
@@ -1776,13 +1725,44 @@ This restores the default ground and start location, removes all other objects a
     level.replace(definition);
     markSaved();
     fitCourse();
-    onNotice('Imported level JSON. Existing named snapshots were kept; save a snapshot to keep it in this browser.', 'info');
+    onNotice(`Imported level JSON. ${keptNote()}`, 'info');
   }
   fileInput.addEventListener('change', () => {
     const file = fileInput.files?.[0];
     fileInput.value = '';
     if (active && file !== undefined) void importFile(file);
   }, listen);
+
+  async function loadServerLevel(): Promise<void> {
+    const entry = options.serverLevels[Number(serverList.value)];
+    if (entry === undefined || loading !== null) return;
+    const generation = ++importGeneration;
+    setLoading('server');
+    let definition: LevelDefinition;
+    try {
+      definition = await downloadServerLevel(entry, events.signal);
+    } catch (error) {
+      if (!disposed && generation === importGeneration) report(error);
+      else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
+      return;
+    } finally {
+      if (!disposed && generation === importGeneration) setLoading(null);
+    }
+    // Leaving the Level tab cancels the load, as it cancels a file import.
+    if (disposed || !active || generation !== importGeneration || !confirmReplacement('Loading this server level')) return;
+    resetSelection();
+    level.replace(definition);
+    markSaved();
+    fitCourse();
+    onNotice(`Loaded "${entry.name}" from the server. ${keptNote()}`, 'info');
+  }
+  action('.level-server-load', () => { void loadServerLevel(); });
+
+  // How a level that replaced the page's is kept, for its notice.
+  function keptNote(): string {
+    const project = options.projectSave.openProject();
+    return project === null ? 'Export it to keep it.' : `It saves to project "${project}" as its next version.`;
+  }
 
 
   function hitTest(world: Point): LevelObject | null {

@@ -940,7 +940,7 @@ body[data-input-mode="touch"] .workshop-search-key {
   display: block;
 }
 
-.debug-button {
+.quick-toggle {
   display: inline-flex;
   min-height: var(--icon-size);
   align-items: center;
@@ -953,12 +953,12 @@ body[data-input-mode="touch"] .workshop-search-key {
   font-weight: 600;
 }
 
-.debug-button:hover {
+.quick-toggle:hover {
   border-color: #9dab96;
   background: #e4e8db;
 }
 
-.debug-button[aria-pressed="true"] {
+.quick-toggle[aria-pressed="true"] {
   border-color: var(--teal);
 }
 
@@ -983,12 +983,12 @@ body[data-input-mode="touch"] .workshop-search-key {
   content: "";
 }
 
-.debug-button[aria-pressed="true"] .toggle-track {
+.quick-toggle[aria-pressed="true"] .toggle-track {
   border-color: var(--teal);
   background: var(--teal);
 }
 
-.debug-button[aria-pressed="true"] .toggle-track::after {
+.quick-toggle[aria-pressed="true"] .toggle-track::after {
   transform: translateX(13px);
   background: #f0f3e8;
 }
@@ -1114,15 +1114,15 @@ body.workshop-open .message-toasts {
     left: 16px;
   }
 
-  .debug-button {
+  .quick-toggle {
     padding: 0 12px;
   }
 
-  .debug-button .toggle-track {
+  .quick-toggle .toggle-track {
     display: none;
   }
 
-  .debug-button[aria-pressed="true"] {
+  .quick-toggle[aria-pressed="true"] {
     color: var(--paper);
     background: var(--teal);
   }
@@ -1245,7 +1245,7 @@ body.workshop-open .message-toasts {
 
   .practice-button[aria-pressed="true"],
 .workshop-toggle[aria-expanded="true"],
-.debug-button[aria-pressed="true"],
+.quick-toggle[aria-pressed="true"],
 .workshop-search-option[aria-selected="true"] {
     outline: 2px solid Highlight;
   }

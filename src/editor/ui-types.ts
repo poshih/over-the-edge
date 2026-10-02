@@ -6,11 +6,14 @@ import type { ProjectSaveTarget } from './project-save';
 import type { ServerCopies } from './server-copies';
 
 export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
-export type EditorAction = UiAction | 'debug';
+export type EditorAction = UiAction | 'debug' | 'record';
 export type WorkshopTab = 'project' | 'physics' | 'character' | 'appearance' | 'sprites' | 'level';
 
 export interface HudState extends GameHudState {
   debug: boolean;
+  // Whether play recording is on, and the Record toggle's tip: what it records, or what it waits for.
+  recording: boolean;
+  recordingNote: string;
   // Null while attempts start where the designer placed the player.
   practice: PracticeId | null;
   contacts: number;

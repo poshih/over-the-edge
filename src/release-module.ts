@@ -20,7 +20,7 @@ export interface ReleaseHost {
   // Where this build's content is served, as an absolute URL.
   readonly contentUrl: string;
   // Where this build's phantoms go and come from (GAME_PHANTOMS_URL), as an absolute URL; null when the
-  // build has no phantoms.
+  // build has no phantom backend.
   readonly phantomsUrl: string | null;
   notice(message: string, kind?: 'info' | 'error'): void;
 }
@@ -40,8 +40,8 @@ export interface ReleaseApi {
 // the player signs in or buys the game), or reject to stop with that error shown. `modelFailed`
 // receives a part that could not follow the backend's selection outside a swap, at boot or after
 // another part's swap; that part keeps its model, or starts with the profile's own. Without
-// `phantoms`, a build with phantoms speaks the reference protocol to the phantom URL; a module may
-// supply phantoms only to such a build.
+// `phantoms`, a build with a phantom URL speaks the reference protocol to it; a module may supply
+// phantoms only to a build with phantoms, from a phantom URL or bundled recordings.
 export interface ReleaseModule {
   readonly access?: ContentAccess;
   readonly phantoms?: PhantomService;

@@ -196,6 +196,46 @@
   background: var(--brass);
 }
 
+.recording-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+  color: #b3261e;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.recording-state[hidden] {
+  display: none;
+}
+
+.recording-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d93025;
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgb(217 48 37 / 45%);
+  }
+
+  50% {
+    opacity: 0.45;
+    box-shadow: 0 0 0 4px rgb(217 48 37 / 0%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording-dot {
+    animation: none;
+  }
+}
+
 .climb-hud {
   position: absolute;
   top: 121px;
@@ -529,4 +569,8 @@ body[data-input-mode="touch"] .climbing-guide .input-instructions {
 
 .game-ui[data-scene="dark"] .secondary-metrics {
   border-left-color: rgb(238 240 230 / 28%);
+}
+
+.game-ui[data-scene="dark"] .recording-state {
+  color: #ff8a80;
 }

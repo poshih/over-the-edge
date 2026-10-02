@@ -62,6 +62,8 @@ my-game/
   art/asset-<sha256>.glb        terrain meshes, named by their content hash
   media/intro.webm
   media/clink.wav
+  level-versions/               the project server's saved levels; see Level versions
+  phantoms/<course>/            phantom recordings played on them
 ```
 
 The paths are fixed, so a manifest only says which files exist:
@@ -147,7 +149,8 @@ appearance and course GLBs, and the media become content files in
 external URLs does not build: a game build packages everything it plays. Model and
 audio loaders are bundled only when the project uses them, and the build still fails
 if an editor module reaches the release. `npm run dev:game` restarts when a project
-file changes.
+file changes. A project directory's `phantoms/` folder holds the
+[phantom recordings](phantoms.md#bundled-recordings) the release bundles for its level.
 
 `GAME_PROJECT` is the whole game, so combining it with `GAME_LEVEL`,
 `GAME_SETTINGS`, `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES` fails. The project
@@ -178,13 +181,13 @@ and the browser warns if something could not be saved yet.
   level, so they save once finished or applied.
 - If the server cannot be reached, saving tries again every few seconds.
 
-Each editor's own Save also has **Save to project** under it: Level's **Save level**,
-Physics' **Save game settings**, Appearance's **Save alignment** (models and alignment)
-and **Save IK profile**, and the character profile's **Save** in Character and Sprites.
-It writes that part into the open server project at once and says so, instead of waiting
-for the automatic save; a level takes along the media and course artwork it names. It is
-disabled until a server project is open, and a part that also changed in the project waits
-for **Keep my version** or **Use the project's**.
+Level's save is **Save to project**, at the top of the Level tab; each other editor's own
+Save also has one under it: Physics' **Save game settings**, Appearance's **Save alignment**
+(models and alignment) and **Save IK profile**, and the character profile's **Save** in
+Character and Sprites. It writes that part into the open server project at once and says so,
+instead of waiting for the automatic save; a level takes along the media and course artwork
+it names. It is disabled until a server project is open, and a part that also changed in the
+project waits for **Keep my version** or **Use the project's**.
 
 - **Open project** loads a server project into every editor at once: the level,
   physics, character profile, appearance models, arm IK and all project sections.
@@ -226,6 +229,30 @@ save until you choose, in Project:
 The editor HUD previews the project's HUD labels and units. Opening a project runs
 its level like any imported level, including intro events.
 
+## Level versions
+
+The project server is where levels are saved: every level it stores becomes the project's
+next numbered **version**, unless it is the same as the latest. That covers the Workshop's
+saves, the level, `level/objects` and `level/labels` API changes, bundles, and a `level.json`
+a tool rewrote on disk, numbered when it is next read. The Level tab's status shows the
+version the page holds, for example *Saved as version 14*; a change shows as unsaved until
+the project saves it a moment later.
+
+Each version keeps its whole level, so any of them can be read back. The project folder holds
+them beside its files, and replacing the project keeps them:
+
+- `level-versions/index.jsonl`: one line per version, oldest first:
+  `{ "version", "content", "course", "savedAt" }`; `content` is the SHA-256 of the level's
+  compact JSON and `course` that of its [play layout](phantoms.md#courses);
+- `level-versions/<content>.json.gz`: each distinct level, compressed; a large course takes
+  about 20 KB per version.
+
+While **Record** is on, the Workshop [records your play](phantoms.md#recording-in-the-workshop)
+on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phantom`. Versions
+that play the same share a course, so edits to decorations, labels, colours or artwork keep a
+level's recordings, and a release bundles its level's. Both folders grow with use: commit them
+to keep the history and recordings, or delete what you no longer need.
+
 ## Publishing a Workshop with its project
 
 `GAME_PROJECT` also works for the Workshop build, so a deployed Workshop opens the game
@@ -256,7 +283,7 @@ Workshop build is unchanged.
 - **Older browser saves.** Here the editors' own browser saves (the character profile from
   **Save**, Appearance's models and the selected IK profile) do not open at start, and opening
   a project never changes them. The saved character profile remains the Revert target, and
-  named IK profiles, game settings profiles and level history stay available. Appearance models
+  named IK profiles and game settings profiles stay available. Appearance models
   are kept in the project's copy instead of Appearance's own storage.
 - **New deployments.** A page without unsaved changes opens the new version. A page with
   unsaved changes keeps them and says that a newer version is published; **Reopen published
@@ -279,18 +306,22 @@ project. `npm run dev` reads the project once, when the server starts.
 ## Server copies
 
 Besides projects, the project server shares named copies with everyone who opens the
-Workshop: **Server levels** in Level, **Server game settings** in Physics, **Server IK
-profiles** in Appearance and **Server character profiles** in Character. Type a name of
+Workshop: **Server game settings** in Physics, **Server IK profiles** in Appearance and
+**Server character profiles** in Character. Type a name of
 1-64 lowercase letters, digits and inner hyphens, then choose **Save to server**; saving
 under a listed name replaces that copy, after asking. Choose a copy and load it to replace
 the editor's current one, as an import does: a character profile loads as a draft, and the
 editor's browser saves stay as they were. **Refresh** picks up copies saved since.
 
 Each kind is a folder of this repository, one JSON file per copy, named by the copy:
-`levels/`, `characters/`, `game-settings/` and `arm-ik/`. A copy is checked like the
-project section of its kind before it is written, and replaced whole. Commit the folders
-to share copies through version control. A static Workshop deployment has no project
-server: it lists the `levels/` folder's levels as it was built, and can save none.
+`characters/`, `game-settings/` and `arm-ik/`. A copy is checked like the project section
+of its kind before it is written, and replaced whole. Commit the folders to share copies
+through version control. A static Workshop deployment has no project server and lists none.
+
+Levels are not server copies: a project keeps its level's [versions](#level-versions).
+**Workshop / Level / Server levels** loads the levels served with the Workshop, the level JSON
+files in the repository's `levels/` folder as it was built or started, after the published
+project's level in a Workshop built with `GAME_PROJECT`.
 
 ## The project server
 
@@ -352,6 +383,8 @@ Conventions:
   bookkeeping in the project's `.studio.json`.
 - Upload files before referencing them. Deleting a file that is still used fails
   with `409`.
+- A change to the level answers with `"level": { "version", "course" }`, the version it
+  was stored as, and `GET` of the level carries `X-Level-Version` and `X-Level-Course`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -364,6 +397,10 @@ Conventions:
 | GET, POST | `/api/projects/{id}/level/objects` | List or add level objects |
 | GET, PUT, PATCH, DELETE | `/api/projects/{id}/level/objects/{objectId}` | One object |
 | GET, PUT | `/api/projects/{id}/level/labels` | Course labels |
+| GET | `/api/projects/{id}/level/versions` | Every [level version](#level-versions), with its recording count |
+| GET | `/api/projects/{id}/level/versions/{version}` | One version's level |
+| GET, POST | `/api/projects/{id}/level/versions/{version}/phantoms?session=&clip=` | List or store recordings played on a version |
+| GET, DELETE | `/api/projects/{id}/level/versions/{version}/phantoms/{name}` | One recording |
 | POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB; returns its asset ID |
 | GET, PUT, DELETE | `/api/projects/{id}/appearance/{part}/model?name=` | A part's GLB |
 | GET, PATCH, DELETE | `/api/projects/{id}/appearance/{part}` | A part's name and alignment |
@@ -373,7 +410,7 @@ Conventions:
 | POST | `/api/projects/{id}/validate` | Every release check, reported as problems |
 | POST, GET | `/api/projects/{id}/publish` | Build the release; latest publish record |
 | GET | `/play/{id}/` | The published release; its content is under `/play/{id}/content/` |
-| GET | `/api/shared/{kind}` | List the [server copies](#server-copies) of `levels`, `characters`, `game-settings` or `arm-ik` |
+| GET | `/api/shared/{kind}` | List the [server copies](#server-copies) of `characters`, `game-settings` or `arm-ik` |
 | GET, PUT, DELETE | `/api/shared/{kind}/{name}` | One server copy; `PUT` replaces any copy with that name |
 
 For example, starting a new game and shaping it from a shell:

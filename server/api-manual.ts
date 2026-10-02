@@ -25,7 +25,6 @@ const endpoint = (method: string, path: string, description: string, body?: stri
 
 // What a shared copy of each kind holds: the value of the project section it matches.
 const SHARED_VALUES: Readonly<Record<SharedKind, string>> = {
-  levels: 'level JSON, as the level section',
   characters: 'character profile JSON, as the characters/primary section',
   'game-settings': 'game settings JSON, as the settings section',
   'arm-ik': 'body-relative elbow hints, as the arm-ik section',
@@ -36,7 +35,7 @@ export function apiManual(auth: 'token' | 'loopback') {
   return {
     name: 'Over the Edge project API',
     version: 1,
-    purpose: 'Create and edit complete game projects (level, physics, characters, look, HUD, audio, enemies, media), then publish each as a standalone, editor-free release. Share named levels, character profiles, game settings and arm IK profiles with every Workshop page.',
+    purpose: 'Create and edit complete game projects (level, physics, characters, look, HUD, audio, enemies, media), then publish each as a standalone, editor-free release. Every saved level is a numbered version, kept with the phantom recordings played on it. Share named character profiles, game settings and arm IK profiles with every Workshop page.',
     auth: auth === 'token'
       ? 'Send Authorization: Bearer <STUDIO_TOKEN> with every request.'
       : 'Requests from this computer through localhost need no token. Set STUDIO_TOKEN to allow other machines.',
@@ -66,6 +65,10 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|POST', '/api/projects/{id}/level/objects', 'List objects (?kind=terrain|trigger|enemy|start) or add one object, an array, or { "objects": [...] }.'),
       endpoint('GET|PUT|PATCH|DELETE', '/api/projects/{id}/level/objects/{objectId}', 'Read, replace, merge-patch or delete one level object.'),
       endpoint('GET|PUT', '/api/projects/{id}/level/labels', 'Course labels: [{ "text", "x", "y" }].'),
+      endpoint('GET', '/api/projects/{id}/level/versions', 'Every saved version of the level, oldest first: { "versions": [{ "version", "content", "course", "savedAt", "recordings" }] }; see "levelVersions".'),
+      endpoint('GET', '/api/projects/{id}/level/versions/{version}', 'One version\'s level JSON, with X-Level-Version and X-Level-Course headers.'),
+      endpoint('GET|POST', '/api/projects/{id}/level/versions/{version}/phantoms?session={session}&clip={clip}', 'List the phantom recordings played on a version ({ "phantoms": [{ "name", "bytes" }] }), or store one: POST the recording\'s bytes as application/octet-stream with its play session (32 lowercase hex digits) and clip number; the same session and clip replace the earlier upload.', 'phantom recording bytes'),
+      endpoint('GET|DELETE', '/api/projects/{id}/level/versions/{version}/phantoms/{name}', 'Download or delete one recording, named v{version}-{session}-{clip}.phantom.'),
       endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a static course GLB; returns its content ID for terrain "art": { "assetId", "mirror" } or a decoration model in art.decorations.', 'GLB bytes'),
       endpoint('GET|DELETE', '/api/projects/{id}/art/assets/{assetId}', 'Download or remove course artwork (unused only).'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
@@ -75,18 +78,25 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/media/{file}', 'Media library files, referenced as /media/{file}.', 'file bytes'),
       endpoint('GET', '/play/{id}/', 'The latest published release of a project; its content is under /play/{id}/content/.'),
       endpoint('GET', '/api/shared/{kind}', `The copies of one kind this server shares with every Workshop page, by name: { "copies": [{ "name", "bytes", "updatedAt" }] }. Kinds: ${SHARED_KINDS.join(', ')}.`),
-      endpoint('GET|PUT|DELETE', '/api/shared/{kind}/{name}', 'Read, store or delete one shared copy. PUT validates it as the project section of its kind and replaces any copy with that name.', 'the copy: a level, character profile, game settings or arm IK profile'),
+      endpoint('GET|PUT|DELETE', '/api/shared/{kind}/{name}', 'Read, store or delete one shared copy. PUT validates it as the project section of its kind and replaces any copy with that name.', 'the copy: a character profile, game settings or arm IK profile'),
     ],
     shared: {
-      description: 'Named copies every Workshop page can load and save: levels, character profiles, game settings and arm IK profiles. '
-        + 'Each kind is a folder of the repository named like it, one JSON file per copy, e.g. levels/quiet-ascent.json; a Workshop build also serves its levels folder.',
+      description: 'Named copies every Workshop page can load and save: character profiles, game settings and arm IK profiles. '
+        + 'Each kind is a folder of the repository named like it, one JSON file per copy, e.g. characters/quiet-climber.json. Levels are saved as project versions instead.',
       names: `1-${SHARED_NAME_LIMIT} lowercase letters, digits and inner hyphens`,
       kinds: Object.fromEntries(SHARED_KINDS.map((kind) => [kind, { maxBytes: SHARED_FORMATS[kind].maxBytes, value: SHARED_VALUES[kind] }])),
     },
     project: {
       files: PROJECT_FILES,
-      layout: 'project.json (manifest), level.json, characters/primary.json and characters/alternate.json (character profiles), art/<assetId>.glb, appearance/<part>.glb, media/<file>.',
+      layout: 'project.json (manifest), level.json, characters/primary.json and characters/alternate.json (character profiles), art/<assetId>.glb, appearance/<part>.glb, media/<file>; beside them the level\'s history, which replacing the project keeps: level-versions/ and phantoms/<course>/.',
       limits: PROJECT_LIMITS,
+    },
+    levelVersions: {
+      description: 'Every level the project stores becomes its next version unless it matches the latest: a PUT of the level section, a level/objects or level/labels change, a bundle, or a level.json changed on disk (numbered at its next GET). '
+        + 'Responses to level changes carry "level": { "version", "course" }; GET level answers with X-Level-Version and X-Level-Course headers.',
+      course: 'The SHA-256 of the level\'s play layout: each terrain object\'s shape, position, size, angle, illusion and surface, the enemies, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, artwork, labels, other trigger events or decorations. '
+        + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level\'s course.',
+      phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records play on the version it plays, one session per run, in consecutive clips.',
     },
     sections: {
       title: { value: 'string, 1-80 characters', description: 'Game title: browser tab and release name.' },

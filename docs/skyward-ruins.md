@@ -14,7 +14,8 @@ baseline, not a final balance claim.
 Run `npm run dev`, open **Workshop / Level**, and load **skyward-ruins** from
 **Server levels**; the Workshop serves
 [`levels/skyward-ruins.json`](../levels/skyward-ruins.json) from its `levels/` folder.
-Save a named level snapshot to retain your changes in that browser. Playtest starts at
+With a server project open, your changes save to it as level versions; otherwise export
+the level to keep them. Playtest starts at
 the authored start. Loading this course does not replace the built-in demo.
 
 For the editor-free game:

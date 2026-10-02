@@ -20,6 +20,7 @@ import { LEVEL_LIMITS, validateLevel } from '../src/level';
 import type { LevelDefinition, LevelObject } from '../src/level';
 import { checkMediaBytes, MEDIA_LIMITS, mediaFile, mediaPath, mediaType } from '../src/media';
 import { MODEL_LIMITS } from '../src/model-data';
+import { PHANTOM_LIMITS } from '../src/phantom-format';
 import {
   appearanceFile, artAssetHashMatches, artFile, checkProjectReferences, defaultProjectManifest, inSection,
   isProjectDataError, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, projectIdForTitle, projectTitle,
@@ -40,7 +41,8 @@ import {
 } from '../src/model-library';
 import type { LibraryAvatarEntry, LibraryEntry, ModelLibrary, PartRole } from '../src/model-library';
 import { apiManual } from './api-manual';
-import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendError, sendFile, sendJson } from './http';
+import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendBytes, sendError, sendFile, sendJson } from './http';
+import type { LevelVersion } from './level-history';
 import { ProjectStore, SECTION_NAMES } from './project-store';
 import type { ProjectChange, ProjectState, SectionName } from './project-store';
 import { Publisher } from './publish';
@@ -192,6 +194,9 @@ export function createStudioHandler(config: StudioConfig) {
       section === null ? {} : { ETag: `"${state.sections[section]}"` });
   };
 
+  // What a response says about a stored level: its version and the phantom course of its recordings.
+  const levelVersion = (version: LevelVersion): { version: number; course: string } => ({ version: version.version, course: version.course });
+
   const level = async (id: string): Promise<LevelDefinition> => {
     const value = await store.readJson(id, LEVEL_REF);
     return inSection('level', () => validateLevel(value));
@@ -201,12 +206,14 @@ export function createStudioHandler(config: StudioConfig) {
   const change = async (context: Context, sections: readonly SectionName[], build: (manifest: ProjectManifest, state: ProjectState) =>
     Promise<Omit<ProjectChange, 'sections'> & { result?: unknown }>): Promise<void> => {
     const id = context.params.id!;
-    const { state, result } = await store.mutate(id, async (current) => {
+    const { state, result, level } = await store.mutate(id, async (current) => {
       expectRevision(context, current.state, sections);
       const next = await build(current.manifest, current.state);
       return { ...next, sections };
     });
-    respondState(context, state, sections[0] ?? null, result === undefined ? {} : { result });
+    respondState(context, state, sections[0] ?? null, {
+      ...(result === undefined ? {} : { result }), ...(level === null ? {} : { level: levelVersion(level) }),
+    });
   };
 
   // One entry per API section: how to read it and how a new value becomes a validated change.
@@ -386,8 +393,8 @@ export function createStudioHandler(config: StudioConfig) {
     }
     const manifest = defaultProjectManifest(title);
     const content = loadProjectContent(manifest, () => DEFAULT_LEVEL);
-    const state = await store.write(validateProjectId(id), content, { replace: false });
-    sendJson(context.response, 201, { id, revision: state.revision, sections: state.sections });
+    const { state, level } = await store.write(validateProjectId(id), content, { replace: false });
+    sendJson(context.response, 201, { id, revision: state.revision, sections: state.sections, level: levelVersion(level) });
   });
   route('GET', '/api/projects/:id', async (context) => {
     const { manifest, state } = await project(context);
@@ -413,8 +420,8 @@ export function createStudioHandler(config: StudioConfig) {
     const id = context.params.id!;
     store.directory(id);
     const content = await importBundle(await readJson(context.request, PROJECT_LIMITS.bundleBytes));
-    const state = await store.write(id, content, { replace: true });
-    sendJson(context.response, 200, { id, revision: state.revision, sections: state.sections });
+    const { state, level } = await store.write(id, content, { replace: true });
+    sendJson(context.response, 200, { id, revision: state.revision, sections: state.sections, level: levelVersion(level) });
   });
   route('POST', '/api/projects/:id/validate', async (context) => {
     const id = context.params.id!;
@@ -431,12 +438,57 @@ export function createStudioHandler(config: StudioConfig) {
   route('POST', '/api/projects/:id/publish', async (context) => {
     const id = context.params.id!;
     const { content, state } = await store.snapshot(id);
-    const record = await publisher.publish(id, state.revision, verifyContent(content));
+    const record = await publisher.publish(id, state.revision, verifyContent(content), store.recordingsDirectory(id));
     sendJson(context.response, 200, record);
   });
   route('GET', '/api/projects/:id/publish', async (context) => {
     await project(context);
     sendJson(context.response, 200, { running: publisher.isRunning(context.params.id!), release: await publisher.status(context.params.id!) });
+  });
+
+  // The level with the version it is stored as; the generic section answers its PUT.
+  route('GET', '/api/projects/:id/level', async (context) => {
+    const { level: value, version, state } = await store.readLevel(context.params.id!);
+    sendJson(context.response, 200, value, {
+      ETag: `"${state.sections.level}"`, 'X-Level-Version': String(version.version), 'X-Level-Course': version.course,
+    });
+  });
+
+  // Level versions and the phantom recordings played on them ------------------------------------
+  const versionNumber = (context: Context): number => {
+    const value = context.params.version!;
+    if (!/^[1-9][0-9]{0,8}$/.test(value)) throw new HttpError(404, 'not-found', `Level version ${value} does not exist.`, { section: 'level' });
+    return Number(value);
+  };
+  route('GET', '/api/projects/:id/level/versions', async (context) => {
+    const versions = await store.levelVersions(context.params.id!);
+    sendJson(context.response, 200, { versions });
+  });
+  route('GET', '/api/projects/:id/level/versions/:version', async (context) => {
+    const { version, json } = await store.levelVersion(context.params.id!, versionNumber(context));
+    sendBytes(context.request, context.response, json, 'application/json; charset=utf-8', {
+      'Cache-Control': 'no-store', 'X-Level-Version': String(version.version), 'X-Level-Course': version.course,
+    });
+  });
+  route('GET', '/api/projects/:id/level/versions/:version/phantoms', async (context) => {
+    sendJson(context.response, 200, { phantoms: await store.recordings(context.params.id!, versionNumber(context)) });
+  });
+  route('POST', '/api/projects/:id/level/versions/:version/phantoms', async (context) => {
+    const session = context.url.searchParams.get('session') ?? '';
+    const clip = context.url.searchParams.get('clip') ?? '';
+    const version = versionNumber(context);
+    const bytes = await readUpload(context.request, PHANTOM_LIMITS.bytes, []);
+    const stored = await store.addRecording(context.params.id!, version, { session, clip: /^[0-9]{1,7}$/.test(clip) ? Number(clip) : -1 }, bytes);
+    sendJson(context.response, 201, { name: stored.name, ...levelVersion(stored.version) });
+  });
+  route('GET', '/api/projects/:id/level/versions/:version/phantoms/:name', async (context) => {
+    const bytes = await store.recording(context.params.id!, versionNumber(context), decodeURIComponent(context.params.name!));
+    sendBytes(context.request, context.response, bytes, 'application/octet-stream', { 'Cache-Control': 'no-store' });
+  });
+  route('DELETE', '/api/projects/:id/level/versions/:version/phantoms/:name', async (context) => {
+    const name = decodeURIComponent(context.params.name!);
+    await store.removeRecording(context.params.id!, versionNumber(context), name);
+    sendJson(context.response, 200, { deleted: name });
   });
 
   route('GET', '/api/projects/:id/level/objects', async (context) => {

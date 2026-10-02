@@ -1,16 +1,15 @@
 import { validateArmIk } from './appearance-profile';
 import { GAME_SETTINGS_LIMITS, validateGameSettings } from './game-settings';
-import { LEVEL_LIMITS, validateLevel } from './level';
 import { ProjectError, validateProjectCharacter } from './project';
 import { SPRITE_FILE_BYTES } from './sprite-data';
 
 /**
- * Copies a Workshop shares with everyone who opens it: levels, character profiles, game settings and arm IK profiles.
- * Each kind is a folder of the repository named like the kind, holding one JSON file per copy, named by the copy:
- * levels/quiet-ascent.json. The project server lists, stores and deletes them; a Workshop build also serves its levels
- * folder's levels.
+ * Copies a Workshop shares with everyone who opens it: character profiles, game settings and arm IK profiles. Each
+ * kind is a folder of the repository named like the kind, holding one JSON file per copy, named by the copy:
+ * characters/quiet-climber.json. The project server lists, stores and deletes them. Levels are not shared copies: a
+ * project keeps its level's versions (docs/projects.md).
  */
-export const SHARED_KINDS = ['levels', 'characters', 'game-settings', 'arm-ik'] as const;
+export const SHARED_KINDS = ['characters', 'game-settings', 'arm-ik'] as const;
 export type SharedKind = (typeof SHARED_KINDS)[number];
 
 export interface SharedFormat {
@@ -22,7 +21,6 @@ export interface SharedFormat {
 }
 
 export const SHARED_FORMATS: Readonly<Record<SharedKind, SharedFormat>> = {
-  levels: { maxBytes: LEVEL_LIMITS.fileBytes, indent: true, validate: validateLevel },
   characters: { maxBytes: SPRITE_FILE_BYTES, indent: false, validate: validateProjectCharacter },
   'game-settings': { maxBytes: GAME_SETTINGS_LIMITS.fileBytes, indent: true, validate: validateGameSettings },
   // Six coordinates; the limit only bounds a request.

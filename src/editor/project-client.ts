@@ -19,6 +19,14 @@ export class ProjectApiError extends Error {
 export interface ServerRevisions {
   readonly revision: number;
   readonly sections: Readonly<Record<string, number>>;
+  // The version a write to the level stored it as.
+  readonly level?: LevelVersionRef;
+}
+
+// A stored level's version, and the phantom course its recordings belong to.
+export interface LevelVersionRef {
+  readonly version: number;
+  readonly course: string;
 }
 
 export interface ServerProjectSummary {
@@ -102,6 +110,22 @@ export class ProjectClient {
     const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/${name}`);
     const revision = Number((response.headers.get('etag') ?? '').replace(/"/g, ''));
     return { value: await response.json(), revision };
+  }
+
+  // The level with the version it is stored as.
+  async level(id: string): Promise<{ value: unknown; revision: number; version: number }> {
+    const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/level`);
+    const revision = Number((response.headers.get('etag') ?? '').replace(/"/g, ''));
+    const version = Number(response.headers.get('x-level-version'));
+    if (!Number.isSafeInteger(version) || version < 1) throw new ProjectApiError(response.status, 'http', 'The project server did not say which version its level is.');
+    return { value: await response.json(), revision, version };
+  }
+
+  // Stores one clip of a play session as a phantom recording of the level's `version`; sending a clip again replaces it.
+  async postPhantom(id: string, version: number, clip: { session: string; clip: number }, recording: Uint8Array<ArrayBuffer>): Promise<void> {
+    const query = new URLSearchParams({ session: clip.session, clip: String(clip.clip) });
+    await this.request('POST', `/projects/${encodeURIComponent(id)}/level/versions/${version}/phantoms?${query}`,
+      { body: recording, type: 'application/octet-stream' });
   }
 
   putSection(id: string, name: string, value: unknown, revision?: number): Promise<ServerRevisions> {

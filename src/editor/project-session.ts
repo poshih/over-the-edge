@@ -168,6 +168,19 @@ interface Binding {
   readonly id: string;
   revision: number;
   readonly sections: Record<string, number>;
+  // The version of the level this page last saved to or loaded from the project, or null before either.
+  level: BoundLevel | null;
+}
+
+// A saved version of the open server project's level, which the page plays.
+export interface PlayedLevel {
+  readonly project: string;
+  readonly version: number;
+}
+
+// The page plays the version while its level is still this object, the one saved or loaded.
+interface BoundLevel extends PlayedLevel {
+  readonly definition: LevelDefinition;
 }
 
 // What this browser's copy holds, or would hold: compared section by section.
@@ -666,11 +679,13 @@ export class ProjectSession {
     return this.run(`Opening ${id}`, async () => {
       const project = await this.client.project(id);
       const read = async (name: string) => (await this.client.section(id, name)).value;
-      const level = await read('level');
+      const level = await this.client.level(id);
       const primary = project.manifest.characters.primary === null ? null : await read('characters/primary');
       const alternate = project.manifest.characters.alternate === null ? null : await read('characters/alternate');
       const models = await Promise.all(project.manifest.appearance.map(async (part) => this.client.blob(this.client.modelUrl(id, part.part))));
-      await this.applyServerProject(project.manifest, project, { level, primary, alternate, models, sizes: fileSizes(project.files) });
+      await this.applyServerProject(project.manifest, project, {
+        level: level.value, levelVersion: level.version, primary, alternate, models, sizes: fileSizes(project.files),
+      });
       this.publishRecord = (await this.client.publishStatus(id)).release;
       this.workspace.notice(`Opened "${project.manifest.title}" from the project server; every change saves to it.`, 'info');
     });
@@ -757,6 +772,13 @@ export class ProjectSession {
     return this.binding?.id ?? null;
   }
 
+  // The saved version of the open project's level that the page plays, or null without a server project or while the
+  // level has changes no save has numbered yet. The same object until the version changes; cheap enough for every step.
+  playedLevel(): PlayedLevel | null {
+    const level = this.binding?.level ?? null;
+    return level !== null && level.definition === this.workspace.level.get() ? level : null;
+  }
+
   // The project server as this page last found it; null before the first check.
   serverHealth(): ServerHealth | null {
     return this.server;
@@ -800,7 +822,10 @@ export class ProjectSession {
       const library = this.library;
       const content = await this.captureFiles(draft, parts, [...this.media.values()], [...this.art.assets], library);
       const state = await this.client.putBundle(valid, packProjectBundle(content));
-      this.binding = { id: valid, revision: state.revision, sections: { ...state.sections } };
+      this.binding = {
+        id: valid, revision: state.revision, sections: { ...state.sections },
+        level: state.level === undefined ? null : { project: valid, version: state.level.version, definition: savedLevel },
+      };
       // Files that only the previous server project held are now served by this one.
       this.media = new Map([...this.media].map(([path, item]) =>
         [path, { ...item, uploaded: true, url: item.blob === null ? this.client.mediaUrl(valid, path) : item.url }]));
@@ -1017,10 +1042,14 @@ export class ProjectSession {
       name === 'characters/primary' ? ['characters/alternate', name] as const : name === 'characters/alternate' ? [] : [name]);
     for (const name of order) {
       if (!saving.has(name)) continue;
-      adopt(name, await this.client.putSection(binding.id, name, values.get(name), revision(name)));
+      const state = await this.client.putSection(binding.id, name, values.get(name), revision(name));
+      adopt(name, state);
       this.synced![name] = baseline[name];
       this.conflicts.delete(name);
-      if (name === 'level') this.workspace.level.markSaved(savedLevel);
+      if (name === 'level') {
+        binding.level = state.level === undefined ? null : { project: binding.id, version: state.level.version, definition: savedLevel };
+        this.workspace.level.markSaved(savedLevel);
+      }
       if (name === 'appearance') this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
       this.changed('status');
     }
@@ -1065,15 +1094,21 @@ export class ProjectSession {
   private async loadFromServer(binding: Binding, names: readonly ProjectSectionName[]): Promise<void> {
     const project = await this.client.project(binding.id);
     const values = new Map<ProjectSectionName, unknown>();
+    let levelVersion: number | null = null;
     for (const name of names) {
       if (name === 'characters/primary' || name === 'characters/alternate') {
         values.set(name, project.manifest.characters[name === 'characters/primary' ? 'primary' : 'alternate'] === null ? null
           : (await this.client.section(binding.id, name)).value);
-      } else if (name === 'level') values.set(name, (await this.client.section(binding.id, name)).value);
+      } else if (name === 'level') {
+        const level = await this.client.level(binding.id);
+        values.set(name, level.value);
+        levelVersion = level.version;
+      }
     }
     const models = names.includes('appearance')
       ? await Promise.all(project.manifest.appearance.map((part) => this.client.blob(this.client.modelUrl(binding.id, part.part)))) : [];
     await this.applySections(project.manifest, names, values, models, binding.id, 'sync', fileSizes(project.files));
+    if (levelVersion !== null) binding.level = { project: binding.id, version: levelVersion, definition: this.workspace.level.get() };
     if (names.includes('appearance')) this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
     for (const name of names) binding.sections[name] = project.sections[name]!;
     const synced = this.fingerprints();
@@ -1318,14 +1353,18 @@ export class ProjectSession {
     });
   }
 
-  private async applyServerProject(manifest: ProjectManifest, state: ServerRevisions & { id: string },
-    files: { level: unknown; primary: unknown; alternate: unknown; models: readonly Blob[]; sizes: ReadonlyMap<string, number> }): Promise<void> {
+  private async applyServerProject(manifest: ProjectManifest, state: ServerRevisions & { id: string }, files: {
+    level: unknown; levelVersion: number; primary: unknown; alternate: unknown; models: readonly Blob[]; sizes: ReadonlyMap<string, number>;
+  }): Promise<void> {
     const values = new Map<ProjectSectionName, unknown>([
       ['level', files.level], ['characters/primary', files.primary], ['characters/alternate', files.alternate],
     ]);
     this.unbind();
     await this.applySections(manifest, PROJECT_SECTIONS, values, files.models, state.id, 'load', files.sizes);
-    this.binding = { id: state.id, revision: state.revision, sections: { ...state.sections } };
+    this.binding = {
+      id: state.id, revision: state.revision, sections: { ...state.sections },
+      level: { project: state.id, version: files.levelVersion, definition: this.workspace.level.get() },
+    };
     this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
     this.synced = this.fingerprints();
     this.remember(state.id);

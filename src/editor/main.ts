@@ -28,6 +28,7 @@ import { isDarkSky } from '../theme';
 import { ProjectClient } from './project-client';
 import { ProjectSession } from './project-session';
 import { createProjectEditor } from './project-editor';
+import { PlayRecorder } from './play-recorder';
 import { ServerCopies } from './server-copies';
 import { publishedLevel } from './server-levels';
 import { createDecorationView } from '../decoration-library';
@@ -129,10 +130,41 @@ const project = new ProjectSession({
   },
   published: publishedProject,
 });
+// Play is recorded for phantoms unless this browser turned recording off.
+const RECORDING_KEY = 'over-the-edge:workshop:recording';
+function recordingPreference(): boolean {
+  try {
+    return localStorage.getItem(RECORDING_KEY) !== 'off';
+  } catch (error) {
+    if (error instanceof DOMException) return true;
+    throw error;
+  }
+}
+const recorder = new PlayRecorder({
+  game, enabled: recordingPreference(),
+  target: () => project.playedLevel(),
+  upload: (target, clip, recording) => client.postPhantom(target.project, target.version, clip, recording),
+  onFailure: (error) => ui.notice(`Play recordings are not being saved: ${error instanceof Error ? error.message : String(error)}`, 'error'),
+});
+function toggleRecording(): void {
+  recorder.setEnabled(!recorder.on);
+  try {
+    localStorage.setItem(RECORDING_KEY, recorder.on ? 'on' : 'off');
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
+}
+// What Record does now, for its tip.
+function recordingNote(): string {
+  if (!recorder.on) return 'Record your play as phantoms of the open project\'s level. Off in this browser.';
+  if (project.openProject() === null) return 'Recording waits for a server project: open or save one in Project.';
+  if (project.playedLevel() === null) return 'Recording waits for the level to save, a moment after each change.';
+  return 'Recording your play as phantoms of this version of the open project\'s level.';
+}
 const serverCopies = new ServerCopies({
   client, health: () => project.serverHealth(), watch: (listener) => project.subscribe(listener),
-  levels: { published: publishedLevel(publishedProject), folder: folderLevels },
 });
+const published = publishedLevel(publishedProject);
 const ui = createUI({
   mount,
   initialSettings: game.settings(),
@@ -207,7 +239,8 @@ const levelEditor = createLevelEditor({
   },
   onNotice: ui.notice,
   warnBeforeUnload: !opensProject,
-  serverCopies, projectSave: project,
+  serverLevels: published === null ? folderLevels : [published, ...folderLevels],
+  projectSave: project,
 });
 const appearanceRestored = appearance.restore();
 const projectEditor = createProjectEditor({
@@ -258,6 +291,10 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
   if (action === 'debug') {
     debug = !debug;
     collisionOverlay.setMode(debug ? 'visible' : 'hidden');
+    return;
+  }
+  if (action === 'record') {
+    toggleRecording();
     return;
   }
   if (action === 'reset') {
@@ -319,7 +356,10 @@ window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
 void project.start();
 game.start((state) => {
-  ui.update({ ...state, debug, practice: practice() });
+  ui.update({
+    ...state, debug, practice: practice(),
+    recording: recorder.on, capturing: recorder.recording && !state.paused, recordingNote: recordingNote(),
+  });
   spriteEditor.updatePreview();
   audio.setPaused(state.paused);
 });
@@ -327,6 +367,7 @@ game.start((state) => {
 if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
+    recorder.dispose();
     projectEditor.dispose();
     serverCopies.dispose();
     project.dispose();

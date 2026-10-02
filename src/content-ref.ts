@@ -1,7 +1,7 @@
 // The grammar of packaged release content: groups, file paths and content: sources. Dependency-free,
 // so profile validators can accept packaged sources without importing the release manifest.
 export const CONTENT_REF_PREFIX = 'content:';
-export const CONTENT_EXTENSIONS = ['json', 'png', 'glb', 'webm', 'mp4', 'mp3', 'ogg', 'wav', 'm4a'] as const;
+export const CONTENT_EXTENSIONS = ['json', 'png', 'glb', 'webm', 'mp4', 'mp3', 'ogg', 'wav', 'm4a', 'phantoms'] as const;
 export type ContentExtension = (typeof CONTENT_EXTENSIONS)[number];
 export const CONTENT_GROUP_LIMIT = 128;
 

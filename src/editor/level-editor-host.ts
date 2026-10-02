@@ -2,7 +2,8 @@ import type { Point } from '../config';
 import type { DecorationObject } from '../level';
 import type { LevelState } from './level-state';
 import type { ProjectSaveTarget } from './project-save';
-import type { ServerCopies } from './server-copies';
+import type { PlayedLevel } from './project-session';
+import type { ServerLevel } from './server-levels';
 
 export interface EditorCamera {
   x: number;
@@ -38,10 +39,12 @@ export interface LevelEditorOptions {
     placed: () => boolean;
   };
   onNotice: (message: string, kind: 'info' | 'error') => void;
-  // The levels shared with everyone who opens this Workshop, listed and saved under Server levels.
-  serverCopies: ServerCopies;
-  // The open server project, which Save to project writes the level into.
-  projectSave: ProjectSaveTarget;
+  // Levels served with this Workshop, which Server levels loads: the published project's first, then the levels
+  // folder's.
+  serverLevels: readonly ServerLevel[];
+  // The open server project: Save to project writes the level into it as its next version, and the version the page
+  // plays shows in the status.
+  projectSave: ProjectSaveTarget & { playedLevel(): PlayedLevel | null };
   // False when the project warns about leaving instead (a Workshop built with GAME_PROJECT, which
   // keeps its project, level included, in the browser).
   warnBeforeUnload?: boolean;
