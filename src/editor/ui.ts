@@ -3,7 +3,7 @@ import {
   CURSOR_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS, TUNING_FIELDS, validateGameSettings, withRig,
 } from '../game-settings';
 import type { CursorSettings, GameSettings } from '../game-settings';
-import { rigGeometry } from '../rig';
+import { minReachLimit, rigGeometry } from '../rig';
 import type { RigSettings } from '../rig';
 import { element, setPressed, setText } from '../dom';
 import { createGameUI, DESKTOP_QUERY } from './game-ui';
@@ -102,12 +102,13 @@ export function createUI(options: UiOptions): GameUi {
       control.setValue(tuning[field.key], { disabled: inactive });
       control.row.classList.toggle('is-inactive', inactive);
     }
+    const reach = rigGeometry(settings.rig).maxReach;
     for (const field of RIG_FIELDS) {
       const control = rigControls.get(field.key);
       if (!control) throw new Error(`Missing rig control: ${field.key}`);
+      if (field.key === 'minReach') control.input.max = String(minReachLimit(settings.rig));
       control.setValue(settings.rig[field.key]);
     }
-    const reach = rigGeometry(settings.rig).maxReach;
     for (const field of CURSOR_FIELDS) {
       const control = cursorControls.get(field.key);
       if (!control) throw new Error(`Missing cursor control: ${field.key}`);

@@ -401,9 +401,11 @@ limits how far input can extend the hammer; it never lengthens the tool. The
 head still cannot pass through solid terrain, and contact can transfer motor
 effort to the player. There is no return-to-hammer behavior.
 
-The slider can retract the head all the way to the hinge, so there is no
-unreachable inner ring. The hinge's own orientation defines aim even at zero
-reach; aiming does not normalize a zero-length hinge-to-head vector.
+By default the slider can retract the head all the way to the hinge, so there is
+no unreachable inner ring. The hinge's own orientation defines aim even at zero
+reach; aiming does not normalize a zero-length hinge-to-head vector. A **Minimum
+reach** keeps the head that far from the hinge: aiming inside it only turns the
+hammer toward the target, and the head stays on that inner ring.
 
 Motor velocity targets come from angular and axial errors with measured joint
 velocity damping, speed caps, and independent force/torque limits. While input
@@ -445,10 +447,13 @@ friction, not a sticky constraint: the head must still press against a surface
 to hold. The pot's own friction coefficient remains **0.45**.
 
 The **Hammer rig** section sets the tool's geometry. **Handle length** (0.75-3 m,
-default **1.5 m**) runs from the butt to the centre of the head; the slider always
-retracts the head to the shoulder hinge, so the butt can travel that far behind
-it. **Maximum extension** (0-2 m, default **1.15 m**) is how far the butt can slide
-past the hinge. The reach is their sum. The three welded handle segments share the
+default **1.5 m**) runs from the butt to the centre of the head. **Maximum
+extension** (0-2 m, default **1.15 m**) is how far the butt can slide past the
+shoulder hinge; the reach is their sum. **Minimum reach** (0 m up to 5 cm short of
+the reach, so the slider can still move; default **0 m**) is how close the head can
+come to the hinge: fully retracted it stops that far out, so the butt travels the
+handle length less the minimum reach behind the hinge, and at 0 the head reaches the
+hinge. A shorter handle or extension caps the minimum reach 5 cm short of the new reach. The three welded handle segments share the
 handle length, and everything else follows the rig: the two-part hammer, the
 one-model hammer's handle, touch gain, compact framing and the target radius limit.
 A rig is never changed in place: a new one rebuilds the player and restarts the run
@@ -489,7 +494,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 4**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 5**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 
@@ -520,7 +525,8 @@ The start location and trigger zones are map objects, not special summit
 settings. Place or drag **Start location** to choose the spawn and adjust its
 initial hammer pose: its angle and its **reach**, the head's distance from the
 shoulder hinge. Reach keeps the start pose the same for any handle length; a
-hammer that cannot reach that far starts fully extended. Each level has one start. Playtest from that position,
+hammer that cannot reach that far starts fully extended, and one whose minimum
+reach is farther starts at its minimum reach. Each level has one start. Playtest from that position,
 and use Reset to repeat the course. Runtime effects never delete objects from
 the editor's authored definition.
 

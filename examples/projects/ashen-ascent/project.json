@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 4,
+    "schemaVersion": 5,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -34,7 +34,8 @@
     },
     "rig": {
       "handleLength": 1.5,
-      "maxExtension": 1.15
+      "maxExtension": 1.15,
+      "minReach": 0
     },
     "cursor": {
       "maxTargetRadius": 2.65,

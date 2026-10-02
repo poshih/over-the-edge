@@ -150,7 +150,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
 
   const alongHandle = (distance: number): Point =>
     transformPoint({ x: distance, y: 0 }, shoulder, spawn.angle);
-  const extension = clamp(spawn.reach, 0, geometry.maxReach) - geometry.handleLength;
+  const extension = clamp(spawn.reach, geometry.minReach, geometry.maxReach) - geometry.handleLength;
   const sliderBody = movingBody('slider', 'slider', alongHandle(extension), spawn.angle, []);
   const slider = attach(world, new PrismaticJoint({
     bodyA: carrier,
@@ -272,10 +272,11 @@ export function drivePlayer(rig: PlayerRig, target: Readonly<Point>, tuning: Rea
   const angularError = distance <= PHYSICS.aimEpsilon
     ? 0 : angleDifference(Math.atan2(targetY, targetX), axisAngle);
   // Targets are hinge-relative and the radius is capped at the reach; clamp so any target maps into the workspace.
-  const { maxReach, handleLength } = rig.geometry;
+  // Inside the minimum reach the head stays at it, and the hammer only turns toward the target.
+  const { minReach, maxReach, handleLength } = rig.geometry;
   const reachable = clampLength({ x: targetX, y: targetY }, maxReach);
   const projectedReach = clamp(
-    reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), 0, maxReach,
+    reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), minReach, maxReach,
   );
   const extensionError = projectedReach - handleLength - rig.slider.getJointTranslation();
   const hingeSpeed = rig.hinge.getJointSpeed();

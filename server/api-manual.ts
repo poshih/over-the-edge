@@ -115,9 +115,9 @@ export function apiManual(auth: 'token' | 'loopback') {
         notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {
-        value: '{ schemaVersion: 4, physics: {...}, rig: { handleLength, maxExtension }, cursor: { maxTargetRadius, deadZone } }', patch: true,
+        value: '{ schemaVersion: 5, physics: {...}, rig: { handleLength, maxExtension, minReach }, cursor: { maxTargetRadius, deadZone } }', patch: true,
         fields: { physics: TUNING_FIELDS, rig: RIG_FIELDS, cursor: CURSOR_FIELDS },
-        notes: 'The reach is rig.handleLength + rig.maxExtension; cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run.',
+        notes: 'The reach is rig.handleLength + rig.maxExtension; rig.minReach, the closest the head comes to the shoulder hinge (0 lets it reach the hinge), must stay at least 0.05 m short of it so the slider can move, and cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run.',
       },
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',

@@ -75,7 +75,8 @@ export interface TerrainObject {
 }
 
 // The hammer starts along `angle` with its head `reach` metres from the shoulder hinge, so a start
-// means the same pose for every rig; a rig that cannot reach that far starts fully extended.
+// means the same pose for every rig; a rig that cannot reach that far starts fully extended, and one whose minimum
+// reach is farther starts at its minimum reach.
 export interface StartObject extends Readonly<Point> {
   readonly kind: 'start';
   readonly id: string;
