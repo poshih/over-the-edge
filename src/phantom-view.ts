@@ -11,7 +11,7 @@ import { ARM_SIDES, DEFAULT_ARM_IK } from './character';
 import type { ArmSide } from './character';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
 import { RIG } from './config';
-import { DEFAULT_GRIPS, placeGrips } from './grips';
+import { DEFAULT_GRIPS, GripHold } from './grips';
 import type { GripDistances, GripShoulder } from './grips';
 import { phantomTool, samplePhantom } from './phantom-format';
 import type { PhantomPose, PhantomTool, PhantomTrack } from './phantom-format';
@@ -62,6 +62,8 @@ interface Figure {
   readonly shaft: Mesh;
   readonly head: Mesh;
   readonly arms: Readonly<Record<ArmSide, Limbs>>;
+  // Where its sliding hands hold the handle.
+  readonly hold: GripHold;
   track: PhantomTrack | null;
   time: number;
   keyframe: number;
@@ -111,6 +113,7 @@ function createFigure(geometry: FigureGeometry): Figure {
     pot: part(geometry.pot, DRAW_ORDER.pot), body: part(geometry.body, DRAW_ORDER.body),
     shaft: part(geometry.shaft, DRAW_ORDER.tool), head: part(geometry.head, DRAW_ORDER.tool),
     arms: { left: limbs(), right: limbs() },
+    hold: new GripHold(),
     track: null, time: 0, keyframe: 0,
   };
 }
@@ -150,6 +153,7 @@ export class PhantomView implements ViewLayer {
     figure.track = track;
     figure.time = 0;
     figure.keyframe = 0;
+    figure.hold.reset();
     for (const side of ARM_SIDES) figure.arms[side].pose = null;
     this.place(figure, 0);
     figure.root.visible = true;
@@ -206,14 +210,14 @@ export class PhantomView implements ViewLayer {
       const chain = DEFAULT_ARM_CHAINS[side];
       const dx = pose.x + chain.shoulder[0] - tool.buttX;
       const dy = pose.y + chain.shoulder[1] - tool.buttY;
-      const dz = this.toolDepth - PLAYER_DEPTH.torso - chain.shoulder[2];
+      // Reach is measured in the course plane, as for the player.
       const along = dx * cos + dy * sin;
       const shoulder = this.shoulders[side];
       shoulder.along = along;
-      shoulder.aside2 = Math.max(0, dx * dx + dy * dy + dz * dz - along * along);
+      shoulder.aside2 = Math.max(0, dx * dx + dy * dy - along * along);
       shoulder.arm = chain.upper + chain.forearm;
     }
-    placeGrips(DEFAULT_GRIPS, this.shoulders, track.handleLength, this.grips);
+    figure.hold.place(DEFAULT_GRIPS, this.shoulders, track.handleLength, this.grips);
     for (const side of ARM_SIDES) {
       const chain = DEFAULT_ARM_CHAINS[side];
       const limbs = figure.arms[side];

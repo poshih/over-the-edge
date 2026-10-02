@@ -380,9 +380,10 @@ orientation, so a grip adjustment rotates with the shaft. The hammer base is
 the translating physical slider, not the shoulder-mounted carrier. Every shaft
 rendering mode shares the same physical base and grip targets, placed by the
 profile's `grips`: with `"fixed"` placement, reach slides the fixed-length hammer and
-both grips outward or inward; with `"sliding"`, the hands hold their grips until one would
-be farther from its shoulder than the slide point share of its arm, then the handle slides
-through them just enough to bring them back. A chain that targets a grip reaches in the
+both grips outward or inward; with `"sliding"`, the hands ride with the handle, extending or
+retracting, until one would be farther from its shoulder, ahead or behind, than the slide point
+share of its arm, then the handle slides through them just enough to bring them back and they
+hold on there. A chain that targets a grip reaches in the
 drawing plane with its own lengths from the built-in shoulder, so start its upper arm there,
 as the example does; a hand without one has the built-in arm, which reaches forward to the
 tool's depth. See [hand grips](../README.md#hand-grips).

@@ -202,14 +202,15 @@ export function composeArmJoints(bind: AvatarRigArmBind, shoulder: Vector3, elbo
   out.hand.multiply(bind.handOffset);
 }
 
-// A reach chord measured along a unit shaft. Callers provide the effective shoulder (actual shoulder
-// minus the wrist offset) in the same frame as the butt; 2D callers put it on the tool's depth plane.
+// A shoulder against a unit shaft in the course plane, as the camera sees them: the depth between the body and
+// the tool never counts against a hand's reach. Callers provide the effective shoulder (actual shoulder minus
+// the wrist offset) in the same frame as the butt.
 export function projectGripShoulder(shoulder: Vector3, butt: Vector3, shaftAxis: Vector3,
   arm: number, out: GripShoulder): void {
-  const dx = shoulder.x - butt.x, dy = shoulder.y - butt.y, dz = shoulder.z - butt.z;
-  const along = dx * shaftAxis.x + dy * shaftAxis.y + dz * shaftAxis.z;
+  const dx = shoulder.x - butt.x, dy = shoulder.y - butt.y;
+  const along = dx * shaftAxis.x + dy * shaftAxis.y;
   out.along = along;
-  out.aside2 = Math.max(0, dx * dx + dy * dy + dz * dz - along * along);
+  out.aside2 = Math.max(0, dx * dx + dy * dy - along * along);
   out.arm = arm;
 }
 

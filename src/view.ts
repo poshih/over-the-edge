@@ -15,7 +15,7 @@ import { ARM_LAYER } from './arm-layer';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { ArmChains, ArmPose } from './arm-ik';
 import type { ArmLengths, CharacterArms } from './character-arms';
-import { DEFAULT_GRIPS, NO_GRIP_ROTATION, placeGrips, sameGripRotation } from './grips';
+import { DEFAULT_GRIPS, GripHold, NO_GRIP_ROTATION, sameGripRotation } from './grips';
 import type { GripDistances, GripRotation, Grips, GripShoulder } from './grips';
 import { AvatarView } from './avatar-view';
 import { DEFAULT_AVATAR_RIGS, createArmSolutions, createFramePlan, createPose, projectGripShoulder } from './avatar-rig';
@@ -339,6 +339,8 @@ export class GameView {
   private toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private grips: Grips = DEFAULT_GRIPS;
   private readonly gripDistances: GripDistances = { left: 0, right: 0 };
+  // Where sliding hands have slid to, kept from frame to frame.
+  private readonly gripHold = new GripHold();
   // Each hand's grip rotation in its grip frame, or null for none.
   private gripRotations: Record<ArmSide, Quaternion | null> = { left: null, right: null };
   // Scratch for turning a grip rotation into another space, and each glove's world-space turn this frame.
@@ -943,7 +945,12 @@ export class GameView {
       binding.visibility.setEnabled({ enabled: (!avatarMode || PROP_PARTS.has(id)) && !replaced });
     }
     this.armChains = withArmLengths(imported?.chains ?? DEFAULT_ARM_CHAINS, presentation.arms);
-    this.grips = presentation.grips;
+    // New grips put the hands back on them; a new slide point or hand turn leaves them where they hold.
+    const grips = presentation.grips;
+    if (grips.placement !== this.grips.placement || grips.left !== this.grips.left || grips.right !== this.grips.right) {
+      this.gripHold.reset();
+    }
+    this.grips = grips;
     this.spriteArms = type === 'sprite-2d';
     // 2D characters keep the wrist rotation authored on their IK chains, and their art hangs from these
     // hand anchors, so only 3D hands turn on their grips.
@@ -1097,6 +1104,7 @@ export class GameView {
   resetPresentation(): void {
     this.headAim.reset();
     this.waistLean.reset();
+    this.gripHold.reset();
     for (const slot of this.slots) slot.rig.resetPresentation();
     this.resetPoseHistory();
   }
@@ -1537,9 +1545,9 @@ export class GameView {
     // Phase 1: the prepared rig writes each side's wrist target track before grips are placed; the arms
     // then follow that plan as the grip rotations turn it.
     const plan = prepared === null ? null : this.frameAvatarRig(prepared, body, tool, cos, sin, shaftLength, options.dt);
-    // Every arm reaches from the body's shoulders with the lengths it is drawn at. A 2D arm chain that targets
-    // a hand's grip reaches in the drawing plane, at its authored lengths unless the profile has its own; every
-    // other arm reaches forward to the tool's depth.
+    // Every arm reaches from the body's shoulders with the lengths it is drawn at, measured in the course plane as
+    // the camera sees it. A 2D arm chain that targets a hand's grip has its authored lengths unless the profile has
+    // its own.
     const flat = this.spriteArms ? slot.rig.naturalArmLengths() : null;
     for (const side of ARM_SIDES) {
       const sprite = flat?.[side] ?? null;
@@ -1548,11 +1556,10 @@ export class GameView {
       // Reach is measured to the wrist, which a rig may hold off the handle's contact point.
       if (plan !== null) shoulder.sub(plan[side].offset);
       shoulder.applyMatrix4(body);
-      if (sprite !== null) shoulder.z = butt.z;
       const lengths = sprite !== null && slot.presentation.arms === null ? sprite : chains[side];
       projectGripShoulder(shoulder, butt, shaftAxis, lengths.upper + lengths.forearm, this.gripShoulders[side]);
     }
-    placeGrips(this.grips, this.gripShoulders, shaftLength, this.gripDistances);
+    this.gripHold.place(this.grips, this.gripShoulders, shaftLength, this.gripDistances);
     const poses: ArmPose[] = [];
     for (const side of ARM_SIDES) {
       const arm = this.arms.get(side);

@@ -173,11 +173,13 @@ export function createCharacterEditor(options: {
           <button type="button" class="button character-grip-reset">Reset hand grips</button>
           <p class="appearance-format">Each grip is that hand's distance from the butt, up to
             ${metres(HEAD_GRIP_MARGIN)} short of the head's centre. Fixed hands stay there and travel with the
-            whole slide, so arms must reach that far. Sliding hands hold their grips until one would be farther
-            from its shoulder than the slide point, a share of its arm's length; then the handle slides through
-            both hands just enough to bring them back within it. Lower slide points keep the hands nearer the
-            shoulders; at 100% they slide only when an arm could not otherwise reach. Avatars, mesh parts and 2D
-            grip targets use the same grips. Physics is unchanged. Save the character profile to keep them.</p>
+            whole slide, so arms must reach that far. Sliding hands start there and hold on as the handle extends
+            or retracts until one would be farther from its shoulder, ahead or behind, than the slide point, a
+            share of its arm's length as the camera sees it; then the handle slides through both hands just enough
+            to bring them back within it, and they hold on there. Lower slide points keep the hands nearer the
+            shoulders; at 100% they slide only when an arm would otherwise be stretched straight. Avatars, mesh
+            parts and 2D grip targets use the same grips. Physics is unchanged. Save the character profile to keep
+            them.</p>
           <fieldset class="tuning-group character-grip-rotation">
             <legend>Hand rotation</legend>
             <div class="character-grip-rotation-controls"></div>
@@ -474,7 +476,8 @@ export function createCharacterEditor(options: {
   const slidePoint = createRangeControl({
     min: SLIDE_AT_LIMITS.min * 100, max: SLIDE_AT_LIMITS.max * 100, step: SLIDE_AT_LIMITS.step * 100,
     label: 'Slide beyond', unit: '%',
-    description: 'Sliding hands keep their grips until one would be farther from its shoulder than this share of its arm\'s length.',
+    description: 'Sliding hands hold on as the handle extends or retracts until one would be farther from its shoulder, ahead or ' +
+      'behind, than this share of its arm\'s length as the camera sees it; then the handle slides through them and they hold on there.',
   }, {
     id: 'character-grip-slide-at', name: 'gripSlideAt', signal: events.signal,
     onInput: value => {

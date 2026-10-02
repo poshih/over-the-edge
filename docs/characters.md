@@ -85,8 +85,11 @@ With the `standard` driver, mapped joints receive the frames that drive the buil
   the grip, the upper arm keeps its length, the forearm stretches along its
   axis, and the hand stays exactly on the grip. The hammer never moves to suit
   an arm. Keep a realistically proportioned humanoid's grips **sliding**, the
-  default: its hands then stay within the slide point of its shoulders wherever
-  the handle allows, and a longer handle with a shorter extension keeps the reach.
+  default: its hands then ride with the handle and slide only to stay within the
+  slide point of its shoulders, measured as the camera sees them, wherever the
+  handle allows, and a longer handle with a shorter extension keeps the reach.
+  The depth to the handle is not part of the slide point, so an arm too short for
+  the **Arm forward distance** still stretches its forearm to reach that depth.
   With fixed grips the hands follow the butt through the whole slide, so expect
   stretching.
 - **Head.** Gaze rotates the head joint about its own bind position, with the
@@ -318,8 +321,9 @@ and shading does no per-frame work.
 
 Profiles use **schema version 16**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
 the hammer in degrees (0-45; see [waist lean](sprites.md#waist-lean)), and `grips`: the placement, each
-hand's distance from the butt (0-3 m), the slide point `slideAt`, a share of each
-arm's length (0.4-1), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
+hand's distance from the butt (0-3 m) where it starts, the slide point `slideAt`, a share of each
+arm's length in the course plane that a sliding hand may ride from its shoulder, either way along the
+handle, before the handle slides through it (0.4-1), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
 and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It also has
 `arms`, `null` for each type's own arm lengths or each side's `upper` and `forearm`
 (0.1-2 m). The model and shading fields below are present only while used.

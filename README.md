@@ -1017,25 +1017,28 @@ GLB import does not author colliders or retarget whole-character animations.
 Each hand's grip is a distance from the butt, **0.04 m** and **0.22 m** by default, set with
 **Left hand grip** and **Right hand grip**; no grip comes nearer than 0.2 m to the head's centre.
 **Fixed** hands stay on their grips and travel with the butt, so arms must reach as far as
-the handle slides. **Slide along the handle**, the default, holds the grips too, until a hand
-would be farther from its shoulder than **Slide beyond**, a share of that arm's length (40-100%,
-default **85%**). Then the handle slides through both hands together, toward the butt or the head,
-by the least amount that brings them back within it, as in Getting Over It: a bent arm keeps its
-grip, and a nearly straight one lets the handle run. A hand that cannot come that close to the
-handle's line holds the point nearest its shoulder, and when no shared slide suits both hands they
-split the difference. The hands never leave the handle or come within 0.2 m of the head's centre,
-so at full extension they may hold the butt beyond the slide point. Lower slide points keep the
-hands nearer the shoulders; at 100% they slide only when an arm could not otherwise reach.
+the handle slides. **Slide along the handle**, the default, starts the hands on their grips, and
+they hold on as the handle extends or retracts, riding with it, until a hand would be farther from
+its shoulder, ahead of it or behind, than **Slide beyond**, a share of that arm's length (40-100%,
+default **85%**). Then the handle slides through both hands together by the least amount that
+brings them back within it, and they hold on where they are: reversing the handle carries the hands
+with it again until one reaches the slide point on the other side, as in Getting Over It. A hand
+that cannot come that close to the handle's line holds the point nearest its shoulder, and when no
+shared slide suits both hands they split the difference. The hands never leave the handle or come
+within 0.2 m of the head's centre, so near full extension or retraction they may hold beyond the
+slide point. Lower slide points keep the hands nearer the shoulders; at 100% they slide only when an
+arm would otherwise be stretched straight. The hands go back to their grips when the run restarts
+or the grips change.
 
-Reach is measured from the body's shoulders, the built-in ones or an imported avatar's, with the
-arm lengths the character draws: forward to the handle at the tool's depth, or, for a 2D arm chain
-that targets `left-grip` or `right-grip`, in the drawing plane, from the same shoulders where the
-example's arm bones start; a 2D character's hand without such a chain has the built-in arm. At 85%
-the built-in 0.82 m arms never stretch on the default rig, reaching at most about 95% of their
-length while holding the butt at full extension; with a 2.1 m handle and 0.55 m extension they stay
-within the slide point everywhere, and 0.55 m upper arms and forearms reach at most about 90%. The
-placement is continuous in aim and extension: extending the handle by a millimetre moves no hand
-more than a millimetre along it. It costs the same every frame. The same section's **Handle
+Reach is measured in the course plane, as the camera sees it, from the body's shoulders, the
+built-in ones or an imported avatar's, with the arm lengths the character draws; a 2D arm chain
+that targets `left-grip` or `right-grip` has its own lengths, from the same shoulders where the
+example's arm bones start, and a 2D character's hand without such a chain has the built-in arm.
+The depth between the body and the handle never counts against the slide point, so it works the
+same at any **Arm forward distance**; an arm too short to also reach that depth straightens toward
+its grip and stretches its forearm. At 85% the built-in 0.82 m arms never stretch on the default
+rig. The placement is continuous in aim and extension: extending the handle by a millimetre moves
+no hand more than a millimetre along it. It costs the same every frame. The same section's **Handle
 length** is the game's [hammer rig](#game-settings) setting, shown here too: it is shared by every
 character, and changing it restarts the run.
 
