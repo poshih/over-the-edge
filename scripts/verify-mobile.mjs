@@ -93,7 +93,7 @@ export async function verifyMobile(browser, address, artifacts) {
       assert.equal(initial.camera.compact, true);
       const reach = await page.evaluate(() => {
         const state = window.gettingOver.snapshot();
-        const pivot = state.parts.find((part) => part.id === 'carrier');
+        const pivot = state.parts.find((part) => part.id === 'shoulder');
         return [-1, 1].map((side) => window.gettingOver.project({ x: pivot.x + side * state.rig.maxReach, y: pivot.y }));
       });
       assert.ok(reach.every((point) => point.x >= 0 && point.x <= width), 'Both horizontal reach extremes must fit on a phone.');

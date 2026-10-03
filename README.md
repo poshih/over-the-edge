@@ -353,21 +353,27 @@ package contract and its Box2D-style joint API.
 ```text
 Dynamic root, rotation locked
   +-- limited unpowered hinge --> pot
-  +-- powered hinge --> invisible carrier
-          +-- powered slider --> handle base
-                  +-- three welded handle segments --> hammer head
+  +-- coupled polar drive (angular + axial motors, passive slide stops)
+          +-- rigid: one compound carriage / shaft / head body
+          +-- compliant: carriage + three spring-welded segments + head
 ```
 
-The player rig has eight dynamic bodies and seven joints. Only its hinge and
-slider have motors. Arms are visual two-bone IK, never collision bodies or
-actuators. The pot and hammer head collide with terrain and nearby living enemies;
-the shaft fixtures supply mass and
-inertia but never generate contacts. Normal locomotion does not teleport bodies,
+A rigid player has three dynamic bodies and two joints; a compliant player has
+seven bodies and six joints. The polar drive solves its lateral constraint and
+both bounded motor rows together against the actual driven body's mass, without
+light guide bodies in the force path. The rigid tool has no welds to converge.
+Component mass, centre of mass and inertia are preserved: the hinge component's
+translation mass belongs to the root, and its rotor inertia belongs to the tool.
+Arms are visual two-bone IK, never collision bodies or actuators. The pot and
+hammer head collide with terrain and nearby living enemies; the shaft fixtures
+supply geometry and mass distribution but never generate contacts. Normal locomotion does not teleport bodies,
 apply assistance forces, or turn off the head's collisions. Authored updrafts
-and enemy contact knockback apply explicit, mass-aware impulses without changing
-the rig or disabling collisions. Terrain collides only from the outside: a body
-whose centre ends up inside a terrain outline, for example after an edit or a
-restored illusion, passes out of it instead of being trapped or shoved.
+and enemy contact knockback apply explicit, mass-aware impulses once per physical
+body without changing the rig or disabling collisions. Terrain collides only from
+the outside: a colliding fixture whose own centroid ends up inside a terrain
+outline, for example after an edit or a restored illusion, passes out of it instead
+of being trapped or shoved. A non-colliding shaft inside rock never suppresses a
+head contact just because they share a body. See [ground-hold stability](docs/ground-hold-stability.md).
 
 The simulation runs at a fixed **240 Hz**, with continuous collision handling,
 64 velocity iterations and 20 position iterations. Time steps and solver
@@ -426,12 +432,14 @@ terrain collider.
 
 ## Game settings
 
-The workshop applies parameters to the existing mechanism without restarting,
-except the hammer rig, which rebuilds the player. Its first section, **Mass & recoil**, groups head mass, player mass and rotation
-speed with sliders for total shaft mass, hinge carrier mass and slider carriage
-mass. Shaft mass is divided equally among the three handle segments; guide-body
-inertia scales with mass. The new defaults preserve the original 0.66 kg shaft
-and 0.5 kg per guide body. All masses stay positive.
+The workshop applies parameters without restarting, except rig dimensions and
+crossing between zero and positive handle compliance, which rebuild the player
+and restart the run. Its first section, **Mass & recoil**, groups head mass, player
+mass and rotation speed with total shaft mass, hinge component mass and carriage
+mass. Shaft mass is uniform along the handle, in one body when rigid and divided
+equally among three segments when compliant. Component inertia scales with mass;
+the defaults remain 0.66 kg for the shaft and 0.5 kg for each hinge/carriage
+component. All masses stay positive.
 
 The other sections include motor strength and speed limits, the downswing boost,
 response gains, damping, contact friction, handle compliance, and control

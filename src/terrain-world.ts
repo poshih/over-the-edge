@@ -1,5 +1,5 @@
 import { Chain, Circle, Settings, Vec2, WorldManifold } from 'planck';
-import type { Body, Contact, ContactImpulse, Vec2Value, World } from 'planck';
+import type { Body, Contact, ContactImpulse, Fixture, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
 import { geometryKey, ILLUSION, isSimplePolygon, isTerrainObject, objectContains, polygonArea, shapeVertices } from './level';
 import type { LevelChange, TerrainObject, TerrainEvent } from './level';
@@ -31,6 +31,11 @@ export class TerrainWorld {
   private readonly disappeared = new Set<string>();
   private readonly listeners = new Set<(event: TerrainEvent) => void>();
   private readonly manifold = new WorldManifold();
+  // Fixtures own collision geometry even when a compound body's COM lies elsewhere. Shapes are
+  // replaced, never resized in place, so local centroids stay valid for each fixture's lifetime.
+  private readonly fixtureCentroids = new WeakMap<Fixture, Vec2>();
+  private readonly probeMass = { mass: 0, center: new Vec2(), I: 0 };
+  private readonly probePoint = new Vec2();
   // Each surface's restitution, from the game settings.
   private restitution: SurfaceRestitution;
   private disposed = false;
@@ -133,7 +138,7 @@ export class TerrainWorld {
     return this.ids.has(body);
   }
 
-  // Terrain only collides from outside: a body whose centre is inside an outline passes out of it.
+  // Terrain only collides from outside: a collider whose probe is inside an outline passes out.
   isInside(body: Body, point: Vec2Value): boolean {
     const id = this.ids.get(body);
     return id !== undefined && objectContains(this.object(id), point);
@@ -166,9 +171,22 @@ export class TerrainWorld {
     const b = contact.getFixtureB().getBody();
     const terrain = this.ids.has(a) ? a : this.ids.has(b) ? b : null;
     if (terrain === null) return;
-    const other = terrain === a ? b : a;
-    if (this.isInside(terrain, other.getWorldCenter())) contact.setEnabled(false);
+    const other = terrain === a ? contact.getFixtureB() : contact.getFixtureA();
+    if (this.isInside(terrain, this.fixtureProbe(other))) contact.setEnabled(false);
   };
+
+  private fixtureProbe(fixture: Fixture): Vec2 {
+    let center = this.fixtureCentroids.get(fixture);
+    if (center === undefined) {
+      fixture.getShape().computeMass(this.probeMass, 1);
+      center = new Vec2(this.probeMass.center.x, this.probeMass.center.y);
+      this.fixtureCentroids.set(fixture, center);
+    }
+    const transform = fixture.getBody().getTransform();
+    this.probePoint.set(transform.p.x + transform.q.c * center.x - transform.q.s * center.y,
+      transform.p.y + transform.q.s * center.x + transform.q.c * center.y);
+    return this.probePoint;
+  }
 
   private readonly onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {
     const a = contact.getFixtureA().getBody();

@@ -13,8 +13,7 @@ export interface RigSettings {
 
 export const DEFAULT_RIG_SETTINGS: Readonly<RigSettings> = Object.freeze({ handleLength: 1.5, maxExtension: 1.15, minReach: 0 });
 
-// The least the slider may travel. Planck locks a prismatic joint whose limits are within 1 cm of each other at
-// zero translation, which would pull the head in to the handle length.
+// The least usable slider travel. Keep a nonzero workspace between the polar drive's two stops.
 export const MIN_SLIDER_TRAVEL = 0.05;
 const HANDLE_LENGTH_LIMITS = { min: 0.75, max: 3 } as const;
 const MAX_EXTENSION_LIMITS = { min: 0, max: 2 } as const;

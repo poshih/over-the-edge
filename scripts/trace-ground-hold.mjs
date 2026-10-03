@@ -8,20 +8,17 @@ import { createServer } from 'vite';
 
 const { values } = parseArgs({ options: {
   project: { type: 'string' },
+  engine: { type: 'string', default: fileURLToPath(new URL('..', import.meta.url)) },
   output: { type: 'string' },
   iterations: { type: 'string', default: '64' },
   continuous: { type: 'string', default: 'on' },
-  guideScale: { type: 'string', default: '1' },
   scenario: { type: 'string', default: 'hold' },
 } });
 if (!values.project || !values.output) throw new Error('Pass --project <project.json> and --output <trace.json>.');
 const iterations = Number(values.iterations);
-const guideScale = Number(values.guideScale);
-if (![64, 1024].includes(iterations) || ![1, 100].includes(guideScale)) {
-  throw new Error('Diagnostic iterations must be 64 or 1024; guideScale must be 1 or 100.');
-}
+if (![64, 1024].includes(iterations)) throw new Error('Diagnostic iterations must be 64 or 1024.');
 if (!['on', 'off'].includes(values.continuous)) throw new Error('Pass --continuous on or off.');
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = values.engine;
 const STEPS = 240 * 16;
 const ZERO_INPUT = Object.freeze({ x: 0, y: 0 });
 const scenarios = {
@@ -30,12 +27,18 @@ const scenarios = {
     { kind: 'terrain', id: 'floor', shape: { type: 'box' }, x: 0, y: -1,
       width: 80, height: 2, angle: 0, depth: 2, color: 0x71817a, illusion: false, surface: 'rock' },
   ] }),
+  overlap: () => ({ schemaVersion: 5, labels: [], objects: [
+    // The non-colliding shaft is inside the floor; the colliding head's centre is above it.
+    { kind: 'start', id: 'start', x: 0, y: -1.8, angle: Math.PI / 4, reach: 1.8 },
+    { kind: 'terrain', id: 'floor', shape: { type: 'box' }, x: 0, y: -1,
+      width: 80, height: 2, angle: 0, depth: 2, color: 0x71817a, illusion: false, surface: 'rock' },
+  ] }),
   air: () => ({ schemaVersion: 5, labels: [], objects: [
     { kind: 'start', id: 'start', x: 0, y: 1.1, angle: -Math.PI / 4, reach: 1.8 },
   ] }),
 };
 const scenario = scenarios[values.scenario];
-if (!scenario) throw new Error('Pass --scenario hold or air.');
+if (!scenario) throw new Error(`Pass --scenario ${Object.keys(scenarios).join(', ')}.`);
 const projectBytes = await readFile(values.project);
 const project = JSON.parse(projectBytes);
 const server = await createServer({ root: ROOT, configFile: false, logLevel: 'error',
@@ -52,11 +55,6 @@ try {
   const step = simulation.world.step.bind(simulation.world);
   simulation.world.step = (dt) => step(dt, iterations, PHYSICS.positionIterations);
   const rig = simulation.rig;
-  for (const body of [rig.carrier, rig.sliderBody]) {
-    const data = { mass: 0, center: { x: 0, y: 0 }, I: 0 };
-    body.getMassData(data);
-    body.setMassData({ ...data, I: data.I * guideScale });
-  }
   let toiEvents = 0;
   const solver = simulation.world.m_solver;
   const solveTOI = solver.solveIslandTOI;
@@ -68,7 +66,7 @@ try {
     const snapshot = simulation.snapshot();
     let weldPositionError = 0;
     let weldAngleError = 0;
-    for (const weld of rig.welds) {
+    for (const weld of rig.tool.welds) {
       const a = weld.getAnchorA();
       const b = weld.getAnchorB();
       weldPositionError = Math.max(weldPositionError, Math.hypot(a.x - b.x, a.y - b.y));
@@ -79,14 +77,14 @@ try {
       tip: snapshot.tip, cursorOffset: snapshot.cursorOffset, targetOffset: snapshot.targetOffset,
       potAngle: snapshot.potAngle, extension: snapshot.extension, headContacts: snapshot.headContacts,
       hingeTorque: snapshot.hingeTorque, sliderForce: snapshot.sliderForce, command: snapshot.command,
-      hingeSpeed: rig.hinge.getJointSpeed(), sliderSpeed: rig.slider.getJointSpeed(),
-      motorResidual: rig.hinge.getJointSpeed() - snapshot.command.angularSpeed,
+      hingeSpeed: rig.drive.getAngularSpeed(), sliderSpeed: rig.drive.getLinearSpeed(),
+      motorResidual: rig.drive.getAngularSpeed() - snapshot.command.angularSpeed,
       weldPositionError, weldAngleError, toiEvents: toiEvents - beforeTOI });
   }
   await writeFile(values.output, JSON.stringify({
     projectHash: createHash('sha256').update(projectBytes).digest('hex'),
-    parameters: { iterations, continuous: values.continuous, guideScale, scenario: values.scenario,
-      dt: PHYSICS.dt, steps: STEPS }, settings: project.settings,
+    parameters: { iterations, continuous: values.continuous, scenario: values.scenario,
+      dt: PHYSICS.dt, steps: STEPS, terrainFriction: PHYSICS.terrainFriction }, settings: project.settings,
     final: simulation.snapshot(), records,
   }));
   console.log(JSON.stringify({ trace: values.output, steps: STEPS, toiEvents,

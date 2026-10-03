@@ -7,6 +7,7 @@ import { isEnemyObject, isTerrainObject, levelFloor, levelSpawn } from './level'
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
+import { partPoint, partVelocity } from './player-bodies';
 import { rigGeometry, sameRig } from './rig';
 import type { RigGeometry } from './rig';
 import { surfaceRestitution } from './surfaces';
@@ -79,6 +80,10 @@ export class Simulation {
   private voidY: number | null;
   private supported = false;
   private readonly manifold = new WorldManifold();
+  private readonly headPoint = new Vec2();
+  private readonly buttPoint = new Vec2();
+  private readonly pointScratch = new Vec2();
+  private readonly velocityScratch = new Vec2();
   private impactTracking = false;
   private headTouching = false;
   private impactSpeed = 0;
@@ -95,7 +100,7 @@ export class Simulation {
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig));
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
-      getHead: () => this.rig.head,
+      getHeadFixture: () => this.rig.tool.head.fixture,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       onBump: (delta) => changePlayerVelocity(this.rig, delta),
@@ -125,7 +130,7 @@ export class Simulation {
         contact.resetRestitution();
       }
     }
-    if (!sameRig(next.rig, previous.rig)) {
+    if (!sameRig(next.rig, previous.rig) || !this.rig.tool.acceptsTuning(next.physics)) {
       this.reset(this.spawn);
       return 'restarted';
     }
@@ -200,8 +205,8 @@ export class Simulation {
   // Writes the rig's current pose into `out`, allocating nothing, so it can be read every step.
   rigPose(out: RigPose): RigPose {
     const root = this.rig.root.getPosition();
-    const tip = this.rig.head.getPosition();
-    const butt = this.rig.sliderBody.getPosition();
+    const tip = partPoint(this.rig.tool.head, this.headPoint);
+    const butt = partPoint(this.rig.tool.butt, this.buttPoint);
     out.x = root.x;
     out.y = root.y;
     out.pot = this.rig.pot.getAngle();
@@ -258,10 +263,10 @@ export class Simulation {
       swinging = this.aim.target.y < previousY;
     }
     this.command = drivePlayer(
-      this.rig, this.worldPoint(this.cursorOrigin(this.rig.root.getPosition()), this.aim.target), this.settings.physics, swinging,
+      this.rig, this.worldPoint(this.cursorOrigin(this.rig.root.getPosition()), this.aim.target), this.settings.physics, { swinging },
     );
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
-    const velocity = this.impactTracking ? this.rig.head.getLinearVelocity() : null;
+    const velocity = this.impactTracking ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
     const approachX = velocity?.x ?? 0;
     const approachY = velocity?.y ?? 0;
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
@@ -309,8 +314,8 @@ export class Simulation {
     for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
       if (contact.isTouching() && contact.isEnabled()) contacts++;
     }
-    const hingeTorque = this.rig.hinge.getMotorTorque(1 / PHYSICS.dt);
-    const sliderForce = this.rig.slider.getMotorForce(1 / PHYSICS.dt);
+    const hingeTorque = this.rig.drive.getMotorTorque(1 / PHYSICS.dt);
+    const sliderForce = this.rig.drive.getMotorForce(1 / PHYSICS.dt);
     // Loads are shares of the strength each motor had in the last step, downswing boost included.
     return {
       time: this.elapsed,
@@ -329,7 +334,7 @@ export class Simulation {
     return {
       ...status,
       root: { x: root.x, y: root.y, angle: this.rig.root.getAngle() },
-      tip: { ...this.rig.head.getPosition() },
+      tip: { ...partPoint(this.rig.tool.head, this.headPoint) },
       cursor: this.worldPoint(origin, this.aim.cursor),
       cursorOrigin: origin,
       cursorOffset: { ...this.aim.cursor },
@@ -337,14 +342,14 @@ export class Simulation {
       targetOffset: { ...this.aim.target },
       rootVelocity: { ...this.rig.root.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
-      extension: this.rig.slider.getJointTranslation(),
+      extension: this.rig.drive.getTranslation(),
       headContacts: this.headContactCount(),
       rig: this.rig.geometry,
-      hingeTorque: this.rig.hinge.getMotorTorque(1 / PHYSICS.dt),
-      sliderForce: this.rig.slider.getMotorForce(1 / PHYSICS.dt),
+      hingeTorque: this.rig.drive.getMotorTorque(1 / PHYSICS.dt),
+      sliderForce: this.rig.drive.getMotorForce(1 / PHYSICS.dt),
       command: { ...this.command },
       tuning: { ...this.settings.physics },
-      bodyProperties: Object.fromEntries(this.rig.parts.map(({ id, body }) =>
+      bodyProperties: Object.fromEntries(this.rig.bodies.map(({ id, body }) =>
         [id, { mass: body.getMass(), inertia: body.getInertia() }] as const)),
       bodyCount: this.world.getBodyCount(),
       jointCount: this.world.getJointCount(),
@@ -369,16 +374,15 @@ export class Simulation {
     return {
       time: this.elapsed,
       parts: this.rig.parts.map((part) => {
-        const position = part.body.getPosition();
+        const position = partPoint(part, this.pointScratch);
         const angle = part.body.getAngle();
-        const velocity = part.body.getLinearVelocity();
+        const velocity = partVelocity(part, this.velocityScratch);
         if (![position.x, position.y, angle, velocity.x, velocity.y, part.body.getAngularVelocity()].every(Number.isFinite)) {
           throw new Error(`Non-finite physics state on ${part.id}. Simulation stopped.`);
         }
-        const fixture = part.body.getFixtureList();
         return {
           id: part.id, kind: part.kind, x: position.x, y: position.y, angle, vertices: part.vertices,
-          collides: fixture !== null && fixture.getFilterMaskBits() !== 0,
+          collides: part.fixture !== undefined && part.fixture.getFilterMaskBits() !== 0,
         };
       }),
       cursorOffset: { ...this.aim.cursor },
@@ -408,9 +412,11 @@ export class Simulation {
   // Auto-restart only arms once the pot or head stood on terrain, so a start with nothing beneath it
   // (or one inside rock that it drops out of) keeps falling instead of restarting in a loop.
   private detectSupport(): void {
-    for (const body of [this.rig.pot, this.rig.head]) {
+    for (const fixture of [this.rig.potFixture, this.rig.tool.head.fixture]) {
+      const body = fixture.getBody();
       for (let edge = body.getContactList(); edge; edge = edge.next) {
         const contact = edge.contact;
+        if (contact.getFixtureA() !== fixture && contact.getFixtureB() !== fixture) continue;
         if (edge.other === null || !contact.isTouching() || !contact.isEnabled() || !this.terrain.isTerrain(edge.other)) continue;
         const manifold = contact.getWorldManifold(this.manifold);
         if (!manifold || manifold.pointCount === 0) continue;
@@ -426,8 +432,11 @@ export class Simulation {
 
   private headContactCount(): number {
     let count = 0;
-    for (let edge = this.rig.head.getContactList(); edge; edge = edge.next) {
-      if (edge.contact.isTouching() && edge.contact.isEnabled()) count++;
+    const fixture = this.rig.tool.head.fixture;
+    for (let edge = fixture.getBody().getContactList(); edge; edge = edge.next) {
+      const contact = edge.contact;
+      if (contact.getFixtureA() !== fixture && contact.getFixtureB() !== fixture) continue;
+      if (contact.isTouching() && contact.isEnabled()) count++;
     }
     return count;
   }
@@ -435,7 +444,7 @@ export class Simulation {
   // An attempt starts aiming at the hammer head, with the cursor on the target.
   private initialAim(): Aim {
     const origin = this.cursorOrigin(this.rig.root.getPosition());
-    const tip = this.rig.head.getPosition();
+    const tip = partPoint(this.rig.tool.head, this.headPoint);
     return aimAt({ x: tip.x - origin.x, y: tip.y - origin.y }, this.settings.cursor.maxTargetRadius);
   }
 

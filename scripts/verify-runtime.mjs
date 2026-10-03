@@ -148,7 +148,7 @@ try {
   await practice('1');
   const rest = await observe(3);
   report.scenarios.rest = rest;
-  assert.equal(rest.end.jointCount, 7);
+  assert.equal(rest.end.jointCount, 2);
   assert.equal(rest.end.parts.length, 8);
   assert.equal(rest.maxRootAngle, 0, 'The root rotation must stay locked.');
   assert.ok(rest.maxDrift < 0.03, `Idle start drifted ${rest.maxDrift} m.`);
@@ -190,7 +190,7 @@ try {
     assert.ok(error < 0.03, `${goal.name} missed the drag target by ${error} m.`);
     assert.ok(slack(aimed) <= defaultCursor.deadZone + 1e-9, `${goal.name}: the cursor must stay within the dead zone of the target.`);
     if (goal.name.startsWith('full-')) {
-      const pivot = aimed.parts.find((part) => part.id === 'carrier');
+      const pivot = aimed.parts.find((part) => part.id === 'shoulder');
       assert.ok(pivot);
       assert.ok(Math.abs(Math.hypot(aimed.tip.x - pivot.x, aimed.tip.y - pivot.y) - maxReach) < 0.03,
         `${goal.name} must extend the head to its full reach from the hinge.`);
@@ -211,7 +211,7 @@ try {
   const overreach = await snapshot();
   await page.waitForFunction((time) => window.gettingOver.snapshot().time >= time, overreach.time + 1);
   const limited = await snapshot();
-  const pivot = limited.parts.find((part) => part.id === 'carrier');
+  const pivot = limited.parts.find((part) => part.id === 'shoulder');
   assert.ok(pivot);
   const targetRadius = radius(limited.targetOffset);
   const tipRadius = Math.hypot(limited.tip.x - pivot.x, limited.tip.y - pivot.y);
@@ -233,7 +233,7 @@ try {
   assert.ok(deadZone > 0, 'The default game has a dead zone.');
   assert.ok(Math.abs(slack(limited) - deadZone) < 1e-6, 'Pushing past the radius leaves the cursor a dead zone beyond the target.');
   const tipFrom = (state) => {
-    const hinge = state.parts.find((part) => part.id === 'carrier');
+    const hinge = state.parts.find((part) => part.id === 'shoulder');
     return { x: state.tip.x - hinge.x, y: state.tip.y - hinge.y };
   };
   await dragWorld({ x: 0, y: -1.5 * deadZone }, 0.3);
@@ -309,7 +309,7 @@ try {
 
   await practice('4');
   await dragInput(2, (state, progress) => {
-    const pivot = state.parts.find((part) => part.id === 'carrier');
+    const pivot = state.parts.find((part) => part.id === 'shoulder');
     assert.ok(pivot);
     const angle = 0.14 + (-3.1 - 0.14) * progress;
     const reach = 1.7;
@@ -330,9 +330,9 @@ try {
     const deadline = setTimeout(() => reject(new Error('Motor sampling timed out.')), 30_000);
     function sample() {
       const state = window.gettingOver.snapshot();
-      const hinge = state.parts.find((part) => part.id === 'carrier');
+      const drive = state.parts.find((part) => part.id === 'slider');
       samples.push({
-        time: state.time, angle: hinge.angle, command: state.command, tuning: state.tuning,
+        time: state.time, angle: drive.angle, command: state.command, tuning: state.tuning,
         hingeTorque: state.hingeTorque, sliderForce: state.sliderForce, hingeLoad: state.hingeLoad,
       });
       if (state.time - first >= duration) { clearTimeout(deadline); resolve(samples); } else requestAnimationFrame(sample);
@@ -479,24 +479,54 @@ try {
   }, deadZone);
   assert.equal((await settings()).cursor.deadZone, deadZone);
   report.scenarios.deadZoneControl = { removed: noSlack.cursorOffset, widened: wideSlack.cursorOffset };
+  const ROOT_MASS_FRACTION = 0.25;
+  const ROTOR_INERTIA_PER_MASS = 0.07;
   const originalProperties = (await snapshot()).bodyProperties;
-  const inertiaPerMass = Object.fromEntries(Object.entries(originalProperties)
-    .map(([id, properties]) => [id, properties.inertia / properties.mass]));
-  const assertMasses = (state) => {
-    const shafts = state.parts.filter((part) => part.kind === 'handle');
-    const expected = {
-      root: state.tuning.playerMass * 0.25,
-      pot: state.tuning.playerMass * 0.75,
-      head: state.tuning.hammerMass,
-      carrier: state.tuning.hingeCarrierMass,
-      slider: state.tuning.sliderCarriageMass,
-      ...Object.fromEntries(shafts.map((part) => [part.id, state.tuning.shaftMass / shafts.length])),
-    };
-    for (const [id, mass] of Object.entries(expected)) {
-      assert.ok(Math.abs(state.bodyProperties[id].mass - mass) < 1e-9, `${id} must receive its tuned physical mass.`);
-      assert.ok(Math.abs(state.bodyProperties[id].inertia - mass * inertiaPerMass[id]) < 1e-9,
-        `${id} inertia must scale with its mass.`);
+  const potInertiaPerMass = originalProperties.pot.inertia / originalProperties.pot.mass;
+  // Integrate each projected polygon about the actual butt. This checks the compound body's
+  // moment independently of the engine's component-mass implementation, in any posed angle.
+  const inertiaAboutButt = (part, butt) => {
+    const cos = Math.cos(part.angle), sin = Math.sin(part.angle);
+    const vertices = part.vertices.map((vertex) => ({
+      x: part.x - butt.x + cos * vertex.x - sin * vertex.y,
+      y: part.y - butt.y + sin * vertex.x + cos * vertex.y,
+    }));
+    let area = 0, moment = 0;
+    for (let index = 0; index < vertices.length; index++) {
+      const a = vertices[index], b = vertices[(index + 1) % vertices.length];
+      const cross = a.x * b.y - b.x * a.y;
+      area += cross;
+      moment += cross * (a.x * a.x + a.x * b.x + b.x * b.x + a.y * a.y + a.y * b.y + b.y * b.y);
     }
+    return moment / (6 * area);
+  };
+  const assertMasses = (state) => {
+    const { tuning, bodyProperties } = state;
+    const shafts = state.parts.filter((part) => part.kind === 'handle');
+    const butt = state.parts.find((part) => part.id === 'slider');
+    const head = state.parts.find((part) => part.id === 'head');
+    const shoulder = state.parts.find((part) => part.id === 'shoulder');
+    const expected = {
+      root: tuning.playerMass * ROOT_MASS_FRACTION + tuning.hingeCarrierMass,
+      pot: tuning.playerMass * (1 - ROOT_MASS_FRACTION),
+      tool: tuning.sliderCarriageMass + tuning.shaftMass + tuning.hammerMass,
+    };
+    assert.deepEqual(Object.keys(bodyProperties).sort(), Object.keys(expected).sort(),
+      'Mass inspection must report each physical body once, not its visual parts.');
+    for (const [id, mass] of Object.entries(expected)) {
+      assert.ok(Math.abs(bodyProperties[id].mass - mass) < 1e-9, `${id} must receive its tuned physical mass.`);
+    }
+    const shoulderDistanceSquared = (shoulder.x - state.root.x) ** 2 + (shoulder.y - state.root.y) ** 2;
+    const rootOriginMoment = tuning.hingeCarrierMass ** 2 * shoulderDistanceSquared / expected.root;
+    const toolMoment = (tuning.sliderCarriageMass + tuning.hingeCarrierMass) * ROTOR_INERTIA_PER_MASS +
+      shafts.reduce((sum, part) => sum + tuning.shaftMass / shafts.length * inertiaAboutButt(part, butt), 0) +
+      tuning.hammerMass * inertiaAboutButt(head, butt);
+    assert.ok(Math.abs(bodyProperties.root.inertia - rootOriginMoment) < 1e-9,
+      'The fixed root must preserve the shoulder component COM without acquiring rotation.');
+    assert.ok(Math.abs(bodyProperties.pot.inertia - expected.pot * potInertiaPerMass) < 1e-9,
+      'Pot inertia must scale with its mass.');
+    assert.ok(Math.abs(bodyProperties.tool.inertia - toolMoment) < 1e-9,
+      'Tool inertia must include the carriage, uniform shaft, head and hinge rotor exactly once.');
   };
   assertMasses(await snapshot());
   for (const label of ['Shaft mass (total)', 'Hinge carrier mass', 'Slider carriage mass', 'Hammer head mass', 'Rotation speed cap']) {
@@ -557,10 +587,8 @@ try {
   const defaults = await snapshot();
   assertMasses(defaults);
   assert.equal(defaults.tuning.shaftMass, 0.66);
-  assert.equal(defaults.bodyProperties.carrier.mass, 0.5);
-  assert.equal(defaults.bodyProperties.carrier.inertia, 0.035);
-  assert.equal(defaults.bodyProperties.slider.mass, 0.5);
-  assert.equal(defaults.bodyProperties.slider.inertia, 0.035);
+  assert.equal(defaults.tuning.hingeCarrierMass, 0.5);
+  assert.equal(defaults.tuning.sliderCarriageMass, 0.5);
   const defaultSettings = await settings();
   assert.deepEqual(defaultSettings.cursor, { maxTargetRadius: defaults.rig.maxReach, deadZone: 0.1 });
   assert.deepEqual([defaults.tuning.hingeDownswingBoost, defaults.tuning.sliderDownswingBoost], [1.3, 1.3]);

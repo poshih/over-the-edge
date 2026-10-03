@@ -292,7 +292,7 @@ export async function verifyGrips(browser, address, artifacts) {
   const handle = (state) => {
     const slider = state.parts.find(part => part.id === 'slider');
     const head = state.parts.find(part => part.id === 'head');
-    const hinge = state.parts.find(part => part.id === 'carrier');
+    const hinge = state.parts.find(part => part.id === 'shoulder');
     const segments = state.parts.filter(part => part.kind === 'handle');
     return {
       shaft: Math.hypot(head.x - slider.x, head.y - slider.y),

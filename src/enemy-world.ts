@@ -1,5 +1,5 @@
 import { Box, Circle, DynamicTree, Vec2, WorldManifold } from 'planck';
-import type { Body, Contact, Vec2Value, World } from 'planck';
+import type { Body, Contact, Fixture, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
 import type { Point } from './config';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
@@ -27,7 +27,7 @@ interface EnemyRecord {
 
 interface EnemyCallbacks {
   readonly getPot: () => Body;
-  readonly getHead: () => Body;
+  readonly getHeadFixture: () => Fixture;
   readonly isTransientTerrain: (body: Body) => boolean;
   readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
   readonly onBump: (velocityChange: Readonly<Point>) => void;
@@ -248,7 +248,8 @@ export class EnemyWorld {
     const record = this.bodies.get(a) ?? this.bodies.get(b);
     if (!record) return;
     const other = a === record.body ? b : a;
-    if (other === this.callbacks.getHead()) {
+    const otherFixture = a === record.body ? contact.getFixtureB() : contact.getFixtureA();
+    if (otherFixture === this.callbacks.getHeadFixture()) {
       const manifold = contact.getWorldManifold(this.manifold);
       if (!manifold || manifold.pointCount === 0) throw new Error('A hammer impact needs a solid contact manifold.');
       const head = other.getLinearVelocityFromWorldPoint(manifold.points[0]);
@@ -258,9 +259,8 @@ export class EnemyWorld {
       if (speed >= ENEMY_BEHAVIOR.hitSpeed) this.hits.add(record);
     } else if (other === this.callbacks.getPot()) this.bumps.add(record);
     else if (record.object.species === 'bird') {
-      const fixture = a === record.body ? contact.getFixtureB() : contact.getFixtureA();
       // Begin-contact fires before TerrainWorld's pre-solve can disable interior contacts.
-      if ((fixture.getFilterCategoryBits() & PHYSICS.terrainCategory) !== 0 &&
+      if ((otherFixture.getFilterCategoryBits() & PHYSICS.terrainCategory) !== 0 &&
         !this.callbacks.insideTerrain(other, this.body(record).getWorldCenter())) this.obstacles.add(record);
     }
   };

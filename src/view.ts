@@ -1014,7 +1014,7 @@ export class GameView {
     this.torso.position.set(origin.x, origin.y, PLAYER_DEPTH.torso);
     this.torso.rotation.z = lean;
     this.torso.updateWorldMatrix(true, false);
-    const aimOrigin = this.part(frame, 'carrier');
+    const aimOrigin = this.part(frame, 'shoulder');
     const aim = { x: frame.cursor.x - aimOrigin.x, y: frame.cursor.y - aimOrigin.y };
     // The head turns within the leaning torso, so it aims in the torso's frame to keep looking at the cursor.
     const cos = Math.cos(lean), sin = Math.sin(lean);

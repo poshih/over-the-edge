@@ -322,8 +322,8 @@ export async function verifyTriggers(browser, address, artifacts) {
     }, placed.id);
     const launched = await physics();
     assert.ok(launched.rootVelocity.y > 0);
-    assert.equal(launched.jointCount, 7);
-    assert.equal(launched.bodyCount, 9, 'Updrafts must not add rigid bodies.');
+    assert.equal(launched.jointCount, 2);
+    assert.equal(launched.bodyCount, 4, 'Updrafts must not add rigid bodies.');
     await page.screenshot({ path: fileURLToPath(new URL('updraft-launch.png', artifacts)) });
     await page.waitForFunction(() => {
       const snapshot = window.gettingOver.snapshot();

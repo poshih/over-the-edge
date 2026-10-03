@@ -1,33 +1,27 @@
-import {
-  Box, Polygon, PrismaticJoint, RevoluteJoint, Vec2, WeldJoint,
-} from 'planck';
-import type { Body, Joint, World } from 'planck';
+import { Polygon, RevoluteJoint, Vec2 } from 'planck';
+import type { Body, Fixture, Joint, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point, Tuning } from './config';
-import { angleDifference, clamp, clampLength, transformPoint } from './math';
+import { angleDifference, clamp, clampLength } from './math';
+import { HammerJoint } from './hammer-joint';
+import { playerBody, PlayerRigError } from './player-bodies';
+import type { PlayerBody, PlayerPart } from './player-bodies';
+import { createPlayerTool } from './player-tool';
+import type { PlayerTool } from './player-tool';
 import type { RigGeometry } from './rig';
 import type { LaunchSettings } from './trigger-events';
 
-export type PartKind = 'root' | 'pot' | 'carrier' | 'slider' | 'handle' | 'head';
-
-export interface PlayerPart {
-  id: string;
-  kind: PartKind;
-  body: Body;
-  vertices: readonly Point[];
-}
+export type { PartKind, PlayerPart } from './player-bodies';
 
 export interface PlayerRig {
   readonly geometry: RigGeometry;
-  parts: PlayerPart[];
-  root: Body;
-  pot: Body;
-  carrier: Body;
-  sliderBody: Body;
-  head: Body;
-  hinge: RevoluteJoint;
-  slider: PrismaticJoint;
-  welds: WeldJoint[];
+  readonly parts: readonly PlayerPart[];
+  readonly bodies: readonly PlayerBody[];
+  readonly root: Body;
+  readonly pot: Body;
+  readonly potFixture: Fixture;
+  readonly drive: HammerJoint;
+  readonly tool: PlayerTool;
 }
 
 export interface MotorCommand {
@@ -42,6 +36,7 @@ export interface MotorCommand {
 
 const LAUNCH_SOLVER_ITERATIONS = 32;
 const SMALL_DRAG_RATIO = 0.001;
+const ORIGIN = Object.freeze({ x: 0, y: 0 });
 
 function clearAirRise(speed: number, damping: number): number {
   const ratio = damping * speed / PHYSICS.gravity;
@@ -66,12 +61,12 @@ function launchSpeed(height: number, damping: number): number {
 export function launchPlayer(rig: PlayerRig, settings: LaunchSettings, tuning: Readonly<Tuning>) {
   let mass = 0;
   let momentum = 0;
-  for (const part of rig.parts) {
-    const partMass = part.body.getMass();
+  for (const { body } of rig.bodies) {
+    const partMass = body.getMass();
     mass += partMass;
-    momentum += partMass * part.body.getLinearVelocity().y;
+    momentum += partMass * body.getLinearVelocity().y;
   }
-  if (mass <= 0) throw new Error('The player rig must have positive mass to launch.');
+  if (mass <= 0) throw new PlayerRigError('The player rig must have positive mass to launch.');
   const speed = launchSpeed(settings.height, tuning.bodyDamping) * settings.strength;
   const delta = Math.max(0, speed - momentum / mass);
   changePlayerVelocity(rig, { x: 0, y: delta });
@@ -79,232 +74,112 @@ export function launchPlayer(rig: PlayerRig, settings: LaunchSettings, tuning: R
 }
 
 export function changePlayerVelocity(rig: PlayerRig, delta: Readonly<Point>): void {
-  // Equal velocity changes preserve relative motion without kicking individual joints.
-  for (const part of rig.parts) {
-    const mass = part.body.getMass();
-    part.body.applyLinearImpulse(new Vec2(delta.x * mass, delta.y * mass), part.body.getWorldCenter());
+  // Each physical body receives this once, even when several visual parts share it.
+  for (const { body } of rig.bodies) {
+    const mass = body.getMass();
+    body.applyLinearImpulse(new Vec2(delta.x * mass, delta.y * mass), body.getWorldCenter());
   }
 }
 
 function attach<T extends Joint>(world: World, joint: T): T {
   const attached = world.createJoint(joint);
-  if (!attached) throw new Error('Cannot construct a player joint while the physics world is stepping.');
+  if (!attached) throw new PlayerRigError('Cannot construct a player joint while the physics world is stepping.');
   return attached;
 }
 
 function setMass(body: Body, mass: number): void {
   const data = { mass: 0, center: new Vec2(), I: 0 };
   body.getMassData(data);
-  if (data.mass <= 0) throw new Error('Player bodies must have positive mass before tuning.');
+  if (data.mass <= 0) throw new PlayerRigError('Player bodies must have positive mass before tuning.');
   data.I *= mass / data.mass;
   data.mass = mass;
   body.setMassData(data);
 }
 
 export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<Tuning>, geometry: RigGeometry): PlayerRig {
-  const parts: PlayerPart[] = [];
-  const movingBody = (id: string, kind: PartKind, position: Point, angle: number, vertices: readonly Point[]): Body => {
-    const body = world.createDynamicBody({
-      position: new Vec2(position.x, position.y),
-      angle,
-      bullet: true,
-      allowSleep: false,
-      fixedRotation: kind === 'root',
-    });
-    parts.push({ id, kind, body, vertices });
-    return body;
-  };
-  const root = movingBody('root', 'root', spawn.position, 0, []);
-  const pot = movingBody('pot', 'pot', spawn.position, 0, RIG.potVertices);
-  pot.createFixture(new Polygon(RIG.potVertices.map((point) => new Vec2(point.x, point.y))), {
-    density: 1,
-    friction: PHYSICS.potFriction,
-    restitution: tuning.potBounciness / 100,
+  const rootOwned = playerBody(world, { id: 'root', position: spawn.position, angle: 0, fixedRotation: true });
+  const potOwned = playerBody(world, { id: 'pot', position: spawn.position, angle: 0, fixedRotation: false });
+  const root = rootOwned.body, pot = potOwned.body;
+  const potFixture = pot.createFixture(new Polygon(RIG.potVertices.map((point) => new Vec2(point.x, point.y))), {
+    density: 1, friction: PHYSICS.potFriction, restitution: tuning.potBounciness / 100,
     filterCategoryBits: PHYSICS.playerCategory,
     filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
   });
-  attach(world, new RevoluteJoint({
-    bodyA: root,
-    bodyB: pot,
-    localAnchorA: new Vec2(),
-    localAnchorB: new Vec2(),
-    referenceAngle: 0,
-    enableLimit: true,
-    lowerAngle: -RIG.potAngleLimit,
-    upperAngle: RIG.potAngleLimit,
-    collideConnected: false,
-  }));
-
+  attach(world, new RevoluteJoint({ bodyA: root, bodyB: pot,
+    localAnchorA: new Vec2(), localAnchorB: new Vec2(), referenceAngle: 0,
+    enableLimit: true, lowerAngle: -RIG.potAngleLimit, upperAngle: RIG.potAngleLimit,
+    collideConnected: false }));
   const shoulder = root.getWorldPoint(RIG.shoulder);
-  const carrier = movingBody('carrier', 'carrier', shoulder, spawn.angle, []);
-  const hinge = attach(world, new RevoluteJoint({
-    bodyA: root,
-    bodyB: carrier,
-    localAnchorA: new Vec2(RIG.shoulder.x, RIG.shoulder.y),
-    localAnchorB: new Vec2(),
-    referenceAngle: 0,
-    enableMotor: true,
-    maxMotorTorque: tuning.hingeTorque,
-    collideConnected: false,
-  }));
-
-  const alongHandle = (distance: number): Point =>
-    transformPoint({ x: distance, y: 0 }, shoulder, spawn.angle);
   const extension = clamp(spawn.reach, geometry.minReach, geometry.maxReach) - geometry.handleLength;
-  const sliderBody = movingBody('slider', 'slider', alongHandle(extension), spawn.angle, []);
-  const slider = attach(world, new PrismaticJoint({
-    bodyA: carrier,
-    bodyB: sliderBody,
-    localAnchorA: new Vec2(),
-    localAnchorB: new Vec2(),
-    localAxisA: new Vec2(1, 0),
-    referenceAngle: 0,
-    enableLimit: true,
-    lowerTranslation: geometry.minExtension,
-    upperTranslation: geometry.maxExtension,
-    enableMotor: true,
-    maxMotorForce: tuning.sliderForce,
-    collideConnected: false,
-  }));
-
-  const welds: WeldJoint[] = [];
-  let previous = sliderBody;
-  for (let index = 0; index < RIG.handleSegments; index++) {
-    const half = geometry.segmentLength / 2;
-    const vertices = [
-      { x: -half, y: -RIG.handleHalfWidth }, { x: half, y: -RIG.handleHalfWidth },
-      { x: half, y: RIG.handleHalfWidth }, { x: -half, y: RIG.handleHalfWidth },
-    ];
-    const segment = movingBody(
-      `handle-${index}`, 'handle',
-      alongHandle(extension + (index + 0.5) * geometry.segmentLength),
-      spawn.angle, vertices,
-    );
-    segment.createFixture(new Box(half, RIG.handleHalfWidth), {
-      density: 1,
-      filterCategoryBits: PHYSICS.toolCategory,
-      // Retain shaft mass and inertia without producing collision contacts.
-      filterMaskBits: 0,
-    });
-    welds.push(attach(world, new WeldJoint({
-      bodyA: previous,
-      bodyB: segment,
-      localAnchorA: new Vec2(index === 0 ? 0 : half, 0),
-      localAnchorB: new Vec2(-half, 0),
-      referenceAngle: 0,
-      frequencyHz: tuning.handleFrequency,
-      dampingRatio: tuning.handleDamping,
-      collideConnected: false,
-    })));
-    previous = segment;
-  }
-  const head = movingBody(
-    'head', 'head', alongHandle(extension + geometry.handleLength),
-    spawn.angle, RIG.headVertices,
-  );
-  head.createFixture(new Polygon(RIG.headVertices.map((point) => new Vec2(point.x, point.y))), {
-    density: 1,
-    friction: tuning.gripFriction,
-    restitution: tuning.hammerBounciness / 100,
-    filterCategoryBits: PHYSICS.toolCategory,
-    filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
-  });
-  welds.push(attach(world, new WeldJoint({
-    bodyA: previous,
-    bodyB: head,
-    localAnchorA: new Vec2(geometry.segmentLength / 2, 0),
-    localAnchorB: new Vec2(),
-    referenceAngle: 0,
-    frequencyHz: tuning.handleFrequency,
-    dampingRatio: tuning.handleDamping,
-    collideConnected: false,
-  })));
-  const rig: PlayerRig = { geometry, parts, root, pot, carrier, sliderBody, head, hinge, slider, welds };
+  const tool = createPlayerTool({ world, shoulder, angle: spawn.angle, extension, geometry, tuning });
+  const drive = attach(world, new HammerJoint({ bodyA: root, bodyB: tool.driveBody,
+    localAnchorA: RIG.shoulder, lowerTranslation: geometry.minExtension, upperTranslation: geometry.maxExtension,
+    maxMotorTorque: tuning.hingeTorque, maxMotorForce: tuning.sliderForce }));
+  const rig: PlayerRig = { geometry, root, pot, potFixture, tool, drive,
+    bodies: [rootOwned, potOwned, ...tool.bodies], parts: [
+      { id: 'root', kind: 'root', body: root, localPoint: ORIGIN, vertices: [] },
+      { id: 'pot', kind: 'pot', body: pot, localPoint: ORIGIN, vertices: RIG.potVertices, fixture: potFixture },
+      { id: 'shoulder', kind: 'shoulder', body: root, localPoint: RIG.shoulder, vertices: [] },
+      ...tool.parts,
+    ] };
   tunePlayer(rig, tuning);
   return rig;
 }
 
 export function tunePlayer(rig: PlayerRig, tuning: Readonly<Tuning>): void {
-  rig.hinge.setMaxMotorTorque(tuning.hingeTorque);
-  rig.slider.setMaxMotorForce(tuning.sliderForce);
-  setMass(rig.root, tuning.playerMass * PHYSICS.rootMassFraction);
+  if (!rig.tool.acceptsTuning(tuning)) throw new PlayerRigError('Rebuild the rig when changing between rigid and compliant handles.');
+  rig.drive.setMotorLimits({ torque: tuning.hingeTorque, force: tuning.sliderForce });
+  // A carrier at the shoulder translates exactly with the fixed-rotation root. Preserve its real
+  // mass here, including COM, while PlayerTool preserves its rotor inertia at the driven body.
+  const rootMass = tuning.playerMass * PHYSICS.rootMassFraction + tuning.hingeCarrierMass;
+  rig.root.setMassData({ mass: rootMass,
+    center: new Vec2(RIG.shoulder.x * tuning.hingeCarrierMass / rootMass,
+      RIG.shoulder.y * tuning.hingeCarrierMass / rootMass), I: 0 });
   setMass(rig.pot, tuning.playerMass * (1 - PHYSICS.rootMassFraction));
-  setMass(rig.head, tuning.hammerMass);
-  for (const [body, mass] of [
-    [rig.carrier, tuning.hingeCarrierMass],
-    [rig.sliderBody, tuning.sliderCarriageMass],
-  ] as const) {
-    body.setMassData({ mass, center: new Vec2(), I: mass * PHYSICS.guideInertiaPerMass });
+  rig.tool.tune(tuning);
+  for (const { body } of rig.bodies) {
+    body.setLinearDamping(tuning.bodyDamping);
+    body.setAngularDamping(tuning.bodyDamping);
+    body.setAwake(true);
   }
-  for (const part of rig.parts) {
-    if (part.kind === 'handle') setMass(part.body, tuning.shaftMass / RIG.handleSegments);
-    part.body.setLinearDamping(tuning.bodyDamping);
-    part.body.setAngularDamping(tuning.bodyDamping);
-    part.body.setAwake(true);
-    for (let fixture = part.body.getFixtureList(); fixture; fixture = fixture.getNext()) {
-      // Only the pot and the hammer head collide.
-      if (fixture.getFilterMaskBits() !== 0) {
-        fixture.setFriction(part.kind === 'pot' ? PHYSICS.potFriction : tuning.gripFriction);
-        fixture.setRestitution((part.kind === 'pot' ? tuning.potBounciness : tuning.hammerBounciness) / 100);
-      }
-    }
-  }
-  for (const weld of rig.welds) {
-    weld.setFrequency(tuning.handleFrequency);
-    weld.setDampingRatio(tuning.handleDamping);
-  }
+  rig.potFixture.setFriction(PHYSICS.potFriction);
+  rig.potFixture.setRestitution(tuning.potBounciness / 100);
+  rig.tool.head.fixture.setFriction(tuning.gripFriction);
+  rig.tool.head.fixture.setRestitution(tuning.hammerBounciness / 100);
 }
 
 // How directly a motor speeds the head up downward, from 0 to 1: its requested speed, and the change it
-// makes to the joint's speed, must both move the head down along `down`, the head's downward component per
-// unit of joint speed (unit length at most). Holding, braking and lifting get nothing.
+// makes to the joint's speed, must both move the head down along `down` (unit length at most).
 function downswing(requested: number, current: number, down: number): number {
   return Math.sign(requested) === Math.sign(requested - current) ? Math.max(0, Math.sign(requested) * down) : 0;
 }
 
-// `swinging` is whether input lowered the target this step: only the player swings the hammer down, so the
-// motors' own corrections, such as pulling a sagging hang back into its pose, keep their tuned strength.
-export function drivePlayer(rig: PlayerRig, target: Readonly<Point>, tuning: Readonly<Tuning>, swinging: boolean): MotorCommand {
+// Only input can swing the hammer down: corrections holding a hang keep their tuned strength.
+export function drivePlayer(rig: PlayerRig, target: Readonly<Point>, tuning: Readonly<Tuning>, options: { swinging: boolean }): MotorCommand {
   const pivot = rig.root.getWorldPoint(RIG.shoulder);
-  const targetX = target.x - pivot.x;
-  const targetY = target.y - pivot.y;
+  const targetX = target.x - pivot.x, targetY = target.y - pivot.y;
   const distance = Math.hypot(targetX, targetY);
-  // The slider axis remains defined even when the head is at the hinge.
-  const axisAngle = rig.carrier.getAngle();
+  const axisAngle = rig.drive.getAngle();
   const angularError = distance <= PHYSICS.aimEpsilon
     ? 0 : angleDifference(Math.atan2(targetY, targetX), axisAngle);
-  // Targets are hinge-relative and the radius is capped at the reach; clamp so any target maps into the workspace.
-  // Inside the minimum reach the head stays at it, and the hammer only turns toward the target.
   const { minReach, maxReach, handleLength } = rig.geometry;
   const reachable = clampLength({ x: targetX, y: targetY }, maxReach);
-  const projectedReach = clamp(
-    reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), minReach, maxReach,
-  );
-  const extensionError = projectedReach - handleLength - rig.slider.getJointTranslation();
-  const hingeSpeed = rig.hinge.getJointSpeed();
-  const sliderSpeed = rig.slider.getJointSpeed();
-  const angularSpeed = clamp(
-    tuning.angleGain * angularError - tuning.angleDamping * hingeSpeed,
-    -tuning.angularSpeed, tuning.angularSpeed,
-  );
-  const linearSpeed = clamp(
-    tuning.extensionGain * extensionError - tuning.extensionDamping * sliderSpeed,
-    -tuning.linearSpeed, tuning.linearSpeed,
-  );
-  // A downswing makes each motor stronger in proportion to how directly it drives the head down: turning
-  // counterclockwise moves the head along (-sin, cos) of the handle's angle, and extending along (cos, sin).
-  // The motors push between the player's own bodies, so the extra strength adds no outside force.
-  const hingeBoost = swinging ? 1 + (tuning.hingeDownswingBoost - 1) * downswing(angularSpeed, hingeSpeed, -Math.cos(axisAngle)) : 1;
-  const sliderBoost = swinging ? 1 + (tuning.sliderDownswingBoost - 1) * downswing(linearSpeed, sliderSpeed, -Math.sin(axisAngle)) : 1;
-  rig.hinge.setMaxMotorTorque(tuning.hingeTorque * hingeBoost);
-  rig.slider.setMaxMotorForce(tuning.sliderForce * sliderBoost);
-  rig.hinge.setMotorSpeed(angularSpeed);
-  rig.slider.setMotorSpeed(linearSpeed);
+  const projectedReach = clamp(reachable.x * Math.cos(axisAngle) + reachable.y * Math.sin(axisAngle), minReach, maxReach);
+  const extensionError = projectedReach - handleLength - rig.drive.getTranslation();
+  const hingeSpeed = rig.drive.getAngularSpeed(), sliderSpeed = rig.drive.getLinearSpeed();
+  const angularSpeed = clamp(tuning.angleGain * angularError - tuning.angleDamping * hingeSpeed,
+    -tuning.angularSpeed, tuning.angularSpeed);
+  const linearSpeed = clamp(tuning.extensionGain * extensionError - tuning.extensionDamping * sliderSpeed,
+    -tuning.linearSpeed, tuning.linearSpeed);
+  const hingeBoost = options.swinging ? 1 + (tuning.hingeDownswingBoost - 1) * downswing(angularSpeed, hingeSpeed, -Math.cos(axisAngle)) : 1;
+  const sliderBoost = options.swinging ? 1 + (tuning.sliderDownswingBoost - 1) * downswing(linearSpeed, sliderSpeed, -Math.sin(axisAngle)) : 1;
+  rig.drive.setMotorLimits({ torque: tuning.hingeTorque * hingeBoost, force: tuning.sliderForce * sliderBoost });
+  rig.drive.setMotorSpeeds({ angular: angularSpeed, linear: linearSpeed });
   return { angularError, extensionError, angularSpeed, linearSpeed, hingeBoost, sliderBoost };
 }
 
 export function destroyPlayer(world: World, rig: PlayerRig): void {
-  for (const part of rig.parts) {
-    if (!world.destroyBody(part.body)) throw new Error(`Could not remove player body ${part.id}.`);
+  for (const { id, body } of rig.bodies) {
+    if (!world.destroyBody(body)) throw new PlayerRigError(`Could not remove player body ${id}.`);
   }
 }
