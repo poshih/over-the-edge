@@ -19,11 +19,11 @@ export class ProjectApiError extends Error {
 export interface ServerRevisions {
   readonly revision: number;
   readonly sections: Readonly<Record<string, number>>;
-  // The version a write to the level stored it as.
-  readonly level?: LevelVersionRef;
+  // The level version the stored level and game settings are, with the phantom course of its recordings; null while
+  // the stored level is invalid.
+  readonly level: LevelVersionRef | null;
 }
 
-// A stored level's version, and the phantom course its recordings belong to.
 export interface LevelVersionRef {
   readonly version: number;
   readonly course: string;
@@ -106,19 +106,12 @@ export class ProjectClient {
     return this.json('GET', `/projects/${encodeURIComponent(id)}/revision`);
   }
 
-  async section(id: string, name: string): Promise<{ value: unknown; revision: number }> {
+  // A section's value and revision; the revision is null when its ETag is missing, as some proxies drop it, and a
+  // weak ETag, as compressing proxies make it, still counts.
+  async section(id: string, name: string): Promise<{ value: unknown; revision: number | null }> {
     const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/${name}`);
-    const revision = Number((response.headers.get('etag') ?? '').replace(/"/g, ''));
-    return { value: await response.json(), revision };
-  }
-
-  // The level with the version it is stored as.
-  async level(id: string): Promise<{ value: unknown; revision: number; version: number }> {
-    const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/level`);
-    const revision = Number((response.headers.get('etag') ?? '').replace(/"/g, ''));
-    const version = Number(response.headers.get('x-level-version'));
-    if (!Number.isSafeInteger(version) || version < 1) throw new ProjectApiError(response.status, 'http', 'The project server did not say which version its level is.');
-    return { value: await response.json(), revision, version };
+    const tag = /^(?:W\/)?"([0-9]{1,15})"$/.exec(response.headers.get('etag') ?? '');
+    return { value: await response.json(), revision: tag === null ? null : Number(tag[1]) };
   }
 
   // Stores one clip of a play session as a phantom recording of the level's `version`; sending a clip again replaces it.

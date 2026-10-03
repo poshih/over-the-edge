@@ -231,27 +231,33 @@ its level like any imported level, including intro events.
 
 ## Level versions
 
-The project server is where levels are saved: every level it stores becomes the project's
-next numbered **version**, unless it is the same as the latest. That covers the Workshop's
-saves, the level, `level/objects` and `level/labels` API changes, bundles, and a `level.json`
-a tool rewrote on disk, numbered when it is next read. The Level tab's status shows the
-version the page holds, for example *Saved as version 14*; a change shows as unsaved until
-the project saves it a moment later.
+The project server is where levels are saved, and a level is played with the project's game
+settings, so a **version** holds both: whenever the stored level or game settings change, they
+become the project's next numbered version, unless they are the same as the latest. That covers
+the Workshop's saves of the level or of Physics, the level, `level/objects`, `level/labels` and
+`settings` API changes, bundles, and a `level.json` or `project.json` a tool rewrote on disk,
+numbered when the project is next read. The Level tab's status shows the version the page
+holds, for example *Saved as version 14*; a change shows as unsaved until the project saves it
+a moment later.
 
-Each version keeps its whole level, so any of them can be read back. The project folder holds
-them beside its files, and replacing the project keeps them:
+Each version keeps its whole level and game settings, so any of them can be read back. The
+project folder holds them beside its files, and replacing the project keeps them:
 
 - `level-versions/index.jsonl`: one line per version, oldest first:
-  `{ "version", "content", "course", "savedAt" }`; `content` is the SHA-256 of the level's
-  compact JSON and `course` that of its [play layout](phantoms.md#courses);
-- `level-versions/<content>.json.gz`: each distinct level, compressed; a large course takes
-  about 20 KB per version.
+  `{ "version", "levelHash", "settingsHash", "course", "savedAt" }`; the hashes are the
+  SHA-256 of the level's and the settings' compact JSON, and `course` that of the level's
+  [play layout and physics](phantoms.md#courses);
+- `level-versions/<sha256>.json.gz`: each distinct level and game settings, compressed, stored
+  once however many versions share it; a large course takes about 20 KB, game settings under
+  1 KB.
 
 While **Record** is on, the Workshop [records your play](phantoms.md#recording-in-the-workshop)
 on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phantom`. Versions
-that play the same share a course, so edits to decorations, labels, colours or artwork keep a
-level's recordings, and a release bundles its level's. Both folders grow with use: commit them
-to keep the history and recordings, or delete what you no longer need.
+that play the same share a course, so edits to decorations, labels, colours, artwork, control
+sensitivity or the cursor keep a level's recordings, while any physics setting starts a new
+course; a release bundles the recordings of its level and settings' course. Both folders grow
+with use: commit them to keep the history and recordings, and delete recordings you no longer
+need. Deleting `level-versions/` restarts the numbering when the project next opens.
 
 ## Publishing a Workshop with its project
 
@@ -383,8 +389,10 @@ Conventions:
   bookkeeping in the project's `.studio.json`.
 - Upload files before referencing them. Deleting a file that is still used fails
   with `409`.
-- A change to the level answers with `"level": { "version", "course" }`, the version it
-  was stored as, and `GET` of the level carries `X-Level-Version` and `X-Level-Course`.
+- Every answer about a project's revisions also says which [level version](#level-versions)
+  its stored level and game settings are: `"level": { "version", "course" }`, or `null` while
+  the stored level is invalid. `GET` of the level carries it as `X-Level-Version` and
+  `X-Level-Course`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -398,7 +406,7 @@ Conventions:
 | GET, PUT, PATCH, DELETE | `/api/projects/{id}/level/objects/{objectId}` | One object |
 | GET, PUT | `/api/projects/{id}/level/labels` | Course labels |
 | GET | `/api/projects/{id}/level/versions` | Every [level version](#level-versions), with its recording count |
-| GET | `/api/projects/{id}/level/versions/{version}` | One version's level |
+| GET | `/api/projects/{id}/level/versions/{version}` | One version: `{ "version", "course", "savedAt", "level", "settings" }` |
 | GET, POST | `/api/projects/{id}/level/versions/{version}/phantoms?session=&clip=` | List or store recordings played on a version |
 | GET, DELETE | `/api/projects/{id}/level/versions/{version}/phantoms/{name}` | One recording |
 | POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB; returns its asset ID |

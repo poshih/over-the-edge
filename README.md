@@ -106,8 +106,8 @@ See [rig strategies](docs/characters.md#rig-strategies).
 
 Releases replay recordings of players near the player as translucent white phantoms. While
 **Record** is on, the Workshop records your play on each saved version of a server project's
-level, marked by a pulsing red **REC**, and a release built from the project bundles the
-recordings made on its level's layout. A release built with **`GAME_PHANTOMS_URL`** also records
+level and game settings, marked by a pulsing red **REC**, and a release built from the project
+bundles the recordings made on its level's layout with its physics. A release built with **`GAME_PHANTOMS_URL`** also records
 a random 10 seconds of its player now and then, sends it to the game's backend and replays what
 the backend sends. Ten seconds take under 4 KB and reproduce every physics step within 1.5 cm;
 arms are placed by the game's own IK rather than recorded. `GAME_PHANTOMS_URL=phantoms/ npm run

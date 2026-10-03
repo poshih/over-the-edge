@@ -142,7 +142,7 @@ function recordingPreference(): boolean {
 }
 const recorder = new PlayRecorder({
   game, enabled: recordingPreference(),
-  target: () => project.playedLevel(),
+  target: () => project.playedVersion(),
   upload: (target, clip, recording) => client.postPhantom(target.project, target.version, clip, recording),
   onFailure: (error) => ui.notice(`Play recordings are not being saved: ${error instanceof Error ? error.message : String(error)}`, 'error'),
 });
@@ -158,8 +158,8 @@ function toggleRecording(): void {
 function recordingNote(): string {
   if (!recorder.on) return 'Record your play as phantoms of the open project\'s level. Off in this browser.';
   if (project.openProject() === null) return 'Recording waits for a server project: open or save one in Project.';
-  if (project.playedLevel() === null) return 'Recording waits for the level to save, a moment after each change.';
-  return 'Recording your play as phantoms of this version of the open project\'s level.';
+  if (project.playedVersion() === null) return 'Recording waits for the level and game settings to save, a moment after each change.';
+  return 'Recording your play as phantoms of the saved version of the open project\'s level and game settings.';
 }
 const serverCopies = new ServerCopies({
   client, health: () => project.serverHealth(), watch: (listener) => project.subscribe(listener),

@@ -154,7 +154,7 @@ export interface ContentManifest {
   // Authored /media/ paths and the packaged file each one plays.
   readonly media: Readonly<Record<string, string>>;
   readonly library: ContentLibrary;
-  // Recordings made on this level's play layout; see docs/phantoms.md.
+  // Recordings made on this level's play layout with these settings' physics; see docs/phantoms.md.
   readonly phantoms: readonly ContentPhantomPack[];
   // Every file the manifest references, by path, with its size in bytes.
   readonly files: Readonly<Record<string, number>>;

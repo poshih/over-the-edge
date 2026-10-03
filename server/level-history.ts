@@ -3,30 +3,39 @@ import { appendFile, open, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { gunzip, gzip } from 'node:zlib';
-import { levelCourse } from '../build/level-hash';
+import { phantomCourse } from '../build/phantom-course';
 import { RECORDINGS_FOLDER } from '../build/release-phantoms';
+import type { GameSettings } from '../src/game-settings';
 import type { LevelDefinition } from '../src/level';
 import { decodePhantom, isPhantomCourse, PhantomError } from '../src/phantom-format';
 import { atomicWrite, missing } from './files';
 import { HttpError } from './http';
 
 // A project's level history, kept in its folder beside the project's files and outliving them: every saved version
-// of the level, and the phantom recordings made while playing one. See docs/projects.md.
+// of the level with the game settings it plays with, and the phantom recordings made while playing one. See
+// docs/projects.md.
 //
-//   level-versions/index.jsonl        one LevelVersion per line, oldest first
-//   level-versions/<content>.json.gz  each distinct level, as its compact JSON
+//   level-versions/index.jsonl       one LevelVersion per line, oldest first
+//   level-versions/<sha256>.json.gz  each distinct level and game settings, as its compact JSON
 //   phantoms/<course>/v<version>-<session>-<clip>.phantom
 //
-// Recordings are filed by course, the SHA-256 of the level's play layout, so every version that plays the same keeps
-// them together: a release bundles the recordings of its level's course.
+// Recordings are filed by course, the SHA-256 of the level's play layout and the physics (src/phantom-course.ts), so
+// every version that plays the same keeps them together: a release bundles the recordings of its course.
 export const LEVEL_HISTORY_FOLDERS = ['level-versions', RECORDINGS_FOLDER] as const;
 
 export interface LevelVersion {
   readonly version: number;
-  // The SHA-256 of the level's compact JSON, which names its stored copy.
-  readonly content: string;
+  // The SHA-256 of the level's and the game settings' compact JSON, each naming its stored copy.
+  readonly levelHash: string;
+  readonly settingsHash: string;
   readonly course: string;
   readonly savedAt: string;
+}
+
+// What the project's answers say of the stored level and settings: the version they are and its course.
+export interface LevelVersionRef {
+  readonly version: number;
+  readonly course: string;
 }
 
 // A recording as listed: its file name and size.
@@ -64,10 +73,11 @@ function parseVersion(line: string): LevelVersion | null {
     throw error;
   }
   if (typeof value !== 'object' || value === null) return null;
-  const { version, content, course, savedAt } = value as Record<string, unknown>;
-  if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1 || typeof content !== 'string' || !SHA256.test(content) ||
-    typeof course !== 'string' || !isPhantomCourse(course) || typeof savedAt !== 'string') return null;
-  return { version, content, course, savedAt };
+  const { version, levelHash, settingsHash, course, savedAt } = value as Record<string, unknown>;
+  if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1 || typeof levelHash !== 'string' || !SHA256.test(levelHash) ||
+    typeof settingsHash !== 'string' || !SHA256.test(settingsHash) || typeof course !== 'string' || !isPhantomCourse(course) ||
+    typeof savedAt !== 'string') return null;
+  return { version, levelHash, settingsHash, course, savedAt };
 }
 
 function parseVersions(lines: readonly string[]): LevelVersion[] {
@@ -122,34 +132,52 @@ export async function findLevelVersion(directory: string, version: number): Prom
   return found;
 }
 
-/**
- * The version of `level`, a validated level just stored as the project's: the latest version when that holds the same
- * level and course, otherwise a new one. Callers hold the project's lock.
- */
-export async function recordLevelVersion(directory: string, level: LevelDefinition): Promise<LevelVersion> {
-  const text = JSON.stringify(level);
-  const content = createHash('sha256').update(text).digest('hex');
-  // Computed every time: a new play layout format gives the same level a new course.
-  const course = levelCourse(level);
-  const recent = await newest(directory);
-  const previous = recent.versions.at(-1) ?? (recent.whole ? null : (await listLevelVersions(directory)).at(-1) ?? null);
-  if (previous?.content === content && previous.course === course) return previous;
-  const copy = join(versions(directory), `${content}.json.gz`);
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+// Stores compact JSON once, named by its SHA-256.
+async function storeCopy(directory: string, hash: string, text: string): Promise<void> {
+  const copy = join(versions(directory), `${hash}.json.gz`);
   const stored = await stat(copy).then(() => true, (error: unknown) => { if (missing(error)) return false; throw error; });
   if (!stored) await atomicWrite(copy, await gzipped(text));
-  const next: LevelVersion = { version: (previous?.version ?? 0) + 1, content, course, savedAt: new Date().toISOString() };
+}
+
+/**
+ * The version of `level` and `settings`, validated, just stored as the project's: the latest version when that holds
+ * the same level, settings and course, otherwise a new one. Callers hold the project's lock.
+ */
+export async function recordLevelVersion(directory: string, level: LevelDefinition, settings: GameSettings): Promise<LevelVersion> {
+  const levelText = JSON.stringify(level);
+  const settingsText = JSON.stringify(settings);
+  const levelHash = sha256(levelText);
+  const settingsHash = sha256(settingsText);
+  // Worked out every time: a new course format gives the same level and settings a new course.
+  const course = phantomCourse(level, settings);
+  const recent = await newest(directory);
+  const previous = recent.versions.at(-1) ?? (recent.whole ? null : (await listLevelVersions(directory)).at(-1) ?? null);
+  if (previous?.levelHash === levelHash && previous.settingsHash === settingsHash && previous.course === course) return previous;
+  await storeCopy(directory, levelHash, levelText);
+  await storeCopy(directory, settingsHash, settingsText);
+  const next: LevelVersion = { version: (previous?.version ?? 0) + 1, levelHash, settingsHash, course, savedAt: new Date().toISOString() };
   await appendFile(join(versions(directory), INDEX), `${recent.unterminated ? '\n' : ''}${JSON.stringify(next)}\n`);
   return next;
 }
 
-// A version's level as its compact JSON.
-export async function readLevelVersion(directory: string, version: LevelVersion): Promise<Buffer> {
+async function readCopy(directory: string, version: LevelVersion, hash: string): Promise<Buffer> {
   try {
-    return await gunzipped(await readFile(join(versions(directory), `${version.content}.json.gz`)));
+    return await gunzipped(await readFile(join(versions(directory), `${hash}.json.gz`)));
   } catch (error) {
-    if (missing(error)) throw new HttpError(404, 'not-found', `The level of version ${version.version} is no longer stored.`, { section: 'level' });
+    if (missing(error)) throw new HttpError(404, 'not-found', `Version ${version.version} is no longer stored whole.`, { section: 'level' });
     throw error;
   }
+}
+
+// A version as JSON: { version, course, savedAt, level, settings }, the level and settings as stored.
+export async function readLevelVersion(directory: string, version: LevelVersion): Promise<Buffer> {
+  const [level, settings] = await Promise.all([readCopy(directory, version, version.levelHash), readCopy(directory, version, version.settingsHash)]);
+  const head = JSON.stringify({ version: version.version, course: version.course, savedAt: version.savedAt });
+  return Buffer.concat([Buffer.from(`${head.slice(0, -1)},"level":`), level, Buffer.from(',"settings":'), settings, Buffer.from('}')]);
 }
 
 export function recordingName(version: number, session: string, clip: number): string {

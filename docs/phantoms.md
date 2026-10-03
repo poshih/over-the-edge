@@ -14,23 +14,25 @@ A release with neither contains no phantom code.
 ## Recording in the Workshop
 
 While **Record** is on in the Workshop header, on until you turn it off in that browser, the
-Workshop records every run you play on a saved version of the open server project's level. A
-pulsing red **REC** beside the game's controls shows when it is recording. Each run is a
-session of clips of up to 10 seconds, each starting with the previous clip's last pose, so a run
-replays as one; a restart, Reset or fall starts the next session. A clip also ends when the
-handle length changes or the level stops being that saved version. Clips shorter than a second,
-or in which the character moved less than 0.5 m and the hammer head less than 3 m, are dropped.
+Workshop records every run you play on a saved [level version](projects.md#level-versions) of
+the open server project: its level together with its game settings. A pulsing red **REC**
+beside the game's controls shows when it is recording. Each run is a session of clips of up to
+10 seconds, each starting with the previous clip's last pose, so a run replays as one; a
+restart, Reset or fall starts the next session. A clip also ends when the handle length
+changes, or the level or game settings stop being that saved version. Clips shorter than a
+second, or in which the character moved less than 0.5 m and the hammer head less than 3 m, are
+dropped.
 
-Recording waits while the level has changes no save has numbered yet: the project saves them a
-moment after you stop editing, as its next [level version](projects.md#level-versions). Without
-a server project nothing is recorded. Clips upload as they end, to
+Recording waits while the level or the game settings have changes no save has numbered yet:
+the project saves them a moment after you stop editing, as its next level version. Without a
+server project nothing is recorded. Clips upload as they end, to
 `POST /api/projects/{id}/level/versions/{version}/phantoms`, and the project keeps them in
 `phantoms/<course>/` beside its files.
 
 ## Bundled recordings
 
-A game build bundles the recordings of its level's [course](#courses) from a folder of
-recordings by course:
+A game build bundles the recordings of its [course](#courses), its level's layout with its
+physics, from a folder of recordings by course:
 
 - a `GAME_PROJECT` folder's own `phantoms/` folder;
 - or **`GAME_PHANTOM_RECORDINGS`**, a folder holding `<course>/*.phantom` files; set it empty to
@@ -170,18 +172,24 @@ length and its bytes. A **pack**, a release's bundled recordings, is laid out th
 ### Courses
 
 Recordings belong to a **course**, which the build and the project server compute: the SHA-256,
-in lowercase hex, of the level's **play layout** (`src/phantom-layout.ts`). The layout holds only
-what moves the player, without object IDs and in a fixed order:
+in lowercase hex, of the level's **play layout** and the game's **physics**
+(`src/phantom-course.ts`). They hold only what moves the player. The layout, without object IDs
+and in a fixed order:
 
 - each terrain object's shape, position, size, angle, illusion and surface;
 - each enemy's species, position, facing, patrol distance and speed;
 - each updraft: a trigger with launch events, its region, position, activation and launches;
 - the start's position, angle and reach.
 
-Decorations, labels, colours, depth, course artwork and other trigger events are left out. A
-recording replays only where its course's layout holds, so editing any of those keeps a
-level's recordings, while moving terrain, changing a surface, an enemy, an updraft or the start
-starts a new course with none.
+The physics: every physics setting but control sensitivity, so the masses, motors, downswing
+boosts, response, friction, damping, bounciness and handle compliance, and the hammer rig's
+handle length, maximum extension and minimum reach.
+
+Decorations, labels, colours, depth, course artwork, other trigger events, control sensitivity
+and the cursor settings are left out. A recording replays only where its course holds, so
+editing any of those keeps a level's recordings, while moving terrain, changing a surface, an
+enemy, an updraft, the start or any physics setting starts a new course with none. Recordings
+made under a physics setting you go back to count again.
 
 `src/phantom-format.ts` implements all of this. It imports no DOM or three.js, and its imports
 carry extensions, so a JavaScript backend can validate recordings with `decodePhantom`, which

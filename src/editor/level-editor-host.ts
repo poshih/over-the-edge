@@ -2,7 +2,7 @@ import type { Point } from '../config';
 import type { DecorationObject } from '../level';
 import type { LevelState } from './level-state';
 import type { ProjectSaveTarget } from './project-save';
-import type { PlayedLevel } from './project-session';
+import type { PlayedVersion } from './project-session';
 import type { ServerLevel } from './server-levels';
 
 export interface EditorCamera {
@@ -42,9 +42,9 @@ export interface LevelEditorOptions {
   // Levels served with this Workshop, which Server levels loads: the published project's first, then the levels
   // folder's.
   serverLevels: readonly ServerLevel[];
-  // The open server project: Save to project writes the level into it as its next version, and the version the page
-  // plays shows in the status.
-  projectSave: ProjectSaveTarget & { playedLevel(): PlayedLevel | null };
+  // The open server project: Save to project writes the level into it, and the level version the page plays shows in
+  // the status.
+  projectSave: ProjectSaveTarget & { playedVersion(): PlayedVersion | null };
   // False when the project warns about leaving instead (a Workshop built with GAME_PROJECT, which
   // keeps its project, level included, in the browser).
   warnBeforeUnload?: boolean;

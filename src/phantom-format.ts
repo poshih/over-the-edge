@@ -45,8 +45,8 @@ const RANGE: readonly (readonly [number, number])[] = [
 
 export class PhantomError extends Error {}
 
-// A course is the SHA-256, in lowercase hex, of its level's play layout (src/phantom-layout.ts): recordings replay
-// only where everything that moves the player is as it was when they were made.
+// A course is the SHA-256, in lowercase hex, of its level's play layout and the game's physics (src/phantom-course.ts):
+// recordings replay only where everything that moves the player is as it was when they were made.
 export function isPhantomCourse(value: string): boolean {
   return /^[0-9a-f]{64}$/.test(value);
 }

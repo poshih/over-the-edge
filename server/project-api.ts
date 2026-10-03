@@ -42,7 +42,6 @@ import {
 import type { LibraryAvatarEntry, LibraryEntry, ModelLibrary, PartRole } from '../src/model-library';
 import { apiManual } from './api-manual';
 import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendBytes, sendError, sendFile, sendJson } from './http';
-import type { LevelVersion } from './level-history';
 import { ProjectStore, SECTION_NAMES } from './project-store';
 import type { ProjectChange, ProjectState, SectionName } from './project-store';
 import { Publisher } from './publish';
@@ -189,13 +188,11 @@ export function createStudioHandler(config: StudioConfig) {
     }
   };
 
+  // Every answer about a project's state says which level version its stored level and game settings are.
   const respondState = (context: Context, state: ProjectState, section: SectionName | null, extra: Record<string, unknown> = {}): void => {
-    sendJson(context.response, 200, { revision: state.revision, sections: state.sections, ...extra },
+    sendJson(context.response, 200, { revision: state.revision, sections: state.sections, level: state.level, ...extra },
       section === null ? {} : { ETag: `"${state.sections[section]}"` });
   };
-
-  // What a response says about a stored level: its version and the phantom course of its recordings.
-  const levelVersion = (version: LevelVersion): { version: number; course: string } => ({ version: version.version, course: version.course });
 
   const level = async (id: string): Promise<LevelDefinition> => {
     const value = await store.readJson(id, LEVEL_REF);
@@ -206,14 +203,12 @@ export function createStudioHandler(config: StudioConfig) {
   const change = async (context: Context, sections: readonly SectionName[], build: (manifest: ProjectManifest, state: ProjectState) =>
     Promise<Omit<ProjectChange, 'sections'> & { result?: unknown }>): Promise<void> => {
     const id = context.params.id!;
-    const { state, result, level } = await store.mutate(id, async (current) => {
+    const { state, result } = await store.mutate(id, async (current) => {
       expectRevision(context, current.state, sections);
       const next = await build(current.manifest, current.state);
       return { ...next, sections };
     });
-    respondState(context, state, sections[0] ?? null, {
-      ...(result === undefined ? {} : { result }), ...(level === null ? {} : { level: levelVersion(level) }),
-    });
+    respondState(context, state, sections[0] ?? null, result === undefined ? {} : { result });
   };
 
   // One entry per API section: how to read it and how a new value becomes a validated change.
@@ -393,14 +388,16 @@ export function createStudioHandler(config: StudioConfig) {
     }
     const manifest = defaultProjectManifest(title);
     const content = loadProjectContent(manifest, () => DEFAULT_LEVEL);
-    const { state, level } = await store.write(validateProjectId(id), content, { replace: false });
-    sendJson(context.response, 201, { id, revision: state.revision, sections: state.sections, level: levelVersion(level) });
+    const state = await store.write(validateProjectId(id), content, { replace: false });
+    sendJson(context.response, 201, { id, revision: state.revision, sections: state.sections, level: state.level });
   });
   route('GET', '/api/projects/:id', async (context) => {
     const { manifest, state } = await project(context);
     const files = await Promise.all(projectFileRefs(manifest).map(async (ref) =>
       ({ path: ref.path, kind: ref.kind, bytes: await store.size(context.params.id!, ref.path) })));
-    sendJson(context.response, 200, { id: context.params.id, revision: state.revision, sections: state.sections, updatedAt: state.updatedAt, manifest, files });
+    sendJson(context.response, 200, {
+      id: context.params.id, revision: state.revision, sections: state.sections, level: state.level, updatedAt: state.updatedAt, manifest, files,
+    });
   });
   route('DELETE', '/api/projects/:id', async (context) => {
     await store.remove(context.params.id!);
@@ -408,7 +405,7 @@ export function createStudioHandler(config: StudioConfig) {
   });
   route('GET', '/api/projects/:id/revision', async (context) => {
     const { state } = await project(context);
-    sendJson(context.response, 200, { revision: state.revision, sections: state.sections, updatedAt: state.updatedAt });
+    sendJson(context.response, 200, { revision: state.revision, sections: state.sections, level: state.level, updatedAt: state.updatedAt });
   });
   route('GET', '/api/projects/:id/bundle', async (context) => {
     const id = context.params.id!;
@@ -420,8 +417,8 @@ export function createStudioHandler(config: StudioConfig) {
     const id = context.params.id!;
     store.directory(id);
     const content = await importBundle(await readJson(context.request, PROJECT_LIMITS.bundleBytes));
-    const { state, level } = await store.write(id, content, { replace: true });
-    sendJson(context.response, 200, { id, revision: state.revision, sections: state.sections, level: levelVersion(level) });
+    const state = await store.write(id, content, { replace: true });
+    sendJson(context.response, 200, { id, revision: state.revision, sections: state.sections, level: state.level });
   });
   route('POST', '/api/projects/:id/validate', async (context) => {
     const id = context.params.id!;
@@ -446,11 +443,12 @@ export function createStudioHandler(config: StudioConfig) {
     sendJson(context.response, 200, { running: publisher.isRunning(context.params.id!), release: await publisher.status(context.params.id!) });
   });
 
-  // The level with the version it is stored as; the generic section answers its PUT.
+  // The level with the version it and the stored game settings are; the generic section answers its PUT.
   route('GET', '/api/projects/:id/level', async (context) => {
-    const { level: value, version, state } = await store.readLevel(context.params.id!);
-    sendJson(context.response, 200, value, {
-      ETag: `"${state.sections.level}"`, 'X-Level-Version': String(version.version), 'X-Level-Course': version.course,
+    const { level, state } = await store.readLevel(context.params.id!);
+    sendJson(context.response, 200, level, {
+      ETag: `"${state.sections.level}"`,
+      ...(state.level === null ? {} : { 'X-Level-Version': String(state.level.version), 'X-Level-Course': state.level.course }),
     });
   });
 
@@ -465,10 +463,8 @@ export function createStudioHandler(config: StudioConfig) {
     sendJson(context.response, 200, { versions });
   });
   route('GET', '/api/projects/:id/level/versions/:version', async (context) => {
-    const { version, json } = await store.levelVersion(context.params.id!, versionNumber(context));
-    sendBytes(context.request, context.response, json, 'application/json; charset=utf-8', {
-      'Cache-Control': 'no-store', 'X-Level-Version': String(version.version), 'X-Level-Course': version.course,
-    });
+    const json = await store.levelVersion(context.params.id!, versionNumber(context));
+    sendBytes(context.request, context.response, json, 'application/json; charset=utf-8', { 'Cache-Control': 'no-store' });
   });
   route('GET', '/api/projects/:id/level/versions/:version/phantoms', async (context) => {
     sendJson(context.response, 200, { phantoms: await store.recordings(context.params.id!, versionNumber(context)) });
@@ -479,7 +475,7 @@ export function createStudioHandler(config: StudioConfig) {
     const version = versionNumber(context);
     const bytes = await readUpload(context.request, PHANTOM_LIMITS.bytes, []);
     const stored = await store.addRecording(context.params.id!, version, { session, clip: /^[0-9]{1,7}$/.test(clip) ? Number(clip) : -1 }, bytes);
-    sendJson(context.response, 201, { name: stored.name, ...levelVersion(stored.version) });
+    sendJson(context.response, 201, { name: stored.name, version: stored.version.version, course: stored.version.course });
   });
   route('GET', '/api/projects/:id/level/versions/:version/phantoms/:name', async (context) => {
     const bytes = await store.recording(context.params.id!, versionNumber(context), decodeURIComponent(context.params.name!));

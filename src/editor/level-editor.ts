@@ -613,17 +613,17 @@ export function createLevelEditor(options: LevelEditorOptions) {
 Export the level first if you want to keep them. Continue without saving?`);
   }
 
-  // Where the level is kept: as a numbered version in the open server project, which saves it a moment after each
-  // change, or nowhere until it is exported.
+  // Where the level is kept: in the open server project, which saves it a moment after each change, as part of the
+  // numbered level version the page plays once its game settings are saved too; or nowhere until it is exported.
   function saveState(): string {
     if (loading === 'file') return 'Reading level file…';
     if (loading === 'server') return 'Downloading server level…';
     if (drawing.vertices.length > 0) return 'Unfinished outline - finish or cancel before saving';
     const project = options.projectSave.openProject();
     if (project === null) return dirty() ? 'Unsaved changes — export, or open a server project in Project, to keep them' : 'No unsaved changes';
-    const played = options.projectSave.playedLevel();
-    return played !== null && !dirty() ? `Saved as version ${played.version} in project "${project}"`
-      : `Unsaved changes — they save to project "${project}" a moment after you stop`;
+    if (dirty()) return `Unsaved changes — they save to project "${project}" a moment after you stop`;
+    const played = options.projectSave.playedVersion();
+    return played === null ? `Saved in project "${project}"` : `Saved as version ${played.version} in project "${project}"`;
   }
 
   function renderStatus(): void {

@@ -29,8 +29,8 @@ export const PHANTOM_PLAYBACK = {
 export interface PhantomBuild {
   // GAME_PHANTOMS_URL as configured, maybe relative to the page; null without a backend.
   readonly url: string | null;
-  // The SHA-256 of the level's play layout: recordings replay only where everything that moves the player is as it
-  // was when they were made.
+  // The SHA-256 of the level's play layout and physics: recordings replay only where everything that moves the player
+  // is as it was when they were made.
   readonly course: string;
   readonly start: typeof startPhantoms;
 }

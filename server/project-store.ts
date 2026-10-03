@@ -1,10 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { GameSettings } from '../src/game-settings';
 import { LEVEL_LIMITS, validateLevel } from '../src/level';
 import type { LevelDefinition } from '../src/level';
+import { PHANTOM_COURSE_FORMAT } from '../src/phantom-course';
 import {
-  inSection, loadProjectContent, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, validateProjectId,
+  inSection, isProjectDataError, loadProjectContent, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, validateProjectId,
   validateProjectManifest,
 } from '../src/project';
 import type { ProjectContent, ProjectFileKind, ProjectFileRef, ProjectManifest } from '../src/project';
@@ -14,7 +16,7 @@ import {
   addRecording, countRecordings, findLevelVersion, LEVEL_HISTORY_FOLDERS, listLevelVersions, listRecordings, readLevelVersion,
   readRecording, recordingName, recordLevelVersion, removeRecording,
 } from './level-history';
-import type { LevelVersion, PhantomRecording } from './level-history';
+import type { LevelVersion, LevelVersionRef, PhantomRecording } from './level-history';
 
 // API sections; each has its own revision so concurrent editors only conflict on what they share.
 export const SECTION_NAMES = [
@@ -27,13 +29,21 @@ export interface ProjectState {
   readonly revision: number;
   readonly sections: Readonly<Record<SectionName, number>>;
   readonly updatedAt: string;
+  // The version the stored level and game settings are, and the course of its recordings; null while the stored level
+  // is not a valid level.
+  readonly level: LevelVersionRef | null;
 }
 
 // The state file also records what each section's stored content was when the store last counted it, so a change
 // made outside the API (a tool, an editor or version control writing the files) is counted too. Null until first seen.
+// The level version is worked out again when the course format it was worked out with is not this code's.
 interface StoredState extends ProjectState {
   readonly observed: Readonly<Record<SectionName, string>> | null;
+  readonly courseFormat: number;
 }
+
+// The sections a level version holds.
+const VERSIONED: ReadonlySet<SectionName> = new Set(['level', 'settings']);
 
 // Each section's stored content: its part of the manifest (null for one kept only in files) and the files it owns.
 const SECTION_MANIFEST: Readonly<Record<SectionName, (manifest: ProjectManifest) => unknown>> = {
@@ -84,9 +94,15 @@ const FILE_PATTERN = /^(?:project\.json|level\.json|characters\/(?:primary|alter
 
 function initialState(): StoredState {
   return {
-    revision: 1, updatedAt: new Date().toISOString(), observed: null,
+    revision: 1, updatedAt: new Date().toISOString(), observed: null, level: null, courseFormat: 0,
     sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, 1])) as Record<SectionName, number>,
   };
+}
+
+function isVersionRef(value: unknown): value is LevelVersionRef {
+  if (typeof value !== 'object' || value === null) return false;
+  const { version, course } = value as Record<string, unknown>;
+  return typeof version === 'number' && Number.isSafeInteger(version) && version >= 1 && typeof course === 'string' && /^[0-9a-f]{64}$/.test(course);
 }
 
 // Each section's stored content in `directory` as a short signature: its part of the manifest and, for every file it
@@ -163,20 +179,45 @@ export class ProjectStore {
   }
 
   // The manifest and its state under the project's lock, with sections whose stored content changed since the store
-  // last counted them (by the signatures above) counted as changed; the state file keeps that bookkeeping.
+  // last counted them (by the signatures above) counted as changed; the state file keeps that bookkeeping. A level or
+  // game settings changed outside the API become a level version here, as does a project first seen.
   private async current(id: string): Promise<{ manifest: ProjectManifest; state: StoredState }> {
     const directory = this.directory(id);
     const recorded = await this.state(directory);
     const manifest = await this.manifest(id);
     const observed = await signatures(directory, manifest);
     const changed = recorded.observed === null ? [] : SECTION_NAMES.filter((name) => recorded.observed![name] !== observed[name]);
-    if (recorded.observed !== null && changed.length === 0) return { manifest, state: recorded };
+    const versioned = recorded.observed === null || recorded.courseFormat !== PHANTOM_COURSE_FORMAT || changed.some((name) => VERSIONED.has(name));
+    if (changed.length === 0 && !versioned) return { manifest, state: recorded };
     const sections = { ...recorded.sections };
     for (const name of changed) sections[name] += 1;
-    const state: StoredState = changed.length === 0 ? { ...recorded, observed }
-      : { revision: recorded.revision + 1, sections, updatedAt: new Date().toISOString(), observed };
+    const level = versioned ? await this.version(id, null, manifest.settings) : recorded.level;
+    const state: StoredState = changed.length === 0 ? { ...recorded, observed, level, courseFormat: PHANTOM_COURSE_FORMAT } : {
+      revision: recorded.revision + 1, sections, updatedAt: new Date().toISOString(), observed, level, courseFormat: PHANTOM_COURSE_FORMAT,
+    };
     await atomicWrite(join(directory, STATE_FILE), `${JSON.stringify(state)}\n`);
     return { manifest, state };
+  }
+
+  // The version of the stored level, or of `level` just stored, with `settings`, recorded if it is new; null while the
+  // stored level is not a valid level, on which nothing can be played.
+  private async version(id: string, level: LevelDefinition | null, settings: GameSettings): Promise<LevelVersionRef | null> {
+    let played = level;
+    if (played === null) {
+      try {
+        played = await this.storedLevel(id);
+      } catch (error) {
+        if (isProjectDataError(error)) return null;
+        throw error;
+      }
+    }
+    const { version, course } = await recordLevelVersion(this.directory(id), played, settings);
+    return { version, course };
+  }
+
+  private async storedLevel(id: string): Promise<LevelDefinition> {
+    const value = await this.readJson(id, LEVEL_REF);
+    return inSection('level', () => validateLevel(value));
   }
 
   private async manifest(id: string): Promise<ProjectManifest> {
@@ -247,21 +288,20 @@ export class ProjectStore {
     });
   }
 
-  // Serializes changes per project; `change` sees the current manifest and state under the lock. `level` is the version
-  // a change to the level stored it as.
+  // Serializes changes per project; `change` sees the current manifest and state under the lock.
   async mutate<T>(id: string, change: (current: { manifest: ProjectManifest; state: ProjectState }) =>
-    Promise<ProjectChange & { readonly result?: T }>): Promise<{ state: ProjectState; result: T | undefined; level: LevelVersion | null }> {
+    Promise<ProjectChange & { readonly result?: T }>): Promise<{ state: ProjectState; result: T | undefined }> {
     return this.locked(id, async () => {
       const current = await this.current(id);
       const next = await change(current);
-      const { state, level } = await this.commit(id, current, next);
-      return { state, result: next.result, level };
+      const state = await this.commit(id, current, next);
+      return { state, result: next.result };
     });
   }
 
   // Writes a complete project, replacing any existing one only when asked; a replaced project's level versions and
-  // recordings stay. Returns the version its level is stored as.
-  async write(id: string, content: ProjectContent, options: { replace: boolean }): Promise<{ state: ProjectState; level: LevelVersion }> {
+  // recordings stay.
+  async write(id: string, content: ProjectContent, options: { replace: boolean }): Promise<ProjectState> {
     return this.locked(id, async () => {
       const directory = this.directory(id);
       let previous: ProjectState | null = null;
@@ -286,10 +326,12 @@ export class ProjectStore {
         }
         await atomicWrite(join(staging, PROJECT_FILES.manifest), `${JSON.stringify(content.manifest, null, 2)}\n`);
         const base = previous ?? { ...initialState(), revision: 0, sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, 0])) as Record<SectionName, number> };
-        // Renaming the staging folder keeps its files' sizes and times, so they are signed here.
+        // Renaming the staging folder keeps its files' sizes and times, so they are signed here. The level version is
+        // worked out once the project is in place with its history.
         const state: StoredState = {
           revision: base.revision + 1, updatedAt: new Date().toISOString(), observed: await signatures(staging, content.manifest),
           sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, base.sections[name] + 1])) as Record<SectionName, number>,
+          level: null, courseFormat: 0,
         };
         await atomicWrite(join(staging, STATE_FILE), `${JSON.stringify(state)}\n`);
         const trash = join(this.root, `.trash-${id}-${randomBytes(6).toString('hex')}`);
@@ -301,7 +343,11 @@ export class ProjectStore {
           }
           await rm(trash, { recursive: true, force: true });
         }
-        return { state, level: await recordLevelVersion(directory, content.level) };
+        const placed: StoredState = {
+          ...state, level: await this.version(id, content.level, content.manifest.settings), courseFormat: PHANTOM_COURSE_FORMAT,
+        };
+        await atomicWrite(join(directory, STATE_FILE), `${JSON.stringify(placed)}\n`);
+        return placed;
       } catch (error) {
         await rm(staging, { recursive: true, force: true });
         throw error;
@@ -324,6 +370,8 @@ export class ProjectStore {
       if (typeof value === 'object' && value !== null && typeof Reflect.get(value, 'revision') === 'number') {
         const sections = Reflect.get(value, 'sections') as Record<string, unknown> | undefined;
         const observed = Reflect.get(value, 'observed') as Record<string, unknown> | null | undefined;
+        const level: unknown = Reflect.get(value, 'level');
+        const courseFormat: unknown = Reflect.get(value, 'courseFormat');
         const base = initialState();
         return {
           revision: Reflect.get(value, 'revision') as number,
@@ -332,6 +380,9 @@ export class ProjectStore {
             [name, typeof sections?.[name] === 'number' ? sections[name] : 1])) as Record<SectionName, number>,
           observed: typeof observed === 'object' && observed !== null && SECTION_NAMES.every((name) => typeof observed[name] === 'string')
             ? Object.fromEntries(SECTION_NAMES.map((name) => [name, observed[name] as string])) as Record<SectionName, string> : null,
+          level: isVersionRef(level) ? { version: level.version, course: level.course } : null,
+          // A version that cannot be read is worked out again.
+          courseFormat: (level === null || isVersionRef(level)) && typeof courseFormat === 'number' ? courseFormat : 0,
         };
       }
     } catch (error) {
@@ -341,10 +392,9 @@ export class ProjectStore {
     return initialState();
   }
 
-  private async commit(id: string, current: { manifest: ProjectManifest; state: StoredState }, change: ProjectChange):
-    Promise<{ state: ProjectState; level: LevelVersion | null }> {
+  private async commit(id: string, current: { manifest: ProjectManifest; state: StoredState }, change: ProjectChange): Promise<ProjectState> {
     const { state } = current;
-    if (change.sections.length === 0) return { state, level: null };
+    if (change.sections.length === 0) return state;
     for (const [path, value] of change.json ?? []) {
       await atomicWrite(this.filePath(id, path), path === PROJECT_FILES.level ? `${JSON.stringify(value, null, 2)}\n` : JSON.stringify(value));
     }
@@ -355,24 +405,30 @@ export class ProjectStore {
     for (const path of change.remove ?? []) await rm(this.filePath(id, path), { force: true });
     const sections = { ...state.sections };
     for (const name of new Set(change.sections)) sections[name] += 1;
-    const next: StoredState = {
-      revision: state.revision + 1, sections, updatedAt: new Date().toISOString(),
-      observed: await signatures(this.directory(id), change.manifest ?? current.manifest),
-    };
-    await atomicWrite(join(this.directory(id), STATE_FILE), `${JSON.stringify(next)}\n`);
+    const manifest = change.manifest ?? current.manifest;
     // Levels reach the store validated.
     const level = change.json?.get(PROJECT_FILES.level) as LevelDefinition | undefined;
-    return { state: next, level: level === undefined ? null : await recordLevelVersion(this.directory(id), level) };
+    const next: StoredState = {
+      revision: state.revision + 1, sections, updatedAt: new Date().toISOString(),
+      observed: await signatures(this.directory(id), manifest),
+      level: change.sections.some((name) => VERSIONED.has(name)) ? await this.version(id, level ?? null, manifest.settings) : state.level,
+      courseFormat: PHANTOM_COURSE_FORMAT,
+    };
+    await atomicWrite(join(this.directory(id), STATE_FILE), `${JSON.stringify(next)}\n`);
+    return next;
   }
 
-  // The stored level and the version it is, read together under the lock. A level changed outside the API, or stored
-  // before versions were kept, becomes a new version here.
-  async readLevel(id: string): Promise<{ level: LevelDefinition; version: LevelVersion; state: ProjectState }> {
+  // The stored level with the state it belongs to, read together under the lock. The level version is worked out
+  // again from the level read, so a history removed or rewritten by hand is numbered afresh when the project opens.
+  async readLevel(id: string): Promise<{ level: LevelDefinition; state: ProjectState }> {
     return this.locked(id, async () => {
-      const { state } = await this.current(id);
-      const value = await this.readJson(id, LEVEL_REF);
-      const level = inSection('level', () => validateLevel(value));
-      return { level, version: await recordLevelVersion(this.directory(id), level), state };
+      const { manifest, state } = await this.current(id);
+      const level = await this.storedLevel(id);
+      const version = await this.version(id, level, manifest.settings);
+      if (version?.version === state.level?.version && version?.course === state.level?.course) return { level, state };
+      const next: StoredState = { ...state, level: version };
+      await atomicWrite(join(this.directory(id), STATE_FILE), `${JSON.stringify(next)}\n`);
+      return { level, state: next };
     });
   }
 
@@ -385,12 +441,9 @@ export class ProjectStore {
     });
   }
 
-  // A version and its level's compact JSON.
-  async levelVersion(id: string, version: number): Promise<{ version: LevelVersion; json: Buffer }> {
-    return this.history(id, async (directory) => {
-      const entry = await findLevelVersion(directory, version);
-      return { version: entry, json: await readLevelVersion(directory, entry) };
-    });
+  // A version as JSON, with its level and game settings.
+  async levelVersion(id: string, version: number): Promise<Buffer> {
+    return this.history(id, async (directory) => readLevelVersion(directory, await findLevelVersion(directory, version)));
   }
 
   // Stores a phantom recording of `version` under a name made of its session and clip, which the same clip sent again

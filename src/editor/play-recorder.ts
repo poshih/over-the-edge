@@ -2,7 +2,7 @@ import type { Game } from '../game';
 import { encodePhantom, PHANTOM_LIMITS, PhantomError } from '../phantom-format';
 import { PhantomCapture } from '../phantom-recorder';
 import type { RigPose } from '../simulation';
-import type { PlayedLevel } from './project-session';
+import type { PlayedVersion } from './project-session';
 
 // One clip in a session, as the project server files it.
 export interface RecordedClip {
@@ -17,23 +17,23 @@ function sessionId(): string {
 
 /**
  * Records Workshop play as phantom recordings of the level version being played (see docs/phantoms.md). While it is
- * on and the page plays a saved version of the open project's level, each run becomes a session of clips up to the
- * longest a recording may be, each starting with the previous one's last pose, so a run replays as one. A restart
- * starts the next session. A clip also ends when the handle length changes, the level stops being that version or
- * recording turns off; one shorter than a second, or in which the player hardly moved, is dropped. Clips upload as
- * they end, on the game's steps, so pauses record nothing.
+ * on and the page plays a saved version of the open project's level and game settings, each run becomes a session of
+ * clips up to the longest a recording may be, each starting with the previous one's last pose, so a run replays as
+ * one. A restart starts the next session. A clip also ends when the handle length changes, the level or settings stop
+ * being that version or recording turns off; one shorter than a second, or in which the player hardly moved, is
+ * dropped. Clips upload as they end, on the game's steps, so pauses record nothing.
  */
 export class PlayRecorder {
   private readonly game: Game;
-  private readonly target: () => PlayedLevel | null;
-  private readonly upload: (target: PlayedLevel, clip: RecordedClip, recording: Uint8Array<ArrayBuffer>) => Promise<void>;
+  private readonly target: () => PlayedVersion | null;
+  private readonly upload: (target: PlayedVersion, clip: RecordedClip, recording: Uint8Array<ArrayBuffer>) => Promise<void>;
   private readonly onFailure: (error: unknown) => void;
   private readonly capture = new PhantomCapture();
   private readonly pose: RigPose = { x: 0, y: 0, pot: 0, tipX: 0, tipY: 0, buttX: 0, buttY: 0 };
   private readonly unobserve: () => void;
   private enabled: boolean;
   // The clip being captured, or null between clips.
-  private clip: { readonly target: PlayedLevel; readonly session: string; readonly index: number } | null = null;
+  private clip: { readonly target: PlayedVersion; readonly session: string; readonly index: number } | null = null;
   private session: string | null = null;
   private clips = 0;
   private time = -Infinity;
@@ -44,8 +44,8 @@ export class PlayRecorder {
     readonly game: Game;
     readonly enabled: boolean;
     // What the page plays now: the version to record for, or null when nothing can be recorded.
-    readonly target: () => PlayedLevel | null;
-    readonly upload: (target: PlayedLevel, clip: RecordedClip, recording: Uint8Array<ArrayBuffer>) => Promise<void>;
+    readonly target: () => PlayedVersion | null;
+    readonly upload: (target: PlayedVersion, clip: RecordedClip, recording: Uint8Array<ArrayBuffer>) => Promise<void>;
     readonly onFailure: (error: unknown) => void;
   }) {
     this.game = options.game;
@@ -98,7 +98,7 @@ export class PlayRecorder {
     this.capture.add(this.pose);
   }
 
-  private begin(target: PlayedLevel, handle: number): void {
+  private begin(target: PlayedVersion, handle: number): void {
     if (this.session === null) {
       this.session = sessionId();
       this.clips = 0;

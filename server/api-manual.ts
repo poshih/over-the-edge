@@ -65,8 +65,8 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|POST', '/api/projects/{id}/level/objects', 'List objects (?kind=terrain|trigger|enemy|start) or add one object, an array, or { "objects": [...] }.'),
       endpoint('GET|PUT|PATCH|DELETE', '/api/projects/{id}/level/objects/{objectId}', 'Read, replace, merge-patch or delete one level object.'),
       endpoint('GET|PUT', '/api/projects/{id}/level/labels', 'Course labels: [{ "text", "x", "y" }].'),
-      endpoint('GET', '/api/projects/{id}/level/versions', 'Every saved version of the level, oldest first: { "versions": [{ "version", "content", "course", "savedAt", "recordings" }] }; see "levelVersions".'),
-      endpoint('GET', '/api/projects/{id}/level/versions/{version}', 'One version\'s level JSON, with X-Level-Version and X-Level-Course headers.'),
+      endpoint('GET', '/api/projects/{id}/level/versions', 'Every saved version of the level and game settings, oldest first: { "versions": [{ "version", "levelHash", "settingsHash", "course", "savedAt", "recordings" }] }; see "levelVersions".'),
+      endpoint('GET', '/api/projects/{id}/level/versions/{version}', 'One version: { "version", "course", "savedAt", "level", "settings" }, with its level JSON and game settings.'),
       endpoint('GET|POST', '/api/projects/{id}/level/versions/{version}/phantoms?session={session}&clip={clip}', 'List the phantom recordings played on a version ({ "phantoms": [{ "name", "bytes" }] }), or store one: POST the recording\'s bytes as application/octet-stream with its play session (32 lowercase hex digits) and clip number; the same session and clip replace the earlier upload.', 'phantom recording bytes'),
       endpoint('GET|DELETE', '/api/projects/{id}/level/versions/{version}/phantoms/{name}', 'Download or delete one recording, named v{version}-{session}-{clip}.phantom.'),
       endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a static course GLB; returns its content ID for terrain "art": { "assetId", "mirror" } or a decoration model in art.decorations.', 'GLB bytes'),
@@ -92,10 +92,10 @@ export function apiManual(auth: 'token' | 'loopback') {
       limits: PROJECT_LIMITS,
     },
     levelVersions: {
-      description: 'Every level the project stores becomes its next version unless it matches the latest: a PUT of the level section, a level/objects or level/labels change, a bundle, or a level.json changed on disk (numbered at its next GET). '
-        + 'Responses to level changes carry "level": { "version", "course" }; GET level answers with X-Level-Version and X-Level-Course headers.',
-      course: 'The SHA-256 of the level\'s play layout: each terrain object\'s shape, position, size, angle, illusion and surface, the enemies, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, artwork, labels, other trigger events or decorations. '
-        + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level\'s course.',
+      description: 'A version is the stored level together with the game settings it plays with. Whenever either changes, they become the project\'s next version unless they match the latest: a change to the level, level/objects, level/labels or settings sections, a bundle, or a level.json or project.json changed on disk (numbered when the project is next read). '
+        + 'Every answer about revisions (section changes, GET revision, GET project, bundles) carries "level": { "version", "course" }, null while the stored level is invalid; GET level answers with X-Level-Version and X-Level-Course headers.',
+      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s shape, position, size, angle, illusion and surface, the enemies, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, artwork, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
+        + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level and settings\' course.',
       phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records play on the version it plays, one session per run, in consecutive clips.',
     },
     sections: {

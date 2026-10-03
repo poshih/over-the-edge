@@ -7,7 +7,7 @@ import { pathType } from '../src/content';
 import { isContentPath } from '../src/content-ref';
 import { sendBytes, sendFile } from '../server/http';
 import { phantomMiddleware, PhantomStore } from '../server/phantom-store';
-import { levelCourse } from './level-hash';
+import { phantomCourse } from './phantom-course';
 import { packReleaseContent } from './release-content';
 import type { ReleaseContent } from './release-content';
 import type { ReleaseInput } from './release-input';
@@ -89,7 +89,7 @@ export function gameRelease(options: {
   const current = (): Packed => {
     if (packed === null) {
       const input = options.load();
-      const course = levelCourse(input.level);
+      const course = phantomCourse(input.level, input.settings);
       packed = { input, course, content: packReleaseContent(input, loadReleaseRecordings(options.recordings, course)) };
       // Files found while loading, such as a level's public/media/ files, join the watch.
       for (const file of input.files) {
