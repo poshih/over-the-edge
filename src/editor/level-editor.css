@@ -603,3 +603,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.level-replay-controls,
+.level-replay-speed,
+.level-replay-position {
+  margin-top: 12px;
+}

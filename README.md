@@ -562,6 +562,10 @@ repository's `levels/` folder, named by its file name, and first, in a Workshop 
 is not a valid level. A level downloads when you load it, and replaces the current level like
 an import, asking first when there are unsaved changes.
 
+**Replays** plays back the runs the Workshop [recorded](docs/phantoms.md#recording-in-the-workshop)
+on each saved version: pick a version and a run, then **Play**, change the speed, move through
+the run with **Position**, and let **Follow** keep the camera on the phantom.
+
 ### Level board
 
 **Board**, on until you turn it off, lays a chessboard over the course so you can name an

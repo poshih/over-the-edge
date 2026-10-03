@@ -31,6 +31,7 @@ import { placeSetPiece, SET_PIECE_CATALOG, SET_PIECE_CATEGORIES, SET_PIECES, set
 import type { SetPiece, SetPieceCategory, SetPieceCounts } from './set-pieces';
 import { SurfaceIndex } from './surface-snap';
 import { createProjectSaveButton } from './project-save';
+import { createReplayViewer } from './replay-viewer';
 import { downloadServerLevel } from './server-levels';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import { DRAWING, PolygonDraft } from './polygon-draft';
@@ -417,6 +418,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
     ? 'This Workshop serves no levels. Put level JSON files in the levels folder of its repository, then build or start it again.'
     : 'The same for everyone who opens this Workshop. Loading one replaces the current level.'}</p>
       </div>
+      `)}
+      ${sectionMarkup({ id: 'level-replays', title: 'Replays', hint: 'Watch the play recorded on this project\'s level' }, `
+      <div class="level-replays"></div>
       `)}
       ${sectionMarkup({ id: 'level-file', title: 'Level JSON', hint: 'Import or export, e.g. for releases' }, `
       <fieldset class="tuning-group level-files">
@@ -1189,6 +1193,7 @@ Export the level first if you want to keep them. Continue without saving?`);
 
   function fitCourse(): void {
     cancelGesture();
+    replays.stopFollowing();
     let combined: Bounds | null = null;
     for (const [id, bound] of bounds) {
       if (level.object(id).kind === 'decoration') continue;
@@ -1332,6 +1337,12 @@ Export the level first if you want to keep them. Continue without saving?`);
     createProjectSaveButton({ target: options.projectSave, sections: ['level'], label: 'the level', signal: events.signal }));
   const unsubscribeProject = options.projectSave.subscribe(() => renderStatus());
   events.signal.addEventListener('abort', unsubscribeProject, { once: true });
+  const replays = createReplayViewer({
+    mount: element(root, '.level-replays'), signal: events.signal, source: options.replays.source, figure: options.replays.figure, onNotice,
+    follow: (point) => {
+      if (active) setCamera({ x: point.x, y: point.y, worldHeight: camera.state().worldHeight });
+    },
+  });
   serverList.replaceChildren(...(options.serverLevels.length === 0 ? [new Option('No server levels', '')]
     : options.serverLevels.map((entry, index) => new Option(entry.name, String(index)))));
 
@@ -1644,6 +1655,7 @@ Export the level first if you want to keep them. Continue without saving?`);
   action('.level-zoom-out', () => zoom(ZOOM_FACTOR));
   action('.level-go-start', () => {
     cancelGesture();
+    replays.stopFollowing();
     const { x, y } = level.start();
     setCamera({ ...camera.state(), x, y });
   });
@@ -1661,6 +1673,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       return;
     }
     cancelGesture();
+    replays.stopFollowing();
     boardInput.value = name;
     if (!boardShown) setBoardShown(true);
     const area = boardSquareBounds(boardLeft(terrainLeft), square);
@@ -1799,6 +1812,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         if (Math.hypot(client.x - gesture.start.x, client.y - gesture.start.y) < DRAG_DISTANCE) return;
         gesture.moved = true;
         overlay.dataset.panning = '';
+        replays.stopFollowing();
       }
       setCamera({
         ...gesture.camera,
@@ -1878,6 +1892,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       renderControls();
     }
     gesture = { kind: 'pinch', pointerId: first, other: second, starts: [a, b], anchor: camera.unproject(midpoint(a, b)), camera: { ...camera.state() } };
+    replays.stopFollowing();
     draw();
   }
 
@@ -2148,6 +2163,7 @@ Export the level first if you want to keep them. Continue without saving?`);
           camera.set(savedCamera === null ? camera.state() : savedCamera);
           renderLoadControls();
           renderControls();
+          replays.setActive(true);
         }
         alignOverlay();
       } else {
@@ -2156,6 +2172,7 @@ Export the level first if you want to keep them. Continue without saving?`);
           onNotice('Your unfinished outline is kept in Workshop / Level. Finish shape to include it in the level.', 'info');
         }
         active = false;
+        replays.setActive(false);
         importGeneration++;
         // The hidden canvas never hears these fingers lift.
         touches.clear();
@@ -2204,6 +2221,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       drawing.clear();
       active = false; disposed = true; importGeneration++;
       options.decorations.preview(null);
+      replays.dispose();
       events.abort(); resize.disconnect(); unsubscribe();
       camera.set(null);
       bounds.clear();

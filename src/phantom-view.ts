@@ -124,6 +124,8 @@ export class PhantomView implements ViewLayer {
   readonly pass = 'actors';
   private readonly geometry = createFigureGeometry();
   private readonly figures: readonly Figure[];
+  // A figure outside playback that hold() poses, made when first needed.
+  private held: Figure | null = null;
   private readonly toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private time: number | null = null;
   private readonly pose: PhantomPose = { x: 0, y: 0, pot: 0, angle: 0, along: 0, across: 0 };
@@ -133,9 +135,10 @@ export class PhantomView implements ViewLayer {
   };
   private readonly grips: GripDistances = { left: 0, right: 0 };
 
-  constructor() {
+  // `figures`: the phantoms that can play at once; a view that only holds one needs none.
+  constructor(options: { readonly figures?: number } = {}) {
     this.root.name = 'phantoms';
-    this.figures = Array.from({ length: PHANTOM_LOOK.figures }, () => createFigure(this.geometry));
+    this.figures = Array.from({ length: options.figures ?? PHANTOM_LOOK.figures }, () => createFigure(this.geometry));
     for (const figure of this.figures) this.root.add(figure.root);
   }
 
@@ -155,7 +158,7 @@ export class PhantomView implements ViewLayer {
     figure.keyframe = 0;
     figure.hold.reset();
     for (const side of ARM_SIDES) figure.arms[side].pose = null;
-    this.place(figure, 0);
+    this.place(figure, 0, true);
     figure.root.visible = true;
     return true;
   }
@@ -170,17 +173,51 @@ export class PhantomView implements ViewLayer {
       if (figure.track === null) continue;
       figure.time += dt;
       if (figure.time >= figure.track.duration) this.stop(figure);
-      else this.place(figure, dt);
+      else this.place(figure, dt, true);
     }
   }
 
-  // Ends every phantom at once.
+  /**
+   * Shows `track` at `seconds` on a figure of its own, whatever the game's time does, and returns the pose it shows,
+   * valid until the next call; null hides the figure. Its hands and arms carry on from the previous call when time
+   * moved forward less than a frame's step, on the same track or into one that `continues` it, as a run's next clip
+   * does; any other move starts them afresh.
+   */
+  hold(track: PhantomTrack | null, seconds: number, continues = false): Readonly<PhantomPose> | null {
+    if (track === null) {
+      if (this.held !== null) this.stop(this.held);
+      return null;
+    }
+    let figure = this.held;
+    if (figure === null) {
+      figure = createFigure(this.geometry);
+      this.root.add(figure.root);
+      this.held = figure;
+    }
+    const time = Math.min(Math.max(seconds, 0), track.duration);
+    const step = figure.track === track ? time - figure.time : continues && figure.track !== null ? time : -1;
+    const smooth = step >= 0 && step <= MAX_FRAME_SECONDS;
+    if (figure.track !== track) figure.keyframe = 0;
+    if (!smooth) {
+      figure.hold.reset();
+      for (const side of ARM_SIDES) figure.arms[side].pose = null;
+    }
+    figure.track = track;
+    figure.time = time;
+    this.place(figure, smooth ? step : 0, false);
+    figure.root.visible = true;
+    return this.pose;
+  }
+
+  // Ends every phantom at once, and hides the held one.
   clear(): void {
     for (const figure of this.figures) this.stop(figure);
+    if (this.held !== null) this.stop(this.held);
   }
 
   dispose(): void {
     for (const figure of this.figures) figure.material.dispose();
+    this.held?.material.dispose();
     for (const geometry of Object.values(this.geometry)) geometry.dispose();
   }
 
@@ -189,12 +226,13 @@ export class PhantomView implements ViewLayer {
     figure.root.visible = false;
   }
 
-  private place(figure: Figure, dt: number): void {
+  // Poses a figure at its track's time; a fading one appears at its start and vanishes at its end.
+  private place(figure: Figure, dt: number, fading: boolean): void {
     const track = figure.track!;
     const { pose, tool } = this;
     figure.keyframe = samplePhantom(track, figure.time, pose, figure.keyframe);
     phantomTool(pose, track.handleLength, tool);
-    const fade = Math.min(1, figure.time / PHANTOM_LOOK.fadeIn, (track.duration - figure.time) / PHANTOM_LOOK.fadeOut);
+    const fade = fading ? Math.min(1, figure.time / PHANTOM_LOOK.fadeIn, (track.duration - figure.time) / PHANTOM_LOOK.fadeOut) : 1;
     figure.material.opacity = PHANTOM_LOOK.opacity * Math.max(0, fade);
     figure.pot.position.set(pose.x, pose.y, PLAYER_DEPTH.pot);
     figure.pot.rotation.z = pose.pot;

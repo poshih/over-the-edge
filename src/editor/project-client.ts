@@ -29,6 +29,19 @@ export interface LevelVersionRef {
   readonly course: string;
 }
 
+// A level version as the project lists it, with how many phantom recordings were made on it.
+export interface LevelVersionSummary extends LevelVersionRef {
+  readonly savedAt: string;
+  readonly recordings: number;
+}
+
+// A phantom recording as the project lists it: v<version>-<session>-<clip>.phantom.
+export interface PhantomSummary {
+  readonly name: string;
+  readonly bytes: number;
+  readonly savedAt: string;
+}
+
 export interface ServerProjectSummary {
   readonly id: string;
   readonly title: string | null;
@@ -112,6 +125,21 @@ export class ProjectClient {
     const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/${name}`);
     const tag = /^(?:W\/)?"([0-9]{1,15})"$/.exec(response.headers.get('etag') ?? '');
     return { value: await response.json(), revision: tag === null ? null : Number(tag[1]) };
+  }
+
+  // Every level version of the project, oldest first.
+  async levelVersions(id: string): Promise<readonly LevelVersionSummary[]> {
+    return (await this.json<{ versions: LevelVersionSummary[] }>('GET', `/projects/${encodeURIComponent(id)}/level/versions`)).versions;
+  }
+
+  async phantoms(id: string, version: number): Promise<readonly PhantomSummary[]> {
+    return (await this.json<{ phantoms: PhantomSummary[] }>('GET', `/projects/${encodeURIComponent(id)}/level/versions/${version}/phantoms`)).phantoms;
+  }
+
+  // One phantom recording's bytes, still to be decoded.
+  async phantom(id: string, version: number, name: string, signal?: AbortSignal): Promise<Uint8Array> {
+    const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/level/versions/${version}/phantoms/${encodeURIComponent(name)}`, { signal });
+    return new Uint8Array(await response.arrayBuffer());
   }
 
   // Stores one clip of a play session as a phantom recording of the level's `version`; sending a clip again replaces it.
@@ -201,7 +229,7 @@ export class ProjectClient {
   }
 
   private async request(method: string, path: string, options: {
-    body?: BodyInit; type?: string; revision?: number; headers?: Record<string, string>;
+    body?: BodyInit; type?: string; revision?: number; headers?: Record<string, string>; signal?: AbortSignal;
   } = {}): Promise<Response> {
     const headers: Record<string, string> = { Accept: JSON_TYPE, ...options.headers };
     if (method !== 'GET') headers['X-Studio-Request'] = '1';
@@ -209,7 +237,7 @@ export class ProjectClient {
     if (options.revision !== undefined) headers['If-Match'] = `"${options.revision}"`;
     let response: Response;
     try {
-      response = await fetch(`${this.base}${path}`, { method, headers, body: options.body, credentials: 'same-origin' });
+      response = await fetch(`${this.base}${path}`, { method, headers, body: options.body, credentials: 'same-origin', signal: options.signal });
     } catch (error) {
       if (!(error instanceof TypeError)) throw error;
       throw new ProjectApiError(0, 'offline', 'The project server did not answer. Check that npm run dev or npm run studio is running.');

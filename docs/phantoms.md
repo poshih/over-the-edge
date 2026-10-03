@@ -29,6 +29,14 @@ server project nothing is recorded. Clips upload as they end, to
 `POST /api/projects/{id}/level/versions/{version}/phantoms`, and the project keeps them in
 `phantoms/<course>/` beside its files.
 
+**Watching them.** **Workshop / Level / Replays** lists the open project's versions that have
+recordings, newest first, each marked *plays as now* or *other layout or physics* against the
+version the page holds, and each version's runs, newest first. **Play** downloads the run's clips
+and plays them in order as one phantom over the current level, at 0.5× to 4× speed; **Position**
+moves through the run, and **Follow** keeps the camera on the phantom until you move the view
+yourself. A dropped clip shows as a jump. Playback keeps its own time, since the game is paused
+in the Level tab, and leaving the tab pauses it.
+
 ## Bundled recordings
 
 A game build bundles the recordings of its [course](#courses), its level's layout with its

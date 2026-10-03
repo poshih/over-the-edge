@@ -172,10 +172,12 @@ interface Binding {
   version: BoundVersion | null;
 }
 
-// A saved level version of the open server project, a level with its game settings, which the page plays.
+// A saved level version of the open server project, a level with its game settings, which the page plays, and the
+// phantom course of its recordings.
 export interface PlayedVersion {
   readonly project: string;
   readonly version: number;
+  readonly course: string;
 }
 
 // The page plays the version while its level is still this object and its settings this text: their synced fingerprints
@@ -1631,7 +1633,7 @@ export class ProjectSession {
     const synced = this.synced!;
     const bound = binding.version;
     if (bound?.version === level.version && bound.level === synced.level && bound.settings === synced.settings) return;
-    binding.version = { project: binding.id, version: level.version, level: synced.level, settings: synced.settings };
+    binding.version = { project: binding.id, version: level.version, course: level.course, level: synced.level, settings: synced.settings };
     this.changed('status');
   }
 

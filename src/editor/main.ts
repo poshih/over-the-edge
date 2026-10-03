@@ -10,6 +10,7 @@ import { GameSettingsError, withRig } from '../game-settings';
 import { Game } from '../game';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { levelSpawn } from '../level';
+import { PhantomView } from '../phantom-view';
 import { Appearance } from './appearance';
 import { AppearanceRig } from '../appearance-rig';
 import { createAppearanceUI } from './appearance-ui';
@@ -214,6 +215,9 @@ const spriteEditor = createSpriteEditor({
 });
 const collisionOverlay = new CollisionOverlay();
 game.view.addLayer(collisionOverlay);
+// The figure Level / Replays poses: one held phantom, none played by the game.
+const replayFigure = new PhantomView({ figures: 0 });
+game.view.addLayer(replayFigure);
 const unsubscribeOverlay = game.simulation.subscribeTerrain((event) => collisionOverlay.apply(event));
 const decorations = game.view.decorations;
 if (decorations === null) throw new Error('The Workshop draws decorations.');
@@ -241,6 +245,17 @@ const levelEditor = createLevelEditor({
   warnBeforeUnload: !opensProject,
   serverLevels: published === null ? folderLevels : [published, ...folderLevels],
   projectSave: project,
+  replays: {
+    figure: replayFigure,
+    source: {
+      project: () => project.openProject(),
+      played: () => project.playedVersion(),
+      subscribe: (listener) => project.subscribe(listener),
+      versions: (id) => client.levelVersions(id),
+      recordings: (id, version) => client.phantoms(id, version),
+      recording: (id, version, name, signal) => client.phantom(id, version, name, signal),
+    },
+  },
 });
 const appearanceRestored = appearance.restore();
 const projectEditor = createProjectEditor({

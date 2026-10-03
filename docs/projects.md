@@ -252,7 +252,8 @@ project folder holds them beside its files, and replacing the project keeps them
   1 KB.
 
 While **Record** is on, the Workshop [records your play](phantoms.md#recording-in-the-workshop)
-on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phantom`. Versions
+on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phantom`, and
+**Level / Replays** plays each run back over the level. Versions
 that play the same share a course, so edits to decorations, labels, colours, artwork, control
 sensitivity or the cursor keep a level's recordings, while any physics setting starts a new
 course; a release bundles the recordings of its level and settings' course. Both folders grow

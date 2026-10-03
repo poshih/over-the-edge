@@ -3,6 +3,7 @@ import type { DecorationObject } from '../level';
 import type { LevelState } from './level-state';
 import type { ProjectSaveTarget } from './project-save';
 import type { PlayedVersion } from './project-session';
+import type { ReplayFigure, ReplaySource } from './replay-viewer';
 import type { ServerLevel } from './server-levels';
 
 export interface EditorCamera {
@@ -45,6 +46,8 @@ export interface LevelEditorOptions {
   // The open server project: Save to project writes the level into it, and the level version the page plays shows in
   // the status.
   projectSave: ProjectSaveTarget & { playedVersion(): PlayedVersion | null };
+  // The recordings Replays lists, and the phantom figure it poses over the level.
+  replays: { readonly source: ReplaySource; readonly figure: ReplayFigure };
   // False when the project warns about leaving instead (a Workshop built with GAME_PROJECT, which
   // keeps its project, level included, in the browser).
   warnBeforeUnload?: boolean;

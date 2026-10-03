@@ -38,10 +38,11 @@ export interface LevelVersionRef {
   readonly course: string;
 }
 
-// A recording as listed: its file name and size.
+// A recording as listed: its file name, size and when it was stored.
 export interface PhantomRecording {
   readonly name: string;
   readonly bytes: number;
+  readonly savedAt: string;
 }
 
 const INDEX = 'index.jsonl';
@@ -220,7 +221,7 @@ export async function listRecordings(directory: string, version: LevelVersion): 
   for (const name of await courseNames(directory, version.course)) {
     if (recordingVersion(name) !== version.version) continue;
     const file = await stat(join(folder, name)).catch((error: unknown) => { if (missing(error)) return null; throw error; });
-    if (file?.isFile()) recordings.push({ name, bytes: file.size });
+    if (file?.isFile()) recordings.push({ name, bytes: file.size, savedAt: file.mtime.toISOString() });
   }
   return recordings;
 }
