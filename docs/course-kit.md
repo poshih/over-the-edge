@@ -91,11 +91,12 @@ matches the engine's default rig and physics, with a margin:
 | `drop` | 9 m | Deepest deliberate drop onto a lower surface |
 | `maxStandSlope` | 40° | Steepest face the pot is assumed to rest on |
 
-Pass your own model when your game's physics differ. The pot's grip on terrain is
-`sqrt(terrainFriction * potFriction)`, and it slides on slopes steeper than `atan(grip)`.
-With the engine's defaults (3 and 0.45) that is about 49°. A game with terrain friction
-0.8 and pot friction 0.45 slides above about 31°, so it passes a `maxStandSlope` a few
-degrees lower, such as `{ ...ENGINE_DEFAULT_REACH, maxStandSlope: 28 }`. A longer or
+Pass your own model when your game's physics differ. The pot's grip on a surface is
+`sqrt(surfaceFriction * potFriction)`, from the game settings' `rockFriction` (or the
+surface's own) and `potFriction`, and it slides on slopes steeper than `atan(grip)`.
+With the engine's defaults (rock 3 and jar 0.45) that is about 49°. A game with rock
+friction 0.8 and jar friction 0.45 slides above about 31°, so it passes a `maxStandSlope` a
+few degrees lower, such as `{ ...ENGINE_DEFAULT_REACH, maxStandSlope: 28 }`. A longer or
 shorter hammer changes `pull` and `rise`. Every field must be a finite positive number and
 `maxStandSlope` must be below 90°; anything else throws `ReachModelError`.
 

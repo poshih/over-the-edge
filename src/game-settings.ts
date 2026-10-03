@@ -12,7 +12,7 @@ export interface CursorSettings {
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 7;
+  readonly schemaVersion: 8;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
@@ -25,7 +25,7 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   deadZone: 0.1,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 7, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 8, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -57,6 +57,9 @@ export const CURSOR_FIELDS: readonly CursorField[] = [
   { key: 'deadZone', label: 'Dead zone', min: 0, max: 0.5, step: 0.01, unit: 'm', description: 'How far the cursor can move around the point the hammer aims at before the hammer follows. Beyond it, the cursor drags that point along, so the cursor reaches this far past the maximum target radius; motion beyond that is discarded. Zero makes the hammer follow every movement.' },
 ];
 
+// The jar's and each terrain surface's friction coefficient.
+const FRICTION_LIMITS = { min: 0.05, max: 10, step: 0.05, unit: '' } as const;
+
 export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'hammerMass', label: 'Hammer head mass', group: 'Mass & recoil', min: 0.5, max: 4, step: 0.1, unit: 'kg', description: 'Lower head mass reduces swing recoil; higher mass increases momentum and motor load.' },
   { key: 'playerMass', label: 'Player mass', group: 'Mass & recoil', min: 6, max: 24, step: 0.5, unit: 'kg', description: 'Character mass shared by the root and pot, excluding hinge and tool components. A heavier player recoils less but is harder to lift.' },
@@ -75,6 +78,12 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'extensionDamping', label: 'Extension damping', group: 'Response', min: 0, max: 0.8, step: 0.02, unit: '', description: 'Measured slider speed opposes the extension command.' },
   { key: 'bodyDamping', label: 'Body damping', group: 'Materials', min: 0, max: 1, step: 0.02, unit: '/s', description: 'Passive linear and angular drag on moving bodies.' },
   { key: 'gripFriction', label: 'Hammer friction', group: 'Materials', min: 0.2, max: 10, step: 0.05, unit: '', description: 'Contact friction on the hammer head, not an artificial grip. The shaft does not collide.' },
+  { key: 'potFriction', label: 'Jar friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction on the pot, the jar: how well it rests on slopes and how much it scrapes as it slides. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
+  { key: 'rockFriction', label: 'Rock friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Rock surface, the default. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
+  { key: 'woodFriction', label: 'Wood friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Wood surface. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
+  { key: 'metalFriction', label: 'Metal friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Metal surface. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
+  { key: 'iceFriction', label: 'Ice friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Ice surface. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
+  { key: 'rubberFriction', label: 'Rubber friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Rubber surface. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
   { key: 'potBounciness', label: 'Jar bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much the pot, the jar, bounces off what it hits: 0% stops dead and 100% bounces back as fast as it came. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
   { key: 'hammerBounciness', label: 'Hammer bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much the hammer head bounces off what it hits: 0% stops dead and 100% bounces back as fast as it came. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
   { key: 'rockBounciness', label: 'Rock bounciness', group: 'Materials', min: 0, max: 100, step: 1, unit: '%', description: 'How much terrain with the Rock surface, the default, bounces what hits it. A contact bounces as much as the bouncier of its two sides, and only when they meet faster than 1 m/s.' },
@@ -146,7 +155,7 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 7) throw new GameSettingsError('Game settings require schema version 7.');
+  if (value.schemaVersion !== 8) throw new GameSettingsError('Game settings require schema version 8.');
   const rig = validateRig(value.rig);
   settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
   const cursor = { ...DEFAULT_CURSOR_SETTINGS };
@@ -155,5 +164,5 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 7, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 8, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

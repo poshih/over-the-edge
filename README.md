@@ -450,11 +450,13 @@ up downward.
 Zero handle frequency means rigid weld constraints; positive frequency enables
 rotational spring compliance.
 
-Ground and every obstacle share a **3.0** rough-rock friction coefficient.
-The hammer defaults to **2.5**. Planck mixes the two as `sqrt(3.0 * 2.5)`,
-giving a contact coefficient of about **2.74**. This is ordinary contact
-friction, not a sticky constraint: the head must still press against a surface
-to hold. The pot's own friction coefficient remains **0.45**.
+**Physics › Materials** sets each contact friction coefficient (0.05-10): **Hammer
+friction** (default **2.5**, from 0.2), **Jar friction** (**0.45**) and one setting for each
+terrain surface: **Rock** (**3**, every obstacle's default), **Wood** (**2**), **Metal**
+(**1**), **Ice** (**0.1**) and **Rubber** (**6**). Planck mixes a contact's two sides as their
+geometric mean, so the hammer on rock grips with `sqrt(2.5 * 3)`, about **2.74**, and the
+jar with about **1.16**, resting on rock slopes up to about 49°. This is ordinary contact
+friction, not a sticky constraint: the head must still press against a surface to hold.
 
 **Physics › Materials** also sets bounciness, from 0% (stops dead) to 100% (bounces
 back as fast as it came): **Jar bounciness** (default **10%**), **Hammer bounciness**
@@ -464,7 +466,7 @@ obstacle's default), **Wood** (**20%**), **Metal** (**30%**), **Ice** (**5%**) a
 properties** in Level. A contact bounces as much as the bouncier of its two sides,
 Planck's rule, so a rubber block bounces even a dead jar, and only when they meet
 faster than 1 m/s, so resting contacts stay still. Enemies take each surface's
-bounciness too. Changes apply at once, also to contacts already touching.
+friction and bounciness too. Changes apply at once, also to contacts already touching.
 
 The **Hammer rig** section sets the tool's geometry. **Handle length** (0.75-3 m,
 default **1.5 m**) runs from the butt to the centre of the head. **Maximum
@@ -528,7 +530,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 7**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 8**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 

@@ -32,7 +32,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 5, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 7: physics (including the downswing boost and each material's bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline) and cursor target (radius and dead zone) |
+| `settings` | `project.json` | Game-settings profile, schema 8: physics (including the downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline) and cursor target (radius and dead zone) |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -76,7 +76,7 @@ The paths are fixed, so a manifest only says which files exist:
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 7, "physics": { "...": "..." },
+    "schemaVersion": 8, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
     "cursor": { "maxTargetRadius": 2.65, "deadZone": 0.1 }
   },

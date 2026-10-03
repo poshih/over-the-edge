@@ -298,8 +298,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
           </div>
           <p class="level-help level-circle-help" hidden>Circle width is its diameter. Height is linked to width.</p>
           ${selectField('surface', 'Surface', SURFACES.map((surface) => ({ value: surface, label: SURFACE_LABELS[surface] })))}
-          <p class="level-help">What it is made of. Each surface's bounciness is set once for the game in Physics /
-            Materials; a contact bounces as much as the bouncier of its two sides.</p>
+          <p class="level-help">What it is made of. Each surface's friction and bounciness are set once for the game in
+            Physics / Materials; a contact bounces as much as the bouncier of its two sides.</p>
           <label class="level-checkbox" for="level-illusion">
             <input id="level-illusion" type="checkbox" aria-describedby="level-illusion-help" /> Illusion
           </label>

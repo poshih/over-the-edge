@@ -28,8 +28,15 @@ export interface Tuning {
   hingeCarrierMass: number;
   sliderCarriageMass: number;
   bodyDamping: number;
+  // Contact friction coefficients: the hammer head's, the pot's and each terrain surface's (src/surfaces.ts).
   gripFriction: number;
-  // Bounciness, in percent: the pot's, the hammer head's and each terrain surface's (src/surfaces.ts).
+  potFriction: number;
+  rockFriction: number;
+  woodFriction: number;
+  metalFriction: number;
+  iceFriction: number;
+  rubberFriction: number;
+  // Bounciness, in percent: the pot's, the hammer head's and each terrain surface's.
   potBounciness: number;
   hammerBounciness: number;
   rockBounciness: number;
@@ -60,6 +67,12 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   sliderCarriageMass: 0.5,
   bodyDamping: 0.12,
   gripFriction: 2.5,
+  potFriction: 0.45,
+  rockFriction: 3,
+  woodFriction: 2,
+  metalFriction: 1,
+  iceFriction: 0.1,
+  rubberFriction: 6,
   potBounciness: 10,
   hammerBounciness: 0,
   rockBounciness: 10,
@@ -82,8 +95,6 @@ export const PHYSICS = {
   playerCategory: 2,
   toolCategory: 4,
   enemyCategory: 8,
-  terrainFriction: 3,
-  potFriction: 0.45,
   rootMassFraction: 0.25,
   guideInertiaPerMass: 0.07,
   aimEpsilon: 0.000001,

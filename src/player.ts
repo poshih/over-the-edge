@@ -103,7 +103,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
   const potOwned = playerBody(world, { id: 'pot', position: spawn.position, angle: 0, fixedRotation: false });
   const root = rootOwned.body, pot = potOwned.body;
   const potFixture = pot.createFixture(new Polygon(RIG.potVertices.map((point) => new Vec2(point.x, point.y))), {
-    density: 1, friction: PHYSICS.potFriction, restitution: tuning.potBounciness / 100,
+    density: 1, friction: tuning.potFriction, restitution: tuning.potBounciness / 100,
     filterCategoryBits: PHYSICS.playerCategory,
     filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
   });
@@ -144,7 +144,7 @@ export function tunePlayer(rig: PlayerRig, tuning: Readonly<Tuning>): void {
     body.setAngularDamping(tuning.bodyDamping);
     body.setAwake(true);
   }
-  rig.potFixture.setFriction(PHYSICS.potFriction);
+  rig.potFixture.setFriction(tuning.potFriction);
   rig.potFixture.setRestitution(tuning.potBounciness / 100);
   rig.tool.head.fixture.setFriction(tuning.gripFriction);
   rig.tool.head.fixture.setRestitution(tuning.hammerBounciness / 100);

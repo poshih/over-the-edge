@@ -12,7 +12,7 @@ import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { partPoint, partVelocity } from './player-bodies';
 import { rigGeometry, sameRig } from './rig';
 import type { RigGeometry } from './rig';
-import { surfaceRestitution } from './surfaces';
+import { surfaceMaterials } from './surfaces';
 import type { LaunchSettings } from './trigger-events';
 import { angleDifference } from './math';
 import { aimAt, limitAim, moveAim } from './aim';
@@ -100,7 +100,7 @@ export class Simulation {
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot,
-      surfaceRestitution(this.settings.physics));
+      surfaceMaterials(this.settings.physics));
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
@@ -135,7 +135,7 @@ export class Simulation {
     const tuned = TUNING_FIELDS.some((field) => next.physics[field.key] !== previous.physics[field.key]);
     if (tuned) {
       // The terrain outlives a rebuilt player, so it takes new surfaces either way.
-      this.terrain.setRestitution(surfaceRestitution(next.physics));
+      this.terrain.setMaterials(surfaceMaterials(next.physics));
       // Existing contacts cache mixed material values independently of fixtures.
       for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
         contact.resetFriction();
