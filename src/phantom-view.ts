@@ -11,7 +11,9 @@ import { ARM_SIDES, DEFAULT_ARM_IK } from './character';
 import type { ArmSide } from './character';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
 import { RIG } from './config';
-import { DEFAULT_GRIPS, GripHold } from './grips';
+import { DEFAULT_GRIPS, GripHold, headGripMargin } from './grips';
+import { DEFAULT_HAMMER_HEAD } from './hammer-head';
+import type { HammerHead } from './hammer-head';
 import type { GripDistances, GripShoulder } from './grips';
 import { phantomTool, samplePhantom } from './phantom-format';
 import type { PhantomPose, PhantomTool, PhantomTrack } from './phantom-format';
@@ -43,7 +45,8 @@ interface FigureGeometry {
   readonly elbow: BufferGeometry;
   readonly hand: BufferGeometry;
   readonly shaft: BufferGeometry;
-  readonly head: BufferGeometry;
+  // The game's default hammer head, replaced when the game settings change it.
+  head: BufferGeometry;
 }
 
 interface Limbs {
@@ -88,7 +91,7 @@ function createFigureGeometry(): FigureGeometry {
     hand: new SphereGeometry(PLAYER_FIGURE.hand, 12, 8),
     // A unit length along x, stretched to each recording's handle.
     shaft: new CylinderGeometry(RIG.handleHalfWidth, RIG.handleHalfWidth, 1, 10).rotateZ(Math.PI / 2),
-    head: createHammerHeadGeometry(),
+    head: createHammerHeadGeometry(DEFAULT_HAMMER_HEAD),
   };
 }
 
@@ -126,6 +129,9 @@ export class PhantomView implements ViewLayer {
   private readonly figures: readonly Figure[];
   // A figure outside playback that hold() poses, made when first needed.
   private held: Figure | null = null;
+  // Phantoms draw the game's default hammer head, whatever hammer their players held.
+  private head: HammerHead = DEFAULT_HAMMER_HEAD;
+  private headMargin = headGripMargin(DEFAULT_HAMMER_HEAD);
   private readonly toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private time: number | null = null;
   private readonly pose: PhantomPose = { x: 0, y: 0, pot: 0, angle: 0, along: 0, across: 0 };
@@ -165,6 +171,7 @@ export class PhantomView implements ViewLayer {
 
   // Playback follows the game's time: it holds while the game is paused.
   update(frame: PhysicsFrame): void {
+    if (frame.rig.head !== this.head) this.setHead(frame.rig.head);
     const previous = this.time;
     this.time = frame.time;
     const elapsed = previous === null ? 0 : frame.time - previous;
@@ -221,6 +228,15 @@ export class PhantomView implements ViewLayer {
     for (const geometry of Object.values(this.geometry)) geometry.dispose();
   }
 
+  private setHead(head: HammerHead): void {
+    const previous = this.geometry.head;
+    this.geometry.head = createHammerHeadGeometry(head);
+    for (const figure of this.held === null ? this.figures : [...this.figures, this.held]) figure.head.geometry = this.geometry.head;
+    previous.dispose();
+    this.head = head;
+    this.headMargin = headGripMargin(head);
+  }
+
   private stop(figure: Figure): void {
     figure.track = null;
     figure.root.visible = false;
@@ -255,7 +271,7 @@ export class PhantomView implements ViewLayer {
       shoulder.aside2 = Math.max(0, dx * dx + dy * dy - along * along);
       shoulder.arm = chain.upper + chain.forearm;
     }
-    figure.hold.place(DEFAULT_GRIPS, this.shoulders, track.handleLength, this.grips);
+    figure.hold.place(DEFAULT_GRIPS, this.shoulders, track.handleLength, this.headMargin, this.grips);
     for (const side of ARM_SIDES) {
       const chain = DEFAULT_ARM_CHAINS[side];
       const limbs = figure.arms[side];

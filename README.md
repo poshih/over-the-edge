@@ -476,10 +476,24 @@ handle length less the minimum reach behind the hinge, and at 0 the head reaches
 hinge. A shorter handle or extension caps the minimum reach 5 cm short of the new reach. The three welded handle segments share the
 handle length, and everything else follows the rig: the two-part hammer, the
 one-model hammer's handle, touch gain, compact framing and the target radius limit.
-A rig is never changed in place: a new one rebuilds the player and restarts the run
-from its start, like **Reset**. A longer handle with a shorter extension keeps the
+Apart from its head, below, a rig is never changed in place: a new one rebuilds the
+player and restarts the run from its start, like **Reset**. A longer handle with a shorter extension keeps the
 reach while letting characters with sliding grips (see [hand grips](#hand-grips))
 use shorter arms.
+
+The **Hammer head** section shapes each hammer's collision outline: the **Default
+hammer**'s, a game setting (`rig.head`), and each [model-library hammer's](docs/characters.md#model-library-and-runtime-swaps)
+own, which collides instead while that hammer is shown. The canvas shows the outline
+around the head's centre, with the handle coming in from the left. Drag a point, press
+an edge to add one there, and select a point to nudge it with the arrow keys (5 mm, or
+5 cm with Shift) or remove it with **Remove point** or Delete; **Mirror** keeps both sides of the
+handle alike, and **Sledge**, **Round** and **Pick** start from a preset. The outline is
+always the smallest convex one around its points, so a head can be a block, a disc, a
+wedge or a pointed pick, never hooked: 3-12 points within 0.6 m of the centre, which
+stays inside. The head's mass stays **Hammer head mass**, and its outline sets how that
+mass turns. A head changes in place, without restarting the run, and the built-in
+hammer mesh, the debug overlay, framing and how near the hands come follow it; imported
+hammer models and sprites keep their own artwork. Phantoms draw the default head.
 
 The **Cursor target** section has a **Maximum target radius** slider, from
 **0.25 m** up to the hammer's reach, default the full reach. A saved radius beyond
@@ -514,7 +528,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 6**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 7**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 

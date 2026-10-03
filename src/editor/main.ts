@@ -29,6 +29,8 @@ import { isDarkSky } from '../theme';
 import { ProjectClient } from './project-client';
 import { ProjectSession } from './project-session';
 import { createProjectEditor } from './project-editor';
+import { createHammerHeadEditor } from './hammer-head-editor';
+import type { HammerHeadEditor } from './hammer-head-editor';
 import { PlayRecorder } from './play-recorder';
 import { ServerCopies } from './server-copies';
 import { publishedLevel } from './server-levels';
@@ -176,6 +178,7 @@ const ui = createUI({
   onSettingsChange: (settings) => {
     game.setSettings(settings);
     spriteEditor.setHammerRig(game.simulation.rigGeometry);
+    hammerHeads?.refresh();
   },
   projectSave: project, serverCopies,
 });
@@ -258,10 +261,33 @@ const levelEditor = createLevelEditor({
   },
 });
 const appearanceRestored = appearance.restore();
+// Physics / Hammer head shapes the default hammer's head, a game setting, and each library hammer's own.
+let hammerHeads: HammerHeadEditor | null = null;
+hammerHeads = createHammerHeadEditor({
+  mount: ui.hammerHeadMount,
+  hammers: () => [
+    // The game's settings, which are current while a settings change is still being shown.
+    { id: null, name: 'Default hammer', head: game.settings().rig.head },
+    ...project.libraryHammers(),
+  ],
+  setHead: (id, head) => {
+    if (id !== null) return project.setLibraryHammerHead(id, head);
+    const settings = game.settings();
+    try {
+      ui.applySettings(withRig(settings, { ...settings.rig, head }));
+      return true;
+    } catch (error) {
+      if (!(error instanceof GameSettingsError)) throw error;
+      ui.notice(error.message, 'error');
+      return false;
+    }
+  },
+});
+const unsubscribeHammerHeads = project.subscribe((event) => { if (event.kind === 'content') hammerHeads?.refresh(); });
 const projectEditor = createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,
   onTestCue: (cue) => audio.handle({ type: 'cue', cue, strength: 1 }),
-  parts: game.view,
+  parts: game,
   serverModels,
 });
 
@@ -383,6 +409,8 @@ if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
     recorder.dispose();
+    unsubscribeHammerHeads();
+    hammerHeads.dispose();
     projectEditor.dispose();
     serverCopies.dispose();
     project.dispose();

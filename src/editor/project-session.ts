@@ -33,12 +33,13 @@ import type { SpriteDocument } from '../sprite-data';
 import { decodeBase64 } from '../sprite-fields';
 import { MODEL_LIMITS } from '../model-data';
 import {
-  checkLibraryModel, checkModelLibrary, libraryAvatarSettings, libraryEntries, libraryIdForName, libraryModelFile, MODEL_LIBRARY_LIMITS, newAvatarEntry, PART_ROLES,
-  validateAvatarSettings, validateModelLibrary,
+  checkLibraryModel, checkModelLibrary, libraryAvatarSettings, libraryEntries, libraryHammerHead, libraryIdForName, libraryModelFile,
+  MODEL_LIBRARY_LIMITS, newAvatarEntry, PART_ROLES, validateAvatarSettings, validateModelLibrary,
 } from '../model-library';
 import type {
-  AvatarHoldSettings, LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, ModelLibrary, PartRole,
+  AvatarHoldSettings, LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, LibraryHammerEntry, ModelLibrary, PartRole,
 } from '../model-library';
+import type { HammerHead } from '../hammer-head';
 import type { AvatarRigRegistry } from '../avatar-rig';
 import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
@@ -158,6 +159,8 @@ export interface LibraryModel {
   readonly key: number;
   // An avatar's settings, the same object until they change; null for a hammer or pot.
   readonly avatar: LibraryAvatarSettings | null;
+  // A hammer's head outline, the same object until it changes; null for an avatar or pot.
+  readonly head: HammerHead | null;
 }
 
 function libraryOf(items: readonly LibraryItem[]): ModelLibrary {
@@ -387,6 +390,7 @@ export class ProjectSession {
       media: [...this.media.values()].map((item) => ({ path: item.path, bytes: item.bytes, kind: mediaKind(item.path) })),
       library: this.library.map(({ role, entry, key }) => ({
         role, id: entry.id, name: entry.name, key, avatar: role === 'avatar' ? this.settingsOf(entry as LibraryAvatarEntry) : null,
+        head: role === 'hammer' ? (entry as LibraryHammerEntry).head : null,
       })),
       alternate: this.alternate, publish: this.publishRecord, error: this.error,
       published: this.published === null ? null : {
@@ -513,9 +517,11 @@ export class ProjectSession {
       for (let suffix = 2; taken.has(id); suffix++) id = `${stem.slice(0, MODEL_LIBRARY_LIMITS.id - String(suffix).length - 1)}-${suffix}`;
       const base = { id, name: file.name.replace(/\.glb$/i, '').trim().slice(0, MODEL_LIBRARY_LIMITS.name) || id };
       const settings = this.characterAvatarSettings();
-      const entry = role !== 'avatar' ? base : model === undefined
-        ? inSection('models', () => newAvatarEntry(bytes, base, settings))
-        : { ...base, ...model, ...settings };
+      // A new hammer starts with the game's default head.
+      const entry = role === 'hammer' ? { ...base, head: this.workspace.settings.get().rig.head }
+        : role !== 'avatar' ? base : model === undefined
+          ? inSection('models', () => newAvatarEntry(bytes, base, settings))
+          : { ...base, ...model, ...settings };
       inSection('models', () => checkLibraryModel(role, entry, bytes, this.avatarRigs));
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
       const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, bytes: blob.size, uploaded: false }];
@@ -535,6 +541,25 @@ export class ProjectSession {
   }
 
   // Changes a library avatar's bone map and settings; the bone map must resolve against its model.
+  // The library's hammers with their heads, without the rest of a snapshot.
+  libraryHammers(): readonly { readonly id: string; readonly name: string; readonly head: HammerHead }[] {
+    return this.library.flatMap(({ role, entry }) => role === 'hammer' ? [{ id: entry.id, name: entry.name, head: (entry as LibraryHammerEntry).head }] : []);
+  }
+
+  // Gives a library hammer a new head outline; false, with the reason reported, when the outline is not a valid head.
+  setLibraryHammerHead(id: string, head: HammerHead): boolean {
+    try {
+      const item = this.libraryItem('hammer', id);
+      const entry: LibraryHammerEntry = Object.freeze({ id, name: item.entry.name, head: inSection('models', () => libraryHammerHead(head)) });
+      this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
+      this.changed('content');
+      return true;
+    } catch (error) {
+      this.report(error);
+      return false;
+    }
+  }
+
   async setLibraryAvatar(id: string, settings: LibraryAvatarSettings): Promise<boolean> {
     try {
       const item = this.libraryItem('avatar', id);

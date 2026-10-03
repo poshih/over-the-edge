@@ -32,7 +32,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 5, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 6: physics (including the downswing boost and each material's bounciness), hammer rig (handle length, maximum extension and minimum reach) and cursor target (radius and dead zone) |
+| `settings` | `project.json` | Game-settings profile, schema 7: physics (including the downswing boost and each material's bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline) and cursor target (radius and dead zone) |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -71,18 +71,19 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 6, "physics": { "...": "..." },
-    "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0 }, "cursor": { "maxTargetRadius": 2.65, "deadZone": 0.1 }
+    "schemaVersion": 7, "physics": { "...": "..." },
+    "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
+    "cursor": { "maxTargetRadius": 2.65, "deadZone": 0.1 }
   },
   "characters": { "primary": null, "alternate": null },
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
   "appearance": [],
-  "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club" }], "pot": [] },
+  "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club", "head": [{ "x": -0.1, "y": -0.2 }, "..."] }], "pot": [] },
   "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30 }, "...": "..." },
   "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
            "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" } },
@@ -102,7 +103,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 5, "labels": [], "objects": [] },
@@ -495,13 +496,15 @@ Appearance tab's body-relative elbow hints. Character profiles are the files
 Workshop / Character exports; see [imported 3D characters](characters.md) and
 [sprites](sprites.md).
 
-**Model library.** `models` lists entries per part: `{ "id", "name" }` for hammers
-and pots, and for avatars also `boneMap`, `driver`, `armForwardDistance`, `grips` and
-`arms`, in the character profile's formats. IDs are 1-64 lowercase letters, digits and inner
+**Model library.** `models` lists entries per part: `{ "id", "name" }` for pots,
+`{ "id", "name", "head" }` for hammers, whose `head` is the hammer's own collision outline
+in the settings' `rig.head` format, and for avatars also `boneMap`, `driver`,
+`armForwardDistance`, `grips` and `arms`, in the character profile's formats. IDs are 1-64 lowercase letters, digits and inner
 hyphens, unique per part; each entry's GLB is `models/<part>/<id>.glb`. Uploading a
 model with `PUT .../model` adds its entry: an avatar takes `settings` (JSON with those
 five fields), keeps its existing entry's, or maps its joints automatically with a
-standard driver. Removing an entry, or leaving it out of a `PUT` of the section, deletes its GLB.
+standard driver; a hammer keeps its existing entry's head or starts with the game's
+default head. Removing an entry, or leaving it out of a `PUT` of the section, deletes its GLB.
 Releases list the library but load an entry only when the game's backend selects it;
 see [runtime swaps](characters.md#model-library-and-runtime-swaps).
 

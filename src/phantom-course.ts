@@ -11,7 +11,8 @@ import type { LevelDefinition } from './level';
 // Changes whenever what counts toward a course does, so every course changes with it.
 export const PHANTOM_COURSE_FORMAT = 1;
 
-// The physics settings that move the player: every tuning field but the controls', and the hammer rig.
+// The physics settings that move the player: every tuning field but the controls', and the hammer rig with the default
+// hammer's head. A library hammer's own head is a cosmetic's: recordings made with it join the course.
 const PHYSICS_FIELDS = TUNING_FIELDS.filter((field) => field.group !== 'Input').map((field) => field.key).sort();
 const RIG_KEYS = RIG_FIELDS.map((field) => field.key).sort();
 
@@ -52,6 +53,6 @@ export function phantomCourseText(level: LevelDefinition, settings: GameSettings
   }
   entries.sort();
   const physics = Object.fromEntries(PHYSICS_FIELDS.map((key) => [key, settings.physics[key]]));
-  const rig = Object.fromEntries(RIG_KEYS.map((key) => [key, settings.rig[key]]));
+  const rig = { ...Object.fromEntries(RIG_KEYS.map((key) => [key, settings.rig[key]])), head: settings.rig.head };
   return `[${PHANTOM_COURSE_FORMAT},[${entries.join(',')}],${JSON.stringify(physics)},${JSON.stringify(rig)}]`;
 }

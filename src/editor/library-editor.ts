@@ -332,7 +332,8 @@ export function createLibraryEditor(options: {
     const models = library();
     // Library rows rebuild only when the library changed.
     if (shown !== null && shown.length === models.length && shown.every((model, index) =>
-      model.key === models[index]!.key && model.name === models[index]!.name && model.avatar === models[index]!.avatar)) return;
+      model.key === models[index]!.key && model.name === models[index]!.name && model.avatar === models[index]!.avatar &&
+      model.head === models[index]!.head)) return;
     shown = models;
     preview.refresh(models);
     render();

@@ -1,7 +1,8 @@
 import { DEFAULT_TUNING } from './config';
 import type { Tuning } from './config';
+import { HammerHeadError, validateHammerHead } from './hammer-head';
 import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, MIN_SLIDER_TRAVEL, minReachLimit, RIG_LIMITS, rigGeometry } from './rig';
-import type { RigSettings } from './rig';
+import type { RigLength, RigSettings } from './rig';
 
 export interface CursorSettings {
   // The farthest from the shoulder hinge the hammer aims; at most the rig's reach.
@@ -11,7 +12,7 @@ export interface CursorSettings {
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 6;
+  readonly schemaVersion: 7;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
@@ -24,7 +25,7 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   deadZone: 0.1,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 6, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 7, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -41,7 +42,7 @@ interface TuningField extends NumericSetting {
   group: 'Mass & recoil' | 'Motors' | 'Downswing' | 'Response' | 'Materials' | 'Input';
 }
 
-type RigField = NumericSetting & { key: keyof RigSettings };
+type RigField = NumericSetting & { key: RigLength };
 type CursorField = NumericSetting & { key: keyof CursorSettings };
 
 export const RIG_FIELDS: readonly RigField[] = [
@@ -112,10 +113,16 @@ function validateTuning(value: unknown): Tuning {
 }
 
 function validateRig(value: unknown): RigSettings {
-  settingsFields(value, RIG_FIELDS.map((field) => field.key), 'Hammer rig');
+  settingsFields(value, [...RIG_FIELDS.map((field) => field.key), 'head'], 'Hammer rig');
   const result = { ...DEFAULT_RIG_SETTINGS };
   for (const field of RIG_FIELDS) {
     result[field.key] = settingNumber(value[field.key], field);
+  }
+  try {
+    result.head = validateHammerHead(value.head);
+  } catch (error) {
+    if (!(error instanceof HammerHeadError)) throw error;
+    throw new GameSettingsError(`The hammer head: ${error.message}`);
   }
   const limit = minReachLimit(result);
   if (result.minReach > limit) {
@@ -139,7 +146,7 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 6) throw new GameSettingsError('Game settings require schema version 6.');
+  if (value.schemaVersion !== 7) throw new GameSettingsError('Game settings require schema version 7.');
   const rig = validateRig(value.rig);
   settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
   const cursor = { ...DEFAULT_CURSOR_SETTINGS };
@@ -148,5 +155,5 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 6, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 7, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

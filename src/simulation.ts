@@ -3,6 +3,8 @@ import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
 import { TUNING_FIELDS, validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
+import { sameHammerHead } from './hammer-head';
+import type { HammerHead } from './hammer-head';
 import { isEnemyObject, isTerrainObject, levelFloor, levelSpawn } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
@@ -87,6 +89,8 @@ export class Simulation {
   private impactTracking = false;
   private headTouching = false;
   private impactSpeed = 0;
+  // The hammer's own head when it is a library hammer, which overrides the settings' default head; null for the default.
+  private hammerHead: HammerHead | null = null;
 
   constructor(settings: Readonly<GameSettings>, level: LevelDefinition) {
     this.settings = validateGameSettings(settings);
@@ -97,7 +101,7 @@ export class Simulation {
     this.world.setContinuousPhysics(true);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot,
       surfaceRestitution(this.settings.physics));
-    this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig));
+    this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
       getHeadFixture: () => this.rig.tool.head.fixture,
@@ -114,7 +118,15 @@ export class Simulation {
 
   get rigGeometry(): RigGeometry { return this.rig.geometry; }
 
-  // A rig is never changed in place: new rig settings rebuild the player and restart the run.
+  // The hammer's own head outline, or null for the settings' default head. The head changes in place, mid-run, so a
+  // hammer swap never restarts the run.
+  setHammerHead(head: HammerHead | null): void {
+    this.ensureLive();
+    this.hammerHead = head;
+    this.applyHead();
+  }
+
+  // A rig is never rebuilt in place, except its head: other new rig settings rebuild the player and restart the run.
   setSettings(settings: Readonly<GameSettings>): SettingsEffect {
     this.ensureLive();
     const next = validateGameSettings(settings);
@@ -133,6 +145,10 @@ export class Simulation {
     if (!sameRig(next.rig, previous.rig) || !this.rig.tool.acceptsTuning(next.physics)) {
       this.reset(this.spawn);
       return 'restarted';
+    }
+    if (!sameHammerHead(next.rig.head, previous.rig.head)) {
+      this.rig = { ...this.rig, geometry: rigGeometry(next.rig) };
+      this.applyHead();
     }
     if (next.cursor.maxTargetRadius !== previous.cursor.maxTargetRadius || next.cursor.deadZone !== previous.cursor.deadZone) {
       // A smaller radius pulls the target straight in; the cursor keeps to its dead zone.
@@ -391,8 +407,9 @@ export class Simulation {
 
   private resetPlayer(): void {
     destroyPlayer(this.world, this.rig);
-    const geometry = sameRig(this.rig.geometry, this.settings.rig) ? this.rig.geometry : rigGeometry(this.settings.rig);
-    this.rig = createPlayer(this.world, this.spawn, this.settings.physics, geometry);
+    const geometry = sameRig(this.rig.geometry, this.settings.rig) && sameHammerHead(this.rig.geometry.head, this.settings.rig.head)
+      ? this.rig.geometry : rigGeometry(this.settings.rig);
+    this.rig = createPlayer(this.world, this.spawn, this.settings.physics, geometry, this.hammerHead ?? this.settings.rig.head);
     this.supported = false;
     this.headTouching = false;
     this.impactSpeed = 0;
@@ -428,6 +445,17 @@ export class Simulation {
         }
       }
     }
+  }
+
+  private applyHead(): void {
+    const head = this.hammerHead ?? this.settings.rig.head;
+    if (sameHammerHead(this.rig.tool.head.vertices, head)) return;
+    this.rig.tool.setHead(head, this.settings.physics);
+    // The frames captured since the last step show it too, so a paused game draws the new head.
+    const outline = (frame: PlayerFrame): PlayerFrame =>
+      ({ ...frame, parts: frame.parts.map((part) => part.kind === 'head' ? { ...part, vertices: head } : part) });
+    this.current = outline(this.current);
+    this.previous = outline(this.previous);
   }
 
   private headContactCount(): number {

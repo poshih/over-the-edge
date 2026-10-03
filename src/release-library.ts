@@ -1,13 +1,19 @@
 // A release's model library. The game's backend decides and stores which library model each part
 // uses; this relays the player's swaps to it one at a time and shows only its answers. Nothing here
 // decides a selection or keeps one: the backend's latest answer lives in memory, as views.
-import type { ContentLibrary, ContentLibraryAvatar, ContentLibraryEntry } from './content';
+import type { ContentLibrary, ContentLibraryAvatar, ContentLibraryEntry, ContentLibraryHammer } from './content';
 import { ContentError } from './content-session';
 import type { ContentAccess } from './content-session';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
 import { EMPTY_SELECTION, isPartRole, libraryAvatarSettings, PART_ROLES } from './model-library';
 import type { LibraryAvatarSettings, ModelSelection, ModelSelectionRequest, PartRole } from './model-library';
-import type { GameView, PartModel } from './view';
+import type { PartModel } from './view';
+
+// What shows each part's model: the game, which also gives its physics a library hammer's head.
+export interface PartModelHost {
+  setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void>;
+  partModels(): Record<PartRole, string | null>;
+}
 
 // What the game's module uses: the library's ids and the parts in use, and requests to its backend.
 export interface ModelLibraryApi {
@@ -64,7 +70,7 @@ export class ReleaseModelLibrary {
   private readonly library: ContentLibrary;
   private readonly select: ContentAccess['select'] | null;
   private readonly loader: CharacterModelLoader | null;
-  private readonly view: GameView;
+  private readonly parts: PartModelHost;
   private readonly signal: AbortSignal;
   private readonly onFailure: (error: unknown) => void;
   // Loaded library models by part, most recent last; the view shows at most one of each.
@@ -77,7 +83,7 @@ export class ReleaseModelLibrary {
     library: ContentLibrary;
     access: ContentAccess;
     loader: CharacterModelLoader | null;
-    view: GameView;
+    parts: PartModelHost;
     signal: AbortSignal;
     // A part that could not follow an answer other than the one a swap waits for.
     onFailure: (error: unknown) => void;
@@ -85,12 +91,12 @@ export class ReleaseModelLibrary {
     this.library = options.library;
     this.select = options.access.select === undefined ? null : options.access.select.bind(options.access);
     this.loader = options.loader;
-    this.view = options.view;
+    this.parts = options.parts;
     this.signal = options.signal;
     this.onFailure = options.onFailure;
     this.api = Object.freeze({
       available: (role: PartRole) => this.library[role].map(entry => entry.id),
-      active: (role: PartRole) => this.view.partModels()[role],
+      active: (role: PartRole) => this.parts.partModels()[role],
       swap: (role: PartRole, id: string | null) => this.swap(role, id),
       refresh: () => this.enqueue(null),
     });
@@ -124,7 +130,7 @@ export class ReleaseModelLibrary {
     for (const role of PART_ROLES) {
       const part = loaded.get(role) ?? null;
       if (part instanceof Error) failures.push(part);
-      await this.view.setPartModel(role, part instanceof Error ? null : part, this.signal);
+      await this.parts.setPartModel(role, part instanceof Error ? null : part, this.signal);
     }
     this.evict();
     return failures;
@@ -183,7 +189,7 @@ export class ReleaseModelLibrary {
   // Shows an answer: each part whose selection changed loads and shows, or keeps its model and fails.
   private async apply(answer: ModelSelection): Promise<Map<PartRole, unknown>> {
     const failures = new Map<PartRole, unknown>();
-    const current = this.view.partModels();
+    const current = this.parts.partModels();
     await Promise.all(PART_ROLES.map(async (role) => {
       const id = answer[role];
       if (id === current[role]) return;
@@ -191,7 +197,7 @@ export class ReleaseModelLibrary {
         if (id !== null && !this.listed(role, id)) {
           throw new ContentError('unknown-model', `The game's backend selected ${role} "${id}", which this release does not list.`);
         }
-        await this.view.setPartModel(role, id === null ? null : await this.model(role, id), this.signal);
+        await this.parts.setPartModel(role, id === null ? null : await this.model(role, id), this.signal);
       } catch (error) {
         failures.set(role, typed(error, `The ${role} could not change`));
       }
@@ -201,7 +207,7 @@ export class ReleaseModelLibrary {
   }
 
   private selection(): ModelSelection {
-    return Object.freeze({ ...this.view.partModels() });
+    return Object.freeze({ ...this.parts.partModels() });
   }
 
   private listed(role: PartRole, id: string): boolean {
@@ -222,6 +228,7 @@ export class ReleaseModelLibrary {
       cache.delete(id);
       cache.set(id, model);
     }
+    if (role === 'hammer') return { id, model, head: (entry as ContentLibraryHammer).head };
     if (role !== 'avatar') return { id, model };
     const avatar = entry as ContentLibraryAvatar;
     let settings = this.settings.get(avatar);
@@ -234,7 +241,7 @@ export class ReleaseModelLibrary {
 
   // Keeps the model each part shows and the most recent others; disposes the rest.
   private evict(): void {
-    const shown = this.view.partModels();
+    const shown = this.parts.partModels();
     for (const role of PART_ROLES) {
       const cache = this.cache[role];
       const spare = [...cache.keys()].filter(id => id !== shown[role]);

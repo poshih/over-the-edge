@@ -15,7 +15,7 @@ import { ARM_LAYER } from './arm-layer';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { ArmChains, ArmPose } from './arm-ik';
 import type { ArmLengths, CharacterArms } from './character-arms';
-import { DEFAULT_GRIPS, GripHold, NO_GRIP_ROTATION, sameGripRotation } from './grips';
+import { DEFAULT_GRIPS, GripHold, headGripMargin, NO_GRIP_ROTATION, sameGripRotation } from './grips';
 import type { GripDistances, GripRotation, Grips, GripShoulder } from './grips';
 import { AvatarView } from './avatar-view';
 import { DEFAULT_AVATAR_RIGS, createArmSolutions, createFramePlan, createPose, projectGripShoulder } from './avatar-rig';
@@ -39,6 +39,8 @@ import { PHYSICS, RIG } from './config';
 import type { InputMode, Point } from './config';
 import type { LevelChange, LevelDefinition, LevelLabel } from './level';
 import type { RigGeometry } from './rig';
+import { DEFAULT_HAMMER_HEAD, hammerHeadRadius } from './hammer-head';
+import type { HammerHead } from './hammer-head';
 import { FlagView } from './flag-view';
 import { UpdraftView } from './updraft-view';
 import { EnemyView } from './enemy-view';
@@ -84,7 +86,6 @@ const VISUAL = {
   touchPixelsPerReach: 100,
 } as const;
 const POT_HALF_WIDTH = Math.max(...RIG.potVertices.map((point) => Math.abs(point.x)));
-const HAMMER_RADIUS = Math.max(...RIG.headVertices.map((point) => Math.hypot(point.x, point.y)));
 // The brass sleeve near the start of each two-part hammer segment.
 const SLEEVE_INSET = 0.07;
 
@@ -162,6 +163,8 @@ export interface PartModel {
   readonly id: string;
   readonly model: LoadedCharacterModel;
   readonly avatar?: LibraryAvatarSettings;
+  // A library hammer's own head outline, which the game's physics takes along with the model.
+  readonly head?: HammerHead;
 }
 
 interface PartViews {
@@ -341,6 +344,12 @@ export class GameView {
   private readonly gripDistances: GripDistances = { left: 0, right: 0 };
   // Where sliding hands have slid to, kept from frame to frame.
   private readonly gripHold = new GripHold();
+  // The physical head's outline, which the built-in head mesh, the framing and the hands follow.
+  private headOutline: HammerHead = DEFAULT_HAMMER_HEAD;
+  private hammerRadius = hammerHeadRadius(DEFAULT_HAMMER_HEAD);
+  private headMargin = headGripMargin(DEFAULT_HAMMER_HEAD);
+  private headModel!: Group;
+  private headMesh!: Mesh;
   // Each hand's grip rotation in its grip frame, or null for none.
   private gripRotations: Record<ArmSide, Quaternion | null> = { left: null, right: null };
   // Scratch for turning a grip rotation into another space, and each glove's world-space turn this frame.
@@ -977,6 +986,7 @@ export class GameView {
     this.syncRig(frame);
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
+    this.syncHead(tip.vertices);
     this.focus = { x: root.x, y: root.y };
     this.hammer = { x: tip.x, y: tip.y };
     this.updateFrustum();
@@ -1095,6 +1105,7 @@ export class GameView {
     this.syncRig(frame);
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
+    this.syncHead(tip.vertices);
     this.focus = { x: root.x, y: root.y };
     this.hammer = { x: tip.x, y: tip.y };
     this.updateFrustum();
@@ -1272,10 +1283,10 @@ export class GameView {
 
   private framingBounds() {
     return {
-      minX: Math.min(this.focus.x - POT_HALF_WIDTH, this.hammer.x - HAMMER_RADIUS),
-      maxX: Math.max(this.focus.x + POT_HALF_WIDTH, this.hammer.x + HAMMER_RADIUS),
-      minY: Math.min(this.focus.y + RIG.potBottom, this.hammer.y - HAMMER_RADIUS),
-      maxY: Math.max(this.focus.y + VISUAL.characterTop, this.hammer.y + HAMMER_RADIUS),
+      minX: Math.min(this.focus.x - POT_HALF_WIDTH, this.hammer.x - this.hammerRadius),
+      maxX: Math.max(this.focus.x + POT_HALF_WIDTH, this.hammer.x + this.hammerRadius),
+      minY: Math.min(this.focus.y + RIG.potBottom, this.hammer.y - this.hammerRadius),
+      maxY: Math.max(this.focus.y + VISUAL.characterTop, this.hammer.y + this.hammerRadius),
     };
   }
 
@@ -1477,7 +1488,9 @@ export class GameView {
     for (const segment of shaftSegments) this.shading.register(segment);
     this.foreground.add(this.customShaft);
     const head = new Group();
-    head.add(new Mesh(createHammerHeadGeometry(), dark));
+    this.headModel = head;
+    this.headMesh = new Mesh(createHammerHeadGeometry(this.headOutline), dark);
+    head.add(this.headMesh);
     const bolt = solid(new SphereGeometry(0.052, 10, 8), brass, [0, 0, 0.13]);
     bolt.scale.z = 0.3;
     head.add(bolt);
@@ -1511,6 +1524,20 @@ export class GameView {
     if (ARM_PARTS.has(slot)) return new VisualVisibility(defaults, { onReplacement: (next) => { if (next !== null) onArmLayer(next); } });
     return new VisualVisibility(defaults, PROP_PARTS.has(slot)
       ? { onReplacement: (next, previous) => this.propReplacementChanged(next, previous) } : {});
+  }
+
+  // Follows the physical head's outline when the hammer's head changes: the built-in head mesh, the framing and how
+  // near the head the hands may come.
+  private syncHead(outline: HammerHead): void {
+    if (outline === this.headOutline) return;
+    this.headOutline = outline;
+    // The shading's outline hull shares the head's geometry, so it is made again around the new one.
+    this.shading.unregister(this.headModel);
+    this.headMesh.geometry.dispose();
+    this.headMesh.geometry = createHammerHeadGeometry(outline);
+    this.shading.register(this.headModel);
+    this.hammerRadius = hammerHeadRadius(outline);
+    this.headMargin = headGripMargin(outline);
   }
 
   // Follows a rebuilt rig: the two-part hammer's segment lengths, hammer models' handles, touch gain and framing.
@@ -1559,7 +1586,7 @@ export class GameView {
       const lengths = sprite !== null && slot.presentation.arms === null ? sprite : chains[side];
       projectGripShoulder(shoulder, butt, shaftAxis, lengths.upper + lengths.forearm, this.gripShoulders[side]);
     }
-    this.gripHold.place(this.grips, this.gripShoulders, shaftLength, this.gripDistances);
+    this.gripHold.place(this.grips, this.gripShoulders, shaftLength, this.headMargin, this.gripDistances);
     const poses: ArmPose[] = [];
     for (const side of ARM_SIDES) {
       const arm = this.arms.get(side);

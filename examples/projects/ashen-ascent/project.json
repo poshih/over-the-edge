@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 6,
+    "schemaVersion": 7,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -42,7 +42,41 @@
     "rig": {
       "handleLength": 1.5,
       "maxExtension": 1.15,
-      "minReach": 0
+      "minReach": 0,
+      "head": [
+        {
+          "x": -0.1,
+          "y": -0.23
+        },
+        {
+          "x": -0.06,
+          "y": -0.29
+        },
+        {
+          "x": 0.06,
+          "y": -0.29
+        },
+        {
+          "x": 0.1,
+          "y": -0.23
+        },
+        {
+          "x": 0.1,
+          "y": 0.23
+        },
+        {
+          "x": 0.06,
+          "y": 0.29
+        },
+        {
+          "x": -0.06,
+          "y": 0.29
+        },
+        {
+          "x": -0.1,
+          "y": 0.23
+        }
+      ]
     },
     "cursor": {
       "maxTargetRadius": 2.65,

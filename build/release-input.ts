@@ -27,7 +27,7 @@ import type { LevelDefinition } from '../src/level';
 import { checkMediaBytes, isMediaLibraryPath, MEDIA_LIMITS, mediaFile, mediaPath } from '../src/media';
 import { appearanceFile, artFile } from '../src/project';
 import { EMPTY_MODEL_LIBRARY, libraryModelFile } from '../src/model-library';
-import type { LibraryAvatarEntry, LibraryEntry, ModelLibrary } from '../src/model-library';
+import type { LibraryAvatarEntry, LibraryEntry, LibraryHammerEntry, ModelLibrary } from '../src/model-library';
 import { EMPTY_SPRITES, parseSpriteDocument, SPRITE_FILE_BYTES, validateSpriteAnchors } from '../src/sprite-data';
 import type { SpriteDocument } from '../src/sprite-data';
 import { DEFAULT_THEME } from '../src/theme';
@@ -59,7 +59,7 @@ export interface ReleaseInput {
   // The project's model library, each entry with its GLB.
   readonly library: {
     readonly avatar: readonly (LibraryAvatarEntry & { readonly bytes: Uint8Array })[];
-    readonly hammer: readonly (LibraryEntry & { readonly bytes: Uint8Array })[];
+    readonly hammer: readonly (LibraryHammerEntry & { readonly bytes: Uint8Array })[];
     readonly pot: readonly (LibraryEntry & { readonly bytes: Uint8Array })[];
   };
 }

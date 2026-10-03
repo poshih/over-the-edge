@@ -39,7 +39,7 @@ import {
   checkLibraryModel, checkModelLibrary, DEFAULT_AVATAR_SETTINGS, isPartRole, libraryEntries, libraryModelFile, libraryModelId,
   MODEL_LIBRARY_LIMITS, newAvatarEntry, validateAvatarSettings, validateModelLibrary,
 } from '../src/model-library';
-import type { LibraryAvatarEntry, LibraryEntry, ModelLibrary, PartRole } from '../src/model-library';
+import type { LibraryAvatarEntry, LibraryEntry, LibraryHammerEntry, ModelLibrary, PartRole } from '../src/model-library';
 import { apiManual } from './api-manual';
 import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendBytes, sendError, sendFile, sendJson } from './http';
 import { ProjectStore, SECTION_NAMES } from './project-store';
@@ -666,8 +666,11 @@ export function createStudioHandler(config: StudioConfig) {
     await change(context, ['models'], async (manifest) => {
       const existing = manifest.models[role].find((candidate) => candidate.id === modelId);
       const base = { id: modelId, name: context.url.searchParams.get('name') ?? existing?.name ?? modelId };
-      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, driver, hair, armForwardDistance, grips, arms }), or maps its joints.
-      const entry: LibraryEntry = role !== 'avatar' ? base : inSection('models', () => {
+      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, driver, hair, armForwardDistance, grips, arms }), or maps its joints;
+      // a hammer keeps its head, or starts with the game's default head.
+      const entry: LibraryEntry = role === 'hammer'
+        ? { ...base, head: (existing as LibraryHammerEntry | undefined)?.head ?? manifest.settings.rig.head } as LibraryHammerEntry
+        : role !== 'avatar' ? base : inSection('models', () => {
         if (settings !== null) return { ...base, ...validateAvatarSettings(avatarSettingsQuery(settings)) };
         if (existing !== undefined) return { ...(existing as LibraryAvatarEntry), ...base };
         return newAvatarEntry(bytes, base, DEFAULT_AVATAR_SETTINGS);

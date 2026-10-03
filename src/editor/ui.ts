@@ -192,6 +192,11 @@ export function createUI(options: UiOptions): GameUi {
     rigControls.set(field.key, control);
     rigGroup.append(control.row);
   }
+  const hammerHead = createSection({ id: 'physics-head', title: 'Hammer head', hint: 'Each hammer\'s collision outline' });
+  const hammerHeadMount = document.createElement('div');
+  hammerHeadMount.className = 'hammer-head-editor';
+  hammerHead.body.append(hammerHeadMount);
+  tuningGroups.append(hammerHead.root);
   const cursorGroup = tuningSection({
     id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius and dead zone',
   }, 'Cursor target', 'tuning-group cursor-settings');
@@ -309,7 +314,7 @@ export function createUI(options: UiOptions): GameUi {
   }, listen);
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
-    projectMount, characterMount, appearanceMount, spriteMount, levelMount, workshopState,
+    projectMount, characterMount, appearanceMount, spriteMount, levelMount, hammerHeadMount, workshopState,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
     applySettings: commitSettings,

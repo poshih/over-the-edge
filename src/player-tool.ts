@@ -2,6 +2,7 @@ import { Box, Polygon, Vec2, WeldJoint } from 'planck';
 import type { Body, Fixture, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { Point, Tuning } from './config';
+import type { HammerHead } from './hammer-head';
 import { transformPoint } from './math';
 import { playerBody, PlayerRigError } from './player-bodies';
 import type { PlayerBody, PlayerContactPart, PlayerPart } from './player-bodies';
@@ -16,6 +17,8 @@ export interface PlayerTool {
   readonly welds: readonly WeldJoint[];
   readonly acceptsTuning: (tuning: Readonly<Tuning>) => boolean;
   readonly tune: (tuning: Readonly<Tuning>) => void;
+  // Replaces the head's collision outline in place, keeping the tool's motion; outside a physics step only.
+  readonly setHead: (head: HammerHead, tuning: Readonly<Tuning>) => void;
 }
 
 type ToolConstruction = Omit<PlayerTool, 'acceptsTuning'>;
@@ -27,13 +30,18 @@ interface ToolInput {
   readonly extension: number;
   readonly geometry: RigGeometry;
   readonly tuning: Readonly<Tuning>;
+  readonly head: HammerHead;
 }
 
 const ORIGIN = Object.freeze({ x: 0, y: 0 });
-const HEAD_SHAPE = new Polygon(RIG.headVertices.map((point) => new Vec2(point.x, point.y)));
-const HEAD_UNIT_MASS = { mass: 0, center: new Vec2(), I: 0 };
-HEAD_SHAPE.computeMass(HEAD_UNIT_MASS, 1);
 
+// A head's mass properties at unit density: its area, centroid and inertia about its centre. The head's mass is a
+// setting, so its outline only spreads that mass.
+function headUnitMass(head: HammerHead): { mass: number; center: Vec2; I: number } {
+  const data = { mass: 0, center: new Vec2(), I: 0 };
+  new Polygon(head.map((point) => new Vec2(point.x, point.y))).computeMass(data, 1);
+  return data;
+}
 function handleVertices(half: number): readonly Point[] {
   return [
     { x: -half, y: -RIG.handleHalfWidth }, { x: half, y: -RIG.handleHalfWidth },
@@ -41,8 +49,8 @@ function handleVertices(half: number): readonly Point[] {
   ];
 }
 
-function headFixture(body: Body, offset: number, tuning: Readonly<Tuning>): Fixture {
-  return body.createFixture(new Polygon(RIG.headVertices.map((point) => new Vec2(point.x + offset, point.y))), {
+function headFixture(body: Body, head: HammerHead, offset: number, tuning: Readonly<Tuning>): Fixture {
+  return body.createFixture(new Polygon(head.map((point) => new Vec2(point.x + offset, point.y))), {
     density: 1, friction: tuning.gripFriction, restitution: tuning.hammerBounciness / 100,
     filterCategoryBits: PHYSICS.toolCategory,
     filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
@@ -68,15 +76,15 @@ function rigidTool(input: ToolInput): ToolConstruction {
     parts.push({ id: `handle-${index}`, kind: 'handle', body, localPoint: { x: offset, y: 0 },
       vertices: handleVertices(geometry.segmentLength / 2), fixture });
   }
-  const fixture = headFixture(body, geometry.handleLength, input.tuning);
   const head: PlayerContactPart = { id: 'head', kind: 'head', body, localPoint: { x: geometry.handleLength, y: 0 },
-    vertices: RIG.headVertices, fixture };
+    vertices: input.head, fixture: headFixture(body, input.head, geometry.handleLength, input.tuning) };
   parts.push(head);
+  let unit = headUnitMass(input.head);
   const massData = { mass: 0, center: new Vec2(), I: 0 };
   const tune = (tuning: Readonly<Tuning>): void => {
     const carriage = tuning.sliderCarriageMass, shaft = tuning.shaftMass, headMass = tuning.hammerMass;
     const length = geometry.handleLength;
-    const headX = length + HEAD_UNIT_MASS.center.x, headY = HEAD_UNIT_MASS.center.y;
+    const headX = length + unit.center.x, headY = unit.center.y;
     massData.mass = carriage + shaft + headMass;
     massData.center.set((shaft * length / 2 + headMass * headX) / massData.mass,
       headMass * headY / massData.mass);
@@ -84,12 +92,18 @@ function rigidTool(input: ToolInput): ToolConstruction {
     // real rotational energy; its translational mass belongs to the fixed-rotation root instead.
     massData.I = (carriage + tuning.hingeCarrierMass) * PHYSICS.guideInertiaPerMass +
       shaft * (length * length / 3 + (2 * RIG.handleHalfWidth) ** 2 / 12) +
-      headMass * (HEAD_UNIT_MASS.I / HEAD_UNIT_MASS.mass + length * length +
-        2 * length * HEAD_UNIT_MASS.center.x);
+      headMass * (unit.I / unit.mass + length * length + 2 * length * unit.center.x);
     body.setMassData(massData);
   };
   tune(input.tuning);
-  return { bodies: [owned], parts, driveBody: body, butt, head, welds: [], tune };
+  const setHead = (outline: HammerHead, tuning: Readonly<Tuning>): void => {
+    body.destroyFixture(head.fixture);
+    head.fixture = headFixture(body, outline, geometry.handleLength, tuning);
+    head.vertices = outline;
+    unit = headUnitMass(outline);
+    tune(tuning);
+  };
+  return { bodies: [owned], parts, driveBody: body, butt, head, welds: [], tune, setHead };
 }
 
 function compliantTool(input: ToolInput): ToolConstruction {
@@ -127,10 +141,10 @@ function compliantTool(input: ToolInput): ToolConstruction {
     segments.push(body);
   }
   const headBody = create('head', geometry.handleLength);
-  const fixture = headFixture(headBody, 0, input.tuning);
   const head: PlayerContactPart = { id: 'head', kind: 'head', body: headBody, localPoint: ORIGIN,
-    vertices: RIG.headVertices, fixture };
+    vertices: input.head, fixture: headFixture(headBody, input.head, 0, input.tuning) };
   parts.push(head);
+  let unit = headUnitMass(input.head);
   weld(headBody, geometry.segmentLength / 2, 0);
   const massData = { mass: 0, center: new Vec2(), I: 0 };
   const tune = (tuning: Readonly<Tuning>): void => {
@@ -142,8 +156,8 @@ function compliantTool(input: ToolInput): ToolConstruction {
     massData.I = massData.mass * (geometry.segmentLength ** 2 + (2 * RIG.handleHalfWidth) ** 2) / 12;
     for (const segment of segments) segment.setMassData(massData);
     massData.mass = tuning.hammerMass;
-    massData.center.set(HEAD_UNIT_MASS.center);
-    massData.I = tuning.hammerMass * HEAD_UNIT_MASS.I / HEAD_UNIT_MASS.mass;
+    massData.center.set(unit.center);
+    massData.I = tuning.hammerMass * unit.I / unit.mass;
     headBody.setMassData(massData);
     for (const joint of welds) {
       joint.setFrequency(tuning.handleFrequency);
@@ -151,7 +165,14 @@ function compliantTool(input: ToolInput): ToolConstruction {
     }
   };
   tune(input.tuning);
-  return { bodies, parts, driveBody: carriage, butt, head, welds, tune };
+  const setHead = (outline: HammerHead, tuning: Readonly<Tuning>): void => {
+    headBody.destroyFixture(head.fixture);
+    head.fixture = headFixture(headBody, outline, 0, tuning);
+    head.vertices = outline;
+    unit = headUnitMass(outline);
+    tune(tuning);
+  };
+  return { bodies, parts, driveBody: carriage, butt, head, welds, tune, setHead };
 }
 
 const TOOL_STRATEGIES = [

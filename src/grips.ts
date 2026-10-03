@@ -1,4 +1,5 @@
-import { RIG } from './config.ts';
+import { DEFAULT_HAMMER_HEAD, hammerHeadBack } from './hammer-head.ts';
+import type { HammerHead } from './hammer-head.ts';
 import { RIG_LIMITS } from './rig.ts';
 
 // Where a character's hands hold the handle. Grips are presentation: physics never reads them.
@@ -15,7 +16,7 @@ export interface GripRotation {
 }
 
 // Where on the handle sliding hands may hold: shares of the stretch a hand can hold, from the butt (0) to as near
-// the head as a hand may come (1, HEAD_GRIP_MARGIN short of its centre), `from` never past `to`.
+// the head as a hand may come (1, its headGripMargin short of the head's centre), `from` never past `to`.
 export interface GripRange {
   readonly from: number;
   readonly to: number;
@@ -46,10 +47,16 @@ export const GRIP_ROTATION_LIMITS = { min: -180, max: 180, step: 1 } as const;
 // handle slides through them all the time.
 export const SLIDE_AT_LIMITS = { min: 0, max: 1, step: 0.05 } as const;
 export const GRIP_RANGE_LIMITS = { min: 0, max: 1, step: 0.01 } as const;
-// Space kept between the leading hand and the head's collision block.
+// Space kept between the leading hand and the head's collision outline.
 export const HEAD_GRIP_CLEARANCE = 0.1;
-// No hand holds nearer the head's centre than this, so none enters its collision block.
-export const HEAD_GRIP_MARGIN = Math.max(...RIG.headVertices.map((point) => point.x)) + HEAD_GRIP_CLEARANCE;
+
+// No hand holds nearer the centre of this head than this, so none enters its collision outline.
+export function headGripMargin(head: HammerHead): number {
+  return hammerHeadBack(head) + HEAD_GRIP_CLEARANCE;
+}
+
+// The margin of the built-in head, which hammer models are authored around (see hammer-handle-fit.ts).
+export const HEAD_GRIP_MARGIN = headGripMargin(DEFAULT_HAMMER_HEAD);
 
 export interface GripDistances {
   left: number;
@@ -85,10 +92,10 @@ export class GripHold {
     this.offset = 0;
   }
 
-  // Places both hands into `out` for this frame.
-  place(grips: Grips, shoulders: Readonly<Record<'left' | 'right', GripShoulder>>, shaftLength: number,
+  // Places both hands into `out` for this frame, `headMargin` (headGripMargin) short of the head's centre at most.
+  place(grips: Grips, shoulders: Readonly<Record<'left' | 'right', GripShoulder>>, shaftLength: number, headMargin: number,
     out: GripDistances): GripDistances {
-    const farthest = Math.max(0, shaftLength - HEAD_GRIP_MARGIN);
+    const farthest = Math.max(0, shaftLength - headMargin);
     const left = Math.min(grips.left, farthest);
     const right = Math.min(grips.right, farthest);
     if (grips.placement === 'fixed') {

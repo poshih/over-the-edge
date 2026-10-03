@@ -13,6 +13,8 @@ import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestA
 import type { CharacterModelReport } from './character-model-inspect';
 import { DEFAULT_GRIPS } from './grips';
 import type { Grips } from './grips';
+import { HammerHeadError, validateHammerHead } from './hammer-head';
+import type { HammerHead } from './hammer-head';
 import { exactRecord, ProjectError, textValue } from './project-fields';
 import { validateArmForwardDistance, validateArms, validateGrips } from './sprite-data';
 
@@ -62,9 +64,14 @@ export type AvatarHoldSettings = Omit<LibraryAvatarSettings, keyof AvatarModelSe
 
 export interface LibraryAvatarEntry extends LibraryEntry, LibraryAvatarSettings {}
 
+// A hammer cosmetic: its head's collision outline replaces the game's default head while the hammer is shown.
+export interface LibraryHammerEntry extends LibraryEntry {
+  readonly head: HammerHead;
+}
+
 export interface ModelLibrary {
   readonly avatar: readonly LibraryAvatarEntry[];
-  readonly hammer: readonly LibraryEntry[];
+  readonly hammer: readonly LibraryHammerEntry[];
   readonly pot: readonly LibraryEntry[];
 }
 
@@ -74,6 +81,7 @@ export const EMPTY_MODEL_LIBRARY: ModelLibrary = Object.freeze({
 
 const ENTRY_KEYS = ['id', 'name'] as const;
 const AVATAR_KEYS = [...ENTRY_KEYS, 'boneMap', 'driver', 'hair', 'armForwardDistance', 'grips', 'arms'] as const;
+const HAMMER_KEYS = [...ENTRY_KEYS, 'head'] as const;
 const ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 export function isPartRole(value: unknown): value is PartRole {
@@ -130,7 +138,7 @@ function validateEntries<T extends LibraryEntry>(value: unknown, role: PartRole,
   }
   const ids = new Set<string>();
   return Object.freeze(value.map((item: unknown) => {
-    const data = exactRecord(item, role === 'avatar' ? AVATAR_KEYS : ENTRY_KEYS, `A library ${role}`);
+    const data = exactRecord(item, role === 'avatar' ? AVATAR_KEYS : role === 'hammer' ? HAMMER_KEYS : ENTRY_KEYS, `A library ${role}`);
     const result = entry(data);
     if (ids.has(result.id)) throw new ProjectError(`The ${role} library lists "${result.id}" twice.`);
     ids.add(result.id);
@@ -142,11 +150,21 @@ function entryBase(data: Record<string, unknown>): LibraryEntry {
   return { id: libraryModelId(data.id), name: textValue(data.name, 1, MODEL_LIBRARY_LIMITS.name, 'Library model name') };
 }
 
+// A library hammer's head outline.
+export function libraryHammerHead(value: unknown): HammerHead {
+  try {
+    return validateHammerHead(value);
+  } catch (error) {
+    if (!(error instanceof HammerHeadError)) throw error;
+    throw new ProjectError(`A library hammer's head: ${error.message}`);
+  }
+}
+
 export function validateModelLibrary(value: unknown): ModelLibrary {
   const library = exactRecord(value, PART_ROLES, 'The model library');
   return Object.freeze({
     avatar: validateEntries(library.avatar, 'avatar', (data) => Object.freeze({ ...entryBase(data), ...validateAvatarSettings(data) })),
-    hammer: validateEntries(library.hammer, 'hammer', (data) => Object.freeze(entryBase(data))),
+    hammer: validateEntries(library.hammer, 'hammer', (data) => Object.freeze({ ...entryBase(data), head: libraryHammerHead(data.head) })),
     pot: validateEntries(library.pot, 'pot', (data) => Object.freeze(entryBase(data))),
   });
 }

@@ -486,6 +486,13 @@ brings its own settings; the profile keeps everything else, such as its shading.
 Library hammers and pots show in every character type, fitted and shaded like the
 profile's own. The selection belongs to the player, so switching characters keeps it.
 
+**Hammer heads.** Each library hammer carries its own head: a collision outline that
+replaces the game's default head while the hammer is shown, so a pick-shaped hammer can
+hook what a sledge cannot. A new hammer starts with the game's default head; shape it in
+Workshop / Physics / **Hammer head**. Swapping hammers, in a release or a Workshop
+preview, swaps the head in place without restarting the run. Phantom recordings do not
+record which hammer was held, so recordings made with any hammer share the course.
+
 **Content.** Each library GLB is its own content group, `library/<part>/<id>`, which
 the release's shell does not list; see [content delivery](content-delivery.md). The
 release fetches a library model only after the backend selects it, through a grant

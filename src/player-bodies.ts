@@ -15,8 +15,10 @@ export interface PlayerPart {
   readonly fixture?: Fixture;
 }
 
+// A part that collides. The hammer head's fixture and outline change when the hammer's head does.
 export interface PlayerContactPart extends PlayerPart {
-  readonly fixture: Fixture;
+  fixture: Fixture;
+  vertices: readonly Point[];
 }
 
 export interface PlayerBody {

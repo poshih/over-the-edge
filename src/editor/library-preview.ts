@@ -1,12 +1,16 @@
 import { createCharacterModelLoader } from '../character-model-loader';
 import type { LoadedCharacterModel } from '../character-model-types';
+import type { HammerHead } from '../hammer-head';
 import { PART_ROLES } from '../model-library';
 import type { PartRole } from '../model-library';
 import type { PartModel } from '../view';
 import type { LibraryModel } from './project-session';
 
+// The game: it shows part models, a library hammer's with its head in the physics.
 export interface PartModelHost {
   setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void>;
+  // A new outline for the shown library hammer's head.
+  setHammerHead(head: HammerHead | null): void;
 }
 
 export interface LibraryPreviewOptions {
@@ -66,14 +70,23 @@ export class LibraryPreview {
   }
 
   // Follows library changes: a removed or replaced model returns its part to the characters' own,
-  // and changed avatar settings apply at once.
+  // and changed avatar settings and hammer heads apply at once.
   refresh(library: readonly LibraryModel[]): void {
     for (const role of PART_ROLES) {
       const wanted = this.wanted[role];
-      const target = wanted !== null ? wanted.entry : this.shown[role]?.entry ?? null;
+      const shown = this.shown[role];
+      const target = wanted !== null ? wanted.entry : shown?.entry ?? null;
       if (target === null) continue;
       const next = library.find((entry) => entry.role === role && entry.key === target.key) ?? null;
       if (next === null || next.avatar !== target.avatar) void this.show(role, next);
+      else if (next.head !== target.head) {
+        // Only the shown hammer's head changed: its model stays.
+        if (wanted !== null) void this.show(role, next);
+        else {
+          this.shown[role] = { entry: next, model: shown!.model };
+          this.options.host.setHammerHead(next.head);
+        }
+      }
     }
   }
 
@@ -97,7 +110,9 @@ export class LibraryPreview {
       } else {
         loaded = current !== null && current.entry.key === entry.key ? current.model : await this.load(role, entry, signal);
         signal.throwIfAborted();
-        await this.options.host.setPartModel(role, { id: entry.id, model: loaded, avatar: entry.avatar ?? undefined }, signal);
+        await this.options.host.setPartModel(role, {
+          id: entry.id, model: loaded, avatar: entry.avatar ?? undefined, head: entry.head ?? undefined,
+        }, signal);
       }
       if (current !== null && current.model !== loaded) current.model.dispose();
       this.shown[role] = entry === null ? null : { entry, model: loaded! };

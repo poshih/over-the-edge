@@ -17,6 +17,7 @@ import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
 import { SHARED_FORMATS, SHARED_KINDS, SHARED_NAME_LIMIT } from '../src/shared-copies';
 import type { SharedKind } from '../src/shared-copies';
+import { HAMMER_HEAD_LIMITS } from '../src/hammer-head';
 import { SURFACES } from '../src/surfaces';
 import { THEME_FIELDS } from '../src/theme';
 import { LAUNCH_FIELDS, SOUND_VOLUME } from '../src/trigger-events';
@@ -29,6 +30,8 @@ const SHARED_VALUES: Readonly<Record<SharedKind, string>> = {
   'game-settings': 'game settings JSON, as the settings section',
   'arm-ik': 'body-relative elbow hints, as the arm-ik section',
 };
+
+const HEAD_NOTES = `rig.head is the default hammer's head: its collision outline, ${HAMMER_HEAD_LIMITS.vertices.min}-${HAMMER_HEAD_LIMITS.vertices.max} points in metres about the head's centre, where the handle ends (x along the handle, away from the butt; y across it), counter-clockwise and convex, every point within ${HAMMER_HEAD_LIMITS.reach} m of the centre, edges at least ${HAMMER_HEAD_LIMITS.edge} m, at least ${HAMMER_HEAD_LIMITS.area} m² and holding the centre ${HAMMER_HEAD_LIMITS.inset} m inside; points round to the millimetre. The head's mass stays physics.hammerMass. A library hammer brings its own head. A head changes in place, without restarting the run.`;
 
 // A self-describing guide for tools and language models; generated from the validators' own limits.
 export function apiManual(auth: 'token' | 'loopback') {
@@ -126,9 +129,10 @@ export function apiManual(auth: 'token' | 'loopback') {
         notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer; terrain surface is required, one of ' + SURFACES.join(', ') + ' (the Workshop starts new terrain as rock), and takes that surface\'s bounciness from the game settings. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {
-        value: '{ schemaVersion: 6, physics: {...}, rig: { handleLength, maxExtension, minReach }, cursor: { maxTargetRadius, deadZone } }', patch: true,
+        value: '{ schemaVersion: 7, physics: {...}, rig: { handleLength, maxExtension, minReach, head: [{ x, y }, ...] }, cursor: { maxTargetRadius, deadZone } }', patch: true,
         fields: { physics: TUNING_FIELDS, rig: RIG_FIELDS, cursor: CURSOR_FIELDS },
-        notes: 'The reach is rig.handleLength + rig.maxExtension; rig.minReach, the closest the head comes to the shoulder hinge (0 lets it reach the hinge), must stay at least 0.05 m short of it so the slider can move, and cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The physics *Bounciness fields are percentages: potBounciness the pot\'s, hammerBounciness the hammer head\'s and rockBounciness, woodBounciness, metalBounciness, iceBounciness and rubberBounciness each terrain surface\'s; a contact bounces as much as its bouncier side, and only above 1 m/s. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run.',
+        notes: 'The reach is rig.handleLength + rig.maxExtension; rig.minReach, the closest the head comes to the shoulder hinge (0 lets it reach the hinge), must stay at least 0.05 m short of it so the slider can move, and cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The physics *Bounciness fields are percentages: potBounciness the pot\'s, hammerBounciness the hammer head\'s and rockBounciness, woodBounciness, metalBounciness, iceBounciness and rubberBounciness each terrain surface\'s; a contact bounces as much as its bouncier side, and only above 1 m/s. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run, except rig.head. ' + HEAD_NOTES,
+        head: HAMMER_HEAD_LIMITS,
       },
       'characters/primary': {
         value: 'character profile JSON or null (the procedural Mesh parts character)',
@@ -143,11 +147,11 @@ export function apiManual(auth: 'token' | 'loopback') {
         alignmentFields: ALIGNMENT_FIELDS,
       },
       models: {
-        value: '{ "avatar": [{ "id", "name", "boneMap", "driver", "armForwardDistance", "grips", "arms" }], "hammer": [{ "id", "name" }], "pot": [{ "id", "name" }] }',
+        value: '{ "avatar": [{ "id", "name", "boneMap", "driver", "armForwardDistance", "grips", "arms" }], "hammer": [{ "id", "name", "head" }], "pot": [{ "id", "name" }] }',
         description: 'The model library: extra avatar, hammer and pot models a release can swap to, one part at a time, as the game\'s backend selects. '
           + 'Upload each GLB with PUT models/{role}/{id}/model first; PUT this section to rename entries, change avatar settings or drop entries.',
         limits: MODEL_LIBRARY_LIMITS,
-        notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; driver is { "id", "config" } naming the trusted rig strategy that interprets them ("standard" is the default); grips, arms and armForwardDistance follow the character profile format.',
+        notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; driver is { "id", "config" } naming the trusted rig strategy that interprets them ("standard" is the default); grips, arms and armForwardDistance follow the character profile format. A hammer\'s head is its own collision outline, in the settings\' rig.head format: it replaces the game\'s default head while that hammer is shown. A hammer uploaded without an entry starts with the game\'s default head.',
       },
       theme: { value: 'scene look', patch: true, fields: THEME_FIELDS },
       hud: { value: 'game readout and trigger-message style', patch: true, fields: HUD_FIELDS },

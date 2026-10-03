@@ -13,7 +13,7 @@ import { RIG } from '../config';
 import { ARM_LENGTH_LIMITS } from '../character-arms';
 import type { ArmLengths, CharacterArms } from '../character-arms';
 import {
-  DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_RANGE_LIMITS, GRIP_ROTATION_LIMITS, HEAD_GRIP_MARGIN, NO_GRIP_ROTATION,
+  DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_RANGE_LIMITS, GRIP_ROTATION_LIMITS, HEAD_GRIP_CLEARANCE, HEAD_GRIP_MARGIN, NO_GRIP_ROTATION,
   sameGripRotation, SLIDE_AT_LIMITS,
 } from '../grips';
 import type { GripPlacement } from '../grips';
@@ -178,7 +178,8 @@ export function createCharacterEditor(options: {
           <div class="character-grip-controls"></div>
           <button type="button" class="button character-grip-reset">Reset hand grips</button>
           <p class="appearance-format">Each grip is that hand's distance from the butt, up to
-            ${metres(HEAD_GRIP_MARGIN)} short of the head's centre. Fixed hands stay there and travel with the
+            ${metres(HEAD_GRIP_MARGIN)} short of the default head's centre; hands always stay
+            ${metres(HEAD_GRIP_CLEARANCE)} clear of the head that collides (Physics / Hammer head). Fixed hands stay there and travel with the
             whole slide, so arms must reach that far. Sliding hands start there and hold on as the handle extends
             or retracts until one would be farther from its shoulder, ahead or behind, than Slide beyond, a share
             of its arm's length as the camera sees it; then the handle slides through both hands just enough to
@@ -240,7 +241,7 @@ export function createCharacterEditor(options: {
         <div class="character-hammer">
           <p class="appearance-format">Replace the stretched shaft and separate head with one model, in every
             character type. Model it on a ${metres(HAMMER_MODEL_HANDLE)} handle, in metres: origin at the butt, handle
-            along +X and the head centred at x = ${metres(HAMMER_MODEL_HANDLE)}, where its collision block spans
+            along +X and the head centred at x = ${metres(HAMMER_MODEL_HANDLE)}, where the default head's collision outline spans
             x ${metres(HAMMER_MODEL_HANDLE - HEAD_HALF_LENGTH)} to ${metres(HAMMER_MODEL_HANDLE + HEAD_HALF_LENGTH)} and
             y -${metres(HEAD_HALF_HEIGHT)} to ${metres(HEAD_HALF_HEIGHT)}. It fits any handle length: the handle up to
             x = ${metres(HAMMER_MODEL_HEAD_END)} stretches, while the head end keeps its size and follows the physical head.
@@ -497,7 +498,7 @@ export function createCharacterEditor(options: {
     const control = createRangeControl({
       min: GRIP_RANGE_LIMITS.min * 100, max: GRIP_RANGE_LIMITS.max * 100, step: GRIP_RANGE_LIMITS.step * 100, label, unit: '%',
       description: `How near ${toward} sliding hands may hold, as a share of the handle a hand can hold: 0% is the butt and ` +
-        `100% is ${metres(HEAD_GRIP_MARGIN)} short of the head's centre, the nearest a hand may come to it.`,
+        `100% is the nearest a hand may come to the head, ${metres(HEAD_GRIP_CLEARANCE)} clear of its outline.`,
     }, {
       id: `character-grip-range-${end}`, name: end === 'from' ? 'gripRangeFrom' : 'gripRangeTo', signal: events.signal,
       onInput: value => {

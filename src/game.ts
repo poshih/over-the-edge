@@ -25,6 +25,9 @@ import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { EnemyEvent, EnemyPhase } from './enemy-types';
 import type { AvatarRigRegistry } from './avatar-rig';
+import type { HammerHead } from './hammer-head';
+import type { PartRole } from './model-library';
+import type { PartModel } from './view';
 
 export class Game {
   readonly simulation: Simulation;
@@ -229,6 +232,23 @@ export class Game {
   // New rig settings rebuild the player, so they restart the run like Reset.
   setSettings(settings: Readonly<GameSettings>): void {
     if (this.simulation.setSettings(settings) === 'restarted') this.restartRun();
+  }
+
+  // Shows a library model for one part, or the characters' own with null. A library hammer brings its head's outline
+  // into the physics, and the characters' own hammer the settings' default head, so the hammer shown is the one that
+  // collides. The head changes mid-run without restarting it.
+  async setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void> {
+    await this.view.setPartModel(role, part, signal);
+    if (role === 'hammer' && !this.stopped) this.simulation.setHammerHead(part?.head ?? null);
+  }
+
+  // A new outline for the shown library hammer's head, as the Workshop edits it.
+  setHammerHead(head: HammerHead | null): void {
+    if (!this.stopped) this.simulation.setHammerHead(head);
+  }
+
+  partModels(): Record<PartRole, string | null> {
+    return this.view.partModels();
   }
 
   setCharacter(state: CharacterState): void {

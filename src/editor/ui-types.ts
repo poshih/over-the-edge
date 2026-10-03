@@ -45,6 +45,8 @@ export interface GameUi {
   appearanceMount: HTMLElement;
   spriteMount: HTMLElement;
   levelMount: HTMLElement;
+  // Physics / Hammer head, which main.ts fills: it edits the game settings and the model library together.
+  hammerHeadMount: HTMLElement;
   workshopState: () => WorkshopState;
   closeWorkshop: () => void;
   update: (state: HudState) => void;

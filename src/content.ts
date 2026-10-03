@@ -23,6 +23,7 @@ import { MEDIA_LIMITS, MEDIA_TYPES, mediaExtension, mediaPath } from './media';
 import { MODEL_LIMITS } from './model-data';
 import { PHANTOM_LIMITS, PHANTOM_PACK_BYTES } from './phantom-format';
 import type { PhantomBounds } from './phantom-format';
+import type { HammerHead } from './hammer-head';
 import { exactRecord } from './project-fields';
 import { SPRITE_LIMITS, validateSpriteAnchors, validateSpriteMetadata } from './sprite-data';
 import type { SpriteDocument } from './sprite-data';
@@ -32,11 +33,11 @@ import {
   CONTENT_REF_PREFIX, isContentGroup, isContentPath, isContentRef, pathExtension, pathGroup,
 } from './content-ref';
 import type { ContentExtension } from './content-ref';
-import { libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSettings } from './model-library';
+import { libraryHammerHead, libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSettings } from './model-library';
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
-export const CONTENT_SCHEMA_VERSION = 7;
+export const CONTENT_SCHEMA_VERSION = 8;
 // The group holding everything the release itself uses; other groups are granted separately.
 export const GAME_GROUP = 'game';
 export const CONTENT_TYPES: Readonly<Record<ContentExtension, string>> = {
@@ -119,10 +120,14 @@ export interface ContentLibraryEntry {
 
 export interface ContentLibraryAvatar extends ContentLibraryEntry, LibraryAvatarSettings {}
 
+export interface ContentLibraryHammer extends ContentLibraryEntry {
+  readonly head: HammerHead;
+}
+
 // The project's model library. Each entry's GLB is its own group, so a backend grants it on its own.
 export interface ContentLibrary {
   readonly avatar: readonly ContentLibraryAvatar[];
-  readonly hammer: readonly ContentLibraryEntry[];
+  readonly hammer: readonly ContentLibraryHammer[];
   readonly pot: readonly ContentLibraryEntry[];
 }
 
@@ -269,7 +274,8 @@ function validateLibrary(value: unknown): ContentLibrary {
     if (!Array.isArray(list) || list.length > MODEL_LIBRARY_LIMITS.entries) throw new ContentManifestError(`The ${role} library lists at most ${MODEL_LIBRARY_LIMITS.entries} models.`);
     const ids = new Set<string>();
     return Object.freeze(list.map((item: unknown) => {
-      const data = exactRecord(item, role === 'avatar' ? ['id', 'name', 'source', 'boneMap', 'driver', 'hair', 'armForwardDistance', 'grips', 'arms'] : ['id', 'name', 'source'], `A library ${role}`);
+      const data = exactRecord(item, role === 'avatar' ? ['id', 'name', 'source', 'boneMap', 'driver', 'hair', 'armForwardDistance', 'grips', 'arms']
+        : role === 'hammer' ? ['id', 'name', 'source', 'head'] : ['id', 'name', 'source'], `A library ${role}`);
       const id = libraryModelId(data.id);
       if (ids.has(id)) throw new ContentManifestError(`The ${role} library lists "${id}" twice.`);
       ids.add(id);
@@ -286,7 +292,7 @@ function validateLibrary(value: unknown): ContentLibrary {
   };
   return Object.freeze({
     avatar: entries('avatar', (data, base) => Object.freeze({ ...base, ...validateAvatarSettings(data) })),
-    hammer: entries('hammer', (_data, base) => Object.freeze(base)),
+    hammer: entries('hammer', (data, base) => Object.freeze({ ...base, head: libraryHammerHead(data.head) })),
     pot: entries('pot', (_data, base) => Object.freeze(base)),
   });
 }

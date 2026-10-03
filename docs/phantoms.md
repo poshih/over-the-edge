@@ -191,7 +191,9 @@ and in a fixed order:
 
 The physics: every physics setting but control sensitivity, so the masses, motors, downswing
 boosts, response, friction, damping, bounciness and handle compliance, and the hammer rig's
-handle length, maximum extension and minimum reach.
+handle length, maximum extension, minimum reach and default head. A model-library hammer's
+own head is a cosmetic's and is left out: recordings made with any hammer share the course,
+and phantoms draw the default head.
 
 Decorations, labels, colours, depth, course artwork, other trigger events, control sensitivity
 and the cursor settings are left out. A recording replays only where its course holds, so

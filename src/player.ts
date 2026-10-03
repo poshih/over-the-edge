@@ -3,6 +3,7 @@ import type { Body, Fixture, Joint, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point, Tuning } from './config';
 import { angleDifference, clamp, clampLength } from './math';
+import type { HammerHead } from './hammer-head';
 import { HammerJoint } from './hammer-joint';
 import { playerBody, PlayerRigError } from './player-bodies';
 import type { PlayerBody, PlayerPart } from './player-bodies';
@@ -96,7 +97,8 @@ function setMass(body: Body, mass: number): void {
   body.setMassData(data);
 }
 
-export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<Tuning>, geometry: RigGeometry): PlayerRig {
+// `head` is the hammer's head outline: the rig's default, or a library hammer's own.
+export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<Tuning>, geometry: RigGeometry, head: HammerHead): PlayerRig {
   const rootOwned = playerBody(world, { id: 'root', position: spawn.position, angle: 0, fixedRotation: true });
   const potOwned = playerBody(world, { id: 'pot', position: spawn.position, angle: 0, fixedRotation: false });
   const root = rootOwned.body, pot = potOwned.body;
@@ -111,7 +113,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
     collideConnected: false }));
   const shoulder = root.getWorldPoint(RIG.shoulder);
   const extension = clamp(spawn.reach, geometry.minReach, geometry.maxReach) - geometry.handleLength;
-  const tool = createPlayerTool({ world, shoulder, angle: spawn.angle, extension, geometry, tuning });
+  const tool = createPlayerTool({ world, shoulder, angle: spawn.angle, extension, geometry, tuning, head });
   const drive = attach(world, new HammerJoint({ bodyA: root, bodyB: tool.driveBody,
     localAnchorA: RIG.shoulder, lowerTranslation: geometry.minExtension, upperTranslation: geometry.maxExtension,
     maxMotorTorque: tuning.hingeTorque, maxMotorForce: tuning.sliderForce }));

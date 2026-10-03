@@ -1,0 +1,128 @@
+.hammer-head-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.hammer-head-label {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.hammer-head-editor select {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #faf9f2;
+  font-size: 11px;
+}
+
+.hammer-head-canvas {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f7f6ee;
+  touch-action: none;
+}
+
+.hammer-head-grid line {
+  stroke: #dfe3d6;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.hammer-head-reach {
+  fill: none;
+  stroke: #b9c2b0;
+  stroke-width: 1px;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.hammer-head-handle {
+  fill: #c9b48c;
+}
+
+.hammer-head-outline {
+  fill: rgb(55 109 80 / 22%);
+  stroke: #376d50;
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* A wide, invisible stroke along each edge, pressed to add a point there. */
+.hammer-head-edge {
+  stroke: transparent;
+  stroke-width: 14px;
+  vector-effect: non-scaling-stroke;
+  cursor: copy;
+}
+
+.hammer-head-centre {
+  fill: #6b4f2a;
+}
+
+.hammer-head-point {
+  fill: #f0f3e8;
+  stroke: #376d50;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+}
+
+.hammer-head-point[aria-pressed="true"] {
+  fill: var(--teal);
+}
+
+.hammer-head-point:focus-visible {
+  outline: none;
+  stroke: #94662b;
+  stroke-width: 3px;
+}
+
+.hammer-head-actions,
+.hammer-head-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hammer-head-readout,
+.hammer-head-help,
+.hammer-head-problem {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.hammer-head-problem {
+  color: #9b3b2b;
+}
+
+.hammer-head-problem:empty {
+  display: none;
+}
+
+@media (forced-colors: active) {
+  .hammer-head-outline,
+  .hammer-head-point {
+    stroke: CanvasText;
+  }
+
+  .hammer-head-point[aria-pressed="true"] {
+    fill: Highlight;
+  }
+}
+
+.hammer-head-mirror[aria-pressed="true"] {
+  border-color: var(--teal);
+  color: var(--paper);
+  background: var(--teal);
+}

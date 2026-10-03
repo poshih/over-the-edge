@@ -2,7 +2,7 @@
 // the same silhouette as ghosts. Metres, about the character's centre.
 import { ExtrudeGeometry, LatheGeometry, Matrix4, Shape, Vector2, Vector3 } from 'three';
 import type { Object3D } from 'three';
-import { RIG } from './config';
+import type { HammerHead } from './hammer-head';
 
 export const PLAYER_FIGURE = {
   // The pot's outline, turned about its axis: [radius, height] pairs from the base up.
@@ -22,11 +22,11 @@ export function createPotGeometry(): LatheGeometry {
   return new LatheGeometry(PLAYER_FIGURE.potProfile.map(([radius, height]) => new Vector2(radius, height)), 40);
 }
 
-// The hammer head's outline, extruded and centred on the tool's depth.
-export function createHammerHeadGeometry(): ExtrudeGeometry {
-  const [first, ...rest] = RIG.headVertices;
+// A hammer head's collision outline, extruded and centred on the tool's depth.
+export function createHammerHeadGeometry(head: HammerHead): ExtrudeGeometry {
+  const [first, ...rest] = head;
   const shape = new Shape();
-  shape.moveTo(first.x, first.y);
+  shape.moveTo(first!.x, first!.y);
   for (const vertex of rest) shape.lineTo(vertex.x, vertex.y);
   shape.closePath();
   const { depth, bevel } = PLAYER_FIGURE.hammerHead;

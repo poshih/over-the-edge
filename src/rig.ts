@@ -1,4 +1,6 @@
 import { RIG } from './config.ts';
+import { DEFAULT_HAMMER_HEAD } from './hammer-head.ts';
+import type { HammerHead } from './hammer-head.ts';
 
 // The configurable part of the hammer rig, set per game in its settings.
 export interface RigSettings {
@@ -9,9 +11,14 @@ export interface RigSettings {
   // The closest the head comes to the shoulder hinge, at least MIN_SLIDER_TRAVEL short of the reach; 0 lets it
   // reach the hinge.
   readonly minReach: number;
+  // The default hammer's head outline; a model-library hammer brings its own.
+  readonly head: HammerHead;
 }
 
-export const DEFAULT_RIG_SETTINGS: Readonly<RigSettings> = Object.freeze({ handleLength: 1.5, maxExtension: 1.15, minReach: 0 });
+// The rig settings set by sliders.
+export type RigLength = Exclude<keyof RigSettings, 'head'>;
+
+export const DEFAULT_RIG_SETTINGS: Readonly<RigSettings> = Object.freeze({ handleLength: 1.5, maxExtension: 1.15, minReach: 0, head: DEFAULT_HAMMER_HEAD });
 
 // The least usable slider travel. Keep a nonzero workspace between the polar drive's two stops.
 export const MIN_SLIDER_TRAVEL = 0.05;
@@ -40,6 +47,7 @@ export function rigGeometry(settings: Readonly<RigSettings>): RigGeometry {
     handleLength: settings.handleLength,
     maxExtension: settings.maxExtension,
     minReach: settings.minReach,
+    head: settings.head,
     minExtension: settings.minReach - settings.handleLength,
     // Float sums such as 2.05 + 0.55 land just off their decimal; nanometres keep the reach equal to it.
     maxReach: Math.round((settings.handleLength + settings.maxExtension) * 1e9) / 1e9,
@@ -52,6 +60,7 @@ export function minReachLimit(settings: Readonly<Pick<RigSettings, 'handleLength
   return Math.round((settings.handleLength + settings.maxExtension - MIN_SLIDER_TRAVEL) * 1e9) / 1e9;
 }
 
+// Whether two rigs build the same player. The head is not compared: it changes in place, mid-run.
 export function sameRig(left: Readonly<RigSettings>, right: Readonly<RigSettings>): boolean {
   return left.handleLength === right.handleLength && left.maxExtension === right.maxExtension && left.minReach === right.minReach;
 }

@@ -188,7 +188,7 @@ export class Release {
     });
     attempt.game = game;
     const library = new ReleaseModelLibrary({
-      library: manifest.library, access, loader: characterModels, view: game.view, signal,
+      library: manifest.library, access, loader: characterModels, parts: game, signal,
       onFailure: (error) => this.modelFailed(error),
     });
     attempt.library = library;
