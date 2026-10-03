@@ -5,11 +5,12 @@ import type { AvatarRigBinds, AvatarRigPose } from './avatar-rig';
 import { ARM_SIDES } from './character';
 import { AVATAR_JOINT_IDS, AVATAR_JOINT_PARENTS } from './character-profile';
 import type { AvatarBoneMap, AvatarJointId } from './character-profile';
-import type { ResolvedAvatarHair, ResolvedAvatarJoints, UnmappedAvatarJoint } from './character-model-inspect';
+import type { ResolvedAvatarJoints, UnmappedAvatarJoint } from './character-model-inspect';
 import type { LoadedCharacterModel } from './character-model-types';
 import { AvatarArmSplit } from './avatar-arm-split';
-import { SkinnedHair } from './skinned-hair';
-import type { MappedJointFrames } from './skinned-hair';
+import type { AvatarMotionSkeleton } from './avatar-motion';
+import type { PreparedAvatarMotions } from './avatar-motion-prepare';
+import { AvatarMotionRunner } from './avatar-motion-runner';
 
 interface DrivenJoint {
   readonly bone: Object3D;
@@ -29,12 +30,14 @@ interface DrivenArm {
 /**
  * An imported skinned GLB driven like the built-in avatar. Mapped joints receive the prepared rig's
  * avatar-space matrices; unmapped joints keep their bind pose relative to their parents, so they
- * follow their nearest mapped ancestor, except the joints of the avatar's hair chains, which the shared
- * hair solver swings (SkinnedHair). Per frame it writes seven bone matrices plus the hair's and allocates nothing.
+ * follow their nearest mapped ancestor, except the joints the avatar's motions claim: its hair chains and
+ * the motions its game registers, the one place they run (AvatarMotionRunner). Per frame it writes seven
+ * bone matrices plus the claimed joints' and allocates nothing.
  *
  * This class is the engine's scene applicator: it owns the model's attachment, resets it to the
  * skin's inverse bind pose, and derives each mapped joint's real node-parent offset from the scene
- * hierarchy. Rig math and strategy code never see the scene.
+ * hierarchy. Rig math, strategy and motion code never see the scene. Offline tools construct it with
+ * the prepared rig and motions (AvatarRigRegistry.prepare) and get the same frames as the game.
  */
 export class SkinnedAvatarView {
   readonly root = new Group();
@@ -46,9 +49,13 @@ export class SkinnedAvatarView {
   private readonly driven: readonly DrivenJoint[];
   private readonly arms: Readonly<Record<'left' | 'right', DrivenArm>>;
   private readonly unmapped: readonly UnmappedAvatarJoint[];
-  // Null for an avatar without hair chains, which then costs nothing.
-  private readonly hair: SkinnedHair | null;
-  private readonly mapped: MappedJointFrames;
+  // An avatar without motions runs none, at no cost.
+  private motions: AvatarMotionRunner;
+  private readonly mapped: AvatarMotionSkeleton;
+  // Each skin joint's node by index, any node's avatar-space bind, and the mapped joints' nodes, which motions bind to.
+  private readonly bones: readonly Object3D[];
+  private readonly avatarSpace: (object: Object3D) => Matrix4;
+  private readonly mappedNodes: ReadonlyMap<Object3D, AvatarJointId>;
   private readonly headPivot = new Vector3();
   private readonly scale: number;
   private readonly statistics: { meshes: number; skinnedMeshes: number; vertices: number; materials: number };
@@ -60,7 +67,7 @@ export class SkinnedAvatarView {
   private writes = 0;
 
   constructor(model: LoadedCharacterModel, resolved: ResolvedAvatarJoints, boneMap: AvatarBoneMap,
-    bindings: AvatarRigBinds, hair: ResolvedAvatarHair) {
+    bindings: AvatarRigBinds, motions: PreparedAvatarMotions) {
     this.model = model;
     this.boneMap = boneMap;
     this.unmapped = resolved.unmapped;
@@ -100,6 +107,7 @@ export class SkinnedAvatarView {
     this.fit.matrix.copy(bindings.fit);
     const avatarSpace = (object: Object3D): Matrix4 =>
       new Matrix4().multiplyMatrices(bindings.fit, modelSpace.get(object)!);
+    this.avatarSpace = avatarSpace;
 
     const joints = {} as Record<AvatarJointId, DrivenJoint>;
     for (const id of AVATAR_JOINT_IDS) {
@@ -121,7 +129,9 @@ export class SkinnedAvatarView {
     const frames = (key: 'bind' | 'current') => Object.freeze(Object.fromEntries(AVATAR_JOINT_IDS.map(id => [id, joints[id][key]]))) as
       Readonly<Record<AvatarJointId, Matrix4>>;
     this.mapped = Object.freeze({ bind: frames('bind'), current: frames('current') });
-    this.hair = hair.chains.length === 0 ? null : new SkinnedHair(hair, model.nodes, avatarSpace, this.mapped.bind);
+    this.bones = Object.freeze(model.report.joints.map(joint => model.nodes.get(joint.node)!));
+    this.mappedNodes = new Map(AVATAR_JOINT_IDS.map(id => [joints[id].bone, id] as const));
+    this.motions = this.runner(motions);
 
     const arms = {} as Record<'left' | 'right', DrivenArm>;
     const chains = {} as Record<'left' | 'right', ArmChain>;
@@ -150,11 +160,24 @@ export class SkinnedAvatarView {
       }
     });
     this.statistics = { meshes, skinnedMeshes, vertices, materials: materials.size };
-    this.armSplit = new AvatarArmSplit(scene, new Map(AVATAR_JOINT_IDS.map(id => [joints[id].bone, id] as const)));
+    this.armSplit = new AvatarArmSplit(scene, this.mappedNodes);
+  }
+
+  // Replaces the avatar's motions in place, prepared for this model with its bone map. Motions it already runs keep
+  // moving; new ones start from rest.
+  setMotions(motions: PreparedAvatarMotions): void {
+    const runner = this.runner(motions, this.motions);
+    this.motions.restore();
+    this.motions = runner;
+  }
+
+  private runner(motions: PreparedAvatarMotions, previous: AvatarMotionRunner | null = null): AvatarMotionRunner {
+    if (motions.model.joints.length !== this.bones.length) throw new Error('These motions were prepared for another model.');
+    return new AvatarMotionRunner(motions, this.bones, this.avatarSpace, { nodes: this.mappedNodes, frames: this.mapped }, previous);
   }
 
   // Applies the prepared rig's avatar-space pose, which the engine wrote this frame from the plan
-  // and the arm solutions, then swings the hair for the frame at `time` (simulation seconds). `body` places
+  // and the arm solutions, then runs the motions for the frame at `time` (simulation seconds). `body` places
   // avatar space, leaning with the upper body; `pot` places the jar, its origin at the jar's bottom-centre.
   apply(body: Matrix4, pot: Matrix4, headRotation: Quaternion, pose: AvatarRigPose, time: number): void {
     this.root.matrix.copy(body);
@@ -183,7 +206,7 @@ export class SkinnedAvatarView {
       joint.bone.matrixWorldNeedsUpdate = true;
     }
     this.writes += this.driven.length;
-    this.hair?.apply(body, pot, time, this.mapped);
+    this.motions.apply(body, pot, time);
   }
 
   inspect() {
@@ -206,6 +229,8 @@ export class SkinnedAvatarView {
       chains: { left: { ...this.chains.left }, right: { ...this.chains.right } },
       joints,
       boneWrites: this.writes,
+      // Each motion's claimed joints and cumulative claimed-joint writes, hair first.
+      motions: this.motions.inspect(),
       // False once another view took the model: this view then draws nothing.
       modelAttached: this.model.scene.parent === this.fit,
     };

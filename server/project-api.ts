@@ -647,10 +647,10 @@ export function createStudioHandler(config: StudioConfig) {
     try {
       parsed = JSON.parse(value);
     } catch {
-      throw new ProjectError('The settings query must be JSON: { boneMap, driver, hair, armForwardDistance, grips, arms }.', { section: 'models' });
+      throw new ProjectError('The settings query must be JSON: { boneMap, driver, hair, motion, armForwardDistance, grips, arms }.', { section: 'models' });
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new ProjectError('The settings query must be an object: { boneMap, driver, hair, armForwardDistance, grips, arms }.', { section: 'models' });
+      throw new ProjectError('The settings query must be an object: { boneMap, driver, hair, motion, armForwardDistance, grips, arms }.', { section: 'models' });
     }
     return parsed as Record<string, unknown>;
   };
@@ -666,7 +666,7 @@ export function createStudioHandler(config: StudioConfig) {
     await change(context, ['models'], async (manifest) => {
       const existing = manifest.models[role].find((candidate) => candidate.id === modelId);
       const base = { id: modelId, name: context.url.searchParams.get('name') ?? existing?.name ?? modelId };
-      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, driver, hair, armForwardDistance, grips, arms }), or maps its joints;
+      // An avatar keeps its entry's settings, takes ?settings= ({ boneMap, driver, hair, motion, armForwardDistance, grips, arms }), or maps its joints;
       // a hammer keeps its head, or starts with the game's default head.
       const entry: LibraryEntry = role === 'hammer'
         ? { ...base, head: (existing as LibraryHammerEntry | undefined)?.head ?? manifest.settings.rig.head } as LibraryHammerEntry

@@ -1,37 +1,28 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
-import type { Object3D } from 'three';
 import { HairSolver } from './hair-solver';
 import type { HairChainState } from './hair-solver';
 import type { AvatarJointId } from './character-profile';
 import { RIG } from './config';
 import type { ResolvedAvatarHair } from './character-model-inspect';
+import type { AvatarMotion, AvatarMotionFrame, AvatarMotionModel, AvatarMotionSkeleton } from './avatar-motion';
 
-// The mapped joints' avatar-space matrices at bind and this frame, as the rig wrote them.
-export interface MappedJointFrames {
-  readonly bind: Readonly<Record<AvatarJointId, Matrix4>>;
-  readonly current: Readonly<Record<AvatarJointId, Matrix4>>;
-}
-
-// A chain joint: its node, avatar-space bind and the bind offset of the next joint (or the tip's, repeated), and
-// this frame's rest frame and position, simulated position and turn.
+// A chain joint: its avatar-space bind and the bind offset of the next joint (or the tip's, repeated), and this
+// frame's rest frame and position, simulated position and turn.
 interface HairJoint {
-  readonly bone: Object3D;
   readonly bind: Matrix4;
   readonly bindPosition: Vector3;
   readonly segment: Vector3;
   readonly rest: Matrix4;
   readonly restPosition: Vector3;
   readonly restDirection: Vector3;
-  readonly current: Matrix4;
   readonly position: Vector3;
   readonly turn: Quaternion;
 }
 
 interface SkinnedChain {
   readonly follows: AvatarJointId;
-  // The avatar-space bind of the node the root hangs from, and that node's matrix this frame.
-  readonly parentBind: Matrix4;
-  readonly parentNow: Matrix4;
+  // Where the chain's joints start among the motion's claims.
+  readonly offset: number;
   readonly joints: readonly HairJoint[];
   readonly state: HairChainState;
   // The world depth of each joint's rest position, which the simulated joint keeps.
@@ -47,16 +38,18 @@ type SkinnedCollider =
 const DIRECTION_EPSILON = 1e-9;
 
 /**
- * An imported avatar's spring-bone hair (docs/characters.md, Hair on an imported avatar). A chain's root follows its
- * mapped joint rigidly; the joints after it rest at their bind offsets from the root in the body's frame, so hair
- * keeps hanging as authored while a head turns, and those rest positions give the shared hair solver its targets and
- * segment lengths. The solver moves the joints in the world's X-Y plane, the game's view. Each joint keeps the world
- * depth of its rest position and turns by the least rotation that carries its rest segment onto the simulated one,
- * so the skin bends along the chain; the tip joint turns with the last segment. Colliders are carried by their
- * mapped joints, or held by the jar. Runs after the rig has written the mapped joints; allocation-free per frame, its
- * cost bounded by the chains' joints and the colliders.
+ * An imported avatar's spring-bone hair (docs/characters.md, Hair on an imported avatar), the first built-in motion:
+ * it claims its chains' joints and runs through the same interface as the motions games register. A chain's root
+ * follows its mapped joint rigidly, its rest frame; the joints after it rest at their bind offsets from the root in
+ * the body's frame, so hair keeps hanging as authored while a head turns, and those rest positions give the shared
+ * hair solver its targets and segment lengths. The solver moves the joints in the world's X-Y plane, the game's view,
+ * on the steps of the avatar's motion clock. Each joint keeps the world depth of its rest position and turns by the
+ * least rotation that carries its rest segment onto the simulated one, so the skin bends along the chain; the tip
+ * joint turns with the last segment. Colliders are carried by their mapped joints, or held by the jar. Pure, built
+ * from the model's facts; its per-frame cost is bounded by the chains' joints and the colliders.
  */
-export class SkinnedHair {
+export class HairMotion implements AvatarMotion {
+  readonly claims: readonly number[];
   private readonly solver: HairSolver;
   private readonly chains: readonly SkinnedChain[];
   private readonly colliders: readonly SkinnedCollider[];
@@ -67,67 +60,68 @@ export class SkinnedHair {
   private readonly point = new Vector3();
   private readonly direction = new Vector3();
 
-  constructor(hair: ResolvedAvatarHair, nodes: ReadonlyMap<number, Object3D>, avatarBind: (object: Object3D) => Matrix4,
-    mappedBind: Readonly<Record<AvatarJointId, Matrix4>>) {
+  // `joints` gives each chain joint's index among the model's skin joints.
+  constructor(hair: ResolvedAvatarHair, model: AvatarMotionModel, joints: readonly (readonly number[])[]) {
     this.solver = new HairSolver(hair.chains.map(resolved => ({ parameters: resolved.chain, segments: resolved.nodes.length - 1 })),
       hair.colliders.map(collider => collider.radius));
+    let offset = 0;
     this.chains = Object.freeze(hair.chains.map((resolved, index): SkinnedChain => {
-      const bones = resolved.nodes.map(node => nodes.get(node)!);
-      const binds = bones.map(bone => avatarBind(bone));
+      const binds = joints[index]!.map(joint => new Matrix4().copy(model.joints[joint]!.bind));
       const positions = binds.map(bind => new Vector3().setFromMatrixPosition(bind));
-      return {
+      const chain: SkinnedChain = {
         follows: resolved.follows,
-        parentBind: avatarBind(bones[0]!.parent!),
-        parentNow: new Matrix4(),
-        joints: Object.freeze(bones.map((bone, at) => ({
-          bone, bind: binds[at]!, bindPosition: positions[at]!,
+        offset,
+        joints: Object.freeze(binds.map((bind, at) => ({
+          bind, bindPosition: positions[at]!,
           // The tip joint has no next joint; its segment repeats the last one.
           segment: at + 1 < positions.length ? positions[at + 1]!.clone().sub(positions[at]!) : positions[at]!.clone().sub(positions[at - 1]!),
           rest: new Matrix4(), restPosition: new Vector3(), restDirection: new Vector3(),
-          current: new Matrix4(), position: new Vector3(), turn: new Quaternion(),
+          position: new Vector3(), turn: new Quaternion(),
         }))),
         state: this.solver.chains[index]!,
-        depth: new Float64Array(bones.length),
+        depth: new Float64Array(binds.length),
       };
+      offset += binds.length;
+      return chain;
     }));
+    this.claims = Object.freeze(joints.flat());
+    const mappedBind = (id: AvatarJointId): Readonly<Matrix4> => model.joints[model.mapped[id]]!.bind;
     this.colliders = Object.freeze(hair.colliders.map((collider): SkinnedCollider => collider.joint === 'pot'
       // The jar's bottom-centre is at the player root's pot bottom at bind.
       ? { frame: 'pot', centre: new Vector3(collider.x, collider.y - RIG.potBottom, 0) }
       // In the plane of the joint it rides on.
       : {
         frame: 'joint', joint: collider.joint,
-        centre: new Vector3(collider.x, collider.y, new Vector3().setFromMatrixPosition(mappedBind[collider.joint]).z),
+        centre: new Vector3(collider.x, collider.y, new Vector3().setFromMatrixPosition(mappedBind(collider.joint)).z),
       }));
-    this.bindInverse = Object.freeze(Object.fromEntries(Object.entries(mappedBind).map(([id, bind]) => [id, bind.clone().invert()])) as
-      Record<AvatarJointId, Matrix4>);
+    this.bindInverse = Object.freeze(Object.fromEntries(Object.keys(model.mapped).map(id =>
+      [id, new Matrix4().copy(mappedBind(id as AvatarJointId)).invert()])) as Record<AvatarJointId, Matrix4>);
   }
 
-  // Simulates the hair for the frame at `time` and writes its joints' local matrices. `body` places avatar space in
-  // the world, as the view's root does; `pot` places the jar, its origin at the jar's bottom-centre.
-  apply(body: Matrix4, pot: Matrix4, time: number, mapped: MappedJointFrames): void {
-    this.bodyInverse.copy(body).invert();
-    for (const chain of this.chains) this.target(chain, body, mapped);
-    for (const [index, collider] of this.colliders.entries()) {
-      if (collider.frame === 'pot') this.point.copy(collider.centre).applyMatrix4(pot);
+  update(frame: AvatarMotionFrame): void {
+    this.bodyInverse.copy(frame.body).invert();
+    for (const chain of this.chains) this.target(chain, frame.body, frame.mapped, frame.rest);
+    for (let index = 0; index < this.colliders.length; index += 1) {
+      const collider = this.colliders[index]!;
+      if (collider.frame === 'pot') this.point.copy(collider.centre).applyMatrix4(frame.pot);
       else {
-        this.follow.multiplyMatrices(mapped.current[collider.joint], this.bindInverse[collider.joint]);
-        this.point.copy(collider.centre).applyMatrix4(this.follow).applyMatrix4(body);
+        this.follow.multiplyMatrices(frame.mapped.current[collider.joint], this.bindInverse[collider.joint]);
+        this.point.copy(collider.centre).applyMatrix4(this.follow).applyMatrix4(frame.body);
       }
       this.solver.colliderX[index] = this.point.x;
       this.solver.colliderY[index] = this.point.y;
     }
-    this.solver.solve(time);
-    for (const chain of this.chains) this.write(chain);
+    this.solver.advance(frame.reset, frame.steps);
+    for (const chain of this.chains) this.write(chain, frame.out);
   }
 
   // The chain's rest pose: the root rides rigidly on its mapped joint, every later joint rests at its bind offset from
   // the root. Its positions are the solver's targets, and their spacing its segment lengths.
-  private target(chain: SkinnedChain, body: Matrix4, mapped: MappedJointFrames): void {
+  private target(chain: SkinnedChain, body: Readonly<Matrix4>, mapped: AvatarMotionSkeleton, rest: readonly Readonly<Matrix4>[]): void {
     this.follow.multiplyMatrices(mapped.current[chain.follows], this.bindInverse[chain.follows]);
-    chain.parentNow.multiplyMatrices(this.follow, chain.parentBind);
     const { joints, state } = chain;
     const root = joints[0]!;
-    root.rest.multiplyMatrices(this.follow, root.bind);
+    root.rest.copy(rest[chain.offset]!);
     root.restPosition.setFromMatrixPosition(root.rest);
     root.restDirection.copy(root.segment).transformDirection(this.follow);
     for (let index = 1; index < joints.length; index += 1) {
@@ -136,8 +130,8 @@ export class SkinnedHair {
       joint.rest.copy(joint.bind).setPosition(joint.restPosition);
       joint.restDirection.copy(joint.segment).normalize();
     }
-    for (const [index, joint] of joints.entries()) {
-      this.point.copy(joint.restPosition).applyMatrix4(body);
+    for (let index = 0; index < joints.length; index += 1) {
+      this.point.copy(joints[index]!.restPosition).applyMatrix4(body);
       state.targetX[index] = this.point.x;
       state.targetY[index] = this.point.y;
       chain.depth[index] = this.point.z;
@@ -146,10 +140,10 @@ export class SkinnedHair {
   }
 
   // Each joint moves to its particle at its rest depth and turns its rest segment onto the simulated one.
-  private write(chain: SkinnedChain): void {
+  private write(chain: SkinnedChain, out: readonly Matrix4[]): void {
     const { joints, state } = chain;
-    for (const [index, joint] of joints.entries()) {
-      joint.position.set(state.currentX[index], state.currentY[index], chain.depth[index]).applyMatrix4(this.bodyInverse);
+    for (let index = 0; index < joints.length; index += 1) {
+      joints[index]!.position.set(state.currentX[index], state.currentY[index], chain.depth[index]).applyMatrix4(this.bodyInverse);
     }
     for (let index = 0; index < joints.length - 1; index += 1) {
       const joint = joints[index]!;
@@ -158,14 +152,11 @@ export class SkinnedHair {
       else joint.turn.setFromUnitVectors(joint.restDirection, this.direction.normalize());
     }
     joints[joints.length - 1]!.turn.copy(joints[joints.length - 2]!.turn);
-    let parent = chain.parentNow;
-    for (const joint of joints) {
+    for (let index = 0; index < joints.length; index += 1) {
+      const joint = joints[index]!;
       // The rest frame turned about its own origin, then placed on the particle.
       this.frame.copy(joint.rest).setPosition(0, 0, 0);
-      joint.current.makeRotationFromQuaternion(joint.turn).multiply(this.frame).setPosition(joint.position);
-      joint.bone.matrix.copy(parent).invert().multiply(joint.current);
-      joint.bone.matrixWorldNeedsUpdate = true;
-      parent = joint.current;
+      out[chain.offset + index]!.makeRotationFromQuaternion(joint.turn).multiply(this.frame).setPosition(joint.position);
     }
   }
 }

@@ -161,20 +161,23 @@ secrets.
 
 ## Avatar rig strategies: the rig module
 
-`AVATAR_RIG_MODULE` adds a game's own [avatar rig strategies](characters.md#rig-strategies) to
-the registry that already holds the standard strategy, so its imported avatars may select them.
+`AVATAR_RIG_MODULE` adds a game's own [avatar rig strategies](characters.md#rig-strategies) and
+[motion kinds](characters.md#secondary-motion) to the registry that already holds the standard
+strategy and the built-in hair, so its imported avatars may select them.
 Like `GAME_MODULE`, it must be a `.ts` or `.js` file inside this repository:
 
 ```sh
 AVATAR_RIG_MODULE=games/my-game/rigs.ts npm run build:game
 ```
 
-The module default-exports `{ apiVersion, strategies }` at **API version 1**
+The module default-exports `{ apiVersion, strategies, motions }` at **API version 2**
 (`AVATAR_RIG_API_VERSION` in `src/avatar-rig.ts`). It is imported once, when the dev server,
 build or project server starts, through Vite's own resolver, so the validators check exactly
-the strategies the browser runs. A module whose export is malformed, declares another API
-version, duplicates a strategy ID or omits the standard strategy fails with a typed
-`AvatarRigError` naming the fault, not a plain loader error.
+the strategies and motion kinds the browser runs. A module whose export is malformed, declares
+another API version, duplicates a strategy ID or omits the standard strategy fails with a typed
+`AvatarRigError` naming the fault, and a malformed or duplicated motion kind with a typed
+`AvatarMotionError`, not a plain loader error. Its editor-only `controls` export is read by the
+Workshop alone; a release never imports it.
 
 Unlike `GAME_MODULE`, the rig module is **not** ignored by publishing: the project server loads
 it to validate every model it stores, and the release it builds keeps it, so a published game

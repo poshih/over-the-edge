@@ -100,9 +100,10 @@ and grants the release access to its content, typically short-lived signed CDN U
 from the game's backend; the engine never sees accounts or credentials. See
 [content delivery](docs/content-delivery.md).
 
-A game that ships custom avatars adds its own rig strategies with
-**`AVATAR_RIG_MODULE`**, and its profiles then name them in each avatar's `driver`.
-See [rig strategies](docs/characters.md#rig-strategies).
+A game that ships custom avatars adds its own rig strategies and secondary-motion kinds with
+**`AVATAR_RIG_MODULE`**, and its profiles then name them in each avatar's `driver` and `motion`.
+See [rig strategies](docs/characters.md#rig-strategies) and
+[secondary motion](docs/characters.md#secondary-motion).
 
 Releases replay recordings of players near the player as translucent white phantoms. While
 **Record** is on, the Workshop records your play on each saved version of a server project's
@@ -947,7 +948,7 @@ Changing it retains the other artwork, but does not silently save it. Use the
 profile's **Save**, **Revert**, and JSON controls; **Save to project** writes it into
 the open [server project](docs/projects.md#working-in-the-workshop), and **Server character
 profiles** shares named [copies](docs/projects.md#server-copies). Profiles use **schema version
-17**; profiles in any other version are rejected, not converted.
+18**; profiles in any other version are rejected, not converted.
 
 Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend

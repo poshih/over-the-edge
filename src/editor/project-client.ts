@@ -1,3 +1,4 @@
+import { libraryAvatarSettings } from '../model-library';
 import type { LibraryAvatarEntry, LibraryEntry, PartRole } from '../model-library';
 import type { ProjectBundle, ProjectManifest } from '../project';
 import type { SharedCopySummary, SharedKind } from '../shared-copies';
@@ -173,10 +174,7 @@ export class ProjectClient {
   // Stores a library GLB with its entry; an avatar's settings travel with it, so its bone map is checked against it.
   putLibraryModel(id: string, role: PartRole, entry: LibraryEntry | LibraryAvatarEntry, blob: Blob, revision?: number): Promise<ServerRevisions> {
     const query = new URLSearchParams({ name: entry.name });
-    if (role === 'avatar') {
-      const { boneMap, driver, hair, armForwardDistance, grips, arms } = entry as LibraryAvatarEntry;
-      query.set('settings', JSON.stringify({ boneMap, driver, hair, armForwardDistance, grips, arms }));
-    }
+    if (role === 'avatar') query.set('settings', JSON.stringify(libraryAvatarSettings(entry as LibraryAvatarEntry)));
     return this.json('PUT', `/projects/${encodeURIComponent(id)}/models/${role}/${entry.id}/model?${query}`,
       { body: blob, type: 'model/gltf-binary', revision });
   }

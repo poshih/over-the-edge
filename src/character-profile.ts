@@ -5,6 +5,8 @@ import { decodeBase64, encodeBase64, number, record, SpriteError, text } from '.
 import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
 import { sameAvatarDriver, validateAvatarDriver } from './avatar-driver.ts';
 import type { AvatarDriver } from './avatar-driver.ts';
+import { sameAvatarMotion, validateAvatarMotion } from './avatar-motion-data.ts';
+import type { AvatarMotionEntry } from './avatar-motion-data.ts';
 import { HAIR_PARAMETER_LIMITS } from './hair-solver.ts';
 import type { HairParameters } from './hair-solver.ts';
 
@@ -82,6 +84,8 @@ export interface AvatarModelProfile {
   readonly driver: AvatarDriver;
   // Bound to the model's joints like the bone map, so it travels with the model.
   readonly hair: AvatarHair;
+  // The game's motion kinds this avatar runs (src/avatar-motion.ts), each configured for this model.
+  readonly motion: readonly AvatarMotionEntry[];
 }
 
 // A rigid prop that replaces the hammer or the pot; each role names its own model.
@@ -152,6 +156,9 @@ export const CHARACTER_MODEL_ERROR_CODES = [
   'invalid-model', 'model-limits', 'no-skin', 'unexpected-skin', 'invalid-skin',
   'missing-joint', 'unknown-joint', 'duplicate-joint', 'ambiguous-joint', 'broken-chain', 'crossed-arms',
   'degenerate-rig', 'too-many-influences', 'unnormalized-weights',
+  // An avatar motion's claims (src/avatar-motion.ts): a mapped joint, a joint hair or another motion has, a joint that
+  // carries a mapped joint or nests with another motion's joints, or more joints than the avatar's motions may move.
+  'mapped-claim', 'shared-claim', 'nested-claim', 'claim-limits',
 ] as const;
 export type CharacterModelErrorCode = (typeof CHARACTER_MODEL_ERROR_CODES)[number];
 
@@ -379,18 +386,27 @@ export function validateAvatarHair(value: unknown, boneMap: AvatarBoneMap): Avat
 }
 
 // The settings bound to an avatar's model: they change together with it, while hold settings (grips, arms) do not.
-export type AvatarModelSettings = Pick<AvatarModelProfile, 'boneMap' | 'driver' | 'hair'>;
+export type AvatarModelSettings = Pick<AvatarModelProfile, 'boneMap' | 'driver' | 'hair' | 'motion'>;
 
-// An avatar model's settings as a file carries them, for example beside a server model: its bone map, driver and hair,
-// each validated as a profile's are. Whether they fit the model is checkAvatarModelSettings' (model-library.ts).
+// An avatar model's settings as a file carries them, for example beside a server model: its bone map, driver, hair and
+// motion, each validated as a profile's are. Whether they fit the model is checkAvatarModelSettings' (model-library.ts).
 export function validateAvatarModelSettings(value: unknown): AvatarModelSettings {
-  const settings = record(value, ['boneMap', 'driver', 'hair'], 'Avatar model settings');
+  const settings = record(value, ['boneMap', 'driver', 'hair', 'motion'], 'Avatar model settings');
   const boneMap = validateAvatarBoneMap(settings.boneMap);
-  return Object.freeze({ boneMap, driver: validateAvatarDriver(settings.driver), hair: validateAvatarHair(settings.hair, boneMap) });
+  return Object.freeze({
+    boneMap, driver: validateAvatarDriver(settings.driver), hair: validateAvatarHair(settings.hair, boneMap),
+    motion: validateAvatarMotion(settings.motion),
+  });
 }
 
 export function sameAvatarModelSettings(left: AvatarModelSettings, right: AvatarModelSettings): boolean {
-  return sameBoneMap(left.boneMap, right.boneMap) && sameAvatarDriver(left.driver, right.driver) && sameAvatarHair(left.hair, right.hair);
+  return sameBoneMap(left.boneMap, right.boneMap) && sameAvatarDriver(left.driver, right.driver) &&
+    sameAvatarMotions(left, right);
+}
+
+// Whether two settings run the same hair and motions; with the same bone map and driver, others swap in place.
+export function sameAvatarMotions(left: Pick<AvatarModelSettings, 'hair' | 'motion'>, right: Pick<AvatarModelSettings, 'hair' | 'motion'>): boolean {
+  return sameAvatarHair(left.hair, right.hair) && sameAvatarMotion(left.motion, right.motion);
 }
 
 export function sameAvatarHair(left: AvatarHair, right: AvatarHair): boolean {
@@ -409,13 +425,14 @@ export function sameAvatarHair(left: AvatarHair, right: AvatarHair): boolean {
 }
 
 export function validateAvatarModelProfile(value: unknown): AvatarModelProfile {
-  const avatar = record(value, ['model', 'boneMap', 'driver', 'hair'], 'The avatar model');
+  const avatar = record(value, ['model', 'boneMap', 'driver', 'hair', 'motion'], 'The avatar model');
   const boneMap = validateAvatarBoneMap(avatar.boneMap);
   return Object.freeze({
     model: text(avatar.model, CHARACTER_MODEL_LIMITS.id, 'Avatar model ID'),
     boneMap,
     driver: validateAvatarDriver(avatar.driver),
     hair: validateAvatarHair(avatar.hair, boneMap),
+    motion: validateAvatarMotion(avatar.motion),
   });
 }
 

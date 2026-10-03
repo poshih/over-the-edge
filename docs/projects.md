@@ -71,7 +71,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [], "decorations": {} },
@@ -103,7 +103,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 5, "labels": [], "objects": [] },
@@ -163,7 +163,7 @@ Deploy it like any other release: the shell, for example with
 `npx wrangler deploy --config wrangler.game.toml`, and the content to the host or CDN
 that serves `GAME_CONTENT_URL`. A game whose players must sign in or own it adds its
 own module with `GAME_MODULE`, and one that ships custom avatars adds its rig
-strategies with `AVATAR_RIG_MODULE`; see [rig strategies](characters.md#rig-strategies).
+strategies and motion kinds with `AVATAR_RIG_MODULE`; see [rig strategies](characters.md#rig-strategies).
 
 ## Working in the Workshop
 
@@ -498,11 +498,11 @@ Workshop / Character exports; see [imported 3D characters](characters.md) and
 
 **Model library.** `models` lists entries per part: `{ "id", "name" }` for pots,
 `{ "id", "name", "head" }` for hammers, whose `head` is the hammer's own collision outline
-in the settings' `rig.head` format, and for avatars also `boneMap`, `driver`,
+in the settings' `rig.head` format, and for avatars also `boneMap`, `driver`, `hair`, `motion`,
 `armForwardDistance`, `grips` and `arms`, in the character profile's formats. IDs are 1-64 lowercase letters, digits and inner
 hyphens, unique per part; each entry's GLB is `models/<part>/<id>.glb`. Uploading a
 model with `PUT .../model` adds its entry: an avatar takes `settings` (JSON with those
-five fields), keeps its existing entry's, or maps its joints automatically with a
+seven fields), keeps its existing entry's, or maps its joints automatically with a
 standard driver; a hammer keeps its existing entry's head or starts with the game's
 default head. Removing an entry, or leaving it out of a `PUT` of the section, deletes its GLB.
 Releases list the library but load an entry only when the game's backend selects it;

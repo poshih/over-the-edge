@@ -20,13 +20,17 @@ import type { GripDistances, GripRotation, Grips, GripShoulder } from './grips';
 import { AvatarView } from './avatar-view';
 import { DEFAULT_AVATAR_RIGS, createArmSolutions, createFramePlan, createPose, projectGripShoulder } from './avatar-rig';
 import type {
-  AvatarRig, AvatarRigArmSolution, AvatarRigFramePlan, AvatarRigPose, AvatarRigRegistry, PreparedAvatarRig,
+  AvatarRig, AvatarRigArmSolution, AvatarRigBinds, AvatarRigFramePlan, AvatarRigPose, AvatarRigRegistry, PreparedAvatarMotions,
+  PreparedAvatarRig,
 } from './avatar-rig';
+import { sameAvatarDriver } from './avatar-driver';
 import type { AvatarDriver } from './avatar-driver';
-import { resolveAvatarHair } from './character-model-inspect';
-import type { CharacterModelUsage, ResolvedAvatarHair } from './character-model-inspect';
+import type { AvatarMotionEntry } from './avatar-motion-data';
+import type { CharacterModelUsage, ResolvedAvatarJoints } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
-import { characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameAvatarModelSettings } from './character-profile';
+import {
+  characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameAvatarModelSettings, sameAvatarMotions, sameBoneMap,
+} from './character-profile';
 import type { AvatarBoneMap, AvatarHair, AvatarModelSettings, CharacterAssets, PropModelRole } from './character-profile';
 import { CharacterShadingView } from './character-shading';
 import { PropModelView } from './prop-model-view';
@@ -34,6 +38,7 @@ import { HammerHandleFit } from './hammer-handle-fit';
 import { SkinnedAvatarView } from './skinned-avatar-view';
 import { HeadAim } from './head-aim';
 import { DEFAULT_WAIST_LEAN, WaistLean } from './waist-lean';
+import type { LeanPreview } from './waist-lean';
 import { createHammerHeadGeometry, createPotGeometry, placeLimb, PLAYER_FIGURE } from './player-figure';
 import { PHYSICS, RIG } from './config';
 import type { InputMode, Point } from './config';
@@ -174,12 +179,18 @@ interface PartViews {
 }
 
 // A fitted imported avatar and the state its frames need. Each profile and library avatar owns one,
-// so pose history and strategy state never leak from the avatar that was showing before it.
+// so pose history and strategy state never leak from the avatar that was showing before it. Its hair
+// and motions change in place, keeping the view.
 interface PreparedAvatar {
   readonly model: LoadedCharacterModel;
   readonly boneMap: AvatarBoneMap;
   readonly driver: AvatarDriver;
-  readonly hair: AvatarHair;
+  hair: AvatarHair;
+  motion: readonly AvatarMotionEntry[];
+  // The motions its view runs, and the fit they are prepared against.
+  motions: PreparedAvatarMotions;
+  readonly resolved: ResolvedAvatarJoints;
+  readonly binds: AvatarRigBinds;
   readonly rig: AvatarRig;
   readonly plan: AvatarRigFramePlan;
   readonly pose: AvatarRigPose;
@@ -188,17 +199,27 @@ interface PreparedAvatar {
 }
 
 // The exact inputs a commit needs to build one avatar view: the cached model, the settings it was
-// fitted with, and the pure preparation. Bound together, so a compiled rig can never be committed
-// against a different model or bone map.
-interface PreparedAvatarView {
-  readonly model: LoadedCharacterModel;
-  readonly boneMap: AvatarBoneMap;
-  readonly driver: AvatarDriver;
-  readonly hair: AvatarHair;
-  readonly prepared: PreparedAvatarRig;
-  // The hair's chains found in the model, checked before any scene changes.
-  readonly resolvedHair: ResolvedAvatarHair;
-}
+// fitted with, and the pure preparation, including its hair and motions, checked before any scene
+// changes. Bound together, so a compiled rig can never be committed against a different model or
+// bone map. A change to the hair and motions alone instead replaces the motions of the view showing,
+// which the preparation names.
+type PreparedAvatarView =
+  | {
+    readonly kind: 'view';
+    readonly model: LoadedCharacterModel;
+    readonly boneMap: AvatarBoneMap;
+    readonly driver: AvatarDriver;
+    readonly hair: AvatarHair;
+    readonly motion: readonly AvatarMotionEntry[];
+    readonly prepared: PreparedAvatarRig;
+  }
+  | {
+    readonly kind: 'motions';
+    readonly view: SkinnedAvatarView;
+    readonly hair: AvatarHair;
+    readonly motion: readonly AvatarMotionEntry[];
+    readonly motions: PreparedAvatarMotions;
+  };
 
 // A slot-owned avatar view: the prepared avatar plus the pool reference that keeps its model alive.
 type OwnedPreparedAvatar = PreparedAvatar & { readonly lease: CharacterModelLease };
@@ -736,15 +757,14 @@ export class GameView {
         // Fitted and prepared before anything changes, so a failure leaves the part as it was. The
         // old view goes first: disposing a view detaches its model's scene, and new settings keep
         // the same model.
-        const prepared = this.avatarRigs.prepare(part.model.report, part.avatar.boneMap, part.avatar.driver);
-        const hair = resolveAvatarHair(part.model.report, prepared.resolved, part.avatar.hair);
+        const prepared = this.avatarRigs.prepare(part.model.report, part.avatar);
         this.disposePart(role);
-        const view = new SkinnedAvatarView(part.model, prepared.resolved, part.avatar.boneMap, prepared.binds, hair);
+        const view = new SkinnedAvatarView(part.model, prepared.resolved, part.avatar.boneMap, prepared.binds, prepared.motions);
         this.shading.register(view.root);
         this.parts.avatar = {
           id: part.id, model: part.model, settings: part.avatar, driver: part.avatar.driver, hair: part.avatar.hair,
-          boneMap: part.avatar.boneMap, rig: prepared.rig, plan: createFramePlan(), pose: createPose(), view,
-          previous: { left: null, right: null },
+          motion: part.avatar.motion, motions: prepared.motions, boneMap: part.avatar.boneMap, resolved: prepared.resolved, binds: prepared.binds,
+          rig: prepared.rig, plan: createFramePlan(), pose: createPose(), view, previous: { left: null, right: null },
         };
       } else {
         // Fitted before shading, whose outline hulls share the fitted geometry.
@@ -757,6 +777,12 @@ export class GameView {
       }
     }
     this.applyPresentation();
+  }
+
+  // Rocks (sway) or kicks (jolt) the upper body about the waist for a moment, so an avatar's secondary motion can be
+  // judged without playing. Presentation only, like the waist lean it adds to.
+  previewMotion(kind: LeanPreview): void {
+    this.waistLean.preview(kind);
   }
 
   // The library model each part shows, or null where characters show their own.
@@ -829,23 +855,41 @@ export class GameView {
   }
 
   // The pure preparation for an avatar view from an already-resolved model, unless the slot already
-  // shows that exact model, bone map, driver and hair. Shared by presentation changes and part restores,
-  // so a prepared rig and hair are always bound to the model and settings they were prepared from.
+  // shows that exact model and settings. The slot's view keeps showing a model fitted with the same
+  // bone map and driver, taking only new hair and motions. Shared by presentation changes and part
+  // restores, so a prepared rig and motions are always bound to the model and settings they were
+  // prepared from.
   private prepareAvatarFrom(slot: CharacterSlot, loaded: LoadedCharacterModel,
     avatar: AvatarModelSettings): PreparedAvatarView | null {
     const current = slot.avatar;
-    if (current !== null && current.model === loaded && sameAvatarModelSettings(current, avatar)) return null;
-    const prepared = this.avatarRigs.prepare(loaded.report, avatar.boneMap, avatar.driver);
+    if (current !== null && current.model === loaded && sameBoneMap(current.boneMap, avatar.boneMap) &&
+      sameAvatarDriver(current.driver, avatar.driver)) {
+      if (sameAvatarMotions(current, avatar)) return null;
+      return {
+        kind: 'motions', view: current.view, hair: avatar.hair, motion: avatar.motion,
+        motions: this.avatarRigs.prepareMotions(loaded.report, current.resolved, current.binds, avatar,
+          { settings: current, motions: current.motions }),
+      };
+    }
     return {
-      model: loaded, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair, prepared,
-      resolvedHair: resolveAvatarHair(loaded.report, prepared.resolved, avatar.hair),
+      kind: 'view', model: loaded, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair, motion: avatar.motion,
+      prepared: this.avatarRigs.prepare(loaded.report, avatar),
     };
   }
 
   // Commits views for the models a slot's committed presentation references, reusing the pure
   // preparation the caller computed before any scene change. Callers pass the prepared avatar for any
-  // avatar this commit builds; null means the slot keeps its current avatar view.
-  private syncModelViews(slot: CharacterSlot, preparedAvatar: PreparedAvatarView | null): void {
+  // avatar this commit builds or whose motions it replaces; null means the slot keeps its current avatar view.
+  private syncModelViews(slot: CharacterSlot, preparation: PreparedAvatarView | null): void {
+    if (preparation?.kind === 'motions') {
+      const current = slot.avatar;
+      if (current?.view !== preparation.view) throw new Error('Avatar motions were prepared for a view the character no longer shows.');
+      current.view.setMotions(preparation.motions);
+      current.motions = preparation.motions;
+      current.hair = preparation.hair;
+      current.motion = preparation.motion;
+    }
+    const preparedAvatar = preparation?.kind === 'view' ? preparation : null;
     const { avatar } = slot.presentation;
     const avatarModel = avatar === undefined ? null : this.resolvedModel(slot, slot.presentation, 'avatar', avatar.model);
     const current = slot.avatar;
@@ -861,13 +905,13 @@ export class GameView {
       slot.avatar = null;
     }
     if (preparedAvatar !== null && avatarLease !== null) {
-      const view = new SkinnedAvatarView(preparedAvatar.model, preparedAvatar.prepared.resolved,
-        preparedAvatar.boneMap, preparedAvatar.prepared.binds, preparedAvatar.resolvedHair);
+      const { prepared } = preparedAvatar;
+      const view = new SkinnedAvatarView(preparedAvatar.model, prepared.resolved, preparedAvatar.boneMap, prepared.binds, prepared.motions);
       this.shading.register(view.root);
       slot.avatar = {
         model: preparedAvatar.model, boneMap: preparedAvatar.boneMap, driver: preparedAvatar.driver, hair: preparedAvatar.hair,
-        rig: preparedAvatar.prepared.rig, plan: createFramePlan(), pose: createPose(), view,
-        previous: { left: null, right: null }, lease: avatarLease,
+        motion: preparedAvatar.motion, motions: prepared.motions, resolved: prepared.resolved, binds: prepared.binds,
+        rig: prepared.rig, plan: createFramePlan(), pose: createPose(), view, previous: { left: null, right: null }, lease: avatarLease,
       };
     }
     for (const role of PROP_MODEL_ROLES) {

@@ -21,9 +21,12 @@ import {
   validateCharacterShading,
 } from '../character-profile';
 import type {
-  AvatarBoneMap, AvatarHair, AvatarJointId, AvatarModelSettings, CharacterAssets, CharacterModel, CharacterModelErrorCode,
+  AvatarBoneMap, AvatarHair, AvatarJointId, AvatarModelSettings, CharacterAssets, CharacterModel,
   CharacterShading, PartialAvatarBoneMap, PropModelRole,
 } from '../character-profile';
+import { NO_AVATAR_MOTION, sameAvatarMotion, validateAvatarMotion } from '../avatar-motion-data';
+import type { AvatarMotionEntry } from '../avatar-motion-data';
+import { AvatarMotionError } from '../avatar-motion';
 import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
 import { STANDARD_AVATAR_DRIVER } from '../avatar-driver';
@@ -55,10 +58,13 @@ export interface SpriteLayerEdit {
   readonly flipbook?: SpriteFlipbook | null;
 }
 
+// A typed model or avatar-motion failure: a CharacterModelError code with the joints it concerns, or an
+// AvatarMotionError code with the motion kind it concerns.
 export interface CharacterModelIssue {
-  readonly code: CharacterModelErrorCode;
+  readonly code: string;
   readonly message: string;
   readonly joints: readonly string[];
+  readonly motion: string | null;
 }
 
 // The imported avatar shown in Character: the draft's model, or an import awaiting a complete bone map.
@@ -102,6 +108,7 @@ interface PendingAvatar {
   readonly boneMap: PartialAvatarBoneMap;
   readonly driver: AvatarDriver;
   readonly hair: AvatarHair;
+  readonly motion: readonly AvatarMotionEntry[];
   readonly issue: CharacterModelIssue;
 }
 
@@ -182,8 +189,10 @@ function samePresentation(left: DirectionalPresentation | null, right: Direction
 
 const PROP_MODEL_IDS: Readonly<Record<PropModelRole, string>> = { hammer: HAMMER_MODEL_ID, pot: POT_MODEL_ID };
 
-function issueOf(error: CharacterModelError): CharacterModelIssue {
-  return Object.freeze({ code: error.code, message: error.message, joints: error.joints });
+function issueOf(error: CharacterModelError | AvatarMotionError): CharacterModelIssue {
+  return error instanceof CharacterModelError
+    ? Object.freeze({ code: error.code, message: error.message, joints: error.joints, motion: null })
+    : Object.freeze({ code: error.code, message: error.message, joints: Object.freeze([]), motion: error.motion });
 }
 
 function modelName(file: File): string {
@@ -363,9 +372,9 @@ export class SpriteEditorState {
   }
 
   // Validates an imported skinned GLB, suggests a bone map and applies it when complete and valid.
-  // Imports a skinned avatar GLB. `settings`, a server model's own, give it its bone map, driver and hair. Otherwise its
-  // joints map automatically: re-importing the avatar's own GLB keeps its trusted driver and its hair, and a different
-  // model starts standard, without hair, whose chains name another model's joints.
+  // Imports a skinned avatar GLB. `settings`, a server model's own, give it its bone map, driver, hair and motions.
+  // Otherwise its joints map automatically: re-importing the avatar's own GLB keeps its trusted driver, its hair and its
+  // motions, and a different model starts standard, without hair or motions, which are configured for another model's joints.
   async importAvatarModel(file: File, settings?: AvatarModelSettings): Promise<void> {
     if (!this.canEdit()) return;
     await this.run(async () => {
@@ -381,6 +390,7 @@ export class SpriteEditorState {
         ...settings ?? {
           boneMap: suggestAvatarBoneMap(report),
           driver: same ? avatar.driver : STANDARD_AVATAR_DRIVER, hair: same ? avatar.hair : NO_AVATAR_HAIR,
+          motion: same ? avatar.motion : NO_AVATAR_MOTION,
         },
       });
     });
@@ -399,6 +409,7 @@ export class SpriteEditorState {
       else boneMap[joint] = name;
       await this.applyAvatar({
         name: base.name, source: base.source, report: base.report, boneMap: Object.freeze(boneMap), driver: base.driver, hair: base.hair,
+        motion: base.motion,
       });
     });
   }
@@ -740,6 +751,34 @@ export class SpriteEditorState {
       const document = Object.freeze({ ...this.draft, waistLean });
       this.validateDraft(document);
       this.rig.setWaistLean(waistLean);
+      this.draft = document;
+      this.error = null;
+      this.changed();
+      return true;
+    } catch (error) {
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message, error);
+      return false;
+    }
+  }
+
+  // Live: the imported avatar's motions change in place, each kind re-validating its configuration against the model.
+  setAvatarMotion(value: unknown): boolean {
+    if (!this.canEdit()) return false;
+    try {
+      const avatar = this.draft.avatar;
+      if (avatar === undefined) throw new SpriteError('Import a skinned avatar GLB before configuring its motions.');
+      const motion = validateAvatarMotion(value);
+      if (sameAvatarMotion(motion, avatar.motion)) {
+        if (this.error !== null) {
+          this.error = null;
+          this.changed();
+        }
+        return true;
+      }
+      const document = Object.freeze({ ...this.draft, avatar: Object.freeze({ ...avatar, motion }) });
+      this.validateDraft(document);
+      this.rig.setAvatarMotion(motion);
       this.draft = document;
       this.error = null;
       this.changed();
@@ -1113,7 +1152,10 @@ export class SpriteEditorState {
     const model = this.model(avatar.model);
     const report = this.describeModel(model.source, 'avatar');
     if (report === null) throw new SpriteError('The avatar model is still loading; try again once it appears.');
-    return { name: model.name, source: model.source, report, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair };
+    return {
+      name: model.name, source: model.source, report, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair,
+      motion: avatar.motion,
+    };
   }
 
   // Keeps an import pending, with its typed issue, until its bone map and hair resolve against the model.
@@ -1129,7 +1171,9 @@ export class SpriteEditorState {
     const model = current !== null && current.source === candidate.source && current.name === candidate.name
       ? current : Object.freeze({ id: AVATAR_MODEL_ID, name: candidate.name, source: candidate.source });
     const document = this.characterDocument({
-      avatar: { model, boneMap: candidate.boneMap as AvatarBoneMap, driver: candidate.driver, hair: candidate.hair },
+      avatar: {
+        model, boneMap: candidate.boneMap as AvatarBoneMap, driver: candidate.driver, hair: candidate.hair, motion: candidate.motion,
+      },
     });
     await this.replaceRig(document);
     if (this.disposed) return;
@@ -1139,14 +1183,16 @@ export class SpriteEditorState {
 
   // A validated draft with the avatar, hammer or pot replaced (or removed with null), other fields kept.
   private characterDocument(changes: {
-    avatar?: { model: CharacterModel; boneMap: AvatarBoneMap; driver: AvatarDriver; hair: AvatarHair } | null;
+    avatar?: {
+      model: CharacterModel; boneMap: AvatarBoneMap; driver: AvatarDriver; hair: AvatarHair; motion: readonly AvatarMotionEntry[];
+    } | null;
     hammer?: CharacterModel | null;
     pot?: CharacterModel | null;
   }): SpriteDocument {
     const avatar = changes.avatar === undefined
       ? this.draft.avatar === undefined ? null
         : { model: this.model(this.draft.avatar.model), boneMap: this.draft.avatar.boneMap, driver: this.draft.avatar.driver,
-          hair: this.draft.avatar.hair }
+          hair: this.draft.avatar.hair, motion: this.draft.avatar.motion }
       : changes.avatar;
     const prop = (role: PropModelRole): CharacterModel | null => {
       const change = changes[role];
@@ -1160,7 +1206,8 @@ export class SpriteEditorState {
     const models = [avatar?.model, hammer, pot].filter((model): model is CharacterModel => model !== null && model !== undefined);
     const assets: CharacterAssets = characterAssets({
       models: models.length === 0 ? undefined : models,
-      avatar: avatar === null ? undefined : { model: avatar.model.id, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair },
+      avatar: avatar === null ? undefined
+        : { model: avatar.model.id, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair, motion: avatar.motion },
       hammer: hammer === null ? undefined : { model: hammer.id },
       pot: pot === null ? undefined : { model: pot.id },
       shading: this.draft.shading,
@@ -1216,7 +1263,7 @@ export class SpriteEditorState {
 
   // Keeps the typed code of character-model failures next to the message.
   private reportError(message: string, error?: unknown): void {
-    this.modelIssue = error instanceof CharacterModelError ? issueOf(error) : null;
+    this.modelIssue = error instanceof CharacterModelError || error instanceof AvatarMotionError ? issueOf(error) : null;
     const repeated = this.error === message;
     this.error = message;
     if (!this.disposed) {

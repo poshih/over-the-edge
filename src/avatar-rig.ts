@@ -1,12 +1,18 @@
-// The avatar-rig kernel: a trusted-host strategy seam for imported skinned avatars. A driver names
-// a strategy and carries bounded JSON config; the registry looks the strategy up, fits the model's
-// binds, and hands the strategy a prepared rig for its two frame phases. No silent fallback: an
-// unknown driver or an invalid config is a typed error, never the standard rig.
+// The avatar-rig kernel: a trusted-host seam for imported skinned avatars. A driver names a
+// strategy and carries bounded JSON config; the registry looks the strategy up, fits the model's
+// binds, and hands the strategy a prepared rig for its two frame phases. The same registry holds the
+// motion kinds an avatar's `motion` names (src/avatar-motion.ts). No silent fallback: an unknown
+// driver or kind, or an invalid config, is a typed error, never the standard rig or a skipped motion.
 import { isAvatarDriverId, STANDARD_AVATAR_DRIVER } from './avatar-driver';
-import type { AvatarDriver, RigJson } from './avatar-driver';
+import type { RigJson } from './avatar-driver';
+import { HAIR_MOTION_ID } from './avatar-motion-data';
+import { AvatarMotionError } from './avatar-motion';
+import type { AvatarMotionKind } from './avatar-motion';
+import { prepareAvatarMotions } from './avatar-motion-prepare';
+import type { AvatarMotionSettings, PreparedAvatarMotions, RunningAvatarMotions } from './avatar-motion-prepare';
 import { resolveAvatarJoints } from './character-model-inspect';
 import type { CharacterModelReport, ResolvedAvatarJoints } from './character-model-inspect';
-import type { AvatarBoneMap } from './character-profile';
+import type { AvatarModelSettings } from './character-profile';
 import { SpriteError } from './sprite-fields';
 import { ARM_SIDES } from './character';
 import { composeArmJoints, fitAvatarRig } from './avatar-rig-math';
@@ -16,6 +22,14 @@ import type {
 
 export { STANDARD_AVATAR_DRIVER, validateAvatarDriver } from './avatar-driver';
 export type { AvatarDriver, RigJson } from './avatar-driver';
+export { AVATAR_MOTION_ERROR_CODES, AVATAR_MOTION_ERROR_KIND, AVATAR_MOTION_LIMITS, AVATAR_MOTION_MAX_STEPS,
+  AVATAR_MOTION_STEP_SECONDS, AvatarMotionError, HAIR_MOTION_ID } from './avatar-motion';
+export type {
+  AvatarMotion, AvatarMotionControl, AvatarMotionControls, AvatarMotionEntry, AvatarMotionFrame, AvatarMotionJoint,
+  AvatarMotionKind, AvatarMotionListControl, AvatarMotionModel, AvatarMotionNumberControl, AvatarMotionPath,
+  AvatarMotionSkeleton,
+} from './avatar-motion';
+export type { AvatarMotionSettings, PreparedAvatarMotion, PreparedAvatarMotions, RunningAvatarMotions } from './avatar-motion-prepare';
 export { bindArmNormal, composeArmJoints, composeLimbJoints, createArmSolutions, createFramePlan, createPose,
   fitAvatarRig, handFrame, limbFrame, projectGripShoulder, SHOULDER_CENTER, SHOULDER_SPAN } from './avatar-rig-math';
 export type {
@@ -24,7 +38,8 @@ export type {
 } from './avatar-rig-math';
 
 // The module contract version a host understands. A module from another API version is rejected.
-export const AVATAR_RIG_API_VERSION = 1;
+// Version 2 added motion kinds.
+export const AVATAR_RIG_API_VERSION = 2;
 
 const AVATAR_RIG_ERROR_CODES = [
   'duplicate-strategy', 'unknown-strategy', 'missing-standard', 'api-version', 'invalid-config', 'invalid-strategy',
@@ -111,10 +126,13 @@ export interface AvatarRigStrategy {
   prepare(config: RigJson, binds: AvatarRigBinds): AvatarRig;
 }
 
-// A host's rig module: the strategies it adds to the standard one, at a known API version.
+// A host's rig module: the strategies it adds to the standard one and its motion kinds, at a known
+// API version. Its editor-only `controls` export, which the Workshop alone reads, describes the
+// kinds' tunable numbers (AvatarMotionControls).
 export interface AvatarRigModule {
-  readonly apiVersion: 1;
+  readonly apiVersion: 2;
   readonly strategies: readonly AvatarRigStrategy[];
+  readonly motions: readonly AvatarMotionKind[];
 }
 
 // The standard rig: the built-in avatar's zero-offset plan and forearm-aligned hand behaviour.
@@ -148,15 +166,16 @@ const STANDARD_AVATAR_RIG_STRATEGY: AvatarRigStrategy = Object.freeze({
   },
 });
 
-// A fitted model plus the strategy instance bound to it, resolved together.
+// A fitted model plus the strategy instance and the motions bound to it, resolved together.
 export interface PreparedAvatarRig {
   readonly binds: AvatarRigBinds;
   readonly rig: AvatarRig;
   readonly resolved: ResolvedAvatarJoints;
+  readonly motions: PreparedAvatarMotions;
 }
 
-// A module lists a bounded set of trusted strategies, each with a driver-style ID.
-export const AVATAR_RIG_LIMITS = Object.freeze({ strategies: 64 });
+// A module lists a bounded set of trusted strategies and motion kinds, each with a driver-style ID.
+export const AVATAR_RIG_LIMITS = Object.freeze({ strategies: 64, motions: 64 });
 
 // Rejects a malformed strategy descriptor at registration, so a bad module fails as a typed boundary
 // error instead of a TypeError in the middle of a frame. Strategies are trusted JS, not content.
@@ -175,16 +194,35 @@ function validateStrategy(value: unknown, index: number): AvatarRigStrategy {
   return value as AvatarRigStrategy;
 }
 
+// Rejects a malformed motion kind at registration, as validateStrategy does a strategy.
+function validateMotionKind(value: unknown, index: number): AvatarMotionKind {
+  if (typeof value !== 'object' || value === null) {
+    throw new AvatarMotionError('invalid-kind', `Avatar motion kind ${index} must be an object.`);
+  }
+  const id = Reflect.get(value, 'id');
+  if (!isAvatarDriverId(id)) {
+    throw new AvatarMotionError('invalid-kind',
+      `Avatar motion kind ${index} needs an ID of lowercase letters, numbers and hyphens, starting with a letter.`);
+  }
+  if (typeof Reflect.get(value, 'prepare') !== 'function') {
+    throw new AvatarMotionError('invalid-kind', `Avatar motion kind "${id}" has no prepare() function.`, id);
+  }
+  return value as AvatarMotionKind;
+}
+
 /**
- * The registered rig strategies, keyed by driver ID. Construct through createAvatarRigRegistry()
- * so the standard strategy is always present; the constructor rejects a malformed or oversized module,
- * duplicate IDs and a missing standard strategy.
+ * The registered rig strategies, keyed by driver ID, and motion kinds, keyed by kind ID. Construct
+ * through createAvatarRigRegistry() so the standard strategy is always present; the constructor rejects
+ * a malformed or oversized module, duplicate IDs, a kind named like the built-in hair and a missing
+ * standard strategy.
  */
 export class AvatarRigRegistry {
   private readonly strategies: ReadonlyMap<string, AvatarRigStrategy>;
   private readonly identifiers: readonly string[];
+  private readonly kinds: ReadonlyMap<string, AvatarMotionKind>;
+  private readonly kindIdentifiers: readonly string[];
 
-  constructor(strategies: readonly AvatarRigStrategy[]) {
+  constructor(strategies: readonly AvatarRigStrategy[], motions: readonly AvatarMotionKind[] = []) {
     if (strategies.length > AVATAR_RIG_LIMITS.strategies) {
       throw new AvatarRigError('invalid-strategy',
         `An avatar rig registry holds at most ${AVATAR_RIG_LIMITS.strategies} strategies.`);
@@ -203,10 +241,39 @@ export class AvatarRigRegistry {
     }
     this.strategies = map;
     this.identifiers = Object.freeze([...map.keys()]);
+    if (motions.length > AVATAR_RIG_LIMITS.motions) {
+      throw new AvatarMotionError('invalid-kind', `An avatar rig registry holds at most ${AVATAR_RIG_LIMITS.motions} motion kinds.`);
+    }
+    const kinds = new Map<string, AvatarMotionKind>();
+    for (let index = 0; index < motions.length; index++) {
+      const kind = validateMotionKind(motions[index], index);
+      if (kind.id === HAIR_MOTION_ID || kinds.has(kind.id)) {
+        throw new AvatarMotionError('duplicate-kind', kind.id === HAIR_MOTION_ID
+          ? `"${HAIR_MOTION_ID}" is the built-in hair; give the motion kind another ID.`
+          : `Two avatar motion kinds share the ID "${kind.id}".`, kind.id);
+      }
+      kinds.set(kind.id, kind);
+    }
+    this.kinds = kinds;
+    this.kindIdentifiers = Object.freeze([...kinds.keys()]);
   }
 
   get ids(): readonly string[] {
     return this.identifiers;
+  }
+
+  // The registered motion kinds' IDs; the built-in hair is not among them.
+  get motionIds(): readonly string[] {
+    return this.kindIdentifiers;
+  }
+
+  motion(id: string): AvatarMotionKind {
+    const kind = this.kinds.get(id);
+    if (kind === undefined) {
+      throw new AvatarMotionError('unknown-kind',
+        `No avatar motion kind is registered as "${id}". Register it in the avatar rig module's motions.`, id);
+    }
+    return kind;
   }
 
   has(id: string): boolean {
@@ -222,10 +289,12 @@ export class AvatarRigRegistry {
     return strategy;
   }
 
-  // Validates the driver, fits the model's binds, and prepares the strategy's per-avatar rig. All
-  // preparation is pure; no scene, material or renderer is touched. A strategy's typed refusal is
-  // normalized to this module's AvatarRigError across the Vite module-runner boundary.
-  prepare(report: CharacterModelReport, boneMap: AvatarBoneMap, driver: AvatarDriver): PreparedAvatarRig {
+  // Validates the driver, fits the model's binds, prepares the strategy's per-avatar rig, then the
+  // avatar's hair and motions. All preparation is pure; no scene, material or renderer is touched. A
+  // strategy's or kind's typed refusal is normalized to the host's error class across the Vite
+  // module-runner boundary.
+  prepare(report: CharacterModelReport, settings: AvatarModelSettings): PreparedAvatarRig {
+    const { boneMap, driver } = settings;
     const strategy = this.strategy(driver.id);
     const resolved = resolveAvatarJoints(report, boneMap);
     const binds = fitAvatarRig(report, boneMap);
@@ -233,34 +302,35 @@ export class AvatarRigRegistry {
     if (typeof rig !== 'object' || rig === null || typeof rig.writeFramePlan !== 'function' || typeof rig.writePose !== 'function') {
       throw new AvatarRigError('invalid-strategy', `Avatar rig "${driver.id}" must synchronously prepare a frame planner and pose writer.`);
     }
-    return { binds, rig, resolved };
+    return { binds, rig, resolved, motions: this.prepareMotions(report, resolved, binds, settings) };
+  }
+
+  // The avatar's hair and motions alone, for a model already fitted with the settings' bone map: a
+  // change to them alone replaces the motions without rebuilding the avatar, keeping those of
+  // `running`, the motions it runs, that did not change.
+  prepareMotions(report: CharacterModelReport, resolved: ResolvedAvatarJoints, binds: AvatarRigBinds,
+    settings: AvatarMotionSettings, running?: RunningAvatarMotions): PreparedAvatarMotions {
+    return prepareAvatarMotions(report, resolved, binds, settings, (id) => this.motion(id), running);
   }
 }
 
 // A registry from a host module; the standard strategy is always present, and a module cannot shadow it.
 export function createAvatarRigRegistry(module: AvatarRigModule): AvatarRigRegistry {
   if (typeof module !== 'object' || module === null) {
-    throw new AvatarRigError('api-version', 'An avatar rig module must default-export its API version and strategies.');
+    throw new AvatarRigError('api-version', 'An avatar rig module must default-export its API version, strategies and motions.');
   }
   if ((module.apiVersion as number) !== AVATAR_RIG_API_VERSION) {
     throw new AvatarRigError('api-version',
       `This host supports avatar rig module API version ${AVATAR_RIG_API_VERSION}; the module declares ${String(module.apiVersion)}.`);
   }
   if (!Array.isArray(module.strategies)) throw new AvatarRigError('api-version', 'An avatar rig module must list its strategies.');
+  if (!Array.isArray(module.motions)) throw new AvatarRigError('api-version', 'An avatar rig module must list its motion kinds.');
   if (module.strategies.length > AVATAR_RIG_LIMITS.strategies - 1) {
     throw new AvatarRigError('invalid-strategy',
       `An avatar rig module adds at most ${AVATAR_RIG_LIMITS.strategies - 1} strategies.`);
   }
-  return new AvatarRigRegistry([STANDARD_AVATAR_RIG_STRATEGY, ...module.strategies]);
+  return new AvatarRigRegistry([STANDARD_AVATAR_RIG_STRATEGY, ...module.strategies], module.motions);
 }
 
 // An unconfigured host deliberately supports only standard content; a bad configured module is not this case.
 export const DEFAULT_AVATAR_RIGS = new AvatarRigRegistry([STANDARD_AVATAR_RIG_STRATEGY]);
-
-// Validates a driver, bone map and rig config against a registry without keeping a prepared rig, for
-// authoring tools that check a model before it is committed. Full pure preparation runs here, so a
-// strategy's binding- or hash-dependent refusal is caught before the profile is committed.
-export function checkAvatarRig(report: CharacterModelReport, boneMap: AvatarBoneMap, driver: AvatarDriver,
-  registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS): void {
-  registry.prepare(report, boneMap, driver);
-}

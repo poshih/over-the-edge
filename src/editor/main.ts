@@ -39,6 +39,7 @@ import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
 import serverModels from 'virtual:workshop-models';
 import avatarRigs from 'virtual:avatar-rigs';
+import motionControls from 'virtual:avatar-motion-controls';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
@@ -208,6 +209,7 @@ const spriteEditor = createSpriteEditor({
   },
   applySavedProfile: !opensProject,
   projectSave: project, serverCopies,
+  motion: { kinds: avatarRigs.motionIds, controls: motionControls, preview: (kind) => game.view.previewMotion(kind) },
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);
     if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);

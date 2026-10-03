@@ -33,11 +33,13 @@ import {
   CONTENT_REF_PREFIX, isContentGroup, isContentPath, isContentRef, pathExtension, pathGroup,
 } from './content-ref';
 import type { ContentExtension } from './content-ref';
-import { libraryHammerHead, libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSettings } from './model-library';
+import {
+  LIBRARY_ENTRY_KEYS, libraryHammerHead, libraryModelId, MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSettings,
+} from './model-library';
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
-export const CONTENT_SCHEMA_VERSION = 8;
+export const CONTENT_SCHEMA_VERSION = 9;
 // The group holding everything the release itself uses; other groups are granted separately.
 export const GAME_GROUP = 'game';
 export const CONTENT_TYPES: Readonly<Record<ContentExtension, string>> = {
@@ -274,8 +276,8 @@ function validateLibrary(value: unknown): ContentLibrary {
     if (!Array.isArray(list) || list.length > MODEL_LIBRARY_LIMITS.entries) throw new ContentManifestError(`The ${role} library lists at most ${MODEL_LIBRARY_LIMITS.entries} models.`);
     const ids = new Set<string>();
     return Object.freeze(list.map((item: unknown) => {
-      const data = exactRecord(item, role === 'avatar' ? ['id', 'name', 'source', 'boneMap', 'driver', 'hair', 'armForwardDistance', 'grips', 'arms']
-        : role === 'hammer' ? ['id', 'name', 'source', 'head'] : ['id', 'name', 'source'], `A library ${role}`);
+      // A content entry is the project's entry with its packaged model's source.
+      const data = exactRecord(item, [...LIBRARY_ENTRY_KEYS[role], 'source'], `A library ${role}`);
       const id = libraryModelId(data.id);
       if (ids.has(id)) throw new ContentManifestError(`The ${role} library lists "${id}" twice.`);
       ids.add(id);

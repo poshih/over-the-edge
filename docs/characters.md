@@ -66,7 +66,8 @@ arms, each upper arm above its forearm, and each forearm above its hand. They
 need not be direct children: a clavicle between the spine and upper arm is
 fine. Unmapped joints, such as spine, neck, clavicles, fingers, twist bones and
 legs, follow their nearest mapped ancestor rigidly in their bind-pose offset,
-except the joints of [hair chains](#hair), which swing.
+except the joints of [hair chains](#hair), which swing, and those a
+[secondary motion](#secondary-motion) moves.
 Joints above the body stay in their bind pose. The Character tab lists every
 unmapped joint and what it follows.
 
@@ -154,6 +155,118 @@ hair's geometry to a chain of joints in the GLB and list the chain in `avatar.ha
   `ambiguous-joint`, `duplicate-joint` (a joint the bone map drives) and
   `broken-chain` (not a parent-to-child run, not hanging from a mapped joint, hanging
   from another chain, or carrying a mapped joint).
+- Hair is the first built-in [secondary motion](#secondary-motion) and runs through the
+  same interface as a game's motions, on the same clock.
+
+### Secondary motion
+
+A game can give its imported avatars motion of its own, such as tails, ears, flaps or
+dangling accessories, without editing the engine. It registers **motion kinds** in its
+[avatar rig module](#rig-strategies) beside its rig strategies, and an avatar lists the
+kinds it runs in `avatar.motion`, each with configuration only that kind interprets:
+
+```json
+"motion": [{ "id": "charm", "config": { "joint": "Charm", "stiffness": 30, "damping": 4 } }]
+```
+
+- Each kind appears at most once per avatar, at most 16 per avatar. `config` is bounded JSON,
+  with a driver's limits: depth 8, 512 values and 16 KiB. `[]` runs no motion, at no cost.
+  `hair` is the built-in hair's ID: hair stays in `avatar.hair`, and no module may register a
+  kind under that ID.
+- When the avatar loads, the engine hands the kind its configuration and read-only facts about
+  the model (`AvatarMotionModel`): every skin joint's name, nearest joint ancestor and bind frame
+  in the fitted avatar space (metres, +Y up, the model facing +Z, the shoulders 0.74 m above the
+  player root), the joints the bone map drives, and the joints hair simulates. The kind validates
+  the configuration and returns the motion, which **claims** the unmapped skin joints it will move,
+  by index. A configuration the kind refuses fails with the kind's own `AvatarMotionError` code.
+- The engine refuses claims with a `CharacterModelError`: `mapped-claim` (a joint the bone map
+  drives), `shared-claim` (a joint hair or another motion already moves), `nested-claim` (a joint
+  that carries a mapped joint, or carries or hangs below hair's or another motion's joints) and
+  `claim-limits` (more than 64 joints over the avatar's motions, hair aside). Claims are therefore
+  disjoint and never nest, so the order motions run in cannot change a result.
+- Every frame, after the head and arms are posed and the upper body leans, each motion gets
+  (`AvatarMotionFrame`):
+  - **the clock**: `reset`, start from rest with no steps, or `steps` fixed 1/60 s steps to
+    advance. It resets and steps exactly as hair does: frozen while time stands still, at most 15
+    catch-up steps, and a reset on a rewind, a restart, a new avatar or motion, or after the avatar
+    was not drawn for longer than those 15 steps. No game code measures time;
+  - **placement**: `body`, where avatar space sits in the world, including the waist lean, and
+    `pot`, the jar's frame, its origin at the jar's bottom-centre;
+  - **the skeleton**: the mapped joints' frames at bind and now, in avatar space;
+  - **rest frames**: each claimed joint's frame this frame if it followed its nearest mapped
+    joint rigidly, as unmapped joints do.
+
+  The motion writes each claimed joint's avatar-space frame into `out`. The engine turns those
+  frames into bone matrices, and joints below a claimed joint follow it rigidly. Motion that should
+  swing with inertia simulates in the world through `body`, as hair does.
+- A motion is presentation only: it never drives IK, gameplay or physics, never sees the scene
+  graph, and never changes the profile. Its `update` must not allocate.
+- An entry naming a kind the registry lacks fails with `unknown-kind`; it is never skipped. Kinds,
+  strategies and their checks are one registry, so a configuration is accepted or refused
+  identically when a profile, a server avatar's settings or a library avatar is imported,
+  stored, packaged or loaded.
+
+A kind, kept in the game's own repository:
+
+```ts
+import { Matrix4, Vector3 } from 'three';
+import { AVATAR_RIG_API_VERSION, AvatarMotionError } from '../../src/avatar-rig';
+import type { AvatarMotionControls, AvatarMotionKind, AvatarRigModule } from '../../src/avatar-rig';
+
+// A charm on one joint that lags behind its rest place in the world, on a damped spring.
+const charm: AvatarMotionKind = {
+  id: 'charm',
+  prepare(config, model) {
+    const { joint: name, stiffness, damping } = (config ?? {}) as Record<string, unknown>;
+    const joint = model.joints.findIndex((candidate) => candidate.name === name);
+    if (joint < 0) throw new AvatarMotionError('unknown-joint', `No skin joint is named "${String(name)}".`);
+    if (typeof stiffness !== 'number' || typeof damping !== 'number') {
+      throw new AvatarMotionError('invalid-spring', 'Give the stiffness and damping as numbers.');
+    }
+    const position = new Vector3(), velocity = new Vector3(), target = new Vector3(), pull = new Vector3();
+    const toAvatar = new Matrix4();
+    return {
+      claims: [joint],
+      update(frame) {
+        target.setFromMatrixPosition(frame.rest[0]).applyMatrix4(frame.body);
+        if (frame.reset) {
+          position.copy(target);
+          velocity.set(0, 0, 0);
+        }
+        for (let step = 0; step < frame.steps; step++) {
+          pull.subVectors(target, position).multiplyScalar(stiffness).addScaledVector(velocity, -damping);
+          velocity.addScaledVector(pull, frame.stepSeconds);
+          position.addScaledVector(velocity, frame.stepSeconds);
+        }
+        toAvatar.copy(frame.body).invert();
+        frame.out[0].copy(frame.rest[0]).setPosition(target.copy(position).applyMatrix4(toAvatar));
+      },
+    };
+  },
+};
+
+export default { apiVersion: AVATAR_RIG_API_VERSION, strategies: [], motions: [charm] } satisfies AvatarRigModule;
+
+// Editor-only: the Workshop's controls for the kinds' numbers. Releases never import it.
+export const controls: AvatarMotionControls = {
+  charm: [
+    { label: 'Stiffness', unit: '/s²', min: 1, max: 200, step: 1, default: 30, path: ['stiffness'] },
+    { label: 'Damping', unit: '/s', min: 0, max: 20, step: 0.1, default: 4, path: ['damping'] },
+  ],
+};
+```
+
+**Workshop controls.** Workshop / Character / **Secondary motion** lists the avatar's hair and
+motions. The module's `controls` export describes each kind's tunable numbers as data: a label, a
+unit, a range, a step, a default and a `path` of object keys and array indices into the
+configuration. A descriptor with a `list` path, a `title` field and `controls` repeats over that
+list, one group per item, titled by the item's field, with paths into the item. Each motion shows its
+controls and a reset to their defaults; a change goes to the draft profile, where the kind checks it
+again, and through Save and Revert. Motions that did not change keep moving, and the changed one
+restarts from rest. **Sway** rocks the upper body about the waist for a few seconds and **Jolt**
+kicks it once, in the running game, so a setting can be judged without playing. Only the Workshop
+reads `controls`, checked against the registry when it starts; invalid controls stop it with
+`invalid-controls`. The Workshop runs none of the game's DOM code, and releases contain no editor code.
 
 ### Errors
 
@@ -178,6 +291,10 @@ on `code`, never on the message. The editor shows the code in its status
 | `degenerate-rig` | Coincident shoulders, or an upper arm or forearm without length in the bind pose |
 | `too-many-influences` | `JOINTS_1`/`WEIGHTS_1`: more than 4 influences per vertex |
 | `unnormalized-weights` | A vertex whose weights do not sum to 1, or a negative weight |
+| `mapped-claim` | A motion claims a joint the bone map drives |
+| `shared-claim` | A motion claims a joint hair or another motion already moves |
+| `nested-claim` | A motion's joint carries a mapped joint, or carries or hangs below hair's or another motion's joints |
+| `claim-limits` | The avatar's motions claim more than 64 joints, hair aside |
 
 The same checks run at import, when a profile loads, and when a release is built.
 They are implemented without a DOM in `src/character-model-inspect.ts`.
@@ -254,11 +371,12 @@ development server starts, and one that fails stops it, naming the file. A model
 under its file name without `.glb`.
 
 **Avatar settings.** An avatar can carry its model settings in a JSON file beside it, `models/avatar/knight.json`:
-`{ "boneMap", "driver", "hair" }`, exactly as a profile's `avatar` has them.
+`{ "boneMap", "driver", "hair", "motion" }`, exactly as a profile's `avatar` has them.
 
-- They travel with the model, so a trusted rig strategy's calibration for those exact bytes and its
-  [hair](#hair) chains are not lost when someone picks it.
-- The file is validated and checked against its model with the Workshop's rig strategies, like a profile's avatar;
+- They travel with the model, so a trusted rig strategy's calibration for those exact bytes, its
+  [hair](#hair) chains and its [motions](#secondary-motion) are not lost when someone picks it.
+- The file is validated and checked against its model with the Workshop's rig strategies and motion kinds, like a
+  profile's avatar;
   one that does not fit stops the build or the server, naming the file.
 - Settings beside a hammer or pot, or without a model, stop it too.
 - An avatar without the file maps its joints when picked, as before.
@@ -266,9 +384,9 @@ under its file name without `.glb`.
 **Picking.** Workshop / Character's **Skinned avatar (GLB)**, **One-model hammer (GLB)**
 and **Pot model (GLB)** sections list the server's models of their part. **Use server
 avatar** (hammer, pot) applies the chosen one as if that file were chosen from the computer, and the model is stored
-in the character profile. An avatar takes its settings file's bone map, driver and hair; without one, it maps
+in the character profile. An avatar takes its settings file's bone map, driver, hair and motions; without one, it maps
 Mixamo-style joints or opens its bone map. Workshop / Project / Model library offers the same models with
-**Add server avatar** (hammer, pot), an avatar with its settings file's bone map, driver and hair and the open
+**Add server avatar** (hammer, pot), an avatar with its settings file's bone map, driver, hair and motions and the open
 character's hold settings. The character downloads one model at a time and is not
 held meanwhile: if it changes before the model arrives, for example through another import,
 Revert or opening a project, that change wins and the model is not used. The model library
@@ -319,7 +437,7 @@ and shading does no per-frame work.
 
 ## Profile format
 
-Profiles use **schema version 17**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
+Profiles use **schema version 18**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
 the hammer in degrees (0-45; see [waist lean](sprites.md#waist-lean)), and `grips`: the placement, each
 hand's distance from the butt (0-3 m) where it starts, the slide point `slideAt`, a share of each
 arm's length in the course plane that a sliding hand may ride from its shoulder, either way along the
@@ -332,7 +450,7 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
 
 ```json
 {
-  "schemaVersion": 17,
+  "schemaVersion": 18,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
   "waistLean": 20,
@@ -355,7 +473,8 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
       "right-upper-arm": "LeftArm", "right-forearm": "LeftForeArm", "right-hand": "LeftHand"
     },
     "driver": { "id": "standard", "config": null },
-    "hair": { "chains": [], "colliders": [] }
+    "hair": { "chains": [], "colliders": [] },
+    "motion": []
   },
   "hammer": { "model": "hammer" },
   "pot": { "model": "pot" },
@@ -375,6 +494,8 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
   config; a profile whose driver no host registered fails to load with `unknown-strategy`
   rather than falling back to another rig.
 - `avatar.hair` is the avatar's [hair](#hair), bound to its model's joints like the bone map.
+- `avatar.motion` lists the game's [motion kinds](#secondary-motion) the avatar runs, each
+  `{ "id", "config" }`, also bound to its model.
 - `shading` is absent for the default look (`pbr`, 3 bands, outline `#1f2428` at
   0.02 m). `outline` is `null` for none; colours are lowercase `#rrggbb`; widths
   are 0.002-0.1 m.
@@ -388,7 +509,8 @@ Profiles in any other schema version are rejected, not converted.
 An imported avatar says how it is fitted and posed through its `driver`. The built-in
 `standard` strategy sizes the arms from the model's own shoulders and bind-pose arm lengths
 (or the profile's arm lengths) and places the hands on the physical grips, exactly as
-described above. A game can add strategies by naming a side-effect-free module with
+described above. A game can add strategies, and the kinds of its avatars'
+[secondary motion](#secondary-motion), by naming a side-effect-free module with
 **`AVATAR_RIG_MODULE`**, a `.ts` or `.js` file inside the repository. The build imports it
 through its own resolver rather than the app's bundle, so it uses relative paths and bare
 package imports, not the app's aliases or `virtual:` modules.
@@ -405,27 +527,34 @@ const strategy: AvatarRigStrategy = {
   },
 };
 
-export default { apiVersion: AVATAR_RIG_API_VERSION, strategies: [strategy] } satisfies AvatarRigModule;
+export default { apiVersion: AVATAR_RIG_API_VERSION, strategies: [strategy], motions: [] } satisfies AvatarRigModule;
 ```
 
-The module's default export is an `apiVersion` and its strategies. A strategy is trusted host
+The module's default export is an `apiVersion` (2), its strategies and its motion kinds, and its
+optional `controls` export is the Workshop's [motion controls](#secondary-motion). A strategy is trusted host
 code, not content: it is pure numeric code that never sees a scene, material or renderer, and
 frame plans are passed explicitly between phases; scratch belongs to one avatar, never a global.
 When the profile rotates a hand, the engine turns a copy of that side's frame plan about the
 hand's grip after phase 1: its `offset`, `shaft` and `forward` all turn, so the arms reach the
 turned wrist and phase 2 receives the turned plan. The plan phase 1 wrote is never rewritten.
 A module that is not an object, declares another API version, has malformed strategies, or duplicates
-an ID (including `standard`) fails with a typed `AvatarRigError`. The factory always supplies the
+an ID (including `standard`) fails with a typed `AvatarRigError`; a malformed motion kind fails with
+an `AvatarMotionError` coded `invalid-kind`, and two kinds with one ID, or one named `hair`, with
+`duplicate-kind`. The factory always supplies the
 standard strategy. Only a direct registry constructor that omits it produces `missing-standard`.
 Configured modules exporting null are invalid, not an unconfigured-host fallback.
 
 The same registry is used by every check: importing or opening a project, the project server's
-writes, packaging a release and the running release, so a driver is accepted or rejected
+writes, packaging a release and the running release, so a driver or motion is accepted or rejected
 identically everywhere. It is built once when the dev server, build or project server starts,
 so changing the module needs a restart. A driver whose strategy is not registered, or whose
 `config` the strategy refuses, fails with an `AvatarRigError` and a `code`: `unknown-strategy`,
 `invalid-config`, `invalid-strategy`, `api-version`, `duplicate-strategy` or
-`missing-standard`. Callers branch on `code`, never on the message.
+`missing-standard`. A motion fails with an `AvatarMotionError` (`src/avatar-motion.ts`): `unknown-kind`
+for an unregistered kind, `invalid-motion` for a motion that is not an object with an `update()` and
+distinct skin-joint indices as its claims, or the kind's own code for a configuration it refuses, with
+the kind's ID in `motion`. Like `AvatarRigError`, it keeps a portable tag across Vite's module runner.
+The Workshop shows both as it shows model errors. Callers branch on `code`, never on the message.
 
 ## Releases with two characters
 
@@ -473,9 +602,9 @@ did not select, and the release keeps nothing about the choice in the browser.
 part, and **Add server avatar / hammer / pot** does the same with one of the Workshop's
 [server models](#server-models). An avatar maps Mixamo-style joints automatically; otherwise its bone map opens
 and the avatar is added once all eight joints resolve. **Bone map** edits an avatar's
-map later. An avatar entry carries its rig `driver`, its [hair](#hair) and what depends on its
-proportions: its bone map, grips, arm lengths and arm forward distance. A new avatar starts
-without hair and takes the grips, arm lengths and arm forward distance of the open character,
+map later. An avatar entry carries its rig `driver`, its [hair](#hair), its [motions](#secondary-motion) and what
+depends on its proportions: its bone map, grips, arm lengths and arm forward distance. A new avatar starts
+without hair or motions and takes the grips, arm lengths and arm forward distance of the open character,
 and **Use character settings** takes them again, so tune them in Workshop / Character first. **Preview** shows a library model in the Workshop's game
 exactly as a release shows it; previews are not saved. The project server stores the
 library as `models/<part>/<id>.glb` with its entries in `project.json`, with
@@ -566,10 +695,13 @@ change without reloading anything. Without a host, documents with models are rej
 Imported avatars are built once when their profile loads. Each frame writes the
 seven driven bone matrices, with no allocation. Unmapped joints keep static local
 matrices; hair chains add their joints' matrices and at most 15 solver steps, bounded by
-their joints and colliders. The hammer and pot models copy one matrix each; a new handle length
+their joints and colliders, and each motion adds its claimed joints' rest frames and matrices
+and its own update, which allocates nothing. A change to an avatar's hair or motions alone
+replaces its motions without rebuilding the avatar. The hammer and pot models copy one matrix each; a new handle length
 rewrites the hammer model's vertices once. This cost does not depend on the level.
 In the editor, `window.gettingOver.level().rendering` reports `importedAvatar`
-(joints, unmapped joints, chains and cumulative `boneWrites`), `hammerModel` and
+(joints, unmapped joints, chains, cumulative `boneWrites`, and each motion's `claims` and cumulative
+claimed-joint `writes`, hair first), `hammerModel` and
 `potModel` (transform, drawn material types and cumulative `matrixWrites`; the
 hammer's `fit` gives its handle length and fitted bounds), `shading`, `characters`
 and `renders`.

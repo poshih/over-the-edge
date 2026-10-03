@@ -16,7 +16,7 @@ import { contentDirectory, contentRequest, notFound } from './release';
 import { SERVER_MODEL_SETTINGS_EXTENSION, SERVER_MODELS, serverAvatarSettingsFile } from './server-model-paths';
 
 // Server models are `models/<part>/<name>.glb` (server-model-paths.ts). An avatar may carry its model settings beside it:
-// `{ "boneMap", "driver", "hair" }`, as a profile's avatar has them.
+// `{ "boneMap", "driver", "hair", "motion" }`, as a profile's avatar has them.
 const MODEL_FILE = /\.glb$/i;
 const MODEL_TYPE = 'model/gltf-binary';
 // Where a server model is under the Workshop's content URL: named by its SHA-256.

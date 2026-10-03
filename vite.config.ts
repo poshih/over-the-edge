@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import { avatarRigModulePath, avatarRigs, loadAvatarRigRegistry } from './build/avatar-rig-module.ts';
+import { avatarMotionControls, avatarRigModulePath, avatarRigs, loadWorkshopAvatarRigs } from './build/avatar-rig-module.ts';
 import { gameTitle } from './build/game-title.ts';
 import { locationUrl } from './build/location-url.ts';
 import { loadProjectInput } from './build/project-release.ts';
@@ -18,9 +18,10 @@ export default defineConfig(async ({ mode, isPreview }) => {
   // WORKSHOP_CONTENT_URL. Previewing serves a finished build, so none of them is read again.
   const requested = isPreview === true ? undefined : process.env.GAME_PROJECT;
   // The trusted rig module is resolved and evaluated once here, so the Workshop's project checks and
-  // the browser's registry both use the same strategies.
+  // the browser's registry both use the same strategies and motion kinds; its motion controls are
+  // checked now too, so a bad one stops the Workshop from starting.
   const rigModule = avatarRigModulePath(project, process.env.AVATAR_RIG_MODULE);
-  const rigRegistry = await loadAvatarRigRegistry(rigModule, mode);
+  const { registry: rigRegistry } = await loadWorkshopAvatarRigs(rigModule, mode);
   const input = requested === undefined ? null : loadProjectInput(project, requested, rigRegistry);
   const levels = isPreview === true ? [] : loadServerLevels(project);
   const models = isPreview === true ? [] : loadServerModels(project, rigRegistry);
@@ -33,6 +34,7 @@ export default defineConfig(async ({ mode, isPreview }) => {
       workshopLevels(levels),
       workshopModels({ models, contentUrl }),
       avatarRigs({ module: rigModule }),
+      avatarMotionControls({ module: rigModule }),
       // A preview serves a build made with GAME_PROJECT, so the studio reads it from the environment either way.
       projectStudio({ root: project, mode, avatarRigs: rigRegistry, workshopProject: process.env.GAME_PROJECT }),
     ],

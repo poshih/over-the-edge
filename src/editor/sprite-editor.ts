@@ -14,6 +14,8 @@ import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
 import { createCharacterEditor } from './character-editor';
+import type { AvatarMotionControls } from '../avatar-motion';
+import type { LeanPreview } from '../waist-lean';
 import { createProjectSaveButton } from './project-save';
 import type { ProjectSaveTarget } from './project-save';
 import type { ServerCopies } from './server-copies';
@@ -56,6 +58,12 @@ export interface SpriteEditorOptions {
   // The open server project, for Save to project, and the character profiles shared on the server.
   projectSave: ProjectSaveTarget;
   serverCopies: ServerCopies;
+  // The game's registered motion kinds, their Workshop controls, and the game view's sway and jolt, for the Character tab.
+  motion: {
+    kinds: readonly string[];
+    controls: AvatarMotionControls;
+    preview: (kind: LeanPreview) => void;
+  };
 }
 
 export interface SpriteEditorHandle {
@@ -467,7 +475,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
     mount: options.characterMount, state, hammerRig: options.hammerRig,
     naturalArms: options.naturalArms, onHandleLength: options.onHandleLength, actions: documentActions,
     serverModels: options.serverModels, onNotice: options.onNotice, signal: events.signal,
-    projectSave: options.projectSave, serverCopies: options.serverCopies,
+    projectSave: options.projectSave, serverCopies: options.serverCopies, motion: options.motion,
   });
   const skeletonEditor = createSkeletonEditor({
     mount: element<HTMLDivElement>(root, '.sprite-skeleton-mount'),

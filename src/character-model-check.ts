@@ -1,13 +1,13 @@
 import { characterModel, embeddedModel } from './character-profile';
-import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints } from './character-model-inspect';
+import { inspectCharacterModel } from './character-model-inspect';
 import type { SpriteDocument } from './sprite-data';
 import { SpriteError } from './sprite-fields';
-import { checkAvatarRig } from './avatar-rig';
 import type { AvatarRigRegistry } from './avatar-rig';
+import { checkAvatarModelSettings } from './model-library';
 
 // Validates a profile's embedded GLBs against MODEL_LIMITS, their skins, bone maps, prop
-// conventions, avatar rigs and hair chains, exactly as the runtime loader will; used before bundling or storing
-// a profile. The registry is the host's trusted rig strategies, passed in so the same custom
+// conventions, avatar rigs, hair chains and motions, exactly as the runtime loader will; used before bundling or
+// storing a profile. The registry is the host's trusted rig strategies and motion kinds, passed in so the same custom
 // AVATAR_RIG_MODULE is applied to build, server and browser checks.
 export function checkCharacterModels(document: SpriteDocument, label: string, registry: AvatarRigRegistry): void {
   const profiles = [['avatar', document.avatar], ['hammer', document.hammer], ['pot', document.pot]] as const;
@@ -20,10 +20,7 @@ export function checkCharacterModels(document: SpriteDocument, label: string, re
     }
     try {
       const report = inspectCharacterModel(bytes.buffer, usage);
-      if (usage === 'avatar' && document.avatar !== undefined) {
-        checkAvatarRig(report, document.avatar.boneMap, document.avatar.driver, registry);
-        resolveAvatarHair(report, resolveAvatarJoints(report, document.avatar.boneMap), document.avatar.hair);
-      }
+      if (usage === 'avatar' && document.avatar !== undefined) checkAvatarModelSettings(report, document.avatar, registry);
     } catch (error) {
       if (error instanceof Error) error.message = `${label}: ${usage} model "${model.name}": ${error.message}`;
       throw error;

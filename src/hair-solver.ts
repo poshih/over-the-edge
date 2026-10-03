@@ -4,9 +4,11 @@
 // fixed rate in the game's X-Y plane. Hair never drives IK, gameplay or physics.
 //
 // Each frame the caller writes every chain's targets (and lengths, where they change) and every collider's centre,
-// calls solve(time) and reads the particles back. Simulation freezes while time stands still, catches up at most
-// HAIR_MAX_STEPS fixed steps, and restarts from the targets on a rewind, after a long gap or after interrupt().
-// DOM-free and allocation-free per frame.
+// advances the solver and reads the particles back. solve(time) runs the solver on its own MotionClock: simulation
+// freezes while time stands still, catches up at most MOTION_MAX_STEPS fixed steps, and restarts from the targets on a
+// rewind, after a long gap or after interrupt(). An imported avatar's hair instead takes the steps of the clock its
+// view shares with the avatar's other motions, through advance(). DOM-free and allocation-free per frame.
+import { MotionClock, MOTION_STEP_SECONDS } from './motion-clock.ts';
 
 // Parameter ranges, shared by every hair format's validation.
 export const HAIR_PARAMETER_LIMITS = Object.freeze({
@@ -27,10 +29,6 @@ export interface HairParameters {
   readonly radius: number;
 }
 
-const HAIR_FIXED_STEP_SECONDS = 1 / 60;
-const HAIR_MAX_STEPS = 15;
-const HAIR_MAX_CATCHUP_SECONDS = HAIR_FIXED_STEP_SECONDS * HAIR_MAX_STEPS;
-const HAIR_TIME_EPSILON = 1e-9;
 const HAIR_CONSTRAINT_ITERATIONS = 8;
 const HAIR_STIFFNESS_FACTOR = 0.35;
 const HAIR_COLLISION_SLOP = 1e-6;
@@ -78,9 +76,8 @@ export class HairSolver {
   private readonly colliderRadius: Float64Array;
   private readonly solvedColliderX: Float64Array;
   private readonly solvedColliderY: Float64Array;
-  private remainder = 0;
-  private lastTime: number | null = null;
-  private running = false;
+  // The clock solve() runs on.
+  private readonly clock = new MotionClock();
 
   constructor(chains: readonly { readonly parameters: HairParameters; readonly segments: number }[], colliderRadii: readonly number[]) {
     this.chains = Object.freeze(chains.map(chain => new HairChainState(chain.parameters, chain.segments)));
@@ -93,7 +90,7 @@ export class HairSolver {
 
   // The hair was not simulated for a while (its pose was shown unconstrained): restart from the targets next time.
   interrupt(): void {
-    this.running = false;
+    this.clock.interrupt();
   }
 
   // Continues exactly where `source`, a solver built from the same chains and colliders, left off.
@@ -101,9 +98,7 @@ export class HairSolver {
     if (source.chains.length !== this.chains.length || source.colliderRadius.length !== this.colliderRadius.length) {
       throw new RangeError('Hair state can only be copied between solvers of the same chains and colliders.');
     }
-    this.remainder = source.remainder;
-    this.lastTime = source.lastTime;
-    this.running = source.running;
+    this.clock.copyFrom(source.clock);
     this.colliderX.set(source.colliderX);
     this.colliderY.set(source.colliderY);
     this.solvedColliderX.set(source.solvedColliderX);
@@ -120,37 +115,36 @@ export class HairSolver {
     }
   }
 
+  // Advances the solver on its own clock to `time`, in simulation seconds.
   solve(time: number): void {
-    const lastTime = this.lastTime;
-    const reset = !this.running || lastTime === null || time < lastTime ||
-      time - lastTime > HAIR_MAX_CATCHUP_SECONDS || this.chains.some(chain => !chain.initialized);
-    if (reset) {
-      this.remainder = 0;
+    this.clock.advance(time);
+    this.advance(this.clock.reset, this.clock.steps);
+  }
+
+  // Restarts from the targets, or takes `steps` fixed steps; with none, the chains only follow moved targets and
+  // colliders. A chain that never ran restarts either way.
+  advance(reset: boolean, steps: number): void {
+    if (reset || this.chains.some(chain => !chain.initialized)) {
       for (const chain of this.chains) {
         this.resetChain(chain);
         this.constrain(chain, 'kinematic');
         chain.previousX.set(chain.currentX);
         chain.previousY.set(chain.currentY);
       }
+    } else if (steps === 0) {
+      let collidersChanged = false;
+      for (let index = 0; index < this.colliderX.length; index += 1) {
+        if (Math.abs(this.colliderX[index] - this.solvedColliderX[index]) > HAIR_MOVE_TOLERANCE ||
+          Math.abs(this.colliderY[index] - this.solvedColliderY[index]) > HAIR_MOVE_TOLERANCE) collidersChanged = true;
+      }
+      for (const chain of this.chains) {
+        if (collidersChanged || this.targetsChanged(chain)) this.constrain(chain, 'kinematic');
+      }
     } else {
-      this.remainder += time - lastTime;
-      const steps = Math.min(HAIR_MAX_STEPS, Math.floor((this.remainder + HAIR_TIME_EPSILON) / HAIR_FIXED_STEP_SECONDS));
-      this.remainder = Math.max(0, this.remainder - steps * HAIR_FIXED_STEP_SECONDS);
-      if (steps === 0) {
-        let collidersChanged = false;
-        for (let index = 0; index < this.colliderX.length; index += 1) {
-          if (Math.abs(this.colliderX[index] - this.solvedColliderX[index]) > HAIR_MOVE_TOLERANCE ||
-            Math.abs(this.colliderY[index] - this.solvedColliderY[index]) > HAIR_MOVE_TOLERANCE) collidersChanged = true;
-        }
+      for (let step = 0; step < steps; step += 1) {
         for (const chain of this.chains) {
-          if (collidersChanged || this.targetsChanged(chain)) this.constrain(chain, 'kinematic');
-        }
-      } else {
-        for (let step = 0; step < steps; step += 1) {
-          for (const chain of this.chains) {
-            this.integrate(chain, HAIR_FIXED_STEP_SECONDS);
-            this.constrain(chain, 'dynamic');
-          }
+          this.integrate(chain, MOTION_STEP_SECONDS);
+          this.constrain(chain, 'dynamic');
         }
       }
     }
@@ -160,8 +154,6 @@ export class HairSolver {
     }
     this.solvedColliderX.set(this.colliderX);
     this.solvedColliderY.set(this.colliderY);
-    this.running = true;
-    this.lastTime = time;
   }
 
   private resetChain(chain: HairChainState): void {

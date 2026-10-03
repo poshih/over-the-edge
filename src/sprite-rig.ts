@@ -30,6 +30,8 @@ import {
   characterAssets, DEFAULT_CHARACTER_SHADING, sameShading, validateCharacterShading,
 } from './character-profile';
 import type { CharacterAssets, CharacterShading } from './character-profile';
+import { sameAvatarMotion, validateAvatarMotion } from './avatar-motion-data';
+import type { AvatarMotionEntry } from './avatar-motion-data';
 import { DirectionalError, validateDirectionalPresentation } from './directional-data';
 import type { DirectionalPresentation } from './directional-data';
 import { DirectionalPose } from './directional-pose';
@@ -567,6 +569,20 @@ export class SpriteRig {
     if (current === shading || current !== undefined && shading !== undefined && sameShading(current, shading)) return;
     const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), shading });
     this.assets = characterAssets({ ...this.assets, shading });
+    commit?.();
+  }
+
+  // Replaces the imported avatar's motions without reloading anything. The host prepares them against the model first,
+  // so a kind's refusal leaves the motions that were running.
+  setAvatarMotion(value: readonly AvatarMotionEntry[]): void {
+    this.assertMutable();
+    const avatar = this.assets.avatar;
+    if (avatar === undefined) throw new SpriteError('Import a skinned avatar GLB before configuring its motions.');
+    const motion = validateAvatarMotion(value);
+    if (sameAvatarMotion(motion, avatar.motion)) return;
+    const next = Object.freeze({ ...avatar, motion });
+    const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), avatar: next });
+    this.assets = characterAssets({ ...this.assets, avatar: next });
     commit?.();
   }
 

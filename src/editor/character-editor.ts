@@ -33,6 +33,9 @@ import { serverModelSettings, ServerModelError } from './server-models';
 import type { ServerModel, ServerModels } from './server-models';
 import type { PartRole } from '../model-library';
 import { createSpriteCharacterExample } from './sprite-character-example';
+import { createMotionEditor } from './motion-editor';
+import type { AvatarMotionControls } from '../avatar-motion';
+import type { LeanPreview } from '../waist-lean';
 import { sectionMarkup } from './workshop-section';
 import './character-editor.css';
 
@@ -108,6 +111,12 @@ export function createCharacterEditor(options: {
   // The open server project, for Save to project, and the character profiles shared on the server.
   readonly projectSave: ProjectSaveTarget;
   readonly serverCopies: ServerCopies;
+  // The game's registered motion kinds, their Workshop controls, and the game view's sway and jolt.
+  readonly motion: {
+    readonly kinds: readonly string[];
+    readonly controls: AvatarMotionControls;
+    readonly preview: (kind: LeanPreview) => void;
+  };
 }): { setHammerRig(rig: RigGeometry): void; dispose(): void } {
   const events = new AbortController();
   const listen = { signal: events.signal };
@@ -236,6 +245,9 @@ export function createCharacterEditor(options: {
           </div>
         </div>
       `)}
+
+      ${sectionMarkup({ id: 'character-motion', title: 'Secondary motion', hint: 'Hair and the game\'s motions on the avatar' },
+        '<div class="character-motion-mount"></div>')}
 
       ${sectionMarkup({ id: 'character-hammer', title: 'One-model hammer (GLB)', hint: 'Any character type' }, `
         <div class="character-hammer">
@@ -414,6 +426,10 @@ export function createCharacterEditor(options: {
   const unmappedList = element<HTMLUListElement>(root, '.character-unmapped-list');
   const avatarDiscard = element<HTMLButtonElement>(root, '.character-avatar-discard');
   const avatarRemove = element<HTMLButtonElement>(root, '.character-avatar-remove');
+  const motionEditor = createMotionEditor({
+    mount: element<HTMLDivElement>(root, '.character-motion-mount'), state: options.state,
+    kinds: options.motion.kinds, controls: options.motion.controls, preview: options.motion.preview, signal: events.signal,
+  });
   const hammerFile = element<HTMLInputElement>(root, '#character-hammer-file');
   const hammerStatus = element<HTMLParagraphElement>(root, '.character-hammer-status');
   const hammerRemove = element<HTMLButtonElement>(root, '.character-hammer-remove');
@@ -726,6 +742,7 @@ export function createCharacterEditor(options: {
     externalWarning.hidden = !snapshot.externalSources;
     setText(technology, CHARACTER_TYPES[profile.characterRiggingType].description);
     renderModels(snapshot, disabled);
+    motionEditor.render(snapshot, disabled);
 
     if (profile !== describedDocument) {
       let rigid = 0;
@@ -756,6 +773,9 @@ export function createCharacterEditor(options: {
     statusBox.dataset.kind = disabled ? 'busy' : snapshot.error !== null ? 'error' : snapshot.dirty ? 'draft' : 'ready';
     if (snapshot.modelIssue === null) delete statusBox.dataset.code;
     else statusBox.dataset.code = snapshot.modelIssue.code;
+    // An avatar motion's refusal also names its kind.
+    if (snapshot.modelIssue?.motion == null) delete statusBox.dataset.motion;
+    else statusBox.dataset.motion = snapshot.modelIssue.motion;
   }
 
   function renderModels(snapshot: ReturnType<SpriteEditorState['snapshot']>, disabled: boolean): void {

@@ -7,16 +7,26 @@ export const WAIST_LEAN_LIMITS = { min: 0, max: 45, step: 1 } as const;
 const RESPONSE_TIME = 0.15;
 const RADIANS_PER_DEGREE = Math.PI / 180;
 
+// A Workshop preview that moves the upper body so secondary motion can be judged without playing: a sway rocks it
+// about the waist a few times, a jolt kicks it once.
+export type LeanPreview = 'sway' | 'jolt';
+const SWAY = { amplitude: 14 * RADIANS_PER_DEGREE, frequency: 1.4, duration: 2.5 } as const;
+const JOLT = { amplitude: 18 * RADIANS_PER_DEGREE, rise: 0.05, duration: 0.6 } as const;
+
 /**
  * The upper body's lean: it turns about the waist toward the side the hammer's shaft points, the most when the shaft
- * is level and not at all when it points straight up or down, easing toward that angle. Its angle is counterclockwise
- * in the view's plane, radians. Allocation-free.
+ * is level and not at all when it points straight up or down, easing toward that angle, plus any preview. Its angle is
+ * counterclockwise in the view's plane, radians. Allocation-free.
  */
 export class WaistLean {
   angle = 0;
   // The waist's height above the torso's origin (the player root).
   private readonly pivotY: number;
+  private eased = 0;
   private previousTime: number | null = null;
+  private previewing: LeanPreview | null = null;
+  // When the preview began, in simulation seconds; null until its first frame.
+  private previewStart: number | null = null;
 
   constructor(pivotY: number) {
     this.pivotY = pivotY;
@@ -32,16 +42,40 @@ export class WaistLean {
     const target = -maxLean * RADIANS_PER_DEGREE * Math.cos(shaftAngle);
     const previous = this.previousTime;
     this.previousTime = time;
-    if (previous === null || time < previous) {
-      this.angle = target;
-      return;
-    }
-    this.angle += (target - this.angle) * -Math.expm1(-(time - previous) / RESPONSE_TIME);
+    if (previous === null || time < previous) this.eased = target;
+    else this.eased += (target - this.eased) * -Math.expm1(-(time - previous) / RESPONSE_TIME);
+    this.angle = this.eased + this.previewAngle(time);
+  }
+
+  // Rocks or kicks the upper body from the next frame on, over the lean, timed by simulation time like the motion it
+  // shows; a rewind ends it. Presentation only, like the lean.
+  preview(kind: LeanPreview): void {
+    this.previewing = kind;
+    this.previewStart = null;
   }
 
   reset(): void {
     this.previousTime = null;
+    this.eased = 0;
     this.angle = 0;
+    this.previewing = null;
+  }
+
+  private previewAngle(time: number): number {
+    if (this.previewing === null) return 0;
+    if (this.previewStart === null) this.previewStart = time;
+    const elapsed = time - this.previewStart;
+    const duration = this.previewing === 'sway' ? SWAY.duration : JOLT.duration;
+    if (elapsed < 0 || elapsed >= duration) {
+      this.previewing = null;
+      return 0;
+    }
+    if (this.previewing === 'sway') {
+      return SWAY.amplitude * Math.sin(Math.PI * elapsed / SWAY.duration) * Math.sin(2 * Math.PI * SWAY.frequency * elapsed);
+    }
+    // Peaks at the rise time, then settles.
+    const rise = elapsed / JOLT.rise;
+    return JOLT.amplitude * rise * Math.exp(1 - rise);
   }
 
   // Where the torso's origin, the player root at `x`, `y` when upright, sits once the upper body turns about the waist.

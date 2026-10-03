@@ -76,7 +76,7 @@ export interface CharacterPresentation extends CharacterAssets {
   readonly arms: CharacterArms | null;
 }
 
-export const SPRITE_SCHEMA_VERSION = 17;
+export const SPRITE_SCHEMA_VERSION = 18;
 
 export interface SpriteDocument extends CharacterPresentation {
   readonly schemaVersion: typeof SPRITE_SCHEMA_VERSION;

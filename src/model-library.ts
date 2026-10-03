@@ -5,11 +5,13 @@ import { AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, NO_AVATAR_HAIR, validateAvata
 import type { AvatarBoneMap, AvatarHair, AvatarModelSettings, PartialAvatarBoneMap } from './character-profile';
 import { STANDARD_AVATAR_DRIVER, validateAvatarDriver } from './avatar-driver';
 import type { AvatarDriver } from './avatar-driver';
-import { checkAvatarRig, DEFAULT_AVATAR_RIGS } from './avatar-rig';
+import { DEFAULT_AVATAR_RIGS } from './avatar-rig';
 import type { AvatarRigRegistry } from './avatar-rig';
+import { NO_AVATAR_MOTION, validateAvatarMotion } from './avatar-motion-data';
+import type { AvatarMotionEntry } from './avatar-motion-data';
 import type { CharacterArms } from './character-arms';
 import { DEFAULT_ARM_FORWARD_DISTANCE } from './character-depth';
-import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestAvatarBoneMap } from './character-model-inspect';
+import { inspectCharacterModel, suggestAvatarBoneMap } from './character-model-inspect';
 import type { CharacterModelReport } from './character-model-inspect';
 import { DEFAULT_GRIPS } from './grips';
 import type { Grips } from './grips';
@@ -48,12 +50,13 @@ export interface LibraryEntry {
   readonly name: string;
 }
 
-// What an avatar model's proportions size: its bone map, driver and hair, bound to its joints, and its grips,
+// What an avatar model's proportions size: its bone map, driver, hair and motions, bound to its joints, and its grips,
 // arm lengths and arm forward distance.
 export interface LibraryAvatarSettings {
   readonly boneMap: AvatarBoneMap;
   readonly driver: AvatarDriver;
   readonly hair: AvatarHair;
+  readonly motion: readonly AvatarMotionEntry[];
   readonly armForwardDistance: number;
   readonly grips: Grips;
   readonly arms: CharacterArms | null;
@@ -80,8 +83,12 @@ export const EMPTY_MODEL_LIBRARY: ModelLibrary = Object.freeze({
 });
 
 const ENTRY_KEYS = ['id', 'name'] as const;
-const AVATAR_KEYS = [...ENTRY_KEYS, 'boneMap', 'driver', 'hair', 'armForwardDistance', 'grips', 'arms'] as const;
+const AVATAR_KEYS = [...ENTRY_KEYS, 'boneMap', 'driver', 'hair', 'motion', 'armForwardDistance', 'grips', 'arms'] as const;
 const HAMMER_KEYS = [...ENTRY_KEYS, 'head'] as const;
+// Each part's entry fields, which every format that lists library entries shares.
+export const LIBRARY_ENTRY_KEYS: Readonly<Record<PartRole, readonly string[]>> = Object.freeze({
+  avatar: AVATAR_KEYS, hammer: HAMMER_KEYS, pot: ENTRY_KEYS,
+});
 const ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 export function isPartRole(value: unknown): value is PartRole {
@@ -113,6 +120,7 @@ export function validateAvatarSettings(value: Record<string, unknown>): LibraryA
     boneMap,
     driver: validateAvatarDriver(value.driver),
     hair: validateAvatarHair(value.hair, boneMap),
+    motion: validateAvatarMotion(value.motion),
     armForwardDistance: validateArmForwardDistance(value.armForwardDistance),
     grips: validateGrips(value.grips),
     arms: validateArms(value.arms),
@@ -126,6 +134,7 @@ export function libraryAvatarSettings(entry: LibraryAvatarSettings): LibraryAvat
     boneMap: entry.boneMap,
     driver: entry.driver,
     hair: entry.hair,
+    motion: entry.motion,
     armForwardDistance: entry.armForwardDistance,
     grips: entry.grips,
     arms: entry.arms,
@@ -138,7 +147,7 @@ function validateEntries<T extends LibraryEntry>(value: unknown, role: PartRole,
   }
   const ids = new Set<string>();
   return Object.freeze(value.map((item: unknown) => {
-    const data = exactRecord(item, role === 'avatar' ? AVATAR_KEYS : role === 'hammer' ? HAMMER_KEYS : ENTRY_KEYS, `A library ${role}`);
+    const data = exactRecord(item, LIBRARY_ENTRY_KEYS[role], `A library ${role}`);
     const result = entry(data);
     if (ids.has(result.id)) throw new ProjectError(`The ${role} library lists "${result.id}" twice.`);
     ids.add(result.id);
@@ -177,17 +186,17 @@ function entryLabel(role: PartRole, entry: LibraryEntry): string {
   return `Library ${role} "${entry.name}" (${entry.id})`;
 }
 
-// The model settings of an avatar known only by its bone map: the standard driver and no hair.
+// The model settings of an avatar known only by its bone map: the standard driver, no hair and no motions.
 export function mappedAvatarModel(boneMap: AvatarBoneMap): AvatarModelSettings {
-  return Object.freeze({ boneMap, driver: STANDARD_AVATAR_DRIVER, hair: NO_AVATAR_HAIR });
+  return Object.freeze({ boneMap, driver: STANDARD_AVATAR_DRIVER, hair: NO_AVATAR_HAIR, motion: NO_AVATAR_MOTION });
 }
 
-// Checks an avatar's model settings against its GLB's report as releases do: the bone map resolves against its skin,
-// the driver prepares for this exact model, and the hair's chains name its skin joints.
+// Checks an avatar's model settings against its GLB's report as releases and loads do, with the full pure preparation:
+// the bone map resolves against its skin, the driver prepares for this exact model, the hair's chains name its skin
+// joints, and each motion's kind accepts its configuration and claims joints the engine allows.
 export function checkAvatarModelSettings(report: CharacterModelReport, settings: AvatarModelSettings,
   registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS): void {
-  checkAvatarRig(report, settings.boneMap, settings.driver, registry);
-  resolveAvatarHair(report, resolveAvatarJoints(report, settings.boneMap), settings.hair);
+  registry.prepare(report, settings);
 }
 
 // Checks a library GLB exactly as release builds and loads do: MODEL_LIMITS, the typed character
@@ -216,7 +225,7 @@ export function checkModelLibrary(
 }
 
 // A new avatar entry for an imported GLB: its mapped joints, when every joint resolves, standard
-// rig strategy, no hair, and hold settings taken from `settings`, typically the open character's.
+// rig strategy, no hair or motions, and hold settings taken from `settings`, typically the open character's.
 export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings: AvatarHoldSettings): LibraryAvatarEntry {
   const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'avatar');
   const suggested: PartialAvatarBoneMap = suggestAvatarBoneMap(report);
