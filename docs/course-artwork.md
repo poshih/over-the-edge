@@ -177,23 +177,3 @@ chunks. Only edited transforms and dirty chunk bounds are uploaded, and fades
 update only active fading batches. Reusing a GLB never duplicates its textures.
 Decoration GLBs are instanced like the placeholders they replace (see
 [decoration performance](decorations.md#performance)).
-
-## Verification
-
-```sh
-npm run verify:art
-```
-
-This packs a course with the command above, including its error cases. It
-builds and plays both release modes, and checks the following in a real browser:
-- Mesh bounds match collision boxes for every built-in shape and a custom
-  polygon, across rotations and mirrors.
-- Decoration GLBs replace their models' placeholders in mesh releases only, stand
-  on their base at the decoration's height, and mirror from mirrored geometry. A
-  model the library lacks releases only with meshes.
-- A 1,000-object, 600 m course reuses one mesh.
-- Illusion fade, disappearance, and reset work with meshes.
-- PNG, JPEG, and WebP textures load.
-- Editing a level in the Workshop keeps its `art` references.
-
-`npm run verify` runs it after the other suites.

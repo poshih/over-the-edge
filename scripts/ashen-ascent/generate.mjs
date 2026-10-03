@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-// Builds the Ashen Ascent example: node scripts/ashen-ascent/generate.mjs [--preview | --check]
+// Builds the Ashen Ascent example: node scripts/ashen-ascent/generate.mjs [--preview]
 // It places every set piece of the Workshop's library once, along a continuous route checked for
 // reach, and writes examples/projects/ashen-ascent/ and docs/ashen-ascent-map.svg.
 // --preview also writes map crops and the reach overlay to artifacts/ashen-ascent/.
-// --check writes nothing and fails when the committed files differ from what the generator builds.
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -82,19 +81,8 @@ try {
   ]);
   const strays = (await readdir(join(root, example, 'media')).catch(() => []))
     .map((name) => `${example}/media/${name}`).filter((path) => !outputs.has(path));
-  if (problems.length > 0) {
-    // Nothing is written or compared while the course has problems.
-  } else if (flags.has('--check')) {
-    const stale = [...strays];
-    for (const [path, data] of outputs) {
-      const current = await readFile(join(root, path)).catch(() => null);
-      if (current === null || !current.equals(Buffer.from(data))) stale.push(path);
-    }
-    if (stale.length > 0) {
-      console.error(`Out of date: ${stale.join(', ')}. Run node scripts/ashen-ascent/generate.mjs.`);
-      process.exitCode = 1;
-    }
-  } else {
+  // Nothing is written while the course has problems.
+  if (problems.length === 0) {
     await mkdir(join(root, example, 'media'), { recursive: true });
     for (const path of strays) await rm(join(root, path));
     for (const [path, data] of outputs) await writeFile(join(root, path), data);

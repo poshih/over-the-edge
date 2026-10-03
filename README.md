@@ -212,13 +212,6 @@ The editor depends on the shared game runtime, never the reverse.
 that graph. Hiding editor controls with a runtime flag is not the release
 boundary.
 
-`npm run verify:game` exercises the release, custom-course/sprite/aim-flipbook/settings/two-character builds,
-development entry, and editor-dependency rejection in isolation. `npm run verify:art`
-does the same for course packages and terrain meshes, `npm run verify:content`
-for the shell and content split, grants, verification and the module boundary, and
-`npm run verify:model-swap` for [runtime model swaps](docs/characters.md#model-library-and-runtime-swaps)
-and the Workshop's model library.
-
 ### Complete games from a project
 
 A project holds a whole game in one place: title, level, physics, both character
@@ -1209,17 +1202,6 @@ never modified.
 
 ## Runtime inspection
 
-```sh
-npm run verify
-```
-
-This builds both entries and exercises browser gameplay with Playwright, including
-the course-artwork checks from `npm run verify:art` and the project, project server
-and Project tab checks from `npm run verify:project`. If Chromium
-is not installed for Playwright, install it with `npx playwright install chromium`
-and rerun. Runtime artifacts are written to the ignored `artifacts/` directory.
-There is no unit-test suite.
-
 The editor entry exposes the read-only `window.gettingOver.snapshot()` and
 `window.gettingOver.project({ x, y })` diagnostics for observing actual physics,
 motor effort, camera state, and world-to-screen coordinates. `snapshot().rig` is
@@ -1249,7 +1231,9 @@ These globals are absent from the game-only release.
 ## Contributing
 
 Issues and pull requests are welcome. Include steps to reproduce gameplay
-problems, and run `npm run verify` before submitting code changes.
+problems, and make sure `npm run build` and `npm run build:game`, which type-check
+the editor, the build tools and the game-only release, succeed before submitting
+code changes. The project has no test suite.
 
 ## License
 

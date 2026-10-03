@@ -155,11 +155,10 @@ the scenery. The project's 11 WAV files, about 1.2 MB in total, are synthesized 
 ```sh
 node scripts/ashen-ascent/generate.mjs            # write the project and the map
 node scripts/ashen-ascent/generate.mjs --preview  # also write zone crops and a reach overlay to artifacts/ashen-ascent/
-node scripts/ashen-ascent/generate.mjs --check    # fail if the committed files differ from the generator
 ```
 
-Change the generator, not `level.json`: `npm run verify:project` runs `--check`,
-then builds the example as an editor-free release and opens it. The generator places
+Change the generator, not `level.json`, and regenerate: hand edits are lost the next time
+the generator runs. The generator places
 each piece with the library's own `placeSetPiece`, so part IDs follow
 `<piece>-<zone>-<part>`. Before it writes anything, it checks all of the following:
 

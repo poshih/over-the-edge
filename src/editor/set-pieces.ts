@@ -715,7 +715,7 @@ export const SET_PIECES: readonly SetPiece[] = Object.freeze(DRAFTS.map(finishPi
 const PIECES_BY_ID = new Map(SET_PIECES.map((piece) => [piece.id, piece]));
 if (PIECES_BY_ID.size !== SET_PIECES.length) throw new Error('Set piece IDs must be unique.');
 
-/** Compact, serializable summary for diagnostics and verification. */
+/** Compact, serializable summary for diagnostics. */
 export const SET_PIECE_CATALOG = Object.freeze(SET_PIECES.map((piece) =>
   Object.freeze({ id: piece.id, category: piece.category, name: piece.name, counts: piece.counts })));
 

@@ -61,9 +61,9 @@ three rather than eight dynamic bodies, and two rather than seven joints.
 The same targeted trace also exercised a head resting outside rock while its
 non-colliding shaft and compound COM were inside, and a positive-frequency
 compliant handle. These are headless physics measurements, not browser visual
-review or proof over all settings, terrain and input sequences. No full
-verification suite, build, deployment or representative-large-level scenario was
-run as part of this investigation.
+review or proof over all settings, terrain and input sequences. No build,
+deployment or representative-large-level scenario was run as part of this
+investigation.
 
 Reproduce only with approval for this runtime check:
 

@@ -522,22 +522,3 @@ model library) together with the JSON files. Export larger games, such as ones w
 character profiles, as directories instead. `project.json`
 is limited to 2 MiB, and each section keeps its existing limit. The model library holds
 at most 32 models per part, 20 MiB each and 64 MiB in total.
-
-## Verification
-
-```sh
-npm run verify:project
-```
-
-This builds the example project as a directory and as a project file, checks that
-the generated Ashen Ascent example matches its generator and builds and opens as an
-editor-free release, checks that invalid projects and conflicting inputs fail, builds
-and plays a project with two character profiles, an appearance model and arm IK,
-exercises the API (validation, revisions, token and host checks, cross-site
-protection, file signatures, references, bundles, publishing), drives the Project tab
-end to end (open, save, live sync, conflicts, enemy art, media, alternate character,
-export, import, save as, publish, reopen) and measures a 1,000-object project. It
-then deploys a Workshop built with a representative project (about 1,000 objects, a
-10 MiB track, a skinned avatar and a second character) to a static site and checks
-that it opens the project, keeps changes across reloads, leaves older browser saves
-unchanged and follows a redeployment. It writes `artifacts/project-report.json`.

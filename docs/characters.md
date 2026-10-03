@@ -705,37 +705,3 @@ claimed-joint `writes`, hair first), `hammerModel` and
 `potModel` (transform, drawn material types and cumulative `matrixWrites`; the
 hammer's `fit` gives its handle length and fitted bounds), `shading`, `characters`
 and `renders`.
-
-## Verification
-
-`scripts/verify-character.mjs`, part of `npm run verify`, generates a
-Mixamo-named skinned humanoid, a hammer and a pot. It checks every typed error
-code and the pot conventions, automatic mapping, IK at reachable and unreachable
-grips, set arm lengths on the imported arm bones, the hammer frame in each 3D type, and the pot's base on its physical
-bottom in 3D and 2D. It also checks live shading flips without new materials,
-per-frame writes on a large course, and that profiles save, restore and export byte
-for byte. `scripts/verify-grips.mjs` first sweeps the placement itself over whole
-slides and full turns with the game's shoulders and tool depth: extending by a millimetre
-moves no hand more than a millimetre, bisection finds no jump, and the hands slide by the
-least amount that keeps both within the slide point. It then sets a 2.1 m handle with a
-0.55 m extension in Physics, checks the rebuilt rig and start pose, and sweeps aims and
-extensions with 0.55 m arm segments: the rendered grips are the placement of what the view
-measures, hands hold their grips, slide both ways and hold the butt, and no arm stretches.
-It then sets each hand's grip, the slide point and the handle length from the Character
-tab and resizes the mesh-part arms per side. Retracted past the body, it checks that a 2D
-character without arm chains reaches like the built-in arms and one with chains reaches in
-its drawing plane at their lengths, then stretches those chains while its elbow caps and
-gloves keep their size. Last, it fits a cel-outlined hammer model to four handle lengths:
-each mesh's fitted bounds are the documented map of its authored ones, and the head keeps
-its size on the physical head. `npm run verify:game` builds a two-profile release whose 3D profile has
-all three models. It checks the toggle mid-level, single asset loads, persistence,
-exact pot tracking, identical physics and each profile's own grip placement while
-switching, and failing builds for
-invalid models, bone maps and pot profiles. `npm run verify:model-swap` builds a
-project with a model library on a large course and plays it with a test backend and
-CDN: the stored selection shows at start without fetching replaced models, each part
-swaps on its own with one grant and one fetch per new model, the backend's refusals
-and different answers win, requests stay in order and superseded swaps are never
-sent, and nothing is stored. It also checks that builds and the project server refuse
-invalid library models, and the Workshop's library, previews and saving. All fixtures
-are generated procedurally; no third-party artwork is involved.

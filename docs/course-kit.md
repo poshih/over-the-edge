@@ -138,4 +138,5 @@ colours (illusions dashed), updrafts with their lift, messages, the ending, enem
 labels. `sky` gives the background's three colours, from the bottom of the map to the top.
 `zones` marks zone boundaries, and `reach` overlays the reach check's stand points. To
 review a course without the game, `renderCrops(map, crops, directory)` renders crops of the
-map to PNG files with Playwright.
+map to PNG files with Playwright. If Chromium is not installed for Playwright, install it with
+`npx playwright install chromium`.

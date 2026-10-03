@@ -1,4 +1,4 @@
-// Small, deterministic media files for project examples and verification.
+// Small, deterministic media files for the example projects.
 
 // A mono 16-bit PCM WAV: a tone with a short attack and exponential decay.
 export function wavFixture({ frequency = 440, seconds = 0.25, rate = 22050, decay = 12, noise = 0 } = {}) {
