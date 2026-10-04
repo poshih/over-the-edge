@@ -69,11 +69,14 @@
   fill: #6b4f2a;
 }
 
+/* A point shows focus by its stroke: an outline, the browser's own focus ring included, would be drawn in the
+   canvas's units, metres, and cover it. */
 .hammer-head-point {
   fill: #f0f3e8;
   stroke: #376d50;
   stroke-width: 2px;
   vector-effect: non-scaling-stroke;
+  outline: none;
   cursor: grab;
 }
 
@@ -82,7 +85,6 @@
 }
 
 .hammer-head-point:focus-visible {
-  outline: none;
   stroke: #94662b;
   stroke-width: 3px;
 }

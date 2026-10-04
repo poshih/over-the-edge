@@ -352,13 +352,16 @@ export function createHammerHeadEditor(options: {
   }, listen);
   svg.addEventListener('pointermove', moveDrag, listen);
   svg.addEventListener('pointerup', endDrag, listen);
-  svg.addEventListener('pointercancel', (event) => {
+  // A cancelled drag, or one whose capture went without a pointerup, changes nothing; the editor takes presses again.
+  const cancelDrag = (event: PointerEvent): void => {
     if (drag === null || event.pointerId !== drag.pointerId) return;
     drag = null;
     shown = head;
     if (stale) refresh();
     else render();
-  }, listen);
+  };
+  svg.addEventListener('pointercancel', cancelDrag, listen);
+  svg.addEventListener('lostpointercapture', cancelDrag, listen);
   svg.addEventListener('focusin', (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target?.classList.contains('hammer-head-point') || drag !== null) return;

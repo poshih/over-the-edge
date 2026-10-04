@@ -61,10 +61,11 @@ label {
   touch-action: manipulation;
 }
 
+/* SVG content draws its own focus: CSS pixels there are the drawing's units, which may be metres. */
 button:focus-visible,
 input:focus-visible,
 #game:focus-visible,
-[tabindex]:focus-visible {
+[tabindex]:not(:where(svg *)):focus-visible {
   outline: 3px solid #94662b;
   outline-offset: 4px;
 }
