@@ -441,8 +441,9 @@ sensitivity. **Downswing** has a **Hinge downswing boost** and a **Slider
 downswing boost**, each 1-3x (default **1.3x**; 1 turns it off), multiplying that
 motor's strength while input moves the target down and the motor speeds the head
 up downward.
-Zero handle frequency means rigid weld constraints; positive frequency enables
-rotational spring compliance.
+Zero handle frequency makes the carriage, shaft and head one rigid body; positive
+frequency joins a carriage, three shaft segments and the head with rotational
+spring welds.
 
 **Physics › Materials** sets each contact friction coefficient (0.05-10): **Hammer
 friction** (default **2.5**, from 0.2), **Jar friction** (**0.45**) and one setting for each
@@ -469,7 +470,7 @@ shoulder hinge; the reach is their sum. **Minimum reach** (0 m up to 5 cm short 
 the reach, so the slider can still move; default **0 m**) is how close the head can
 come to the hinge: fully retracted it stops that far out, so the butt travels the
 handle length less the minimum reach behind the hinge, and at 0 the head reaches the
-hinge. A shorter handle or extension caps the minimum reach 5 cm short of the new reach. The three welded handle segments share the
+hinge. A shorter handle or extension caps the minimum reach 5 cm short of the new reach. The three handle segments share the
 handle length, and everything else follows the rig: the two-part hammer, the
 one-model hammer's handle, touch gain, compact framing and the target radius limit.
 Apart from its head, below, a rig is never changed in place: a new one rebuilds the
@@ -1040,7 +1041,6 @@ arm, forearm, elbow and hand, the full hammer shaft, and the hammer head. Parts
 without an import keep their procedural visual in Mesh parts mode. In Avatar
 mode, body-part imports remain stored but hidden; pot and hammer imports still
 apply. A character profile's hammer or pot model hides the matching imports.
-Invisible physics guide bodies do not need models.
 
 Imports are **cosmetic only**. They attach to the existing physics and visual-IK
 anchors; they do not replace colliders, change mass, or create new rigid bodies.

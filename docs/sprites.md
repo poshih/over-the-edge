@@ -377,7 +377,7 @@ This game supplies `left-grip` and `right-grip` from the same actual grip
 positions used by its existing arms. It also supplies `hammer-base`, `aim`,
 and the thirteen visual anchors as target ports. Offsets follow the target's
 orientation, so a grip adjustment rotates with the shaft. The hammer base is
-the translating physical slider, not the shoulder-mounted carrier. Every shaft
+the translating physical slider, not the shoulder hinge. Every shaft
 rendering mode shares the same physical base and grip targets, placed by the
 profile's `grips`: with `"fixed"` placement, reach slides the fixed-length hammer and
 both grips outward or inward; with `"sliding"`, the hands ride with the handle, extending or
