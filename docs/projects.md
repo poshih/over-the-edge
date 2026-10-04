@@ -2,7 +2,8 @@
 
 A **project** holds every authored input of one complete game: title, level,
 physics, characters, appearance models, arm IK, a model library, theme, HUD, audio,
-enemy art, media and course artwork. The engine is the same for every project, so you can
+enemy art, media and course artwork, and the data of the game's
+[Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
@@ -44,9 +45,10 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: release look, terrain GLBs and the GLBs replacing decoration models |
 | `media` | `project.json` + `media/<file>` | Videos and sounds, used as `/media/<file>` |
+| `plugins/<id>` | `project.json` | One [Workshop plugin](workshop-plugins.md)'s own data, for the Workshop only |
 
-Nothing else reaches a release: game builds do not copy `public/`, so a project
-release ships only its own content plus the site icon.
+Nothing else reaches a release, and plugin data never does: game builds do not copy
+`public/`, so a project release ships only its own content plus the site icon.
 
 ## Project directory
 
@@ -71,7 +73,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "shapes", "assets": [], "decorations": {} },
@@ -89,7 +91,8 @@ The paths are fixed, so a manifest only says which files exist:
            "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
   "enemies": { "bird": { "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null },
-  "media": [{ "path": "/media/cavern-loop.wav" }]
+  "media": [{ "path": "/media/cavern-loop.wav" }],
+  "plugins": { "tuner": { "joint": 12, "radius": 0.1 } }
 }
 ```
 
@@ -103,7 +106,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 5, "labels": [], "objects": [] },
@@ -403,6 +406,7 @@ Conventions:
 | GET, DELETE | `/api/projects/{id}` | Manifest, revisions and file sizes; delete |
 | GET, PUT | `/api/projects/{id}/bundle` | Export or import the whole project |
 | GET, PUT, PATCH | `/api/projects/{id}/{section}` | Any section in the table above |
+| GET, PUT, PATCH, DELETE | `/api/projects/{id}/plugins/{plugin}` | A Workshop plugin's data, or `null` without any |
 | DELETE | `/api/projects/{id}/characters/{primary\|alternate}` | Remove a profile |
 | GET, POST | `/api/projects/{id}/level/objects` | List or add level objects |
 | GET, PUT, PATCH, DELETE | `/api/projects/{id}/level/objects/{objectId}` | One object |
@@ -507,6 +511,12 @@ standard driver; a hammer keeps its existing entry's head or starts with the gam
 default head. Removing an entry, or leaving it out of a `PUT` of the section, deletes its GLB.
 Releases list the library but load an entry only when the game's backend selects it;
 see [runtime swaps](characters.md#model-library-and-runtime-swaps).
+
+**Plugin data.** `plugins` maps each [Workshop plugin](workshop-plugins.md)'s ID to its
+data, one JSON document of at most 64 KiB, nesting depth 16 and 8,192 values, for at most
+16 plugins. Each is a section of its own, `plugins/<id>`, with its own revision. The server
+and the project checks hold it to those limits but never interpret it; the Workshop runs the
+plugin's own validation whenever the section loads or changes.
 
 **Course artwork.** `mode` is `shapes` or `meshes`; assets come from
 `npm run pack:course` packages or the API upload. `decorations` maps decoration model IDs

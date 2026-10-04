@@ -1,0 +1,46 @@
+/* Workshop plugins' tabs and sections (src/editor/workshop-plugin-host.ts): their controls match the built-in tabs'. */
+
+.workshop-plugin-sections:empty {
+  display: none;
+}
+
+.workshop-plugin {
+  min-width: 0;
+}
+
+.workshop-plugin select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #faf9f2;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.workshop-plugin .button {
+  min-width: 0;
+  padding-inline: 8px;
+  white-space: normal;
+  font-size: 11px;
+}
+
+.workshop-plugin .quick-toggle {
+  margin: 4px 0;
+}
+
+.workshop-plugin-field {
+  margin-bottom: 12px;
+}
+
+.workshop-plugin-field > .appearance-label {
+  margin-top: 0;
+}
+
+.touch-controls .workshop-plugin select,
+.touch-controls .workshop-plugin .button {
+  font-size: 16px;
+}

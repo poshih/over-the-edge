@@ -209,7 +209,15 @@ export class SkinnedAvatarView {
     this.motions.apply(body, pot, time);
   }
 
-  inspect() {
+  // Skin joint `index`'s current world frame, brought up to date for this frame's pose.
+  jointWorld(index: number, out: Matrix4): Matrix4 {
+    const bone = this.bones[index];
+    if (bone === undefined) throw new RangeError(`The avatar has no skin joint ${index}.`);
+    bone.updateWorldMatrix(true, false);
+    return out.copy(bone.matrixWorld);
+  }
+
+    inspect() {
     const joints = {} as Record<AvatarJointId, [number, number, number]>;
     const position = new Vector3();
     for (const id of AVATAR_JOINT_IDS) {

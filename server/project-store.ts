@@ -10,6 +10,7 @@ import {
   validateProjectManifest,
 } from '../src/project';
 import type { ProjectContent, ProjectFileKind, ProjectFileRef, ProjectManifest } from '../src/project';
+import { pluginOfSection, pluginSection } from '../src/plugin-data';
 import { atomicWrite, missing } from './files';
 import { HttpError } from './http';
 import {
@@ -18,16 +19,34 @@ import {
 } from './level-history';
 import type { LevelVersion, LevelVersionRef, PhantomRecording } from './level-history';
 
-// API sections; each has its own revision so concurrent editors only conflict on what they share.
+// API sections; each has its own revision so concurrent editors only conflict on what they share. Besides these, each
+// Workshop plugin's data is its own section, `plugins/<id>` (src/plugin-data.ts).
 export const SECTION_NAMES = [
   'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance', 'models',
   'theme', 'hud', 'audio', 'enemies', 'art', 'media',
 ] as const;
-export type SectionName = (typeof SECTION_NAMES)[number];
+export type BuiltinSectionName = (typeof SECTION_NAMES)[number];
+export type SectionName = BuiltinSectionName | `plugins/${string}`;
+
+// A section's revision. A plugin section that never held data has revision 0; once it has, its revision only grows,
+// also when its data is removed, so a page never mistakes new data for data it saw.
+export function sectionRevision(state: ProjectState, name: SectionName): number {
+  return state.sections[name] ?? 0;
+}
+
+// The sections a manifest holds: every built-in one, and each plugin's that has data.
+function manifestSections(manifest: ProjectManifest): SectionName[] {
+  return [...SECTION_NAMES, ...Object.keys(manifest.plugins).map(pluginSection)];
+}
+
+function isSectionName(name: string): name is SectionName {
+  return (SECTION_NAMES as readonly string[]).includes(name) || pluginOfSection(name) !== null;
+}
 
 export interface ProjectState {
   readonly revision: number;
-  readonly sections: Readonly<Record<SectionName, number>>;
+  // Every built-in section's revision, and each plugin section's once it held data.
+  readonly sections: Readonly<Partial<Record<SectionName, number>>>;
   readonly updatedAt: string;
   // The version the stored level and game settings are, and the course of its recordings; null while the stored level
   // is not a valid level.
@@ -38,7 +57,7 @@ export interface ProjectState {
 // made outside the API (a tool, an editor or version control writing the files) is counted too. Null until first seen.
 // The level version is worked out again when the course format it was worked out with is not this code's.
 interface StoredState extends ProjectState {
-  readonly observed: Readonly<Record<SectionName, string>> | null;
+  readonly observed: Readonly<Partial<Record<SectionName, string>>> | null;
   readonly courseFormat: number;
 }
 
@@ -46,7 +65,7 @@ interface StoredState extends ProjectState {
 const VERSIONED: ReadonlySet<SectionName> = new Set(['level', 'settings']);
 
 // Each section's stored content: its part of the manifest (null for one kept only in files) and the files it owns.
-const SECTION_MANIFEST: Readonly<Record<SectionName, (manifest: ProjectManifest) => unknown>> = {
+const SECTION_MANIFEST: Readonly<Record<BuiltinSectionName, (manifest: ProjectManifest) => unknown>> = {
   title: (manifest) => manifest.title,
   level: () => null,
   settings: (manifest) => manifest.settings,
@@ -62,7 +81,7 @@ const SECTION_MANIFEST: Readonly<Record<SectionName, (manifest: ProjectManifest)
   art: (manifest) => manifest.art,
   media: (manifest) => manifest.media,
 };
-const FILE_SECTIONS: Readonly<Record<ProjectFileKind, (path: string) => SectionName>> = {
+const FILE_SECTIONS: Readonly<Record<ProjectFileKind, (path: string) => BuiltinSectionName>> = {
   level: () => 'level',
   character: (path) => path === PROJECT_FILES.primary ? 'characters/primary' : 'characters/alternate',
   art: () => 'art',
@@ -95,7 +114,7 @@ const FILE_PATTERN = /^(?:project\.json|level\.json|characters\/(?:primary|alter
 function initialState(): StoredState {
   return {
     revision: 1, updatedAt: new Date().toISOString(), observed: null, level: null, courseFormat: 0,
-    sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, 1])) as Record<SectionName, number>,
+    sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, 1])),
   };
 }
 
@@ -106,17 +125,31 @@ function isVersionRef(value: unknown): value is LevelVersionRef {
 }
 
 // Each section's stored content in `directory` as a short signature: its part of the manifest and, for every file it
-// owns, the file's size and modification time in nanoseconds, which any write changes. Costs one stat per file.
-async function signatures(directory: string, manifest: ProjectManifest): Promise<Record<SectionName, string>> {
-  const parts = Object.fromEntries(SECTION_NAMES.map((name) => [name, [SECTION_MANIFEST[name](manifest)]])) as Record<SectionName, unknown[]>;
+// owns, the file's size and modification time in nanoseconds, which any write changes. Costs one stat per file. A
+// plugin section without data has no signature.
+async function signatures(directory: string, manifest: ProjectManifest): Promise<Partial<Record<SectionName, string>>> {
+  const parts = new Map<SectionName, unknown[]>(SECTION_NAMES.map((name) => [name, [SECTION_MANIFEST[name](manifest)]]));
+  for (const [id, data] of Object.entries(manifest.plugins)) parts.set(pluginSection(id), [data]);
   for (const ref of projectFileRefs(manifest)) {
     const found = await stat(join(directory, ...ref.path.split('/')), { bigint: true }).then(
       (file) => `${file.size}:${file.mtimeNs}`,
       (error: unknown) => { if (missing(error)) return 'missing'; throw error; });
-    parts[FILE_SECTIONS[ref.kind](ref.path)]!.push(ref.path, found);
+    parts.get(FILE_SECTIONS[ref.kind](ref.path))!.push(ref.path, found);
   }
-  return Object.fromEntries(SECTION_NAMES.map((name) =>
-    [name, createHash('sha256').update(JSON.stringify(parts[name])).digest('hex')])) as Record<SectionName, string>;
+  return Object.fromEntries([...parts].map(([name, part]) => [name, createHash('sha256').update(JSON.stringify(part)).digest('hex')]));
+}
+
+// The sections whose signatures differ, a plugin section gaining or losing its data included.
+function changedSections(before: Partial<Record<SectionName, string>>, after: Partial<Record<SectionName, string>>): SectionName[] {
+  const names = new Set([...Object.keys(before), ...Object.keys(after)].filter(isSectionName));
+  return [...names].filter((name) => before[name] !== after[name]);
+}
+
+// `sections` with each of `names` counted once more.
+function counted(sections: Readonly<Partial<Record<SectionName, number>>>, names: Iterable<SectionName>): Partial<Record<SectionName, number>> {
+  const next = { ...sections };
+  for (const name of new Set(names)) next[name] = (next[name] ?? 0) + 1;
+  return next;
 }
 
 /**
@@ -186,11 +219,10 @@ export class ProjectStore {
     const recorded = await this.state(directory);
     const manifest = await this.manifest(id);
     const observed = await signatures(directory, manifest);
-    const changed = recorded.observed === null ? [] : SECTION_NAMES.filter((name) => recorded.observed![name] !== observed[name]);
+    const changed = recorded.observed === null ? [] : changedSections(recorded.observed, observed);
     const versioned = recorded.observed === null || recorded.courseFormat !== PHANTOM_COURSE_FORMAT || changed.some((name) => VERSIONED.has(name));
     if (changed.length === 0 && !versioned) return { manifest, state: recorded };
-    const sections = { ...recorded.sections };
-    for (const name of changed) sections[name] += 1;
+    const sections = counted(recorded.sections, changed);
     const level = versioned ? await this.version(id, null, manifest.settings) : recorded.level;
     const state: StoredState = changed.length === 0 ? { ...recorded, observed, level, courseFormat: PHANTOM_COURSE_FORMAT } : {
       revision: recorded.revision + 1, sections, updatedAt: new Date().toISOString(), observed, level, courseFormat: PHANTOM_COURSE_FORMAT,
@@ -325,12 +357,12 @@ export class ProjectStore {
           } else await atomicWrite(target, content.files.get(ref.path)!);
         }
         await atomicWrite(join(staging, PROJECT_FILES.manifest), `${JSON.stringify(content.manifest, null, 2)}\n`);
-        const base = previous ?? { ...initialState(), revision: 0, sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, 0])) as Record<SectionName, number> };
+        const base = previous ?? { ...initialState(), revision: 0, sections: {} };
         // Renaming the staging folder keeps its files' sizes and times, so they are signed here. The level version is
-        // worked out once the project is in place with its history.
+        // worked out once the project is in place with its history. Every section the project had or has changes.
         const state: StoredState = {
           revision: base.revision + 1, updatedAt: new Date().toISOString(), observed: await signatures(staging, content.manifest),
-          sections: Object.fromEntries(SECTION_NAMES.map((name) => [name, base.sections[name] + 1])) as Record<SectionName, number>,
+          sections: counted(base.sections, [...manifestSections(content.manifest), ...Object.keys(base.sections).filter(isSectionName)]),
           level: null, courseFormat: 0,
         };
         await atomicWrite(join(staging, STATE_FILE), `${JSON.stringify(state)}\n`);
@@ -373,13 +405,17 @@ export class ProjectStore {
         const level: unknown = Reflect.get(value, 'level');
         const courseFormat: unknown = Reflect.get(value, 'courseFormat');
         const base = initialState();
+        // Plugin sections are kept as recorded; a built-in one missing from the file starts again.
+        const plugins = (record: Record<string, unknown> | null | undefined, type: 'number' | 'string') =>
+          Object.entries(record ?? {}).filter(([name, entry]) => pluginOfSection(name) !== null && typeof entry === type);
         return {
           revision: Reflect.get(value, 'revision') as number,
           updatedAt: typeof Reflect.get(value, 'updatedAt') === 'string' ? Reflect.get(value, 'updatedAt') as string : base.updatedAt,
-          sections: Object.fromEntries(SECTION_NAMES.map((name) =>
-            [name, typeof sections?.[name] === 'number' ? sections[name] : 1])) as Record<SectionName, number>,
+          sections: Object.fromEntries([
+            ...SECTION_NAMES.map((name) => [name, typeof sections?.[name] === 'number' ? sections[name] : 1]), ...plugins(sections, 'number'),
+          ]),
           observed: typeof observed === 'object' && observed !== null && SECTION_NAMES.every((name) => typeof observed[name] === 'string')
-            ? Object.fromEntries(SECTION_NAMES.map((name) => [name, observed[name] as string])) as Record<SectionName, string> : null,
+            ? Object.fromEntries([...SECTION_NAMES.map((name) => [name, observed[name] as string]), ...plugins(observed, 'string')]) : null,
           level: isVersionRef(level) ? { version: level.version, course: level.course } : null,
           // A version that cannot be read is worked out again.
           courseFormat: (level === null || isVersionRef(level)) && typeof courseFormat === 'number' ? courseFormat : 0,
@@ -403,8 +439,7 @@ export class ProjectStore {
       await atomicWrite(this.filePath(id, PROJECT_FILES.manifest), `${JSON.stringify(change.manifest, null, 2)}\n`);
     }
     for (const path of change.remove ?? []) await rm(this.filePath(id, path), { force: true });
-    const sections = { ...state.sections };
-    for (const name of new Set(change.sections)) sections[name] += 1;
+    const sections = counted(state.sections, change.sections);
     const manifest = change.manifest ?? current.manifest;
     // Levels reach the store validated.
     const level = change.json?.get(PROJECT_FILES.level) as LevelDefinition | undefined;

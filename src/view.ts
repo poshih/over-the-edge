@@ -26,6 +26,7 @@ import type {
 import { sameAvatarDriver } from './avatar-driver';
 import type { AvatarDriver } from './avatar-driver';
 import type { AvatarMotionEntry } from './avatar-motion-data';
+import type { AvatarMotionModel } from './avatar-motion';
 import type { CharacterModelUsage, ResolvedAvatarJoints } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
 import {
@@ -122,6 +123,23 @@ export interface CameraFraming extends Point {
 }
 
 export type ViewPass = 'course' | 'actors' | 'marks';
+
+// A preview that moves the character's whole presentation for a while: its body, pot and tool together, by `offset` in
+// the view's plane and turned about the player's root, over `duration` seconds of simulation time. Presentation only:
+// the camera, physics and overlays keep the simulation's frame. It ends early on a rewind, a restart or another preview.
+export interface PresentationPreview {
+  readonly duration: number;
+  // Writes the offset `elapsed` seconds in: metres, and radians counterclockwise. Non-finite values end the preview.
+  offset(elapsed: number, out: { x: number; y: number; turn: number }): void;
+}
+
+// The imported avatar the character shows: the facts its motion kinds get, each motion's claimed joints, and a joint's
+// current world frame.
+export interface ImportedAvatarFacts {
+  readonly model: AvatarMotionModel;
+  readonly motions: readonly { readonly id: string; readonly claims: readonly number[] }[];
+  jointWorld(index: number, out: Matrix4): Matrix4;
+}
 
 export interface ViewLayer {
   readonly root: Object3D;
@@ -355,6 +373,17 @@ export class GameView {
   // Parts whose library model is on its way while characters load, so their own is never loaded.
   private readonly reserved = new Set<PartRole>();
   private readonly potFrame = new Matrix4();
+  // The running presentation preview, from the simulation time of its first frame, and the frame it draws: the
+  // simulation's with the player's parts and cursor moved. Reused, so a preview allocates nothing per frame.
+  private presentationPreview: { readonly preview: PresentationPreview; start: number | null } | null = null;
+  private readonly previewOffset = { x: 0, y: 0, turn: 0 };
+  // The aim a sprite character turns its head and faces by: before a presentation preview's turn, which its anchors
+  // already carry.
+  private readonly spriteAim = { x: 0, y: 0 };
+  private previewParts: PartPose[] = [];
+  private readonly previewCursor = { x: 0, y: 0 };
+  private previewFrame: PhysicsFrame | null = null;
+  private avatarFacts: { readonly avatar: PreparedAvatar; readonly motions: PreparedAvatarMotions; readonly facts: ImportedAvatarFacts } | null = null;
   private renders = 0;
   private readonly customShaft = new Group();
   // Two-part hammer segments, rescaled when the rig changes.
@@ -570,6 +599,13 @@ export class GameView {
     passes[layer.pass].add(layer.root);
   }
 
+  // Removes a layer added with addLayer() and disposes it.
+  removeLayer(layer: ViewLayer): void {
+    if (!this.layers.delete(layer)) return;
+    layer.root.removeFromParent();
+    layer.dispose();
+  }
+
   // Adds the release's second character profile; only the active profile renders and updates.
   createAlternateCharacter(): SpriteRig {
     if (this.slots.length >= MAX_CHARACTER_PROFILES) {
@@ -782,7 +818,35 @@ export class GameView {
   // Rocks (sway) or kicks (jolt) the upper body about the waist for a moment, so an avatar's secondary motion can be
   // judged without playing. Presentation only, like the waist lean it adds to.
   previewMotion(kind: LeanPreview): void {
+    this.presentationPreview = null;
     this.waistLean.preview(kind);
+  }
+
+  // Runs `preview`, ending any other.
+  previewPresentation(preview: PresentationPreview): void {
+    this.waistLean.endPreview();
+    this.presentationPreview = { preview, start: null };
+  }
+
+  // Ends `preview` if it still runs.
+  endPresentationPreview(preview: PresentationPreview): void {
+    if (this.presentationPreview?.preview === preview) this.presentationPreview = null;
+  }
+
+  // The imported avatar the character shows, the same object until it changes; null for any other avatar.
+  importedAvatar(): ImportedAvatarFacts | null {
+    const avatar = this.activeAvatar;
+    if (avatar === null || !(this.avatarRenderer instanceof SkinnedAvatarView)) return null;
+    const cached = this.avatarFacts;
+    if (cached !== null && cached.avatar === avatar && cached.motions === avatar.motions) return cached.facts;
+    const view = avatar.view;
+    const facts: ImportedAvatarFacts = Object.freeze({
+      model: avatar.motions.model,
+      motions: Object.freeze(avatar.motions.motions.map(({ id, claims }) => Object.freeze({ id, claims }))),
+      jointWorld: (index: number, out: Matrix4) => view.jointWorld(index, out),
+    });
+    this.avatarFacts = { avatar, motions: avatar.motions, facts };
+    return facts;
   }
 
   // The library model each part shows, or null where characters show their own.
@@ -1025,14 +1089,18 @@ export class GameView {
     if (next !== null) this.shading.register(next);
   }
 
-  render(frame: PhysicsFrame, options: CharacterState & { dt: number }): void {
+  render(physics: PhysicsFrame, options: CharacterState & { dt: number }): void {
     this.renders++;
-    this.syncRig(frame);
+    this.syncRig(physics);
+    this.syncHead(this.part(physics, 'head').vertices);
+    // The camera follows the simulation; the character draws where a presentation preview moves it.
+    const focus = this.part(physics, 'root');
+    const reach = this.part(physics, 'head');
+    this.focus = { x: focus.x, y: focus.y };
+    this.hammer = { x: reach.x, y: reach.y };
+    const frame = this.presentedFrame(physics);
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
-    this.syncHead(tip.vertices);
-    this.focus = { x: root.x, y: root.y };
-    this.hammer = { x: tip.x, y: tip.y };
     this.updateFrustum();
     const target = this.cameraTarget();
     const blend = this.framing === null ? 1 - Math.exp(-VISUAL.cameraResponse * options.dt) : 1;
@@ -1061,17 +1129,25 @@ export class GameView {
     const shaftCenter = { x: (shaftBase.x + tip.x) / 2, y: (shaftBase.y + tip.y) / 2 };
     const shaftAngle = shaftLength <= PHYSICS.aimEpsilon ? shaftBase.angle : Math.atan2(tip.y - shaftBase.y, tip.x - shaftBase.x);
     // The upper body leans toward the hammer, turning about the waist; everything drawn on the torso and the arms'
-    // shoulders turn with it.
-    this.waistLean.update(shaftAngle, this.maxWaistLean, frame.time);
+    // shoulders turn with it. A presentation preview's turn turns the leaning body about the root with the pot and tool,
+    // so the lean is the unturned one.
+    const turn = frame === physics ? 0 : this.previewOffset.turn;
+    const turnCos = Math.cos(turn), turnSin = Math.sin(turn);
+    this.waistLean.update(shaftAngle - turn, this.maxWaistLean, frame.time);
     const lean = this.waistLean.angle;
     const origin = this.waistLean.torsoOrigin(root.x, root.y, this.torsoOrigin);
+    if (turn !== 0) {
+      const dx = origin.x - root.x, dy = origin.y - root.y;
+      origin.x = root.x + dx * turnCos - dy * turnSin;
+      origin.y = root.y + dx * turnSin + dy * turnCos;
+    }
     this.torso.position.set(origin.x, origin.y, PLAYER_DEPTH.torso);
-    this.torso.rotation.z = lean;
+    this.torso.rotation.z = lean + turn;
     this.torso.updateWorldMatrix(true, false);
     const aimOrigin = this.part(frame, 'shoulder');
     const aim = { x: frame.cursor.x - aimOrigin.x, y: frame.cursor.y - aimOrigin.y };
     // The head turns within the leaning torso, so it aims in the torso's frame to keep looking at the cursor.
-    const cos = Math.cos(lean), sin = Math.sin(lean);
+    const cos = Math.cos(lean + turn), sin = Math.sin(lean + turn);
     this.headAim.update({ x: aim.x * cos + aim.y * sin, y: aim.y * cos - aim.x * sin }, frame.time);
     this.headOffset.copy(this.headPivot).applyQuaternion(this.headAim.rotation).negate().add(this.headPivot);
     this.meshHead.matrix.makeRotationFromQuaternion(this.headAim.rotation).setPosition(this.headOffset);
@@ -1103,7 +1179,10 @@ export class GameView {
     this.spriteTargets.set('hammer-shaft', { ...shaftCenter, angle: shaftAngle });
     this.spriteTargets.set('hammer-head', { x: tip.x, y: tip.y, angle: tip.angle });
     this.spriteTargets.set('aim', { ...frame.cursor, angle: Math.atan2(aim.y, aim.x) });
-    this.slots[this.activeSlot]!.rig.update({ time: frame.time, dt: options.dt, aim, targets: this.spriteTargets });
+    const spriteAim = this.spriteAim;
+    spriteAim.x = aim.x * turnCos + aim.y * turnSin;
+    spriteAim.y = aim.y * turnCos - aim.x * turnSin;
+    this.slots[this.activeSlot]!.rig.update({ time: frame.time, dt: options.dt, aim: spriteAim, targets: this.spriteTargets });
     this.targetPositions.set([tip.x, tip.y, 0.8, frame.cursor.x, frame.cursor.y, 0.8]);
     this.targetLine.geometry.attributes.position.needsUpdate = true;
     this.targetLine.computeLineDistances();
@@ -1112,7 +1191,7 @@ export class GameView {
     this.flags.update();
     this.updrafts.update(frame.time);
     this.enemies.update(frame.enemies, frame.time);
-    for (const layer of this.layers) layer.update(frame, armPoses);
+    for (const layer of this.layers) layer.update(physics, armPoses);
     this.renderer.info.reset();
     this.renderer.clear();
     this.renderer.render(this.course, this.camera);
@@ -1157,6 +1236,7 @@ export class GameView {
   }
 
   resetPresentation(): void {
+    this.presentationPreview = null;
     this.headAim.reset();
     this.waistLean.reset();
     this.gripHold.reset();
@@ -1750,6 +1830,57 @@ export class GameView {
     sprite.position.set(position.x, position.y, 0.04);
     sprite.scale.set(2.25, 0.42, 1);
     this.labels.add(sprite);
+  }
+
+  // `frame`, or while a presentation preview runs, a frame whose player parts and cursor it moved: turned by the offset's
+  // turn about the root, then moved by its offset. The preview ends past its duration, on a rewind or on bad values.
+  private presentedFrame(frame: PhysicsFrame): PhysicsFrame {
+    const running = this.presentationPreview;
+    if (running === null) return frame;
+    if (running.start === null) running.start = frame.time;
+    const elapsed = frame.time - running.start;
+    const offset = this.previewOffset;
+    offset.x = 0;
+    offset.y = 0;
+    offset.turn = 0;
+    if (elapsed >= 0 && elapsed <= running.preview.duration) running.preview.offset(elapsed, offset);
+    // The preview may have ended or been replaced while it ran.
+    if (this.presentationPreview !== running || elapsed < 0 || elapsed > running.preview.duration ||
+      !Number.isFinite(offset.x) || !Number.isFinite(offset.y) || !Number.isFinite(offset.turn)) {
+      if (this.presentationPreview === running) this.presentationPreview = null;
+      return frame;
+    }
+    let root: PartPose | null = null;
+    for (let index = 0; index < frame.parts.length && root === null; index += 1) {
+      if (frame.parts[index]!.id === 'root') root = frame.parts[index]!;
+    }
+    if (root === null) throw new Error('Missing rendered physics part: root');
+    const cos = Math.cos(offset.turn), sin = Math.sin(offset.turn);
+    const pivotX = root.x, pivotY = root.y;
+    if (this.previewParts.length !== frame.parts.length) {
+      this.previewParts = frame.parts.map((part) => ({ ...part }));
+    }
+    for (let index = 0; index < frame.parts.length; index += 1) {
+      const part = frame.parts[index]!;
+      const moved = this.previewParts[index]!;
+      const dx = part.x - pivotX, dy = part.y - pivotY;
+      moved.id = part.id;
+      moved.kind = part.kind;
+      moved.vertices = part.vertices;
+      moved.collides = part.collides;
+      moved.x = pivotX + dx * cos - dy * sin + offset.x;
+      moved.y = pivotY + dx * sin + dy * cos + offset.y;
+      moved.angle = part.angle + offset.turn;
+    }
+    const cursorX = frame.cursor.x - pivotX, cursorY = frame.cursor.y - pivotY;
+    this.previewCursor.x = pivotX + cursorX * cos - cursorY * sin + offset.x;
+    this.previewCursor.y = pivotY + cursorX * sin + cursorY * cos + offset.y;
+    const shown = this.previewFrame ??= { time: frame.time, parts: this.previewParts, cursor: this.previewCursor, enemies: frame.enemies, rig: frame.rig };
+    shown.time = frame.time;
+    shown.parts = this.previewParts;
+    shown.enemies = frame.enemies;
+    shown.rig = frame.rig;
+    return shown;
   }
 
   private part(frame: PhysicsFrame, id: string): PartPose {

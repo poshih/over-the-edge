@@ -33,12 +33,14 @@ import { DirectionalError } from './directional-data';
 import { exactRecord, ProjectError, textValue } from './project-fields';
 import { EMPTY_MODEL_LIBRARY, libraryEntries, libraryModelFile, MODEL_LIBRARY_LIMITS, validateModelLibrary } from './model-library';
 import type { ModelLibrary } from './model-library';
+import { NO_PLUGIN_DATA, validateProjectPlugins } from './plugin-data';
+import type { PluginData } from './plugin-data';
 
 export { ProjectError } from './project-fields';
 
 export const PROJECT_FORMAT = 'over-the-edge-project';
 export const PROJECT_BUNDLE_FORMAT = 'over-the-edge-project-bundle';
-export const PROJECT_SCHEMA_VERSION = 9;
+export const PROJECT_SCHEMA_VERSION = 10;
 export const PROJECT_FILES = {
   manifest: 'project.json',
   level: 'level.json',
@@ -86,11 +88,13 @@ export interface ProjectManifest {
   readonly audio: AudioSettings;
   readonly enemies: EnemyArtSettings;
   readonly media: readonly MediaEntry[];
+  // Workshop plugins' own data by plugin ID (src/plugin-data.ts): editor data, which releases never include.
+  readonly plugins: Readonly<Record<string, PluginData>>;
 }
 
 const MANIFEST_KEYS = [
   'format', 'schemaVersion', 'title', 'level', 'art', 'settings', 'characters', 'armIk', 'appearance', 'models',
-  'theme', 'hud', 'audio', 'enemies', 'media',
+  'theme', 'hud', 'audio', 'enemies', 'media', 'plugins',
 ] as const;
 
 export function artFile(id: string): string { return `art/${artId(id)}.glb`; }
@@ -206,6 +210,7 @@ export function validateProjectManifest(value: unknown): ProjectManifest {
     audio: inSection('audio', () => validateAudio(data.audio)),
     enemies: inSection('enemies', () => validateEnemyArt(data.enemies)),
     media: inSection('media', () => validateMediaIndex(data.media)),
+    plugins: validateProjectPlugins(data.plugins),
   });
 }
 
@@ -214,7 +219,7 @@ export function defaultProjectManifest(title: string): ProjectManifest {
     format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title, level: PROJECT_FILES.level,
     art: { mode: 'shapes', assets: [], decorations: NO_DECORATION_ART }, settings: DEFAULT_GAME_SETTINGS,
     characters: { primary: null, alternate: null }, armIk: DEFAULT_ARM_IK, appearance: [], models: EMPTY_MODEL_LIBRARY,
-    theme: DEFAULT_THEME, hud: DEFAULT_HUD, audio: DEFAULT_AUDIO, enemies: DEFAULT_ENEMY_ART, media: [],
+    theme: DEFAULT_THEME, hud: DEFAULT_HUD, audio: DEFAULT_AUDIO, enemies: DEFAULT_ENEMY_ART, media: [], plugins: NO_PLUGIN_DATA,
   });
 }
 

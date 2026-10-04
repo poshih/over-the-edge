@@ -490,7 +490,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   // Actions -----------------------------------------------------------------------------------
   const confirmReplace = (action: string): boolean => session.dirtySections().length === 0 ||
     window.confirm(`${action} replaces the current game in the Workshop. Unsaved changes (${session.dirtySections().join(', ')}) will be lost. Continue?`);
-  title.addEventListener('change', () => { if (!session.setTitle(title.value)) title.value = session.snapshot().title; }, listen);
+  title.addEventListener('change', () => { if (session.setTitle(title.value) !== null) title.value = session.snapshot().title; }, listen);
   element(root, '.project-keep-mine').addEventListener('click', () => { void session.keepMyVersions(); }, listen);
   element(root, '.project-use-project').addEventListener('click', () => { void session.useProjectVersions(); }, listen);
   element(root, '.project-restore').addEventListener('click', () => {
@@ -540,7 +540,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   mediaFile.addEventListener('change', () => {
     const file = mediaFile.files?.[0];
     mediaFile.value = '';
-    if (file !== undefined) void session.addMedia(file).then((path) => { if (path !== null) options.onNotice(`Added ${path} to the media library.`, 'info'); });
+    if (file !== undefined) void session.addMedia(file).then((path) => { if (typeof path === 'string') options.onNotice(`Added ${path} to the media library.`, 'info'); });
   }, listen);
   element(root, '.project-alternate-current').addEventListener('click', () => { session.useCurrentAsAlternate(); }, listen);
   element(root, '.project-alternate-swap').addEventListener('click', () => { void session.swapCharacters(); }, listen);

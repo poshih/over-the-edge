@@ -152,12 +152,13 @@ export function createLibraryEditor(options: {
       return;
     }
     const added = await session.addLibraryModel(role, file);
-    if (added !== null) options.onNotice(`Added ${role} "${added.name}" (${added.id}) to the model library.`, 'info');
+    if (!(added instanceof Error)) options.onNotice(`Added ${role} "${added.name}" (${added.id}) to the model library.`, 'info');
   }
 
   async function commitAdd(file: File, model: AvatarModelSettings): Promise<LibraryModel | null> {
     const added = await session.addLibraryModel('avatar', file, model);
-    if (added !== null) options.onNotice(`Added avatar "${added.name}" (${added.id}) to the model library.`, 'info');
+    if (added instanceof Error) return null;
+    options.onNotice(`Added avatar "${added.name}" (${added.id}) to the model library.`, 'info');
     return added;
   }
 

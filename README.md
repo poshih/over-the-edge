@@ -105,6 +105,11 @@ A game that ships custom avatars adds its own rig strategies and secondary-motio
 See [rig strategies](docs/characters.md#rig-strategies) and
 [secondary motion](docs/characters.md#secondary-motion).
 
+A game adds its own Workshop tools with **`WORKSHOP_MODULE`**, an editor-only module: tabs and
+sections built from the Workshop's controls, edits through the engine's own operations, data of
+its own kept in the project, and overlays, canvas drags and previews in the running game.
+Releases contain none of it. See [Workshop plugins](docs/workshop-plugins.md).
+
 Releases replay recordings of players near the player as translucent white phantoms. While
 **Record** is on, the Workshop records your play on each saved version of a server project's
 level and game settings, marked by a pulsing red **REC**, and a release built from the project
@@ -1226,6 +1231,9 @@ layer's shown frame.
 and revisions, unsaved and conflicting sections, the project sections and audio
 playback, and in a Workshop built with `GAME_PROJECT` the published project and this
 browser's copy.
+`window.gettingOver.plugins()` lists the [Workshop plugins](docs/workshop-plugins.md), whether
+each is running and each one's last error, and why the module has none after a change made it
+invalid.
 These globals are absent from the game-only release.
 
 ## Contributing

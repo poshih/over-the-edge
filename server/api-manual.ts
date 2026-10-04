@@ -14,6 +14,7 @@ import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGE
 import { BOARD_CELL } from '../src/level-board';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
 import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
+import { PLUGIN_DATA_LIMITS } from '../src/plugin-data';
 import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
 import { SHARED_FORMATS, SHARED_KINDS, SHARED_NAME_LIMIT } from '../src/shared-copies';
 import type { SharedKind } from '../src/shared-copies';
@@ -79,6 +80,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/models/{role}/{model}/model?name=Hooded%20hero', 'A library GLB for the avatar, hammer or pot. A new avatar maps its joints, or takes ?settings={ boneMap, driver, hair, motion, armForwardDistance, grips, arms }.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/models/{role}/{model}', 'A library entry: its name, and an avatar\'s bone map and settings.', '{ "name"?: "...", "boneMap"?: {...}, ... }'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/media/{file}', 'Media library files, referenced as /media/{file}.', 'file bytes'),
+      endpoint('GET|PUT|PATCH|DELETE', '/api/projects/{id}/plugins/{plugin}', 'A Workshop plugin\'s own data, the section plugins/{plugin}: its JSON document, or null without one; PUT null or DELETE removes it. See sections["plugins/{plugin}"].', 'any JSON value'),
       endpoint('GET', '/play/{id}/', 'The latest published release of a project; its content is under /play/{id}/content/.'),
       endpoint('GET', '/api/shared/{kind}', `The copies of one kind this server shares with every Workshop page, by name: { "copies": [{ "name", "bytes", "updatedAt" }] }. Kinds: ${SHARED_KINDS.join(', ')}.`),
       endpoint('GET|PUT|DELETE', '/api/shared/{kind}/{name}', 'Read, store or delete one shared copy. PUT validates it as the project section of its kind and replaces any copy with that name.', 'the copy: a character profile, game settings or arm IK profile'),
@@ -171,6 +173,11 @@ export function apiManual(auth: 'token' | 'loopback') {
         description: 'Course artwork. Upload GLBs with POST art/assets; PUT can rename or drop unused assets, change the mode, and map decoration models to assets: in mesh releases the asset replaces every decoration of that model, built-in placeholder or not.',
       },
       media: { value: '[{ "path": "/media/file.ext" }]', types: MEDIA_TYPES, limits: MEDIA_LIMITS, description: 'Upload with PUT media/{file}; PUT this list to drop unused files.' },
+      'plugins/{plugin}': {
+        value: 'any JSON value, or null for none', limits: PLUGIN_DATA_LIMITS,
+        description: 'Data a Workshop plugin (WORKSHOP_MODULE) keeps in the project, one section per plugin ID (lowercase letters, digits and hyphens, starting with a letter), stored in project.json\'s plugins. '
+          + 'The server checks only these limits; the Workshop runs the plugin\'s own validation when it loads or changes the data. A plugin section that never held data has revision 0. Releases never include plugin data.',
+      },
     },
   };
 }

@@ -10,6 +10,8 @@ import type { ArmIkProfile } from './arm-ik-store';
 import { SnapshotError } from './named-snapshots';
 import type { SnapshotEntry } from './named-snapshots';
 import { loadVisualModel } from './visual-model';
+import { validateAppearanceParts } from '../appearance-profile';
+import type { AppearancePart } from '../appearance-profile';
 
 export class Appearance {
   private readonly rig: AppearanceRig;
@@ -92,6 +94,22 @@ export class Appearance {
 
   resetArmIk(): void {
     this.previewArmIk(DEFAULT_ARM_IK);
+  }
+
+  // Previews `value` as an edit: the refusal, reported, or null when it applied.
+  setArmIk(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
+    try {
+      this.armIk = validateArmIk(value);
+      this.armIkIssue = null;
+      this.changed();
+      return null;
+    } catch (error) {
+      if (!(error instanceof AppearanceError)) throw error;
+      this.notice(error.message, 'error');
+      return error;
+    }
   }
 
   saveArmIk(name: string): SnapshotEntry | null {
@@ -223,6 +241,27 @@ export class Appearance {
     return complete;
   }
 
+  // replaceParts() as an edit, its list checked as a project's: the refusal, the reported failures of the parts that
+  // did not load, or null.
+  async setParts(parts: readonly { part: VisualPartId; name: string; blob: Blob; alignment: VisualAlignment }[]): Promise<Error | null> {
+    const refused = this.editable();
+    if (refused !== null) return refused;
+    let checked: readonly AppearancePart[];
+    try {
+      checked = validateAppearanceParts(parts.map(({ part, name, alignment }) => ({ part, name, alignment })));
+    } catch (error) {
+      if (!(error instanceof AppearanceError)) throw error;
+      this.notice(error.message, 'error');
+      return error;
+    }
+    if (await this.replaceParts(checked.map((entry, index) => ({ ...entry, blob: parts[index]!.blob, alignment: { ...entry.alignment } })))) return null;
+    const failures = parts.flatMap(({ part }) => {
+      const message = this.errors.get(part);
+      return message === undefined ? [] : [`${part}: ${message}`];
+    });
+    return new AppearanceError(failures.length === 0 ? 'Some appearance models could not be loaded.' : failures.join(' '));
+  }
+
   preview(slot: VisualPartId, value: unknown): void {
     if (!this.canEdit(slot)) return;
     if (!this.records.has(slot)) throw new Error(`Cannot preview alignment without a model for ${slot}.`);
@@ -307,12 +346,18 @@ export class Appearance {
   }
 
   private canEdit(slot?: VisualPartId): boolean {
-    if (this.disposed) return false;
+    return this.editable(slot) === null;
+  }
+
+  // Why the appearance cannot change now, reported, or null when it can.
+  private editable(slot?: VisualPartId): AppearanceError | null {
+    if (this.disposed) return new AppearanceError('The appearance editor is closed.');
     if (this.restoring || (slot !== undefined && this.busy.has(slot))) {
-      this.notice('Wait for this appearance operation to finish before editing.', 'error');
-      return false;
+      const refusal = new AppearanceError('Wait for this appearance operation to finish before editing.');
+      this.notice(refusal.message, 'error');
+      return refusal;
     }
-    return true;
+    return null;
   }
 
   private reportArmIkError(error: unknown): void {

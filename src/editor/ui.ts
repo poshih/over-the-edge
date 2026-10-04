@@ -12,7 +12,8 @@ import { PRACTICES } from './practices';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
 import { createGameSettingsUI } from './game-settings-ui';
-import type { GameUi, HudState, PracticeId, UiOptions, WorkshopState, WorkshopTab } from './ui-types';
+import type { PracticeId } from './practices';
+import type { GameUi, HudState, PluginSectionTab, PluginWorkshopTab, UiOptions, WorkshopState, WorkshopTab } from './ui-types';
 import { createSection, rememberSections } from './workshop-section';
 import type { WorkshopSection } from './workshop-section';
 import { createWorkshopSearch } from './workshop-search';
@@ -57,9 +58,11 @@ export function createUI(options: UiOptions): GameUi {
   const appearanceMount = element<HTMLElement>(root, '#appearance-pane');
   const spriteMount = element<HTMLElement>(root, '#sprites-pane');
   const levelMount = element<HTMLElement>(root, '#level-pane');
-  const tabs = TABS.map((id) => ({
+  // The built-in tabs, then Workshop plugins' tabs in the order they were added.
+  const tabs: { readonly id: WorkshopTab; readonly button: HTMLButtonElement; readonly pane: HTMLElement }[] = TABS.map((id) => ({
     id, button: element<HTMLButtonElement>(root, `#${id}-tab`), pane: element<HTMLElement>(root, `#${id}-pane`),
   }));
+  const tabList = element<HTMLElement>(root, '.workshop-tabs');
   const workshopState = (): WorkshopState => ({ open: !panel.hidden, compact: !desktop.matches, tab: selectedTab });
   const selectTab = (id: WorkshopTab): void => {
     selectedTab = id;
@@ -71,16 +74,69 @@ export function createUI(options: UiOptions): GameUi {
     }
     options.onWorkshopChange(workshopState());
   };
-  for (const [index, tab] of tabs.entries()) {
-    tab.button.addEventListener('click', () => selectTab(tab.id), listen);
+  const wireTab = (tab: (typeof tabs)[number], signal: AbortSignal): void => {
+    tab.button.addEventListener('click', () => selectTab(tab.id), { signal });
     tab.button.addEventListener('keydown', (event) => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
+      const index = tabs.indexOf(tab);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 :
         (index + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
-      selectTab(tabs[next].id);
-      tabs[next].button.focus();
-    }, listen);
+      selectTab(tabs[next]!.id);
+      tabs[next]!.button.focus();
+    }, { signal });
+  };
+  for (const tab of tabs) wireTab(tab, events.signal);
+  function addTab(tabOptions: { readonly id: PluginWorkshopTab; readonly label: string; readonly title?: string }) {
+    if (tabs.some((tab) => tab.id === tabOptions.id)) throw new Error(`The Workshop already has a tab ${tabOptions.id}.`);
+    const button = document.createElement('button');
+    button.id = `${tabOptions.id}-tab`;
+    button.type = 'button';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', 'false');
+    button.setAttribute('aria-controls', `${tabOptions.id}-pane`);
+    button.tabIndex = -1;
+    button.textContent = tabOptions.label;
+    if (tabOptions.title !== undefined) button.title = tabOptions.title;
+    const pane = document.createElement('section');
+    pane.id = `${tabOptions.id}-pane`;
+    pane.className = 'workshop-pane plugin-pane';
+    pane.setAttribute('role', 'tabpanel');
+    pane.setAttribute('aria-labelledby', button.id);
+    pane.hidden = true;
+    const body = document.createElement('div');
+    body.className = 'workshop-scroll plugin-scroll';
+    pane.append(body);
+    const tab = { id: tabOptions.id, button, pane };
+    const tabEvents = new AbortController();
+    tabList.append(button);
+    panel.append(pane);
+    tabs.push(tab);
+    wireTab(tab, tabEvents.signal);
+    return {
+      body,
+      remove: (): void => {
+        const index = tabs.indexOf(tab);
+        if (index < 0) return;
+        tabs.splice(index, 1);
+        tabEvents.abort();
+        button.remove();
+        pane.remove();
+        if (selectedTab === tab.id) selectTab('physics');
+      },
+    };
+  }
+  // A container at the end of a built-in tab's scrolling body, made on first use.
+  function pluginSections(tab: PluginSectionTab): HTMLElement {
+    const scroll = element<HTMLElement>(root, `#${tab}-pane`).querySelector<HTMLElement>('.workshop-scroll');
+    if (scroll === null) throw new Error(`The ${tab} tab has no scrolling body for plugin sections.`);
+    let container = scroll.querySelector<HTMLElement>(':scope > .workshop-plugin-sections');
+    if (container === null) {
+      container = document.createElement('div');
+      container.className = 'workshop-plugin-sections';
+      scroll.append(container);
+    }
+    return container;
   }
   const groups = new Map<string, HTMLFieldSetElement>();
   const controls = new Map<keyof Tuning, RangeControl>();
@@ -295,10 +351,11 @@ export function createUI(options: UiOptions): GameUi {
     getSettings: () => settings, onLoad: commitSettings, onNotice: notice,
   });
   rememberSections(panel, events.signal);
+  const quick = element<HTMLElement>(root, '.workshop-quick');
   const search = createWorkshopSearch({
     root: element(root, '.workshop-search'), signal: events.signal, selectTab, selectedTab: () => selectedTab,
-    scopes: [
-      { label: 'Workshop', root: element(root, '.workshop-quick'), tab: null },
+    scopes: () => [
+      { label: 'Workshop', root: quick, tab: null },
       ...tabs.map((tab) => ({ label: tab.button.textContent?.trim() ?? tab.id, root: tab.pane, tab: tab.id })),
     ],
   });
@@ -314,7 +371,7 @@ export function createUI(options: UiOptions): GameUi {
   }, listen);
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
-    projectMount, characterMount, appearanceMount, spriteMount, levelMount, hammerHeadMount, workshopState,
+    projectMount, characterMount, appearanceMount, spriteMount, levelMount, hammerHeadMount, addTab, pluginSections, workshopState,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
     applySettings: commitSettings,

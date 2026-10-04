@@ -460,8 +460,9 @@ export class SpriteEditorState {
   }
 
   // Live, like arm forward distance: the loaded models switch materials without reloading.
-  setShading(value: unknown): boolean {
-    if (!this.canEdit()) return false;
+  setShading(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const shading = validateCharacterShading(value);
       if (sameShading(shading, this.draft.shading ?? DEFAULT_CHARACTER_SHADING)) {
@@ -469,7 +470,7 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       const assets = characterAssets({
         ...characterAssets(this.draft), shading: sameShading(shading, DEFAULT_CHARACTER_SHADING) ? undefined : shading,
@@ -482,11 +483,11 @@ export class SpriteEditorState {
       this.draft = document;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
@@ -685,8 +686,9 @@ export class SpriteEditorState {
     });
   }
 
-  setCharacterRiggingType(value: unknown): boolean {
-    if (!this.canEdit()) return false;
+  setCharacterRiggingType(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const characterRiggingType = validateCharacterRiggingType(value, this.draft.layers.length);
       if (characterRiggingType === this.draft.characterRiggingType) {
@@ -694,7 +696,7 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       const document = Object.freeze({ ...this.draft, characterRiggingType });
       this.validateDraft(document);
@@ -704,16 +706,17 @@ export class SpriteEditorState {
       this.directionalPreview = false;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
-  setArmForwardDistance(value: unknown): boolean {
-    if (!this.canEdit()) return false;
+  setArmForwardDistance(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const armForwardDistance = validateArmForwardDistance(value);
       if (armForwardDistance === this.draft.armForwardDistance) {
@@ -721,7 +724,7 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       const document = Object.freeze({ ...this.draft, armForwardDistance });
       this.validateDraft(document);
@@ -729,16 +732,17 @@ export class SpriteEditorState {
       this.draft = document;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
-  setWaistLean(value: unknown): boolean {
-    if (!this.canEdit()) return false;
+  setWaistLean(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const waistLean = validateWaistLean(value);
       if (waistLean === this.draft.waistLean) {
@@ -746,7 +750,7 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       const document = Object.freeze({ ...this.draft, waistLean });
       this.validateDraft(document);
@@ -754,17 +758,18 @@ export class SpriteEditorState {
       this.draft = document;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
   // Live: the imported avatar's motions change in place, each kind re-validating its configuration against the model.
-  setAvatarMotion(value: unknown): boolean {
-    if (!this.canEdit()) return false;
+  setAvatarMotion(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const avatar = this.draft.avatar;
       if (avatar === undefined) throw new SpriteError('Import a skinned avatar GLB before configuring its motions.');
@@ -774,7 +779,7 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       const document = Object.freeze({ ...this.draft, avatar: Object.freeze({ ...avatar, motion }) });
       this.validateDraft(document);
@@ -782,17 +787,18 @@ export class SpriteEditorState {
       this.draft = document;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
   // Live, like arm forward distance: only where the hands hold the handle changes.
-  setGrips(value: unknown): boolean {
-    if (!this.canEdit()) return false;
+  setGrips(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const grips = validateGrips(value);
       if (sameGrips(grips, this.draft.grips)) {
@@ -800,7 +806,7 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       const document = Object.freeze({ ...this.draft, grips });
       this.validateDraft(document);
@@ -808,17 +814,18 @@ export class SpriteEditorState {
       this.draft = document;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
   // Live: stretches the character's arms in every type; null returns to each type's own lengths.
-  setArms(value: unknown): boolean {
-    if (!this.canEdit()) return false;
+  setArms(value: unknown): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const arms = validateArms(value);
       if (sameArms(arms, this.draft.arms)) {
@@ -826,7 +833,7 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       const document = Object.freeze({ ...this.draft, arms });
       this.validateDraft(document);
@@ -834,11 +841,11 @@ export class SpriteEditorState {
       this.draft = document;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
@@ -892,8 +899,9 @@ export class SpriteEditorState {
     }
   }
 
-  setPresentation(value: DirectionalPresentation | null): boolean {
-    if (!this.canEdit()) return false;
+  setPresentation(value: DirectionalPresentation | null): Error | null {
+    const refused = this.editable();
+    if (refused !== null) return refused;
     try {
       const presentation = value === null ? null : validateDirectionalPresentation(value);
       const document = Object.freeze({ ...this.draft, presentation });
@@ -903,17 +911,17 @@ export class SpriteEditorState {
           this.error = null;
           this.changed();
         }
-        return true;
+        return null;
       }
       this.rig.configurePresentation(presentation);
       this.draft = document;
       this.error = null;
       this.changed();
-      return true;
+      return null;
     } catch (error) {
       if (!isDocumentError(error)) throw error;
       this.reportError(error.message, error);
-      return false;
+      return error;
     }
   }
 
@@ -1062,6 +1070,23 @@ export class SpriteEditorState {
       this.warnExternalSources(document);
     });
     return loaded;
+  }
+
+  // Replaces the draft with a whole profile as an edit, validated and loaded as an imported profile is. Returns the
+  // refusal, or null once the profile shows.
+  async setDocument(value: SpriteDocument): Promise<Error | null> {
+    const refused = this.editable();
+    if (refused !== null) return refused;
+    this.pendingAvatar = null;
+    return this.run(async () => {
+      const document = validateSpriteDocument(value);
+      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
+      await this.replaceRig(document);
+      if (this.disposed) return;
+      this.draft = document;
+      this.selectedLayerId = document.layers[0]?.id ?? null;
+      this.warnExternalSources(document);
+    });
   }
 
   validatedDraft(): SpriteDocument | null {
@@ -1253,12 +1278,18 @@ export class SpriteEditorState {
   }
 
   private canEdit(): boolean {
-    if (this.disposed) return false;
+    return this.editable() === null;
+  }
+
+  // Why the draft cannot change now, reported, or null when it can.
+  private editable(): SpriteError | null {
+    if (this.disposed) return new SpriteError('The character editor is closed.');
     if (this.restoring || this.busy) {
-      this.notice('Wait for the current sprite operation to finish before editing.', 'error');
-      return false;
+      const refusal = new SpriteError('Wait for the current sprite operation to finish before editing.');
+      this.notice(refusal.message, 'error');
+      return refusal;
     }
-    return true;
+    return null;
   }
 
   // Keeps the typed code of character-model failures next to the message.
@@ -1272,16 +1303,19 @@ export class SpriteEditorState {
     }
   }
 
-  private async run(operation: () => Promise<void>): Promise<void> {
+  // Runs one operation, reporting a refusal; returns the refusal, or null when the operation finished.
+  private async run(operation: () => Promise<void>): Promise<Error | null> {
     this.busy = true;
     this.error = null;
     this.changed();
     try {
       await operation();
+      return null;
     } catch (error) {
-      if (this.disposed && isAbort(error)) return;
+      if (this.disposed && isAbort(error)) return new SpriteError('The character editor closed before the operation finished.');
       if (!(isDocumentError(error) || error instanceof VisualStoreError)) throw error;
       if (!this.disposed) this.reportError(error.message, error);
+      return error;
     } finally {
       this.busy = false;
       this.changed();

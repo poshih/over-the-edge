@@ -1,6 +1,7 @@
 import { START_SPAWN } from '../course';
 import type { PlayerSpawn } from '../config';
-import type { PracticeId } from './ui-types';
+
+export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
 
 export interface Practice extends PlayerSpawn {
   id: PracticeId;

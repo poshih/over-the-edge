@@ -8,6 +8,7 @@ import { DEFAULT_CONTENT_URL } from './build/release.ts';
 import { loadServerLevels, workshopLevels } from './build/workshop-levels.ts';
 import { loadServerModels, workshopModels } from './build/workshop-models.ts';
 import { workshopProject } from './build/workshop-project.ts';
+import { checkWorkshopModule, workshopModulePath, workshopPlugins } from './build/workshop-plugins.ts';
 import { projectStudio } from './server/project-api.ts';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
@@ -22,6 +23,9 @@ export default defineConfig(async ({ mode, isPreview }) => {
   // checked now too, so a bad one stops the Workshop from starting.
   const rigModule = avatarRigModulePath(project, process.env.AVATAR_RIG_MODULE);
   const { registry: rigRegistry } = await loadWorkshopAvatarRigs(rigModule, mode);
+  // The game's editor-only Workshop plugins, checked now, so a malformed module stops the Workshop from starting.
+  const pluginModule = workshopModulePath(project, process.env.WORKSHOP_MODULE);
+  await checkWorkshopModule(pluginModule, mode);
   const input = requested === undefined ? null : loadProjectInput(project, requested, rigRegistry);
   const levels = isPreview === true ? [] : loadServerLevels(project);
   const models = isPreview === true ? [] : loadServerModels(project, rigRegistry);
@@ -35,6 +39,7 @@ export default defineConfig(async ({ mode, isPreview }) => {
       workshopModels({ models, contentUrl }),
       avatarRigs({ module: rigModule }),
       avatarMotionControls({ module: rigModule }),
+      workshopPlugins({ module: pluginModule }),
       // A preview serves a build made with GAME_PROJECT, so the studio reads it from the environment either way.
       projectStudio({ root: project, mode, avatarRigs: rigRegistry, workshopProject: process.env.GAME_PROJECT }),
     ],

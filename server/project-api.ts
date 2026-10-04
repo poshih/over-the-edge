@@ -29,6 +29,7 @@ import {
 } from '../src/project';
 import type { ProjectContent, ProjectManifest } from '../src/project';
 import { mergePatch } from '../src/project-fields';
+import { isPluginId, PLUGIN_DATA_LIMITS, pluginDataIn, pluginSection, validatePluginData, withPluginData } from '../src/plugin-data';
 import { isSharedKind, SHARED_FORMATS, SHARED_KINDS, sharedText } from '../src/shared-copies';
 import type { SharedKind } from '../src/shared-copies';
 import { EMPTY_SPRITES, SPRITE_FILE_BYTES } from '../src/sprite-data';
@@ -42,8 +43,8 @@ import {
 import type { LibraryAvatarEntry, LibraryEntry, LibraryHammerEntry, ModelLibrary, PartRole } from '../src/model-library';
 import { apiManual } from './api-manual';
 import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendBytes, sendError, sendFile, sendJson } from './http';
-import { ProjectStore, SECTION_NAMES } from './project-store';
-import type { ProjectChange, ProjectState, SectionName } from './project-store';
+import { ProjectStore, SECTION_NAMES, sectionRevision } from './project-store';
+import type { BuiltinSectionName, ProjectChange, ProjectState, SectionName } from './project-store';
 import { Publisher } from './publish';
 import { SharedStore } from './shared-store';
 
@@ -83,6 +84,8 @@ const COOKIE = 'ote-studio';
 const MIN_TOKEN = 16;
 const LEVEL_REF = { path: PROJECT_FILES.level, maxBytes: LEVEL_LIMITS.fileBytes } as const;
 const PATCHABLE: ReadonlySet<SectionName> = new Set(['settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'theme', 'hud', 'audio', 'enemies', 'art']);
+// A plugin's data as JSON text, with room for formatting around the stored document.
+const PLUGIN_BODY_LIMIT = PLUGIN_DATA_LIMITS.bytes * 4;
 
 function digest(value: string): Buffer {
   return createHash('sha256').update(value).digest();
@@ -182,16 +185,16 @@ export function createStudioHandler(config: StudioConfig) {
     const header = context.request.headers['if-match'];
     if (header === undefined) return;
     const expected = Number(header.replace(/^W\//, '').replace(/"/g, ''));
-    if (sections.some((section) => state.sections[section] !== expected)) {
+    if (sections.some((section) => sectionRevision(state, section) !== expected)) {
       throw new HttpError(412, 'conflict', `The ${sections.join(', ')} section changed on the server (revision ${
-        state.sections[sections[0]!]}); reload it and try again.`, { section: sections[0] });
+        sectionRevision(state, sections[0]!)}); reload it and try again.`, { section: sections[0] });
     }
   };
 
   // Every answer about a project's state says which level version its stored level and game settings are.
   const respondState = (context: Context, state: ProjectState, section: SectionName | null, extra: Record<string, unknown> = {}): void => {
     sendJson(context.response, 200, { revision: state.revision, sections: state.sections, level: state.level, ...extra },
-      section === null ? {} : { ETag: `"${state.sections[section]}"` });
+      section === null ? {} : { ETag: `"${sectionRevision(state, section)}"` });
   };
 
   const level = async (id: string): Promise<LevelDefinition> => {
@@ -212,7 +215,7 @@ export function createStudioHandler(config: StudioConfig) {
   };
 
   // One entry per API section: how to read it and how a new value becomes a validated change.
-  const sections: Record<SectionName, {
+  const sections: Record<BuiltinSectionName, {
     limit: number;
     read: (id: string, manifest: ProjectManifest) => Promise<unknown>;
     write: (id: string, manifest: ProjectManifest, value: unknown) => Promise<Omit<ProjectChange, 'sections'>>;
@@ -792,13 +795,49 @@ export function createStudioHandler(config: StudioConfig) {
     sendJson(context.response, 200, { deleted: context.params.name });
   });
 
+  // Workshop plugins' data: one section per plugin, `plugins/<id>`, holding its JSON document or null. The engine checks
+  // its limits but never its content; the Workshop runs the plugin's own validation.
+  const pluginId = (context: Context): string => {
+    const id = context.params.plugin!;
+    if (!isPluginId(id)) {
+      throw new HttpError(400, 'invalid-plugin', `Plugin IDs use 1-${PLUGIN_DATA_LIMITS.id} lowercase letters, digits and hyphens, starting with a letter.`);
+    }
+    return id;
+  };
+  const writePlugin = async (context: Context, id: string, data: (current: unknown) => unknown): Promise<void> => {
+    const section = pluginSection(id);
+    await change(context, [section], async (manifest) => {
+      const value = data(pluginDataIn(manifest.plugins, id));
+      const next = value === null ? null : validatePluginData(id, value);
+      return { manifest: withManifest(manifest, { plugins: withPluginData(manifest.plugins, id, next) }) };
+    });
+  };
+  route('GET', '/api/projects/:id/plugins/:plugin', async (context) => {
+    const id = pluginId(context);
+    const { manifest, state } = await project(context);
+    sendJson(context.response, 200, pluginDataIn(manifest.plugins, id), { ETag: `"${sectionRevision(state, pluginSection(id))}"` });
+  });
+  route('PUT', '/api/projects/:id/plugins/:plugin', async (context) => {
+    const id = pluginId(context);
+    const value = await readJson(context.request, PLUGIN_BODY_LIMIT);
+    await writePlugin(context, id, () => value);
+  });
+  route('PATCH', '/api/projects/:id/plugins/:plugin', async (context) => {
+    const id = pluginId(context);
+    const patch = await readJson(context.request, PLUGIN_BODY_LIMIT);
+    await writePlugin(context, id, (current) => mergePatch(current, patch));
+  });
+  route('DELETE', '/api/projects/:id/plugins/:plugin', async (context) => {
+    await writePlugin(context, pluginId(context), () => null);
+  });
+
   // Generic sections, registered last so the specific routes above win.
   for (const name of SECTION_NAMES) {
     const spec = sections[name];
     const path = `/api/projects/:id/${name}`;
     route('GET', path, async (context) => {
       const { manifest, state } = await project(context);
-      sendJson(context.response, 200, await spec.read(context.params.id!, manifest), { ETag: `"${state.sections[name]}"` });
+      sendJson(context.response, 200, await spec.read(context.params.id!, manifest), { ETag: `"${sectionRevision(state, name)}"` });
     });
     route('PUT', path, async (context) => {
       const value = await readJson(context.request, spec.limit);

@@ -402,7 +402,7 @@ export function createCharacterEditor(options: {
     description: 'Distance between the configured chest front and both hand/hammer grip targets. Applies to the two 3D character modes.',
   }, {
     id: 'character-arm-forward-distance', name: 'armForwardDistance', signal: events.signal,
-    onInput: value => { if (!options.state.setArmForwardDistance(value)) render(); },
+    onInput: value => { if (options.state.setArmForwardDistance(value) !== null) render(); },
   });
   element(root, '.character-arm-forward-control').append(forward.row);
   forwardReset.addEventListener('click', () => { options.state.setArmForwardDistance(DEFAULT_ARM_FORWARD_DISTANCE); }, listen);
@@ -412,7 +412,7 @@ export function createCharacterEditor(options: {
     description: 'The most the upper body leans toward the hammer, turning at the waist. Applies to the two 3D character modes.',
   }, {
     id: 'character-waist-lean', name: 'waistLean', signal: events.signal,
-    onInput: value => { if (!options.state.setWaistLean(value)) render(); },
+    onInput: value => { if (options.state.setWaistLean(value) !== null) render(); },
   });
   element(root, '.character-waist-lean-control').append(lean.row);
   leanReset.addEventListener('click', () => { options.state.setWaistLean(DEFAULT_WAIST_LEAN); }, listen);
@@ -463,7 +463,7 @@ export function createCharacterEditor(options: {
       id: `character-${side}-${segment}-length`, name: `${side}${segment === 'upper' ? 'Upper' : 'Forearm'}Length`, signal: events.signal,
       onInput: value => {
         const arms = shownArms(options.state.snapshot().document.arms);
-        if (!options.state.setArms({ ...arms, [side]: { ...arms[side], [segment]: value } })) render();
+        if (options.state.setArms({ ...arms, [side]: { ...arms[side], [segment]: value } }) !== null) render();
       },
     });
     element(root, '.character-arm-length-controls').append(control.row);
@@ -476,7 +476,7 @@ export function createCharacterEditor(options: {
     }, {
       id: `character-${side}-grip`, name: `${side}Grip`, signal: events.signal,
       onInput: value => {
-        if (!options.state.setGrips({ ...options.state.snapshot().document.grips, [side]: value })) render();
+        if (options.state.setGrips({ ...options.state.snapshot().document.grips, [side]: value }) !== null) render();
       },
     });
     element(root, '.character-grip-controls').append(control.row);
@@ -492,7 +492,7 @@ export function createCharacterEditor(options: {
       onInput: value => {
         const grips = options.state.snapshot().document.grips;
         const rotation = { ...grips.rotation, [side]: { ...grips.rotation[side], [axis]: value } };
-        if (!options.state.setGrips({ ...grips, rotation })) render();
+        if (options.state.setGrips({ ...grips, rotation }) !== null) render();
       },
     });
     element(root, '.character-grip-rotation-controls').append(control.row);
@@ -506,7 +506,7 @@ export function createCharacterEditor(options: {
   }, {
     id: 'character-grip-slide-at', name: 'gripSlideAt', signal: events.signal,
     onInput: value => {
-      if (!options.state.setGrips({ ...options.state.snapshot().document.grips, slideAt: value / 100 })) render();
+      if (options.state.setGrips({ ...options.state.snapshot().document.grips, slideAt: value / 100 }) !== null) render();
     },
   });
   element(root, '.character-grip-slide-control').append(slidePoint.row);
@@ -523,7 +523,7 @@ export function createCharacterEditor(options: {
         // Moving one end past the other carries the other along.
         const slideRange = end === 'from' ? { from: share, to: Math.max(share, grips.slideRange.to) }
           : { from: Math.min(share, grips.slideRange.from), to: share };
-        if (!options.state.setGrips({ ...grips, slideRange })) render();
+        if (options.state.setGrips({ ...grips, slideRange }) !== null) render();
       },
     });
     element(root, '.character-grip-range-controls').append(control.row);
@@ -558,7 +558,7 @@ export function createCharacterEditor(options: {
   }
   const editShading = (change: Partial<CharacterShading>): void => {
     const current = options.state.snapshot().shading;
-    if (!options.state.setShading({ ...current, ...change })) render();
+    if (options.state.setShading({ ...current, ...change }) !== null) render();
   };
   const bands = createRangeControl({
     ...SHADING_LIMITS.bands, label: 'Cel bands', unit: '',
@@ -582,7 +582,7 @@ export function createCharacterEditor(options: {
   for (const input of gripModes) {
     input.addEventListener('change', () => {
       if (!input.checked) return;
-      if (!options.state.setGrips({ ...options.state.snapshot().document.grips, placement: input.value })) render();
+      if (options.state.setGrips({ ...options.state.snapshot().document.grips, placement: input.value }) !== null) render();
     }, listen);
   }
   gripReset.addEventListener('click', () => {
@@ -660,7 +660,7 @@ export function createCharacterEditor(options: {
     typeSelect.append(option);
   }
   typeSelect.addEventListener('change', () => {
-    if (!options.state.setCharacterRiggingType(typeSelect.value)) render();
+    if (options.state.setCharacterRiggingType(typeSelect.value) !== null) render();
   }, listen);
   avatarButton.addEventListener('click', () => { options.state.setCharacterRiggingType('avatar-3d'); }, listen);
   saveButton.addEventListener('click', options.actions.save, listen);

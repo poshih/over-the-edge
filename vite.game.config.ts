@@ -10,6 +10,7 @@ import { projectModulePath } from './build/module-path.ts';
 import { DEFAULT_CONTENT_URL, gameRelease } from './build/release';
 import { loadFileRelease, loadProjectRelease } from './build/release-input';
 import { RECORDINGS_FOLDER } from './build/release-phantoms';
+import { workshopModulePath } from './build/workshop-plugins';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 const FILE_INPUTS = ['GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES'] as const;
@@ -51,10 +52,15 @@ function gameModule(): string | null {
   return projectModulePath(project, process.env.GAME_MODULE, 'GAME_MODULE');
 }
 
+// Editor modules, and the game's Workshop plugins (WORKSHOP_MODULE) when it names them, never reach a release.
 function gameOnlyBoundary(): Plugin {
   const editor = resolve(project, 'src/editor') + sep;
+  const plugins = workshopModulePath(project, process.env.WORKSHOP_MODULE);
   const enforceBoundary = (ids: Iterable<string>): void => {
-    const forbidden = [...ids].filter((id) => id.split('?')[0].startsWith(editor));
+    const forbidden = [...ids].filter((id) => {
+      const path = id.split('?')[0];
+      return path.startsWith(editor) || path === plugins;
+    });
     if (forbidden.length > 0) {
       throw new Error(`Editor code/assets reached the game-only build:\n${forbidden.map((id) => id.slice(project.length)).join('\n')}`);
     }

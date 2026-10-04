@@ -43,6 +43,9 @@ import type { HammerHead } from '../hammer-head';
 import type { AvatarRigRegistry } from '../avatar-rig';
 import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
+import { NO_PLUGIN_DATA, pluginDataIn, pluginOfSection, pluginSection, validatePluginData, withPluginData } from '../plugin-data';
+import type { PluginData } from '../plugin-data';
+import { sameJson } from '../bounded-json';
 import { ProjectApiError, ProjectClient } from './project-client';
 import type { PublishRecord, ServerHealth, ServerProjectSummary, ServerRevisions } from './project-client';
 import { ProjectCopyStore } from './project-copy';
@@ -51,14 +54,33 @@ import { loadPublishedProject } from './published-project';
 import type { PublishedProject } from './published-project';
 import { ServerModelError } from './server-models';
 
+// The engine's sections. Besides them, each Workshop plugin's data is a section of its own, `plugins/<id>`.
 export const PROJECT_SECTIONS = [
   'title', 'level', 'settings', 'characters/primary', 'characters/alternate', 'arm-ik', 'appearance', 'models',
   'theme', 'hud', 'audio', 'enemies', 'art', 'media',
 ] as const;
-export type ProjectSectionName = (typeof PROJECT_SECTIONS)[number];
+export type BuiltinSectionName = (typeof PROJECT_SECTIONS)[number];
+export type ProjectSectionName = BuiltinSectionName | `plugins/${string}`;
 
-// Server writes happen in this order, so new files exist before references and references go before removals.
-const SAVE_ORDER: readonly ProjectSectionName[] = [
+// Each section's state, by name: a plugin section without data has none.
+type SectionRecord<T> = Partial<Record<ProjectSectionName, T>>;
+
+export function isProjectSection(name: string): name is ProjectSectionName {
+  return (PROJECT_SECTIONS as readonly string[]).includes(name) || pluginOfSection(name) !== null;
+}
+
+// The Workshop's plugins, as the project needs them: which it has, and each one's own check of its data, which returns
+// the plugin's typed refusal or null.
+export interface ProjectPlugins {
+  has(id: string): boolean;
+  validate(id: string, data: PluginData): Error | null;
+}
+
+const NO_PLUGINS: ProjectPlugins = Object.freeze({ has: () => false, validate: () => null });
+
+// Server writes happen in this order, so new files exist before references and references go before removals. Plugin
+// sections reference nothing, so they go last.
+const SAVE_ORDER: readonly BuiltinSectionName[] = [
   'title', 'settings', 'arm-ik', 'theme', 'hud', 'enemies', 'level', 'audio',
   'characters/primary', 'characters/alternate', 'art', 'appearance', 'models', 'media',
 ];
@@ -170,6 +192,7 @@ function libraryOf(items: readonly LibraryItem[]): ModelLibrary {
 interface Binding {
   readonly id: string;
   revision: number;
+  // The server's revision of each section this page reconciled with; a plugin section absent here is at revision 0.
   readonly sections: Record<string, number>;
   // The level version of the level and game settings this page last saved or loaded, once the project said which.
   version: BoundVersion | null;
@@ -195,7 +218,7 @@ const VERSIONED = ['level', 'settings'] as const;
 
 // What this browser's copy holds, or would hold: compared section by section.
 interface CopyState {
-  readonly fingerprints: Record<ProjectSectionName, unknown>;
+  readonly fingerprints: SectionRecord<unknown>;
   readonly origin: string | null;
   readonly dirty: readonly ProjectSectionName[];
 }
@@ -203,7 +226,7 @@ interface CopyState {
 // A save that left changed sections unsaved: what they were, why, and when to try them again unchanged (null: only
 // once they change).
 interface SaveFailure {
-  readonly fingerprints: Record<ProjectSectionName, unknown>;
+  readonly fingerprints: SectionRecord<unknown>;
   readonly message: string;
   readonly retryAt: number | null;
 }
@@ -217,7 +240,13 @@ interface KeptChanges {
 
 function sameCopy(a: CopyState | null, b: CopyState | null): boolean {
   return a !== null && b !== null && a.origin === b.origin && a.dirty.join() === b.dirty.join() &&
-    PROJECT_SECTIONS.every((name) => a.fingerprints[name] === b.fingerprints[name]);
+    sameSections(a.fingerprints, b.fingerprints);
+}
+
+// Whether two sets of fingerprints hold the same sections, a plugin section without data in either included.
+function sameSections(a: SectionRecord<unknown>, b: SectionRecord<unknown>): boolean {
+  const names = new Set([...Object.keys(a), ...Object.keys(b)] as ProjectSectionName[]);
+  return [...names].every((name) => a[name] === b[name]);
 }
 
 export type ProjectEvent = { readonly kind: 'status' } | { readonly kind: 'content' };
@@ -242,6 +271,8 @@ export interface ProjectSnapshot {
   readonly media: readonly { readonly path: string; readonly bytes: number; readonly kind: 'video' | 'audio' }[];
   readonly library: readonly LibraryModel[];
   readonly alternate: SpriteDocument | null;
+  // The plugins this project keeps data for.
+  readonly plugins: readonly string[];
   readonly publish: PublishRecord | null;
   readonly error: string | null;
   // The project this Workshop was built with (GAME_PROJECT), and whether the page shows a version
@@ -276,6 +307,7 @@ export class ProjectSession {
   private readonly workspace: ProjectWorkspace;
   // The avatar drivers this Workshop accepts; injected so a custom AVATAR_RIG_MODULE reaches every validator.
   private readonly avatarRigs: AvatarRigRegistry;
+  private readonly plugins: ProjectPlugins;
   private readonly client: ProjectClient;
   private readonly published: PublishedProject | null;
   private readonly copy: ProjectCopyStore | null;
@@ -296,8 +328,10 @@ export class ProjectSession {
   // One settings object per avatar entry, so views can tell when an avatar's settings changed.
   private readonly avatarSettings = new WeakMap<LibraryAvatarEntry, LibraryAvatarSettings>();
   private alternate: SpriteDocument | null = null;
+  // Each plugin's data, the same object until it changes; data for a plugin this Workshop lacks stays as it came.
+  private pluginData: Readonly<Record<string, PluginData>> = NO_PLUGIN_DATA;
   private binding: Binding | null = null;
-  private synced: Record<ProjectSectionName, unknown> | null = null;
+  private synced: SectionRecord<unknown> | null = null;
   // Appearance files last saved to or loaded from the server, by part.
   private syncedModels = new Map<VisualPartId, Blob>();
   private readonly conflicts = new Set<ProjectSectionName>();
@@ -325,7 +359,7 @@ export class ProjectSession {
   // last save that left changes unsaved.
   private saver: ReturnType<typeof setInterval> | null = null;
   private saving: Promise<void> | null = null;
-  private saveSeen: Record<ProjectSectionName, unknown> | null = null;
+  private saveSeen: SectionRecord<unknown> | null = null;
   private saveFailure: SaveFailure | null = null;
   // Changes this browser kept to the Workshop's own project, found when it opened from the server at start.
   private kept: KeptChanges | null = null;
@@ -335,9 +369,12 @@ export class ProjectSession {
   // Each character draft validated once, so repeated saves do not report the same problem again.
   private readonly validatedDrafts = new WeakMap<SpriteDocument, SpriteDocument | null>();
 
-  constructor(options: { workspace: ProjectWorkspace; avatarRigs: AvatarRigRegistry; client?: ProjectClient; published?: PublishedProject | null }) {
+  constructor(options: {
+    workspace: ProjectWorkspace; avatarRigs: AvatarRigRegistry; plugins?: ProjectPlugins; client?: ProjectClient; published?: PublishedProject | null;
+  }) {
     this.workspace = options.workspace;
     this.avatarRigs = options.avatarRigs;
+    this.plugins = options.plugins ?? NO_PLUGINS;
     this.client = options.client ?? new ProjectClient();
     this.published = options.published ?? null;
     this.copy = this.published === null ? null : new ProjectCopyStore();
@@ -392,7 +429,7 @@ export class ProjectSession {
         role, id: entry.id, name: entry.name, key, avatar: role === 'avatar' ? this.settingsOf(entry as LibraryAvatarEntry) : null,
         head: role === 'hammer' ? (entry as LibraryHammerEntry).head : null,
       })),
-      alternate: this.alternate, publish: this.publishRecord, error: this.error,
+      alternate: this.alternate, plugins: Object.keys(this.pluginData), publish: this.publishRecord, error: this.error,
       published: this.published === null ? null : {
         title: this.published.title, version: this.published.version,
         origin: this.origin === this.published.version ? 'current' : this.origin === null ? 'none' : 'outdated',
@@ -412,7 +449,42 @@ export class ProjectSession {
   dirtySections(): ProjectSectionName[] {
     if (this.synced === null) return [];
     const current = this.fingerprints();
-    return PROJECT_SECTIONS.filter((name) => current[name] !== this.synced![name]);
+    return this.sectionNames().filter((name) => current[name] !== this.synced![name]);
+  }
+
+  // The open project's manifest as it would save now, unsaved changes included.
+  manifest(): ProjectManifest {
+    return this.manifestDraft();
+  }
+
+  // A plugin's data in the open project, or null without any.
+  pluginDataOf(id: string): PluginData | null {
+    return pluginDataIn(this.pluginData, id);
+  }
+
+  // Replaces a plugin's data, or removes it with null. The data must fit the engine's limits and pass the plugin's own
+  // validation; it then saves like any section. Returns the refusal, the plugin's own typed error when its validation
+  // refused, which is also reported; null when the data changed or was already the same.
+  setPluginData(id: string, value: unknown): Error | null {
+    try {
+      const data = value === null ? null : validatePluginData(id, value);
+      if (data !== null) {
+        const refusal = this.plugins.validate(id, data);
+        if (refusal !== null) {
+          this.report(pluginRefusal(id, refusal));
+          return refusal;
+        }
+      }
+      const current = pluginDataIn(this.pluginData, id);
+      if (data === null ? current === null : current !== null && sameJson(current, data)) return null;
+      this.pluginData = withPluginData(this.pluginData, id, data);
+      this.changed('content');
+      return null;
+    } catch (error) {
+      if (!isProjectDataError(error)) throw error;
+      this.report(error);
+      return error;
+    }
   }
 
   // Unsaved work that exists only in this page (the level editor warns about its own changes). A
@@ -429,22 +501,22 @@ export class ProjectSession {
 
   resolveMedia = (source: string): string => this.media.get(source)?.url ?? source;
 
-  setTitle(value: string): boolean {
+  // Each edit returns its refusal, which is also reported, or null when it applied.
+  setTitle(value: string): Error | null {
     try {
       this.title = projectTitle(value);
       this.changed('status');
-      return true;
+      return null;
     } catch (error) {
-      this.report(error);
-      return false;
+      return this.refuse(error);
     }
   }
 
-  setTheme(value: unknown): boolean { return this.setSection(() => { this.theme = validateTheme(value); }); }
-  setHud(value: unknown): boolean { return this.setSection(() => { this.hud = validateHud(value); }); }
-  setEnemies(value: unknown): boolean { return this.setSection(() => { this.enemies = validateEnemyArt(value); }); }
+  setTheme(value: unknown): Error | null { return this.setSection(() => { this.theme = validateTheme(value); }); }
+  setHud(value: unknown): Error | null { return this.setSection(() => { this.hud = validateHud(value); }); }
+  setEnemies(value: unknown): Error | null { return this.setSection(() => { this.enemies = validateEnemyArt(value); }); }
 
-  setAudio(value: unknown): boolean {
+  setAudio(value: unknown): Error | null {
     return this.setSection(() => {
       const audio = validateAudio(value);
       const missing = audioSources(audio).filter((source) => source.startsWith('/') && !this.media.has(source));
@@ -453,12 +525,19 @@ export class ProjectSession {
     });
   }
 
-  setArtMode(mode: ArtMode): void {
-    this.art = { ...this.art, mode };
-    this.changed('status');
+  setArtMode(mode: ArtMode): Error | null {
+    try {
+      inSection('art', () => validateProjectArt({ mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations }));
+      this.art = { ...this.art, mode };
+      this.changed('status');
+      return null;
+    } catch (error) {
+      return this.refuse(error);
+    }
   }
 
-  async addMedia(file: File): Promise<string | null> {
+  // The added file's /media/ path, or the refusal.
+  async addMedia(file: File): Promise<string | Error> {
     try {
       const path = mediaPathForFile(file.name);
       if (path === null) throw new ProjectError('Choose a .webm, .mp4, .mp3, .ogg, .wav or .m4a file with a letter or digit in its name.', { section: 'media' });
@@ -472,21 +551,19 @@ export class ProjectSession {
       this.changed('content');
       return path;
     } catch (error) {
-      this.report(error);
-      return null;
+      return this.refuse(error);
     }
   }
 
-  removeMedia(path: string): boolean {
+  removeMedia(path: string): Error | null {
     try {
       const manifest = { ...this.draftManifest(), media: [...this.media.keys()].filter((existing) => existing !== path).map((existing) => ({ path: existing })) };
       checkProjectReferences(validateProjectManifest(manifest), this.workspace.level.get());
       this.replaceMedia(path, null);
       this.changed('content');
-      return true;
+      return null;
     } catch (error) {
-      this.report(error);
-      return false;
+      return this.refuse(error);
     }
   }
 
@@ -500,8 +577,8 @@ export class ProjectSession {
 
   // Adds a GLB to the model library for one part, checked like releases check it. A new avatar uses `model` (its bone
   // map, driver and hair) or maps its joints automatically, and takes the open character's grips, arm lengths and arm
-  // forward distance.
-  async addLibraryModel(role: PartRole, file: File, model?: AvatarModelSettings): Promise<LibraryModel | null> {
+  // forward distance. Returns the new model, or the refusal.
+  async addLibraryModel(role: PartRole, file: File, model?: AvatarModelSettings): Promise<LibraryModel | Error> {
     try {
       if (file.size === 0 || file.size > MODEL_LIMITS.bytes) {
         throw new ProjectError(`Choose a GLB file no larger than ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'models' });
@@ -530,8 +607,7 @@ export class ProjectSession {
       this.changed('content');
       return this.snapshot().library.find((model) => model.role === role && model.id === id)!;
     } catch (error) {
-      this.report(error);
-      return null;
+      return this.refuse(error);
     }
   }
 
@@ -546,21 +622,20 @@ export class ProjectSession {
     return this.library.flatMap(({ role, entry }) => role === 'hammer' ? [{ id: entry.id, name: entry.name, head: (entry as LibraryHammerEntry).head }] : []);
   }
 
-  // Gives a library hammer a new head outline; false, with the reason reported, when the outline is not a valid head.
-  setLibraryHammerHead(id: string, head: HammerHead): boolean {
+  // Gives a library hammer a new head outline; the refusal, reported, when the outline is not a valid head.
+  setLibraryHammerHead(id: string, head: HammerHead): Error | null {
     try {
       const item = this.libraryItem('hammer', id);
       const entry: LibraryHammerEntry = Object.freeze({ id, name: item.entry.name, head: inSection('models', () => libraryHammerHead(head)) });
       this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
       this.changed('content');
-      return true;
+      return null;
     } catch (error) {
-      this.report(error);
-      return false;
+      return this.refuse(error);
     }
   }
 
-  async setLibraryAvatar(id: string, settings: LibraryAvatarSettings): Promise<boolean> {
+  async setLibraryAvatar(id: string, settings: LibraryAvatarSettings): Promise<Error | null> {
     try {
       const item = this.libraryItem('avatar', id);
       const entry: LibraryAvatarEntry = Object.freeze({
@@ -568,20 +643,21 @@ export class ProjectSession {
       });
       const bytes = new Uint8Array(await (await this.libraryBlob('avatar', id)).arrayBuffer());
       inSection('models', () => checkLibraryModel('avatar', entry, bytes, this.avatarRigs));
-      if (!this.library.includes(item)) return false;
+      if (!this.library.includes(item)) {
+        throw new ProjectError(`Library avatar "${id}" changed while its model was checked; try again.`, { section: 'models' });
+      }
       this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
       this.changed('content');
-      return true;
+      return null;
     } catch (error) {
-      this.report(error);
-      return false;
+      return this.refuse(error);
     }
   }
 
   // Gives a library avatar the open character's grips, arm lengths and arm forward distance.
-  async useCharacterSettings(id: string): Promise<boolean> {
+  async useCharacterSettings(id: string): Promise<Error | null> {
     const item = this.library.find((candidate) => candidate.role === 'avatar' && candidate.entry.id === id);
-    if (item === undefined) return false;
+    if (item === undefined) return this.refuse(new ProjectError(`The project has no library avatar "${id}".`, { section: 'models' }));
     return this.setLibraryAvatar(id, { ...libraryAvatarSettings(item.entry as LibraryAvatarEntry), ...this.characterAvatarSettings() });
   }
 
@@ -652,14 +728,37 @@ export class ProjectSession {
     }
   }
 
+  alternateCharacter(): SpriteDocument | null {
+    return this.alternate;
+  }
+
   removeAlternate(): void {
     this.alternate = null;
     this.changed('content');
   }
 
-  // A course package from `npm run pack:course`: its level replaces the current one, with its GLBs.
-  async importCoursePackage(file: File): Promise<boolean> {
-    return this.run('Importing course package', async () => {
+  // Makes `document` the project's alternate character, or removes it with null; the refusal, reported, or null.
+  setAlternate(document: SpriteDocument | null): Error | null {
+    try {
+      if (document === null) {
+        if (this.alternate === null) return null;
+        this.removeAlternate();
+        return null;
+      }
+      const validated = validateProjectCharacter(document);
+      this.checkCharacterProfile(validated, 'alternate character');
+      this.alternate = validated;
+      this.changed('content');
+      return null;
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  // A course package from `npm run pack:course`: its level replaces the current one, with its GLBs. Returns the refusal,
+  // or null once imported.
+  async importCoursePackage(file: File): Promise<Error | null> {
+    return this.attempt('Importing course package', async () => {
       if (file.size > 96 * 1024 * 1024) throw new ArtError('Course packages are limited to 96 MiB.');
       const pack = validateCoursePackage(JSON.parse(await file.text()));
       const assets = pack.assets.map((asset) => ({
@@ -926,7 +1025,7 @@ export class ProjectSession {
   // unsaved changes in it wait for the owner to restore them into the project or discard them; a copy without any goes.
   private async keepChanges(project: string, copy: ProjectCopy | null): Promise<void> {
     if (copy === null || copy.origin === null) return;
-    const sections = PROJECT_SECTIONS.filter((name) => copy.dirty.includes(name));
+    const sections = copy.dirty.filter(isProjectSection);
     if (sections.length === 0) {
       try {
         await this.copy!.clear();
@@ -949,7 +1048,7 @@ export class ProjectSession {
     const synced = this.synced;
     if (binding === null || synced === null || this.busy !== null || this.saving !== null || this.disposed) return;
     const current = this.fingerprints();
-    const pending = PROJECT_SECTIONS.filter((name) => current[name] !== synced[name] && !this.conflicts.has(name));
+    const pending = this.sectionNames().filter((name) => current[name] !== synced[name] && !this.conflicts.has(name));
     const seen = this.saveSeen;
     this.saveSeen = pending.length === 0 ? null : current;
     if (pending.length === 0) {
@@ -975,7 +1074,7 @@ export class ProjectSession {
   // One automatic save. What it leaves unsaved is reported once and tried again when it changes, or shortly after the
   // server could not be reached; a section that also changed in the project becomes a conflict for the owner.
   private async attemptSave(binding: Binding, names: ReadonlySet<ProjectSectionName>,
-    fingerprints: Record<ProjectSectionName, unknown>): Promise<void> {
+    fingerprints: SectionRecord<unknown>): Promise<void> {
     let message: string | null = null;
     let retryAt: number | null = null;
     try {
@@ -1036,10 +1135,10 @@ export class ProjectSession {
       problems.set('characters/alternate', 'waits for the primary character.');
     }
     const saving = new Set([...wanted].filter((name) => !problems.has(name)));
-    const revision = (name: ProjectSectionName): number | undefined => overwrite.has(name) ? undefined : binding.sections[name];
+    const revision = (name: ProjectSectionName): number | undefined => overwrite.has(name) ? undefined : binding.sections[name] ?? 0;
     // Only the written section's revision: other sections may have changed meanwhile, for the next poll.
     const adopt = (name: ProjectSectionName, state: ServerRevisions): void => {
-      binding.sections[name] = state.sections[name]!;
+      binding.sections[name] = state.sections[name] ?? 0;
     };
     // New files first, so the sections that reference them validate on the server.
     if (saving.has('media')) {
@@ -1073,13 +1172,14 @@ export class ProjectSession {
       }
     }
     // The server removes an alternate before the primary it depends on, and adds them the other way round.
-    const order = alternate !== null ? SAVE_ORDER : SAVE_ORDER.flatMap((name) =>
-      name === 'characters/primary' ? ['characters/alternate', name] as const : name === 'characters/alternate' ? [] : [name]);
+    const order: ProjectSectionName[] = [...alternate !== null ? SAVE_ORDER : SAVE_ORDER.flatMap((name) =>
+      name === 'characters/primary' ? ['characters/alternate', name] as const : name === 'characters/alternate' ? [] : [name]),
+    ...[...saving].filter((name) => pluginOfSection(name) !== null).sort()];
     for (const name of order) {
       if (!saving.has(name)) continue;
       const state = await this.client.putSection(binding.id, name, values.get(name), revision(name));
       adopt(name, state);
-      this.synced![name] = baseline[name];
+      this.markSynced(name, baseline[name]);
       this.conflicts.delete(name);
       this.adoptVersion(binding, state);
       if (name === 'level') this.workspace.level.markSaved(savedLevel);
@@ -1094,7 +1194,7 @@ export class ProjectSession {
   // back by section.
   private capture(names: ReadonlySet<ProjectSectionName>): { values: Map<ProjectSectionName, unknown>; problems: Map<ProjectSectionName, string> } {
     const manifest = this.manifestDraft();
-    const value: Record<ProjectSectionName, () => unknown> = {
+    const value: Record<BuiltinSectionName, () => unknown> = {
       title: () => manifest.title,
       level: () => this.levelDraft(manifest),
       settings: () => manifest.settings,
@@ -1114,7 +1214,8 @@ export class ProjectSession {
     const problems = new Map<ProjectSectionName, string>();
     for (const name of names) {
       try {
-        values.set(name, value[name]());
+        const plugin = pluginOfSection(name);
+        values.set(name, plugin === null ? value[name as BuiltinSectionName]() : pluginDataIn(manifest.plugins, plugin));
       } catch (error) {
         if (!isProjectDataError(error)) throw error;
         problems.set(name, error.message);
@@ -1142,10 +1243,10 @@ export class ProjectSession {
       ? await Promise.all(project.manifest.appearance.map((part) => this.client.blob(this.client.modelUrl(binding.id, part.part)))) : [];
     await this.applySections(project.manifest, names, values, models, binding.id, 'sync', fileSizes(project.files));
     if (names.includes('appearance')) this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
-    for (const name of names) binding.sections[name] = name === 'level' && levelRevision !== null ? levelRevision : project.sections[name]!;
+    for (const name of names) binding.sections[name] = name === 'level' && levelRevision !== null ? levelRevision : project.sections[name] ?? 0;
     const synced = this.fingerprints();
     for (const name of names) {
-      this.synced![name] = synced[name];
+      this.markSynced(name, synced[name]);
       this.conflicts.delete(name);
     }
     this.adoptVersion(binding, project);
@@ -1184,7 +1285,7 @@ export class ProjectSession {
     return this.run('Opening this browser\'s copy', async () => {
       await this.applyContent(copy.content, null);
       this.origin = copy.origin;
-      const dirty = PROJECT_SECTIONS.filter((name) => copy.dirty.includes(name));
+      const dirty = copy.dirty.filter(isProjectSection);
       for (const name of dirty) this.synced![name] = UNSAVED;
       if (dirty.includes('level')) this.workspace.level.markSaved(null);
       // The page now shows exactly what the copy holds.
@@ -1234,7 +1335,7 @@ export class ProjectSession {
   private copyState(): CopyState {
     const fingerprints = this.fingerprints();
     const synced = this.synced;
-    return { fingerprints, origin: this.origin, dirty: synced === null ? [] : PROJECT_SECTIONS.filter((name) => fingerprints[name] !== synced[name]) };
+    return { fingerprints, origin: this.origin, dirty: synced === null ? [] : this.sectionNames().filter((name) => fingerprints[name] !== synced[name]) };
   }
 
   // Runs every second: stores changes once they have held still for one check, or at once when
@@ -1355,7 +1456,7 @@ export class ProjectSession {
     this.adoptVersion(binding, state);
     // binding.revision is the server revision this page has fully reconciled with.
     if (state.revision === binding.revision) return;
-    const changed = PROJECT_SECTIONS.filter((name) => state.sections[name] !== binding.sections[name]);
+    const changed = this.sectionNames(state.sections).filter((name) => (state.sections[name] ?? 0) !== (binding.sections[name] ?? 0));
     const dirty = new Set(this.dirtySections());
     const conflicting = changed.filter((name) => dirty.has(name) && !this.conflicts.has(name));
     for (const name of conflicting) this.conflicts.add(name);
@@ -1395,7 +1496,7 @@ export class ProjectSession {
       ['level', files.level], ['characters/primary', files.primary], ['characters/alternate', files.alternate],
     ]);
     this.unbind();
-    await this.applySections(manifest, PROJECT_SECTIONS, values, files.models, state.id, 'load', files.sizes);
+    await this.applySections(manifest, this.wholeProject(manifest), values, files.models, state.id, 'load', files.sizes);
     // The level came on its own, maybe older than the project's answer: its own revision says which it is.
     const binding: Binding = { id: state.id, revision: state.revision, sections: { ...state.sections, level: files.levelRevision }, version: null };
     this.binding = binding;
@@ -1421,6 +1522,17 @@ export class ProjectSession {
     if (primary !== null) this.checkCharacterProfile(primary, 'primary character');
     if (alternate !== undefined && alternate !== null) this.checkCharacterProfile(alternate, 'alternate character');
     const parts = has.has('appearance') ? validateAppearanceParts(manifest.appearance).map((part, index) => ({ ...part, blob: models[index]! })) : null;
+    // Each plugin checks its incoming data; a plugin this Workshop lacks keeps its data as it came.
+    const plugins = names.flatMap((name) => {
+      const id = pluginOfSection(name);
+      return id === null ? [] : [id];
+    });
+    for (const id of plugins) {
+      const data = pluginDataIn(manifest.plugins, id);
+      if (data === null || !this.plugins.has(id)) continue;
+      const refusal = this.plugins.validate(id, data);
+      if (refusal !== null) throw pluginRefusal(id, refusal);
+    }
     // Models the runtime would refuse fail here, before anything in the page changes.
     for (const part of parts ?? []) {
       const bytes = await part.blob.arrayBuffer();
@@ -1470,6 +1582,14 @@ export class ProjectSession {
     }
     // Audio references media, so it follows the library.
     if (has.has('audio')) this.audio = manifest.audio;
+    for (const id of plugins) this.pluginData = withPluginData(this.pluginData, id, pluginDataIn(manifest.plugins, id));
+    if (mode === 'load') {
+      const lacking = plugins.filter((id) => pluginDataIn(manifest.plugins, id) !== null && !this.plugins.has(id));
+      if (lacking.length > 0) {
+        this.workspace.notice(`This project keeps data for the Workshop plugin${lacking.length === 1 ? '' : 's'} ${lacking.map((id) => `"${id}"`).join(', ')
+        }, which this Workshop does not have. ${lacking.length === 1 ? 'Its data stays' : 'Their data stays'} unchanged.`, 'info');
+      }
+    }
     this.changed('content');
     this.applyLook();
   }
@@ -1478,7 +1598,7 @@ export class ProjectSession {
     // Library models a release would refuse fail here, before anything in the page changes.
     inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
     this.unbind();
-    await this.applySections(content.manifest, PROJECT_SECTIONS.filter((name) => !LOCAL_FILES.has(name)), contentValues(content),
+    await this.applySections(content.manifest, this.wholeProject(content.manifest).filter((name) => !LOCAL_FILES.has(name)), contentValues(content),
       appearanceBlobs(content), serverId);
     this.setMedia(localMedia(content));
     this.art = localArt(content);
@@ -1538,6 +1658,7 @@ export class ProjectSession {
       models: libraryOf(this.library),
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
       media: [...this.media.keys()].map((path) => ({ path })),
+      plugins: this.pluginData,
     });
   }
 
@@ -1617,7 +1738,34 @@ export class ProjectSession {
       : ref.kind === 'character' ? (ref.path === PROJECT_FILES.primary ? draft.primary : draft.alternate) : files.get(ref.path));
   }
 
-  private fingerprints(): Record<ProjectSectionName, unknown> {
+  // Every section this page knows of: the engine's, and each plugin section that has data here, was synced or appears
+  // among `revisions`.
+  private sectionNames(revisions: Readonly<Record<string, unknown>> = {}): ProjectSectionName[] {
+    const plugins = new Set(Object.keys(this.pluginData));
+    for (const record of [this.synced ?? {}, this.binding?.sections ?? {}, revisions]) {
+      for (const name of Object.keys(record)) {
+        const id = pluginOfSection(name);
+        if (id !== null) plugins.add(id);
+      }
+    }
+    return [...PROJECT_SECTIONS, ...[...plugins].sort().map(pluginSection)];
+  }
+
+  // Every section of a whole project replacing this page's: the engine's, the plugin sections it brings and those this
+  // page holds, which it removes.
+  private wholeProject(manifest: ProjectManifest): ProjectSectionName[] {
+    const plugins = new Set([...Object.keys(manifest.plugins), ...Object.keys(this.pluginData)]);
+    return [...PROJECT_SECTIONS, ...[...plugins].sort().map(pluginSection)];
+  }
+
+  // Records a section's synced fingerprint; a plugin section without data has none.
+  private markSynced(name: ProjectSectionName, fingerprint: unknown): void {
+    if (fingerprint === undefined) delete this.synced![name];
+    else this.synced![name] = fingerprint;
+  }
+
+  // Each section's current value as a fingerprint: equal while the section is unchanged.
+  fingerprints(): SectionRecord<unknown> {
     const blob = (value: Blob | null): number => {
       if (value === null) return 0;
       let id = this.blobIds.get(value);
@@ -1639,6 +1787,7 @@ export class ProjectSession {
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
       art: JSON.stringify([this.art.mode, this.art.assets.map((asset) => [asset.id, asset.name]), this.art.decorations]),
       media: JSON.stringify([...this.media.values()].map((item) => [item.path, blob(item.blob)])),
+      ...Object.fromEntries(Object.entries(this.pluginData).map(([id, data]) => [pluginSection(id), data])),
     };
   }
 
@@ -1670,15 +1819,14 @@ export class ProjectSession {
     this.applyLook();
   }
 
-  private setSection(update: () => void): boolean {
+  private setSection(update: () => void): Error | null {
     try {
       update();
       this.applyLook();
       this.changed('status');
-      return true;
+      return null;
     } catch (error) {
-      this.report(error);
-      return false;
+      return this.refuse(error);
     }
   }
 
@@ -1690,30 +1838,40 @@ export class ProjectSession {
   }
 
   private async run(label: string, task: () => Promise<void>): Promise<boolean> {
+    return await this.attempt(label, task) === null;
+  }
+
+  // Runs one operation of the session, reporting a refusal; returns the refusal, or null when the operation finished.
+  private async attempt(label: string, task: () => Promise<void>): Promise<Error | null> {
     // An automatic save finishes first, so an action never sees the project half written.
     while (this.saving !== null) await this.saving;
     if (this.busy !== null) {
-      this.workspace.notice(`Wait for "${this.busy}" to finish first.`, 'error');
-      return false;
+      const refusal = new ProjectError(`Wait for "${this.busy}" to finish first.`);
+      this.workspace.notice(refusal.message, 'error');
+      return refusal;
     }
     this.busy = label;
     this.error = null;
     this.changed('status');
     try {
       await task();
-      return true;
+      return null;
     } catch (error) {
       if (error instanceof ProjectApiError && error.status === 412 && error.section !== null) {
         this.conflicts.add(error.section as ProjectSectionName);
-        this.report(new ProjectError(`${error.message} In Project, keep your version of ${error.section} or use the project's.`));
-      } else {
-        this.report(error);
+        return this.refuse(new ProjectError(`${error.message} In Project, keep your version of ${error.section} or use the project's.`));
       }
-      return false;
+      return this.refuse(error);
     } finally {
       this.busy = null;
       this.changed('status');
     }
+  }
+
+  // Reports a refusal and returns it; anything but an expected refusal is a programmer error and propagates.
+  private refuse(error: unknown): Error {
+    this.report(error);
+    return error as Error;
   }
 
   private report(error: unknown): void {
@@ -1761,6 +1919,13 @@ function contentValues(content: ProjectContent): Map<ProjectSectionName, unknown
   return new Map<ProjectSectionName, unknown>([
     ['level', content.level], ['characters/primary', content.characters.primary], ['characters/alternate', content.characters.alternate],
   ]);
+}
+
+// A plugin's refusal of its data as the project reports it, naming the plugin's section and its error code.
+function pluginRefusal(id: string, refusal: Error): ProjectError {
+  const code = Reflect.get(refusal, 'code');
+  return new ProjectError(`${pluginSection(id)}: ${refusal.message}${typeof code === 'string' ? ` (${code})` : ''}`,
+    { section: pluginSection(id), cause: refusal });
 }
 
 function appearanceBlobs(content: ProjectContent): Blob[] {

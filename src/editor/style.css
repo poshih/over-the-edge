@@ -395,7 +395,9 @@ body[data-input-mode="touch"] .workshop-search-key {
 
 .workshop-tabs {
   display: grid;
-  grid-template-columns: repeat(6, minmax(max-content, 1fr));
+  /* One column per tab: the built-in ones, then any Workshop plugin's. */
+  grid-auto-columns: minmax(max-content, 1fr);
+  grid-auto-flow: column;
   flex: 0 0 auto;
   gap: 4px;
   overflow-x: auto;

@@ -2,11 +2,11 @@ import '../game-shell.css';
 import './game-ui.css';
 import './style.css';
 import { Vector3 } from 'three';
-import { PHYSICS } from '../config';
 import { SPRITE_TARGET_IDS } from '../character';
 import type { PlayerSpawn, Point, UiActionOptions } from '../config';
 import { DEFAULT_LEVEL } from '../default-level';
 import { GameSettingsError, withRig } from '../game-settings';
+import type { GameSettings } from '../game-settings';
 import { Game } from '../game';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { levelSpawn } from '../level';
@@ -19,9 +19,10 @@ import { CollisionOverlay } from './collision-overlay';
 import { createLevelEditor } from './level-editor';
 import { LevelState } from './level-state';
 import { PRACTICES, practiceById } from './practices';
+import type { PracticeId } from './practices';
 import { createUI } from './ui';
 import { createSpriteEditor } from './sprite-editor';
-import type { EditorAction, PracticeId, WorkshopState } from './ui-types';
+import type { EditorAction, WorkshopState } from './ui-types';
 import { AudioDirector } from '../audio';
 import { urlMediaHost } from '../media-host';
 import { DEFAULT_AUDIO } from '../audio-settings';
@@ -35,6 +36,8 @@ import { PlayRecorder } from './play-recorder';
 import { ServerCopies } from './server-copies';
 import { publishedLevel } from './server-levels';
 import { createDecorationView } from '../decoration-library';
+import { workshopGameState } from './game-state';
+import { WorkshopPluginHost, workshopPlugins } from './workshop-plugin-host';
 import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
 import serverModels from 'virtual:workshop-models';
@@ -56,6 +59,8 @@ let debug = false;
 // test part of the course. Placing the player never moves the level's own start.
 let origin: PracticeId | PlayerSpawn = 'start';
 let editing = false;
+// The game's Workshop plugins, which start once the project is open.
+let plugins: WorkshopPluginHost | null = null;
 // Media resolve through the open project once it starts.
 let resolveMedia = (source: string): string => source;
 let mediaVersion = 0;
@@ -93,7 +98,7 @@ const unsubscribeLevel = level.subscribe((change) => {
 });
 // The open project, created before the editors so each can save into it; it reads them only once started.
 const project = new ProjectSession({
-  avatarRigs, client,
+  avatarRigs, client, plugins: workshopPlugins,
   workspace: {
     level: {
       get: () => level.definition(),
@@ -180,6 +185,7 @@ const ui = createUI({
     game.setSettings(settings);
     spriteEditor.setHammerRig(game.simulation.rigGeometry);
     hammerHeads?.refresh();
+    plugins?.settingsChanged();
   },
   projectSave: project, serverCopies,
 });
@@ -199,13 +205,10 @@ const spriteEditor = createSpriteEditor({
   serverModels,
   // The Character tab's handle length edits the same game setting as Physics.
   onHandleLength: (handleLength) => {
-    const settings = ui.settings();
-    try {
-      ui.applySettings(withRig(settings, { ...settings.rig, handleLength }));
-    } catch (error) {
-      if (!(error instanceof GameSettingsError)) throw error;
-      ui.notice(error.message, 'error');
-    }
+    applySettings(() => {
+      const settings = ui.settings();
+      return withRig(settings, { ...settings.rig, handleLength });
+    });
   },
   applySavedProfile: !opensProject,
   projectSave: project, serverCopies,
@@ -273,16 +276,11 @@ hammerHeads = createHammerHeadEditor({
     ...project.libraryHammers(),
   ],
   setHead: (id, head) => {
-    if (id !== null) return project.setLibraryHammerHead(id, head);
-    const settings = game.settings();
-    try {
-      ui.applySettings(withRig(settings, { ...settings.rig, head }));
-      return true;
-    } catch (error) {
-      if (!(error instanceof GameSettingsError)) throw error;
-      ui.notice(error.message, 'error');
-      return false;
-    }
+    if (id !== null) return project.setLibraryHammerHead(id, head) === null;
+    return applySettings(() => {
+      const settings = game.settings();
+      return withRig(settings, { ...settings.rig, head });
+    }) === null;
   },
 });
 const unsubscribeHammerHeads = project.subscribe((event) => { if (event.kind === 'content') hammerHeads?.refresh(); });
@@ -292,6 +290,18 @@ const projectEditor = createProjectEditor({
   parts: game,
   serverModels,
 });
+
+// Applies the game settings `next` builds, as Physics does: a refusal is reported and returned.
+function applySettings(next: () => GameSettings): GameSettingsError | null {
+  try {
+    ui.applySettings(next());
+    return null;
+  } catch (error) {
+    if (!(error instanceof GameSettingsError)) throw error;
+    ui.notice(error.message, 'error');
+    return error;
+  }
+}
 
 function resetPractice(id: PracticeId): void {
   spriteEditor.leavePreview();
@@ -318,6 +328,7 @@ function restart(): void {
 const practice = (): PracticeId | null => typeof origin === 'string' ? origin : null;
 
 function updateWorkshop(state: WorkshopState): void {
+  plugins?.setWorkshop(state);
   spriteEditor.setActive(state.open && state.tab === 'sprites');
   const nextEditing = state.open && state.tab === 'level';
   if (nextEditing !== editing) {
@@ -360,27 +371,24 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
   game.perform(action, options);
 }
 
+const gameState = () => workshopGameState(game, { practice: practice(), placedPlayer: typeof origin === 'string' ? null : origin, debug });
+
+plugins = new WorkshopPluginHost({
+  registry: workshopPlugins, ui, game, canvas, project, level, character: spriteEditor, appearance,
+  settings: (settings) => applySettings(() => settings),
+  control: { restart, placePlayer, state: gameState },
+  notice: ui.notice,
+});
+
 const diagnostics = Object.freeze({
-  snapshot: () => {
-    const state = game.simulation.snapshot();
-    const reasons = game.pauseState();
-    return {
-      ...state, practice: practice(), placedPlayer: typeof origin === 'string' ? null : origin, debug,
-      parts: game.simulation.frame(1).parts.map((part) => ({
-        ...part, vertices: part.vertices.map((point) => ({ ...point })),
-      })),
-      paused: reasons.length > 0, pauseReasons: reasons,
-      pointerLocked: game.input.locked, inputMode: game.input.mode,
-      camera: game.view.cameraState(), cursorScreen: game.view.project(state.cursor),
-      step: PHYSICS.dt, stopped: game.halted, timer: game.timerState(),
-    };
-  },
+  snapshot: gameState,
   project: (point: Point) => game.view.project(point),
   settings: () => game.settings(),
   appearance: () => appearance.snapshot(),
   sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.sprites.inspect() }),
   events: () => game.eventState(),
   gameProject: () => ({ ...project.snapshot(), playback: audio.inspect(), parts: game.view.partModels() }),
+  plugins: () => plugins.inspect(),
   level: () => ({
     definition: level.definition(),
     terrain: game.simulation.terrainState(),
@@ -397,7 +405,7 @@ declare global {
 }
 window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
-void project.start();
+void project.start().then(() => plugins.start());
 game.start((state) => {
   ui.update({
     ...state, debug, practice: practice(),
@@ -410,6 +418,7 @@ game.start((state) => {
 if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
+    plugins.dispose();
     recorder.dispose();
     unsubscribeHammerHeads();
     hammerHeads.dispose();

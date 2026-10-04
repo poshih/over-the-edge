@@ -66,9 +66,16 @@ export interface SpriteEditorOptions {
   };
 }
 
+// The character profile's edit operations, as Workshop plugins share them with the Character tab.
+export type CharacterEdits = Pick<SpriteEditorState, 'setDocument' | 'setCharacterRiggingType' | 'setArmForwardDistance' | 'setWaistLean' |
+  'setGrips' | 'setArms' | 'setShading' | 'setAvatarMotion' | 'setPresentation'>;
+
 export interface SpriteEditorHandle {
   ready: Promise<void>;
   snapshot: () => SpriteEditorSnapshot;
+  // Tells `listener` now and after every change to the character profile or its editor.
+  subscribe: (listener: () => void) => () => void;
+  readonly edits: CharacterEdits;
   // Replaces the draft with a whole profile, for example from a project; false if it was rejected.
   loadDocument: (document: SpriteDocument, options?: { readonly wait?: boolean }) => Promise<boolean>;
   // The validated draft, or null after reporting why it cannot be saved.
@@ -492,6 +499,18 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   return {
     ready,
     snapshot: () => state.snapshot(),
+    subscribe: (listener) => state.subscribe(listener),
+    edits: Object.freeze({
+      setDocument: (value) => state.setDocument(value),
+      setCharacterRiggingType: (value) => state.setCharacterRiggingType(value),
+      setArmForwardDistance: (value) => state.setArmForwardDistance(value),
+      setWaistLean: (value) => state.setWaistLean(value),
+      setGrips: (value) => state.setGrips(value),
+      setArms: (value) => state.setArms(value),
+      setShading: (value) => state.setShading(value),
+      setAvatarMotion: (value) => state.setAvatarMotion(value),
+      setPresentation: (value) => state.setPresentation(value),
+    }),
     loadDocument: (document, options) => state.loadDocument(document, options),
     validatedDocument: () => state.validatedDraft(),
     setActive: (value) => {

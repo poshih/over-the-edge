@@ -2,12 +2,17 @@ import type { InputMode, UiAction, UiActionOptions } from '../config';
 import type { GameSettings } from '../game-settings';
 import type { HudSettings } from '../hud';
 import type { GameHudState } from './game-ui';
+import type { PracticeId } from './practices';
 import type { ProjectSaveTarget } from './project-save';
 import type { ServerCopies } from './server-copies';
 
-export type PracticeId = 'start' | 'ledge' | 'pogo' | 'vault';
 export type EditorAction = UiAction | 'debug' | 'record';
-export type WorkshopTab = 'project' | 'physics' | 'character' | 'appearance' | 'sprites' | 'level';
+export type BuiltinWorkshopTab = 'project' | 'physics' | 'character' | 'appearance' | 'sprites' | 'level';
+// A Workshop plugin's tab: plugin_<plugin ID>_<tab ID>.
+export type PluginWorkshopTab = `plugin_${string}`;
+export type WorkshopTab = BuiltinWorkshopTab | PluginWorkshopTab;
+// The built-in tabs that hold Workshop plugins' sections.
+export type PluginSectionTab = 'character' | 'level' | 'physics' | 'project';
 
 export interface HudState extends GameHudState {
   debug: boolean;
@@ -47,6 +52,11 @@ export interface GameUi {
   levelMount: HTMLElement;
   // Physics / Hammer head, which main.ts fills: it edits the game settings and the model library together.
   hammerHeadMount: HTMLElement;
+  // A Workshop plugin's tab after the built-in ones: its button and pane, and its removal.
+  addTab: (options: { readonly id: PluginWorkshopTab; readonly label: string; readonly title?: string }) =>
+    { readonly body: HTMLElement; remove(): void };
+  // Where Workshop plugins' sections go in a built-in tab: after its own.
+  pluginSections: (tab: PluginSectionTab) => HTMLElement;
   workshopState: () => WorkshopState;
   closeWorkshop: () => void;
   update: (state: HudState) => void;

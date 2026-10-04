@@ -119,7 +119,8 @@ function score(target: Target, words: readonly string[], phrase: string): number
  */
 export function createWorkshopSearch(options: {
   readonly root: HTMLElement;
-  readonly scopes: readonly SearchScope[];
+  // The places to search, read whenever the search indexes, so plugin tabs added later are found too.
+  readonly scopes: () => readonly SearchScope[];
   readonly selectTab: (tab: WorkshopTab) => void;
   readonly selectedTab: () => WorkshopTab;
   readonly signal: AbortSignal;
@@ -139,7 +140,7 @@ export function createWorkshopSearch(options: {
   function index(): Target[] {
     if (targets !== null) return targets;
     targets = [];
-    for (const scope of options.scopes) {
+    for (const scope of options.scopes()) {
       for (const control of scope.root.querySelectorAll<HTMLElement>(CONTROLS)) {
         const state = availability(control, scope.root);
         if (state === 'hidden' || control.matches(SKIPPED)) continue;

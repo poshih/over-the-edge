@@ -61,6 +61,11 @@ export class WaistLean {
     this.previewing = null;
   }
 
+  // Ends a running preview at once.
+  endPreview(): void {
+    this.previewing = null;
+  }
+
   private previewAngle(time: number): number {
     if (this.previewing === null) return 0;
     if (this.previewStart === null) this.previewStart = time;

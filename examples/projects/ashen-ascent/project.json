@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -334,5 +334,6 @@
     {
       "path": "/media/boom.wav"
     }
-  ]
+  ],
+  "plugins": {}
 }

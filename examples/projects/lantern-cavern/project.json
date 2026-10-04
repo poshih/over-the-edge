@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -276,5 +276,6 @@
     {
       "path": "/media/whoosh.wav"
     }
-  ]
+  ],
+  "plugins": {}
 }

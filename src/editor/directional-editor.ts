@@ -371,7 +371,7 @@ export function createDirectionalEditor(options: {
       return false;
     }
     clearLocalError();
-    const accepted = options.state.setPresentation(change(current));
+    const accepted = options.state.setPresentation(change(current)) === null;
     renderError();
     return accepted;
   }
