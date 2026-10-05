@@ -3,7 +3,7 @@ import type { FieldSpec } from './project-fields';
 import { DEFAULT_MESSAGE_STYLE, MESSAGE_STYLES } from './trigger-events';
 import type { MessageStyle } from './trigger-events';
 
-// What the game shows over play: the game-only release's corner readout, and how trigger messages appear.
+// What the game shows over play: the readouts shared by the Workshop and releases, and how trigger messages appear.
 export interface HudSettings {
   readonly height: {
     readonly visible: boolean; readonly label: string; readonly unit: string;

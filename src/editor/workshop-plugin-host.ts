@@ -1,8 +1,9 @@
-// Runs the game's Workshop plugins (WORKSHOP_MODULE, src/editor/workshop-sdk.ts). Once the project is open, each plugin
+// Runs the manifest's workshop facets (docs/workshop-plugins.md). Once the project is open, each plugin
 // starts with a host of its own: its places in the Workshop, the project, its own data and the running game. Each is
-// isolated: an error it throws stops it alone, and everything it added goes with it. A change to the module restarts
+// isolated: an error it throws stops it alone, and everything it added goes with it. A change to a workshop facet restarts
 // the plugins and keeps the project's unsaved changes.
-import workshopModule from 'virtual:workshop-plugins';
+import workshopFacets from 'virtual:game-plugins/workshop';
+import kinds, { plugins as manifestPlugins } from 'virtual:game-plugins/kinds';
 import type { Point } from '../config';
 import type { Game } from '../game';
 import type { GameSettings } from '../game-settings';
@@ -17,11 +18,15 @@ import { PROJECT_SECTIONS } from './project-session';
 import type { ProjectPlugins, ProjectSession } from './project-session';
 import type { SpriteEditorHandle } from './sprite-editor';
 import type { GameUi, PluginSectionTab, PluginWorkshopTab, WorkshopState } from './ui-types';
-import { validateWorkshopModule, workshopRefusal, WorkshopPluginError } from './workshop-plugin-module';
+import { PluginError, pluginRefusal } from '../plugins/kernel';
+import type { PluginEntry } from '../plugins/kernel';
+import type { Kinds } from '../plugins/kinds';
+import { composeWorkshop } from './workshop';
+import type { AvatarMotionControls } from './avatar-motion-controls';
 import { WORKSHOP_PREVIEW_LIMITS } from './workshop-sdk';
 import type {
   WorkshopCharacterEdits, WorkshopEdits, WorkshopGame, WorkshopHost, WorkshopLevelEdits, WorkshopMount, WorkshopOverlay,
-  WorkshopPlugin, WorkshopPluginData, WorkshopPointerEvent, WorkshopPreview, WorkshopProject, WorkshopProjectSnapshot,
+  WorkshopFacet, WorkshopPluginData, WorkshopPointerEvent, WorkshopPreview, WorkshopProject, WorkshopProjectSnapshot,
   WorkshopRefusal, WorkshopSectionTab,
 } from './workshop-sdk';
 import { createSection } from './workshop-section';
@@ -39,36 +44,39 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function pluginsOf(value: unknown): ReadonlyMap<string, WorkshopPlugin> {
-  return new Map(value === null ? [] : validateWorkshopModule(value).map((plugin) => [plugin.id, plugin]));
-}
-
 type RegistryEvent = { readonly kind: 'replaced' } | { readonly kind: 'failed'; readonly id: string; readonly error: Error };
 
 /**
- * The module's plugins as this page has them, and what the project needs of them: which plugins the Workshop has, and
- * each one's check of its data. A hot update of the module replaces them. A plugin that fails stays stopped until then,
+ * The workshop facets as this page has them, and what the project needs of them: which plugins the Workshop has, and
+ * each one's check of its data. A hot update replaces them. A plugin that fails stays stopped until then,
  * and its data stays as it is, no longer checked.
  */
 export class WorkshopPluginRegistry implements ProjectPlugins {
-  private definitions: ReadonlyMap<string, WorkshopPlugin>;
-  private problem: WorkshopPluginError | null = null;
+  private definitions: ReadonlyMap<string, WorkshopFacet> = new Map();
+  private controls: AvatarMotionControls = new Map();
+  private readonly kinds: Kinds;
+  private problem: PluginError | null = null;
   private readonly failures = new Set<string>();
   // Each plugin's last error, kept across hot updates.
   private readonly errors = new Map<string, Error>();
   private readonly listeners = new Set<(event: RegistryEvent) => void>();
 
-  // A module that is not a valid Workshop module stops the Workshop's start with its typed error.
-  constructor(value: unknown) {
-    this.definitions = pluginsOf(value);
+  // Load and hot update share the same refusal state; the host reports it once the Workshop is ready.
+  constructor(value: unknown, kinds: Kinds) {
+    this.kinds = kinds;
+    this.replace(value);
   }
 
-  get plugins(): readonly WorkshopPlugin[] {
-    return [...this.definitions.values()];
+  get plugins(): readonly PluginEntry<WorkshopFacet>[] {
+    return [...this.definitions].map(([id, facet]) => ({ id, facet }));
   }
 
-  // Why the module has no plugins, after a hot update brought an invalid one.
-  get moduleError(): WorkshopPluginError | null {
+  motionControls(): AvatarMotionControls {
+    return this.controls;
+  }
+
+  // Why the facets cannot run at load or after a hot update.
+  get facetError(): PluginError | null {
     return this.problem;
   }
 
@@ -93,7 +101,7 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
       plugin.validate(data);
       return null;
     } catch (error) {
-      const refusal = workshopRefusal(error, id);
+      const refusal = pluginRefusal(error, id);
       if (refusal !== null) return refusal;
       this.fail(id, new Error(`Checking its data failed: ${asError(error).message}`, { cause: error }));
       return null;
@@ -102,22 +110,26 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
 
   fail(id: string, error: unknown): void {
     if (!this.definitions.has(id) || this.failures.has(id)) return;
-    const failure = asError(error);
+    const failure = new PluginError('plugin-failed', `Workshop plugin "${id}" failed: ${asError(error).message}`, id, null, { cause: error });
     this.failures.add(id);
     this.errors.set(id, failure);
     for (const listener of this.listeners) listener({ kind: 'failed', id, error: failure });
   }
 
-  // A hot update: the module's new plugins, or none while it is not a valid Workshop module.
+  // Composition is atomic at load and hot update; invalid facets keep the project's data but cannot run.
   replace(value: unknown): void {
     this.failures.clear();
     try {
-      this.definitions = pluginsOf(value);
+      const composed = composeWorkshop(value, this.kinds);
+      this.definitions = new Map(composed.entries.map(({ id, facet }) => [id, facet]));
+      this.controls = composed.controls;
       this.problem = null;
     } catch (error) {
-      if (!(error instanceof WorkshopPluginError)) throw error;
+      if (!(error instanceof PluginError)) throw error;
       this.definitions = new Map();
+      this.controls = new Map();
       this.problem = error;
+      if (error.plugin !== null) this.errors.set(error.plugin, error);
     }
     for (const listener of this.listeners) listener({ kind: 'replaced' });
   }
@@ -128,11 +140,11 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
   }
 }
 
-export const workshopPlugins = new WorkshopPluginRegistry(workshopModule);
+export const workshopPlugins = new WorkshopPluginRegistry(workshopFacets, kinds);
 
 // A change to the plugins replaces them here, so the Workshop itself, and the open project, stay.
 if (import.meta.hot) {
-  import.meta.hot.accept('virtual:workshop-plugins', (next) => {
+  import.meta.hot.accept('virtual:game-plugins/workshop', (next) => {
     if (next !== undefined) workshopPlugins.replace(next.default);
   });
 }
@@ -193,8 +205,8 @@ class RunningPlugin {
   stopping = false;
   private readonly registry: WorkshopPluginRegistry;
 
-  constructor(definition: WorkshopPlugin, registry: WorkshopPluginRegistry, data: PluginData | null) {
-    this.id = definition.id;
+  constructor(id: string, registry: WorkshopPluginRegistry, data: PluginData | null) {
+    this.id = id;
     this.registry = registry;
     this.data = data;
   }
@@ -220,7 +232,7 @@ class RunningPlugin {
 
   // Refuses a host operation once the plugin has stopped, so late work of a stopped plugin adds nothing.
   live(): void {
-    if (this.stopping) throw new WorkshopPluginError('plugin-stopped', `Workshop plugin "${this.id}" has stopped.`, this.id);
+    if (this.stopping) throw new PluginError('plugin-stopped', `Workshop plugin "${this.id}" has stopped.`, this.id);
   }
 }
 
@@ -274,6 +286,7 @@ export class WorkshopPluginHost {
   start(): void {
     if (this.started || this.lifecycle.signal.aborted) return;
     this.started = true;
+    if (this.showFacetError()) return;
     this.startAll();
   }
 
@@ -288,37 +301,44 @@ export class WorkshopPluginHost {
     this.projectChanged();
   }
 
-  inspect(): { readonly moduleError: string | null; readonly plugins: readonly { id: string; running: boolean; error: string | null }[] } {
+  inspect() {
     const registry = this.options.registry;
     return {
-      moduleError: registry.moduleError?.message ?? null,
-      plugins: registry.plugins.map(({ id }) => ({
-        id, running: this.running.get(id)?.stopping === false, error: registry.lastError(id)?.message ?? null,
+      facetError: registry.facetError?.message ?? null,
+      plugins: manifestPlugins.map(({ id, facets }) => ({
+        id, facets, workshopRunning: this.running.get(id)?.stopping === false, error: registry.lastError(id)?.message ?? null,
       })),
     };
   }
 
   dispose(): void {
-    for (const id of [...this.running.keys()]) this.stop(id);
+    for (const id of [...this.running.keys()].reverse()) this.stop(id);
     for (const unsubscribe of this.unsubscribe) unsubscribe();
     this.lifecycle.abort();
   }
 
   private startAll(): void {
     this.told = this.options.project.fingerprints();
-    for (const definition of this.options.registry.plugins) {
-      if (this.options.registry.failed(definition.id)) continue;
-      const plugin = new RunningPlugin(definition, this.options.registry, this.options.project.pluginDataOf(definition.id));
+    for (const { id, facet } of this.options.registry.plugins) {
+      if (this.options.registry.failed(id)) continue;
+      const plugin = new RunningPlugin(id, this.options.registry, this.options.project.pluginDataOf(id));
       const host = this.createHost(plugin);
       this.running.set(plugin.id, plugin);
-      plugin.guard(() => definition.start(host))();
+      plugin.guard(() => facet.start(host))();
     }
+  }
+
+  private showFacetError(): boolean {
+    const problem = this.options.registry.facetError;
+    if (problem === null) return false;
+    this.options.notice(`The Workshop facets cannot run until fixed: ${problem.message}`, 'error');
+    return true;
   }
 
   private registryChanged(event: RegistryEvent): void {
     if (event.kind === 'failed') {
       console.error(`Workshop plugin "${event.id}" failed.`, event.error);
-      this.options.notice(`Workshop plugin "${event.id}" failed and stopped: ${event.error.message}`, 'error');
+      this.options.notice(`Workshop plugin "${event.id}" failed and stopped: ${asError(event.error.cause).message}`, 'error');
       const plugin = this.running.get(event.id);
       if (plugin === undefined) return;
       plugin.stopping = true;
@@ -326,16 +346,12 @@ export class WorkshopPluginHost {
       queueMicrotask(() => { if (this.running.get(event.id) === plugin) this.stop(event.id); });
       return;
     }
-    for (const id of [...this.running.keys()]) this.stop(id);
-    const problem = this.options.registry.moduleError;
-    if (problem !== null) {
-      this.options.notice(`The Workshop module has no plugins until it is fixed: ${problem.message}`, 'error');
-      return;
-    }
+    for (const id of [...this.running.keys()].reverse()) this.stop(id);
+    if (this.showFacetError()) return;
     if (!this.started) return;
     this.startAll();
     const ids = this.options.registry.plugins.map(({ id }) => id);
-    this.options.notice(ids.length === 0 ? 'The Workshop module now has no plugins.' : `Restarted the Workshop plugins: ${ids.join(', ')}.`, 'info');
+    this.options.notice(ids.length === 0 ? 'There are now no Workshop facets.' : `Restarted the Workshop plugins: ${ids.join(', ')}.`, 'info');
   }
 
   // Removes everything the plugin added: its places, overlays, listeners, preview, pause and drag.
@@ -439,9 +455,9 @@ export class WorkshopPluginHost {
 
   private placeId(plugin: RunningPlugin, kind: 'tab' | 'section', id: string): void {
     if (!isPluginId(id)) {
-      throw new WorkshopPluginError('invalid-plugin', `Plugin ${kind} IDs use lowercase letters, digits and hyphens, starting with a letter, not "${id}".`, plugin.id);
+      throw new PluginError('invalid-plugin', `Plugin ${kind} IDs use lowercase letters, digits and hyphens, starting with a letter, not "${id}".`, plugin.id);
     }
-    if (plugin.mounts.has(id)) throw new WorkshopPluginError('invalid-plugin', `Workshop plugin "${plugin.id}" already has a tab or section "${id}".`, plugin.id);
+    if (plugin.mounts.has(id)) throw new PluginError('invalid-plugin', `Workshop plugin "${plugin.id}" already has a tab or section "${id}".`, plugin.id);
   }
 
   private createHost(plugin: RunningPlugin): WorkshopHost {
@@ -469,7 +485,7 @@ export class WorkshopPluginHost {
       subscribe: (callback: (value: PluginData | null) => void) => listener(plugin.dataListeners, callback),
     });
     return Object.freeze({
-      id: plugin.id,
+      plugin: plugin.id,
       signal,
       addTab: (tab: { readonly id: string; readonly label: string; readonly title?: string }) => {
         live();
@@ -480,7 +496,7 @@ export class WorkshopPluginHost {
       },
       addSection: (tab: WorkshopSectionTab, section: { readonly id: string; readonly title: string; readonly hint?: string; readonly open?: boolean }) => {
         live();
-        if (!SECTION_TABS.includes(tab)) throw new WorkshopPluginError('invalid-plugin', `Plugins add sections to ${SECTION_TABS.join(', ')}, not "${tab}".`, plugin.id);
+        if (!SECTION_TABS.includes(tab)) throw new PluginError('invalid-plugin', `Plugins add sections to ${SECTION_TABS.join(', ')}, not "${tab}".`, plugin.id);
         this.placeId(plugin, 'section', section.id);
         const created = createSection({ id: `plugin_${plugin.id}_${section.id}`, title: section.title, hint: section.hint, open: section.open });
         options.ui.pluginSections(tab as PluginSectionTab).append(created.root);
@@ -507,7 +523,7 @@ export class WorkshopPluginHost {
       addOverlay: (overlay: WorkshopOverlay) => {
         live();
         if (!OVERLAY_PASSES.includes(overlay.pass)) {
-          throw new WorkshopPluginError('invalid-plugin', `Overlays draw in the ${OVERLAY_PASSES.join(', ')} pass, not "${overlay.pass}".`, plugin.id);
+          throw new PluginError('invalid-plugin', `Overlays draw in the ${OVERLAY_PASSES.join(', ')} pass, not "${overlay.pass}".`, plugin.id);
         }
         const layer: ViewLayer = {
           root: overlay.root, pass: overlay.pass,
@@ -555,7 +571,7 @@ export class WorkshopPluginHost {
       placePlayer: (position: Point) => {
         live();
         if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) {
-          throw new WorkshopPluginError('invalid-plugin', 'The player is placed at a finite position.', plugin.id);
+          throw new PluginError('invalid-plugin', 'The player is placed at a finite position.', plugin.id);
         }
         control.placePlayer({ x: position.x, y: position.y });
       },
@@ -581,7 +597,7 @@ export class WorkshopPluginHost {
     }
     const { duration } = value;
     if (!Number.isFinite(duration) || duration <= 0 || duration > WORKSHOP_PREVIEW_LIMITS.duration) {
-      throw new WorkshopPluginError('invalid-plugin', `A preview lasts more than 0 and at most ${WORKSHOP_PREVIEW_LIMITS.duration} seconds.`, plugin.id);
+      throw new PluginError('invalid-plugin', `A preview lasts more than 0 and at most ${WORKSHOP_PREVIEW_LIMITS.duration} seconds.`, plugin.id);
     }
     const limit = WORKSHOP_PREVIEW_LIMITS.distance;
     const preview: PresentationPreview = {

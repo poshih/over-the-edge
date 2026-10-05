@@ -78,9 +78,13 @@ after deploying; domains are not stored in this repository.
 The playable release has a separate HTML/TypeScript entry and stylesheet. It
 does not load the Workshop, level editor, model importer, saved editor profiles,
 practice shortcuts, collision overlay, or editor diagnostic globals.
-Its HUD contains only current height and elapsed time, plus a character choice when
-the release bundles two character profiles. On-screen Play/Pause/Reset,
-peak height, branding, and help remain in the editor build, not the release.
+Its HUD shows the height, health and timer readouts, plus a character choice when
+the release bundles two character profiles. The project's
+[HUD settings](docs/projects.md#section-reference) choose whether the height and timer
+show, health shows in levels where something can hurt the player, and a game's runtime
+plugin can replace any readout; see [HUD readouts](docs/runtime-plugins.md#hud-readouts).
+On-screen Play/Pause/Reset, peak height, branding, and help remain in the editor build,
+not the release.
 
 ```sh
 npm run build:game
@@ -98,22 +102,28 @@ local server deploys anything; deploy both outputs as described below.
 The existing `npm run build` and `wrangler.toml` continue to target the
 editor/workshop in `dist/`, not this separate release.
 
-A game bundles its own code into its release with **`GAME_MODULE`**. The module can draw
-the HUD's readouts and the level's objects its own way, and a game whose content only some players may load signs
-players in with its own identity management there and grants the release access to its
-content, typically short-lived signed CDN URLs from the game's backend; the engine never
-sees accounts or credentials. See [the game's module](docs/game-module.md) and
-[content delivery](docs/content-delivery.md).
+A game adds its own code with **plugins**, listed in a JSON manifest that **`GAME_PLUGINS`**
+names. Each plugin has up to four facets, one for each place its code runs:
 
-A game that ships custom avatars adds its own rig strategies and secondary-motion kinds with
-**`AVATAR_RIG_MODULE`**, and its profiles then name them in each avatar's `driver` and `motion`.
-See [rig strategies](docs/characters.md#rig-strategies) and
-[secondary motion](docs/characters.md#secondary-motion).
+- **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
+  `driver` and `motion`, checked identically wherever content is validated;
+- **runtime**, how play looks, such as the HUD's readouts and the level's objects, in the
+  Workshop's play-test, studio previews and releases;
+- **release**, release-only services: a game whose content only some players may load signs
+  players in there with its own identity management and grants the release access to its
+  content, typically short-lived signed CDN URLs from the game's backend, so the engine never
+  sees accounts or credentials;
+- **workshop**, the game's own Workshop tools: tabs and sections built from the Workshop's
+  controls, edits through the engine's own operations, data of its own kept in the project, and
+  overlays, canvas drags and previews in the running game. Releases contain none of it.
 
-A game adds its own Workshop tools with **`WORKSHOP_MODULE`**, an editor-only module: tabs and
-sections built from the Workshop's controls, edits through the engine's own operations, data of
-its own kept in the project, and overlays, canvas drags and previews in the running game.
-Releases contain none of it. See [Workshop plugins](docs/workshop-plugins.md).
+```sh
+GAME_PLUGINS=examples/plugins/plugins.json npm run dev     # the example plugin, in the Workshop
+GAME_PLUGINS=games/my-game/plugins.json npm run build:game
+```
+
+See [plugins](docs/plugins.md), [content delivery](docs/content-delivery.md) and
+[Workshop plugins](docs/workshop-plugins.md).
 
 Releases replay recordings of players near the player as translucent white phantoms. While
 **Record** is on, the Workshop records your play on each saved version of a server project's
@@ -133,8 +143,9 @@ GAME_TITLE="My Climbing Game" npm run dev:game
 ```
 
 The same setting works with `npm run dev` and `npm run build` for the Workshop.
-It controls the browser tab title and Workshop heading; the game-only HUD
-still contains only height and elapsed time. Omit it to keep **Over the Edge**.
+It controls the browser tab title and Workshop heading; the game-only HUD shows
+no title, only the readouts and character choice described under
+[Game-only release](#game-only-release). Omit it to keep **Over the Edge**.
 Titles are plain text, support Unicode, and must contain 1-80 characters on
 one line after trimming surrounding spaces. Empty or invalid titles fail
 instead of silently using the default.
@@ -283,23 +294,23 @@ reach and fairness before writing. Its builder, route tools and checks form a re
 ## Customizing a game
 
 A downstream game changes the engine without forking it. Its [project](docs/projects.md)
-holds the data that sets most of what players see and hear, and three modules of the game's
-own code replace or extend the engine where data cannot. Each extension point has the
-engine's own look and behaviour as its default, so a game replaces only what it needs.
+holds the data that sets most of what players see and hear, and its [plugins](docs/plugins.md),
+the game's own code that `GAME_PLUGINS` names, replace or extend the engine where data cannot.
+Each extension point has the engine's own look and behaviour as its default, so a game replaces
+only what it needs.
 
 | To change | Use |
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
-| How the release's HUD readouts look: height, health and timer | The game's module, `GAME_MODULE`: see [HUD readouts](docs/game-module.md#hud-readouts) |
-| How the release's flags, updrafts, bonfires, traps, projectiles and lava and swamp pools look | The game's module: see [object looks](docs/game-module.md#object-looks) |
-| Sign-in and content access, the phantom backend, and the library models each player has | The game's module: see [the game's module](docs/game-module.md) and [content delivery](docs/content-delivery.md) |
-| How imported avatars are rigged, and their secondary motion | The rig module, `AVATAR_RIG_MODULE`: see [rig strategies](docs/characters.md#rig-strategies) |
-| The Workshop: the game's own tabs, sections, data, overlays and previews | The Workshop module, `WORKSHOP_MODULE`: see [Workshop plugins](docs/workshop-plugins.md) |
+| How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
+| How the HUD's readouts (height, health and timer) and the level's flags, updrafts, bonfires, traps, projectiles and lava and swamp pools look, in Workshop play-tests, studio previews and releases | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| Sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
+| The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
-The modules are build inputs, the game's own trusted code, never project data, so nothing sent
-to a project server can add code to a game. Each runs where its code belongs: the game's module
-in the releases built with it, the rig module wherever the game runs and is validated, and the
-Workshop module in the Workshop alone. [`AGENTS.md`](AGENTS.md) makes this a requirement: every
+Plugins are build inputs, the game's own trusted code, never project data, so nothing sent to a
+project server can add code to a game. Each facet runs where its code belongs: kinds wherever
+the game runs and is validated, runtime wherever it plays, release in the releases built with it,
+and workshop in the Workshop alone. [`AGENTS.md`](AGENTS.md) makes this a requirement: every
 new feature ships with its extension point.
 
 ## Controls
@@ -781,8 +792,8 @@ Their base rings and wind arrows use two shared instanced batches; only changed
 marker transforms are uploaded. Wind motion uses one shader clock instead of
 per-vent simulation, allocation, or particle updates, and pauses with gameplay.
 The same runtime works in editor-free builds; authoring controls stay in the Workshop.
-A game's module can draw flag and updraft markers its own way; see
-[object looks](docs/game-module.md#object-looks).
+A game's runtime plugin can draw flag and updraft markers its own way; see
+[object looks](docs/runtime-plugins.md#object-looks).
 
 ### Enemies
 
@@ -835,8 +846,8 @@ the obstacle line, behind the player.
 Health, lit bonfires and deaths are runtime state: saves and exports keep only the
 authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/projects.md)
 sound them, and a [phantom](docs/phantoms.md) session ends at a death as at a restart. A
-game's module can draw the [health readout](docs/game-module.md#hud-readouts) and
-[bonfires](docs/game-module.md#object-looks) its own way.
+game's runtime plugin can draw the [health readout](docs/runtime-plugins.md#hud-readouts) and
+[bonfires](docs/runtime-plugins.md#object-looks) its own way.
 
 ### Traps
 
@@ -861,7 +872,7 @@ Stagger neighbouring axes with their offsets.
 
 Traps run on the run's clock, so their rhythm is the same every attempt. Up to **256**
 projectiles fly at once across a level; a trap skips its shot while they all fly. A game's
-module can draw traps and projectiles its own way; see [object looks](docs/game-module.md#object-looks).
+runtime plugin can draw traps and projectiles its own way; see [object looks](docs/runtime-plugins.md#object-looks).
 
 ### Liquid pools
 
@@ -888,8 +899,8 @@ surface, and its **drag**, the rate it then slows the player at:
 The half of a pool behind the obstacle line draws with the course, and the half in front draws
 translucent over the actors, so whatever is in the liquid looks in it. Like a decoration in front
 of the line, it draws under a 3D character's arms and the hammer, which keep their own depth so
-the hands hold the hammer. A game's module can draw lava and swamp its own way; see
-[object looks](docs/game-module.md#object-looks). Lava glows and crusts
+the hands hold the hammer. A game's runtime plugin can draw lava and swamp its own way; see
+[object looks](docs/runtime-plugins.md#object-looks). Lava glows and crusts
 over as it flows; swamp is murky, with scum near its surface. Enemies and projectiles pass
 through liquids untouched. Pools count toward the level's floor: a fall out of the level is
 20 m below its lowest terrain, launch zone or pool.
@@ -1357,9 +1368,9 @@ layer's shown frame.
 and revisions, unsaved and conflicting sections, the project sections and audio
 playback, and in a Workshop built with `GAME_PROJECT` the published project and this
 browser's copy.
-`window.gettingOver.plugins()` lists the [Workshop plugins](docs/workshop-plugins.md), whether
-each is running and each one's last error, and why the module has none after a change made it
-invalid.
+`window.gettingOver.plugins()` lists the game's [plugins](docs/plugins.md): each one's facets,
+whether its [workshop facet](docs/workshop-plugins.md) runs and its last error, and why the
+workshop facets do not run while they are invalid.
 These globals are absent from the game-only release.
 
 ## Contributing

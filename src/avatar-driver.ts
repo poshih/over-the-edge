@@ -3,6 +3,7 @@
 import { boundedJson, sameJson } from './bounded-json.ts';
 import type { JsonValue } from './bounded-json.ts';
 import { record, SpriteError } from './sprite-fields.ts';
+import { isNamespacedId, isPluginId } from './plugins/ids.ts';
 
 export type RigJson = JsonValue;
 export interface AvatarDriver {
@@ -10,12 +11,11 @@ export interface AvatarDriver {
   readonly config: RigJson;
 }
 
-export const AVATAR_DRIVER_LIMITS = Object.freeze({ id: 64, depth: 8, values: 512, bytes: 16 * 1024 });
+export const AVATAR_DRIVER_LIMITS = Object.freeze({ depth: 8, values: 512, bytes: 16 * 1024 });
 export const STANDARD_AVATAR_DRIVER: AvatarDriver = Object.freeze({ id: 'standard', config: null });
-const DRIVER_ID = /^[a-z][a-z0-9-]*$/;
 
 export function isAvatarDriverId(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= AVATAR_DRIVER_LIMITS.id && DRIVER_ID.test(value);
+  return isPluginId(value) || isNamespacedId(value);
 }
 
 // Copies and freezes a bounded JSON value: strategy and motion configuration is data, never executable objects. It
@@ -26,7 +26,9 @@ export function boundedRigJson(value: unknown, label: string): RigJson {
 
 export function validateAvatarDriver(value: unknown): AvatarDriver {
   const data = record(value, ['id', 'config'], 'Avatar driver');
-  if (!isAvatarDriverId(data.id)) throw new SpriteError(`Avatar driver IDs use 1-${AVATAR_DRIVER_LIMITS.id} lowercase letters, numbers and hyphens, starting with a letter.`);
+  if (!isAvatarDriverId(data.id)) {
+    throw new SpriteError('Avatar driver IDs name a built-in or "<plugin>/<name>", each part using 1-64 lowercase letters, digits and hyphens, starting with a letter.');
+  }
   return Object.freeze({ id: data.id, config: boundedRigJson(data.config, 'Avatar driver configuration') });
 }
 

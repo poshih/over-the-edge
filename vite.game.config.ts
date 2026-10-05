@@ -1,16 +1,14 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import type { Plugin, UserConfig } from 'vite';
-import { avatarRigModulePath, avatarRigs, loadAvatarRigRegistry } from './build/avatar-rig-module.ts';
+import type { UserConfig } from 'vite';
+import { facetBoundaryPaths, gamePlugins, loadKinds, pluginBoundary, readGamePlugins } from './build/game-plugins.ts';
 import { gameTitle } from './build/game-title.ts';
 import { locationUrl } from './build/location-url.ts';
-import { projectModulePath } from './build/module-path.ts';
 import { DEFAULT_CONTENT_URL, gameRelease } from './build/release';
 import { loadFileRelease, loadProjectRelease } from './build/release-input';
 import { RECORDINGS_FOLDER } from './build/release-phantoms';
-import { workshopModulePath } from './build/workshop-plugins';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 const FILE_INPUTS = ['GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES'] as const;
@@ -47,38 +45,6 @@ function phantomRecordings(requested: string | undefined): string | null {
   return existsSync(folder) && statSync(folder).isDirectory() ? join(folder, RECORDINGS_FOLDER) : null;
 }
 
-// The game's own module, bundled into the shell and started before content loads.
-function gameModule(): string | null {
-  return projectModulePath(project, process.env.GAME_MODULE, 'GAME_MODULE');
-}
-
-// Editor modules, and the game's Workshop plugins (WORKSHOP_MODULE) when it names them, never reach a release.
-function gameOnlyBoundary(): Plugin {
-  const editor = resolve(project, 'src/editor') + sep;
-  const plugins = workshopModulePath(project, process.env.WORKSHOP_MODULE);
-  const enforceBoundary = (ids: Iterable<string>): void => {
-    const forbidden = [...ids].filter((id) => {
-      const path = id.split('?')[0];
-      return path.startsWith(editor) || path === plugins;
-    });
-    if (forbidden.length > 0) {
-      throw new Error(`Editor code/assets reached the game-only build:\n${forbidden.map((id) => id.slice(project.length)).join('\n')}`);
-    }
-  };
-  return {
-    name: 'game-only-boundary',
-    enforce: 'pre',
-    load(id) { enforceBoundary([id]); },
-    generateBundle(_options, bundle) {
-      const files = new Set<string>();
-      for (const output of Object.values(bundle)) {
-        if (output.type === 'chunk') for (const id of Object.keys(output.modules)) files.add(id);
-      }
-      enforceBoundary(files);
-    },
-  };
-}
-
 // Typed, so the returned literal keeps its narrow types (`publicDir: false`) through the Promise.
 export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   // GAME_PROJECT is a complete game; its parts cannot also come from the per-file inputs.
@@ -94,14 +60,25 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
     level: projectJson('GAME_LEVEL'), settings: projectJson('GAME_SETTINGS'),
     sprites: projectJson('GAME_SPRITES'), alternateSprites: projectJson('GAME_ALTERNATE_SPRITES'),
   };
-  // The trusted rig module is resolved and evaluated once here, so the release's model checks and
-  // the browser's registry both use the same strategies.
-  const rigModule = avatarRigModulePath(project, process.env.AVATAR_RIG_MODULE);
-  const rigRegistry = await loadAvatarRigRegistry(rigModule, mode);
-  const moduleFile = gameModule();
-  // Only a game's module brings a backend that selects library models, so only a build with one packages the library.
+  const manifest = readGamePlugins(project, process.env.GAME_PLUGINS);
+  const kinds = await loadKinds(manifest, mode);
+  const rigRegistry = kinds.avatarRigs;
+  const studioPreview = process.env.GAME_STUDIO_PREVIEW === '1';
+  const environments = ['kinds', 'runtime', 'release'] as const;
+  const boundaryEnvironments = studioPreview ? ['kinds', 'runtime'] as const : environments;
+  // Previews serve an empty release list, but the boundary still uses the complete manifest to refuse its files.
+  const servedManifest = studioPreview ? Object.freeze({
+    ...manifest,
+    plugins: Object.freeze(manifest.plugins.map(plugin => {
+      const files = { ...plugin };
+      delete files.release;
+      return Object.freeze(files);
+    })),
+  }) : manifest;
+  // Only a release facet can select library models; studio previews have public access and no library.
+  const library = !studioPreview && manifest.plugins.some(plugin => plugin.release !== undefined);
   const release = requested === undefined ? null
-    : loadProjectRelease(project, requested, selectedMode, rigRegistry, { library: moduleFile !== null });
+    : loadProjectRelease(project, requested, selectedMode, rigRegistry, { library });
   return {
     root: resolve(project, 'play'),
     envDir: project,
@@ -113,14 +90,13 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
       gameRelease({
         load: release === null ? () => loadFileRelease(project, files, selectedMode, rigRegistry) : () => release,
         contentUrl: contentUrl(),
-        phantomsUrl: phantomsUrl(),
+        phantomsUrl: studioPreview ? null : phantomsUrl(),
         recordings: phantomRecordings(requested),
-        module: moduleFile,
         watch: release === null ? Object.values(files).filter((path): path is string => path !== null) : release.files,
         restartOnChange: release !== null,
       }),
-      gameOnlyBoundary(),
-      avatarRigs({ module: rigModule }),
+      pluginBoundary('game-only-boundary', facetBoundaryPaths(manifest, boundaryEnvironments), resolve(project, 'src/editor')),
+      gamePlugins({ manifest: servedManifest, environments }),
     ],
     build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },
     server: { host: '0.0.0.0', port: 5182, strictPort: true, fs: { allow: [project] } },

@@ -1,17 +1,32 @@
-// Validates the Workshop's controls for motion kinds (AvatarMotionControls), the editor-only `controls` export of a
-// game's avatar rig module. Data only, checked once when the Workshop starts, in Node and again in the browser;
-// releases never import it.
-import { AvatarMotionError } from './avatar-motion';
-import type {
-  AvatarMotionControl, AvatarMotionControls, AvatarMotionListControl, AvatarMotionNumberControl, AvatarMotionPath,
-} from './avatar-motion';
+// The Workshop-only point for motion controls (docs/workshop-plugins.md). Validated in the browser at load and HMR.
+import { keyedPoint } from '../plugins/kernel';
+
+export type AvatarMotionPath = readonly (string | number)[];
+export interface AvatarMotionNumberControl {
+  readonly label: string;
+  readonly unit: string;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+  readonly default: number;
+  readonly path: AvatarMotionPath;
+}
+export interface AvatarMotionListControl {
+  readonly list: AvatarMotionPath;
+  readonly title: string;
+  readonly controls: readonly AvatarMotionNumberControl[];
+}
+export type AvatarMotionControl = AvatarMotionNumberControl | AvatarMotionListControl;
+export interface AvatarMotionControlSet {
+  readonly id: string;
+  readonly controls: readonly AvatarMotionControl[];
+}
+export type AvatarMotionControls = ReadonlyMap<string, AvatarMotionControlSet>;
 
 export const AVATAR_MOTION_CONTROL_LIMITS = Object.freeze({ controls: 64, label: 80, unit: 16, path: 8, key: 64 });
 
-export const NO_AVATAR_MOTION_CONTROLS: AvatarMotionControls = Object.freeze({});
-
-function fail(message: string, motion: string | null = null): never {
-  throw new AvatarMotionError('invalid-controls', message, motion);
+function fail(message: string, motion: string): never {
+  throw new TypeError(`Motion "${motion}": ${message}`);
 }
 
 function fields(value: unknown, keys: readonly string[], label: string, motion: string): Record<string, unknown> {
@@ -59,7 +74,9 @@ function numberControl(value: unknown, motion: string): AvatarMotionNumberContro
 
 function listControl(value: unknown, motion: string): AvatarMotionListControl {
   const data = fields(value, ['list', 'title', 'controls'], 'A motion control list', motion);
-  if (!Array.isArray(data.controls) || data.controls.length === 0) fail('A motion control list needs its controls.', motion);
+  if (!Array.isArray(data.controls) || data.controls.length === 0 || data.controls.length > AVATAR_MOTION_CONTROL_LIMITS.controls) {
+    fail(`A motion control list needs 1-${AVATAR_MOTION_CONTROL_LIMITS.controls} controls.`, motion);
+  }
   return Object.freeze({
     list: path(data.list, 'A control list\'s list', motion),
     title: text(data.title, AVATAR_MOTION_CONTROL_LIMITS.key, 'A control list\'s title field', motion),
@@ -67,24 +84,22 @@ function listControl(value: unknown, motion: string): AvatarMotionListControl {
   });
 }
 
-// A module's controls, or none when it exports none. Each key names a registered motion kind (`kinds`); each control is
-// a number, or a list's numbers when it names a `list`.
-export function validateAvatarMotionControls(value: unknown, kinds: readonly string[]): AvatarMotionControls {
-  if (value === undefined) return NO_AVATAR_MOTION_CONTROLS;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    fail('An avatar rig module\'s controls export maps motion kind IDs to their controls.');
+function checkControls(value: unknown): AvatarMotionControlSet {
+  const data = fields(value, ['id', 'controls'], 'A motion control set', 'unknown');
+  if (typeof data.id !== 'string') fail('A control set needs its motion kind ID.', 'unknown');
+  const id = data.id;
+  if (!Array.isArray(data.controls) || data.controls.length > AVATAR_MOTION_CONTROL_LIMITS.controls) {
+    fail(`Controls must be a list of at most ${AVATAR_MOTION_CONTROL_LIMITS.controls} controls.`, id);
   }
-  return Object.freeze(Object.fromEntries(Object.entries(value).map(([id, controls]) => {
-    if (!kinds.includes(id)) fail(`Controls are given for "${id}", which is not a registered motion kind.`, id);
-    if (!Array.isArray(controls)) fail(`Motion kind "${id}"'s controls must be a list.`, id);
-    let count = 0;
-    const validated = controls.map((control: unknown): AvatarMotionControl => {
-      const result = typeof control === 'object' && control !== null && Object.hasOwn(control, 'list')
-        ? listControl(control, id) : numberControl(control, id);
-      count += 'list' in result ? result.controls.length : 1;
-      if (count > AVATAR_MOTION_CONTROL_LIMITS.controls) fail(`Motion kind "${id}" describes at most ${AVATAR_MOTION_CONTROL_LIMITS.controls} controls.`, id);
-      return result;
-    });
-    return [id, Object.freeze(validated)];
-  })));
+  let count = 0;
+  const controls = data.controls.map((control: unknown): AvatarMotionControl => {
+    const result = typeof control === 'object' && control !== null && Object.hasOwn(control, 'list')
+      ? listControl(control, id) : numberControl(control, id);
+    count += 'list' in result ? result.controls.length : 1;
+    if (count > AVATAR_MOTION_CONTROL_LIMITS.controls) fail(`Describe at most ${AVATAR_MOTION_CONTROL_LIMITS.controls} controls.`, id);
+    return result;
+  });
+  return Object.freeze({ id, controls: Object.freeze(controls) });
 }
+
+export const AVATAR_MOTION_CONTROLS = keyedPoint('avatar.motion-controls', 'workshop', 64, checkControls);

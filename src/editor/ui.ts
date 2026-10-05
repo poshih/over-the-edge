@@ -11,6 +11,7 @@ import { inputModeForPointer } from '../input';
 import { PRACTICES } from './practices';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
+import type { HudFrame } from '../hud-readouts';
 import { createGameSettingsUI } from './game-settings-ui';
 import type { PracticeId } from './practices';
 import type { GameUi, HudState, PluginSectionTab, PluginWorkshopTab, UiOptions, WorkshopState, WorkshopTab } from './ui-types';
@@ -327,13 +328,18 @@ export function createUI(options: UiOptions): GameUi {
   const sliderMeter = element<HTMLMeterElement>(root, '#slider-effort');
   const debugButton = element<HTMLButtonElement>(root, '[data-action="debug"]');
   const recordButton = element<HTMLButtonElement>(root, '[data-action="record"]');
-  function update(state: HudState): void {
-    hud.update(state);
+  function updateDiagnostics(): void {
+    if (panel.hidden || selectedTab !== 'physics') return;
+    const state = options.readStatus();
     setText(contacts, `${state.contacts} ${state.contacts === 1 ? 'contact' : 'contacts'}`);
     setText(hinge, `${Math.round(state.hingeLoad * 100)}%`);
     setText(slider, `${Math.round(state.sliderLoad * 100)}%`);
     if (hingeMeter.value !== state.hingeLoad) hingeMeter.value = state.hingeLoad;
     if (sliderMeter.value !== state.sliderLoad) sliderMeter.value = state.sliderLoad;
+  }
+  function update(frame: HudFrame, state: HudState): void {
+    hud.update(frame, state.capturing);
+    updateDiagnostics();
     setPressed(debugButton, state.debug);
     setPressed(recordButton, state.recording);
     if (recordButton.title !== state.recordingNote) recordButton.title = state.recordingNote;

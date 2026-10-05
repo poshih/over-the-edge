@@ -13,11 +13,17 @@
   default implementation of that same contract, replaceable piece by piece: a
   game swaps the health readout without redrawing the rest of the HUD. A feature
   is complete only with its extension point and the docs saying how to use it.
-  Put each extension point where its code runs: the game's module (`GAME_MODULE`,
-  `src/release-module.ts`, `docs/game-module.md`) in releases, the rig module
-  (`AVATAR_RIG_MODULE`) for code that content selects by ID, the Workshop module
-  (`WORKSHOP_MODULE`) for authoring tools. Keep contracts small, typed, validated
-  where they load and free of engine internals and globals. Engine code, docs and
+  Put each extension point where its code runs, in a facet of the plugins a
+  game lists in its `GAME_PLUGINS` manifest, each with up to four facets:
+  `kinds` for code that content selects by ID, validated identically in Node
+  and every game; `runtime` for what play shows, sounds and does, in the
+  Workshop, studio previews and releases; `release` for release-only services;
+  and `workshop` for authoring tools. Each environment has one SDK
+  (`src/plugins/kinds-sdk.ts`, `runtime-sdk.ts` and `release-sdk.ts`;
+  `src/editor/workshop-sdk.ts`), and the kernel (`src/plugins/kernel.ts`,
+  `docs/plugins.md`) composes its points. Keep contracts small, typed,
+  validated where they load with `PluginError`, free of engine internals and
+  globals, and with no per-frame cost unless active. Engine code, docs and
   commits never name a downstream game.
 - Authored level data is shared by physics and rendering. Temporary gameplay
   effects must not mutate the authored level or its saved/exported definition.

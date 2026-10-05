@@ -14,7 +14,7 @@ import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
 import { createCharacterEditor } from './character-editor';
-import type { AvatarMotionControls } from '../avatar-motion';
+import type { AvatarMotionControls } from './avatar-motion-controls';
 import type { LeanPreview } from '../waist-lean';
 import { createProjectSaveButton } from './project-save';
 import type { ProjectSaveTarget } from './project-save';
@@ -61,7 +61,8 @@ export interface SpriteEditorOptions {
   // The game's registered motion kinds, their Workshop controls, and the game view's sway and jolt, for the Character tab.
   motion: {
     kinds: readonly string[];
-    controls: AvatarMotionControls;
+    controls: () => AvatarMotionControls;
+    subscribe: (listener: () => void) => () => void;
     preview: (kind: LeanPreview) => void;
   };
 }

@@ -1,12 +1,12 @@
 /**
  * The public Workshop plugin SDK: the one editor module a game's Workshop plugins import (they may also import the
- * engine's public runtime SDKs, such as src/avatar-rig.ts, and the game's own code).
+ * engine's public kinds SDK and the game's own code).
  *
- * A game names one editor-only module with WORKSHOP_MODULE. Its default export is a WorkshopModule: this API version and
- * the game's plugins. When the Workshop's project is open, it starts each plugin with a WorkshopHost, through which the
+ * GAME_PLUGINS names each plugin's workshop facet, whose default export is a WorkshopFacet (docs/workshop-plugins.md).
+ * When the Workshop's project is open, it starts each facet with a WorkshopHost, through which the
  * plugin adds its tabs and sections, reads the open project, edits it through the operations the built-in tabs use,
  * keeps its own data in the project, and works with the running game. Everything a plugin adds goes when it stops: on
- * an error it throws, or when the module changes, which restarts the plugins and keeps the project's unsaved changes.
+ * an error it throws, or when a workshop facet changes, which restarts the plugins and keeps the project's unsaved changes.
  * A stopped plugin's host then refuses everything that would add or change something, with `plugin-stopped`.
  * Plugins are the game's trusted code, never content. Releases contain none of their code or data.
  */
@@ -36,11 +36,16 @@ import type { PartPose } from '../simulation';
 import type { CharacterRiggingType, SpriteDocument } from '../sprite-data';
 import type { GameTheme } from '../theme';
 import type { WorkshopGameState } from './game-state';
+import type { Contribution } from '../plugins/kernel';
 
 export {
-  validateWorkshopModule, WORKSHOP_API_VERSION, WORKSHOP_PLUGIN_ERROR_CODES, WORKSHOP_PLUGIN_ERROR_KIND, WORKSHOP_PLUGIN_LIMITS,
-  WorkshopPluginError,
-} from './workshop-plugin-module';
+  add, isNamespacedId, namespaceOf, PLUGIN_API_VERSION, PLUGIN_ERROR_CODES, PLUGIN_LIMITS, PluginError, pluginRefusal, replace, wrap,
+} from '../plugins/kernel';
+export type { Contribution, KeyedPoint, ListPoint, PluginEnvironment, SlotPoint } from '../plugins/kernel';
+export { AVATAR_MOTION_CONTROLS, AVATAR_MOTION_CONTROL_LIMITS } from './avatar-motion-controls';
+export type {
+  AvatarMotionControl, AvatarMotionControls, AvatarMotionControlSet, AvatarMotionListControl, AvatarMotionNumberControl, AvatarMotionPath,
+} from './avatar-motion-controls';
 export { PLUGIN_DATA_LIMITS } from '../plugin-data';
 export type { PluginData } from '../plugin-data';
 export type { JsonValue } from '../bounded-json';
@@ -53,24 +58,19 @@ export type {
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The module and its plugins
+// A plugin's authoring facet
 
-// WORKSHOP_MODULE's default export.
-export interface WorkshopModule {
-  readonly apiVersion: 1;
-  readonly plugins: readonly WorkshopPlugin[];
-}
-
-export interface WorkshopPlugin {
-  // 1-64 lowercase letters, digits and hyphens, starting with a letter; it also names the plugin's project data.
-  readonly id: string;
-  // Checks the plugin's own data whenever it loads or changes, refusing with WorkshopPluginError and a code of the
+export interface WorkshopFacet {
+  readonly contributes?: readonly Contribution[];
+  // Checks the plugin's own data whenever it loads or changes, refusing with PluginError and a code of the
   // plugin's own. Pure: it may run before the plugin starts, and never touches the page. Anything else it throws stops
-  // the plugin, and its data is then accepted unchecked until the module changes.
+  // the plugin, and its data is then accepted unchecked until its facet changes.
   validate?(data: PluginData): void;
   // Starts the plugin once the Workshop's project is open. An error it throws, or a promise it rejects, stops it.
   start(host: WorkshopHost): void | Promise<void>;
 }
+
+export function defineWorkshop<T extends WorkshopFacet>(facet: T): T { return facet; }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The host
@@ -80,7 +80,7 @@ export type WorkshopSectionTab = 'character' | 'level' | 'physics' | 'project';
 
 export interface WorkshopHost {
   // The plugin's ID.
-  readonly id: string;
+  readonly plugin: string;
   // Aborted when the plugin stops.
   readonly signal: AbortSignal;
   // A tab of the plugin's own, after the built-in ones. `id` is unique among the plugin's tabs and sections.

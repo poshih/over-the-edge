@@ -1,6 +1,5 @@
-// A game release's boot: it starts the game's module, loads the content through the module's access
-// (or public access), builds the game from the manifest and hands the module its API. Nothing in
-// the release decides who may load what; a refusal reaches the module, which may retry.
+// Release boot: release facets compose access and load-flow services; each load attempt owns its runtime session.
+// Nothing here decides who may load what. See docs/release-plugins.md.
 import type { DecorationView } from './decoration-view';
 import type { AudioDirector } from './audio';
 import { bootSources, levelSoundSources } from './content';
@@ -14,16 +13,19 @@ import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
 import type { MediaHost } from './media-host';
 import { createPlayUI } from './play-ui';
-import { validateHudReadouts } from './hud-readouts';
-import type { HudReadouts } from './hud-readouts';
-import { validateLooks } from './object-looks';
-import type { Looks } from './object-looks';
-import type { ReleaseApi, ReleaseHost, ReleaseModule, StartRelease } from './release-module';
+import { ACCESS, FAILED, MODEL_FAILED, PHANTOMS, PROGRESS, READY, ReleasePlugins } from './plugins/release';
+import type { ReleaseApi, ReleaseFacet } from './plugins/release';
+import { RuntimePlugins } from './plugins/runtime';
+import type { RuntimeFacet } from './plugins/runtime';
+import { PluginError } from './plugins/kernel';
+import type { PluginEntry } from './plugins/kernel';
+import type { Kinds } from './plugins/kinds';
+import { httpPhantoms } from './phantom-service';
+import type { PhantomService } from './phantom-service';
 import type { PhantomBuild, Phantoms } from './phantoms';
 import { readSelection, ReleaseModelLibrary } from './release-library';
 import { EMPTY_SELECTION } from './model-library';
 import type { ModelSelection } from './model-library';
-import avatarRigs from 'virtual:avatar-rigs';
 
 // Code the shell includes only when its content needs it, chosen at build time.
 export interface ReleaseCode {
@@ -35,7 +37,9 @@ export interface ReleaseCode {
   readonly AudioDirector: typeof AudioDirector | null;
   readonly createDecorations: (() => DecorationView) | null;
   readonly phantoms: PhantomBuild | null;
-  readonly start: StartRelease | null;
+  readonly runtimePlugins: readonly PluginEntry<RuntimeFacet>[];
+  readonly releasePlugins: readonly PluginEntry<ReleaseFacet>[];
+  readonly kinds: Kinds;
 }
 
 interface Loaded {
@@ -44,6 +48,8 @@ interface Loaded {
   readonly game: Game;
   readonly audio: AudioDirector | null;
   readonly library: ReleaseModelLibrary;
+  readonly plugins: RuntimePlugins;
+  readonly lifecycle: AbortController;
 }
 
 interface Attempt {
@@ -51,6 +57,8 @@ interface Attempt {
   game: Game | null;
   audio: AudioDirector | null;
   library: ReleaseModelLibrary | null;
+  readonly plugins: RuntimePlugins;
+  readonly lifecycle: AbortController;
 }
 
 function message(error: unknown): string {
@@ -68,10 +76,8 @@ export class Release {
   private readonly code: ReleaseCode;
   private readonly lifecycle = new AbortController();
   private readonly ui: ReturnType<typeof createPlayUI>;
-  private module: ReleaseModule | null = null;
-  // The HUD readouts and the level objects' looks the game's module draws its own way.
-  private readouts: HudReadouts = {};
-  private looks: Looks = {};
+  private plugins: ReleasePlugins | null = null;
+  private phantomService: PhantomService | null = null;
   private loading: Attempt | null = null;
   private loaded: Loaded | null = null;
   private phantoms: Phantoms | null = null;
@@ -87,28 +93,22 @@ export class Release {
   async run(): Promise<void> {
     try {
       const contentUrl = new URL(this.code.pins.contentUrl, document.baseURI).href;
-      const host: ReleaseHost = Object.freeze({
-        mount: this.mount, contentUrl, phantomsUrl: this.phantomsUrl(),
+      this.plugins = await ReleasePlugins.start(this.code.releasePlugins, {
+        mount: this.mount, contentUrl, phantomsUrl: this.phantomsUrl(), signal: this.lifecycle.signal,
         notice: (text: string, kind: 'info' | 'error' = 'info') => this.ui.notice(text, kind),
       });
-      if (this.code.start !== null) {
-        try {
-          this.module = (await this.code.start(host)) ?? null;
-        } catch (error) {
-          throw new Error(`The game's module failed to start: ${message(error)}`);
-        }
-        // Closed while the module started, for example during sign-in: it is disposed now.
-        if (this.lifecycle.signal.aborted) {
-          this.module?.dispose?.();
-          return;
-        }
-        if (this.module?.phantoms !== undefined && this.code.phantoms === null) {
-          throw new Error('The game\'s module supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL.');
-        }
-        this.readouts = validateHudReadouts(this.module?.hud);
-        this.looks = validateLooks(this.module?.looks);
+      this.lifecycle.signal.throwIfAborted();
+      const plugins = this.plugins;
+      const phantomsUrl = this.phantomsUrl();
+      this.phantomService = plugins.slot(PHANTOMS, phantomsUrl === null ? null : httpPhantoms(phantomsUrl));
+      if (this.phantomService !== null && this.code.phantoms === null) {
+        const plugin = plugins.owner(PHANTOMS);
+        throw new PluginError('invalid-contribution',
+          `Plugin "${plugin}" supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL.`,
+          plugin, PHANTOMS.id);
       }
-      const access = this.module?.access ?? publicAccess(contentUrl);
+      const access = plugins.slot(ACCESS, publicAccess(contentUrl));
+      const failed = plugins.slot(FAILED, async (error: ContentError) => { throw error; });
       for (;;) {
         try {
           this.loaded = await this.load(access);
@@ -118,13 +118,15 @@ export class Release {
           const halted = this.loading?.game?.halted === true;
           this.discardAttempt();
           if (this.lifecycle.signal.aborted || halted && isAbort(error)) return;
-          if (!(error instanceof ContentError) || this.module?.failed === undefined) throw error;
-          await this.module.failed(error);
+          if (!(error instanceof ContentError)) throw error;
+          await failed(error);
           if (this.lifecycle.signal.aborted) return;
         }
       }
       this.play(this.loaded);
     } catch (error) {
+      this.discardAttempt();
+      this.discardLoaded();
       if (this.lifecycle.signal.aborted && isAbort(error)) return;
       this.fatal.hidden = false;
       this.fatal.textContent = `The game could not load: ${message(error)}`;
@@ -133,37 +135,49 @@ export class Release {
 
   dispose(): void {
     this.lifecycle.abort(new DOMException('The release closed.', 'AbortError'));
-    this.module?.dispose?.();
     this.discardAttempt();
+    this.discardLoaded();
+    this.ui.dispose();
+    this.plugins?.dispose();
+  }
+
+  private discardLoaded(): void {
     this.phantoms?.dispose();
     this.phantoms = null;
     if (this.loaded !== null) {
+      this.loaded.lifecycle.abort(new DOMException('The game closed.', 'AbortError'));
       this.loaded.audio?.dispose();
       // The game's views let go of library models before the library disposes them.
       this.loaded.game.dispose();
       this.loaded.library.dispose();
       this.loaded.session.dispose();
+      this.ui.clear();
+      this.loaded.plugins.dispose();
       this.loaded = null;
     }
-    this.ui.dispose();
   }
 
   private discardAttempt(): void {
     if (this.loading === null) return;
     this.loading.audio?.dispose();
+    this.loading.lifecycle.abort(new DOMException('The load attempt closed.', 'AbortError'));
     this.loading.game?.dispose();
     this.loading.library?.dispose();
     this.loading.session.dispose();
+    this.loading.plugins.dispose();
     this.loading = null;
   }
 
   private async load(access: ContentAccess): Promise<Loaded> {
-    const signal = this.lifecycle.signal;
-    const module = this.module;
-    const session = new ContentSession({
-      access, pins: this.code.pins, onProgress: module?.progress === undefined ? undefined : (progress) => module.progress!(progress),
+    const lifecycle = new AbortController();
+    const signal = AbortSignal.any([this.lifecycle.signal, lifecycle.signal]);
+    const plugins = RuntimePlugins.start(this.code.runtimePlugins, {
+      notice: (text, kind = 'info') => this.ui.notice(text, kind),
     });
-    const attempt: Attempt = { session, game: null, audio: null, library: null };
+    const session = new ContentSession({
+      access, pins: this.code.pins, onProgress: (progress) => this.plugins!.notify(PROGRESS, (callback) => callback(progress)),
+    });
+    const attempt: Attempt = { session, game: null, audio: null, library: null, plugins, lifecycle };
     this.loading = attempt;
     // The backend's selection is read alongside the game group's grant, so it adds no round trip.
     const selectionRead = readSelection(access, signal).then(
@@ -189,7 +203,7 @@ export class Release {
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
       canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
-      characterModels, content, media, decorations: this.code.createDecorations, avatarRigs, looks: this.looks,
+      characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
       theme: manifest.theme, enemyArt: manifest.enemies, messageStyle: manifest.hud.messages.style,
       onCue: audio === null ? undefined : (cue) => audio.handle(cue),
       onAction: (action, options) => game.perform(action, options),
@@ -218,12 +232,12 @@ export class Release {
         manifest.appearance, { signal, content })]),
       parts,
     ]);
-    // A part whose selection failed starts with the profile's own model, and the module hears why.
+    // A part whose selection failed starts with the profile's own model, and release observers hear why.
     const failures = await library.show(await parts);
     for (const failure of selectionError === null ? failures : [selectionError, ...failures]) this.modelFailed(failure);
     session.forgetDownloads();
     this.loading = null;
-    return { session, manifest, game, audio, library };
+    return { session, manifest, game, audio, library, plugins, lifecycle };
   }
 
   private phantomsUrl(): string | null {
@@ -232,15 +246,16 @@ export class Release {
   }
 
   private modelFailed(error: unknown): void {
-    this.module?.modelFailed?.(error instanceof Error ? error : new Error(String(error)));
+    const failure = error instanceof Error ? error : new Error(String(error));
+    this.plugins!.notify(MODEL_FAILED, (callback) => callback(failure));
   }
 
   private play(loaded: Loaded): void {
-    const { game, manifest, audio, library } = loaded;
+    const { game, manifest, audio, library, plugins } = loaded;
     const { primary, alternate } = manifest.characters;
     this.ui.show({
       hud: manifest.hud,
-      readouts: this.readouts,
+      plugins,
       characters: alternate === null ? null : {
         types: [primary.characterRiggingType, alternate.characterRiggingType],
         onSelect: (index) => { if (!game.halted) game.selectCharacter(index); },
@@ -249,17 +264,19 @@ export class Release {
     if (game.halted) return;
     game.selectCharacter(this.ui.enableCharacters());
     game.setInputBlock({ reason: 'loading', blocked: false });
-    const api: ReleaseApi = Object.freeze({
-      setPause: (paused: boolean) => game.setPause({ reason: 'module', paused }),
-      setInputBlock: (blocked: boolean) => game.setInputBlock({ reason: 'module', blocked }),
-      get halted() { return game.halted; },
-      modelLibrary: library.api,
+    this.plugins!.notify(READY, (callback, plugin) => {
+      const api: ReleaseApi = Object.freeze({
+        setPause: (paused: boolean) => game.setPause({ reason: `release:${plugin}`, paused }),
+        setInputBlock: (blocked: boolean) => game.setInputBlock({ reason: `release:${plugin}`, blocked }),
+        get halted() { return game.halted; },
+        modelLibrary: library.api,
+      });
+      callback(api);
     });
-    this.module?.ready?.(api);
     const phantoms = this.code.phantoms;
     if (phantoms !== null) {
       this.phantoms = phantoms.start({
-        game, course: phantoms.course, url: this.phantomsUrl(), service: this.module?.phantoms ?? null,
+        game, course: phantoms.course, service: this.phantomService,
         packs: manifest.phantoms, content: (source, request) => loaded.session.bytes(source, request),
       });
     }

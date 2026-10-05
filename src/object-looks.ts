@@ -7,8 +7,10 @@ import type { AxeObject, BonfireObject, LevelObject, PoolObject, ShooterObject, 
 import { PoolView } from './pool-view';
 import { ProjectileView, ShooterView } from './shooter-view';
 import { UpdraftView } from './updraft-view';
+import { PluginError, slotPoint } from './plugins/kernel';
+import type { RuntimePlugins } from './plugins/runtime';
 
-// How the level's objects of each kind look, and the contract a game's module (GAME_MODULE) replaces any of them with:
+// How the level's objects of each kind look, replaced or wrapped by runtime facets (docs/runtime-plugins.md):
 // the engine's own looks below are the defaults, built on the same contract.
 
 // What a look adds to each of the view's passes, drawn each over the last: the course, behind the actors; the actors;
@@ -25,7 +27,7 @@ export interface ObjectLook<T extends LevelObject> {
   readonly passes: LookPasses;
   // The level's objects of its kind: all of them when the level loads, and again whenever any of them changes.
   set(objects: readonly T[]): void;
-  // Called every frame with the run's time, in seconds; draw only what changed.
+  // Called every frame only while this look's kind has objects, with the run's time in seconds; draw only what changed.
   update(time: number): void;
   dispose(): void;
   // What the game's diagnostics report about it.
@@ -39,7 +41,8 @@ export interface BonfireLook extends ObjectLook<BonfireObject> {
 
 export interface ProjectileLook {
   readonly passes: LookPasses;
-  // Called every frame with the projectiles in flight, each with its tip at its position and flying along its angle.
+  // Called every frame while the level has shooters or projectiles fly, plus one final empty update when both end.
+  // Each projectile has its tip at its position and flies along its angle.
   update(projectiles: readonly ProjectilePose[], time: number): void;
   dispose(): void;
   inspect?(): unknown;
@@ -58,10 +61,22 @@ export interface ObjectLooks {
   readonly swamp: () => ObjectLook<PoolObject>;
 }
 export type LookName = keyof ObjectLooks;
-export const LOOKS = ['flag', 'updraft', 'bonfire', 'shooter', 'projectile', 'axe', 'lava', 'swamp'] as const satisfies readonly LookName[];
 
-// The looks a game draws its own way; the others keep the engine's.
-export type Looks = Readonly<Partial<ObjectLooks>>;
+function lookFactory<T extends () => unknown>(value: unknown): T {
+  if (typeof value !== 'function') throw new TypeError('An object look must be a factory.');
+  return value as T;
+}
+
+export const LOOKS = Object.freeze({
+  flag: slotPoint('looks.flag', 'runtime', lookFactory<ObjectLooks['flag']>),
+  updraft: slotPoint('looks.updraft', 'runtime', lookFactory<ObjectLooks['updraft']>),
+  bonfire: slotPoint('looks.bonfire', 'runtime', lookFactory<ObjectLooks['bonfire']>),
+  shooter: slotPoint('looks.shooter', 'runtime', lookFactory<ObjectLooks['shooter']>),
+  projectile: slotPoint('looks.projectile', 'runtime', lookFactory<ObjectLooks['projectile']>),
+  axe: slotPoint('looks.axe', 'runtime', lookFactory<ObjectLooks['axe']>),
+  lava: slotPoint('looks.lava', 'runtime', lookFactory<ObjectLooks['lava']>),
+  swamp: slotPoint('looks.swamp', 'runtime', lookFactory<ObjectLooks['swamp']>),
+});
 
 // An engine view of one kind of object, as a look.
 function viewLook<T extends LevelObject>(view: {
@@ -118,31 +133,14 @@ const SELECTED: Readonly<Record<Exclude<LookName, 'projectile'>, (object: LevelO
   swamp: (object) => object.kind === 'pool' && object.liquid === 'swamp',
 };
 
-// The looks a game's module supplies, checked where the module is loaded: only the engine's looks, each a factory, or
-// undefined for the engine's. A factory may be a method of the object, its own or inherited; it is called on its object.
-export function validateLooks(value: unknown): Looks {
-  if (value === undefined) return {};
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new TypeError(`The game's module must supply looks as an object of look factories: ${LOOKS.join(', ')}.`);
-  }
-  for (const name of Object.keys(value)) {
-    if (!(LOOKS as readonly string[]).includes(name)) {
-      throw new TypeError(`The game's module supplies looks.${name}, but the looks are ${LOOKS.join(', ')}.`);
-    }
-  }
-  const looks: Partial<Record<LookName, () => unknown>> = {};
-  for (const name of LOOKS) {
-    const factory: unknown = Reflect.get(value, name);
-    if (factory === undefined) continue;
-    if (typeof factory !== 'function') throw new TypeError(`The game's module must supply looks.${name} as a look factory.`);
-    looks[name] = () => Reflect.apply(factory, value, []);
-  }
-  return Object.freeze(looks as Looks);
-}
-
 // Builds `name`'s look, checking what the factory returns.
-function create<L>(name: LookName, factory: () => L): L {
-  const look: unknown = factory();
+function create<L>(name: LookName, factory: () => L, plugins: RuntimePlugins): L {
+  const point = LOOKS[name];
+  const plugin = plugins.owner(point);
+  let look: unknown;
+  try { look = factory(); } catch (error) {
+    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${point.id}".`, plugin, point.id, { cause: error });
+  }
   const method = (key: string): boolean => typeof Reflect.get(look as object, key) === 'function';
   const passes: unknown = typeof look === 'object' && look !== null ? Reflect.get(look, 'passes') : undefined;
   const valid = typeof passes === 'object' && passes !== null &&
@@ -152,8 +150,8 @@ function create<L>(name: LookName, factory: () => L): L {
     }) &&
     method('update') && method('dispose') && (name === 'projectile' || method('set')) && (name !== 'bonfire' || method('setLit'));
   if (!valid) {
-    throw new TypeError(`The ${name} look must return its passes, as three.js objects, and ${
-      name === 'projectile' ? 'update and dispose' : name === 'bonfire' ? 'set, setLit, update and dispose' : 'set, update and dispose'}.`);
+    throw new PluginError('invalid-contribution', `Plugin "${plugin ?? 'engine'}": the ${name} look must return its passes, as three.js objects, and ${
+      name === 'projectile' ? 'update and dispose' : name === 'bonfire' ? 'set, setLit, update and dispose' : 'set, update and dispose'}.`, plugin, point.id);
   }
   return look as L;
 }
@@ -168,32 +166,57 @@ interface Placed {
   // The objects it was last given; null before the level loads.
   objects: readonly LevelObject[] | null;
 }
+const NO_PROJECTILES: readonly ProjectilePose[] = Object.freeze([]);
 
 /**
- * The looks of the level's objects in one view: the game's own where its module supplies them, the engine's otherwise.
+ * The looks of the level's objects in one view, composed once from the runtime session.
  * Each gets its kind's objects when the level loads and again only when one of them changes.
  */
 export class LevelLooks {
   private readonly placed: readonly Placed[];
   private readonly bonfire: BonfireLook;
   private readonly projectile: ProjectileLook;
-  private readonly fronts: readonly Object3D[];
+  private readonly passList: readonly LookPasses[];
+  private fronts: readonly Object3D[] = [];
+  private active: readonly Placed[] = [];
+  private hasShooters = false;
+  private projectileActive = false;
 
-  constructor(looks: Looks, objects: readonly LevelObject[]) {
-    const factories: ObjectLooks = { ...DEFAULT_LOOKS, ...looks };
-    this.bonfire = create('bonfire', factories.bonfire);
-    this.projectile = create('projectile', factories.projectile);
-    this.placed = (['flag', 'updraft', 'bonfire', 'shooter', 'axe', 'lava', 'swamp'] as const).map((name): Placed => {
-      const factory: () => ObjectLook<LevelObject> = factories[name];
-      return { name, look: name === 'bonfire' ? this.bonfire : create(name, factory), objects: null };
-    });
-    this.fronts = this.passes().flatMap(({ front }) => front === undefined ? [] : [front]);
-    this.setLevel(objects);
+  constructor(plugins: RuntimePlugins, objects: readonly LevelObject[]) {
+    const factories: ObjectLooks = {
+      flag: plugins.slot(LOOKS.flag, DEFAULT_LOOKS.flag),
+      updraft: plugins.slot(LOOKS.updraft, DEFAULT_LOOKS.updraft),
+      bonfire: plugins.slot(LOOKS.bonfire, DEFAULT_LOOKS.bonfire),
+      shooter: plugins.slot(LOOKS.shooter, DEFAULT_LOOKS.shooter),
+      projectile: plugins.slot(LOOKS.projectile, DEFAULT_LOOKS.projectile),
+      axe: plugins.slot(LOOKS.axe, DEFAULT_LOOKS.axe),
+      lava: plugins.slot(LOOKS.lava, DEFAULT_LOOKS.lava),
+      swamp: plugins.slot(LOOKS.swamp, DEFAULT_LOOKS.swamp),
+    };
+    const created: { dispose(): void }[] = [];
+    const build = <L extends { dispose(): void }>(name: LookName, factory: () => L): L => {
+      const look = create(name, factory, plugins);
+      created.push(look);
+      return look;
+    };
+    try {
+      this.bonfire = build('bonfire', factories.bonfire);
+      this.projectile = build('projectile', factories.projectile);
+      this.placed = (['flag', 'updraft', 'bonfire', 'shooter', 'axe', 'lava', 'swamp'] as const).map((name): Placed => {
+        const factory: () => ObjectLook<LevelObject> = factories[name];
+        return { name, look: name === 'bonfire' ? this.bonfire : build(name, factory), objects: null };
+      });
+      this.passList = Object.freeze([...this.placed.map(({ look }) => look.passes), this.projectile.passes]);
+      this.setLevel(objects);
+    } catch (error) {
+      for (let index = created.length - 1; index >= 0; index--) created[index]!.dispose();
+      throw error;
+    }
   }
 
   // Every look's passes, for the view to add to its own.
   passes(): readonly LookPasses[] {
-    return [...this.placed.map(({ look }) => look.passes), this.projectile.passes];
+    return this.passList;
   }
 
   // The level's objects, when it loads and after each edit: every look gets its own at load, even none, and then only
@@ -205,6 +228,10 @@ export class LevelLooks {
       placed.objects = next;
       placed.look.set(next);
     }
+    this.active = this.placed.filter(placed => placed.objects!.length > 0);
+    this.hasShooters = this.active.some(placed => placed.name === 'shooter');
+    const passes = this.active.map(({ look }) => look.passes);
+    this.fronts = passes.flatMap(({ front }) => front === undefined ? [] : [front]);
   }
 
   setLit(ids: readonly string[]): void {
@@ -212,14 +239,20 @@ export class LevelLooks {
   }
 
   update(time: number, projectiles: readonly ProjectilePose[]): void {
-    for (const { look } of this.placed) look.update(time);
-    this.projectile.update(projectiles, time);
+    for (const { look } of this.active) look.update(time);
+    if (this.hasShooters || projectiles.length > 0) {
+      this.projectile.update(projectiles, time);
+      this.projectileActive = true;
+    } else if (this.projectileActive) {
+      this.projectile.update(NO_PROJECTILES, time);
+      this.projectileActive = false;
+    }
   }
 
   // Whether some look draws in front of the obstacle line now.
   drawsFront(): boolean {
     for (const front of this.fronts) if (front.visible) return true;
-    return false;
+    return this.projectileActive && this.projectile.passes.front?.visible === true;
   }
 
   inspect() {

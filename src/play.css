@@ -10,35 +10,6 @@
   gap: 16px;
 }
 
-/* The engine's own readouts. */
-.play-readout {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: rgb(243 241 232 / 88%);
-  box-shadow: 0 2px 8px rgb(32 50 39 / 10%);
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.play-readout dt {
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.5;
-  letter-spacing: 0.05em;
-}
-
-.play-readout dd {
-  margin: 2px 0 0;
-  font-size: 22px;
-  line-height: 1.3;
-}
-
-.play-readout-unit {
-  margin-left: 4px;
-  font-size: 14px;
-}
-
 .play-ui .ui-notice {
   bottom: max(16px, env(safe-area-inset-bottom));
 }
@@ -116,10 +87,4 @@
 .play-character-option input:focus-visible + span {
   outline: 3px solid #94662b;
   outline-offset: 2px;
-}
-
-.play-readout-health dd {
-  display: flex;
-  align-items: center;
-  min-height: 29px;
 }

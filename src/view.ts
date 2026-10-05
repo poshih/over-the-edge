@@ -18,7 +18,7 @@ import type { ArmLengths, CharacterArms } from './character-arms';
 import { DEFAULT_GRIPS, GripHold, headGripMargin, NO_GRIP_ROTATION, sameGripRotation } from './grips';
 import type { GripDistances, GripRotation, Grips, GripShoulder } from './grips';
 import { AvatarView } from './avatar-view';
-import { DEFAULT_AVATAR_RIGS, createArmSolutions, createFramePlan, createPose, projectGripShoulder } from './avatar-rig';
+import { createArmSolutions, createFramePlan, createPose, projectGripShoulder } from './avatar-rig';
 import type {
   AvatarRig, AvatarRigArmSolution, AvatarRigBinds, AvatarRigFramePlan, AvatarRigPose, AvatarRigRegistry, PreparedAvatarMotions,
   PreparedAvatarRig,
@@ -47,7 +47,8 @@ import type { RigGeometry } from './rig';
 import { DEFAULT_HAMMER_HEAD, hammerHeadRadius } from './hammer-head';
 import type { HammerHead } from './hammer-head';
 import { LevelLooks } from './object-looks';
-import type { Looks } from './object-looks';
+import type { Kinds } from './plugins/kinds';
+import type { RuntimePlugins } from './plugins/runtime';
 import { EnemyView } from './enemy-view';
 import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
@@ -467,16 +468,16 @@ export class GameView {
     content?: ContentLoader;
     theme?: GameTheme;
     enemyArt?: EnemyArtSettings;
-    // The rig strategies this host registers besides the standard one.
-    avatarRigs?: AvatarRigRegistry;
+    kinds: Kinds;
+    plugins: RuntimePlugins;
     // Creates the decoration view; without it the view draws no decorations.
     decorations?: (() => DecorationView) | null;
-    // How the level's objects look where the game draws them its own way; the engine's looks elsewhere.
-    looks?: Looks;
-  } = {}) {
+  }) {
     this.canvas = canvas;
     this.characterModels = options.characterModels ?? null;
-    this.avatarRigs = options.avatarRigs ?? DEFAULT_AVATAR_RIGS;
+    this.avatarRigs = options.kinds.avatarRigs;
+    // Resolve and check plugin factories before creating a WebGL renderer or attaching any view listeners.
+    this.looks = new LevelLooks(options.plugins, level.objects);
     this.content = options.content;
     this.theme = options.theme ?? DEFAULT_THEME;
     const theme = this.theme;
@@ -519,7 +520,6 @@ export class GameView {
     this.buildScenery();
     this.decorations = options.decorations?.() ?? null;
     this.decorations?.setObjects(level.objects);
-    this.looks = new LevelLooks(options.looks ?? {}, level.objects);
     this.course.add(this.terrain.root);
     this.actors.add(this.enemies.root);
     for (const passes of this.looks.passes()) {

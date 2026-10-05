@@ -40,7 +40,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
 | `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
 | `theme` | `project.json` | Sky, fog, exposure, camera, lights, sun disc, backdrop, aim marker, procedural character colours |
-| `hud` | `project.json` | Release readout labels, unit, scale, decimals and visibility; how trigger messages appear |
+| `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, in Workshop play-tests and releases; how trigger messages appear |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the course look, the GLB meshes terrain places and the GLBs replacing decoration models |
@@ -156,12 +156,12 @@ play, and the art of the enemies its level places. From a project directory it n
 the other files, and copies each file it takes into the content one at a time. That content is the
 base game every player loads. Each model library entry, such as a cosmetic avatar, hammer
 or pot, is content of its own outside it, which a release downloads from the content URL
-only once the game's backend selects it for the player; a build without `GAME_MODULE` has
-no backend to select one, so it packages none. A project whose level events or audio name
-external URLs does not build: a game build packages everything it plays. Model and
-audio loaders are bundled only when the project uses them, and the build still fails
-if an editor module reaches the release. `npm run dev:game` restarts when a project
-file it uses changes. A project directory's `phantoms/` folder holds the
+only once the game's backend selects it for the player; a build without a
+[release facet](release-plugins.md#library-models) has no backend to select one, so it packages
+none. A project whose level events or audio name external URLs does not build: a game build
+packages everything it plays. Model and audio loaders are bundled only when the project uses
+them, and the build still fails if an editor module reaches the release. `npm run dev:game`
+restarts when a project file it uses changes. A project directory's `phantoms/` folder holds the
 [phantom recordings](phantoms.md#bundled-recordings) the release bundles for its level.
 
 `GAME_PROJECT` is the whole game, so combining it with `GAME_LEVEL`,
@@ -172,9 +172,10 @@ course look.
 
 Deploy it like any other release: the shell, for example with
 `npx wrangler deploy --config wrangler.game.toml`, and the content to the host or CDN
-that serves `GAME_CONTENT_URL`. A game whose players must sign in or own it adds its
-own module with `GAME_MODULE`, and one that ships custom avatars adds its rig
-strategies and motion kinds with `AVATAR_RIG_MODULE`; see [rig strategies](characters.md#rig-strategies).
+that serves `GAME_CONTENT_URL`. A game adds its own code with [plugins](plugins.md), named by
+`GAME_PLUGINS` alongside `GAME_PROJECT`: one whose players must sign in or own it supplies its
+content access in a [release facet](release-plugins.md), and one that ships custom avatars
+registers its rig strategies and motion kinds in a [kinds facet](kinds-plugins.md).
 
 ## Working in the Workshop
 
@@ -216,7 +217,8 @@ project waits for **Keep my version** or **Use the project's**.
   file** replaces the Workshop's game with one. Both work without a server.
 - **Publish standalone game** saves unsaved changes, builds the release on the
   server from a copy of the project's folder and links to it at `/play/<id>/`,
-  where the studio also serves its content.
+  where the studio also serves its content. It is a [studio preview](plugins.md#studio-previews):
+  it shows the game's runtime plugins but runs none of its release facets.
 
 The remaining sections edit what only a project has, with a live preview:
 **Theme**, **HUD**, **Audio** (music and cue sounds from the media library, with
@@ -497,8 +499,9 @@ procedural Mesh parts character (pot, trim, dark details, suit, skin, handle);
 imported models keep their own materials. Theme changes restyle existing lights
 and materials in place.
 
-**HUD.** A game's [module](game-module.md#hud-readouts) can draw any of the release's readouts
-its own way; these settings still say which show, and with what labels and formats.
+**HUD.** A game's [runtime plugin](runtime-plugins.md#hud-readouts) can draw any of the
+readouts its own way, in the Workshop, studio previews and releases; these settings still say
+which show, and with what labels and formats.
 `height.label`, `height.unit` (may be empty), `height.scale` (metres are
 multiplied by it; `3.28084` shows feet), `height.decimals` (0-3) and
 `timer.label`; either readout can be hidden. `messages.style` is how message events
@@ -549,9 +552,10 @@ model with `PUT .../model` adds its entry: an avatar takes `settings` (JSON with
 seven fields), keeps its existing entry's, or maps its joints automatically with a
 standard driver; a hammer keeps its existing entry's head or starts with the game's
 default head. Removing an entry, or leaving it out of a `PUT` of the section, deletes its GLB.
-Releases built with `GAME_MODULE` list the library but load an entry only when the game's
-backend selects it, and the Workshop downloads one only when it previews or edits it, so the
-library has no total size; see [runtime swaps](characters.md#model-library-and-runtime-swaps).
+Releases built with a [release facet](release-plugins.md#library-models) list the library but
+load an entry only when the game's backend selects it, and the Workshop downloads one only when
+it previews or edits it, so the library has no total size; see
+[runtime swaps](characters.md#model-library-and-runtime-swaps).
 
 **Plugin data.** `plugins` maps each [Workshop plugin](workshop-plugins.md)'s ID to its
 data, one JSON document of at most 64 KiB, nesting depth 16 and 8,192 values, for at most

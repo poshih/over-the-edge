@@ -205,7 +205,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       media: { value: '[{ "path": "/media/file.ext" }]', types: MEDIA_TYPES, limits: MEDIA_LIMITS, description: 'Upload with PUT media/{file}; PUT this list to drop unused files.' },
       'plugins/{plugin}': {
         value: 'any JSON value, or null for none', limits: PLUGIN_DATA_LIMITS,
-        description: 'Data a Workshop plugin (WORKSHOP_MODULE) keeps in the project, one section per plugin ID (lowercase letters, digits and hyphens, starting with a letter), stored in project.json\'s plugins. '
+        description: 'Data a Workshop facet (GAME_PLUGINS; docs/workshop-plugins.md) keeps in the project, one section per plugin ID (lowercase letters, digits and hyphens, starting with a letter), stored in project.json\'s plugins. '
           + 'The server checks only these limits; the Workshop runs the plugin\'s own validation when it loads or changes the data. A plugin section that never held data has revision 0. Releases never include plugin data.',
       },
     },

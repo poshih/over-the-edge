@@ -1,7 +1,8 @@
 import type { InputMode, UiAction, UiActionOptions } from '../config';
 import type { GameSettings } from '../game-settings';
 import type { HudSettings } from '../hud';
-import type { GameHudState } from './game-ui';
+import type { HudFrame } from '../hud-readouts';
+import type { RuntimePlugins } from '../plugins/runtime';
 import type { PracticeId } from './practices';
 import type { ProjectSaveTarget } from './project-save';
 import type { ServerCopies } from './server-copies';
@@ -14,16 +15,15 @@ export type WorkshopTab = BuiltinWorkshopTab | PluginWorkshopTab;
 // The built-in tabs that hold Workshop plugins' sections.
 export type PluginSectionTab = 'character' | 'level' | 'physics' | 'project';
 
-export interface HudState extends GameHudState {
+// Workshop chrome, kept separately from the shared, read-only HUD frame and reused by main.ts.
+export interface HudState {
   debug: boolean;
   // Whether play recording is on, and the Record toggle's tip: what it records, or what it waits for.
   recording: boolean;
   recordingNote: string;
+  capturing: boolean;
   // Null while attempts start where the designer placed the player.
   practice: PracticeId | null;
-  contacts: number;
-  hingeLoad: number;
-  sliderLoad: number;
 }
 export interface WorkshopState {
   open: boolean;
@@ -33,6 +33,9 @@ export interface WorkshopState {
 
 export interface UiOptions {
   mount: HTMLElement;
+  plugins: RuntimePlugins;
+  // Physics diagnostics only, requested while its tab is visible, never as part of the HUD frame.
+  readStatus: () => { readonly contacts: number; readonly hingeLoad: number; readonly sliderLoad: number };
   initialSettings: Readonly<GameSettings>;
   initialInputMode: InputMode;
   onAction: (action: EditorAction, options?: UiActionOptions) => void;
@@ -59,7 +62,7 @@ export interface GameUi {
   pluginSections: (tab: PluginSectionTab) => HTMLElement;
   workshopState: () => WorkshopState;
   closeWorkshop: () => void;
-  update: (state: HudState) => void;
+  update: (frame: HudFrame, state: HudState) => void;
   // Applies a complete settings profile, e.g. from a project, as if loaded in Physics.
   applySettings: (settings: GameSettings) => void;
   settings: () => GameSettings;

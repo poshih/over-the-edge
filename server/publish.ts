@@ -85,7 +85,7 @@ export class Publisher {
   async publish(id: string, snapshot: (directory: string, select: ReleaseSelection) => Promise<number>, recordings: string): Promise<PublishRecord> {
     const work = join(this.releases, `.build-${id}-${randomBytes(6).toString('hex')}`);
     try {
-      // Only the files the release takes: a studio release keeps the project's art look and has no module, so no
+      // Only the files the release takes: a studio preview keeps runtime facets but has no release facets, so no
       // library models.
       const revision = await snapshot(join(work, 'project'), (manifest, level) => releaseProjectFiles(manifest, level, manifest.art.mode, false));
       const task = this.queue.then(() => this.build(id, revision, work, recordings));
@@ -162,14 +162,15 @@ export class Publisher {
 
   private runBuild(project: string, recordings: string, output: string): Promise<void> {
     const env: NodeJS.ProcessEnv = {
-      ...process.env, GAME_PROJECT: project, GAME_PHANTOM_RECORDINGS: recordings, VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true',
+      ...process.env, GAME_PROJECT: project, GAME_STUDIO_PREVIEW: '1',
+      GAME_PHANTOM_RECORDINGS: recordings, VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true',
     };
     // The project is the whole game; per-file inputs from the studio's own environment must not leak in.
     // A studio preview serves its own content, so it keeps the default content URL and public access, and
-    // it has no phantom service: it replays the project's own recordings. Without a module it has no backend
-    // that selects library models, so the build packages none.
+    // it has no phantom service: it replays the project's own recordings. It keeps GAME_PLUGINS for kinds and runtime,
+    // but serves no release facets and packages no library models (docs/plugins.md).
     for (const variable of [
-      'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE', 'GAME_CONTENT_URL', 'GAME_MODULE',
+      'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE', 'GAME_CONTENT_URL',
       'GAME_PHANTOMS_URL',
     ]) delete env[variable];
     const vite = join(this.root, 'node_modules', 'vite', 'bin', 'vite.js');

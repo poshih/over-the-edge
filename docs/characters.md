@@ -161,18 +161,19 @@ hair's geometry to a chain of joints in the GLB and list the chain in `avatar.ha
 ### Secondary motion
 
 A game can give its imported avatars motion of its own, such as tails, ears, flaps or
-dangling accessories, without editing the engine. It registers **motion kinds** in its
-[avatar rig module](#rig-strategies) beside its rig strategies, and an avatar lists the
-kinds it runs in `avatar.motion`, each with configuration only that kind interprets:
+dangling accessories, without editing the engine. A plugin's
+[kinds facet](kinds-plugins.md#motion-kinds) registers **motion kinds** beside its
+[rig strategies](#rig-strategies), and an avatar lists the kinds it runs in `avatar.motion`,
+each by its ID, `<plugin>/<name>`, with configuration only that kind interprets:
 
 ```json
-"motion": [{ "id": "charm", "config": { "joint": "Charm", "stiffness": 30, "damping": 4 } }]
+"motion": [{ "id": "my-game/charm", "config": { "joint": "Charm", "stiffness": 30, "damping": 4 } }]
 ```
 
 - Each kind appears at most once per avatar, at most 16 per avatar. `config` is bounded JSON,
   with a driver's limits: depth 8, 512 values and 16 KiB. `[]` runs no motion, at no cost.
-  `hair` is the built-in hair's ID: hair stays in `avatar.hair`, and no module may register a
-  kind under that ID.
+  `hair` is the built-in hair's ID: hair stays in `avatar.hair`, and no plugin's kind can take
+  that ID.
 - When the avatar loads, the engine hands the kind its configuration and read-only facts about
   the model (`AvatarMotionModel`): every skin joint's name, nearest joint ancestor and bind frame
   in the fitted avatar space (metres, +Y up, the model facing +Z, the shoulders 0.74 m above the
@@ -202,20 +203,20 @@ kinds it runs in `avatar.motion`, each with configuration only that kind interpr
 - A motion is presentation only: it never drives IK, gameplay or physics, never sees the scene
   graph, and never changes the profile. Its `update` must not allocate.
 - An entry naming a kind the registry lacks fails with `unknown-kind`; it is never skipped. Kinds,
-  strategies and their checks are one registry, so a configuration is accepted or refused
-  identically when a profile, a server avatar's settings or a library avatar is imported,
-  stored, packaged or loaded.
+  strategies and their checks are one registry, composed from the game's kinds facets, so a
+  configuration is accepted or refused identically when a profile, a server avatar's settings or
+  a library avatar is imported, stored, packaged or loaded.
 
-A kind, kept in the game's own repository:
+A kind, kept in the game's own repository as `games/my-game/charm.ts`:
 
 ```ts
 import { Matrix4, Vector3 } from 'three';
-import { AVATAR_RIG_API_VERSION, AvatarMotionError } from '../../src/avatar-rig';
-import type { AvatarMotionControls, AvatarMotionKind, AvatarRigModule } from '../../src/avatar-rig';
+import { AvatarMotionError } from '../../src/plugins/kinds-sdk';
+import type { AvatarMotionKind } from '../../src/plugins/kinds-sdk';
 
 // A charm on one joint that lags behind its rest place in the world, on a damped spring.
-const charm: AvatarMotionKind = {
-  id: 'charm',
+export const charm: AvatarMotionKind = {
+  id: 'my-game/charm',
   prepare(config, model) {
     const { joint: name, stiffness, damping } = (config ?? {}) as Record<string, unknown>;
     const joint = model.joints.findIndex((candidate) => candidate.name === name);
@@ -244,29 +245,22 @@ const charm: AvatarMotionKind = {
     };
   },
 };
-
-export default { apiVersion: AVATAR_RIG_API_VERSION, strategies: [], motions: [charm] } satisfies AvatarRigModule;
-
-// Editor-only: the Workshop's controls for the kinds' numbers. Releases never import it.
-export const controls: AvatarMotionControls = {
-  charm: [
-    { label: 'Stiffness', unit: '/s²', min: 1, max: 200, step: 1, default: 30, path: ['stiffness'] },
-    { label: 'Damping', unit: '/s', min: 0, max: 20, step: 0.1, default: 4, path: ['damping'] },
-  ],
-};
 ```
 
+The plugin's kinds facet registers it with `add(AVATAR_MOTIONS, charm)`; see
+[kinds plugins](kinds-plugins.md#motion-kinds).
+
 **Workshop controls.** Workshop / Character / **Secondary motion** lists the avatar's hair and
-motions. The module's `controls` export describes each kind's tunable numbers as data: a label, a
-unit, a range, a step, a default and a `path` of object keys and array indices into the
-configuration. A descriptor with a `list` path, a `title` field and `controls` repeats over that
-list, one group per item, titled by the item's field, with paths into the item. Each motion shows its
-controls and a reset to their defaults; a change goes to the draft profile, where the kind checks it
-again, and through Save and Revert. Motions that did not change keep moving, and the changed one
-restarts from rest. **Sway** rocks the upper body about the waist for a few seconds and **Jolt**
-kicks it once, in the running game, so a setting can be judged without playing. Only the Workshop
-reads `controls`, checked against the registry when it starts; invalid controls stop it with
-`invalid-controls`. The Workshop runs none of the game's DOM code, and releases contain no editor code.
+motions. A plugin's workshop facet describes each of its kinds' tunable numbers as data, at
+`AVATAR_MOTION_CONTROLS`: a label, a unit, a range, a step, a default and a `path` of object keys
+and array indices into the configuration, or a list of them repeated over a list in the
+configuration; see [motion controls](workshop-plugins.md#motion-controls). Each motion shows its
+controls and a reset to their defaults; a change goes to the draft profile, where the kind checks
+it again, and through Save and Revert. Motions that did not change keep moving, and the changed
+one restarts from rest. **Sway** rocks the upper body about the waist for a few seconds and
+**Jolt** kicks it once, in the running game, so a setting can be judged without playing. Only the
+Workshop reads the controls, checked against the registered motion kinds, and releases contain
+no editor code.
 
 ### Errors
 
@@ -297,7 +291,11 @@ on `code`, never on the message. The editor shows the code in its status
 | `claim-limits` | The avatar's motions claim more than 64 joints, hair aside |
 
 The same checks run at import, when a profile loads, and when a release is built.
-They are implemented without a DOM in `src/character-model-inspect.ts`.
+They are implemented without a DOM in `src/character-model-inspect.ts`. A driver or a motion
+whose strategy or kind is not registered, or refuses its configuration, fails with an error of
+its own, an `AvatarRigError` or an `AvatarMotionError` (see [rig strategies](#rig-strategies)),
+and a kinds facet that registers them wrongly with a `PluginError` (see
+[kinds plugins](kinds-plugins.md#errors)).
 
 ## One-model hammer
 
@@ -471,8 +469,9 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
   are used in every type. `characterRiggingType` still selects the type.
 - `avatar.driver` is `{ "id", "config" }`, the [rig strategy](#rig-strategies) that fits the
   model and poses its arms. `standard` is the only built-in strategy and accepts a `null`
-  config; a profile whose driver no host registered fails to load with `unknown-strategy`
-  rather than falling back to another rig.
+  config; a game's strategies are named `<plugin>/<name>`. A profile whose driver no kinds
+  facet registered fails to load with `unknown-strategy` rather than falling back to another
+  rig.
 - `avatar.hair` is the avatar's [hair](#hair), bound to its model's joints like the bone map.
 - `avatar.motion` lists the game's [motion kinds](#secondary-motion) the avatar runs, each
   `{ "id", "config" }`, also bound to its model.
@@ -486,52 +485,62 @@ Profiles in any other schema version are rejected, not converted.
 An imported avatar says how it is fitted and posed through its `driver`. The built-in
 `standard` strategy sizes the arms from the model's own shoulders and bind-pose arm lengths
 (or the profile's arm lengths) and places the hands on the physical grips, exactly as
-described above. A game can add strategies, and the kinds of its avatars'
-[secondary motion](#secondary-motion), by naming a side-effect-free module with
-**`AVATAR_RIG_MODULE`**, a `.ts` or `.js` file inside the repository. The build imports it
-through its own resolver rather than the app's bundle, so it uses relative paths and bare
-package imports, not the app's aliases or `virtual:` modules.
+described above. A game adds strategies of its own, named `<plugin>/<name>`, and the kinds of
+its avatars' [secondary motion](#secondary-motion), in a plugin's kinds facet; see
+[kinds plugins](kinds-plugins.md). A strategy that poses the arms as the standard one does, a
+starting point for a game's own, kept in the game's repository as `games/my-game/my-rig.ts`:
 
 ```ts
-import { AVATAR_RIG_API_VERSION, AvatarRigError } from '../../src/avatar-rig';
-import type { AvatarRigModule, AvatarRigStrategy } from '../../src/avatar-rig';
+import { AvatarRigError, composeArmJoints, STANDARD_AVATAR_FRAME_PLANNER } from '../../src/plugins/kinds-sdk';
+import type { AvatarRigStrategy } from '../../src/plugins/kinds-sdk';
 
-const strategy: AvatarRigStrategy = {
-  id: 'my-rig',
+const SIDES = ['left', 'right'] as const;
+
+export const myRig: AvatarRigStrategy = {
+  id: 'my-game/my-rig',
   prepare(config, binds) {
-    // Validate config here once; reject bad data with AvatarRigError('invalid-config', ...).
-    // Return { writeFramePlan(context, out), writePose(context, out) }.
+    // Validate the configuration once, here, and refuse bad data with AvatarRigError.
+    if (config !== null) throw new AvatarRigError('invalid-config', 'This rig takes no configuration; use null.');
+    return {
+      // Phase 1: where each hand rides on the tool.
+      writeFramePlan(context, out) {
+        STANDARD_AVATAR_FRAME_PLANNER.writeFramePlan(context, out);
+      },
+      // Phase 2: the arm joints, from the solved arms and the plan they followed.
+      writePose(context, out) {
+        for (const side of SIDES) {
+          const arm = context.arms[side];
+          composeArmJoints(binds.arms[side], arm.shoulder, arm.elbow, arm.wrist, arm.normal,
+            context.plan[side].shaft, context.plan[side].forward, out[side]);
+        }
+      },
+    };
   },
 };
-
-export default { apiVersion: AVATAR_RIG_API_VERSION, strategies: [strategy], motions: [] } satisfies AvatarRigModule;
 ```
 
-The module's default export is an `apiVersion` (2), its strategies and its motion kinds, and its
-optional `controls` export is the Workshop's [motion controls](#secondary-motion). A strategy is trusted host
-code, not content: it is pure numeric code that never sees a scene, material or renderer, and
-frame plans are passed explicitly between phases; scratch belongs to one avatar, never a global.
-When the profile rotates a hand, the engine turns a copy of that side's frame plan about the
-hand's grip after phase 1: its `offset`, `shaft` and `forward` all turn, so the arms reach the
-turned wrist and phase 2 receives the turned plan. The plan phase 1 wrote is never rewritten.
-A module that is not an object, declares another API version, has malformed strategies, or duplicates
-an ID (including `standard`) fails with a typed `AvatarRigError`; a malformed motion kind fails with
-an `AvatarMotionError` coded `invalid-kind`, and two kinds with one ID, or one named `hair`, with
-`duplicate-kind`. The factory always supplies the
-standard strategy. Only a direct registry constructor that omits it produces `missing-standard`.
-Configured modules exporting null are invalid, not an unconfigured-host fallback.
+A strategy is trusted host code, not content: it is pure numeric code that never sees a scene,
+material or renderer, and frame plans are passed explicitly between phases; scratch belongs to
+one avatar, never a global. `prepare` checks the configuration once, before the avatar changes,
+and returns the avatar's rig synchronously. When the profile rotates a hand, the engine turns a
+copy of that side's frame plan about the hand's grip after phase 1: its `offset`, `shaft` and
+`forward` all turn, so the arms reach the turned wrist and phase 2 receives the turned plan. The
+plan phase 1 wrote is never rewritten.
 
 The same registry is used by every check: importing or opening a project, the project server's
 writes, packaging a release and the running release, so a driver or motion is accepted or rejected
-identically everywhere. It is built once when the dev server, build or project server starts,
-so changing the module needs a restart. A driver whose strategy is not registered, or whose
-`config` the strategy refuses, fails with an `AvatarRigError` and a `code`: `unknown-strategy`,
-`invalid-config`, `invalid-strategy`, `api-version`, `duplicate-strategy` or
-`missing-standard`. A motion fails with an `AvatarMotionError` (`src/avatar-motion.ts`): `unknown-kind`
+identically everywhere. Node builds it once, when the dev server, build or project server starts,
+so changing a kinds facet needs a restart; see [kinds plugins](kinds-plugins.md#node-and-the-browser).
+A driver fails with an `AvatarRigError` and a `code`: `unknown-strategy` when no strategy is
+registered under its ID, `invalid-config` when the strategy refuses its `config`, and
+`invalid-strategy` when the strategy prepares no frame planner and pose writer. A motion fails
+with an `AvatarMotionError` (`src/avatar-motion.ts`): `unknown-kind`
 for an unregistered kind, `invalid-motion` for a motion that is not an object with an `update()` and
 distinct skin-joint indices as its claims, or the kind's own code for a configuration it refuses, with
 the kind's ID in `motion`. Like `AvatarRigError`, it keeps a portable tag across Vite's module runner.
 The Workshop shows both as it shows model errors. Callers branch on `code`, never on the message.
+Registering a malformed strategy or kind fails with a `PluginError` instead; see
+[kinds plugins](kinds-plugins.md#errors).
 
 ## Releases with two characters
 
@@ -602,29 +611,17 @@ record which hammer was held, so recordings made with any hammer share the cours
 the release's shell does not list; see [content delivery](content-delivery.md). The
 release fetches a library model only after the backend selects it, through a grant
 for that group, so the backend and its CDN can refuse models the player does not own.
-Only a game built with its own module (`GAME_MODULE`) has a backend that selects, so a
-build without one packages no library models.
+Only a game built with a [release facet](release-plugins.md#library-models) has a backend that
+selects, so a build without one, and every studio preview, packages no library models.
 
-**The backend's contract.** The game's module adds `select(request, signal)` to its
-content access. With `null` it returns the stored selection, `{ avatar, hammer, pot }`
+**The backend's contract.** A plugin's release facet adds `select(request, signal)` to the
+content access it supplies. With `null` it returns the stored selection, `{ avatar, hammer, pot }`
 of library IDs or `null` for the profile's own model; with `{ role, id }` it asks the
 backend to change one part, and returns the selection the backend then stores. The
-backend may refuse by throwing a `ContentError`, or answer with any selection:
-
-```ts
-export async function start(host: ReleaseHost): Promise<ReleaseModule> {
-  const access: ContentAccess = {
-    grant: (request, signal) => backend.grant(request, signal),
-    // Checks the player's entitlements, stores the result and answers it.
-    select: (request, signal) => backend.select(request, signal),
-  };
-  return {
-    access,
-    modelFailed: (error) => host.notice(error.message, 'error'),
-    ready: (api) => shop.onEquip((role, id) => api.modelLibrary.swap(role, id)),
-  };
-}
-```
+backend may refuse by throwing a `ContentError`, or answer with any selection.
+[Library models](release-plugins.md#library-models) shows the facet, which relays the player's
+choices through `api.modelLibrary`, where `api` is the `ReleaseApi` its `READY` callbacks
+receive.
 
 - At boot the release reads the stored selection alongside the game's first grant,
   loads the selected models, and starts with them showing. Parts it replaces never
@@ -638,8 +635,8 @@ export async function start(host: ReleaseHost): Promise<ReleaseModule> {
   after it changed elsewhere.
 - An answer shows as a whole: every part it changes loads and shows. A part that
   cannot, for example because its grant is refused, keeps its model and fails the
-  swap that asked for it, or reaches `modelFailed` when no swap asked; at boot it
-  starts with the profile's own model.
+  swap that asked for it, or reaches the `MODEL_FAILED` callbacks when no swap asked; at
+  boot it starts with the profile's own model.
 - Without `select()`, parts use the profiles' models and swaps fail with `unavailable`.
 
 The release keeps the model each part shows and the most recent other one per

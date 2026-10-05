@@ -246,7 +246,13 @@
   font-variant-numeric: tabular-nums;
 }
 
-.height-reading {
+.workshop-hud .play-readout {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.workshop-hud .play-readout-height dd {
   display: flex;
   align-items: baseline;
   gap: 5px;
@@ -256,15 +262,13 @@
   letter-spacing: -0.06em;
 }
 
-.metric-unit {
+.workshop-hud .play-readout-unit {
   color: #56665b;
   font-size: 18px;
   font-weight: 400;
 }
 
-.secondary-metrics {
-  display: flex;
-  gap: 24px;
+.peak-metric {
   padding-left: 21px;
   border-left: 1px solid rgb(46 71 60 / 21%);
 }
@@ -460,12 +464,11 @@ body[data-input-mode="touch"] .climbing-guide .input-instructions {
     gap: 18px;
   }
 
-  .height-reading {
+  .workshop-hud .play-readout-height dd {
     font-size: 35px;
   }
 
-  .secondary-metrics {
-    gap: 21px;
+  .peak-metric {
     padding-left: 18px;
   }
 
@@ -522,7 +525,7 @@ body[data-input-mode="touch"] .climbing-guide .input-instructions {
     top: 96px;
   }
 
-  .height-reading {
+  .workshop-hud .play-readout-height dd {
     font-size: 34px;
   }
 
@@ -560,14 +563,14 @@ body[data-input-mode="touch"] .climbing-guide .input-instructions {
 }
 
 .game-ui[data-scene="dark"] .brand .eyebrow,
-.game-ui[data-scene="dark"] .climb-hud .eyebrow,
+.game-ui[data-scene="dark"] .play-readout dt,
 .game-ui[data-scene="dark"] .metric-label,
-.game-ui[data-scene="dark"] .metric-unit,
+.game-ui[data-scene="dark"] .play-readout-unit,
 .game-ui[data-scene="dark"] .input-state {
   color: #c9d2c8;
 }
 
-.game-ui[data-scene="dark"] .secondary-metrics {
+.game-ui[data-scene="dark"] .peak-metric {
   border-left-color: rgb(238 240 230 / 28%);
 }
 

@@ -1,8 +1,9 @@
 import { createNotice } from './notice';
 import type { CharacterRiggingType } from './sprite-data';
 import type { HudSettings } from './hud';
-import { createHudReadout, DEFAULT_HUD_READOUTS, HUD_READOUTS } from './hud-readouts';
-import type { HudFrame, HudReadout, HudReadoutName, HudReadouts } from './hud-readouts';
+import { createHudBar } from './hud-bar';
+import type { HudFrame } from './hud-readouts';
+import type { RuntimePlugins } from './plugins/runtime';
 
 const CHARACTER_KEY = 'over-the-edge:play:character';
 const CHARACTER_LABELS: Readonly<Record<CharacterRiggingType, string>> = {
@@ -38,18 +39,6 @@ export function characterLabels(types: readonly CharacterRiggingType[]): string[
   return labels.map((label, index) => labels.indexOf(label) !== labels.lastIndexOf(label) ? `${label} ${index + 1}` : label);
 }
 
-// A readout in its slot of the HUD.
-interface Shown {
-  readonly name: HudReadoutName;
-  readonly slot: HTMLElement;
-  readonly readout: HudReadout;
-}
-
-// Whether the project's HUD settings show `name`'s readout; health shows wherever something can hurt the player.
-function shows(hud: HudSettings, name: HudReadoutName): boolean {
-  return name === 'height' ? hud.height.visible : name === 'timer' ? hud.timer.visible : true;
-}
-
 // The release's interface. Notices work from the start; the readouts and the character choice appear
 // once the release's content has said what they show.
 export function createPlayUI(options: { mount: HTMLElement }) {
@@ -59,26 +48,22 @@ export function createPlayUI(options: { mount: HTMLElement }) {
   const inputs: HTMLInputElement[] = [];
   const notice = createNotice({ mount: root });
   options.mount.append(root);
-  const readouts: Shown[] = [];
+  let bar: ReturnType<typeof createHudBar> | null = null;
   let selected = 0;
+  const choices: HTMLElement[] = [];
+  const clear = (): void => {
+    bar?.dispose();
+    bar = null;
+    for (const choice of choices.splice(0)) choice.remove();
+    inputs.length = 0;
+  };
   return {
-    // `readouts` are the game's own, from its module; the rest are the engine's. The project's HUD settings say which
-    // show, and with what labels, units and formats.
-    show(settings: { hud: HudSettings; readouts: HudReadouts; characters: PlayCharacterChoice | null }): void {
-      const bar = document.createElement('div');
-      bar.className = 'play-hud';
-      bar.setAttribute('role', 'group');
-      bar.setAttribute('aria-label', 'Climb statistics');
-      for (const name of HUD_READOUTS) {
-        if (!shows(settings.hud, name)) continue;
-        const slot = document.createElement('div');
-        slot.className = `play-hud-slot play-hud-${name}`;
-        // Health waits for the first frame to say whether anything can hurt the player.
-        slot.hidden = name === 'health';
-        bar.append(slot);
-        readouts.push({ name, slot, readout: createHudReadout(name, settings.readouts[name] ?? DEFAULT_HUD_READOUTS[name], slot, settings.hud) });
-      }
-      const shown: HTMLElement[] = [bar];
+    // The project's settings choose visibility and labels; the runtime session chooses implementations.
+    show(settings: { hud: HudSettings; plugins: RuntimePlugins; characters: PlayCharacterChoice | null }): void {
+      clear();
+      bar = createHudBar(settings.plugins, settings.hud);
+      bar.root.classList.add('play-hud');
+      const shown: HTMLElement[] = [bar.root];
       const characters = settings.characters;
       // A single-profile release shows no settings, exactly as before.
       if (characters !== null && characters.types.length > 1) {
@@ -114,16 +99,15 @@ export function createPlayUI(options: { mount: HTMLElement }) {
           inputs.push(input);
         });
         shown.push(group);
+        choices.push(group);
       }
       root.prepend(...shown);
     },
     update(frame: HudFrame): void {
-      for (const { name, slot, readout } of readouts) {
-        if (name === 'health' && slot.hidden !== (frame.health === null)) slot.hidden = frame.health === null;
-        readout.update(frame);
-      }
+      bar?.update(frame);
     },
     notice: notice.show,
+    clear,
     // Enables the character choice once every profile has loaded; returns the restored choice.
     enableCharacters(): number {
       for (const input of inputs) input.disabled = false;
@@ -131,7 +115,7 @@ export function createPlayUI(options: { mount: HTMLElement }) {
     },
     dispose(): void {
       events.abort();
-      for (const { readout } of readouts.splice(0)) readout.dispose?.();
+      clear();
       notice.dispose();
       root.remove();
     },

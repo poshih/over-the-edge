@@ -29,6 +29,7 @@ import { Bonfires } from './bonfires';
 import type { BonfireState } from './bonfires';
 import { bonfireSpawn, HEALTH } from './hazards';
 import { LiquidWorld } from './liquid-world';
+import type { HealthReading } from './health-meter';
 
 export interface PartPose extends Point {
   id: string;
@@ -96,6 +97,7 @@ export class Simulation {
   private safeUntil = 0;
   // Whether anything in the level can hurt the player, so health matters.
   private hurts: boolean;
+  private readonly hudHealth = { current: 0, max: 0 };
   // Whether a hit hurt the player, who survived it, since takeHurt last looked.
   private hurtTaken = false;
   // How many times the player has been placed: at every restart and every return to a bonfire.
@@ -407,6 +409,16 @@ export class Simulation {
       projectiles: this.hazards.frame(alpha),
       rig: this.rig.geometry,
     };
+  }
+
+  // HUD-only data: no allocations, contact walk, motor queries or plugin callbacks.
+  writeHudFrame(out: { height: number; bestHeight: number; health: HealthReading | null }): void {
+    this.ensureLive();
+    out.height = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
+    out.bestHeight = this.bestHeight;
+    this.hudHealth.current = this.health;
+    this.hudHealth.max = this.settings.physics.health;
+    out.health = this.hurts ? this.hudHealth : null;
   }
 
   status() {

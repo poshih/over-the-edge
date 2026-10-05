@@ -1,17 +1,19 @@
-// Workshop plugins' own project data: each plugin a game registers in the Workshop (WORKSHOP_MODULE) may keep one bounded
+// Workshop plugins' own project data: each plugin in GAME_PLUGINS may keep one bounded
 // JSON document in the open project, under its ID in the manifest's `plugins`, and the project API serves it as the
 // section `plugins/<id>`. The engine stores, fingerprints, saves and conflict-checks it like any other section but
 // never interprets it; a plugin validates its own. It is editor data: releases never include it.
 import { boundedJson } from './bounded-json';
 import type { JsonValue } from './bounded-json';
 import { ProjectError } from './project-fields';
+import { isPluginId, PLUGIN_ID_LIMIT } from './plugins/ids.ts';
+export { isPluginId } from './plugins/ids.ts';
 
 export type PluginData = JsonValue;
 
 export const PLUGIN_DATA_LIMITS = Object.freeze({
   // Plugins with data in one project.
   plugins: 16,
-  id: 64,
+  id: PLUGIN_ID_LIMIT,
   depth: 16,
   values: 8192,
   bytes: 64 * 1024,
@@ -19,13 +21,7 @@ export const PLUGIN_DATA_LIMITS = Object.freeze({
 
 export const NO_PLUGIN_DATA: Readonly<Record<string, PluginData>> = Object.freeze({});
 
-const PLUGIN_ID = /^[a-z][a-z0-9-]*$/;
 const SECTION_PREFIX = 'plugins/';
-
-// A plugin ID: 1-64 lowercase letters, digits and hyphens, starting with a letter.
-export function isPluginId(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= PLUGIN_DATA_LIMITS.id && PLUGIN_ID.test(value);
-}
 
 // A plugin's data in `plugins`, or null without any: only the plugin's own entry, never a property every object has.
 export function pluginDataIn(plugins: Readonly<Record<string, PluginData>>, id: string): PluginData | null {

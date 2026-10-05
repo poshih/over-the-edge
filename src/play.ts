@@ -7,7 +7,9 @@ import loadAppearance from 'virtual:game-appearance';
 import AudioDirector from 'virtual:game-audio';
 import createDecorations from 'virtual:game-decorations';
 import phantoms from 'virtual:game-phantoms';
-import start from 'virtual:game-module';
+import kinds from 'virtual:game-plugins/kinds';
+import runtimePlugins from 'virtual:game-plugins/runtime';
+import releasePlugins from 'virtual:game-plugins/release';
 import { Release } from './release';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
@@ -16,7 +18,8 @@ const fatal = document.querySelector<HTMLElement>('#fatal-error');
 if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface mounts are required.');
 
 const release = new Release({ canvas, mount, fatal }, {
-  pins, createCharacterModels, loadCourseArt, loadAppearance, AudioDirector, createDecorations, phantoms, start,
+  pins, createCharacterModels, loadCourseArt, loadAppearance, AudioDirector, createDecorations, phantoms,
+  kinds, runtimePlugins, releasePlugins,
 });
 if (import.meta.hot) {
   import.meta.hot.accept();

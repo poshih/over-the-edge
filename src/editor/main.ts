@@ -23,7 +23,7 @@ import { PRACTICES, practiceById } from './practices';
 import type { PracticeId } from './practices';
 import { createUI } from './ui';
 import { createSpriteEditor } from './sprite-editor';
-import type { EditorAction, WorkshopState } from './ui-types';
+import type { EditorAction, GameUi, HudState, WorkshopState } from './ui-types';
 import { AudioDirector } from '../audio';
 import { urlMediaHost } from '../media-host';
 import { DEFAULT_AUDIO } from '../audio-settings';
@@ -42,13 +42,41 @@ import { WorkshopPluginHost, workshopPlugins } from './workshop-plugin-host';
 import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
 import serverModels from 'virtual:workshop-models';
-import avatarRigs from 'virtual:avatar-rigs';
-import motionControls from 'virtual:avatar-motion-controls';
+import kinds from 'virtual:game-plugins/kinds';
+import runtimeFacets from 'virtual:game-plugins/runtime';
+import { RuntimePlugins } from '../plugins/runtime';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
 const fatal = document.querySelector<HTMLElement>('#fatal-error');
 if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface mounts are required.');
+
+// Runtime facets start before the UI exists; their notices are explicitly buffered until it mounts.
+const startupNotices: { message: string; kind: 'info' | 'error' }[] = [];
+let runtimeNotice = (message: string, kind: 'info' | 'error' = 'info'): void => { startupNotices.push({ message, kind }); };
+function startRuntime(): RuntimePlugins {
+  try {
+    return RuntimePlugins.start(runtimeFacets, { notice: (message, kind) => runtimeNotice(message, kind) });
+  } catch (error) {
+    fatal!.hidden = false;
+    fatal!.textContent = `The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`;
+    throw error;
+  }
+}
+const runtimePlugins = startRuntime();
+const avatarRigs = kinds.avatarRigs;
+
+// Consumer construction is also fatal: never keep a runtime session whose Game or HUD could not be built.
+function boot<T>(create: () => T, discard: () => void): T {
+  try {
+    return create();
+  } catch (error) {
+    fatal!.hidden = false;
+    fatal!.textContent = `The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`;
+    try { discard(); } finally { runtimePlugins.dispose(); }
+    throw error;
+  }
+}
 
 // A Workshop built with GAME_PROJECT opens that game and keeps it, with its changes, in this
 // browser's copy of the project; the editors' own browser saves do not open at start.
@@ -70,7 +98,7 @@ const media = urlMediaHost((source) => resolveMedia(source));
 const audio = new AudioDirector({
   settings: DEFAULT_AUDIO, media, onError: (message) => ui.notice(message, 'error'),
 });
-const game = new Game({
+const game = boot(() => new Game({
   canvas, fatal, eventMount: mount, level: level.definition(),
   characterModels: createCharacterModelLoader(),
   decorations: createDecorationView,
@@ -78,7 +106,7 @@ const game = new Game({
   // The Workshop never plays trigger videos: each is skipped at once and its trigger goes on, so testing
   // is never interrupted. Releases play them.
   videos: 'skip',
-  avatarRigs,
+  kinds, plugins: runtimePlugins,
   onCue: (cue) => audio.handle(cue),
   onAction: perform,
   onNotice: (message) => ui.notice(message, 'error'),
@@ -92,13 +120,13 @@ const game = new Game({
       resetPractice(PRACTICES[Number(key) - 1].id);
     }
   },
-});
+}), () => audio.dispose());
 const unsubscribeLevel = level.subscribe((change) => {
   game.applyLevel(change);
   if (change.kind === 'replace') origin = 'start';
 });
 // The open project, created before the editors so each can save into it; it reads them only once started.
-const project = new ProjectSession({
+const project: ProjectSession = new ProjectSession({
   avatarRigs, client, plugins: workshopPlugins,
   workspace: {
     level: {
@@ -175,8 +203,10 @@ const serverCopies = new ServerCopies({
   client, health: () => project.serverHealth(), watch: (listener) => project.subscribe(listener),
 });
 const published = publishedLevel(publishedProject);
-const ui = createUI({
+const ui: GameUi = boot(() => createUI({
   mount,
+  plugins: runtimePlugins,
+  readStatus: () => game.simulation.status(),
   initialSettings: game.settings(),
   initialInputMode: game.input.mode,
   onAction: perform,
@@ -189,7 +219,16 @@ const ui = createUI({
     plugins?.settingsChanged();
   },
   projectSave: project, serverCopies,
+}), () => {
+  recorder.dispose();
+  serverCopies.dispose();
+  project.dispose();
+  audio.dispose();
+  unsubscribeLevel();
+  game.dispose();
 });
+runtimeNotice = (message, kind = 'info') => ui.notice(message, kind);
+for (const { message, kind } of startupNotices.splice(0)) ui.notice(message, kind);
 const rig = new AppearanceRig(game.view.visuals);
 const appearance = new Appearance(rig, ui.notice, { browserStore: !opensProject });
 const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice, projectSave: project, serverCopies });
@@ -213,7 +252,11 @@ const spriteEditor = createSpriteEditor({
   },
   applySavedProfile: !opensProject,
   projectSave: project, serverCopies,
-  motion: { kinds: avatarRigs.motionIds, controls: motionControls, preview: (kind) => game.view.previewMotion(kind) },
+  motion: {
+    kinds: avatarRigs.motionIds, controls: () => workshopPlugins.motionControls(),
+    subscribe: (listener) => workshopPlugins.subscribe(() => listener()),
+    preview: (kind) => game.view.previewMotion(kind),
+  },
   anchors: VISUAL_PARTS.map(({ id, label }) => {
     const binding = game.view.visuals.get(id);
     if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);
@@ -431,11 +474,14 @@ void project.start().then(() => {
   unsubscribeCourseLook = project.subscribe(() => courseMeshes.setMode(project.courseLook()));
   plugins.start();
 });
+const hudState: HudState = { debug, practice: practice(), recording: recorder.on, capturing: false, recordingNote: recordingNote() };
 game.start((state) => {
-  ui.update({
-    ...state, debug, practice: practice(),
-    recording: recorder.on, capturing: recorder.recording && !state.paused, recordingNote: recordingNote(),
-  });
+  hudState.debug = debug;
+  hudState.practice = practice();
+  hudState.recording = recorder.on;
+  hudState.capturing = recorder.recording && !state.paused;
+  hudState.recordingNote = recordingNote();
+  ui.update(state, hudState);
   spriteEditor.updatePreview();
   audio.setPaused(state.paused);
 });
@@ -462,6 +508,7 @@ if (import.meta.hot) {
     rig.dispose();
     ui.dispose();
     game.dispose();
+    runtimePlugins.dispose();
     delete window.gettingOver;
   });
 }

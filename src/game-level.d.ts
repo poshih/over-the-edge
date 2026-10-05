@@ -41,15 +41,18 @@ declare module 'virtual:game-phantoms' {
   export default phantoms;
 }
 
-// The game's own module (GAME_MODULE), or null.
-declare module 'virtual:game-module' {
-  const start: import('./release-module').StartRelease | null;
-  export default start;
+declare module 'virtual:game-plugins/kinds' {
+  const kinds: import('./plugins/kinds').Kinds;
+  export const plugins: readonly { readonly id: string; readonly facets: readonly import('./plugins/kernel').PluginEnvironment[] }[];
+  export default kinds;
 }
 
-// The trusted rig registry both the game shell and the Workshop build from AVATAR_RIG_MODULE (or the
-// standard registry without one). The same registry reaches GameView before any character loads.
-declare module 'virtual:avatar-rigs' {
-  const registry: import('./avatar-rig').AvatarRigRegistry;
-  export default registry;
+declare module 'virtual:game-plugins/runtime' {
+  const entries: readonly import('./plugins/kernel').PluginEntry<import('./plugins/runtime').RuntimeFacet>[];
+  export default entries;
+}
+
+declare module 'virtual:game-plugins/release' {
+  const entries: readonly import('./plugins/kernel').PluginEntry<import('./plugins/release').ReleaseFacet>[];
+  export default entries;
 }

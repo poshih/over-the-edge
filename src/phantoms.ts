@@ -8,7 +8,6 @@ import type { Game } from './game';
 import { decodePhantom, decodePhantomPack, isPhantomNear } from './phantom-format';
 import type { PhantomTrack } from './phantom-format';
 import { PhantomRecorder } from './phantom-recorder';
-import { httpPhantoms } from './phantom-service';
 import type { PhantomService } from './phantom-service';
 import { PHANTOM_LOOK, PhantomView } from './phantom-view';
 import { PHYSICS } from './config';
@@ -107,21 +106,19 @@ class PhantomPacks {
 
 /**
  * Replays phantoms for a running game from the release's bundled recordings and its backend: the
- * game's own service or, without one, the reference protocol at `url`. With a backend, the player's
+ * service resolved by the release plugin session. With a backend, the player's
  * movement is recorded for it too. Everything runs on the game's steps, so pauses hold it too.
  */
 export function startPhantoms(options: {
   readonly game: Game;
   readonly course: string;
-  // An absolute URL, used when there is no service; null without a backend.
-  readonly url: string | null;
   readonly service: PhantomService | null;
   readonly packs: readonly ContentPhantomPack[];
   readonly content: ContentLoader;
   readonly random?: () => number;
 }): Phantoms {
   const { game, course } = options;
-  const service = options.service ?? (options.url === null ? null : httpPhantoms(options.url));
+  const service = options.service;
   const random = options.random ?? Math.random;
   const lifecycle = new AbortController();
   const view = new PhantomView();

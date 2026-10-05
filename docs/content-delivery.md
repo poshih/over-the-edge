@@ -1,9 +1,9 @@
 # Content delivery
 
 A game build is a **public shell** plus **private content**. The shell is the page, the
-engine's and the game module's code, the styles and the icon. The content is everything the
-game shows or plays: the level, settings, character profiles, theme, HUD, audio settings,
-images, models and media. The release loads content only through the game's **content
+engine's code and the game's [plugins](plugins.md), the styles and the icon. The content is
+everything the game shows or plays: the level, settings, character profiles, theme, HUD, audio
+settings, images, models and media. The release loads content only through the game's **content
 access**, which is where each game plugs in its own identity management: its sign-in, its
 backend and its CDN. The engine never sees accounts, tokens or entitlements; it only packages
 content, asks for access and verifies what arrives.
@@ -23,7 +23,7 @@ inside the shell's folder, so deploying the shell never publishes content.
 dist-game/
   index.html
   favicon.svg
-  assets/index-<hash>.js          engine code, and the game's module when there is one
+  assets/index-<hash>.js          engine code, and the game's plugins when it has any
   assets/index-<hash>.css
 dist-game-content/
   game/<sha256>.json              the manifest
@@ -31,7 +31,7 @@ dist-game-content/
   game/<sha256>.glb               character, appearance and course models
   game/<sha256>.wav               media, by extension
   game/<sha256>.phantoms          bundled phantom recordings, one pack per height band
-  library/<part>/<id>/<sha256>.glb  one model library entry, for runtime swaps (with GAME_MODULE)
+  library/<part>/<id>/<sha256>.glb  one model library entry, for runtime swaps (with a release facet)
 ```
 
 - **Groups.** Content is split into groups that a CDN grants as a unit. The `game` group is the
@@ -39,7 +39,8 @@ dist-game-content/
   scoped to `game/` covers the whole group. Each [model library](characters.md#model-library-and-runtime-swaps)
   entry, such as a cosmetic avatar, hammer or pot, is its own group, `library/<part>/<id>`, never part
   of the base game and fetched only once the game's backend selects it for the player; a game
-  built without `GAME_MODULE` has no such backend, and no library groups.
+  built without a [release facet](release-plugins.md#library-models) has no such backend, and no
+  library groups, and neither has a studio preview.
 - **Named by content.** Every file is named by its SHA-256. Files are immutable, cacheable
   forever and renamed when they change. Two builds of the same game write identical content,
   wherever it is served.
@@ -55,8 +56,9 @@ dist-game-content/
 - **Only what the game uses.** A game build reads and checks only the files it packages, so an
   unused file in a project cannot fail the build. It packages the course meshes the level
   draws in the release's look, the media the level and the audio play, and the art of the
-  enemy species the level places. The model library is packaged only for a game with its own
-  module (`GAME_MODULE`): without a backend to select them, no library model can ever show.
+  enemy species the level places. The model library is packaged only for a game with a
+  release facet, outside studio previews: without a backend to select them, no library model
+  can ever show.
   From a project directory, each file is read, checked and copied into the content on its own,
   so a build never holds more than one at a time; a project file is one JSON text, which the
   build reads whole.
@@ -75,13 +77,13 @@ GAME_CONTENT_URL=https://cdn.example.com/my-game/ npm run build:game
 
 Development, staging and production builds set different content URLs. Moving to another CDN,
 or mirroring on two, means uploading the same files and changing the content URL, which rebuilds
-the shell but not the content. A game's module can also choose each file's URL itself (see
-below), which rebuilds nothing.
+the shell but not the content. A game's [content access](release-plugins.md#access-and-sign-in)
+can also choose each file's URL itself (see [grants](#grants)), which rebuilds nothing.
 
 ## Public games
 
-A game without a module loads its content from the content URL, without cookies. Deploy both
-outputs:
+A game whose plugins supply no content access loads its content from the content URL, without
+cookies. Deploy both outputs:
 
 - the shell, for example with `npx wrangler deploy --config wrangler.game.toml --keep-vars`;
 - the content, uploaded to whatever static host or CDN serves the content URL. Serve it from
@@ -90,84 +92,40 @@ outputs:
 
 `wrangler.game.toml` deploys the shell only; publishing content is always a separate step.
 
-## Protected games: the game's module
+## Protected games: content access
 
-`GAME_MODULE` bundles one module of the game's own code into the shell (see
-[the game's module](game-module.md)). It must be a `.ts` or `.js` file inside this repository,
-and combines with `GAME_PROJECT` or the per-file inputs:
+A game whose content only some players may load supplies its own content access from a plugin's
+[release facet](release-plugins.md), named in the game's [plugin manifest](plugins.md#the-manifest).
+It combines with `GAME_PROJECT` or the per-file inputs:
 
 ```sh
-GAME_PROJECT=projects/my-game GAME_MODULE=games/my-game/module.ts \
+GAME_PLUGINS=games/my-game/plugins.json GAME_PROJECT=projects/my-game \
   GAME_CONTENT_URL=https://cdn.example.com/my-game/ npm run build:game
 ```
 
-The module exports `start(host)`. The release calls it once, before it fetches anything, and
-awaits it, so the module can sign the player in first. Types are in `src/release-module.ts`.
+The release starts its release facets before it fetches anything, so a plugin can sign the
+player in first, and then asks for every file through the access they supply at `ACCESS`. The
+plugin also hears of the load's progress and failures, and resolves a failure to load again,
+for example once the player has signed in or bought the game. [Access and
+sign-in](release-plugins.md#access-and-sign-in) shows such a plugin, and [grants](#grants)
+describes what its access answers. A release built without `GAME_PLUGINS` contains no downstream
+code, and the shell is public, so plugins must hold no secrets.
 
-```ts
-import { ContentError } from '../../src/release-module';
-import type { ReleaseHost, ReleaseModule } from '../../src/release-module';
+## Avatar rig strategies and motion kinds
 
-export async function start(host: ReleaseHost): Promise<ReleaseModule> {
-  // host.mount is the release's interface element: the module may add its own sign-in UI there.
-  return {
-    access: {
-      async grant(request, signal) {
-        // The game's backend checks the player's session and entitlement for request.group,
-        // then signs request.paths. The engine never sees the session or the signing key.
-        const response = await fetch('https://api.example.com/content-grants', {
-          method: 'POST', credentials: 'include', signal,
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
-        });
-        if (response.status === 401) throw new ContentError('unauthenticated', 'Sign in to play.');
-        if (response.status === 403) throw new ContentError('denied', 'This account does not own the game.');
-        if (!response.ok) throw new ContentError('unavailable', 'The store is unavailable.');
-        const answer = await response.json();
-        return { urls: new Map(Object.entries(answer.urls)), credentials: 'omit', expires: answer.expires };
-      },
-    },
-    progress: ({ loaded, total }) => { /* show loading */ },
-    // Resolve to load again, for example once the player has signed in or bought the game;
-    // reject to stop with that error shown.
-    failed: (error) => showSignIn(host.mount, error.code),
-    ready: (api) => { /* the game runs; api.setPause(true) while the module's UI is open */ },
-    dispose: () => { /* development reloads */ },
-  };
-}
-```
+A plugin's [kinds facet](kinds-plugins.md) adds a game's own
+[avatar rig strategies](characters.md#rig-strategies) and [motion kinds](characters.md#secondary-motion)
+to the engine's standard strategy and built-in hair, so its imported avatars may select them.
+The dev server, the project server and every build compose the kinds facets in Node as they
+start, with the same function the browser uses, so the validators check exactly the strategies
+and motion kinds the release runs. Every validator enforces them: importing or opening a project,
+the project server's writes, release packaging and the running release, so a custom driver never
+falls back to the standard rig in one path and works in another.
 
-The module's whole contract, what `start` receives and returns, the API the running game hands it
-and the HUD readouts it may draw its own way, is in [the game's module](game-module.md). A release
-built without `GAME_MODULE` contains no downstream code, and the shell is public, so the module
-must hold no secrets.
-
-## Avatar rig strategies: the rig module
-
-`AVATAR_RIG_MODULE` adds a game's own [avatar rig strategies](characters.md#rig-strategies) and
-[motion kinds](characters.md#secondary-motion) to the registry that already holds the standard
-strategy and the built-in hair, so its imported avatars may select them.
-Like `GAME_MODULE`, it must be a `.ts` or `.js` file inside this repository:
-
-```sh
-AVATAR_RIG_MODULE=games/my-game/rigs.ts npm run build:game
-```
-
-The module default-exports `{ apiVersion, strategies, motions }` at **API version 2**
-(`AVATAR_RIG_API_VERSION` in `src/avatar-rig.ts`). It is imported once, when the dev server,
-build or project server starts, through Vite's own resolver, so the validators check exactly
-the strategies and motion kinds the browser runs. A module whose export is malformed, declares
-another API version, duplicates a strategy ID or omits the standard strategy fails with a typed
-`AvatarRigError` naming the fault, and a malformed or duplicated motion kind with a typed
-`AvatarMotionError`, not a plain loader error. Its editor-only `controls` export is read by the
-Workshop alone; a release never imports it.
-
-Unlike `GAME_MODULE`, the rig module is **not** ignored by publishing: the project server loads
-it to validate every model it stores, and the release it builds keeps it, so a published game
-shows the same avatars. The registry is a **startup snapshot** — it is not reloaded when the
-module changes, so restart the dev server, rebuild or restart the project server. Every
-validator enforces it: importing or opening a project, the project server's writes, release
-packaging and the running release, so a custom driver never falls back to the standard rig in
-one path and works in another.
+Publishing keeps them: the project server validates every model it stores against the game's
+kinds facets, and the studio previews it builds bundle the same facets, so a published game
+shows the same avatars. The kinds are a **startup snapshot**: they are not composed again when a
+facet changes, so restart the dev server, rebuild or restart the project server.
 
 ## Grants
 
@@ -181,8 +139,8 @@ interface ContentGrant {
 }
 ```
 
-A refusal throws a `ContentError`. The engine adds the group when the module leaves it out, and
-wraps anything else the adapter throws as `unavailable`.
+A refusal throws a `ContentError`. The engine adds the group when the access leaves it out, and
+wraps anything else the access throws as `unavailable`.
 
 | Code | Meaning |
 | --- | --- |
@@ -244,10 +202,10 @@ keep requesting ranges while they play.
 
 ## Threat model
 
-- **The backend decides.** The shell, the engine and the module run on the player's machine,
-  where the player can change them. So the game's backend makes every decision that matters,
-  such as who may load which group and which library model each part uses, and enforces it
-  through what it grants and what its CDN serves; the release only carries decisions out.
+- **The backend decides.** The shell, the engine and the game's plugins run on the player's
+  machine, where the player can change them. So the game's backend makes every decision that
+  matters, such as who may load which group and which library model each part uses, and enforces
+  it through what it grants and what its CDN serves; the release only carries decisions out.
 - **Protected.** A player the backend refuses (signed out, not entitled, or holding an expired
   grant) cannot get content from the shell, its deployment, the CDN or the engine's API.
 - **Verified.** Whoever controls the CDN cannot make the release use anything but the build's
@@ -261,9 +219,10 @@ keep requesting ranges while they play.
   reloads the page. `npm run preview:game` serves `dist-game/` and `dist-game-content/` together.
 - The project server's **Publish** writes the shell to `releases/<id>/` and the content to
   `releases/<id>.content/`, and serves both at `/play/<id>/`, behind the studio's own access
-  checks. Publishing ignores `GAME_CONTENT_URL` and `GAME_MODULE`: a studio preview uses public
-  access to its own content and, without a backend that selects, packages no library models. It
-  honors [`AVATAR_RIG_MODULE`](#avatar-rig-strategies-the-rig-module): the published shell bundles
-  the same strategies the project server validated the project's models against.
+  checks. Publishing ignores `GAME_CONTENT_URL` and builds a [studio preview](plugins.md#studio-previews):
+  it keeps the game's kinds and runtime facets, so the published shell bundles the same
+  strategies the project server validated the project's models against and shows the game's own
+  HUD readouts and looks, but drops every release facet. A studio preview therefore uses public
+  access to its own content and, without a backend that selects, packages no library models.
 - A Workshop built with `GAME_PROJECT` publishes every project file, so a game with protected
   content deploys that Workshop only behind its own access control, or not at all.

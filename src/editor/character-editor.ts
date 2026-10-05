@@ -32,7 +32,7 @@ import type { ServerModel, ServerModels } from './server-models';
 import type { PartRole } from '../model-library';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import { createMotionEditor } from './motion-editor';
-import type { AvatarMotionControls } from '../avatar-motion';
+import type { AvatarMotionControls } from './avatar-motion-controls';
 import type { LeanPreview } from '../waist-lean';
 import { sectionMarkup } from './workshop-section';
 import './character-editor.css';
@@ -112,7 +112,8 @@ export function createCharacterEditor(options: {
   // The game's registered motion kinds, their Workshop controls, and the game view's sway and jolt.
   readonly motion: {
     readonly kinds: readonly string[];
-    readonly controls: AvatarMotionControls;
+    readonly controls: () => AvatarMotionControls;
+    readonly subscribe: (listener: () => void) => () => void;
     readonly preview: (kind: LeanPreview) => void;
   };
 }): { setHammerRig(rig: RigGeometry): void; dispose(): void } {
@@ -805,12 +806,14 @@ export function createCharacterEditor(options: {
   options.mount.append(root);
   renderRig();
   const unsubscribe = options.state.subscribe(render);
+  const unsubscribeMotion = options.motion.subscribe(render);
   options.signal.addEventListener('abort', dispose, { ...listen, once: true });
 
   function dispose(): void {
     if (disposed) return;
     disposed = true;
     unsubscribe();
+    unsubscribeMotion();
     events.abort();
     root.remove();
   }

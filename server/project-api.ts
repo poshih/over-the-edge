@@ -693,7 +693,7 @@ export function createStudioHandler(config: StudioConfig) {
         : role !== 'avatar' ? base : inSection('models', () => {
         if (settings !== null) return { ...base, ...validateAvatarSettings(avatarSettingsQuery(settings)) };
         if (existing !== undefined) return { ...(existing as LibraryAvatarEntry), ...base };
-        return newAvatarEntry(bytes, base, DEFAULT_AVATAR_SETTINGS);
+        return newAvatarEntry(bytes, base, DEFAULT_AVATAR_SETTINGS, config.avatarRigs);
       });
       inSection('models', () => checkLibraryModel(role, entry, bytes, config.avatarRigs));
       const models = withEntry(manifest.models, role, entry);

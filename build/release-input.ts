@@ -228,7 +228,7 @@ export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode:
  * A build from GAME_PROJECT, with GAME_ART_MODE applied. It takes only what the game uses, each file read once and
  * checked like every project's: the course artwork its level draws in the release's look, the appearance models, the
  * media its level and audio play and the art of the enemies its level places. The model library is the game's when
- * `library` says it has a backend that can select its models (GAME_MODULE); without one no library model can show, so
+ * `library` says it has a release facet that can select its models (docs/release-plugins.md); without one no library model can show, so
  * none is packaged.
  */
 export function loadProjectRelease(root: string, requested: string, selectedMode: string | undefined,

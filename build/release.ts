@@ -23,7 +23,6 @@ const MODULES = {
   audio: 'virtual:game-audio',
   decorations: 'virtual:game-decorations',
   phantoms: 'virtual:game-phantoms',
-  module: 'virtual:game-module',
 } as const;
 type ModuleName = keyof typeof MODULES;
 const RESOLVED = Object.fromEntries(Object.entries(MODULES).map(([name, id]) => [`\0${id}`, name])) as Record<string, ModuleName>;
@@ -79,7 +78,6 @@ export function gameRelease(options: {
   // A folder of phantom recordings by course, whose recordings of the level the release bundles; null for none. Read
   // once: new recordings join the next build or server start.
   readonly recordings: string | null;
-  readonly module: string | null;
   // Input files known before loading; a change reloads the page, or restarts the server for a project.
   readonly watch: readonly string[];
   readonly restartOnChange: boolean;
@@ -103,9 +101,6 @@ export function gameRelease(options: {
     return packed;
   };
   const code = (name: ModuleName): string => {
-    if (name === 'module') {
-      return options.module === null ? 'export default null;' : `export { start as default } from ${JSON.stringify(options.module)};`;
-    }
     const { course, content } = current();
     if (name === 'content') return `export default ${JSON.stringify({ contentUrl: options.contentUrl, ...content.pins })};`;
     if (name === 'phantoms') {

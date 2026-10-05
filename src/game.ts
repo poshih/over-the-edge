@@ -24,11 +24,12 @@ import type { AudioCue, GameCue } from './audio-settings';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { EnemyEvent, EnemyPhase } from './enemy-types';
-import type { AvatarRigRegistry } from './avatar-rig';
 import type { HammerHead } from './hammer-head';
 import type { PartRole } from './model-library';
 import type { PartModel } from './view';
-import type { Looks } from './object-looks';
+import type { Kinds } from './plugins/kinds';
+import type { RuntimePlugins } from './plugins/runtime';
+import type { HudFrame } from './hud-readouts';
 
 export class Game {
   readonly simulation: Simulation;
@@ -61,6 +62,10 @@ export class Game {
   private previousTime = 0;
   private timerElapsed = 0;
   private timerRunning = true;
+  private readonly hudFrame: { -readonly [K in keyof HudFrame]: HudFrame[K] } = {
+    height: 0, bestHeight: 0, elapsed: 0, timerRunning: true, health: null, paused: false,
+    pointerLocked: false, inputMode: 'mouse',
+  };
 
   constructor(options: {
     canvas: HTMLCanvasElement;
@@ -69,16 +74,15 @@ export class Game {
     level: LevelDefinition;
     settings?: Readonly<GameSettings>;
     characterModels?: CharacterModelLoader | null;
-    // The trusted rig strategies every profile and library avatar may select.
-    avatarRigs?: AvatarRigRegistry;
+    // Required, explicit environment sessions; nothing silently chooses a registry or runtime defaults.
+    kinds: Kinds;
+    plugins: RuntimePlugins;
     // Loads a release's packaged sprite images.
     content?: ContentLoader;
     theme?: GameTheme;
     enemyArt?: EnemyArtSettings;
     // Creates the decoration view, when the game draws decorations.
     decorations?: (() => DecorationView) | null;
-    // How the level's objects look where the game draws them its own way.
-    looks?: Looks;
     // How message events appear; toasts by default.
     messageStyle?: MessageStyle;
     // Whether play-video events play or are skipped; they play by default. The Workshop skips them.
@@ -102,10 +106,16 @@ export class Game {
     window.addEventListener('unhandledrejection', (event) =>
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
-    this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
-      characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
-      decorations: options.decorations, avatarRigs: options.avatarRigs, looks: options.looks,
-    });
+    try {
+      this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
+        characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
+        decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
+      });
+    } catch (error) {
+      this.lifecycle.abort();
+      this.simulation.dispose();
+      throw error;
+    }
     if (this.onCue !== null) this.simulation.trackImpacts(true);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
     this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => {
@@ -140,7 +150,7 @@ export class Game {
     }, listen);
   }
 
-  start(onFrame: (state: ReturnType<Game['state']>) => void): void {
+  start(onFrame: (state: HudFrame) => void): void {
     if (this.started) throw new Error('The game loop is already running.');
     this.started = true;
     this.previousTime = performance.now();
@@ -191,20 +201,22 @@ export class Game {
         const frame = this.simulation.frame(this.pauseReasons.size > 0 ? 1 : clamp(this.accumulator / PHYSICS.dt, 0, 1));
         this.view.render(frame, { dt, ...this.character });
       }
-      onFrame(this.state());
+      onFrame(this.readHudFrame());
       this.animationFrame = requestAnimationFrame(animate);
     };
     this.animationFrame = requestAnimationFrame(animate);
   }
 
-  state() {
-    const state = this.simulation.status();
-    return {
-      ...state, elapsed: this.timerElapsed, timerRunning: this.timerRunning,
-      paused: this.pauseReasons.size > 0,
-      pointerLocked: this.input.locked,
-      inputMode: this.input.mode,
-    };
+  // Reused, read-only to consumers. Diagnostics request simulation.status() separately in the Workshop.
+  readHudFrame(): HudFrame {
+    const frame = this.hudFrame;
+    this.simulation.writeHudFrame(frame);
+    frame.elapsed = this.timerElapsed;
+    frame.timerRunning = this.timerRunning;
+    frame.paused = this.pauseReasons.size > 0;
+    frame.pointerLocked = this.input.locked;
+    frame.inputMode = this.input.mode;
+    return frame;
   }
 
   get halted(): boolean {

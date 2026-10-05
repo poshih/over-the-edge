@@ -11,7 +11,7 @@ export interface AvatarMotionEntry {
   readonly config: RigJson;
 }
 
-// The built-in hair's motion ID: hair is configured as `avatar.hair`, and no module may register a kind under it.
+// The built-in hair's motion ID: hair is configured as `avatar.hair`; plugin kinds use "<plugin>/<name>".
 export const HAIR_MOTION_ID = 'hair';
 
 export const AVATAR_MOTION_LIMITS = Object.freeze({
@@ -33,7 +33,7 @@ export function validateAvatarMotion(value: unknown): readonly AvatarMotionEntry
   return Object.freeze(value.map((item: unknown): AvatarMotionEntry => {
     const entry = record(item, ['id', 'config'], 'An avatar motion');
     if (!isAvatarDriverId(entry.id)) {
-      throw new SpriteError('An avatar motion names its kind with lowercase letters, numbers and hyphens, starting with a letter.');
+      throw new SpriteError('An avatar motion names a built-in or "<plugin>/<name>", each part using 1-64 lowercase letters, digits and hyphens, starting with a letter.');
     }
     if (entry.id === HAIR_MOTION_ID) throw new SpriteError('Hair chains belong in the avatar\'s hair, not its motion list.');
     if (ids.has(entry.id)) throw new SpriteError(`The avatar lists motion "${entry.id}" twice; each kind runs at most once.`);

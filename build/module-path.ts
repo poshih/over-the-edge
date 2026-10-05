@@ -1,27 +1,23 @@
 import { realpathSync, statSync } from 'node:fs';
-import { extname, resolve, sep } from 'node:path';
+import { dirname, extname, isAbsolute, resolve, sep } from 'node:path';
+import { PluginError } from '../src/plugins/kernel';
+import type { PluginEnvironment } from '../src/plugins/kernel';
 
 const MODULE_EXTENSIONS: readonly string[] = ['.ts', '.mts', '.js', '.mjs'];
 
-export class ProjectModuleError extends Error {
-  constructor(message: string) { super(message); this.name = 'ProjectModuleError'; }
-}
-
-// GAME_MODULE and AVATAR_RIG_MODULE share one physical-path containment rule.
-export function projectModulePath(project: string, requested: string | undefined, variable: string): string | null {
-  if (requested === undefined) return null;
+// Facets are trusted build inputs, relative to their manifest and physically contained in the repo.
+export function pluginFacetPath(project: string, manifest: string, plugin: string, facet: PluginEnvironment, requested: string): string {
   const root = realpathSync(project);
   try {
-    const path = realpathSync(resolve(root, requested));
-    if (!path.startsWith(root.endsWith(sep) ? root : root + sep) ||
-      !MODULE_EXTENSIONS.includes(extname(path)) || !statSync(path).isFile()) {
-      throw new ProjectModuleError(`${variable} must name a .ts, .mts, .js or .mjs module inside this project.`);
+    if (isAbsolute(requested)) throw new Error('Facet paths must be relative to the manifest.');
+    const path = realpathSync(resolve(dirname(manifest), requested));
+    if (!path.startsWith(root + sep) || !MODULE_EXTENSIONS.includes(extname(path)) || !statSync(path).isFile()) {
+      throw new Error('Facets must name .ts, .mts, .js or .mjs files physically inside this repo.');
     }
     return path;
   } catch (error) {
-    if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
-      throw new ProjectModuleError(`${variable} ${requested} does not exist.`);
-    }
-    throw error;
+    throw new PluginError('invalid-plugin',
+      `Plugin manifest ${manifest}, plugin "${plugin}", ${facet} "${requested}": ${error instanceof Error ? error.message : String(error)}`,
+      plugin, null, { cause: error });
   }
 }

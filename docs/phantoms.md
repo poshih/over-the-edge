@@ -214,8 +214,8 @@ accepts anything and throws `PhantomError` unless the result is a playable track
 
 ## The protocol
 
-A release without a [module service](#the-games-own-backend) speaks the reference protocol
-under the phantom URL:
+A release whose plugins supply no [phantom service](#the-games-own-backend) speaks the
+reference protocol under the phantom URL:
 
 | Request | Body | Answer |
 | --- | --- | --- |
@@ -240,34 +240,12 @@ a backend that wants players' identities takes them from its own session, like
 
 ## The game's own backend
 
-A game's [module](game-module.md) may carry phantoms its
-own way: `ReleaseModule.phantoms` replaces the reference client. `ReleaseHost.phantomsUrl` is the
-build's phantom URL, absolute, or `null` without a backend.
-
-```ts
-import { httpPhantoms } from '../../src/release-module';
-import type { ReleaseHost, ReleaseModule } from '../../src/release-module';
-
-export async function start(host: ReleaseHost): Promise<ReleaseModule> {
-  const session = await signIn(host.mount);
-  return {
-    // The reference protocol with the game's own authorization.
-    phantoms: host.phantomsUrl === null ? undefined : httpPhantoms(host.phantomsUrl, {
-      headers: async () => ({ Authorization: `Bearer ${await session.token()}` }),
-    }),
-  };
-}
-```
-
-`httpPhantoms(url, { credentials, headers })` is the reference client. `credentials: 'include'`
-sends cookies to another origin, which then needs CORS with credentials. A module can instead
-implement `PhantomService` itself, over any transport:
-
-- `submit(course, recording, signal)` hands over one recording;
-- `nearby(course, { x, y, limit }, signal)` resolves to recordings in the phantom format.
-
-A module may supply phantoms to a release with a phantom URL or bundled recordings; one that
-supplies them to a release without either stops it with an error.
+A plugin's [release facet](release-plugins.md) may carry phantoms its own way: its service at
+the `PHANTOMS` point replaces the reference client, with the game's own authorization or over a
+transport of its own, through the same `PhantomService` contract, `submit` and `nearby`.
+[Phantom backend](release-plugins.md#phantom-backend) shows how. A plugin may supply phantoms to
+a release with a phantom URL or bundled recordings; one that supplies them to a release without
+either stops it with an error.
 
 ## The reference store
 

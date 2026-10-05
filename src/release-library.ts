@@ -15,7 +15,7 @@ export interface PartModelHost {
   partModels(): Record<PartRole, string | null>;
 }
 
-// What the game's module uses: the library's ids and the parts in use, and requests to its backend.
+// What release facets use: the library's IDs, parts in use and requests to the backend (docs/release-plugins.md).
 export interface ModelLibraryApi {
   available(role: PartRole): readonly string[];
   active(role: PartRole): string | null;

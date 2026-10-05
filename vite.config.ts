@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import { avatarMotionControls, avatarRigModulePath, avatarRigs, loadWorkshopAvatarRigs } from './build/avatar-rig-module.ts';
+import { facetBoundaryPaths, gamePlugins, loadKinds, pluginBoundary, readGamePlugins } from './build/game-plugins.ts';
 import { gameTitle } from './build/game-title.ts';
 import { locationUrl } from './build/location-url.ts';
 import { loadProjectInput } from './build/project-release.ts';
@@ -8,7 +8,6 @@ import { DEFAULT_CONTENT_URL } from './build/release.ts';
 import { loadServerLevels, workshopLevels } from './build/workshop-levels.ts';
 import { loadServerModels, workshopModels } from './build/workshop-models.ts';
 import { workshopProject } from './build/workshop-project.ts';
-import { checkWorkshopModule, workshopModulePath, workshopPlugins } from './build/workshop-plugins.ts';
 import { projectStudio } from './server/project-api.ts';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
@@ -18,14 +17,11 @@ export default defineConfig(async ({ mode, isPreview }) => {
   // Workshop also serves the levels folder's levels, and offers the models folder's models from
   // WORKSHOP_CONTENT_URL. Previewing serves a finished build, so none of them is read again.
   const requested = isPreview === true ? undefined : process.env.GAME_PROJECT;
-  // The trusted rig module is resolved and evaluated once here, so the Workshop's project checks and
-  // the browser's registry both use the same strategies and motion kinds; its motion controls are
-  // checked now too, so a bad one stops the Workshop from starting.
-  const rigModule = avatarRigModulePath(project, process.env.AVATAR_RIG_MODULE);
-  const { registry: rigRegistry } = await loadWorkshopAvatarRigs(rigModule, mode);
-  // The game's editor-only Workshop plugins, checked now, so a malformed module stops the Workshop from starting.
-  const pluginModule = workshopModulePath(project, process.env.WORKSHOP_MODULE);
-  await checkWorkshopModule(pluginModule, mode);
+  // Only pure kinds facets run in Node. Workshop facets validate in the page, including on HMR.
+  const manifest = readGamePlugins(project, process.env.GAME_PLUGINS);
+  const kinds = await loadKinds(manifest, mode);
+  const rigRegistry = kinds.avatarRigs;
+  const environments = ['kinds', 'runtime', 'workshop'] as const;
   const input = requested === undefined ? null : loadProjectInput(project, requested, rigRegistry);
   const levels = isPreview === true ? [] : loadServerLevels(project);
   const models = isPreview === true ? [] : loadServerModels(project, rigRegistry);
@@ -37,9 +33,8 @@ export default defineConfig(async ({ mode, isPreview }) => {
       workshopProject(input),
       workshopLevels(levels),
       workshopModels({ models, contentUrl }),
-      avatarRigs({ module: rigModule }),
-      avatarMotionControls({ module: rigModule }),
-      workshopPlugins({ module: pluginModule }),
+      pluginBoundary('workshop-boundary', facetBoundaryPaths(manifest, environments)),
+      gamePlugins({ manifest, environments }),
       // A preview serves a build made with GAME_PROJECT, so the studio reads it from the environment either way.
       projectStudio({ root: project, mode, avatarRigs: rigRegistry, workshopProject: process.env.GAME_PROJECT }),
     ],

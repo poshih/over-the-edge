@@ -1,7 +1,7 @@
 import { setText } from '../dom';
 import type { RigJson } from '../avatar-driver';
 import type { AvatarMotionEntry } from '../avatar-motion-data';
-import type { AvatarMotionControls, AvatarMotionNumberControl, AvatarMotionPath } from '../avatar-motion';
+import type { AvatarMotionControl, AvatarMotionControls, AvatarMotionNumberControl, AvatarMotionPath } from './avatar-motion-controls';
 import type { LeanPreview } from '../waist-lean';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
@@ -43,7 +43,7 @@ function write(config: RigJson, path: AvatarMotionPath, value: number, at = 0): 
 
 // Every number a kind's controls describe in one motion's configuration, with its path from the configuration's root;
 // a list's controls repeat for each of its items, titled by the item's title field.
-function describedNumbers(config: RigJson, controls: AvatarMotionControls[string]):
+function describedNumbers(config: RigJson, controls: readonly AvatarMotionControl[]):
   { readonly group: string | null; readonly path: AvatarMotionPath; readonly spec: AvatarMotionNumberControl }[] {
   const numbers: { group: string | null; path: AvatarMotionPath; spec: AvatarMotionNumberControl }[] = [];
   for (const control of controls) {
@@ -67,7 +67,7 @@ function describedNumbers(config: RigJson, controls: AvatarMotionControls[string
 
 /**
  * Workshop / Character / Secondary motion: the imported avatar's motions, each with the controls its kind describes in
- * the avatar rig module's editor-only `controls`, a reset to their defaults, and a sway and a jolt that move the
+ * a workshop facet's AVATAR_MOTION_CONTROLS (docs/workshop-plugins.md), a reset to their defaults, and a sway and a jolt that move the
  * avatar in the running game so the motion can be judged without playing. A change goes to the draft profile, where
  * the kind re-validates it against the model, and through Save and Revert. Hair shows here too; its chains are edited
  * in the profile JSON.
@@ -77,7 +77,7 @@ export function createMotionEditor(options: {
   readonly state: SpriteEditorState;
   // The registered motion kinds, and their controls.
   readonly kinds: readonly string[];
-  readonly controls: AvatarMotionControls;
+  readonly controls: () => AvatarMotionControls;
   readonly preview: (kind: LeanPreview) => void;
   readonly signal: AbortSignal;
 }): { render(snapshot: SpriteEditorSnapshot, disabled: boolean): void } {
@@ -85,7 +85,7 @@ export function createMotionEditor(options: {
   root.className = 'character-motion';
   root.innerHTML = `
     <p class="appearance-format">Secondary motion moves an imported avatar's unmapped joints after the body, head and arms
-      are posed: its hair chains, and the motion kinds the game registers in its avatar rig module, such as tails, ears
+      are posed: its hair chains, and the motion kinds the game registers in kinds facets, such as tails, ears
       or dangling accessories. A profile lists its kinds in <code>avatar.motion</code>; each runs only on the avatar it
       is configured for.</p>
     <p class="appearance-format character-motion-status" role="status" aria-live="polite"></p>
@@ -121,7 +121,7 @@ export function createMotionEditor(options: {
   }
 
   function defaults(config: RigJson, id: string): RigJson {
-    return describedNumbers(config, options.controls[id] ?? []).reduce((next, { path, spec }) => write(next, path, spec.default), config);
+    return describedNumbers(config, options.controls().get(id)?.controls ?? []).reduce((next, { path, spec }) => write(next, path, spec.default), config);
   }
 
   function build(entries: readonly AvatarMotionEntry[]): void {
@@ -137,7 +137,7 @@ export function createMotionEditor(options: {
       const legend = document.createElement('legend');
       legend.textContent = entry.id;
       group.append(legend);
-      const numbers = describedNumbers(entry.config, options.controls[entry.id] ?? []);
+      const numbers = describedNumbers(entry.config, options.controls().get(entry.id)?.controls ?? []);
       let parent: HTMLElement = group;
       let current: string | null = null;
       numbers.forEach(({ group: title, path, spec }, index) => {
@@ -185,7 +185,8 @@ export function createMotionEditor(options: {
       const entries = avatar?.motion ?? [];
       // The controls are rebuilt only when what they show changes, so a slider keeps its focus while it drags.
       const shape = JSON.stringify(entries.map(entry => [entry.id,
-        describedNumbers(entry.config, options.controls[entry.id] ?? []).map(({ group, path, spec }) => [group, path, spec.label])]));
+        describedNumbers(entry.config, options.controls().get(entry.id)?.controls ?? [])
+          .map(({ group, path, spec }) => [group, path, spec])]));
       if (shape !== layout) {
         layout = shape;
         build(entries);

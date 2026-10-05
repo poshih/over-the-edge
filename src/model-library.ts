@@ -5,7 +5,6 @@ import { AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, NO_AVATAR_HAIR, validateAvata
 import type { AvatarBoneMap, AvatarHair, AvatarModelSettings, PartialAvatarBoneMap } from './character-profile';
 import { STANDARD_AVATAR_DRIVER, validateAvatarDriver } from './avatar-driver';
 import type { AvatarDriver } from './avatar-driver';
-import { DEFAULT_AVATAR_RIGS } from './avatar-rig';
 import type { AvatarRigRegistry } from './avatar-rig';
 import { NO_AVATAR_MOTION, validateAvatarMotion } from './avatar-motion-data';
 import type { AvatarMotionEntry } from './avatar-motion-data';
@@ -194,7 +193,7 @@ export function mappedAvatarModel(boneMap: AvatarBoneMap): AvatarModelSettings {
 // the bone map resolves against its skin, the driver prepares for this exact model, the hair's chains name its skin
 // joints, and each motion's kind accepts its configuration and claims joints the engine allows.
 export function checkAvatarModelSettings(report: CharacterModelReport, settings: AvatarModelSettings,
-  registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS): void {
+  registry: AvatarRigRegistry): void {
   registry.prepare(report, settings);
 }
 
@@ -204,7 +203,7 @@ export function checkLibraryModel(
   role: PartRole,
   entry: LibraryEntry | LibraryAvatarEntry,
   bytes: Uint8Array,
-  registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS,
+  registry: AvatarRigRegistry,
 ): void {
   try {
     const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, role);
@@ -218,19 +217,19 @@ export function checkLibraryModel(
 export function checkModelLibrary(
   library: ModelLibrary,
   bytes: (path: string) => Uint8Array,
-  registry: AvatarRigRegistry = DEFAULT_AVATAR_RIGS,
+  registry: AvatarRigRegistry,
 ): void {
   for (const { role, entry } of libraryEntries(library)) checkLibraryModel(role, entry, bytes(libraryModelFile(role, entry.id)), registry);
 }
 
 // A new avatar entry for an imported GLB: its mapped joints, when every joint resolves, standard
 // rig strategy, no hair or motions, and hold settings taken from `settings`, typically the open character's.
-export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings: AvatarHoldSettings): LibraryAvatarEntry {
+export function newAvatarEntry(bytes: Uint8Array, entry: LibraryEntry, settings: AvatarHoldSettings, registry: AvatarRigRegistry): LibraryAvatarEntry {
   const report = inspectCharacterModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'avatar');
   const suggested: PartialAvatarBoneMap = suggestAvatarBoneMap(report);
   const boneMap = validateAvatarBoneMap(Object.fromEntries(AVATAR_JOINT_IDS.map((joint) => [joint, suggested[joint] ?? null])));
   const avatar: LibraryAvatarEntry = Object.freeze({ ...entry, ...mappedAvatarModel(boneMap), ...settings });
-  checkLibraryModel('avatar', avatar, bytes);
+  checkLibraryModel('avatar', avatar, bytes, registry);
   return avatar;
 }
 

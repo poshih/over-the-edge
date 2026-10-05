@@ -1,31 +1,19 @@
 import gameTitle from 'virtual:game-title';
 import type { InputMode, UiAction, UiActionOptions } from '../config';
-import { element, formatElapsedTime, setText } from '../dom';
+import { element, setText } from '../dom';
 import { inputModeForPointer } from '../input';
 import { createNotice } from '../notice';
 import { DEFAULT_HUD, formatHeight } from '../hud';
 import type { HudSettings } from '../hud';
-import { createHealthMeter } from '../health-meter';
-import type { HealthReading } from '../health-meter';
+import { createHudBar } from '../hud-bar';
+import type { HudFrame } from '../hud-readouts';
+import type { RuntimePlugins } from '../plugins/runtime';
 
 export const DESKTOP_QUERY = '(min-width: 1040px)';
 
-export interface GameHudState {
-  height: number;
-  bestHeight: number;
-  elapsed: number;
-  paused: boolean;
-  pointerLocked: boolean;
-  inputMode: InputMode;
-  timerRunning: boolean;
-  // Null in levels where nothing can hurt the player.
-  health: HealthReading | null;
-  // Whether play is being recorded right now.
-  capturing: boolean;
-}
-
 export function createGameUI(options: {
   mount: HTMLElement;
+  plugins: RuntimePlugins;
   initialInputMode: InputMode;
   onAction: (action: UiAction, options?: UiActionOptions) => void;
 }) {
@@ -56,14 +44,8 @@ export function createGameUI(options: {
         </div>
       </header>
       <section class="climb-hud" aria-label="Climb statistics">
-        <div class="height-metric">
-          <p class="eyebrow">CURRENT HEIGHT</p>
-          <p class="height-reading"><span class="height-value">0.0</span><span class="metric-unit">m</span></p>
-        </div>
-        <div class="secondary-metrics">
-          <div><p class="metric-label">PEAK</p><p class="metric-reading"><span class="peak-value">0.0</span><span class="small-unit">m</span></p></div>
-          <div><p class="metric-label timer-label">ELAPSED</p><p class="metric-reading elapsed-value">00:00</p></div>
-          <div class="health-metric" hidden><p class="metric-label">HEALTH</p><div class="metric-reading"></div></div>
+        <div class="peak-metric">
+          <p class="metric-label">PEAK</p><p class="metric-reading"><span class="peak-value">0.0</span><span class="small-unit">m</span></p>
         </div>
       </section>
       <footer class="game-help" aria-label="How to play">
@@ -91,19 +73,14 @@ export function createGameUI(options: {
   const inputState = element<HTMLElement>(root, '.input-state');
   const inputStateText = element<HTMLElement>(root, '.input-state-text');
   const recording = element<HTMLElement>(root, '.recording-state');
-  const height = element<HTMLElement>(root, '.height-value');
   const peak = element<HTMLElement>(root, '.peak-value');
-  const elapsed = element<HTMLElement>(root, '.elapsed-value');
-  const timerLabel = element<HTMLElement>(root, '.timer-label');
-  const heightLabel = element<HTMLElement>(root, '.height-metric .eyebrow');
-  const heightMetric = element<HTMLElement>(root, '.height-metric');
-  const peakMetric = element<HTMLElement>(root, '.secondary-metrics > div:first-child');
-  const timerMetric = element<HTMLElement>(root, '.secondary-metrics > div:nth-child(2)');
-  const healthMetric = element<HTMLElement>(root, '.health-metric');
-  const healthMeter = createHealthMeter();
-  element<HTMLElement>(healthMetric, '.metric-reading').append(healthMeter.root);
-  const units = [...root.querySelectorAll<HTMLElement>('.metric-unit, .small-unit')];
+  const peakMetric = element<HTMLElement>(root, '.peak-metric');
+  const peakUnit = element<HTMLElement>(root, '.small-unit');
+  const climb = element<HTMLElement>(root, '.climb-hud');
   let hud: HudSettings = DEFAULT_HUD;
+  let bar = createHudBar(options.plugins, hud);
+  bar.root.classList.add('workshop-hud');
+  climb.prepend(bar.root);
   const instructions = element<HTMLElement>(root, '.input-instructions');
   const mouseIcon = element<HTMLElement>(root, '.mouse-icon');
   const guideHeading = element<HTMLElement>(root, '.guide-heading');
@@ -142,28 +119,26 @@ export function createGameUI(options: {
     },
     // Previews a project's HUD labels, units and visibility on the Workshop readout.
     setHud: (next: HudSettings): void => {
+      if (next === hud) return;
       hud = next;
-      setText(heightLabel, hud.height.label);
-      for (const unit of units) setText(unit, hud.height.unit);
-      heightMetric.hidden = !hud.height.visible;
+      bar.dispose();
+      bar = createHudBar(options.plugins, hud);
+      bar.root.classList.add('workshop-hud');
+      climb.prepend(bar.root);
+      setText(peakUnit, hud.height.unit);
       peakMetric.hidden = !hud.height.visible;
-      timerMetric.hidden = !hud.timer.visible;
     },
-    update: (state: GameHudState): void => {
+    update: (state: HudFrame, capturing: boolean): void => {
       if (inputMode !== state.inputMode) setMode(state.inputMode);
-      setText(height, formatHeight(hud, state.height));
+      bar.update(state);
       setText(peak, formatHeight(hud, state.bestHeight));
-      setText(elapsed, formatElapsedTime(state.elapsed));
-      setText(timerLabel, state.timerRunning ? hud.timer.label : 'TIME STOPPED');
-      if (healthMetric.hidden !== (state.health === null)) healthMetric.hidden = state.health === null;
-      if (state.health !== null) healthMeter.update(state.health);
       setText(pauseLabel, state.paused ? 'Resume' : 'Pause');
       pause.classList.toggle('is-active', state.paused);
       play.classList.toggle('is-active', !state.paused && (state.pointerLocked || state.inputMode === 'touch'));
       const touch = state.inputMode === 'touch';
       const mode = state.paused ? 'paused' : touch ? 'touch' : state.pointerLocked ? 'captured' : 'free';
       if (inputState.dataset.mode !== mode) inputState.dataset.mode = mode;
-      if (recording.hidden === state.capturing) recording.hidden = !state.capturing;
+      if (recording.hidden === capturing) recording.hidden = !capturing;
       const pausedHint = touch ? 'tap Play to continue' : state.pointerLocked ? 'Esc to release mouse' : 'take your time';
       setText(inputStateText, state.paused ? `Paused - ${pausedHint}` :
         touch ? 'Touch controls - drag anywhere' :
@@ -172,6 +147,7 @@ export function createGameUI(options: {
     notice: notice.show,
     dispose: (): void => {
       events.abort();
+      bar.dispose();
       notice.dispose();
       root.remove();
       document.body.classList.remove('touch-controls');

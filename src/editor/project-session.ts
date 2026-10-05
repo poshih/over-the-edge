@@ -319,7 +319,7 @@ function isExpected(error: unknown): error is Error {
  */
 export class ProjectSession {
   private readonly workspace: ProjectWorkspace;
-  // The avatar drivers this Workshop accepts; injected so a custom AVATAR_RIG_MODULE reaches every validator.
+  // The avatar drivers this Workshop accepts; the composed Kinds registry reaches every validator.
   private readonly avatarRigs: AvatarRigRegistry;
   private readonly plugins: ProjectPlugins;
   private readonly client: ProjectClient;
@@ -692,7 +692,7 @@ export class ProjectSession {
       // A new hammer starts with the game's default head.
       const entry = role === 'hammer' ? { ...base, head: this.workspace.settings.get().rig.head }
         : role !== 'avatar' ? base : model === undefined
-          ? inSection('models', () => newAvatarEntry(bytes, base, settings))
+          ? inSection('models', () => newAvatarEntry(bytes, base, settings, this.avatarRigs))
           : { ...base, ...model, ...settings };
       inSection('models', () => checkLibraryModel(role, entry, bytes, this.avatarRigs));
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
@@ -2148,4 +2148,3 @@ function fileSizes(files: readonly { readonly path: string; readonly bytes: numb
 function projectFileName(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'game';
 }
-

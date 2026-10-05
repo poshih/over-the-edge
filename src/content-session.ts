@@ -299,7 +299,7 @@ export class ContentSession {
     } catch (error) {
       // Only the session's own closing is a cancellation; an adapter's own abort is a failure.
       if (this.lifecycle.signal.aborted) throw aborted(this.lifecycle.signal);
-      // A refusal reaches the module naming the group it concerns.
+      // A refusal reaches the release facets' FAILED point, naming its group (docs/release-plugins.md).
       if (error instanceof ContentError) throw error.group === null ? new ContentError(error.code, error.message, { group: request.group }) : error;
       throw new ContentError('unavailable', `The game's content access failed for ${request.group}: ${
         error instanceof Error ? error.message : String(error)}`, { group: request.group });

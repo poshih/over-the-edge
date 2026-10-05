@@ -1,6 +1,6 @@
 // The avatar-motion SDK: secondary motion a game registers for its imported skinned avatars, such as tails, ears,
-// flaps or dangling accessories, without editing the engine. Kinds live in the game's render-only avatar rig module
-// (AVATAR_RIG_MODULE, src/avatar-rig.ts) beside its rig strategies; a profile's `avatar.motion` names a kind by ID
+// flaps or dangling accessories, without editing the engine. Kinds live in a plugin's kinds facet
+// (docs/kinds-plugins.md) beside its rig strategies; a profile's `avatar.motion` names a kind by ID
 // with configuration only that kind interprets. When an avatar loads, the kind validates its configuration against
 // read-only facts about the model and claims the unmapped skin joints it will move. Every frame, after the mapped
 // joints are posed, the engine hands each motion its clock, its placement, the mapped joints and each claim's rest
@@ -17,7 +17,7 @@ export type { AvatarMotionEntry } from './avatar-motion-data';
 export type { RigJson } from './avatar-driver';
 
 // The engine's refusal codes. A kind refuses its configuration with codes of its own.
-export const AVATAR_MOTION_ERROR_CODES = ['duplicate-kind', 'unknown-kind', 'invalid-kind', 'invalid-motion', 'invalid-controls'] as const;
+export const AVATAR_MOTION_ERROR_CODES = ['unknown-kind', 'invalid-motion'] as const;
 export type AvatarMotionEngineErrorCode = typeof AVATAR_MOTION_ERROR_CODES[number];
 
 // A portable tag for a typed refusal across Vite's separate Node module-runner class identity.
@@ -27,7 +27,7 @@ const ERROR_CODE = /^[a-z][a-z0-9-]{0,63}$/;
 /**
  * A typed motion refusal; callers branch on `code`, never the message. A kind throws it for a configuration it
  * refuses, with a code of its own (lowercase letters, numbers and hyphens); the engine raises the codes above for
- * registration, lookup and contract faults. `motion` is the kind the refusal concerns: the engine sets it on a
+ * lookup and content contract faults. `motion` is the kind the refusal concerns: the engine sets it on a
  * kind's own refusals.
  */
 export class AvatarMotionError extends SpriteError {
@@ -120,34 +120,3 @@ export interface AvatarMotionKind {
   readonly id: string;
   prepare(config: RigJson, model: AvatarMotionModel): AvatarMotion;
 }
-
-// The Workshop's controls for a kind's tunable numbers, kept in the editor-only `controls` export of the game's
-// avatar rig module. Data only: the Workshop renders it, and releases never import it.
-
-// A path into a configuration: object keys and array indices.
-export type AvatarMotionPath = readonly (string | number)[];
-
-// One number in a configuration, and the reset its control restores.
-export interface AvatarMotionNumberControl {
-  readonly label: string;
-  // Shown after the value, such as "m" or "Hz"; empty for none.
-  readonly unit: string;
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
-  readonly default: number;
-  readonly path: AvatarMotionPath;
-}
-
-// Controls repeated over a list in a configuration: one group per item, titled by a field of the item, with paths
-// into the item.
-export interface AvatarMotionListControl {
-  readonly list: AvatarMotionPath;
-  readonly title: string;
-  readonly controls: readonly AvatarMotionNumberControl[];
-}
-
-export type AvatarMotionControl = AvatarMotionNumberControl | AvatarMotionListControl;
-
-// Each kind's controls, by kind ID.
-export type AvatarMotionControls = Readonly<Record<string, readonly AvatarMotionControl[]>>;
