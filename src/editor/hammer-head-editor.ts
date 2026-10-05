@@ -3,6 +3,7 @@ import { RIG } from '../config';
 import { element, setPressed, setText } from '../dom';
 import { DEFAULT_HAMMER_HEAD, HAMMER_HEAD_LIMITS, HammerHeadError, hammerHeadBack, sameHammerHead, validateHammerHead } from '../hammer-head';
 import type { HammerHead } from '../hammer-head';
+import { createRangeControl } from './range-control';
 import './hammer-head-editor.css';
 
 // A hammer whose head the editor shapes: the default hammer (id null), whose head is a game setting, or a library hammer.
@@ -21,9 +22,15 @@ export interface HammerHeadEditor {
 const SVG = 'http://www.w3.org/2000/svg';
 // Metres shown around the head's centre, beyond the farthest a point may go.
 const VIEW = HAMMER_HEAD_LIMITS.reach + 0.1;
-// Points snap to this, and the arrow keys move them this far (ten times with Shift).
-const STEP = 0.005;
-const GRID = 0.1;
+// The grids a moved or added point snaps to, in whole millimetres, and the arrow keys move it one step of (ten with
+// Shift). Each is 1, 2 or 5 times a power of ten, so it divides the 10 cm between the lines always drawn; a grid of
+// 2 cm or more draws too, where a finer one would fill the canvas. Outlines round to the millimetre, so 1 mm is free.
+const SNAP_GRIDS: readonly number[] = [1, 2, 5, 10, 20, 50, 100];
+const DEFAULT_SNAP = 5;
+const LINES = 100;
+const FINEST_DRAWN = 20;
+// This browser's choice of grid.
+const SNAP_KEY = 'over-the-edge:hammer-head:snap';
 // Screen pixels a pressed point must move before it drags, so a click only selects it.
 const DRAG_PIXELS = 3;
 
@@ -72,15 +79,31 @@ function symmetric(head: HammerHead): boolean {
   return head.every((point) => head.some((other) => other.x === point.x && other.y === -point.y));
 }
 
-// The nearest grid point within reach of the centre.
-function snap(point: Readonly<Point>): Point {
+// The nearest point of a grid `step` millimetres apart within reach of the centre. Whole millimetres keep grid points
+// exact, so one on the rim stays there.
+function snap(point: Readonly<Point>, step: number): Point {
   const distance = Math.hypot(point.x, point.y);
   const scale = distance > HAMMER_HEAD_LIMITS.reach ? HAMMER_HEAD_LIMITS.reach / distance : 1;
-  const x = point.x * scale, y = point.y * scale;
-  const rounded = { x: Math.round(x / STEP) * STEP + 0, y: Math.round(y / STEP) * STEP + 0 };
+  const x = point.x * scale * 1000, y = point.y * scale * 1000;
+  const rounded = { x: Math.round(x / step) * step / 1000 + 0, y: Math.round(y / step) * step / 1000 + 0 };
   // Rounding may push a point on the rim past it; then it rounds toward the centre.
   return Math.hypot(rounded.x, rounded.y) <= HAMMER_HEAD_LIMITS.reach ? rounded
-    : { x: Math.trunc(x / STEP) * STEP + 0, y: Math.trunc(y / STEP) * STEP + 0 };
+    : { x: Math.trunc(x / step) * step / 1000 + 0, y: Math.trunc(y / step) * step / 1000 + 0 };
+}
+
+function gridLabel(step: number): string {
+  return step < 10 ? `${step} mm` : `${step / 10} cm`;
+}
+
+// The grid this browser chose last.
+function readSnap(): number {
+  try {
+    const stored = Number(localStorage.getItem(SNAP_KEY));
+    return SNAP_GRIDS.includes(stored) ? stored : DEFAULT_SNAP;
+  } catch (error) {
+    if (error instanceof DOMException) return DEFAULT_SNAP;
+    throw error;
+  }
 }
 
 // Where a point landed in an outline, which rounds points to the millimetre; -1 when it is not one of its points.
@@ -95,8 +118,9 @@ function metres(value: number): string {
 /**
  * Physics / Hammer head: each hammer's collision outline, shaped on a canvas around the head's centre, where the
  * handle ends. Points drag, an edge takes a new point where it is pressed, the arrow keys nudge the selected point and
- * Delete removes it; the outline is always the smallest convex one around its points, so it can never fold in. Mirror
- * keeps the two sides of the handle alike. Each change applies once the pointer lifts.
+ * Delete removes it; moved and added points snap to the chosen grid. The outline is always the smallest convex one
+ * around its points, so it can never fold in. Mirror keeps the two sides of the handle alike. Each change applies once
+ * the pointer lifts.
  */
 export function createHammerHeadEditor(options: {
   readonly mount: HTMLElement;
@@ -114,6 +138,7 @@ export function createHammerHeadEditor(options: {
     <svg class="hammer-head-canvas" viewBox="${-VIEW} ${-VIEW} ${2 * VIEW} ${2 * VIEW}" role="group"
       aria-label="Hammer head outline: the handle comes in from the left to the head's centre">
       <g class="hammer-head-world" transform="scale(1 -1)">
+        <g class="hammer-head-snap-grid"></g>
         <g class="hammer-head-grid"></g>
         <circle class="hammer-head-reach" r="${HAMMER_HEAD_LIMITS.reach}"></circle>
         <rect class="hammer-head-handle" x="${-VIEW}" y="${-RIG.handleHalfWidth}" width="${VIEW}" height="${2 * RIG.handleHalfWidth}"></rect>
@@ -123,6 +148,7 @@ export function createHammerHeadEditor(options: {
         <g class="hammer-head-points"></g>
       </g>
     </svg>
+    <div class="hammer-head-snap"></div>
     <div class="hammer-head-actions">
       <button type="button" class="button hammer-head-mirror" aria-pressed="false"
         title="Keep both sides of the handle alike; turning it on mirrors the side above the handle">Mirror</button>
@@ -146,15 +172,54 @@ export function createHammerHeadEditor(options: {
   const readout = element<HTMLParagraphElement>(root, '.hammer-head-readout');
   const problem = element<HTMLParagraphElement>(root, '.hammer-head-problem');
   const help = element<HTMLParagraphElement>(root, '.hammer-head-help');
-  const grid = svg.querySelector<SVGGElement>('.hammer-head-grid')!;
-  for (let line = -HAMMER_HEAD_LIMITS.reach; line <= HAMMER_HEAD_LIMITS.reach + 1e-9; line += GRID) {
-    for (const [x1, y1, x2, y2] of [[line, -VIEW, line, VIEW], [-VIEW, line, VIEW, line]]) {
-      const path = document.createElementNS(SVG, 'line');
-      path.setAttribute('x1', String(x1)); path.setAttribute('y1', String(y1));
-      path.setAttribute('x2', String(x2)); path.setAttribute('y2', String(y2));
-      grid.append(path);
+  const snapGrid = svg.querySelector<SVGGElement>('.hammer-head-snap-grid')!;
+
+  // Lines `every` millimetres apart within reach of the centre, each across the canvas, leaving out the 10 cm lines when
+  // `between` is set.
+  function drawLines(group: SVGGElement, every: number, between: boolean): void {
+    const count = Math.floor(Math.round(HAMMER_HEAD_LIMITS.reach * 1000) / every);
+    const lines: SVGLineElement[] = [];
+    for (let index = -count; index <= count; index++) {
+      if (between && index * every % LINES === 0) continue;
+      const at = index * every / 1000;
+      for (const [x1, y1, x2, y2] of [[at, -VIEW, at, VIEW], [-VIEW, at, VIEW, at]] as const) {
+        const line = document.createElementNS(SVG, 'line');
+        line.setAttribute('x1', String(x1)); line.setAttribute('y1', String(y1));
+        line.setAttribute('x2', String(x2)); line.setAttribute('y2', String(y2));
+        lines.push(line);
+      }
     }
+    group.replaceChildren(...lines);
   }
+  drawLines(svg.querySelector<SVGGElement>('.hammer-head-grid')!, LINES, false);
+
+  let grid = readSnap();
+  const snapControl = createRangeControl({
+    label: 'Snap grid', min: 0, max: SNAP_GRIDS.length - 1, step: 1, unit: '',
+    description: 'Points snap to this grid as you drag or add them, and the arrow keys move one step, ten with Shift. ' +
+      'Grids of 2 cm and more show on the canvas. This browser remembers the choice.',
+  }, {
+    id: 'hammer-head-snap', name: 'hammer-head-snap', signal: events.signal,
+    format: (index) => gridLabel(SNAP_GRIDS[index]!),
+    onInput: (index) => {
+      grid = SNAP_GRIDS[index]!;
+      try {
+        localStorage.setItem(SNAP_KEY, String(grid));
+      } catch (error) {
+        if (!(error instanceof DOMException)) throw error;
+      }
+      showSnap();
+    },
+  });
+  element<HTMLDivElement>(root, '.hammer-head-snap').append(snapControl.row);
+
+  // The chosen grid on the slider and, when it is coarse enough to see, on the canvas.
+  function showSnap(): void {
+    snapControl.setValue(SNAP_GRIDS.indexOf(grid));
+    if (grid >= FINEST_DRAWN) drawLines(snapGrid, grid, true);
+    else snapGrid.replaceChildren();
+  }
+  showSnap();
 
   let hammers: readonly HeadedHammer[] = [];
   // The chosen hammer's id (null: the default hammer) and the outline shown: its head, or a drag's outline.
@@ -304,7 +369,7 @@ export function createHammerHeadEditor(options: {
       drag.moved = true;
     }
     const raw = pointer(event);
-    let at = snap({ x: raw.x + drag.offset.x, y: raw.y + drag.offset.y });
+    let at = snap({ x: raw.x + drag.offset.x, y: raw.y + drag.offset.y }, grid);
     // A mirrored point on the handle's line stays on it.
     if (mirror && drag.partner === null && Math.abs(drag.points[drag.index]!.y) < 1e-9) at = { x: at.x, y: 0 };
     drag.points[drag.index] = at;
@@ -339,13 +404,13 @@ export function createHammerHeadEditor(options: {
       startDrag(event, head.map((point) => ({ ...point })), index);
     } else if (target?.classList.contains('hammer-head-edge')) {
       event.preventDefault();
-      const added = mirror && Math.abs(snap(pointer(event)).y) > 1e-9 ? 2 : 1;
+      const added = mirror && Math.abs(snap(pointer(event), grid).y) > 1e-9 ? 2 : 1;
       if (head.length + added > HAMMER_HEAD_LIMITS.vertices.max) {
         setText(problem, `A hammer head outline has at most ${HAMMER_HEAD_LIMITS.vertices.max} points.`);
         return;
       }
       const points = head.map((point) => ({ ...point }));
-      points.push(snap(pointer(event)));
+      points.push(snap(pointer(event), grid));
       if (added === 2) points.push(mirrored(points[points.length - 1]!));
       startDrag(event, points, points.length - added);
     }
@@ -390,11 +455,11 @@ export function createHammerHeadEditor(options: {
     const move = moves[event.key];
     if (move === undefined) return;
     event.preventDefault();
-    const step = event.shiftKey ? STEP * 10 : STEP;
+    const distance = (event.shiftKey ? 10 : 1) * grid / 1000;
     const points = head.map((point) => ({ ...point }));
     const partner = partnerOf(points, selected);
     const onLine = mirror && partner === null && Math.abs(points[selected]!.y) < 1e-9;
-    const at = snap({ x: points[selected]!.x + move.x * step, y: onLine ? 0 : points[selected]!.y + move.y * step });
+    const at = snap({ x: points[selected]!.x + move.x * distance, y: onLine ? 0 : points[selected]!.y + move.y * distance }, grid);
     points[selected] = at;
     if (partner !== null) points[partner] = mirrored(at);
     const next = outlineOf(points);

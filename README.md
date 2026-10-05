@@ -522,8 +522,11 @@ The **Hammer head** section shapes each hammer's collision outline: the **Defaul
 hammer**'s, a game setting (`rig.head`), and each [model-library hammer's](docs/characters.md#model-library-and-runtime-swaps)
 own, which collides instead while that hammer is shown. The canvas shows the outline
 around the head's centre, with the handle coming in from the left. Drag a point, press
-an edge to add one there, and select a point to nudge it with the arrow keys (5 mm, or
-5 cm with Shift) or remove it with **Remove point** or Delete; **Mirror** keeps both sides of the
+an edge to add one there, and select a point to nudge it with the arrow keys (one step of
+the grid, or ten with Shift) or remove it with **Remove point** or Delete. Moved and added
+points snap to the **Snap grid**, which the slider below the canvas sets from 1 mm to 10 cm
+(5 mm until you change it; the browser remembers your choice); the canvas draws grids of
+2 cm and more between its 10 cm lines. **Mirror** keeps both sides of the
 handle alike, and **Sledge**, **Round** and **Pick** start from a preset. The outline is
 always the smallest convex one around its points, so a head can be a block, a disc, a
 wedge or a pointed pick, never hooked: 3-12 points within 0.6 m of the centre, which

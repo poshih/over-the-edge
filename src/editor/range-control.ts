@@ -18,6 +18,8 @@ export function createRangeControl(field: RangeSpec, options: {
   name: string;
   signal: AbortSignal;
   onInput: (value: number) => void;
+  // How the readout shows a value; by default the number and the field's unit.
+  format?: (value: number) => string;
 }): RangeControl {
   const row = document.createElement('div');
   row.className = 'tuning-field';
@@ -84,8 +86,8 @@ export function createRangeControl(field: RangeSpec, options: {
     setValue: (value, state = {}) => {
       input.value = String(value);
       input.disabled = state.disabled === true;
-      const formatted = value.toLocaleString('en-US', { maximumFractionDigits: 2 });
-      const text = `${formatted}${field.unit ? ` ${field.unit}` : ''}`;
+      const text = options.format?.(value)
+        ?? `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })}${field.unit ? ` ${field.unit}` : ''}`;
       if (output.textContent !== text) output.textContent = text;
       input.setAttribute('aria-valuetext', text);
       updateButtons();

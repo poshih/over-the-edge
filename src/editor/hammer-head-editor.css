@@ -37,6 +37,13 @@
   vector-effect: non-scaling-stroke;
 }
 
+/* The snap grid between the 10 cm lines, fainter than them. */
+.hammer-head-snap-grid line {
+  stroke: #eaece2;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
 .hammer-head-reach {
   fill: none;
   stroke: #b9c2b0;
