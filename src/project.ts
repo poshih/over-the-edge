@@ -31,7 +31,7 @@ import { decodeBase64, encodeBase64, SpriteError } from './sprite-fields';
 import { SkeletonError } from './skeleton-data';
 import { DirectionalError } from './directional-data';
 import { exactRecord, ProjectError, textValue } from './project-fields';
-import { EMPTY_MODEL_LIBRARY, libraryEntries, libraryModelFile, MODEL_LIBRARY_LIMITS, validateModelLibrary } from './model-library';
+import { EMPTY_MODEL_LIBRARY, libraryEntries, libraryModelFile, validateModelLibrary } from './model-library';
 import type { ModelLibrary } from './model-library';
 import { NO_PLUGIN_DATA, validateProjectPlugins } from './plugin-data';
 import type { PluginData } from './plugin-data';
@@ -52,9 +52,9 @@ export const PROJECT_LIMITS = {
   id: 64,
   manifestBytes: 2 * 1024 * 1024,
   appearanceBytes: 64 * 1024 * 1024,
-  // Holds every binary budget base64-encoded (art, appearance, media and the model library: 352 MiB,
-  // about 470 MiB encoded) with the JSON files, below the longest string Chromium holds (512 MiB):
-  // a project file is one JSON text, read and written whole.
+  // A project file is one JSON text, read and written whole, so it stays below the longest string Chromium holds
+  // (512 MiB). Projects may outgrow it, since the model library has no total: a larger game stays a project directory
+  // or a server project, whose files move one at a time.
   bundleBytes: 480 * 1024 * 1024,
 } as const;
 const GLB_DATA = 'data:model/gltf-binary;base64,';
@@ -217,7 +217,7 @@ export function validateProjectManifest(value: unknown): ProjectManifest {
 export function defaultProjectManifest(title: string): ProjectManifest {
   return validateProjectManifest({
     format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title, level: PROJECT_FILES.level,
-    art: { mode: 'shapes', assets: [], decorations: NO_DECORATION_ART }, settings: DEFAULT_GAME_SETTINGS,
+    art: { mode: 'meshes', assets: [], decorations: NO_DECORATION_ART }, settings: DEFAULT_GAME_SETTINGS,
     characters: { primary: null, alternate: null }, armIk: DEFAULT_ARM_IK, appearance: [], models: EMPTY_MODEL_LIBRARY,
     theme: DEFAULT_THEME, hud: DEFAULT_HUD, audio: DEFAULT_AUDIO, enemies: DEFAULT_ENEMY_ART, media: [], plugins: NO_PLUGIN_DATA,
   });
@@ -268,8 +268,8 @@ export function checkProjectReferences(manifest: ProjectManifest, level: LevelDe
     else if (!media.has(source)) problems.push(`${owner} uses ${source}, which is not in the media library.`);
   };
   for (const object of level.objects) {
-    if (object.kind === 'terrain' && object.art !== undefined && !assets.has(object.art.assetId)) {
-      problems.push(`Terrain "${object.id}" uses artwork ${object.art.assetId}, which is not in the course artwork.`);
+    if (object.kind === 'terrain' && object.mesh.type === 'asset' && !assets.has(object.mesh.assetId)) {
+      problems.push(`Terrain "${object.id}" is mesh ${object.mesh.assetId}, which is not in the course artwork.`);
     }
     if (object.kind === 'trigger') {
       object.events.forEach((event, index) => {
@@ -282,51 +282,82 @@ export function checkProjectReferences(manifest: ProjectManifest, level: LevelDe
   if (problems.length > 0) throw new ProjectError(problems.slice(0, 8).join(' ') + (problems.length > 8 ? ` (${problems.length - 8} more)` : ''), { section: 'level' });
 }
 
-export interface ProjectContent {
+// A project's JSON documents: everything but its binary files.
+export interface ProjectDocuments {
   readonly manifest: ProjectManifest;
   readonly level: LevelDefinition;
   readonly characters: { readonly primary: SpriteDocument | null; readonly alternate: SpriteDocument | null };
+}
+
+export interface ProjectContent extends ProjectDocuments {
   readonly files: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+}
+
+// Each kind's total besides each file's own limit. The model library has none: a release loads a library model only
+// once the game's backend selects it, and the Workshop only the ones it uses.
+const FILE_BUDGETS: Readonly<Partial<Record<ProjectFileKind, number>>> = {
+  art: ART_LIMITS.totalBytes, appearance: PROJECT_LIMITS.appearanceBytes, media: MEDIA_LIMITS.totalBytes,
+};
+
+// Refuses `bytes` of one kind's files over the kind's total.
+export function checkFileBudget(kind: ProjectFileKind, bytes: number): void {
+  const budget = FILE_BUDGETS[kind];
+  if (budget !== undefined && bytes > budget) {
+    throw new ProjectError(`The project's ${kind} files exceed ${budget / 1024 ** 2} MiB.`, { section: kind });
+  }
+}
+
+// Reads a project's JSON documents through `read`, which returns each one's parsed value, and validates them with every
+// cross-reference. Binary files are not read, so a project can open before, or without, downloading them.
+export function loadProjectDocuments(manifest: ProjectManifest, read: (ref: ProjectFileRef) => unknown): ProjectDocuments {
+  let level: LevelDefinition | null = null;
+  const characters: { primary: SpriteDocument | null; alternate: SpriteDocument | null } = { primary: null, alternate: null };
+  for (const ref of projectFileRefs(manifest)) {
+    if (ref.binary) continue;
+    // A file that cannot be read reports itself; only its contents fail as its section.
+    const value = read(ref);
+    if (ref.kind === 'level') level = inSection('level', () => validateLevel(value));
+    else {
+      const document = inSection(ref.path, () => validateProjectCharacter(value));
+      if (ref.path === PROJECT_FILES.primary) characters.primary = document;
+      else characters.alternate = document;
+    }
+  }
+  if (level === null) throw new ProjectError('The project has no level.', { section: 'level' });
+  checkProjectReferences(manifest, level);
+  return Object.freeze({ manifest, level, characters: Object.freeze(characters) });
 }
 
 // Reads a project through `read` and validates every file and cross-reference. `read` returns the
 // parsed value of JSON files and bytes of binary files, and must enforce each ref's maxBytes.
 export function loadProjectContent(manifest: ProjectManifest, read: (ref: ProjectFileRef) => unknown): ProjectContent {
-  const refs = projectFileRefs(manifest);
+  return loadProjectFiles(loadProjectDocuments(manifest, read), read);
+}
+
+// Reads and checks every binary file of a project whose documents are validated, through `read`, which returns each
+// one's bytes and must enforce its ref's maxBytes.
+export function loadProjectFiles(documents: ProjectDocuments, read: (ref: ProjectFileRef) => unknown): ProjectContent {
+  const { manifest } = documents;
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
-  let level: LevelDefinition | null = null;
-  const characters: { primary: SpriteDocument | null; alternate: SpriteDocument | null } = { primary: null, alternate: null };
-  const totals: Record<'art' | 'appearance' | 'model' | 'media', number> = { art: 0, appearance: 0, model: 0, media: 0 };
-  const budgets = {
-    art: ART_LIMITS.totalBytes, appearance: PROJECT_LIMITS.appearanceBytes, model: MODEL_LIBRARY_LIMITS.totalBytes, media: MEDIA_LIMITS.totalBytes,
-  };
-  for (const ref of refs) {
+  const totals = new Map<ProjectFileKind, number>();
+  for (const ref of projectFileRefs(manifest)) {
+    if (!ref.binary) continue;
     const value = read(ref);
-    if (ref.kind === 'level') level = inSection('level', () => validateLevel(value));
-    else if (ref.kind === 'character') {
-      const document = inSection(ref.path, () => validateProjectCharacter(value));
-      if (ref.path === PROJECT_FILES.primary) characters.primary = document;
-      else characters.alternate = document;
-    } else {
-      if (!(value instanceof Uint8Array)) throw new ProjectError(`${ref.path} must be a binary file.`, { section: ref.path });
-      if (value.byteLength === 0 || value.byteLength > ref.maxBytes) {
-        throw new ProjectError(`${ref.path} must contain 1 byte to ${ref.maxBytes / 1024 ** 2} MiB.`, { section: ref.path });
-      }
-      totals[ref.kind] += value.byteLength;
-      if (totals[ref.kind] > budgets[ref.kind]) {
-        throw new ProjectError(`The project's ${ref.kind} files exceed ${budgets[ref.kind] / 1024 ** 2} MiB.`, { section: ref.kind });
-      }
-      if (ref.kind === 'media') {
-        const entry = manifest.media.find(candidate => mediaFile(candidate.path) === ref.path)!;
-        inSection('media', () => checkMediaBytes(entry.path, value));
-      }
-      // Views over shared memory are copied, so every file owns a plain ArrayBuffer.
-      files.set(ref.path, value.buffer instanceof ArrayBuffer ? value as Uint8Array<ArrayBuffer> : new Uint8Array(value));
+    if (!(value instanceof Uint8Array)) throw new ProjectError(`${ref.path} must be a binary file.`, { section: ref.path });
+    if (value.byteLength === 0 || value.byteLength > ref.maxBytes) {
+      throw new ProjectError(`${ref.path} must contain 1 byte to ${ref.maxBytes / 1024 ** 2} MiB.`, { section: ref.path });
     }
+    const total = (totals.get(ref.kind) ?? 0) + value.byteLength;
+    totals.set(ref.kind, total);
+    checkFileBudget(ref.kind, total);
+    if (ref.kind === 'media') {
+      const entry = manifest.media.find(candidate => mediaFile(candidate.path) === ref.path)!;
+      inSection('media', () => checkMediaBytes(entry.path, value));
+    }
+    // Views over shared memory are copied, so every file owns a plain ArrayBuffer.
+    files.set(ref.path, value.buffer instanceof ArrayBuffer ? value as Uint8Array<ArrayBuffer> : new Uint8Array(value));
   }
-  if (level === null) throw new ProjectError('The project has no level.', { section: 'level' });
-  checkProjectReferences(manifest, level);
-  return Object.freeze({ manifest, level, characters: Object.freeze(characters), files });
+  return Object.freeze({ manifest, level: documents.level, characters: documents.characters, files });
 }
 
 export interface ProjectBundle {
@@ -351,8 +382,14 @@ function decodeData(source: unknown, ref: ProjectFileRef, manifest: ProjectManif
   return decodeBase64(data);
 }
 
-// Validates a bundle's file tree and returns its parsed, checked content.
-export function unpackProjectBundle(value: unknown): ProjectContent {
+// A project file opened: its documents, validated with every reference, and its binary files, each decoded and held to
+// its limit only when read.
+export interface OpenedBundle extends ProjectDocuments {
+  file(ref: ProjectFileRef): Uint8Array<ArrayBuffer>;
+}
+
+// Opens a bundle's file tree without decoding its binary files, so a reader that uses some of them decodes only those.
+export function openProjectBundle(value: unknown): OpenedBundle {
   const bundle = exactRecord(value, ['format', 'schemaVersion', 'files'], 'Project bundle');
   if (bundle.format !== PROJECT_BUNDLE_FORMAT || bundle.schemaVersion !== PROJECT_SCHEMA_VERSION) {
     throw new ProjectError('This project bundle format or version is not supported.');
@@ -364,39 +401,64 @@ export function unpackProjectBundle(value: unknown): ProjectContent {
   const expected = new Set([PROJECT_FILES.manifest, ...refs.map(ref => ref.path)]);
   const unknown = Object.keys(files).filter(path => !expected.has(path));
   if (unknown.length > 0) throw new ProjectError(`The bundle contains files the manifest does not use: ${unknown.slice(0, 5).join(', ')}.`);
-  return loadProjectContent(manifest, (ref) => {
+  const entry = (ref: ProjectFileRef): unknown => {
     if (!Object.hasOwn(files, ref.path)) throw new ProjectError(`The bundle is missing ${ref.path}.`, { section: ref.path });
-    const entry: unknown = Reflect.get(files, ref.path);
-    if (ref.binary) return decodeData(entry, ref, manifest);
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return Reflect.get(files, ref.path);
+  };
+  const documents = loadProjectDocuments(manifest, (ref) => {
+    const document = entry(ref);
+    if (typeof document !== 'object' || document === null || Array.isArray(document)) {
       throw new ProjectError(`${ref.path} must be a JSON object in a bundle.`, { section: ref.path });
     }
-    return entry;
+    return document;
   });
+  return { ...documents, file: (ref) => decodeData(entry(ref), ref, manifest) };
+}
+
+// Validates a bundle's file tree and returns its parsed, checked content, every file decoded.
+export function unpackProjectBundle(value: unknown): ProjectContent {
+  const bundle = openProjectBundle(value);
+  return loadProjectFiles(bundle, (ref) => bundle.file(ref));
+}
+
+function bundleTooLarge(length: number): ProjectError {
+  return new ProjectError(`This project needs a ${Math.ceil(length / 1024 ** 2)} MiB project file, and project files hold at most ${
+    PROJECT_LIMITS.bundleBytes / 1024 ** 2} MiB. Keep a game this large as a project directory or on the project server.`);
+}
+
+// A JSON file's value among a project's documents.
+function documentValue(documents: ProjectDocuments, ref: ProjectFileRef): unknown {
+  return ref.kind === 'level' ? documents.level : ref.path === PROJECT_FILES.primary ? documents.characters.primary : documents.characters.alternate;
+}
+
+function dataPrefix(ref: ProjectFileRef, manifest: ProjectManifest): string {
+  return `data:${projectFileType(ref, manifest)};base64,`;
+}
+
+// Refuses a project too large for one project file, measured as the file would be written: its documents as JSON and
+// each binary file, by its size in `size`, as base64. A caller that knows the sizes refuses before reading any file.
+export function checkBundleSize(documents: ProjectDocuments, size: (ref: ProjectFileRef) => number): void {
+  // Each entry is "path":value, with its quotes and separators.
+  let length = PROJECT_FILES.manifest.length + JSON.stringify(documents.manifest).length + 4;
+  for (const ref of projectFileRefs(documents.manifest)) {
+    length += ref.path.length + 4 + (ref.binary ? dataPrefix(ref, documents.manifest).length + Math.ceil(size(ref) / 3) * 4 + 2
+      : JSON.stringify(documentValue(documents, ref)).length);
+  }
+  if (length > PROJECT_LIMITS.bundleBytes) throw bundleTooLarge(length);
 }
 
 // A project too large for one project file fails here, measured before any of its text is written.
-export function packProjectBundle(content: Pick<ProjectContent, 'manifest' | 'level' | 'characters' | 'files'>): ProjectBundle {
-  const refs = projectFileRefs(content.manifest);
-  const json = (ref: ProjectFileRef): unknown => ref.kind === 'level' ? content.level
-    : ref.path === PROJECT_FILES.primary ? content.characters.primary : content.characters.alternate;
+export function packProjectBundle(content: ProjectContent): ProjectBundle {
   const binary = (ref: ProjectFileRef): Uint8Array => {
     const bytes = content.files.get(ref.path);
     if (bytes === undefined) throw new ProjectError(`The project is missing ${ref.path}.`, { section: ref.path });
     return bytes;
   };
-  const prefix = (ref: ProjectFileRef): string => `data:${projectFileType(ref, content.manifest)};base64,`;
-  // Each entry is "path":value, with its quotes and separators.
-  let length = PROJECT_FILES.manifest.length + JSON.stringify(content.manifest).length + 4;
-  for (const ref of refs) {
-    length += ref.path.length + 4 + (ref.binary ? prefix(ref).length + Math.ceil(binary(ref).byteLength / 3) * 4 + 2 : JSON.stringify(json(ref)).length);
-  }
-  if (length > PROJECT_LIMITS.bundleBytes) {
-    throw new ProjectError(`This project needs a ${Math.ceil(length / 1024 ** 2)} MiB project file, and project files hold at most ${
-      PROJECT_LIMITS.bundleBytes / 1024 ** 2} MiB. Keep a game this large as a project directory or on the project server.`);
-  }
+  checkBundleSize(content, (ref) => binary(ref).byteLength);
   const files: Record<string, unknown> = { [PROJECT_FILES.manifest]: content.manifest };
-  for (const ref of refs) files[ref.path] = ref.binary ? `${prefix(ref)}${encodeBase64(binary(ref))}` : json(ref);
+  for (const ref of projectFileRefs(content.manifest)) {
+    files[ref.path] = ref.binary ? `${dataPrefix(ref, content.manifest)}${encodeBase64(binary(ref))}` : documentValue(content, ref);
+  }
   return { format: PROJECT_BUNDLE_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, files };
 }
 

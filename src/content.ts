@@ -17,7 +17,7 @@ import { validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
 import { validateHud } from './hud';
 import type { HudSettings } from './hud';
-import { LEVEL_LIMITS, validateLevel } from './level';
+import { LEVEL_LIMITS, terrainAssets, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 import { MEDIA_LIMITS, MEDIA_TYPES, mediaExtension, mediaPath } from './media';
 import { MODEL_LIMITS } from './model-data';
@@ -247,10 +247,7 @@ function validateContentArt(value: unknown, level: LevelDefinition): ContentArt 
   if (Object.keys(decorations).length !== Object.keys(usedDecorationArt(level, decorations)).length) {
     throw new ContentManifestError('Decoration artwork must map only models the level uses.');
   }
-  const used = new Set(art.mode === 'shapes' ? [] : [
-    ...level.objects.flatMap(object => object.kind === 'terrain' && object.art !== undefined ? [object.art.assetId] : []),
-    ...Object.values(decorations),
-  ]);
+  const used = new Set(art.mode === 'shapes' ? [] : [...terrainAssets(level), ...Object.values(decorations)]);
   if (used.size !== ids.size || [...used].some(id => !ids.has(id))) {
     throw new ContentManifestError('Course artwork must list exactly the meshes the level uses.');
   }

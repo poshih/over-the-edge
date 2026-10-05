@@ -9,7 +9,7 @@ come from the engine through Vite's module loader, as in
 
 | Module | Contents |
 | --- | --- |
-| `course.mjs` | `CourseBuilder`, which builds terrain, triggers, messages, updrafts, enemies, labels, decorations and set pieces, and groups them for the checks; `random`, a seeded generator; `outline`, `worldBounds` and `UNIT` for shapes |
+| `course.mjs` | `CourseBuilder`, which builds terrain, triggers, messages, updrafts, enemies, labels, decorations and set pieces, and groups them for the checks; `random`, a seeded generator; `outline`, `worldBounds` and `UNIT` for the collision outlines of built-in meshes and drawn shapes |
 | `trail.mjs` | `Trail`, a cursor that walks the route and adds floors, steps, stairs and set pieces end to end |
 | `pieces.mjs` | `PIECE_PATHS`, how the route enters and leaves each library set piece |
 | `checks.mjs` | Overlap, footprint, draft, cramped-collider, reach and trap checks, the reach model and the budget |

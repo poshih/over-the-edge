@@ -10,6 +10,8 @@ import { phantomMiddleware, PhantomStore } from '../server/phantom-store';
 import { phantomCourse } from './phantom-course';
 import { packReleaseContent } from './release-content';
 import type { ReleaseContent } from './release-content';
+import { readReleaseFile } from './release-file';
+import type { ReleaseFile } from './release-file';
 import type { ReleaseInput } from './release-input';
 import { loadReleaseRecordings } from './release-phantoms';
 
@@ -66,8 +68,8 @@ export function contentRequest(request: IncomingMessage, base: string): string |
 /**
  * Builds a game release as a public shell plus private content. The shell (dist-game/) holds only
  * code, styles, the page and the icon, and pins the content's manifest; the content (dist-game-
- * content/) holds every level, profile, setting, image, model and media file, named by SHA-256.
- * Development and preview servers serve the content at the default content URL.
+ * content/) holds the level, profiles, settings, images, models and media the game uses, named by
+ * SHA-256. Development and preview servers serve the content at the default content URL.
  */
 export function gameRelease(options: {
   readonly load: () => ReleaseInput;
@@ -130,10 +132,11 @@ export function gameRelease(options: {
       if (output.dir === undefined) return;
       const directory = contentDirectory(output.dir);
       rmSync(directory, { recursive: true, force: true });
-      for (const [path, bytes] of current().content.files) {
-        const file = join(directory, ...path.split('/'));
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, bytes);
+      // One file at a time: a project file is read again, and checked, only as it is written.
+      for (const [path, file] of current().content.files) {
+        const target = join(directory, ...path.split('/'));
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, readReleaseFile(file));
       }
     },
     transformIndexHtml: { order: 'pre', handler: (html) => html.replace('href="/favicon.svg"', 'href="favicon.svg"') },
@@ -151,18 +154,20 @@ export function gameRelease(options: {
           next();
           return;
         }
-        let bytes: Uint8Array | undefined;
+        let file: ReleaseFile | undefined;
         try {
-          bytes = isContentPath(path) ? current().content.files.get(path) : undefined;
+          file = isContentPath(path) ? current().content.files.get(path) : undefined;
         } catch (error) {
           next(error);
           return;
         }
-        if (bytes === undefined) {
+        if (file === undefined) {
           notFound(response);
           return;
         }
-        sendBytes(request, response, bytes, pathType(path), { 'Cache-Control': 'no-cache' });
+        // A project file streams from disk; a change to it restarts the server, which packages it again.
+        if (file instanceof Uint8Array) sendBytes(request, response, file, pathType(path), { 'Cache-Control': 'no-cache' });
+        else sendFile(request, response, file.path, pathType(path), { 'Cache-Control': 'no-cache' });
       });
       server.watcher.add([...watched]);
       server.watcher.on('change', (file) => {

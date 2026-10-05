@@ -48,7 +48,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       validation: 'Every change is validated before anything is written. A rejected change leaves the project untouched and returns { "error": { "code", "message", "section" } }.',
       patch: 'PATCH applies a JSON merge patch (RFC 7386): objects merge, arrays and other values replace. Unlike RFC 7386, null sets a field to null, because sections have fixed keys.',
       concurrency: 'GET section responses carry ETag: "<section revision>". Send If-Match with that value on a change to fail with 412 if someone else changed the section first. Editing the project\'s files directly also counts: reads bump the revision of every section whose files changed. GET /api/projects/{id}/revision is a cheap poll.',
-      references: 'Levels and audio may only use /media/ paths that exist in the project media library, and terrain artwork that exists in the course artwork, so every project always builds. Every decoration model must be built in or drawn by course artwork. Upload files before referencing them.',
+      references: 'Levels and audio may only use /media/ paths that exist in the project media library, and terrain meshes that exist in the course artwork, so every project always builds. Every decoration model must be built in or drawn by course artwork. Upload files before referencing them.',
       ids: 'Project IDs and shared copy names use lowercase letters, digits and inner hyphens.',
     },
     endpoints: [
@@ -59,7 +59,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET', '/api/projects/{id}', 'Manifest, revisions and file sizes.'),
       endpoint('DELETE', '/api/projects/{id}', 'Delete a project.'),
       endpoint('GET', '/api/projects/{id}/revision', 'Current revision and per-section revisions.'),
-      endpoint('GET', '/api/projects/{id}/bundle', 'The whole project as one JSON bundle (add ?download=1 for a file download).'),
+      endpoint('GET', '/api/projects/{id}/bundle', 'The whole project as one JSON bundle (add ?download=1 for a file download). A project too large for one bundle (project.limits.bundleBytes, base64 included) is refused before its binary files are read; move it as its directory instead.'),
       endpoint('PUT', '/api/projects/{id}/bundle', 'Create or replace a project from a bundle.', 'project bundle JSON'),
       endpoint('POST', '/api/projects/{id}/validate', 'Deep check of every file, model and reference.'),
       endpoint('POST', '/api/projects/{id}/publish', 'Build the standalone release: its shell into releases/{id}/ and its content into releases/{id}.content/, both served at /play/{id}/.'),
@@ -73,8 +73,9 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET', '/api/projects/{id}/level/versions/{version}', 'One version: { "version", "course", "savedAt", "level", "settings" }, with its level JSON and game settings.'),
       endpoint('GET|POST', '/api/projects/{id}/level/versions/{version}/phantoms?session={session}&clip={clip}', 'List the phantom recordings played on a version ({ "phantoms": [{ "name", "bytes", "savedAt" }] }), or store one: POST the recording\'s bytes as application/octet-stream with its play session (32 lowercase hex digits) and clip number; the same session and clip replace the earlier upload.', 'phantom recording bytes'),
       endpoint('GET|DELETE', '/api/projects/{id}/level/versions/{version}/phantoms/{name}', 'Download or delete one recording, named v{version}-{session}-{clip}.phantom.'),
-      endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a static course GLB; returns its content ID for terrain "art": { "assetId", "mirror" } or a decoration model in art.decorations.', 'GLB bytes'),
+      endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a static course GLB; returns its content ID, to place it as a terrain mesh or map a decoration model to it in art.decorations.', 'GLB bytes'),
       endpoint('GET|DELETE', '/api/projects/{id}/art/assets/{assetId}', 'Download or remove course artwork (unused only).'),
+      endpoint('GET', '/api/projects/{id}/art/assets/{assetId}/terrain', 'The GLB as terrain to place: { mesh, width, height, depth }, its natural size in metres and its mesh entry, which carries the collision the GLB declares (extras.collision on its scene or a root node) or else its slice on the obstacle line, the middle of its depth. Place it with that mesh, at any size; 400 when the GLB has no usable slice.'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/appearance/{part}', 'A part\'s name and alignment.', '{ "alignment"?: {...}, "name"?: "..." }'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/models/{role}/{model}/model?name=Hooded%20hero', 'A library GLB for the avatar, hammer or pot. A new avatar maps its joints, or takes ?settings={ boneMap, driver, hair, motion, armForwardDistance, grips, arms }.', 'GLB bytes'),
@@ -99,7 +100,7 @@ export function apiManual(auth: 'token' | 'loopback') {
     levelVersions: {
       description: 'A version is the stored level together with the game settings it plays with. Whenever either changes, they become the project\'s next version unless they match the latest: a change to the level, level/objects, level/labels or settings sections, a bundle, or a level.json or project.json changed on disk (numbered when the project is next read). '
         + 'Every answer about revisions (section changes, GET revision, GET project, bundles) carries "level": { "version", "course" }, null while the stored level is invalid; GET level answers with X-Level-Version and X-Level-Course headers.',
-      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s shape, position, size, angle, illusion and surface, the enemies, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, artwork, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
+      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
         + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level and settings\' course.',
       phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records play on the version it plays, one session per run, in consecutive clips.',
     },
@@ -110,7 +111,7 @@ export function apiManual(auth: 'token' | 'loopback') {
         description: 'The course. Prefer the level/objects endpoints for small edits.',
         limits: { ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects },
         objects: {
-          terrain: { kind: 'terrain', id: 'ledge-1', shape: { type: `one of ${SHAPE_KINDS.join(', ')}; or { "type": "polygon", "vertices": [{ "x", "y" }] }` }, x: 4, y: 2, width: 3, height: 1, angle: 0, depth: 2, color: 7438714, illusion: false, surface: SURFACES.join(' | ') },
+          terrain: { kind: 'terrain', id: 'ledge-1', mesh: { type: 'shape', shape: SHAPE_KINDS.join(' | ') }, x: 4, y: 2, width: 3, height: 1, angle: 0, depth: 2, mirror: false, color: 7438714, illusion: false, surface: SURFACES.join(' | ') },
           start: { kind: 'start', id: 'start', x: 0, y: 0.53, angle: 0.4, reach: 2.3 },
           trigger: {
             kind: 'trigger', id: 'summit', name: 'Summit', x: 0, y: 40, region: { type: 'circle', radius: 2 },
@@ -118,6 +119,11 @@ export function apiManual(auth: 'token' | 'loopback') {
             events: [{ type: 'stop-timer' }, { type: 'message', title: 'Summit reached', message: '...' }],
           },
           enemy: { kind: 'enemy', id: 'bird-1', species: ENEMY_SPECIES.join(' | '), x: 3, y: 5, facing: 'left | right', patrolDistance: 3, speed: 1.4 },
+        },
+        terrainMeshes: {
+          shape: { type: 'shape', shape: SHAPE_KINDS.join(' | ') },
+          outline: { type: 'outline', vertices: `3-${LEVEL_LIMITS.polygonVertices} { x, y } points of a simple counterclockwise outline in the unit box, -0.5 to 0.5 on both axes` },
+          asset: { type: 'asset', assetId: 'asset-<SHA-256 of the GLB>', collision: `{ type: ${SHAPE_KINDS.join(' | ')} } or { type: 'slice', loops: [[{ x, y }]] }, copied from GET art/assets/{assetId}/terrain` },
         },
         enemyFields: ENEMY_FIELDS,
         triggerEvents: {
@@ -128,7 +134,7 @@ export function apiManual(auth: 'token' | 'loopback') {
           'launch-player': { type: 'launch-player', height: `${LAUNCH_FIELDS.height.min}-${LAUNCH_FIELDS.height.max} m`, strength: `${LAUNCH_FIELDS.strength.min}-${LAUNCH_FIELDS.strength.max}` },
         },
         board: `Designers name areas by the Workshop's level board, like a chessboard: ${BOARD_CELL} m squares such as D7. Rows count up from y = 0 (row n spans y ${BOARD_CELL}(n-1) to ${BOARD_CELL}n m; row 0 lies just below 0). Columns are lettered A, B, ... Z, AA, ... rightward from column A, the ${BOARD_CELL} m band, on multiples of ${BOARD_CELL} m, that holds the leftmost terrain point.`,
-        notes: 'Coordinates are metres, y up; angle is radians; terrain color is a 0xRRGGBB integer; terrain surface is required, one of ' + SURFACES.join(', ') + ' (the Workshop starts new terrain as rock), and takes that surface\'s friction and bounciness from the game settings. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
+        notes: 'Coordinates are metres, y up; angle is radians. Terrain is a mesh in a box: the mesh\'s bounds fill width and height, and depth centred on the obstacle line, where the 2D physics plays out; mirror reflects it, collision included, left to right before it turns; a circle collision needs equal width and height. A built-in shape or drawn outline is extruded in color, a 0xRRGGBB integer, which also draws an asset mesh in the shapes look. Terrain surface is required, one of ' + SURFACES.join(', ') + ' (the Workshop starts new terrain as rock), and takes that surface\'s friction and bounciness from the game settings. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {
         value: '{ schemaVersion: 8, physics: {...}, rig: { handleLength, maxExtension, minReach, head: [{ x, y }, ...] }, cursor: { maxTargetRadius, deadZone } }', patch: true,
@@ -151,6 +157,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       models: {
         value: '{ "avatar": [{ "id", "name", "boneMap", "driver", "hair", "motion", "armForwardDistance", "grips", "arms" }], "hammer": [{ "id", "name", "head" }], "pot": [{ "id", "name" }] }',
         description: 'The model library: extra avatar, hammer and pot models a release can swap to, one part at a time, as the game\'s backend selects. '
+          + 'A release downloads an entry only once it is selected, and the Workshop only when it previews or edits it, so the library has no total size. '
           + 'Upload each GLB with PUT models/{role}/{id}/model first; PUT this section to rename entries, change avatar settings or drop entries.',
         limits: MODEL_LIBRARY_LIMITS,
         notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; driver is { "id", "config" } naming the trusted rig strategy that interprets them ("standard" is the default); grips, arms and armForwardDistance follow the character profile format. A hammer\'s head is its own collision outline, in the settings\' rig.head format: it replaces the game\'s default head while that hammer is shown. A hammer uploaded without an entry starts with the game\'s default head.',
@@ -170,7 +177,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       },
       art: {
         value: '{ mode: "shapes" | "meshes", assets: [{ id, name }], decorations: { [modelId]: assetId } }', patch: true, limits: ART_LIMITS,
-        description: 'Course artwork. Upload GLBs with POST art/assets; PUT can rename or drop unused assets, change the mode, and map decoration models to assets: in mesh releases the asset replaces every decoration of that model, built-in placeholder or not.',
+        description: 'Course artwork: the GLBs terrain meshes draw and decoration models may draw. Upload GLBs with POST art/assets; PUT can rename or drop unused assets, change the mode, and map decoration models to assets: in mesh releases the asset replaces every decoration of that model, built-in placeholder or not. The mode is how the Workshop and releases draw the course: "meshes" draws each terrain mesh\'s GLB, "shapes" every terrain object as its collision extruded and decorations as their placeholders.',
       },
       media: { value: '[{ "path": "/media/file.ext" }]', types: MEDIA_TYPES, limits: MEDIA_LIMITS, description: 'Upload with PUT media/{file}; PUT this list to drop unused files.' },
       'plugins/{plugin}': {

@@ -1,5 +1,5 @@
-import { loadProjectContent, PROJECT_FILES, ProjectError, projectFileRefs, validateProjectManifest } from '../project';
-import type { ProjectContent } from '../project';
+import { loadProjectDocuments, PROJECT_FILES, ProjectError, projectFileRefs, validateProjectManifest } from '../project';
+import type { OpenedFile, OpenedProject, PublishedFile, PublishedProject } from './published-project';
 import { VisualStore, VisualStoreError } from './visual-store';
 
 // The record next to the project's files; no project file has this path.
@@ -45,16 +45,26 @@ export interface ProjectCopy {
   readonly origin: string | null;
   // Sections that had unsaved changes when the copy was written.
   readonly dirty: readonly string[];
-  readonly content: ProjectContent;
+  readonly content: OpenedProject;
+}
+
+// A stored published file: its size and SHA-256 name its bytes in any deployment that still serves them.
+function publishedReference(value: unknown): { sha256: string; bytes: number } | null {
+  if (typeof value !== 'object' || value === null || value instanceof Blob) return null;
+  const sha256: unknown = Reflect.get(value, 'sha256');
+  const bytes: unknown = Reflect.get(value, 'bytes');
+  return typeof sha256 === 'string' && Number.isSafeInteger(bytes) ? { sha256, bytes: bytes as number } : null;
 }
 
 /**
  * This browser's copy of the open project, stored like a project directory: every file under its
- * path (JSON values, and Blobs for binary files) next to one state record. A write stores only
+ * path (JSON values; a Blob for each binary file the page holds, and the published file for each one
+ * the published project serves, which stays on the site) next to one state record. A write stores only
  * the files that changed and removes the ones that are gone, in one transaction; after another
  * page (another tab) wrote the copy, it rewrites all of it, so the copy is always one page's project.
  */
 export class ProjectCopyStore {
+  private readonly published: PublishedProject;
   private readonly store = new VisualStore<CopyRecord>({ database: 'over-the-edge:project-copy', store: 'files', keyPath: 'path' });
   // getRandomValues, unlike randomUUID, also works on plain-HTTP addresses.
   private readonly writer = Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -65,6 +75,14 @@ export class ProjectCopyStore {
   private mark: WriteMark | null = null;
   private readMark: WriteMark | null = null;
 
+  // `published` resolves the copy's published files: a copy started from an older deployment opens while this one
+  // still serves the files it uses.
+  constructor(published: PublishedProject) {
+    this.published = published;
+  }
+
+  // Reads the copy without its files' bytes: JSON files are validated as a project's, binary files stay Blobs this page
+  // reads only when it uses them, or published files.
   async read(): Promise<ProjectCopy | null> {
     this.stored = null;
     this.readMark = null;
@@ -79,17 +97,17 @@ export class ProjectCopyStore {
     const { origin, dirty, mark } = copyState(records.get(STATE));
     this.readMark = mark;
     const manifest = validateProjectManifest(records.get(PROJECT_FILES.manifest));
-    const binaries = new Map<string, Uint8Array<ArrayBuffer>>();
+    const documents = loadProjectDocuments(manifest, (ref) => records.get(ref.path));
+    const files = new Map<string, OpenedFile>();
     for (const ref of projectFileRefs(manifest)) {
       if (!ref.binary) continue;
       const value = records.get(ref.path);
-      if (!(value instanceof Blob) || value.size > ref.maxBytes) {
-        throw new ProjectError(`This browser's copy of the project is missing ${ref.path}.`, { section: ref.path });
-      }
-      binaries.set(ref.path, new Uint8Array(await value.arrayBuffer()));
+      const reference = publishedReference(value);
+      if (value instanceof Blob && value.size > 0 && value.size <= ref.maxBytes) files.set(ref.path, value);
+      else if (reference !== null) files.set(ref.path, this.publishedFile(ref.path, reference));
+      else throw new ProjectError(`This browser's copy of the project is missing ${ref.path}.`, { section: ref.path });
     }
-    const content = loadProjectContent(manifest, (ref) => ref.binary ? binaries.get(ref.path) : records.get(ref.path));
-    return { origin, dirty, content };
+    return { origin, dirty, content: Object.freeze({ ...documents, files }) };
   }
 
   // After the page opened the copy it read: `files` are the page's values for what the store holds.
@@ -126,6 +144,15 @@ export class ProjectCopyStore {
 
   dispose(): void {
     this.store.close();
+  }
+
+  // The file this deployment serves with a stored published file's bytes, wherever it is.
+  private publishedFile(path: string, reference: { sha256: string; bytes: number }): PublishedFile {
+    const file = this.published.files.find((candidate) => candidate.sha256 === reference.sha256 && candidate.bytes === reference.bytes);
+    if (file === undefined) {
+      throw new ProjectError(`This browser's copy of the project uses ${path} from a published version this site no longer serves.`, { section: path });
+    }
+    return file;
   }
 
   private async guard<T>(task: () => Promise<T>, problem: string): Promise<T> {

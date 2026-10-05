@@ -98,7 +98,10 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   // the browser's registry both use the same strategies.
   const rigModule = avatarRigModulePath(project, process.env.AVATAR_RIG_MODULE);
   const rigRegistry = await loadAvatarRigRegistry(rigModule, mode);
-  const release = requested === undefined ? null : loadProjectRelease(project, requested, selectedMode, rigRegistry);
+  const moduleFile = gameModule();
+  // Only a game's module brings a backend that selects library models, so only a build with one packages the library.
+  const release = requested === undefined ? null
+    : loadProjectRelease(project, requested, selectedMode, rigRegistry, { library: moduleFile !== null });
   return {
     root: resolve(project, 'play'),
     envDir: project,
@@ -112,7 +115,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
         contentUrl: contentUrl(),
         phantomsUrl: phantomsUrl(),
         recordings: phantomRecordings(requested),
-        module: gameModule(),
+        module: moduleFile,
         watch: release === null ? Object.values(files).filter((path): path is string => path !== null) : release.files,
         restartOnChange: release !== null,
       }),

@@ -13,6 +13,7 @@ import { VISUAL_PART_IDS } from '../src/character';
 import type { VisualPartId } from '../src/character';
 import { validateCourseModel } from '../src/course-art-model';
 import { DEFAULT_LEVEL } from '../src/default-level';
+import { meshTerrain } from '../src/mesh-collision';
 import { validateEnemyArt } from '../src/enemy-art-data';
 import { validateGameSettings } from '../src/game-settings';
 import { validateHud } from '../src/hud';
@@ -22,7 +23,7 @@ import { checkMediaBytes, MEDIA_LIMITS, mediaFile, mediaPath, mediaType } from '
 import { MODEL_LIMITS } from '../src/model-data';
 import { PHANTOM_LIMITS } from '../src/phantom-format';
 import {
-  appearanceFile, artAssetHashMatches, artFile, checkProjectReferences, defaultProjectManifest, inSection,
+  appearanceFile, artAssetHashMatches, artFile, checkBundleSize, checkProjectReferences, defaultProjectManifest, inSection,
   isProjectDataError, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, projectIdForTitle, projectTitle,
   unpackProjectBundle, validateMediaIndex, validateProjectArt, validateProjectCharacter, validateProjectId,
   validateProjectManifest, packProjectBundle, loadProjectContent,
@@ -38,7 +39,7 @@ import { validateTheme } from '../src/theme';
 import { checkAppearanceModel } from '../src/appearance-model';
 import {
   checkLibraryModel, checkModelLibrary, DEFAULT_AVATAR_SETTINGS, isPartRole, libraryEntries, libraryModelFile, libraryModelId,
-  MODEL_LIBRARY_LIMITS, newAvatarEntry, validateAvatarSettings, validateModelLibrary,
+  newAvatarEntry, validateAvatarSettings, validateModelLibrary,
 } from '../src/model-library';
 import type { LibraryAvatarEntry, LibraryEntry, LibraryHammerEntry, ModelLibrary, PartRole } from '../src/model-library';
 import { apiManual } from './api-manual';
@@ -412,6 +413,11 @@ export function createStudioHandler(config: StudioConfig) {
   });
   route('GET', '/api/projects/:id/bundle', async (context) => {
     const id = context.params.id!;
+    // A project too large for one project file is refused before its binary files are read.
+    const documents = await store.documents(id);
+    const sizes = new Map(await Promise.all(projectFileRefs(documents.manifest).filter((ref) => ref.binary)
+      .map(async (ref) => [ref.path, await store.size(id, ref.path)] as const)));
+    checkBundleSize(documents, (ref) => sizes.get(ref.path) ?? 0);
     const bundle = packProjectBundle((await store.snapshot(id)).content);
     sendJson(context.response, 200, bundle, context.url.searchParams.has('download')
       ? { 'Content-Disposition': `attachment; filename="${id}.project.json"` } : {});
@@ -437,8 +443,8 @@ export function createStudioHandler(config: StudioConfig) {
   });
   route('POST', '/api/projects/:id/publish', async (context) => {
     const id = context.params.id!;
-    const { content, state } = await store.snapshot(id);
-    const record = await publisher.publish(id, state.revision, verifyContent(content), store.recordingsDirectory(id));
+    // The build reads a copy of the files the release takes and runs every release check on them.
+    const record = await publisher.publish(id, (directory, select) => store.copy(id, directory, select), store.recordingsDirectory(id));
     sendJson(context.response, 200, record);
   });
   route('GET', '/api/projects/:id/publish', async (context) => {
@@ -551,6 +557,16 @@ export function createStudioHandler(config: StudioConfig) {
     const asset = manifest.art.assets.find((candidate) => candidate.id === context.params.assetId);
     if (asset === undefined) throw new HttpError(404, 'not-found', 'Unknown course artwork.', { section: 'art' });
     sendFile(context.request, context.response, store.filePath(context.params.id!, artFile(asset.id)), 'model/gltf-binary');
+  });
+  // A course mesh as terrain to place: its mesh entry, with the collision its GLB declares or its slice on the obstacle
+  // line, and its own size in metres.
+  route('GET', '/api/projects/:id/art/assets/:assetId/terrain', async (context) => {
+    const { manifest } = await project(context);
+    const asset = manifest.art.assets.find((candidate) => candidate.id === context.params.assetId);
+    if (asset === undefined) throw new HttpError(404, 'not-found', 'Unknown course artwork.', { section: 'art' });
+    const bytes = await store.readBytes(context.params.id!, { path: artFile(asset.id), maxBytes: ART_LIMITS.bytes });
+    sendJson(context.response, 200, inSection('art', () =>
+      meshTerrain(asset.id, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)));
   });
   route('DELETE', '/api/projects/:id/art/assets/:assetId', async (context) => {
     await change(context, ['art'], async (manifest) => {
@@ -680,13 +696,6 @@ export function createStudioHandler(config: StudioConfig) {
       });
       inSection('models', () => checkLibraryModel(role, entry, bytes, config.avatarRigs));
       const models = withEntry(manifest.models, role, entry);
-      let total = bytes.byteLength;
-      for (const other of libraryEntries(manifest.models)) {
-        if (other.role !== role || other.entry.id !== modelId) total += await store.size(context.params.id!, libraryModelFile(other.role, other.entry.id));
-      }
-      if (total > MODEL_LIBRARY_LIMITS.totalBytes) {
-        throw new HttpError(413, 'too-large', `The model library exceeds ${formatBytes(MODEL_LIBRARY_LIMITS.totalBytes)}.`, { section: 'models' });
-      }
       return { manifest: withManifest(manifest, { models }), binary: new Map([[libraryModelFile(role, modelId), bytes]]), result: libraryEntry({ ...manifest, models }, role, modelId) };
     });
   });

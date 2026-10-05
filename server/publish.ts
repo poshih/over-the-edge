@@ -1,15 +1,20 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, extname, join, relative, sep } from 'node:path';
-import { packProjectBundle, validateProjectId } from '../src/project';
-import type { ProjectContent } from '../src/project';
+import { validateProjectId } from '../src/project';
+import type { ProjectManifest } from '../src/project';
+import type { LevelDefinition } from '../src/level';
 import { pathType } from '../src/content';
 import { isContentPath } from '../src/content-ref';
 import { contentDirectory } from '../build/release';
+import { releaseProjectFiles } from '../build/release-input';
 import { HttpError, sendFile } from './http';
+
+// The binary files of a project, by path, that a release of it takes.
+export type ReleaseSelection = (manifest: ProjectManifest, level: LevelDefinition) => Iterable<string>;
 
 const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
 const LOG_LIMIT = 16 * 1024;
@@ -74,12 +79,21 @@ export class Publisher {
     }
   }
 
-  // `content` is a validated snapshot, so later edits cannot change a build that is in progress; `recordings` is the
-  // project's folder of phantom recordings, which the release bundles for its level.
-  publish(id: string, revision: number, content: ProjectContent, recordings: string): Promise<PublishRecord> {
-    const task = this.queue.then(() => this.build(id, revision, content, recordings));
-    this.queue = task.catch(() => undefined);
-    return task;
+  // `snapshot` copies the project, with the binary files the selection it is given names, into the directory it is given
+  // and returns the revision it copied, at once, so later edits cannot change a build that is waiting or in progress;
+  // `recordings` is the project's folder of phantom recordings, which the release bundles for its level.
+  async publish(id: string, snapshot: (directory: string, select: ReleaseSelection) => Promise<number>, recordings: string): Promise<PublishRecord> {
+    const work = join(this.releases, `.build-${id}-${randomBytes(6).toString('hex')}`);
+    try {
+      // Only the files the release takes: a studio release keeps the project's art look and has no module, so no
+      // library models.
+      const revision = await snapshot(join(work, 'project'), (manifest, level) => releaseProjectFiles(manifest, level, manifest.art.mode, false));
+      const task = this.queue.then(() => this.build(id, revision, work, recordings));
+      this.queue = task.catch(() => undefined);
+      return await task;
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
   }
 
   async serve(request: IncomingMessage, response: ServerResponse, pathname: string): Promise<void> {
@@ -118,17 +132,14 @@ export class Publisher {
     });
   }
 
-  private async build(id: string, revision: number, content: ProjectContent, recordings: string): Promise<PublishRecord> {
+  // Builds the project copied into `work`/project with the regular release build, as GAME_PROJECT, so the build reads
+  // the project's files from that directory like any other.
+  private async build(id: string, revision: number, work: string, recordings: string): Promise<PublishRecord> {
     this.running.add(id);
     const started = Date.now();
-    const work = join(this.releases, `.build-${id}-${randomBytes(6).toString('hex')}`);
     try {
-      await mkdir(work, { recursive: true });
-      // One bundle file keeps the snapshot self-contained and validated by the same release loader.
-      const bundlePath = join(work, 'project.bundle.json');
-      await writeFile(bundlePath, JSON.stringify(packProjectBundle(content)));
       const output = join(work, 'release');
-      await this.runBuild(relative(this.root, bundlePath), recordings, output);
+      await this.runBuild(relative(this.root, join(work, 'project')), recordings, output);
       // The release build writes the content beside its output folder.
       const outputs = [[output, join(this.releases, id)], [contentDirectory(output), join(this.releases, `${id}.content`)]] as const;
       const previous = outputs.map(([, target]) =>
@@ -146,7 +157,6 @@ export class Publisher {
       return record;
     } finally {
       this.running.delete(id);
-      await rm(work, { recursive: true, force: true });
     }
   }
 
@@ -156,7 +166,8 @@ export class Publisher {
     };
     // The project is the whole game; per-file inputs from the studio's own environment must not leak in.
     // A studio preview serves its own content, so it keeps the default content URL and public access, and
-    // it has no phantom service: it replays the project's own recordings.
+    // it has no phantom service: it replays the project's own recordings. Without a module it has no backend
+    // that selects library models, so the build packages none.
     for (const variable of [
       'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE', 'GAME_CONTENT_URL', 'GAME_MODULE',
       'GAME_PHANTOMS_URL',

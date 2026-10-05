@@ -31,14 +31,15 @@ dist-game-content/
   game/<sha256>.glb               character, appearance and course models
   game/<sha256>.wav               media, by extension
   game/<sha256>.phantoms          bundled phantom recordings, one pack per height band
-  library/<part>/<id>/<sha256>.glb  one model library entry, for runtime swaps
+  library/<part>/<id>/<sha256>.glb  one model library entry, for runtime swaps (with GAME_MODULE)
 ```
 
-- **Groups.** Content is split into groups that a CDN grants as a unit. The `game` group holds
-  everything every player uses. A path is `<group>/<sha256>.<extension>`, so one credential
+- **Groups.** Content is split into groups that a CDN grants as a unit. The `game` group is the
+  base game: everything every player uses. A path is `<group>/<sha256>.<extension>`, so one credential
   scoped to `game/` covers the whole group. Each [model library](characters.md#model-library-and-runtime-swaps)
-  entry is its own group, `library/<part>/<id>`, fetched only once the game's backend selects it
-  for the player.
+  entry, such as a cosmetic avatar, hammer or pot, is its own group, `library/<part>/<id>`, never part
+  of the base game and fetched only once the game's backend selects it for the player; a game
+  built without `GAME_MODULE` has no such backend, and no library groups.
 - **Named by content.** Every file is named by its SHA-256. Files are immutable, cacheable
   forever and renamed when they change. Two builds of the same game write identical content,
   wherever it is served.
@@ -50,7 +51,15 @@ dist-game-content/
   naming the source, when a level's video or sound event, the audio settings or a character
   profile names an external URL, or when a profile's image or model is not embedded. Per-file
   builds package a level's `/media/` files from `public/media/`; project builds package the
-  project's media library.
+  project's media library files the level and the audio play.
+- **Only what the game uses.** A game build reads and checks only the files it packages, so an
+  unused file in a project cannot fail the build. It packages the course meshes the level
+  draws in the release's look, the media the level and the audio play, and the art of the
+  enemy species the level places. The model library is packaged only for a game with its own
+  module (`GAME_MODULE`): without a backend to select them, no library model can ever show.
+  From a project directory, each file is read, checked and copied into the content on its own,
+  so a build never holds more than one at a time; a project file is one JSON text, which the
+  build reads whole.
 - **Code by use.** The shell includes the GLB, course-mesh, appearance and audio loaders only
   when its content needs them.
 
@@ -280,7 +289,7 @@ keep requesting ranges while they play.
 - The project server's **Publish** writes the shell to `releases/<id>/` and the content to
   `releases/<id>.content/`, and serves both at `/play/<id>/`, behind the studio's own access
   checks. Publishing ignores `GAME_CONTENT_URL` and `GAME_MODULE`: a studio preview uses public
-  access to its own content, and, without a backend that selects, shows no library models. It
+  access to its own content and, without a backend that selects, packages no library models. It
   honors [`AVATAR_RIG_MODULE`](#avatar-rig-strategies-the-rig-module): the published shell bundles
   the same strategies the project server validated the project's models against.
 - A Workshop built with `GAME_PROJECT` publishes every project file, so a game with protected

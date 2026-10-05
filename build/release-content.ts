@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { audioSources, hasAudio } from '../src/audio-settings';
 import {
   CONTENT_FORMAT, CONTENT_LIMITS, CONTENT_SCHEMA_VERSION, contentFilePath, contentRef, GAME_GROUP, levelMediaSources,
@@ -13,13 +12,15 @@ import { unknownDecorationModels } from '../src/decoration-models';
 import { mediaExtension } from '../src/media';
 import { embeddedPng } from '../src/sprite-data';
 import type { SpriteDocument } from '../src/sprite-data';
+import { releaseFileDigest, releaseFileSize, sha256Hex } from './release-file';
+import type { ReleaseFile } from './release-file';
 import type { ReleaseInput } from './release-input';
 import { packReleaseRecordings } from './release-phantoms';
 import type { ReleaseRecording } from './release-phantoms';
 
 // A game build's content output: every file by path, including the manifest, and what the shell pins.
 export interface ReleaseContent {
-  readonly files: ReadonlyMap<string, Uint8Array>;
+  readonly files: ReadonlyMap<string, ReleaseFile>;
   readonly pins: Omit<ContentPins, 'contentUrl'>;
   // Which runtime loaders the shell needs; a release that uses none of a kind omits its code.
   readonly uses: {
@@ -37,10 +38,10 @@ const PACKAGED = 'A game build packages every asset';
  * is served.
  */
 export function packReleaseContent(input: ReleaseInput, recordings: readonly ReleaseRecording[]): ReleaseContent {
-  const files = new Map<string, Uint8Array>();
-  const add = (bytes: Uint8Array, extension: ContentExtension, group = GAME_GROUP): string => {
-    const path = contentFilePath(group, createHash('sha256').update(bytes).digest('hex'), extension);
-    files.set(path, bytes);
+  const files = new Map<string, ReleaseFile>();
+  const add = (file: ReleaseFile, extension: ContentExtension, group = GAME_GROUP): string => {
+    const path = contentFilePath(group, releaseFileDigest(file), extension);
+    files.set(path, file);
     return contentRef(path);
   };
   const character = (document: SpriteDocument, label: string): SpriteDocument => {
@@ -57,7 +58,7 @@ export function packReleaseContent(input: ReleaseInput, recordings: readonly Rel
     return { ...document, images, ...(models === undefined ? {} : { models }) };
   };
   const media: Record<string, string> = {};
-  for (const entry of input.media) media[entry.path] = add(entry.bytes, mediaExtension(entry.path));
+  for (const entry of input.media) media[entry.path] = add(entry.file, mediaExtension(entry.path));
   for (const [owner, sources] of [['The level', levelMediaSources(input.level)], ['The audio', audioSources(input.audio)]] as const) {
     for (const source of sources) {
       if (!Object.hasOwn(media, source)) throw new Error(`${owner} plays ${source}. ${PACKAGED}, so play a /media/ file the game includes.`);
@@ -75,22 +76,22 @@ export function packReleaseContent(input: ReleaseInput, recordings: readonly Rel
       primary: character(input.primary, 'The primary character'),
       alternate: input.alternate === null ? null : character(input.alternate, 'The alternate character'),
     },
-    appearance: input.appearance.map(part => ({ part: part.part, name: part.name, alignment: part.alignment, source: add(part.bytes, 'glb') })),
+    appearance: input.appearance.map(part => ({ part: part.part, name: part.name, alignment: part.alignment, source: add(part.file, 'glb') })),
     art: {
       mode: input.art.mode, decorations: input.art.decorations,
-      assets: input.art.assets.map(asset => ({ id: asset.id, name: asset.name, source: add(asset.bytes, 'glb') })),
+      assets: input.art.assets.map(asset => ({ id: asset.id, name: asset.name, source: add(asset.file, 'glb') })),
     },
     media,
-    library: Object.fromEntries(PART_ROLES.map(role => [role, input.library[role].map(({ bytes, ...entry }) =>
-      ({ ...entry, source: add(bytes, 'glb', libraryGroup(role, entry.id)) }))])),
+    library: Object.fromEntries(PART_ROLES.map(role => [role, input.library[role].map(({ file, ...entry }) =>
+      ({ ...entry, source: add(file, 'glb', libraryGroup(role, entry.id)) }))])),
     phantoms: packReleaseRecordings(recordings).map(pack => ({ source: add(pack.bytes, 'phantoms'), bounds: pack.bounds })),
     files: {} as Record<string, number>,
   };
-  draft.files = Object.fromEntries([...files].map(([path, bytes]) => [path, bytes.byteLength]));
+  draft.files = Object.fromEntries([...files].map(([path, file]) => [path, releaseFileSize(file)]));
   // The manifest is written as the release will read it back.
   const manifest = new TextEncoder().encode(JSON.stringify(validateContentManifest(draft)));
   if (manifest.byteLength > CONTENT_LIMITS.manifestBytes) throw new Error('The release content manifest exceeds its size limit.');
-  const manifestPath = contentFilePath(GAME_GROUP, createHash('sha256').update(manifest).digest('hex'), 'json');
+  const manifestPath = contentFilePath(GAME_GROUP, sha256Hex(manifest), 'json');
   files.set(manifestPath, manifest);
   const { primary, alternate } = draft.characters;
   return {

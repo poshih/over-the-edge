@@ -2,7 +2,7 @@ import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments
 import type { Vector3 } from 'three';
 import type { ArmPose } from '../arm-ik';
 import type { Point } from '../config';
-import { objectVertices } from '../level';
+import { objectLoops } from '../level';
 import type { TerrainEvent } from '../level';
 import { transformPoint } from '../math';
 import { OBSTACLE_LINE } from '../obstacle-line';
@@ -24,7 +24,7 @@ export class CollisionOverlay implements ViewLayer {
   private readonly fixed = new LineSegments(new BufferGeometry(), this.material);
   private readonly moving = new LineSegments(new BufferGeometry(), this.material);
   private readonly positions = new Float32Array(DYNAMIC_EDGES * 6);
-  private readonly outlines = new Map<string, readonly Point[]>();
+  private readonly outlines = new Map<string, readonly (readonly Point[])[]>();
   private dirty = true;
 
   constructor() {
@@ -42,10 +42,10 @@ export class CollisionOverlay implements ViewLayer {
     switch (event.type) {
       case 'reset':
         this.outlines.clear();
-        for (const object of event.objects) this.outlines.set(object.id, objectVertices(object));
+        for (const object of event.objects) this.outlines.set(object.id, objectLoops(object));
         break;
       case 'upsert':
-        this.outlines.set(event.object.id, objectVertices(event.object));
+        this.outlines.set(event.object.id, objectLoops(event.object));
         break;
       case 'remove':
       case 'disappear':
@@ -61,11 +61,13 @@ export class CollisionOverlay implements ViewLayer {
     if (!this.root.visible) return;
     if (this.dirty) {
       const positions: number[] = [];
-      for (const vertices of this.outlines.values()) {
-        for (let index = 0; index < vertices.length; index++) {
-          const a = vertices[index];
-          const b = vertices[(index + 1) % vertices.length];
-          positions.push(a.x, a.y, OBSTACLE_LINE, b.x, b.y, OBSTACLE_LINE);
+      for (const loops of this.outlines.values()) {
+        for (const vertices of loops) {
+          for (let index = 0; index < vertices.length; index++) {
+            const a = vertices[index];
+            const b = vertices[(index + 1) % vertices.length];
+            positions.push(a.x, a.y, OBSTACLE_LINE, b.x, b.y, OBSTACLE_LINE);
+          }
         }
       }
       this.fixed.geometry.dispose();

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "labels": [
     {
       "x": 1.575,
@@ -51,8 +51,9 @@
     {
       "kind": "terrain",
       "id": "ground",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 0,
       "y": -1,
@@ -60,6 +61,7 @@
       "height": 2,
       "angle": 0,
       "depth": 3,
+      "mirror": false,
       "color": 5399646,
       "illusion": false,
       "surface": "rock"
@@ -75,8 +77,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-01",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 3.3,
       "y": 1.075,
@@ -84,6 +87,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -91,8 +95,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-02",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.1,
       "y": 2.675,
@@ -100,6 +105,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -107,8 +113,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 1.575,
       "y": 4.275,
@@ -116,6 +123,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -123,8 +131,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-04",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.199,
       "y": 6.803,
@@ -132,6 +141,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -139,8 +149,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-05",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 2.118,
       "y": 9.205,
@@ -148,6 +159,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -155,8 +167,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-06",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 6.834,
       "y": 11.483,
@@ -164,6 +177,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -171,8 +185,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-07",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 4.689,
       "y": 13.86,
@@ -180,6 +195,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -187,8 +203,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-08",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 8.3,
       "y": 16.513,
@@ -196,6 +213,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -203,8 +221,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-09",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.764,
       "y": 18.766,
@@ -212,6 +231,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -219,8 +239,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-10",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 9.584,
       "y": 21.368,
@@ -228,6 +249,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -235,8 +257,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.66,
       "y": 23.696,
@@ -244,6 +267,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -251,8 +275,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 11.999,
       "y": 26.123,
@@ -260,6 +285,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -267,8 +293,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-13",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 8.004,
       "y": 28.651,
@@ -276,6 +303,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -283,8 +311,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-14",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 11.384,
       "y": 30.853,
@@ -292,6 +321,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -299,8 +329,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 8.922,
       "y": 33.406,
@@ -308,6 +339,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -315,8 +347,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-16",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 12.6,
       "y": 35.934,
@@ -324,6 +357,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -331,8 +365,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-17",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 9.3,
       "y": 38.336,
@@ -340,6 +375,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -347,8 +383,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-18",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 13.516,
       "y": 40.614,
@@ -356,6 +393,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -363,8 +401,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-19",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 10.796,
       "y": 43.216,
@@ -372,6 +411,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -379,8 +419,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-20",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 14.501,
       "y": 45.644,
@@ -388,6 +429,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -395,8 +437,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-21",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 12.14,
       "y": 47.847,
@@ -404,6 +447,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -411,8 +455,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 16.916,
       "y": 50.399,
@@ -420,6 +465,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -427,8 +473,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-23",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 13.036,
       "y": 52.927,
@@ -436,6 +483,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -443,8 +491,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-24",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 16.9,
       "y": 55.179,
@@ -452,6 +501,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -459,8 +509,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 13.111,
       "y": 57.682,
@@ -468,6 +519,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -475,8 +527,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 18.909,
       "y": 60.109,
@@ -484,6 +537,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -491,8 +545,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-27",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 15.965,
       "y": 62.462,
@@ -500,6 +555,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -507,8 +563,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-28",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 19.801,
       "y": 65.04,
@@ -516,6 +573,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -523,8 +581,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-29",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 17.671,
       "y": 67.492,
@@ -532,6 +591,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -539,8 +599,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-30",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 21.766,
       "y": 69.745,
@@ -548,6 +609,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -555,8 +617,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-31",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 19.478,
       "y": 72.347,
@@ -564,6 +627,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -571,8 +635,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-32",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 25.1,
       "y": 74.675,
@@ -580,6 +645,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -587,8 +653,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-01",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 21.794,
       "y": 77.273,
@@ -596,6 +663,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -603,8 +671,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-02",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 24.879,
       "y": 79.545,
@@ -612,6 +681,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -619,8 +689,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 23.024,
       "y": 81.493,
@@ -628,6 +699,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -635,8 +707,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-04",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 26.595,
       "y": 84.091,
@@ -644,6 +717,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -651,8 +725,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-05",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 23.78,
       "y": 86.114,
@@ -660,6 +735,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -667,8 +743,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-06",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 28.192,
       "y": 88.636,
@@ -676,6 +753,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -683,8 +761,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-07",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 26.733,
       "y": 90.909,
@@ -692,6 +771,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -699,8 +779,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-08",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 29.632,
       "y": 93.182,
@@ -708,6 +789,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -715,8 +797,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-09",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 28.088,
       "y": 95.455,
@@ -724,6 +807,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -731,8 +815,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-10",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 30.901,
       "y": 97.727,
@@ -740,6 +825,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -747,8 +833,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 27.473,
       "y": 99.675,
@@ -756,6 +843,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -763,8 +851,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 33.807,
       "y": 101.948,
@@ -772,6 +861,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -779,8 +869,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-13",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 30.308,
       "y": 104.545,
@@ -788,6 +879,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -795,8 +887,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-14",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 32.983,
       "y": 106.818,
@@ -804,6 +897,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -811,8 +905,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 30.713,
       "y": 108.766,
@@ -820,6 +915,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -827,8 +923,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-16",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 33.881,
       "y": 111.364,
@@ -836,6 +933,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -843,8 +941,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-17",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 31.079,
       "y": 113.386,
@@ -852,6 +951,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -859,8 +959,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-18",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 34.762,
       "y": 115.909,
@@ -868,6 +969,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -875,8 +977,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-19",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 33.017,
       "y": 118.182,
@@ -884,6 +987,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -891,8 +995,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-20",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 35.692,
       "y": 120.455,
@@ -900,6 +1005,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -907,8 +1013,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-21",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 33.993,
       "y": 122.727,
@@ -916,6 +1023,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -923,8 +1031,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 38.527,
       "y": 124.675,
@@ -932,6 +1041,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -939,8 +1049,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-23",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 35.099,
       "y": 127.273,
@@ -948,6 +1059,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -955,8 +1067,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-24",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 37.912,
       "y": 129.545,
@@ -964,6 +1077,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -971,8 +1085,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 34.568,
       "y": 131.493,
@@ -980,6 +1095,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -987,8 +1103,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 40.203,
       "y": 133.766,
@@ -996,6 +1113,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1003,8 +1121,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-27",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 37.808,
       "y": 136.364,
@@ -1012,6 +1131,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1019,8 +1139,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-28",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 41.039,
       "y": 138.386,
@@ -1028,6 +1149,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1035,8 +1157,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-29",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 39.405,
       "y": 140.909,
@@ -1044,6 +1167,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1051,8 +1175,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-30",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 42.451,
       "y": 143.182,
@@ -1060,6 +1185,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1067,8 +1193,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-31",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 41.121,
       "y": 145.455,
@@ -1076,6 +1203,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1083,8 +1211,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-32",
-      "shape": {
-        "type": "ramp"
+      "mesh": {
+        "type": "shape",
+        "shape": "ramp"
       },
       "x": 44.206,
       "y": 147.727,
@@ -1092,6 +1221,7 @@
       "height": 0.6,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1099,8 +1229,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-33",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 40.9,
       "y": 149.675,
@@ -1108,6 +1239,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -1115,8 +1247,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-01",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 42.26,
       "y": 151.223,
@@ -1124,6 +1257,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1131,8 +1265,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-02",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 44.413,
       "y": 153.495,
@@ -1140,6 +1275,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1147,8 +1283,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 41.024,
       "y": 156.493,
@@ -1156,6 +1293,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -1163,8 +1301,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-04",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 43.461,
       "y": 158.041,
@@ -1172,6 +1311,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1179,8 +1319,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-05",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 40.447,
       "y": 161.114,
@@ -1188,6 +1329,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1195,8 +1337,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-06",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 42.392,
       "y": 162.586,
@@ -1204,6 +1347,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1211,8 +1355,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-07",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 39.2,
       "y": 164.859,
@@ -1220,6 +1365,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1227,8 +1373,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-08",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 41.165,
       "y": 167.132,
@@ -1236,6 +1383,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1243,8 +1391,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-09",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 37.888,
       "y": 169.405,
@@ -1252,6 +1401,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1259,8 +1409,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-10",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 39.767,
       "y": 171.677,
@@ -1268,6 +1419,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1275,8 +1427,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 34.806,
       "y": 174.675,
@@ -1284,6 +1437,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1291,8 +1445,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 39.807,
       "y": 176.948,
@@ -1300,6 +1455,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1307,8 +1463,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-13",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 34.775,
       "y": 178.495,
@@ -1316,6 +1473,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1323,8 +1481,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-14",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 36.517,
       "y": 180.768,
@@ -1332,6 +1491,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1339,8 +1499,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 32.396,
       "y": 183.766,
@@ -1348,6 +1509,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1355,8 +1517,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-16",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 34.747,
       "y": 185.314,
@@ -1364,6 +1527,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1371,8 +1535,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-17",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 31.428,
       "y": 188.386,
@@ -1380,6 +1545,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1387,8 +1553,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-18",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 32.962,
       "y": 189.859,
@@ -1396,6 +1563,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1403,8 +1571,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-19",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 29.483,
       "y": 192.132,
@@ -1412,6 +1581,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1419,8 +1589,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-20",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 31.225,
       "y": 194.405,
@@ -1428,6 +1599,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1435,8 +1607,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-21",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 27.793,
       "y": 196.677,
@@ -1444,6 +1617,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1451,8 +1625,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 31.194,
       "y": 199.675,
@@ -1460,6 +1635,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1467,8 +1643,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-23",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 26.233,
       "y": 201.223,
@@ -1476,6 +1653,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1483,8 +1661,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-24",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 28.112,
       "y": 203.495,
@@ -1492,6 +1671,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1499,8 +1679,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 23.235,
       "y": 206.493,
@@ -1508,6 +1689,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1515,8 +1697,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 27.125,
       "y": 208.766,
@@ -1524,6 +1707,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1531,8 +1715,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-27",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 23.608,
       "y": 210.314,
@@ -1540,6 +1725,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1547,8 +1733,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-28",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 26.628,
       "y": 213.386,
@@ -1556,6 +1743,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1563,8 +1751,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-29",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 22.539,
       "y": 214.859,
@@ -1572,6 +1761,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1579,8 +1769,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-30",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 24.651,
       "y": 217.132,
@@ -1588,6 +1779,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1595,8 +1787,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-31",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 21.587,
       "y": 219.405,
@@ -1604,6 +1797,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1611,8 +1805,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-32",
-      "shape": {
-        "type": "circle"
+      "mesh": {
+        "type": "shape",
+        "shape": "circle"
       },
       "x": 23.74,
       "y": 221.677,
@@ -1620,6 +1815,7 @@
       "height": 2.1,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1627,8 +1823,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-33",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 18.9,
       "y": 224.675,
@@ -1636,6 +1833,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -1643,8 +1841,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-01",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -1686,6 +1884,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -1693,8 +1892,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-02",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -1736,6 +1935,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -1743,8 +1943,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 17.237,
       "y": 231.493,
@@ -1752,6 +1953,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -1759,8 +1961,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-04",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -1802,6 +2004,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -1809,8 +2012,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-05",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 16.418,
       "y": 236.114,
@@ -1818,6 +2022,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -1825,8 +2030,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-06",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -1868,6 +2073,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -1875,8 +2081,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-07",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -1918,6 +2124,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -1925,8 +2132,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-08",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -1968,6 +2175,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -1975,8 +2183,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-09",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2018,6 +2226,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2025,8 +2234,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-10",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2068,6 +2277,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2075,8 +2285,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 10.289,
       "y": 249.675,
@@ -2084,6 +2295,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2091,8 +2303,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 14.748,
       "y": 251.948,
@@ -2100,6 +2313,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2107,8 +2321,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-13",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2150,6 +2364,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2157,8 +2372,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-14",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2200,6 +2415,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2207,8 +2423,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.315,
       "y": 258.766,
@@ -2216,6 +2433,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2223,8 +2441,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-16",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2266,6 +2484,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2273,8 +2492,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-17",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 4.104,
       "y": 263.386,
@@ -2282,6 +2502,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2289,8 +2510,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-18",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2332,6 +2553,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2339,8 +2561,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-19",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2382,6 +2604,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2389,8 +2612,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-20",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2432,6 +2655,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2439,8 +2663,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-21",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2482,6 +2706,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2489,8 +2714,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 3.711,
       "y": 274.675,
@@ -2498,6 +2724,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2505,8 +2732,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-23",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2548,6 +2775,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2555,8 +2783,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-24",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2598,6 +2826,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2605,8 +2834,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -4.676,
       "y": 281.493,
@@ -2614,6 +2844,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2621,8 +2852,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -1.328,
       "y": 283.766,
@@ -2630,6 +2862,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2637,8 +2870,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-27",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2680,6 +2913,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2687,8 +2921,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-28",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -2.068,
       "y": 288.386,
@@ -2696,6 +2931,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2703,8 +2939,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-29",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2746,6 +2982,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2753,8 +2990,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-30",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2796,6 +3033,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2803,8 +3041,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-31",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2846,6 +3084,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2853,8 +3092,8 @@
     {
       "kind": "terrain",
       "id": "z04-step-32",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -2896,6 +3135,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2903,8 +3143,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-33",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -11.1,
       "y": 299.675,
@@ -2912,6 +3153,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -2919,8 +3161,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-01",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -9.771,
       "y": 301.823,
@@ -2928,6 +3171,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -2935,8 +3179,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-02",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -8.101,
       "y": 304.095,
@@ -2944,6 +3189,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -2951,8 +3197,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -12.51,
       "y": 306.493,
@@ -2960,6 +3207,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -2967,8 +3215,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-04",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -9.416,
       "y": 308.641,
@@ -2976,6 +3225,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -2983,8 +3233,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-05",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -12.415,
       "y": 310.914,
@@ -2992,6 +3243,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -2999,8 +3251,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-06",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -10.849,
       "y": 313.186,
@@ -3008,6 +3261,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3015,8 +3269,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-07",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -14.023,
       "y": 315.659,
@@ -3024,6 +3279,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3031,8 +3287,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-08",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -12.439,
       "y": 317.732,
@@ -3040,6 +3297,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3047,8 +3305,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-09",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -15.599,
       "y": 320.005,
@@ -3056,6 +3315,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3063,8 +3323,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-10",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -14.201,
       "y": 322.277,
@@ -3072,6 +3333,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3079,8 +3341,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -19.044,
       "y": 324.675,
@@ -3088,6 +3351,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3095,8 +3359,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -14.525,
       "y": 326.948,
@@ -3104,6 +3369,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3111,8 +3377,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-13",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -19.439,
       "y": 329.095,
@@ -3120,6 +3387,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3127,8 +3395,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-14",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -18.179,
       "y": 331.368,
@@ -3136,6 +3405,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3143,8 +3413,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -23.705,
       "y": 333.766,
@@ -3152,6 +3423,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3159,8 +3431,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-16",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -20.312,
       "y": 335.914,
@@ -3168,6 +3441,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3175,8 +3449,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-17",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -23.688,
       "y": 338.186,
@@ -3184,6 +3459,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3191,8 +3467,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-18",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -22.461,
       "y": 340.459,
@@ -3200,6 +3477,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3207,8 +3485,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-19",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -25.921,
       "y": 342.932,
@@ -3216,6 +3495,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3223,8 +3503,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-20",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -24.561,
       "y": 345.005,
@@ -3232,6 +3513,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3239,8 +3521,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-21",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -27.875,
       "y": 347.277,
@@ -3248,6 +3531,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3255,8 +3539,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -24.956,
       "y": 349.675,
@@ -3264,6 +3549,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3271,8 +3557,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-23",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -29.799,
       "y": 351.823,
@@ -3280,6 +3567,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3287,8 +3575,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-24",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -28.401,
       "y": 354.095,
@@ -3296,6 +3585,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3303,8 +3593,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -33.161,
       "y": 356.493,
@@ -3312,6 +3603,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3319,8 +3611,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -29.752,
       "y": 358.766,
@@ -3328,6 +3621,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3335,8 +3629,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-27",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -33.151,
       "y": 360.914,
@@ -3344,6 +3639,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3351,8 +3647,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-28",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -31.585,
       "y": 363.186,
@@ -3360,6 +3657,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3367,8 +3665,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-29",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -34.584,
       "y": 365.459,
@@ -3376,6 +3675,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3383,8 +3683,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-30",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -31.115,
       "y": 367.932,
@@ -3392,6 +3693,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3399,8 +3701,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-31",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -35.899,
       "y": 370.005,
@@ -3408,6 +3711,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3415,8 +3719,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-32",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -34.229,
       "y": 372.277,
@@ -3424,6 +3729,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3431,8 +3737,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-33",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -39.1,
       "y": 374.675,
@@ -3440,6 +3747,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -3447,8 +3755,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-01",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -36.646,
       "y": 377.048,
@@ -3456,6 +3765,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3463,8 +3773,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-02",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -32.499,
       "y": 379.32,
@@ -3472,6 +3783,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3479,8 +3791,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -34.794,
       "y": 381.493,
@@ -3488,6 +3801,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -3495,8 +3809,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-04",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -30.663,
       "y": 383.866,
@@ -3504,6 +3819,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3511,8 +3827,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-05",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -33.977,
       "y": 386.114,
@@ -3520,6 +3837,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3527,8 +3845,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-06",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -28.945,
       "y": 388.236,
@@ -3536,6 +3855,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3543,8 +3863,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-07",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -31.343,
       "y": 390.684,
@@ -3552,6 +3873,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3559,8 +3881,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-08",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -27.383,
       "y": 392.957,
@@ -3568,6 +3891,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3575,8 +3899,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-09",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -29.867,
       "y": 395.055,
@@ -3584,6 +3909,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3591,8 +3917,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-10",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -25.993,
       "y": 397.502,
@@ -3600,6 +3927,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3607,8 +3935,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -29.861,
       "y": 399.675,
@@ -3616,6 +3945,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3623,8 +3953,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -23.466,
       "y": 401.948,
@@ -3632,6 +3963,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3639,8 +3971,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-13",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -27.404,
       "y": 404.32,
@@ -3648,6 +3981,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3655,8 +3989,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-14",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -23.668,
       "y": 406.593,
@@ -3664,6 +3999,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3671,8 +4007,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -26.378,
       "y": 408.766,
@@ -3680,6 +4017,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3687,8 +4025,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-16",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -22.65,
       "y": 411.139,
@@ -3696,6 +4035,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3703,8 +4043,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-17",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -25.952,
       "y": 413.386,
@@ -3712,6 +4053,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3719,8 +4061,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-18",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -21.647,
       "y": 415.509,
@@ -3728,6 +4071,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3735,8 +4079,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-19",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -24.332,
       "y": 417.957,
@@ -3744,6 +4089,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3751,8 +4097,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-20",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -20.596,
       "y": 420.23,
@@ -3760,6 +4107,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3767,8 +4115,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-21",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -23.234,
       "y": 422.327,
@@ -3776,6 +4125,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3783,8 +4133,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -18.139,
       "y": 424.675,
@@ -3792,6 +4143,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3799,8 +4151,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-23",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -22.007,
       "y": 427.048,
@@ -3808,6 +4161,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3815,8 +4169,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-24",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -18.133,
       "y": 429.145,
@@ -3824,6 +4179,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3831,8 +4187,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -21.917,
       "y": 431.493,
@@ -3840,6 +4197,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3847,8 +4205,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -15.169,
       "y": 433.766,
@@ -3856,6 +4215,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3863,8 +4223,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-27",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -19.055,
       "y": 435.964,
@@ -3872,6 +4233,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3879,8 +4241,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-28",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -14.272,
       "y": 438.386,
@@ -3888,6 +4251,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3895,8 +4259,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-29",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -17.337,
       "y": 440.684,
@@ -3904,6 +4269,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3911,8 +4277,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-30",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -13.231,
       "y": 442.782,
@@ -3920,6 +4287,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3927,8 +4295,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-31",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -15.501,
       "y": 445.23,
@@ -3936,6 +4305,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3943,8 +4313,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-32",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -11.354,
       "y": 447.502,
@@ -3952,6 +4323,7 @@
       "height": 0.45,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3959,8 +4331,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-33",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -15.1,
       "y": 449.675,
@@ -3968,6 +4341,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -3975,8 +4349,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-01",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4018,6 +4392,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4025,8 +4400,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-02",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4068,6 +4443,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4075,8 +4451,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -10.463,
       "y": 456.493,
@@ -4084,6 +4461,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -4091,8 +4469,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-04",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4134,6 +4512,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4141,8 +4520,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-05",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -9.585,
       "y": 461.114,
@@ -4150,6 +4530,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4157,8 +4538,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-06",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4200,6 +4581,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4207,8 +4589,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-07",
-      "shape": {
-        "type": "triangle"
+      "mesh": {
+        "type": "shape",
+        "shape": "triangle"
       },
       "x": -6.269,
       "y": 465.509,
@@ -4216,6 +4599,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4223,8 +4607,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-08",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4266,6 +4650,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4273,8 +4658,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-09",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4316,6 +4701,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4323,8 +4709,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-10",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4366,6 +4752,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4373,8 +4760,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -5.044,
       "y": 474.675,
@@ -4382,6 +4770,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4389,8 +4778,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 1.111,
       "y": 476.948,
@@ -4398,6 +4788,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4405,8 +4796,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-13",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4448,6 +4839,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4455,8 +4847,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-14",
-      "shape": {
-        "type": "triangle"
+      "mesh": {
+        "type": "shape",
+        "shape": "triangle"
       },
       "x": 0.53,
       "y": 481.418,
@@ -4464,6 +4857,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4471,8 +4865,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -1.319,
       "y": 483.766,
@@ -4480,6 +4875,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4487,8 +4883,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-16",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4530,6 +4926,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4537,8 +4934,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-17",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -0.832,
       "y": 488.386,
@@ -4546,6 +4944,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4553,8 +4952,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-18",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4596,6 +4995,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4603,8 +5003,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-19",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4646,6 +5046,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4653,8 +5054,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-20",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4696,6 +5097,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4703,8 +5105,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-21",
-      "shape": {
-        "type": "triangle"
+      "mesh": {
+        "type": "shape",
+        "shape": "triangle"
       },
       "x": 2.689,
       "y": 497.327,
@@ -4712,6 +5115,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4719,8 +5123,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 7.044,
       "y": 499.675,
@@ -4728,6 +5133,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4735,8 +5141,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-23",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4778,6 +5184,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4785,8 +5192,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-24",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4828,6 +5235,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4835,8 +5243,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 3.748,
       "y": 506.493,
@@ -4844,6 +5253,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4851,8 +5261,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 10.831,
       "y": 508.766,
@@ -4860,6 +5271,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4867,8 +5279,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-27",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4910,6 +5322,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4917,8 +5330,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-28",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 11.788,
       "y": 513.386,
@@ -4926,6 +5340,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4933,8 +5348,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-29",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -4976,6 +5391,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -4983,8 +5399,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-30",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -5026,6 +5442,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -5033,8 +5450,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-31",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -5076,6 +5493,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -5083,8 +5501,8 @@
     {
       "kind": "terrain",
       "id": "z07-step-32",
-      "shape": {
-        "type": "polygon",
+      "mesh": {
+        "type": "outline",
         "vertices": [
           {
             "x": -0.5,
@@ -5126,6 +5544,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -5133,8 +5552,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-33",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 17.1,
       "y": 524.675,
@@ -5142,6 +5562,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -5149,8 +5570,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-01",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 12.503,
       "y": 526.823,
@@ -5158,6 +5580,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5165,8 +5588,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-02",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 14.898,
       "y": 529.095,
@@ -5174,6 +5598,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5181,8 +5606,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-03",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 11.461,
       "y": 531.493,
@@ -5190,6 +5616,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -5197,8 +5624,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-04",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 14.431,
       "y": 533.641,
@@ -5206,6 +5634,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5213,8 +5642,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-05",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 11.126,
       "y": 536.114,
@@ -5222,6 +5652,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5229,8 +5660,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-06",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 13.846,
       "y": 538.186,
@@ -5238,6 +5670,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5245,8 +5678,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-07",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 10.896,
       "y": 540.459,
@@ -5254,6 +5688,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5261,8 +5696,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-08",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 13.105,
       "y": 542.732,
@@ -5270,6 +5706,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5277,8 +5714,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-09",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 10.07,
       "y": 545.005,
@@ -5286,6 +5724,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5293,8 +5732,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-10",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 12.192,
       "y": 547.277,
@@ -5302,6 +5742,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5309,8 +5750,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-11",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 7.473,
       "y": 549.675,
@@ -5318,6 +5760,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5325,8 +5768,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-12",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 12.716,
       "y": 551.948,
@@ -5334,6 +5778,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5341,8 +5786,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-13",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 7.927,
       "y": 554.095,
@@ -5350,6 +5796,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5357,8 +5804,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-14",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 9.91,
       "y": 556.368,
@@ -5366,6 +5814,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5373,8 +5822,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-15",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.357,
       "y": 558.766,
@@ -5382,6 +5832,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5389,8 +5840,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-16",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 8.626,
       "y": 560.914,
@@ -5398,6 +5850,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5405,8 +5858,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-17",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 4.632,
       "y": 563.386,
@@ -5414,6 +5868,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5421,8 +5876,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-18",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 7.326,
       "y": 565.459,
@@ -5430,6 +5886,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5437,8 +5894,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-19",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 4.09,
       "y": 567.732,
@@ -5446,6 +5904,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5453,8 +5912,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-20",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 6.073,
       "y": 570.005,
@@ -5462,6 +5922,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5469,8 +5930,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-21",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 2.884,
       "y": 572.277,
@@ -5478,6 +5940,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5485,8 +5948,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-22",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 6.527,
       "y": 574.675,
@@ -5494,6 +5958,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5501,8 +5966,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-23",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 1.808,
       "y": 576.823,
@@ -5510,6 +5976,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5517,8 +5984,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-24",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 3.93,
       "y": 579.095,
@@ -5526,6 +5994,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5533,8 +6002,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-25",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -0.705,
       "y": 581.493,
@@ -5542,6 +6012,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5549,8 +6020,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-26",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 3.429,
       "y": 583.766,
@@ -5558,6 +6030,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5565,8 +6038,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-27",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 0.154,
       "y": 585.914,
@@ -5574,6 +6048,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5581,8 +6056,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-28",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 3.174,
       "y": 588.386,
@@ -5590,6 +6066,7 @@
       "height": 0.5,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5597,8 +6074,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-29",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -0.431,
       "y": 590.459,
@@ -5606,6 +6084,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5613,8 +6092,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-30",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 1.924,
       "y": 592.732,
@@ -5622,6 +6102,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5629,8 +6110,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-31",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": -0.898,
       "y": 595.005,
@@ -5638,6 +6120,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5645,8 +6128,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-32",
-      "shape": {
-        "type": "hexagon"
+      "mesh": {
+        "type": "shape",
+        "shape": "hexagon"
       },
       "x": 1.497,
       "y": 597.277,
@@ -5654,6 +6138,7 @@
       "height": 0.9,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -5661,8 +6146,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-33",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -3.1,
       "y": 599.675,
@@ -5670,6 +6156,7 @@
       "height": 0.65,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 4150617,
       "illusion": false,
       "surface": "rock"
@@ -5677,8 +6164,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -1.4,
       "y": 4.2,
@@ -5686,6 +6174,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -5714,8 +6203,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.947,
       "y": 33.331,
@@ -5723,6 +6213,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -5751,8 +6242,9 @@
     {
       "kind": "terrain",
       "id": "z01-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 22.401,
       "y": 60.034,
@@ -5760,6 +6252,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7899521,
       "illusion": false,
       "surface": "rock"
@@ -5788,8 +6281,9 @@
     {
       "kind": "terrain",
       "id": "z1-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 6.235,
       "y": 15.571,
@@ -5797,6 +6291,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -5804,8 +6299,9 @@
     {
       "kind": "terrain",
       "id": "z1-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 7.549,
       "y": 20.427,
@@ -5813,6 +6309,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -5820,8 +6317,9 @@
     {
       "kind": "terrain",
       "id": "z1-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 13.551,
       "y": 49.558,
@@ -5829,6 +6327,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -5836,8 +6335,9 @@
     {
       "kind": "terrain",
       "id": "z1-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 14.865,
       "y": 54.413,
@@ -5845,6 +6345,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -5892,8 +6393,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 20.049,
       "y": 81.418,
@@ -5901,6 +6403,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -5929,8 +6432,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 27.738,
       "y": 108.691,
@@ -5938,6 +6442,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -5966,8 +6471,9 @@
     {
       "kind": "terrain",
       "id": "z02-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 43.589,
       "y": 133.691,
@@ -5975,6 +6481,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 9797996,
       "illusion": false,
       "surface": "rock"
@@ -6003,8 +6510,9 @@
     {
       "kind": "terrain",
       "id": "z2-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 27.267,
       "y": 92.17,
@@ -6012,6 +6520,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6019,8 +6528,9 @@
     {
       "kind": "terrain",
       "id": "z2-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 28.566,
       "y": 96.716,
@@ -6028,6 +6538,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6035,8 +6546,9 @@
     {
       "kind": "terrain",
       "id": "z2-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 35.162,
       "y": 123.988,
@@ -6044,6 +6556,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6051,8 +6564,9 @@
     {
       "kind": "terrain",
       "id": "z2-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 40.116,
       "y": 142.17,
@@ -6060,6 +6574,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6107,8 +6622,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 38.049,
       "y": 156.418,
@@ -6116,6 +6632,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -6144,8 +6661,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 29.103,
       "y": 183.691,
@@ -6153,6 +6671,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -6181,8 +6700,9 @@
     {
       "kind": "terrain",
       "id": "z03-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 30.1,
       "y": 208.691,
@@ -6190,6 +6710,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 7049880,
       "illusion": false,
       "surface": "rock"
@@ -6218,8 +6739,9 @@
     {
       "kind": "terrain",
       "id": "z3-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 40.885,
       "y": 164.897,
@@ -6227,6 +6749,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6234,8 +6757,9 @@
     {
       "kind": "terrain",
       "id": "z3-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 39.603,
       "y": 169.443,
@@ -6243,6 +6767,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6250,8 +6775,9 @@
     {
       "kind": "terrain",
       "id": "z3-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 29.478,
       "y": 196.716,
@@ -6259,6 +6785,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6266,8 +6793,9 @@
     {
       "kind": "terrain",
       "id": "z3-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 27.948,
       "y": 201.261,
@@ -6275,6 +6803,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6322,8 +6851,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 13.053,
       "y": 231.418,
@@ -6331,6 +6861,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -6359,8 +6890,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 0.427,
       "y": 258.691,
@@ -6368,6 +6900,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -6396,8 +6929,9 @@
     {
       "kind": "terrain",
       "id": "z04-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 1.647,
       "y": 283.691,
@@ -6405,6 +6939,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10065580,
       "illusion": false,
       "surface": "rock"
@@ -6433,8 +6968,9 @@
     {
       "kind": "terrain",
       "id": "z4-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 18.188,
       "y": 239.897,
@@ -6442,6 +6978,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6449,8 +6986,9 @@
     {
       "kind": "terrain",
       "id": "z4-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 16.421,
       "y": 244.443,
@@ -6458,6 +6996,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6465,8 +7004,9 @@
     {
       "kind": "terrain",
       "id": "z4-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 3.387,
       "y": 271.716,
@@ -6474,6 +7014,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6481,8 +7022,9 @@
     {
       "kind": "terrain",
       "id": "z4-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 1.372,
       "y": 276.261,
@@ -6490,6 +7032,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6537,8 +7080,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -16.623,
       "y": 306.418,
@@ -6546,6 +7090,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -6574,8 +7119,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -28.521,
       "y": 333.691,
@@ -6583,6 +7129,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -6611,8 +7158,9 @@
     {
       "kind": "terrain",
       "id": "z05-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -26.777,
       "y": 358.691,
@@ -6620,6 +7168,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 6789261,
       "illusion": false,
       "surface": "rock"
@@ -6648,8 +7197,9 @@
     {
       "kind": "terrain",
       "id": "z5-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -12.188,
       "y": 314.897,
@@ -6657,6 +7207,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6664,8 +7215,9 @@
     {
       "kind": "terrain",
       "id": "z5-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -13.334,
       "y": 319.443,
@@ -6673,6 +7225,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6680,8 +7233,9 @@
     {
       "kind": "terrain",
       "id": "z5-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -25.64,
       "y": 346.716,
@@ -6689,6 +7243,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6696,8 +7251,9 @@
     {
       "kind": "terrain",
       "id": "z5-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -27.534,
       "y": 351.261,
@@ -6705,6 +7261,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6752,8 +7309,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -37.769,
       "y": 381.418,
@@ -6761,6 +7319,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -6789,8 +7348,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -29.353,
       "y": 408.691,
@@ -6798,6 +7358,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -6826,8 +7387,9 @@
     {
       "kind": "terrain",
       "id": "z06-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -10.731,
       "y": 433.691,
@@ -6835,6 +7397,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10060152,
       "illusion": false,
       "surface": "rock"
@@ -6863,8 +7426,9 @@
     {
       "kind": "terrain",
       "id": "z6-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -29.448,
       "y": 392.17,
@@ -6872,6 +7436,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6879,8 +7444,9 @@
     {
       "kind": "terrain",
       "id": "z6-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -28.028,
       "y": 396.716,
@@ -6888,6 +7454,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6895,8 +7462,9 @@
     {
       "kind": "terrain",
       "id": "z6-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -21.504,
       "y": 423.988,
@@ -6904,6 +7472,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6911,8 +7480,9 @@
     {
       "kind": "terrain",
       "id": "z6-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -15.266,
       "y": 442.17,
@@ -6920,6 +7490,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -6967,8 +7538,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -13.438,
       "y": 456.418,
@@ -6976,6 +7548,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -7004,8 +7577,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -4.294,
       "y": 483.691,
@@ -7013,6 +7587,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -7041,8 +7616,9 @@
     {
       "kind": "terrain",
       "id": "z07-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 15.843,
       "y": 508.691,
@@ -7050,6 +7626,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 8622508,
       "illusion": false,
       "surface": "rock"
@@ -7078,8 +7655,9 @@
     {
       "kind": "terrain",
       "id": "z7-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -4.808,
       "y": 467.17,
@@ -7087,6 +7665,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -7094,8 +7673,9 @@
     {
       "kind": "terrain",
       "id": "z7-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": -3.267,
       "y": 471.716,
@@ -7103,6 +7683,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -7110,8 +7691,9 @@
     {
       "kind": "terrain",
       "id": "z7-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 3.679,
       "y": 498.988,
@@ -7119,6 +7701,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -7126,8 +7709,9 @@
     {
       "kind": "terrain",
       "id": "z7-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 10.708,
       "y": 517.17,
@@ -7135,6 +7719,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -7182,8 +7767,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-03-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 8.196,
       "y": 531.418,
@@ -7191,6 +7777,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -7219,8 +7806,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-15-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 1.39,
       "y": 558.691,
@@ -7228,6 +7816,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -7256,8 +7845,9 @@
     {
       "kind": "terrain",
       "id": "z08-step-26-wind-base",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 6.404,
       "y": 583.691,
@@ -7265,6 +7855,7 @@
       "height": 0.8,
       "angle": 0,
       "depth": 1.5,
+      "mirror": false,
       "color": 10923417,
       "illusion": false,
       "surface": "rock"
@@ -7293,8 +7884,9 @@
     {
       "kind": "terrain",
       "id": "z8-illusion-1",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 13.131,
       "y": 539.897,
@@ -7302,6 +7894,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -7309,8 +7902,9 @@
     {
       "kind": "terrain",
       "id": "z8-illusion-2",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 12.335,
       "y": 544.443,
@@ -7318,6 +7912,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -7325,8 +7920,9 @@
     {
       "kind": "terrain",
       "id": "z8-illusion-3",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 5.119,
       "y": 571.716,
@@ -7334,6 +7930,7 @@
       "height": 0.28,
       "angle": -0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"
@@ -7341,8 +7938,9 @@
     {
       "kind": "terrain",
       "id": "z8-illusion-4",
-      "shape": {
-        "type": "box"
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
       },
       "x": 4.073,
       "y": 576.261,
@@ -7350,6 +7948,7 @@
       "height": 0.28,
       "angle": 0.10471975511965977,
       "depth": 1.5,
+      "mirror": false,
       "color": 12696496,
       "illusion": true,
       "surface": "rock"

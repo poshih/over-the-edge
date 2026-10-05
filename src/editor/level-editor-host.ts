@@ -1,5 +1,6 @@
 import type { Point } from '../config';
 import type { DecorationObject } from '../level';
+import type { MeshTerrain } from '../mesh-collision';
 import type { LevelState } from './level-state';
 import type { ProjectSaveTarget } from './project-save';
 import type { PlayedVersion } from './project-session';
@@ -30,6 +31,16 @@ export interface LevelEditorOptions {
     size: (model: string) => { readonly width: number; readonly height: number } | null;
     // Shows a placement or drag as a translucent model in the scene, or nothing.
     preview: (object: DecorationObject | null) => void;
+  };
+  // The project's course meshes, which Level places as terrain.
+  meshes: {
+    list: () => readonly { readonly id: string; readonly name: string }[];
+    // A mesh ready to place, with its collision; or the refusal, which the project reports.
+    terrain: (id: string) => Promise<MeshTerrain | Error>;
+    // Adds a GLB to the project's meshes: it, ready to place, or the refusal, which the project reports.
+    add: (file: File) => Promise<{ readonly id: string; readonly terrain: MeshTerrain } | Error>;
+    // Calls `listener` whenever the meshes may have changed.
+    subscribe: (listener: () => void) => () => void;
   };
   onPlay: () => void;
   // The live player, which the designer can place anywhere to test part of the course without moving

@@ -602,6 +602,8 @@ record which hammer was held, so recordings made with any hammer share the cours
 the release's shell does not list; see [content delivery](content-delivery.md). The
 release fetches a library model only after the backend selects it, through a grant
 for that group, so the backend and its CDN can refuse models the player does not own.
+Only a game built with its own module (`GAME_MODULE`) has a backend that selects, so a
+build without one packages no library models.
 
 **The backend's contract.** The game's module adds `select(request, signal)` to its
 content access. With `null` it returns the stored selection, `{ avatar, hammer, pot }`

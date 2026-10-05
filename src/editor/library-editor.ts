@@ -92,9 +92,9 @@ export function createLibraryEditor(options: {
       </div>
     </fieldset>
     <p class="appearance-format">Self-contained GLB 2.0 files checked like the character's own models, up to
-      ${MODEL_LIMITS.bytes / 1024 ** 2} MiB each, ${MODEL_LIBRARY_LIMITS.entries} per part and
-      ${MODEL_LIBRARY_LIMITS.totalBytes / 1024 ** 2} MiB in total. A new avatar maps Mixamo-style joints
-      automatically and takes the open character's grips, arm lengths and arm forward distance.</p>
+      ${MODEL_LIMITS.bytes / 1024 ** 2} MiB each and ${MODEL_LIBRARY_LIMITS.entries} per part. Each model downloads only
+      when it is used: here when you preview or edit it, in a release when the game's backend selects it. A new avatar
+      maps Mixamo-style joints automatically and takes the open character's grips, arm lengths and arm forward distance.</p>
   `;
   const bones = element<HTMLFieldSetElement>(root, '.project-library-bones');
   const bonesTitle = element<HTMLElement>(root, '.project-library-bones-title');

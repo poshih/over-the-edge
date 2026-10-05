@@ -142,8 +142,8 @@ its backdrop hills, because the scenery is the landscape, and pushes the fog out
 | Labels | 15 | One below the level limit |
 | Decorations | 193 | Scenery only; all 26 library models |
 
-That is 686 objects plus the start. The course uses the five built-in shapes, so
-all terrain shares **5 geometry templates** and no custom polygons. Measured on the earlier
+That is 686 objects plus the start. The course uses the five built-in meshes, so
+all terrain shares **6 collision shapes**, the five and the mirrored ramp, and no drawn outlines. Measured on the earlier
 59-piece course, the release rendered in **46-65 draw calls** (8,000-23,000 triangles) along
 the climb, about half of them scenery; the eight added pieces reuse the same shapes and have
 not been re-measured. Only nearby enemies run physics. Idle frames upload nothing for

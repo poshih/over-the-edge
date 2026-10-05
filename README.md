@@ -172,11 +172,11 @@ Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
 validated and packaged as content at build time; the game needs no editor or external
 level service. The `/media/` files its events play are packaged from `public/media/`,
 and a game build fails on any source it cannot package, such as an external URL. Level exports do not contain gameplay settings, sprite layouts,
-private character GLBs, or IK profiles; a [project](docs/projects.md) holds all of them. To dress terrain and decorations with meshes
-from your own art pipeline, combine the level JSON and your GLBs into a course package with
-`npm run pack:course`, then pass the package as `GAME_LEVEL`. `GAME_ART_MODE=shapes`
+private character GLBs, or IK profiles; a [project](docs/projects.md) holds all of them. A level that places GLB
+meshes from your own art pipeline, or maps decorations to them, builds from a course package, the level JSON with
+its GLBs, made with `npm run pack:course`; pass the package as `GAME_LEVEL`. `GAME_ART_MODE=shapes`
 or `GAME_ART_MODE=meshes` overrides the package's look; shape-only releases omit
-the GLBs and mesh loader. See [course artwork](docs/course-artwork.md).
+the GLBs and mesh loader. See [course meshes](docs/course-artwork.md).
 
 To bundle your physics and cursor behavior into the game-only release, export a
 game-settings profile from **Workshop / Physics**, put it inside the project,
@@ -548,10 +548,13 @@ It's exact tuning.
 ## Level editing
 
 Open **Workshop / Level** to edit the course. Editing pauses gameplay and
-separates placement gestures from hammer input. Choose a block, thin platform,
-ramp, triangle, circle, or hexagon, then click/tap the game preview to place it.
-Select an object to move it or adjust its position, dimensions, rotation,
-surface and illusion property. Dragging previews the change; releasing commits it. Drag empty
+separates placement gestures from hammer input. Terrain is made of meshes, and each brings
+its collision: choose a block, thin platform, ramp, triangle, circle, or hexagon, draw a
+shape, or import a GLB under **Meshes**, then click/tap the game preview to place it. A GLB
+collides as the simple shape it declares or as its slice on the [obstacle line](#obstacle-line);
+see [course meshes](docs/course-artwork.md). Select an object to move it or adjust its
+position, dimensions, rotation, mirroring, surface and illusion property. Dragging previews
+the change; releasing commits it. Drag empty
 space, or drag with the middle button from anywhere, to pan; the wheel and + / - zoom.
 On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
@@ -617,7 +620,7 @@ at the drawing zoom, so pointer samples do not become hundreds of physics edges.
 Tap the first point, press **Enter**, or choose **Finish shape** to close the
 outline. Clockwise and counterclockwise input both work; the shared terrain
 converter normalizes winding and rejects invalid geometry. Concave outlines,
-including ledges and notches, use the same polygon format as the built-in course.
+including ledges and notches, use the same outline format as the built-in course.
 
 **Undo point / stroke**, Backspace, or Ctrl/Cmd+Z removes the last point or
 completed stroke. During a stroke, undo cancels only that in-progress stroke.
@@ -632,12 +635,12 @@ Finished drawings are ordinary terrain objects: select, move, resize, rotate,
 set depth, or enable **Illusion** as usual. Named saves, JSON exchange, and
 editor-free game builds preserve them without a new level format.
 
-Outlines support **3-64 points**, **0.25-128 m** width and height, and the existing
-limit of **32 distinct terrain geometry templates** per level. Crossing or
+Outlines support **3-64 points**, **0.25-128 m** width and height, and the level's
+limit of **64 distinct terrain collision shapes**, each mirroring counted on its own. Crossing or
 overlapping edges, holes, and zero-area shapes are rejected without changing the
 authored level; the draft remains available for undo or cancellation. Curves are
 polygonal approximations, not Bezier surfaces. Separate objects can surround an
-opening without requiring a polygon with holes.
+opening, or a GLB mesh can bring a slice with holes.
 
 The built-in demo's large `ascent` obstacle is an **18-point hand-authored
 concave polygon** in `src/course.ts`, not a stack of blocks. Its extrusion has
@@ -818,11 +821,11 @@ select, move, resize, retune, or delete any of them as usual. Object IDs follow
 of the most recent drop, remembering up to **64** drops. Importing, loading, or
 starting a new level clears that history.
 
-Pieces use only the built-in block, ramp, triangle, circle, and hexagon shapes, so
-they share existing geometry templates and never add custom polygons. A piece whose
-objects would exceed the terrain, trigger, enemy, or label limit is disabled. A drop
-that would exceed the geometry template limit is rejected with a notice and leaves
-the level unchanged. Previews never modify the authored level. Surface snapping uses
+Pieces use only the built-in block, ramp, triangle, circle, and hexagon meshes, so
+they share the built-in collision shapes and never add custom outlines; a mirrored piece's
+ramps share the mirrored ramp. A piece whose objects would exceed the terrain, trigger,
+enemy, or label limit is disabled. A drop that would exceed the collision shape limit is
+rejected with a notice and leaves the level unchanged. Previews never modify the authored level. Surface snapping uses
 a column index built lazily at most once per level change. A drop uploads only its
 new terrain instances. The catalog, thumbnails, and ghost are editor modules and are
 excluded from game-only builds. Tropes that need moving props, such as swinging or
@@ -851,7 +854,7 @@ distant decorations look smaller and drift slowly by, and near ones pass quickly
 Fog still applies, so raise the theme's fog end to see the far horizon, and hide the
 theme's backdrop mountains if they stand in front of it. Decorations draw in instanced
 batches with no physics, and a game-only release includes their code only when its level
-places any. The models are placeholders: [course artwork](docs/course-artwork.md#decoration-models)
+places any. The models are placeholders: a [course package](docs/course-artwork.md#decoration-models)
 replaces any model, by ID, with your own textured GLB in mesh releases. See the
 [decoration guide](docs/decorations.md) for every model, the level format and performance.
 
@@ -861,15 +864,16 @@ The physics is 2D and plays out on one plane, the **obstacle line** at z = 0 (`O
 `src/obstacle-line.ts`). The camera frames the course on it, the level editor picks on it and
 decoration depths are measured from it. Everything that collides is drawn centred on it, so with
 the perspective camera each collision outline runs through the middle of what it looks like. Each
-terrain object and its [course artwork](#course-artwork-from-your-own-pipeline) reach half their
-depth toward the camera and half behind, and the pot, enemies and phantoms stand on the line. The
-engine places them there, so no level can put a collider anywhere else. The collision overlay (**D**)
+terrain object's [mesh](#course-meshes-from-your-own-pipeline) reaches half its depth toward the
+camera and half behind, and a GLB mesh's collision is its slice there, through the middle of its
+depth; the pot, enemies and phantoms stand on the line. The engine places them there, so no level
+can put a collider anywhere else. The collision overlay (**D**)
 draws on the line too. The hammer and hands are drawn in front of the chest (see
 [arm forward distance](#custom-visuals)), so in perspective the hammer model sits slightly off its
 outline while its contacts stay on the line.
 
 Colliders reach toward the camera, so the view draws in passes, each over the last: the course
-(terrain, its artwork and the decorations behind the line); then the actors (the characters, phantoms
+(terrain, its meshes and the decorations behind the line); then the actors (the characters, phantoms
 and enemies); then the decorations on or in front of the line; then a 3D character's
 [arms with the hammer](#custom-visuals), sharing one depth so the hands hold it, with the aim cursor
 and line, course labels and the collision overlay drawn over the arms but under the hammer. A
@@ -885,27 +889,31 @@ behind the line. A 1.5 m-deep block leaves only 0.25 m there, so give terrain th
 behind the path more depth. Deep terrain also reaches further toward the camera: an 8 m-deep block
 comes 4 m in front of the line, which a wide field of view exaggerates.
 
-### Course artwork from your own pipeline
+### Course meshes from your own pipeline
 
-Terrain collision is always the authored 2D polygon outline. By default the game
-draws each terrain object as a 2.5D extrusion of that outline, `depth` deep and centred
-on the [obstacle line](#obstacle-line), so what you see matches what the hammer grips. For bespoke artwork, make
-static GLB meshes with any pipeline you like and assign them to terrain objects
-when packing a course. Each mesh is fitted to its object's width, height, and
-depth, rotates with it, and replaces its extruded shape. Collision never comes
-from a mesh, and illusion fades, disappearance, and resets remain per object.
-A course can also map decoration model IDs to GLBs, replacing those placeholders.
+A course is built from meshes, and each brings its collision. The built-in meshes and drawn
+shapes are 2.5D extrusions of their outline, `depth` deep and centred on the
+[obstacle line](#obstacle-line), and collide as that outline. Make static GLB meshes with any
+pipeline you like and import them under **Workshop / Level / Meshes**: each placement is fitted
+to its object's width, height and depth, rotates and mirrors with it, and collides as the
+simple shape its GLB declares (`extras.collision`: `box`, `ramp`, `triangle`, `circle` or
+`hexagon`) or, without one, as its slice: its cross-section through the middle of its depth,
+where it meets the obstacle line, traced into outlines that may have holes. The collision is
+stored in the level, so physics never loads a GLB, and illusion fades, disappearance and
+resets remain per object. A course package can also map decoration model IDs to GLBs,
+replacing those placeholders.
 
-The editor designs collision only and never generates artwork. Levels that already
-reference meshes keep those references while you edit them, and **Workshop / Project /
-Course artwork** can import a packed course into a [project](docs/projects.md). See the [course artwork guide](docs/course-artwork.md) for the fitting
-rules, packing command, package format, and limits.
+The editor never generates meshes. The GLBs are the [project's](docs/projects.md) course
+artwork, and **Workshop / Project / Course artwork** chooses whether the Workshop and releases
+draw them or every terrain object as its extruded collision. See the
+[course meshes guide](docs/course-artwork.md) for the fitting and slicing rules, the level
+format, packing, and limits.
 
 ### Performance boundaries
 
 The level format supports **1,000 terrain objects**, **128 triggers**, **64 enemies**,
-**1,000 decorations**, one start, **32 distinct terrain geometry templates**, up to
-**64 vertices per custom polygon**, and **16 course labels**. Each trigger supports up to **8 ordered events**. Dimensions,
+**1,000 decorations**, one start, **64 distinct terrain collision shapes**, up to
+**64 points per drawn outline**, slices of up to **16 outlines and 256 points**, and **16 course labels**. Each trigger supports up to **8 ordered events**. Dimensions,
 coordinates, winding, intersections, IDs, and import size are validated.
 Preset objects reuse normalized geometry rather than allocating a new mesh and
 material for every placement.

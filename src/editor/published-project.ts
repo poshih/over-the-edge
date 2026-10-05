@@ -1,10 +1,13 @@
-import { loadProjectContent, PROJECT_FILES, ProjectError, validateProjectManifest } from '../project';
-import type { ProjectContent } from '../project';
+import { loadProjectDocuments, PROJECT_FILES, ProjectError, projectFileRefs, validateProjectManifest } from '../project';
+import type { ProjectDocuments, ProjectFileKind } from '../project';
+import { sha256Hex } from '../sha256';
 
-interface PublishedFile {
+/** One of the published project's files: where it is served, and the size and SHA-256 it was built with. */
+export interface PublishedFile {
   readonly path: string;
   readonly url: string;
   readonly bytes: number;
+  readonly sha256: string;
 }
 
 /** The game a Workshop was built with (GAME_PROJECT): its files, served next to the Workshop. */
@@ -15,74 +18,112 @@ export interface PublishedProject {
   readonly files: readonly PublishedFile[];
 }
 
+// A binary file of a project the Workshop opens: bytes this page holds, or a published file it downloads when it uses it.
+export type OpenedFile = Blob | PublishedFile;
+
+// A project as the Workshop opens it from a project file, this browser's copy or the published project: its validated
+// documents, and its binary files by path.
+export interface OpenedProject extends ProjectDocuments {
+  readonly files: ReadonlyMap<string, OpenedFile>;
+}
+
+// The files the editors use as soon as a project opens. Library models, media and course artwork download when used.
+const OPENING: ReadonlySet<ProjectFileKind> = new Set(['level', 'character', 'appearance']);
+
 function unavailable(path: string, detail: string): ProjectError {
-  return new ProjectError(`The published project's ${path} could not be downloaded (${detail}). Check the connection, then choose Reopen published project.`, { section: path });
+  return new ProjectError(`The published project's ${path} could not be downloaded (${detail}). Check the connection, then try again.`, { section: path });
 }
 
 function mismatch(path: string): ProjectError {
   return new ProjectError(`The published project's ${path} does not match this Workshop; reload the page to get the current deployment.`, { section: path });
 }
 
-async function download(file: PublishedFile, signal: AbortSignal, received: (bytes: number) => void): Promise<Uint8Array<ArrayBuffer>> {
+/** Downloads one published file, checked against the size and SHA-256 this Workshop was built with. */
+export async function downloadPublishedFile(file: PublishedFile, signal: AbortSignal,
+  received: (bytes: number) => void = () => undefined): Promise<Uint8Array<ArrayBuffer>> {
   // Sizes are known from the build, so the file streams into one buffer of its exact size.
   const bytes = new Uint8Array(file.bytes);
   let length = 0;
   try {
     const response = await fetch(file.url, { signal });
-    if (!response.ok || response.body === null) throw unavailable(file.path, `HTTP ${response.status}`);
+    if (!response.ok || response.body === null) {
+      await response.body?.cancel();
+      // Files are named by their content, so one a newer deployment changed is gone from the site.
+      throw response.status === 404 ? mismatch(file.path) : unavailable(file.path, `HTTP ${response.status}`);
+    }
     const reader = response.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (length + value.byteLength > bytes.byteLength) throw mismatch(file.path);
-      bytes.set(value, length);
-      length += value.byteLength;
-      received(value.byteLength);
+    try {
+      for (let next = await reader.read(); !next.done; next = await reader.read()) {
+        if (length + next.value.byteLength > bytes.byteLength) {
+          await reader.cancel();
+          throw mismatch(file.path);
+        }
+        bytes.set(next.value, length);
+        length += next.value.byteLength;
+        received(next.value.byteLength);
+      }
+    } finally {
+      reader.releaseLock();
     }
   } catch (error) {
     if (error instanceof TypeError) throw unavailable(file.path, 'no complete response');
     throw error;
   }
-  if (length !== bytes.byteLength) throw mismatch(file.path);
+  if (length !== bytes.byteLength || await sha256Hex(bytes) !== file.sha256) throw mismatch(file.path);
   return bytes;
 }
 
-// Downloads every file of the published project and validates them like an imported project file.
+/**
+ * Opens the published project: downloads its manifest and what the editors use at once (the level, the characters and
+ * the appearance models) and validates them like an imported project file. Every other file stays a published file,
+ * downloaded when the Workshop uses it.
+ */
 export async function loadPublishedProject(project: PublishedProject, options: {
   onProgress: (fraction: number) => void;
   signal?: AbortSignal;
-}): Promise<ProjectContent> {
-  const total = project.files.reduce((sum, file) => sum + file.bytes, 0);
-  let received = 0;
+}): Promise<OpenedProject> {
+  const published = new Map(project.files.map((file) => [file.path, file]));
+  const find = (path: string): PublishedFile => {
+    const file = published.get(path);
+    if (file === undefined) throw new ProjectError(`The published project is missing ${path}.`, { section: path });
+    return file;
+  };
   // One failed file stops the others.
   const downloads = new AbortController();
   const abort = (): void => downloads.abort(options.signal?.reason);
   options.signal?.addEventListener('abort', abort, { once: true });
-  let data: Map<string, Uint8Array<ArrayBuffer>>;
+  const decoder = new TextDecoder();
+  const json = (path: string, bytes: Uint8Array): unknown => {
+    try {
+      return JSON.parse(decoder.decode(bytes));
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      throw new ProjectError(`${path} is not valid JSON: ${error.message}`, { section: path });
+    }
+  };
   try {
-    data = new Map(await Promise.all(project.files.map(async (file) => [file.path, await download(file, downloads.signal, (bytes) => {
+    const manifest = validateProjectManifest(json(PROJECT_FILES.manifest, await downloadPublishedFile(find(PROJECT_FILES.manifest), downloads.signal)));
+    const refs = projectFileRefs(manifest);
+    const opening = refs.filter((ref) => OPENING.has(ref.kind));
+    const total = opening.reduce((sum, ref) => sum + find(ref.path).bytes, 0);
+    let received = 0;
+    const data = new Map(await Promise.all(opening.map(async (ref) => [ref.path, await downloadPublishedFile(find(ref.path), downloads.signal, (bytes) => {
       received += bytes;
       options.onProgress(total === 0 ? 1 : received / total);
     })] as const)));
+    const documents = loadProjectDocuments(manifest, (ref) => json(ref.path, data.get(ref.path)!));
+    const files = new Map<string, OpenedFile>();
+    for (const ref of refs) {
+      if (!ref.binary) continue;
+      const file = find(ref.path);
+      const bytes = data.get(ref.path);
+      files.set(ref.path, bytes === undefined ? file : new Blob([bytes], { type: 'model/gltf-binary' }));
+    }
+    return Object.freeze({ ...documents, files });
   } catch (error) {
     downloads.abort();
     throw error;
   } finally {
     options.signal?.removeEventListener('abort', abort);
   }
-  const decoder = new TextDecoder();
-  const read = (path: string): Uint8Array<ArrayBuffer> => {
-    const bytes = data.get(path);
-    if (bytes === undefined) throw new ProjectError(`The published project is missing ${path}.`, { section: path });
-    return bytes;
-  };
-  const json = (path: string): unknown => {
-    try {
-      return JSON.parse(decoder.decode(read(path)));
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-      throw new ProjectError(`${path} is not valid JSON: ${error.message}`, { section: path });
-    }
-  };
-  return loadProjectContent(validateProjectManifest(json(PROJECT_FILES.manifest)), (ref) => ref.binary ? read(ref.path) : json(ref.path));
 }

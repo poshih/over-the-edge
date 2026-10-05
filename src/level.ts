@@ -6,19 +6,23 @@ import type { TriggerAction } from './trigger-events';
 import { LAUNCH_FIELDS, SOUND_VOLUME } from './trigger-events';
 import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
 import type { EnemyFacing, EnemySpecies } from './enemy-types';
-import { ArtError, validateTerrainArt } from './art-types';
+import { ArtError, artId } from './art-types';
 import { isSurface, SURFACES } from './surfaces';
 import type { Surface } from './surfaces';
-import type { TerrainArt } from './art-types';
 
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
-export const LEVEL_SCHEMA_VERSION = 5;
+export const LEVEL_SCHEMA_VERSION = 6;
 export const LEVEL_LIMITS = {
   objects: 1000,
-  geometryKinds: 32,
+  // Distinct collision geometry across a level's terrain: one physics shape and one extruded template each.
+  geometryKinds: 64,
+  // Points of a drawn outline, and of each loop of a mesh's slice.
   polygonVertices: 64,
+  // A mesh's slice: its loops, and their points together.
+  sliceLoops: 16,
+  sliceVertices: 256,
   labels: 16,
   text: 80,
   coordinate: 2048,
@@ -26,7 +30,7 @@ export const LEVEL_LIMITS = {
   maximumSize: 128,
   minimumDepth: 0.1,
   maximumDepth: 8,
-  fileBytes: 4 * 1024 * 1024,
+  fileBytes: 8 * 1024 * 1024,
 } as const;
 
 export const ILLUSION = { fadeSeconds: 0.8, minimumTopNormal: 0.5 } as const;
@@ -56,27 +60,57 @@ export const DECORATION_MODEL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + ENEMY_LIMITS.objects + DECORATION_LIMITS.objects + 1;
 export const TRIGGER_MARKERS = ['none', 'flag', 'updraft'] as const;
 export const ROCK_COLOR = 0x71817a;
+// The simple outlines the engine knows, each filling the unit box: the built-in meshes, and the collision types a mesh
+// may declare.
 export const SHAPE_KINDS = ['box', 'ramp', 'triangle', 'circle', 'hexagon'] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
-export type LevelShape = { readonly type: ShapeKind } |
-  { readonly type: 'polygon'; readonly vertices: readonly Readonly<Point>[] };
+// A closed outline in a terrain object's unit box, [-0.5, 0.5] on both axes, before it is sized, mirrored, turned and
+// placed.
+export type Outline = readonly Readonly<Point>[];
+
+/**
+ * How a mesh collides: the simple shape it declares, fitted to its box, or else its slice: its cross-section on the
+ * obstacle line, generated from the mesh (src/mesh-collision.ts). A slice's loops keep the solid on each edge's left, so
+ * outer loops run counterclockwise and holes clockwise.
+ */
+export type MeshCollision =
+  | { readonly type: ShapeKind }
+  | { readonly type: 'slice'; readonly loops: readonly Outline[] };
+
+/** What a terrain object is: a mesh, which draws it and brings its collision. */
+export type TerrainMesh =
+  // A built-in mesh: the shape extruded, colliding as the shape.
+  | { readonly type: 'shape'; readonly shape: ShapeKind }
+  // A drawn outline extruded, colliding as the outline: counterclockwise, normalized to the unit box.
+  | { readonly type: 'outline'; readonly vertices: Outline }
+  // A GLB from the course's meshes, its artwork assets, with the collision it declares or its slice.
+  | { readonly type: 'asset'; readonly assetId: string; readonly collision: MeshCollision };
 
 export interface TerrainObject {
   readonly kind: 'terrain';
   readonly id: string;
-  readonly shape: LevelShape;
+  readonly mesh: TerrainMesh;
   readonly x: number;
   readonly y: number;
+  // The mesh's box: its bounds fill `width` and `height`, and `depth` centred on the obstacle line.
   readonly width: number;
   readonly height: number;
   readonly angle: number;
   readonly depth: number;
+  // Reflects the mesh, and with it its collision, left to right before it turns.
+  readonly mirror: boolean;
+  // The colour of a built-in mesh or a drawn outline, and of a mesh drawn as its collision in a shapes release.
   readonly color: number;
   readonly illusion: boolean;
   // What it is made of, which sets how bouncy it is (src/surfaces.ts).
   readonly surface: Surface;
-  readonly art?: TerrainArt;
 }
+
+/**
+ * A terrain object's collision in its unit box, mirrored as placed: a true circle, or outline loops with the solid on
+ * each edge's left.
+ */
+export type TerrainCollision = { readonly type: 'circle' } | { readonly type: 'loops'; readonly loops: readonly Outline[] };
 
 // The hammer starts along `angle` with its head `reach` metres from the shoulder hinge, so a start
 // means the same pose for every rig; a rig that cannot reach that far starts fully extended, and one whose minimum
@@ -149,7 +183,7 @@ export type TerrainEvent =
   | { readonly type: 'remove' | 'disappear'; readonly id: string }
   | { readonly type: 'fade'; readonly id: string; readonly startedAt: number };
 
-const SHAPE_VERTICES: Record<ShapeKind, readonly Readonly<Point>[]> = {
+const SHAPE_VERTICES: Record<ShapeKind, Outline> = {
   box: [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.5 }, { x: 0.5, y: 0.5 }, { x: -0.5, y: 0.5 }],
   ramp: [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.5 }, { x: 0.5, y: 0.5 }],
   triangle: [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.5 }, { x: 0, y: 0.5 }],
@@ -159,11 +193,28 @@ const SHAPE_VERTICES: Record<ShapeKind, readonly Readonly<Point>[]> = {
   hexagon: [{ x: 0.5, y: 0 }, { x: 0.25, y: 0.5 }, { x: -0.25, y: 0.5 },
     { x: -0.5, y: 0 }, { x: -0.25, y: -0.5 }, { x: 0.25, y: -0.5 }],
 };
+// Shapes that mirroring leaves unchanged.
+const SYMMETRIC: ReadonlySet<ShapeKind> = new Set(['box', 'triangle', 'circle', 'hexagon']);
 const MIN_POLYGON_AREA = 5e-6;
 
 for (const vertices of Object.values(SHAPE_VERTICES)) {
   for (const vertex of vertices) Object.freeze(vertex);
   Object.freeze(vertices);
+}
+
+const SHAPE_MESHES = Object.freeze(Object.fromEntries(SHAPE_KINDS.map((shape) =>
+  [shape, Object.freeze({ type: 'shape', shape })]))) as Readonly<Record<ShapeKind, TerrainMesh>>;
+const SHAPE_COLLISIONS = Object.freeze(Object.fromEntries(SHAPE_KINDS.map((shape) =>
+  [shape, Object.freeze({ type: shape })]))) as Readonly<Record<ShapeKind, MeshCollision>>;
+
+// The built-in mesh of a shape, one shared object per shape.
+export function shapeMesh(shape: ShapeKind): TerrainMesh {
+  return SHAPE_MESHES[shape];
+}
+
+// A shape's outline in the unit box; the circle's is its polygon approximation.
+export function shapeOutline(shape: ShapeKind): Outline {
+  return SHAPE_VERTICES[shape];
 }
 
 function cross(a: Readonly<Point>, b: Readonly<Point>, c: Readonly<Point>): number {
@@ -191,26 +242,32 @@ export function polygonArea(vertices: readonly Readonly<Point>[]): number {
   return area / 2;
 }
 
-function polygon(value: unknown): readonly Readonly<Point>[] {
+// A closed outline's points: within the unit box, with nonzero edges, no edges that cross or overlap, and an area.
+function outlinePoints(value: unknown, label: string): Outline {
   if (!Array.isArray(value) || value.length < 3 || value.length > LEVEL_LIMITS.polygonVertices) {
-    throw new LevelError(`A polygon needs 3 to ${LEVEL_LIMITS.polygonVertices} vertices.`);
+    throw new LevelError(`${label} needs 3 to ${LEVEL_LIMITS.polygonVertices} points.`);
   }
-  const vertices = value.map((entry) => point(entry, 0.5, 'Polygon vertex'));
+  const vertices = value.map((entry) => point(entry, 0.5, `${label} point`));
   for (let i = 0; i < vertices.length; i++) {
     const a = vertices[i];
     const b = vertices[(i + 1) % vertices.length];
-    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-5) throw new LevelError('Polygon edges must have nonzero length.');
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-5) throw new LevelError(`${label}'s edges must have nonzero length.`);
     for (let j = i + 1; j < vertices.length; j++) {
       if (j === i + 1 || (i === 0 && j === vertices.length - 1)) continue;
-      const c = vertices[j];
-      const d = vertices[(j + 1) % vertices.length];
-      if (segmentsTouch(a, b, c, d)) {
-        throw new LevelError('Polygon edges cannot cross or overlap.');
+      if (segmentsTouch(a, b, vertices[j], vertices[(j + 1) % vertices.length])) {
+        throw new LevelError(`${label}'s edges cannot cross or overlap.`);
       }
     }
   }
-  if (polygonArea(vertices) <= MIN_POLYGON_AREA) throw new LevelError('Polygon vertices must enclose an area in counterclockwise order.');
+  if (Math.abs(polygonArea(vertices)) <= MIN_POLYGON_AREA) throw new LevelError(`${label} must enclose an area.`);
   return Object.freeze(vertices);
+}
+
+// A drawn outline: its points run counterclockwise.
+function polygon(value: unknown): Outline {
+  const vertices = outlinePoints(value, 'A drawn outline');
+  if (polygonArea(vertices) < 0) throw new LevelError('A drawn outline\'s points must run counterclockwise.');
+  return vertices;
 }
 
 // A closed outline is simple when no two non-adjacent edges cross or overlap.
@@ -224,6 +281,178 @@ export function isSimplePolygon(vertices: readonly Readonly<Point>[]): boolean {
   return true;
 }
 
+// Whether `p`, a point on no edge, lies inside the closed outline.
+function insideOutline(vertices: Outline, p: Readonly<Point>): boolean {
+  let inside = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+    const a = vertices[j];
+    const b = vertices[i];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function outlineBounds(vertices: Outline): { minX: number; maxX: number; minY: number; maxY: number } {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const vertex of vertices) {
+    minX = Math.min(minX, vertex.x); maxX = Math.max(maxX, vertex.x);
+    minY = Math.min(minY, vertex.y); maxY = Math.max(maxY, vertex.y);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+function outlinesTouch(first: Outline, second: Outline): boolean {
+  const a = outlineBounds(first);
+  const b = outlineBounds(second);
+  if (a.maxX < b.minX || b.maxX < a.minX || a.maxY < b.minY || b.maxY < a.minY) return false;
+  for (let i = 0; i < first.length; i++) {
+    for (let j = 0; j < second.length; j++) {
+      if (segmentsTouch(first[i], first[(i + 1) % first.length], second[j], second[(j + 1) % second.length])) return true;
+    }
+  }
+  return false;
+}
+
+// Slices validated already, by their JSON: every placement of a mesh shares its slice, which is checked once.
+const SLICES = new Map<string, MeshCollision>();
+const SLICE_MEMORY = 256;
+
+function validateSlice(value: unknown): MeshCollision {
+  fields(value, ['type', 'loops'], 'A mesh slice');
+  const key = JSON.stringify(value.loops);
+  const known = SLICES.get(key);
+  if (known !== undefined) return known;
+  if (!Array.isArray(value.loops) || value.loops.length === 0 || value.loops.length > LEVEL_LIMITS.sliceLoops) {
+    throw new LevelError(`A mesh slice has 1 to ${LEVEL_LIMITS.sliceLoops} loops.`);
+  }
+  const loops = value.loops.map((entry, index) => outlinePoints(entry, `Slice loop ${index + 1}`));
+  if (loops.reduce((sum, loop) => sum + loop.length, 0) > LEVEL_LIMITS.sliceVertices) {
+    throw new LevelError(`A mesh slice has at most ${LEVEL_LIMITS.sliceVertices} points.`);
+  }
+  for (let a = 0; a < loops.length; a++) {
+    for (let b = a + 1; b < loops.length; b++) {
+      if (outlinesTouch(loops[a], loops[b])) throw new LevelError('A mesh slice\'s loops cannot cross or touch.');
+    }
+  }
+  // Loops never touch, so a loop nests as deep as any of its points: inside an even number of others it bounds solid.
+  loops.forEach((loop, index) => {
+    const depth = loops.filter((other, at) => at !== index && insideOutline(other, loop[0])).length;
+    if ((polygonArea(loop) > 0) !== (depth % 2 === 0)) {
+      throw new LevelError('A mesh slice keeps the solid on each edge\'s left: outer loops run counterclockwise and holes clockwise.');
+    }
+  });
+  const slice: MeshCollision = Object.freeze({ type: 'slice', loops: Object.freeze(loops) });
+  if (SLICES.size >= SLICE_MEMORY) SLICES.clear();
+  SLICES.set(key, slice);
+  return slice;
+}
+
+function shapeKind(value: unknown, label: string): ShapeKind {
+  const kind = SHAPE_KINDS.find((candidate) => candidate === value);
+  if (kind === undefined) throw new LevelError(`${label} must be one of ${SHAPE_KINDS.join(', ')}.`);
+  return kind;
+}
+
+export function validateMeshCollision(value: unknown): MeshCollision {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new LevelError('A mesh needs its collision: a simple shape or its slice.');
+  }
+  const type: unknown = Reflect.get(value, 'type');
+  if (type === 'slice') return validateSlice(value);
+  fields(value, ['type'], 'A mesh collision');
+  return SHAPE_COLLISIONS[shapeKind(type, 'A mesh collision type')];
+}
+
+export function validateTerrainMesh(value: unknown): TerrainMesh {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new LevelError('Terrain needs a mesh: a built-in shape, a drawn outline or a mesh asset.');
+  }
+  const type: unknown = Reflect.get(value, 'type');
+  if (type === 'shape') {
+    fields(value, ['type', 'shape'], 'A built-in mesh');
+    return SHAPE_MESHES[shapeKind(value.shape, 'A built-in mesh shape')];
+  }
+  if (type === 'outline') {
+    fields(value, ['type', 'vertices'], 'A drawn outline');
+    return Object.freeze({ type, vertices: polygon(value.vertices) });
+  }
+  if (type === 'asset') {
+    fields(value, ['type', 'assetId', 'collision'], 'A mesh asset');
+    let assetId: string;
+    try {
+      assetId = artId(value.assetId);
+    } catch (error) {
+      if (!(error instanceof ArtError)) throw error;
+      throw new LevelError('A mesh asset names its GLB as asset-<SHA-256 of the GLB>.');
+    }
+    return Object.freeze({ type, assetId, collision: validateMeshCollision(value.collision) });
+  }
+  throw new LevelError('Terrain needs a mesh: a built-in shape, a drawn outline or a mesh asset.');
+}
+
+// A mesh's collision before mirroring: a shape, or outline loops.
+function meshSource(mesh: TerrainMesh): ShapeKind | readonly Outline[] {
+  if (mesh.type === 'shape') return mesh.shape;
+  if (mesh.type === 'outline') return [mesh.vertices];
+  return mesh.collision.type === 'slice' ? mesh.collision.loops : mesh.collision.type;
+}
+
+const CIRCLE: TerrainCollision = Object.freeze({ type: 'circle' });
+// Each mesh's collision, as placed and mirrored, worked out once.
+const COLLISIONS = new WeakMap<TerrainMesh, [TerrainCollision | null, TerrainCollision | null]>();
+const GEOMETRY_KEYS = new WeakMap<TerrainMesh, string>();
+
+// Reflects an outline left to right; reversing it keeps the solid on each edge's left.
+function mirrorOutline(vertices: Outline): Outline {
+  return Object.freeze(vertices.map((vertex) => Object.freeze({ x: -vertex.x + 0, y: vertex.y })).reverse());
+}
+
+export function terrainCollision(object: Pick<TerrainObject, 'mesh' | 'mirror'>): TerrainCollision {
+  let cached = COLLISIONS.get(object.mesh);
+  if (cached === undefined) {
+    cached = [null, null];
+    COLLISIONS.set(object.mesh, cached);
+  }
+  const index = object.mirror ? 1 : 0;
+  let collision = cached[index];
+  if (collision === null) {
+    const source = meshSource(object.mesh);
+    if (source === 'circle') collision = CIRCLE;
+    else {
+      const loops = typeof source === 'string' ? [SHAPE_VERTICES[source]] : source;
+      collision = Object.freeze({ type: 'loops', loops: object.mirror ? Object.freeze(loops.map(mirrorOutline)) : loops });
+    }
+    cached[index] = collision;
+  }
+  return collision;
+}
+
+// Whether a mesh collides as a true circle, which needs equal width and height.
+export function meshIsCircle(mesh: TerrainMesh): boolean {
+  return meshSource(mesh) === 'circle';
+}
+
+/**
+ * The key of a terrain object's collision geometry in its unit box, the same for everything that collides alike: one
+ * physics shape and one extruded template each. A mesh that declares a box shares the built-in box's.
+ */
+export function geometryKey(object: Pick<TerrainObject, 'mesh' | 'mirror'>): string {
+  let key = GEOMETRY_KEYS.get(object.mesh);
+  const source = meshSource(object.mesh);
+  if (key === undefined) {
+    key = typeof source === 'string' ? source : `loops:${JSON.stringify(source)}`;
+    GEOMETRY_KEYS.set(object.mesh, key);
+  }
+  return object.mirror && !(typeof source === 'string' && SYMMETRIC.has(source)) ? `${key}|mirror` : key;
+}
+
+/** The mesh assets the level's terrain draws, each once. */
+export function terrainAssets(level: LevelDefinition): Set<string> {
+  const assets = new Set<string>();
+  for (const object of level.objects) if (object.kind === 'terrain' && object.mesh.type === 'asset') assets.add(object.mesh.assetId);
+  return assets;
+}
+
 export function terrainFromOutline(
   outline: Pick<TerrainObject, 'id' | 'color' | 'depth' | 'surface'> & { readonly vertices: readonly Readonly<Point>[] },
 ): TerrainObject {
@@ -234,45 +463,43 @@ export function terrainFromOutline(
   const maxX = Math.max(...outline.vertices.map((vertex) => vertex.x));
   const minY = Math.min(...outline.vertices.map((vertex) => vertex.y));
   const maxY = Math.max(...outline.vertices.map((vertex) => vertex.y));
-  const width = number(maxX - minX, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Polygon width');
-  const height = number(maxY - minY, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Polygon height');
+  const width = number(maxX - minX, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Outline width');
+  const height = number(maxY - minY, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Outline height');
   // Min-relative normalization keeps both extrema exactly inside the shape's [-0.5, 0.5] bounds.
   const vertices = outline.vertices.map((vertex) => ({
     x: (vertex.x - minX) / width - 0.5, y: (vertex.y - minY) / height - 0.5,
   }));
   if (polygonArea(vertices) < 0) vertices.reverse();
   return validateTerrain({
-    kind: 'terrain', id: outline.id, shape: { type: 'polygon', vertices },
-    x: (minX + maxX) / 2, y: (minY + maxY) / 2, width, height, angle: 0,
+    kind: 'terrain', id: outline.id, mesh: { type: 'outline', vertices },
+    x: (minX + maxX) / 2, y: (minY + maxY) / 2, width, height, angle: 0, mirror: false,
     color: outline.color, depth: outline.depth, illusion: false, surface: outline.surface,
   });
 }
 
-export function shapeVertices(shape: LevelShape): readonly Readonly<Point>[] {
-  return shape.type === 'polygon' ? shape.vertices : SHAPE_VERTICES[shape.type];
-}
-
-export function geometryKey(shape: LevelShape): string {
-  return shape.type === 'polygon' ? `polygon:${JSON.stringify(shape.vertices)}` : shape.type;
-}
-
-export function objectVertices(object: TerrainObject): Point[] {
-  return shapeVertices(object.shape).map((vertex) =>
-    transformPoint({ x: vertex.x * object.width, y: vertex.y * object.height }, object, object.angle));
+// A terrain object's collision outlines in the course; a circle's is its polygon approximation.
+export function objectLoops(object: TerrainObject): Point[][] {
+  const collision = terrainCollision(object);
+  const loops = collision.type === 'circle' ? [SHAPE_VERTICES.circle] : collision.loops;
+  return loops.map((loop) => loop.map((vertex) =>
+    transformPoint({ x: vertex.x * object.width, y: vertex.y * object.height }, object, object.angle)));
 }
 
 export function objectContains(object: TerrainObject, position: Point): boolean {
   const local = transformPoint({ x: position.x - object.x, y: position.y - object.y }, { x: 0, y: 0 }, -object.angle);
   const p = { x: local.x / object.width, y: local.y / object.height };
   if (Math.abs(p.x) > 0.5 || Math.abs(p.y) > 0.5) return false;
-  if (object.shape.type === 'circle') return p.x ** 2 + p.y ** 2 <= 0.25;
-  const vertices = shapeVertices(object.shape);
+  const collision = terrainCollision(object);
+  if (collision.type === 'circle') return p.x ** 2 + p.y ** 2 <= 0.25;
+  // Even-odd across the loops, so a hole is outside.
   let inside = false;
-  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-    const a = vertices[j];
-    const b = vertices[i];
-    if (onSegment(a, b, p)) return true;
-    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  for (const vertices of collision.loops) {
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+      const a = vertices[j];
+      const b = vertices[i];
+      if (onSegment(a, b, p)) return true;
+      if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+    }
   }
   return inside;
 }
@@ -345,45 +572,25 @@ function validateEnemy(value: unknown): EnemyObject {
 }
 
 function validateTerrain(value: unknown): TerrainObject {
-  const hasArt = typeof value === 'object' && value !== null && Object.hasOwn(value, 'art');
-  fields(value, ['kind', 'id', 'shape', 'x', 'y', 'width', 'height', 'angle', 'depth', 'color', 'illusion', 'surface',
-    ...(hasArt ? ['art'] : [])], 'Terrain object');
-  let art: TerrainArt | undefined;
-  if (hasArt) {
-    try { art = validateTerrainArt(value.art); }
-    catch (error) {
-      if (!(error instanceof ArtError)) throw error;
-      throw new LevelError(error.message);
-    }
-  }
+  fields(value, ['kind', 'id', 'mesh', 'x', 'y', 'width', 'height', 'angle', 'depth', 'mirror', 'color', 'illusion', 'surface'],
+    'Terrain object');
   const id = objectId(value.id);
-  const raw = value.shape;
-  if (typeof raw !== 'object' || raw === null || !Object.hasOwn(raw, 'type')) throw new LevelError('Choose a supported shape.');
-  const type: unknown = Reflect.get(raw, 'type');
-  let shape: LevelShape;
-  if (type === 'polygon') {
-    fields(raw, ['type', 'vertices'], 'Polygon shape');
-    shape = Object.freeze({ type, vertices: polygon(raw.vertices) });
-  } else {
-    fields(raw, ['type'], 'Shape');
-    const kind = SHAPE_KINDS.find((candidate) => candidate === type);
-    if (kind === undefined) throw new LevelError('Choose a supported shape.');
-    shape = Object.freeze({ type: kind });
-  }
+  const mesh = validateTerrainMesh(value.mesh);
   const width = number(value.width, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Width');
   const height = number(value.height, LEVEL_LIMITS.minimumSize, LEVEL_LIMITS.maximumSize, 'Height');
-  if (shape.type === 'circle' && width !== height) throw new LevelError('A circle must have equal width and height.');
+  if (meshIsCircle(mesh) && width !== height) throw new LevelError('A circle must have equal width and height.');
+  if (typeof value.mirror !== 'boolean') throw new LevelError('Mirror must be enabled or disabled.');
   if (typeof value.illusion !== 'boolean') throw new LevelError('Illusion must be enabled or disabled.');
   if (!isSurface(value.surface)) throw new LevelError(`Surface must be one of ${SURFACES.join(', ')}.`);
   const color = number(value.color, 0, 0xffffff, 'Rock color');
   if (!Number.isInteger(color)) throw new LevelError('Rock color must be a whole RGB value.');
   return Object.freeze({
-    kind: 'terrain', id, shape,
+    kind: 'terrain', id, mesh,
     x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Position X'),
     y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Position Y'),
     width, height, angle: number(value.angle, -Math.PI, Math.PI, 'Rotation'),
     depth: number(value.depth, LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth, 'Depth'),
-    color, illusion: value.illusion, surface: value.surface, ...(art === undefined ? {} : { art }),
+    mirror: value.mirror, color, illusion: value.illusion, surface: value.surface,
   });
 }
 
@@ -421,8 +628,8 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (objects.filter(isTriggerObject).length > TRIGGER_LIMITS.objects) throw new LevelError(`A level supports up to ${TRIGGER_LIMITS.objects} triggers.`);
   if (objects.filter(isEnemyObject).length > ENEMY_LIMITS.objects) throw new LevelError(`A level supports up to ${ENEMY_LIMITS.objects} enemies.`);
   if (objects.filter(isDecorationObject).length > DECORATION_LIMITS.objects) throw new LevelError(`A level supports up to ${DECORATION_LIMITS.objects} decorations.`);
-  if (new Set(terrain.map((object) => geometryKey(object.shape))).size > LEVEL_LIMITS.geometryKinds) {
-    throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
+  if (new Set(terrain.map(geometryKey)).size > LEVEL_LIMITS.geometryKinds) {
+    throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
   }
   return Object.freeze({ schemaVersion: LEVEL_SCHEMA_VERSION, ...metadata, objects: Object.freeze(objects) });
 }
@@ -534,9 +741,9 @@ export function levelFloor(level: LevelDefinition): number | null {
   let floor = Infinity;
   for (const object of level.objects) {
     if (object.kind !== 'terrain') continue;
-    floor = Math.min(floor, object.shape.type === 'circle'
+    floor = Math.min(floor, meshIsCircle(object.mesh)
       ? object.y - object.width / 2
-      : Math.min(...objectVertices(object).map((vertex) => vertex.y)));
+      : Math.min(...objectLoops(object).flat().map((vertex) => vertex.y)));
   }
   if (floor === Infinity) return null;
   for (const object of level.objects) {

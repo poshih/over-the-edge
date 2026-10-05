@@ -1,7 +1,8 @@
 // Editor-only SVG rendering for set pieces: palette thumbnails and the placement ghost. Both are
 // built once per piece (and mirror state) in piece-local coordinates; moving the ghost only
 // changes one transform, so previews never touch per-part geometry while the pointer moves.
-import { objectVertices } from '../level';
+import { objectLoops } from '../level';
+import type { Point } from '../config';
 import { createGizmo } from './object-gizmos';
 import { LABEL_SIZE, setPieceBounds, setPieceParts } from './set-pieces';
 import type { SetPiece, SetPiecePart } from './set-pieces';
@@ -18,13 +19,18 @@ function svg<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<st
   return node;
 }
 
+/** SVG path data for collision outlines; drawn with the even-odd rule, a hole stays empty. */
+export function loopsPath(loops: readonly (readonly Point[])[]): string {
+  return loops.map((loop) => `M${loop.map((point) => `${point.x} ${point.y}`).join('L')}Z`).join('');
+}
+
 function appendParts(group: SVGGElement, parts: readonly SetPiecePart[], ghost: boolean): void {
   const overlays: SVGElement[] = [];
   for (const part of parts) {
     if (part.kind === 'terrain') {
-      const points = objectVertices({ ...part, id: PREVIEW_ID }).map((point) => `${point.x},${point.y}`).join(' ');
-      group.append(svg('polygon', {
-        points, fill: `#${part.color.toString(16).padStart(6, '0')}`, 'vector-effect': 'non-scaling-stroke',
+      group.append(svg('path', {
+        d: loopsPath(objectLoops({ ...part, id: PREVIEW_ID })), 'fill-rule': 'evenodd',
+        fill: `#${part.color.toString(16).padStart(6, '0')}`, 'vector-effect': 'non-scaling-stroke',
         class: part.illusion ? 'level-set-piece-terrain level-set-piece-illusion' : 'level-set-piece-terrain',
       }));
     } else if (part.kind === 'label') {

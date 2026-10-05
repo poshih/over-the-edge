@@ -161,16 +161,20 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         <div class="project-library-mount"></div>
       `)}
 
-      ${sectionMarkup({ id: 'project-art', title: 'Course artwork', hint: 'Terrain and decoration meshes from course packages' }, `
-        <label class="appearance-label" for="project-art-mode">Release look</label>
+      ${sectionMarkup({ id: 'project-art', title: 'Course artwork', hint: 'The meshes the course is built from' }, `
+        <label class="appearance-label" for="project-art-mode">Course look</label>
         <select id="project-art-mode">
-          <option value="shapes">Extruded shapes and placeholders</option>
           <option value="meshes">Meshes</option>
+          <option value="shapes">Extruded collision and placeholders</option>
         </select>
+        <p class="appearance-format">How the Workshop and releases draw the course: its GLB meshes, or every terrain object
+          as its collision extruded and decorations as their placeholders, for a quick blockout.</p>
+        <ul class="project-media-list project-art-list" aria-label="Course meshes"></ul>
         <p class="appearance-format project-art-status"></p>
         <label class="appearance-label" for="project-course-file">Import course package</label>
         <input id="project-course-file" type="file" accept=".json,application/json" />
-        <p class="appearance-format">A course package from npm run pack:course replaces the level and brings its GLBs.</p>
+        <p class="appearance-format">Level / Meshes imports GLBs one at a time. A course package from npm run pack:course
+          replaces the level and brings its GLBs, including those drawing decoration models.</p>
       `)}
     </div>
   `;
@@ -196,6 +200,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const alternateFile = element<HTMLInputElement>(root, '.project-alternate-file');
   const artMode = element<HTMLSelectElement>(root, '#project-art-mode');
   const artStatus = element<HTMLParagraphElement>(root, '.project-art-status');
+  const artList = element<HTMLUListElement>(root, '.project-art-list');
   const courseFile = element<HTMLInputElement>(root, '#project-course-file');
   const buttons = [...root.querySelectorAll<HTMLButtonElement>('button')];
 
@@ -407,11 +412,24 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       : `Alternate character: ${snapshot.alternate.characterRiggingType}. Players can switch in the standalone game's corner control.`;
     artMode.value = snapshot.art.mode;
     const models = Object.keys(snapshot.art.decorations);
+    artList.replaceChildren(...snapshot.art.assets.map((asset) => {
+      const entry = document.createElement('li');
+      const name = document.createElement('span');
+      name.className = 'project-media-path';
+      name.textContent = asset.name;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'button';
+      remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', `Remove ${asset.name}`);
+      remove.addEventListener('click', () => { session.removeCourseMesh(asset.id); }, listen);
+      entry.append(name, remove);
+      return entry;
+    }));
     artStatus.textContent = snapshot.art.assets.length === 0
-      ? 'No GLBs; terrain renders as extruded shapes and decorations as their placeholders.'
-      : `${snapshot.art.assets.length} GLB${snapshot.art.assets.length === 1 ? '' : 's'}: ${snapshot.art.assets.map((asset) => asset.name).join(', ')}. ` +
-        (models.length === 0 ? 'Decorations draw their placeholders.'
-          : `In mesh releases they replace the decoration placeholder${models.length === 1 ? '' : 's'} ${models.join(', ')}.`);
+      ? 'No meshes yet: terrain draws as its collision extruded, and decorations as their placeholders.'
+      : models.length === 0 ? 'Decorations draw their placeholders.'
+        : `In mesh releases the meshes replace the decoration placeholder${models.length === 1 ? '' : 's'} ${models.join(', ')}.`;
     previousContent = snapshot;
   }
 

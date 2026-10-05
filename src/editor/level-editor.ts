@@ -4,13 +4,14 @@ import { ENEMY_BEHAVIOR, ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIE
 import type { EnemySpecies } from '../enemy-types';
 import {
   DECORATION_LIMITS, ILLUSION, isDecorationObject, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, LevelError,
-  ROCK_COLOR, SHAPE_KINDS, objectContains, objectVertices, shapeVertices, terrainFromOutline, TRIGGER_LIMITS, TRIGGER_MARKERS,
-  validateLevel, validateLevelObject,
+  meshIsCircle, ROCK_COLOR, SHAPE_KINDS, objectContains, objectLoops, shapeMesh, shapeOutline, terrainFromOutline, TRIGGER_LIMITS,
+  TRIGGER_MARKERS, validateLevel, validateLevelObject,
 } from '../level';
 import type {
-  DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, LevelShape, ShapeKind, StartObject, TerrainObject,
+  DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, ShapeKind, StartObject, TerrainMesh, TerrainObject,
   TriggerObject, TriggerRegion,
 } from '../level';
+import type { MeshTerrain } from '../mesh-collision';
 import { builtInDecoration, builtInGeometry, DECORATION_CATEGORIES, DECORATION_MODELS } from '../decoration-models';
 import type { DecorationCategory, DecorationModel } from '../decoration-models';
 import { decorationThumbnail } from './decoration-thumbnail';
@@ -26,7 +27,7 @@ import type { BoardViewport } from './level-board-view';
 import { createJsonDownload } from './json-download';
 import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
 import { EntityGizmos, enemyGlyph, objectGizmoBounds, updraftGlyph } from './object-gizmos';
-import { createSetPieceGhost, createSetPieceThumbnail } from './set-piece-view';
+import { createSetPieceGhost, createSetPieceThumbnail, loopsPath } from './set-piece-view';
 import { placeSetPiece, SET_PIECE_CATALOG, SET_PIECE_CATEGORIES, SET_PIECES, setPieceById } from './set-pieces';
 import type { SetPiece, SetPieceCategory, SetPieceCounts } from './set-pieces';
 import { SurfaceIndex } from './surface-snap';
@@ -45,7 +46,7 @@ type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piec
 // 'decorate' selects and moves decorations; 'select' never picks them, so scenery cannot get in the way of the course.
 type Tool = 'select' | 'decorate' | 'draw' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
-interface TerrainPreset { id: string; label: string; shape: LevelShape; width: number; height: number }
+interface TerrainPreset { id: string; label: string; shape: ShapeKind; width: number; height: number }
 interface TriggerPreset {
   id: string; label: string; name: string; region: TriggerRegion;
   activation: TriggerObject['activation']; marker: TriggerObject['marker'];
@@ -87,9 +88,9 @@ const PRESET_SETTINGS: Record<ShapeKind, { label: string; width: number; height:
   hexagon: { label: 'Hexagon', width: 2.5, height: 2.5 },
 };
 const PRESETS: readonly TerrainPreset[] = SHAPE_KINDS.flatMap((type): TerrainPreset[] => {
-  const preset = { id: type, shape: Object.freeze({ type }), ...PRESET_SETTINGS[type] };
+  const preset = { id: type, shape: type, ...PRESET_SETTINGS[type] };
   return type === 'box'
-    ? [preset, { id: 'platform', label: 'Platform', shape: preset.shape, width: 4, height: 0.4 }]
+    ? [preset, { id: 'platform', label: 'Platform', shape: type, width: 4, height: 0.4 }]
     : [preset];
 });
 const TRIGGER_PRESETS: readonly TriggerPreset[] = [
@@ -109,6 +110,41 @@ const TRIGGER_PRESETS: readonly TriggerPreset[] = [
     events: UPDRAFT_EVENTS,
   },
 ];
+
+const MESH_PRESET = 'mesh:';
+// A mesh with no outline to show until its GLB is read.
+const MESH_ICON = '<svg viewBox="-0.65 -0.65 1.3 1.3" aria-hidden="true"><path d="M-0.5 0.3 L-0.1 -0.45 L0.5 -0.2 L0.35 0.45 L-0.2 0.5 Z" ' +
+  'fill="none" stroke="currentColor" stroke-width="0.08" stroke-linejoin="round" /><path d="M-0.1 -0.45 L0 0.05 L0.35 0.45 M0 0.05 ' +
+  'L-0.5 0.3" fill="none" stroke="currentColor" stroke-width="0.06" /></svg>';
+
+const tidySize = (value: number, minimum: number, maximum: number): number =>
+  Math.min(maximum, Math.max(minimum, Number(value.toFixed(4))));
+
+// A mesh placed at its own size, scaled as a whole into the level's size limits when it is too large or too small.
+function meshPlacement(mesh: TerrainMesh, size: Pick<MeshTerrain, 'width' | 'height' | 'depth'>, at: Point): TerrainObject {
+  const { minimumSize, maximumSize, minimumDepth, maximumDepth } = LEVEL_LIMITS;
+  const shrink = Math.min(1, maximumSize / Math.max(size.width, size.height), maximumDepth / size.depth);
+  const grow = Math.max(1, minimumSize / Math.min(size.width, size.height), minimumDepth / size.depth);
+  const scale = shrink < 1 ? shrink : grow;
+  let width = tidySize(size.width * scale, minimumSize, maximumSize);
+  let height = tidySize(size.height * scale, minimumSize, maximumSize);
+  // A circle's box is square.
+  if (meshIsCircle(mesh)) width = height = Math.max(width, height);
+  return {
+    kind: 'terrain', id: 'placement-preview', mesh, x: at.x, y: at.y, width, height, angle: 0, mirror: false,
+    depth: tidySize(size.depth * scale, minimumDepth, maximumDepth), color: ROCK_COLOR, illusion: false, surface: DEFAULT_SURFACE,
+  };
+}
+
+// How a terrain object collides, for the inspector.
+function collisionNote(mesh: TerrainMesh): string {
+  if (mesh.type === 'shape') return 'Collides as its shape.';
+  if (mesh.type === 'outline') return 'Collides as its drawn outline.';
+  if (mesh.collision.type !== 'slice') return `Collides as the ${mesh.collision.type} its GLB declares, fitted to its box.`;
+  const { loops } = mesh.collision;
+  return `Collides as its slice on the obstacle line: ${loops.length} outline${loops.length === 1 ? '' : 's'}, ` +
+    `${loops.reduce((sum, loop) => sum + loop.length, 0)} points.`;
+}
 
 function asTerrain(object: LevelObject | null): TerrainObject | null {
   return object !== null && isTerrainObject(object) ? object : null;
@@ -135,10 +171,10 @@ function isPlacementTool(tool: Tool): tool is PlacementTool {
 function objectBounds(object: LevelObject): Bounds {
   if (object.kind === 'decoration') return { left: object.x, right: object.x, bottom: object.y, top: object.y };
   if (isTerrainObject(object)) {
-    const vertices = objectVertices(object);
+    const points = objectLoops(object).flat();
     return {
-      left: Math.min(...vertices.map((point) => point.x)), right: Math.max(...vertices.map((point) => point.x)),
-      bottom: Math.min(...vertices.map((point) => point.y)), top: Math.max(...vertices.map((point) => point.y)),
+      left: Math.min(...points.map((point) => point.x)), right: Math.max(...points.map((point) => point.x)),
+      bottom: Math.min(...points.map((point) => point.y)), top: Math.max(...points.map((point) => point.y)),
     };
   }
   return objectGizmoBounds(object);
@@ -268,6 +304,15 @@ export function createLevelEditor(options: LevelEditorOptions) {
             <button type="button" class="button level-drawing-cancel">Cancel outline</button>
           </div>
         </div>
+        <p class="level-help level-palette-label">Meshes</p>
+        <div class="level-palette level-mesh-palette" aria-label="Course meshes"></div>
+        <div class="level-action-row">
+          <button type="button" class="button level-mesh-import">Import GLB mesh</button>
+        </div>
+        <input class="level-mesh-file" type="file" accept=".glb,model/gltf-binary" aria-label="Import a GLB mesh" hidden />
+        <p class="level-help">Any GLB places as terrain at its own size. It collides as the shape it declares
+          (extras.collision on its scene or a root node: box, ramp, triangle, circle or hexagon), or else as its slice
+          where it meets the obstacle line, the middle of its depth. Imported meshes join Project / Course artwork.</p>
         <p class="level-help level-palette-label">Start, triggers &amp; enemies</p>
         <div class="level-entity-palette" aria-label="Start and trigger palette">
           <button type="button" class="button level-preset" data-level-tool="start" aria-pressed="false">
@@ -297,6 +342,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
             ${numericField('depth', 'Depth', LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth)}
           </div>
           <p class="level-help level-circle-help" hidden>Circle width is its diameter. Height is linked to width.</p>
+          <label class="level-checkbox" for="level-terrain-mirror">
+            <input id="level-terrain-mirror" type="checkbox" /> Mirror left / right (M)
+          </label>
+          <p class="level-help level-terrain-collision"></p>
           ${selectField('surface', 'Surface', SURFACES.map((surface) => ({ value: surface, label: SURFACE_LABELS[surface] })))}
           <p class="level-help">What it is made of. Each surface's friction and bounciness are set once for the game in
             Physics / Materials; a contact bounces as much as the bouncier of its two sides.</p>
@@ -453,8 +502,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   overlay.setAttribute('aria-label', 'Level canvas. Drag a shape to move it, or empty space to pan; the middle button pans from anywhere. Plus and minus zoom. V returns to selecting. Enter finishes a drawing; Backspace undoes a stroke. Escape cancels; Delete removes selection.');
   overlay.innerHTML = `<svg class="level-guides" aria-hidden="true">
     <g class="level-camera-group">
-      <polygon class="level-selection" vector-effect="non-scaling-stroke" hidden />
-      <polygon class="level-ghost" vector-effect="non-scaling-stroke" hidden />
+      <path class="level-selection" fill-rule="evenodd" vector-effect="non-scaling-stroke" hidden />
+      <path class="level-ghost" fill-rule="evenodd" vector-effect="non-scaling-stroke" hidden />
       <g class="level-drawing-guide" hidden>
         <polyline class="level-drawing-line" vector-effect="non-scaling-stroke" />
         <path class="level-drawing-links" vector-effect="non-scaling-stroke" />
@@ -472,8 +521,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   };
   const svg = graphic<SVGSVGElement>('svg');
   const cameraGroup = graphic<SVGGElement>('.level-camera-group');
-  const selectionPolygon = graphic<SVGPolygonElement>('.level-selection');
-  const ghostPolygon = graphic<SVGPolygonElement>('.level-ghost');
+  const selectionPolygon = graphic<SVGPathElement>('.level-selection');
+  const ghostPolygon = graphic<SVGPathElement>('.level-ghost');
   const drawingGuide = graphic<SVGGElement>('.level-drawing-guide');
   const drawingLine = graphic<SVGPolylineElement>('.level-drawing-line');
   const drawingLinks = graphic<SVGPathElement>('.level-drawing-links');
@@ -524,6 +573,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let tool: Tool = 'select';
   let selectedId: string | null = null;
   let presetId: string | null = null;
+  // The latest mesh being read to place; one finishing after another request or a change of tool is not armed.
+  let meshRequest = 0;
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
   // Fingers on the canvas, so a second one turns the first's gesture into a pinch.
@@ -657,13 +708,13 @@ Export the level first if you want to keep them. Continue without saving?`);
     element(root, '.level-selection-name').textContent =
       armedPiece !== null ? `${armedPiece.name}${setPieceMirror ? ' (mirrored)' : ''} — click / tap the canvas to drop it` :
       object === null ? 'Select an object, or place terrain, a start, a trigger or an enemy.' :
-      tool === 'place' && terrain !== null ? `New ${terrain.shape.type} — click / tap the canvas to place` :
+      tool === 'place' && terrain !== null ? `New ${terrainName(terrain)}${terrain.mirror ? ' (mirrored)' : ''} — click / tap the canvas to place` :
       tool === 'place-trigger' ? `New ${presetId === 'ending-trigger' ? 'ending trigger' : 'trigger'} — click / tap the canvas to place` :
       tool === 'place-enemy' && enemy !== null ? `New ${ENEMY_SPECS[enemy.species].label} - click / tap its base to place` :
       tool === 'place-decoration' && decoration !== null ? `New ${modelName(decoration.model)}${decoration.mirror ? ' (mirrored)' : ''} — click / tap its base to place` :
       tool === 'start' ? 'Start location — click / tap the canvas to place' :
       tool === 'player' ? 'Place player — click / tap where the pot should stand' :
-      terrain !== null ? `${terrain.shape.type} · ${terrain.id}` :
+      terrain !== null ? `${terrainName(terrain)} · ${terrain.id}` :
       start !== null ? `Start location · ${start.id}` :
       trigger !== null ? `Trigger "${trigger.name}" · ${trigger.id}` :
       enemy !== null ? `${ENEMY_SPECS[enemy.species].label} - ${enemy.id}` :
@@ -684,10 +735,12 @@ Export the level first if you want to keep them. Continue without saving?`);
       input('width').value = String(Number(terrain.width.toFixed(4)));
       input('height').value = String(Number(terrain.height.toFixed(4)));
       input('depth').value = String(Number(terrain.depth.toFixed(4)));
-      input('height').disabled = terrain.shape.type === 'circle';
+      input('height').disabled = meshIsCircle(terrain.mesh);
       input('illusion').checked = terrain.illusion;
+      input('terrain-mirror').checked = terrain.mirror;
       select('surface').value = terrain.surface;
-      element(root, '.level-circle-help').hidden = terrain.shape.type !== 'circle';
+      element(root, '.level-circle-help').hidden = !meshIsCircle(terrain.mesh);
+      element(root, '.level-terrain-collision').textContent = collisionNote(terrain.mesh);
     } else if (start !== null) {
       input('angle').value = String(Number((start.angle * DEGREES).toFixed(4)));
       input('reach').value = String(Number(start.reach.toFixed(4)));
@@ -775,7 +828,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         'pan. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
         'Escape cancels. Pan with the middle button or two fingers and zoom as usual; your unfinished outline is kept.',
-      place: 'Click / tap to place this shape. Adjust its properties first if needed. Escape cancels placement.',
+      place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
       'place-set-piece': 'Click / tap to drop the set piece. Its base rests on the terrain top nearest the pointer; move ' +
@@ -944,10 +997,10 @@ Export the level first if you want to keep them. Continue without saving?`);
     element(root, '.level-set-piece-status').textContent = setPieceStatus;
   }
 
-  function drawPolygon(polygon: SVGPolygonElement, object: TerrainObject | null): void {
+  function drawPolygon(polygon: SVGPathElement, object: TerrainObject | null): void {
     polygon.toggleAttribute('hidden', object === null);
     if (object === null) return;
-    polygon.setAttribute('points', objectVertices(object).map((point) => `${point.x},${point.y}`).join(' '));
+    polygon.setAttribute('d', loopsPath(objectLoops(object)));
     polygon.classList.toggle('level-illusion-outline', object.illusion);
   }
 
@@ -987,10 +1040,10 @@ Export the level first if you want to keep them. Continue without saving?`);
     setPieceGhost.classList.toggle('level-set-piece-snapped', setPieceSnapped);
   }
 
-  function drawPoints(polygon: SVGPolygonElement, points: readonly Point[] | null): void {
+  function drawPoints(polygon: SVGPathElement, points: readonly Point[] | null): void {
     polygon.toggleAttribute('hidden', points === null);
     if (points === null) return;
-    polygon.setAttribute('points', points.map((point) => `${point.x},${point.y}`).join(' '));
+    polygon.setAttribute('d', loopsPath([points]));
     polygon.classList.remove('level-illusion-outline');
   }
 
@@ -1182,6 +1235,7 @@ Export the level first if you want to keep them. Continue without saving?`);
 
   function chooseTool(next: 'select' | 'decorate' | 'start' | 'player' | 'draw'): void {
     cancelGesture();
+    meshRequest++;
     tool = next;
     drawingCursor = null;
     if (next === 'draw') selectedId = null;
@@ -1370,7 +1424,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     icon.setAttribute('aria-hidden', 'true');
     const polygon = document.createElementNS(SVG_NS, 'polygon');
     const size = Math.max(preset.width, preset.height);
-    polygon.setAttribute('points', shapeVertices(preset.shape).map((p) =>
+    polygon.setAttribute('points', shapeOutline(preset.shape).map((p) =>
       `${p.x * preset.width / size},${-p.y * preset.height / size}`).join(' '));
     icon.append(polygon);
     button.append(icon, document.createTextNode(preset.label));
@@ -1380,8 +1434,8 @@ Export the level first if you want to keep them. Continue without saving?`);
       const view = camera.state();
       tool = 'place'; presetId = preset.id; selectedId = null;
       placement = {
-        kind: 'terrain', id: 'placement-preview', shape: preset.shape, x: view.x, y: view.y,
-        width: preset.width, height: preset.height, angle: 0,
+        kind: 'terrain', id: 'placement-preview', mesh: shapeMesh(preset.shape), x: view.x, y: view.y,
+        width: preset.width, height: preset.height, angle: 0, mirror: false,
         depth: DEFAULT_OBJECT_DEPTH, color: ROCK_COLOR, illusion: false, surface: DEFAULT_SURFACE,
       };
       renderControls();
@@ -1389,6 +1443,66 @@ Export the level first if you want to keep them. Continue without saving?`);
     }, listen);
     element(root, '.level-palette').insertBefore(button, element(root, '.level-draw-tool'));
   }
+
+  // Meshes: the project's course meshes, each placed with its collision once its GLB is read.
+  const meshPalette = element(root, '.level-mesh-palette');
+  const meshFile = element<HTMLInputElement>(root, '.level-mesh-file');
+
+  function terrainName(terrain: TerrainObject): string {
+    const { mesh } = terrain;
+    if (mesh.type === 'shape') return PRESET_SETTINGS[mesh.shape].label;
+    if (mesh.type === 'outline') return 'Drawn shape';
+    return options.meshes.list().find((candidate) => candidate.id === mesh.assetId)?.name ?? 'Missing mesh';
+  }
+
+  function armMesh(id: string, terrain: MeshTerrain): void {
+    cancelGesture();
+    tool = 'place'; presetId = `${MESH_PRESET}${id}`; selectedId = null; drawingCursor = null;
+    placement = meshPlacement(terrain.mesh, terrain, camera.state());
+    renderControls();
+    draw();
+  }
+
+  // Arms a mesh once it is read, unless the designer has moved on meanwhile: chosen another mesh, preset or tool, or
+  // started a gesture.
+  async function armWhenRead(read: Promise<{ readonly id: string; readonly terrain: MeshTerrain } | Error>): Promise<void> {
+    const request = ++meshRequest;
+    const from = { tool, presetId };
+    const mesh = await read;
+    if (mesh instanceof Error || request !== meshRequest || !active || disposed || gesture !== null ||
+      tool !== from.tool || presetId !== from.presetId) return;
+    armMesh(mesh.id, mesh.terrain);
+  }
+
+  function renderMeshes(): void {
+    const meshes = options.meshes.list();
+    meshPalette.replaceChildren(...meshes.map((mesh) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'button level-preset';
+      button.dataset.levelPreset = `${MESH_PRESET}${mesh.id}`;
+      button.title = mesh.name;
+      button.innerHTML = MESH_ICON;
+      button.append(document.createTextNode(mesh.name));
+      button.addEventListener('click', () => {
+        if (!active || released(button)) return;
+        void armWhenRead(options.meshes.terrain(mesh.id).then((terrain) => terrain instanceof Error ? terrain : { id: mesh.id, terrain }));
+      }, listen);
+      return button;
+    }));
+    // A mesh taken out of the project can no longer be placed.
+    if (presetId?.startsWith(MESH_PRESET) && !meshes.some((mesh) => presetId === `${MESH_PRESET}${mesh.id}`)) chooseTool('select');
+    else renderControls();
+  }
+
+  element(root, '.level-mesh-import').addEventListener('click', () => { if (active) meshFile.click(); }, listen);
+  meshFile.addEventListener('change', () => {
+    const file = meshFile.files?.[0];
+    meshFile.value = '';
+    if (file === undefined) return;
+    void armWhenRead(options.meshes.add(file));
+  }, listen);
+  const unsubscribeMeshes = options.meshes.subscribe(renderMeshes);
 
   for (const preset of TRIGGER_PRESETS) {
     const button = document.createElement('button');
@@ -1480,7 +1594,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       cancelGesture();
       applyEdit(() => {
         const value = input(name).valueAsNumber;
-        const circle = object.shape.type === 'circle' && (name === 'width' || name === 'height');
+        const circle = meshIsCircle(object.mesh) && (name === 'width' || name === 'height');
         commitOrPreview({ ...object, [name]: value, ...(circle ? { width: value, height: value } : {}) });
       });
     }, listen);
@@ -1491,6 +1605,13 @@ Export the level first if you want to keep them. Continue without saving?`);
     if (object === null) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, illusion: input('illusion').checked }));
+  }, listen);
+  input('terrain-mirror').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTerrain(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, mirror: input('terrain-mirror').checked }));
   }, listen);
   select('surface').addEventListener('change', () => {
     if (!active) return;
@@ -2074,7 +2195,10 @@ Export the level first if you want to keep them. Continue without saving?`);
       case 'v': chooseTool('select'); break;
       case 'm':
         if (tool === 'place-set-piece') toggleSetPieceMirror();
-        else if (tool === 'place-decoration' && placement !== null && placement.kind === 'decoration') {
+        else if (tool === 'place' && placement !== null && placement.kind === 'terrain') {
+          placement = { ...placement, mirror: !placement.mirror };
+          renderControls(); draw();
+        } else if (tool === 'place-decoration' && placement !== null && placement.kind === 'decoration') {
           decorationMirror = !placement.mirror;
           placement = { ...placement, mirror: decorationMirror };
           renderControls(); draw();
@@ -2133,7 +2257,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     renderControls();
     draw();
   });
-  renderControls();
+  renderMeshes();
   root.inert = true;
 
   return {
@@ -2222,7 +2346,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       active = false; disposed = true; importGeneration++;
       options.decorations.preview(null);
       replays.dispose();
-      events.abort(); resize.disconnect(); unsubscribe();
+      events.abort(); resize.disconnect(); unsubscribe(); unsubscribeMeshes();
       camera.set(null);
       bounds.clear();
       entityGizmos.destroy();

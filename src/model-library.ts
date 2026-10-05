@@ -42,7 +42,6 @@ export const MODEL_LIBRARY_LIMITS = {
   entries: 32,
   id: 64,
   name: CHARACTER_MODEL_LIMITS.name,
-  totalBytes: 64 * 1024 * 1024,
 } as const;
 
 export interface LibraryEntry {

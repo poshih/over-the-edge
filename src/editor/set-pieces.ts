@@ -1,12 +1,12 @@
 // Editor-only library of multi-object set pieces. Every part is an ordinary level object built
-// from the built-in shapes, authored relative to the piece's base (y = 0). Placing a piece only
+// from the built-in meshes, authored relative to the piece's base (y = 0). Placing a piece only
 // translates (and optionally mirrors) its parts, so the level format, runtime and game-only build
-// are unchanged and pieces never add geometry templates beyond the built-in shapes.
+// are unchanged and pieces add no collision shapes beyond the built-in ones and the mirrored ramp.
 import type { Point } from '../config';
 import { ENEMY_SPECS, enemyBounds } from '../enemy-types';
 import type { EnemyFacing, EnemySpecies } from '../enemy-types';
 import {
-  objectVertices, ROCK_COLOR, TRIGGER_LIMITS, triggerBounds, validateLevelMetadata, validateLevelObject,
+  objectLoops, ROCK_COLOR, shapeMesh, TRIGGER_LIMITS, triggerBounds, validateLevelMetadata, validateLevelObject,
 } from '../level';
 import type { EnemyObject, LevelLabel, LevelObject, ShapeKind, TerrainObject, TriggerObject } from '../level';
 import { DEFAULT_SURFACE } from '../surfaces';
@@ -69,7 +69,7 @@ interface Style { readonly color?: number; readonly depth?: number; readonly ill
 
 function shape(type: ShapeKind, x: number, y: number, width: number, height: number, angle: number, style: Style): TerrainPart {
   return {
-    kind: 'terrain', shape: { type }, x, y, width, height, angle,
+    kind: 'terrain', mesh: shapeMesh(type), x, y, width, height, angle, mirror: false,
     depth: style.depth ?? DEPTH, color: style.color ?? COLOR.rock, illusion: style.illusion ?? false,
     surface: style.surface ?? DEFAULT_SURFACE,
   };
@@ -629,9 +629,9 @@ function tidyAngle(angle: number): number {
 
 function partBounds(part: SetPiecePart): SetPieceBounds {
   if (part.kind === 'terrain') {
-    const vertices = objectVertices({ ...part, id: CHECK_ID });
-    const xs = vertices.map((point) => point.x);
-    const ys = vertices.map((point) => point.y);
+    const points = objectLoops({ ...part, id: CHECK_ID }).flat();
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
     return { left: Math.min(...xs), right: Math.max(...xs), bottom: Math.min(...ys), top: Math.max(...ys) };
   }
   if (part.kind === 'label') {
@@ -671,12 +671,7 @@ function shiftPart(part: SetPiecePart, dx: number): SetPiecePart {
 /** Mirrors a part about the piece's vertical axis (x = 0). */
 export function mirrorPart(part: SetPiecePart): SetPiecePart {
   const x = -part.x + 0;
-  if (part.kind === 'terrain') {
-    // A mirrored ramp is the same right triangle turned a quarter turn with its sides swapped.
-    return part.shape.type === 'ramp'
-      ? { ...part, x, width: part.height, height: part.width, angle: tidyAngle(-part.angle - Math.PI / 2) }
-      : { ...part, x, angle: tidyAngle(-part.angle) };
-  }
+  if (part.kind === 'terrain') return { ...part, x, angle: tidyAngle(-part.angle), mirror: !part.mirror };
   if (part.kind === 'enemy') return { ...part, x, facing: part.facing === 'left' ? 'right' : 'left' };
   return { ...part, x };
 }

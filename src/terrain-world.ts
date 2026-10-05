@@ -1,7 +1,7 @@
 import { Chain, Circle, Settings, Vec2, WorldManifold } from 'planck';
 import type { Body, Contact, ContactImpulse, Fixture, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
-import { geometryKey, ILLUSION, isSimplePolygon, isTerrainObject, objectContains, polygonArea, shapeVertices } from './level';
+import { geometryKey, ILLUSION, isSimplePolygon, isTerrainObject, objectContains, polygonArea, terrainCollision } from './level';
 import type { LevelChange, TerrainObject, TerrainEvent } from './level';
 import { sameSurfaceMaterials } from './surfaces';
 import type { SurfaceMaterial, SurfaceMaterials } from './surfaces';
@@ -16,16 +16,16 @@ function chainLoop(points: Vec2[]): Vec2[] {
   }
   while (kept.length > 3 && Vec2.distance(kept[0], kept[kept.length - 1]) <= slop) kept.pop();
   const valid = kept.length >= 3 && Vec2.distance(kept[0], kept[kept.length - 1]) > slop &&
-    polygonArea(kept) > slop * slop && isSimplePolygon(kept);
+    Math.abs(polygonArea(kept)) > slop * slop && isSimplePolygon(kept);
   return valid ? kept : points;
 }
 
-// Each terrain body has one fixture.
+// A terrain body has a fixture per outline of its collision, all of one surface.
 function applyMaterial(body: Body, material: SurfaceMaterial): void {
-  const fixture = body.getFixtureList();
-  if (fixture === null) return;
-  fixture.setFriction(material.friction);
-  fixture.setRestitution(material.restitution);
+  for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) {
+    fixture.setFriction(material.friction);
+    fixture.setRestitution(material.restitution);
+  }
 }
 
 export class TerrainWorld {
@@ -81,7 +81,7 @@ export class TerrainWorld {
     const removals = new Set(removed);
     for (const object of terrain) {
       const previous = this.objects.get(object.id);
-      if (previous && geometryKey(previous.shape) !== geometryKey(object.shape)) removals.add(object.id);
+      if (previous && geometryKey(previous) !== geometryKey(object)) removals.add(object.id);
     }
     for (const id of removed) this.remove(id);
     for (const object of terrain) this.upsert(object);
@@ -128,10 +128,14 @@ export class TerrainWorld {
 
   inspect() {
     this.ensureLive();
+    let fixtureCount = 0;
+    for (const body of this.bodies.values()) {
+      for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) fixtureCount++;
+    }
     return {
       objectCount: this.objects.size,
       bodyCount: this.bodies.size,
-      fixtureCount: this.bodies.size,
+      fixtureCount,
       fading: [...this.fading].map(([id, startedAt]) => ({ id, startedAt })),
       disappeared: [...this.disappeared],
     };
@@ -226,12 +230,10 @@ export class TerrainWorld {
       if (previous.x !== object.x || previous.y !== object.y || previous.angle !== object.angle) {
         body.setTransform(new Vec2(object.x, object.y), object.angle);
       }
-      if (previous.width !== object.width || previous.height !== object.height ||
-        geometryKey(previous.shape) !== geometryKey(object.shape)) {
-        const fixture = body.getFixtureList();
-        if (!fixture) throw new Error(`Terrain body has no fixture: ${object.id}.`);
-        body.destroyFixture(fixture);
-        this.createFixture(body, object);
+      if (previous.width !== object.width || previous.height !== object.height || geometryKey(previous) !== geometryKey(object)) {
+        if (body.getFixtureList() === null) throw new Error(`Terrain body has no fixture: ${object.id}.`);
+        for (let fixture = body.getFixtureList(); fixture !== null; fixture = body.getFixtureList()) body.destroyFixture(fixture);
+        this.createFixtures(body, object);
       } else if (previous.surface !== object.surface) {
         applyMaterial(body, this.materials[object.surface]);
         // Contacts already touching keep the friction and bounciness they mixed when they began.
@@ -259,23 +261,28 @@ export class TerrainWorld {
 
   private createBody(object: TerrainObject): void {
     const body = this.world.createBody({ position: new Vec2(object.x, object.y), angle: object.angle });
-    this.createFixture(body, object);
+    this.createFixtures(body, object);
     this.bodies.set(object.id, body);
     this.ids.set(body, object.id);
   }
 
-  private createFixture(body: Body, object: TerrainObject): void {
-    const shape = object.shape.type === 'circle'
-      ? new Circle(object.width / 2)
-      : new Chain(chainLoop(shapeVertices(object.shape).map((vertex) =>
-        new Vec2(vertex.x * object.width, vertex.y * object.height))), true);
+  // A true circle, or one closed chain per outline of the mesh's collision, sized and mirrored as placed.
+  private createFixtures(body: Body, object: TerrainObject): void {
     const material = this.materials[object.surface];
-    body.createFixture(shape, {
+    const options = {
       friction: material.friction,
       restitution: material.restitution,
       filterCategoryBits: PHYSICS.terrainCategory,
       filterMaskBits: PHYSICS.playerCategory | PHYSICS.toolCategory | PHYSICS.enemyCategory,
-    });
+    };
+    const collision = terrainCollision(object);
+    if (collision.type === 'circle') {
+      body.createFixture(new Circle(object.width / 2), options);
+      return;
+    }
+    for (const loop of collision.loops) {
+      body.createFixture(new Chain(chainLoop(loop.map((vertex) => new Vec2(vertex.x * object.width, vertex.y * object.height))), true), options);
+    }
   }
 
   private destroyBody(id: string): void {

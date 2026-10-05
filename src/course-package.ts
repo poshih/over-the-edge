@@ -2,7 +2,7 @@ import { ART_LIMITS, ArtError, artId, artName, artRecord } from './art-types';
 import type { ArtMode, ArtResource } from './art-types';
 import { validateDecorationArt } from './decoration-art';
 import type { DecorationArt } from './decoration-art';
-import { validateLevel } from './level';
+import { terrainAssets, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 
 export interface CoursePackage {
@@ -47,10 +47,8 @@ export function validateCoursePackage(value: unknown): CoursePackage {
   const ids = new Set(assets.map((asset) => asset.id));
   if (ids.size !== assets.length) throw new ArtError('Duplicate packaged assets.');
   const level = validateLevel(data.level);
-  for (const object of level.objects) {
-    if (object.kind === 'terrain' && object.art !== undefined && !ids.has(object.art.assetId)) {
-      throw new ArtError(`Artwork for terrain "${object.id}" is missing from this package.`);
-    }
+  for (const asset of terrainAssets(level)) {
+    if (!ids.has(asset)) throw new ArtError(`The package's level places mesh ${asset}, which it does not contain.`);
   }
   return Object.freeze({
     format: 'over-the-edge-course', schemaVersion: 2, mode: data.mode, level,

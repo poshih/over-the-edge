@@ -2,14 +2,16 @@ import {
   Box3, Color, DynamicDrawUsage, ExtrudeGeometry, Group, InstancedBufferAttribute,
   InstancedMesh, Matrix4, MeshStandardMaterial, Sphere,
 } from 'three';
-import { geometryKey, ILLUSION, LEVEL_LIMITS } from './level';
-import type { TerrainObject, LevelShape, TerrainEvent } from './level';
+import { geometryKey, ILLUSION, LEVEL_LIMITS, terrainCollision } from './level';
+import type { TerrainObject, TerrainEvent } from './level';
 import { markInstanceSlot } from './instancing';
 import { OBSTACLE_LINE } from './obstacle-line';
 import { terrainGeometry } from './terrain-geometry';
 
 const CHUNK_SIZE = 32;
 const INITIAL_CAPACITY = 8;
+// A level's collision shapes, with room for an edit that replaces them all.
+const TEMPLATE_LIMIT = LEVEL_LIMITS.geometryKinds * 2;
 const SIDE_SHADE = 0.62;
 type MaterialPair = [MeshStandardMaterial, MeshStandardMaterial];
 type TerrainMesh = InstancedMesh<ExtrudeGeometry, MaterialPair>;
@@ -112,7 +114,7 @@ export class TerrainView {
           phase = { startedAt: event.startedAt, materials: materials({ fading: true }), batches: new Map() };
           this.phases.set(event.startedAt, phase);
         }
-        const key = geometryKey(object.shape);
+        const key = geometryKey(object);
         this.insert(object, this.getBatch(object, key, phase));
         break;
       }
@@ -191,7 +193,7 @@ export class TerrainView {
 
   private upsert(object: TerrainObject): void {
     const instance = this.instances.get(object.id);
-    const key = geometryKey(object.shape);
+    const key = geometryKey(object);
     const destination = batchKey(object, key);
     // Authored edits revive illusions, just as recreating their physics body does.
     if (instance && instance.batch.phase === null && instance.batch.key === destination) {
@@ -209,14 +211,15 @@ export class TerrainView {
     this.insert(object, this.getBatch(object, key, null));
   }
 
-  private getTemplate(shape: LevelShape, key: string): Template {
+  // One template per collision shape as placed, mirrored or not; an unused one is evicted to make room.
+  private getTemplate(object: TerrainObject, key: string): Template {
     const existing = this.templates.get(key);
     if (existing) {
       this.templates.delete(key);
       this.templates.set(key, existing);
       return existing;
     }
-    if (this.templates.size >= LEVEL_LIMITS.geometryKinds) {
+    if (this.templates.size >= TEMPLATE_LIMIT) {
       for (const [candidate, template] of this.templates) {
         if (template.references !== 0) continue;
         template.geometry.dispose();
@@ -224,9 +227,9 @@ export class TerrainView {
         this.counters.geometryEvictions++;
         break;
       }
-      if (this.templates.size >= LEVEL_LIMITS.geometryKinds) throw new Error('Terrain geometry limit exceeded.');
+      if (this.templates.size >= TEMPLATE_LIMIT) throw new Error('Terrain geometry limit exceeded.');
     }
-    const geometry = terrainGeometry(shape);
+    const geometry = terrainGeometry(terrainCollision(object));
     const template = { geometry, references: 0 };
     this.templates.set(key, template);
     this.counters.geometriesBuilt++;
@@ -238,7 +241,7 @@ export class TerrainView {
     const collection = phase ? phase.batches : this.opaque;
     const existing = collection.get(key);
     if (existing) return existing;
-    const template = this.getTemplate(object.shape, shapeKey);
+    const template = this.getTemplate(object, shapeKey);
     const batch: Batch = {
       key, template, phase, entries: [],
       mesh: this.createMesh(template, phase ? phase.materials : this.opaqueMaterials, INITIAL_CAPACITY),

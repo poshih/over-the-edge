@@ -9,6 +9,7 @@ import { GameSettingsError, withRig } from '../game-settings';
 import type { GameSettings } from '../game-settings';
 import { Game } from '../game';
 import { createCharacterModelLoader } from '../character-model-loader';
+import { CourseArtView } from '../course-art-view';
 import { levelSpawn } from '../level';
 import { PhantomView } from '../phantom-view';
 import { Appearance } from './appearance';
@@ -223,6 +224,20 @@ const spriteEditor = createSpriteEditor({
 });
 const collisionOverlay = new CollisionOverlay();
 game.view.addLayer(collisionOverlay);
+// The course draws as the project's look says, as its releases draw it: placed GLBs, loaded from the project as the level
+// uses them, or every terrain object as its collision.
+const courseMeshes = new CourseArtView({
+  terrain: game.view.terrain,
+  subscribe: (listener) => game.simulation.subscribeTerrain(listener),
+  fetch: (id) => project.courseMeshBlob(id),
+  onFailure: (id, error) => {
+    const name = project.courseMeshes().find((mesh) => mesh.id === id)?.name ?? id;
+    ui.notice(`The mesh "${name}" cannot be drawn, so its terrain shows its collision: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  },
+});
+game.view.addLayer(courseMeshes);
+courseMeshes.setMode(project.courseLook());
+const unsubscribeCourseLook = project.subscribe(() => courseMeshes.setMode(project.courseLook()));
 // The figure Level / Replays poses: one held phantom, none played by the game.
 const replayFigure = new PhantomView({ figures: 0 });
 game.view.addLayer(replayFigure);
@@ -242,6 +257,12 @@ const levelEditor = createLevelEditor({
   decorations: {
     size: (model) => decorations.size(model),
     preview: (object) => decorations.setPreview(object),
+  },
+  meshes: {
+    list: () => project.courseMeshes(),
+    terrain: (id) => project.courseMeshTerrain(id),
+    add: (file) => project.addCourseMesh(file),
+    subscribe: (listener) => project.subscribe((event) => { if (event.kind === 'content') listener(); }),
   },
   onPlay: () => perform('play'),
   player: {
@@ -429,6 +450,7 @@ if (import.meta.hot) {
     unsubscribeLevel();
     unsubscribeAppearance();
     unsubscribeOverlay();
+    unsubscribeCourseLook();
     levelEditor.dispose();
     spriteEditor.dispose();
     appearanceUi.dispose();

@@ -97,7 +97,7 @@ landings can catch falls but do not save progress. Reset returns to the start,
 restores illusions and enemies, and rearms events.
 
 Permanent terrain includes boxes, ramps, circles, hexagons, triangles, and two
-reused custom polygon shapes. Illusions are optional: their disappearance does
+reused drawn outlines. Illusions are optional: their disappearance does
 not remove the permanent route. They start fading only after a supporting pot
 landing, not after a hammer strike.
 
@@ -123,8 +123,8 @@ climb goes on, and popups pause gameplay until they are dismissed.
 ## Authoring budget
 
 The course uses **320 terrain objects**, **31 triggers**, **32 enemies**, one
-start, **7 terrain geometry templates**, and **9 labels**. Box counts include
-thin platforms and broad landings; those do not require separate templates.
+start, **7 terrain collision shapes**, and **9 labels**. Box counts include
+thin platforms and broad landings; those do not require separate shapes.
 Enemies share their sprite atlas and draw batch, and only nearby enemies run
 physics and AI.
 

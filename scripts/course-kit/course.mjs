@@ -63,11 +63,12 @@ export class CourseBuilder {
     return color;
   }
 
-  // Terrain in the zone's palette: `tone` names one of its colours.
+  // Terrain of a built-in mesh in the zone's palette: `tone` names one of its colours; `mirror` reflects it left to right.
   terrain(name, type, x, y, width, height, options = {}) {
     const object = {
-      kind: 'terrain', id: this.id(name), shape: { type }, x: tidy(x), y: tidy(y), width: tidy(width), height: tidy(height),
-      angle: Math.max(-Math.PI, Math.min(Math.PI, tidy(options.angle ?? 0, 6))), depth: options.depth ?? 1.5,
+      kind: 'terrain', id: this.id(name), mesh: { type: 'shape', shape: type }, x: tidy(x), y: tidy(y),
+      width: tidy(width), height: tidy(height), angle: Math.max(-Math.PI, Math.min(Math.PI, tidy(options.angle ?? 0, 6))),
+      depth: options.depth ?? 1.5, mirror: options.mirror ?? false,
       color: this.color(options.tone ?? 'rock', options.color),
       illusion: options.illusion ?? false,
       surface: options.surface ?? 'rock',
@@ -83,9 +84,6 @@ export class CourseBuilder {
 
   // A right triangle whose vertical side is on the right (rising to the right), or on the left when mirrored.
   ramp(name, left, bottom, width, height, options = {}) {
-    if (options.mirror) {
-      return this.terrain(name, 'ramp', left + width / 2, bottom + height / 2, height, width, { ...options, angle: -Math.PI / 2 });
-    }
     return this.terrain(name, 'ramp', left + width / 2, bottom + height / 2, width, height, options);
   }
 
@@ -230,17 +228,25 @@ export class CourseShapeError extends Error {
   }
 }
 
+// The outline in its unit box a terrain object collides as: its built-in shape, the shape its mesh declares or its drawn
+// outline, counterclockwise also when mirrored. A mesh's slice may have several loops, which the checks do not measure.
+function unitOutline(object) {
+  const { mesh } = object;
+  const kind = mesh.type === 'shape' ? mesh.shape : mesh.type === 'asset' && mesh.collision.type !== 'slice' ? mesh.collision.type : null;
+  const unit = kind !== null ? UNIT[kind] : mesh.type === 'outline' ? mesh.vertices.map((vertex) => [vertex.x, vertex.y]) : undefined;
+  if (unit === undefined) throw new CourseShapeError(`${object.id} collides as a mesh's slice, which the course checks do not measure.`);
+  return object.mirror ? unit.map(([x, y]) => [-x, y]).reverse() : unit;
+}
+
 /**
- * An object's outline in world space; a custom polygon uses its own normalized vertices. The checks assume
- * convex outlines, as every built-in shape is: they measure a concave polygon's overlaps by its convex hull
- * and may misjudge points in its notches, so give a concave polygon a clear space of its own.
+ * An object's collision outline in world space. The checks assume convex outlines, as every built-in shape is:
+ * they measure a concave outline's overlaps by its convex hull and may misjudge points in its notches, so give a
+ * concave outline a clear space of its own.
  */
 export function outline(object) {
   const cosine = Math.cos(object.angle);
   const sine = Math.sin(object.angle);
-  const unit = object.shape.type === 'polygon' ? object.shape.vertices.map((vertex) => [vertex.x, vertex.y]) : UNIT[object.shape.type];
-  if (unit === undefined) throw new CourseShapeError(`${object.id} has an unknown shape "${object.shape.type}".`);
-  return unit.map(([unitX, unitY]) => {
+  return unitOutline(object).map(([unitX, unitY]) => {
     const x = unitX * object.width;
     const y = unitY * object.height;
     return { x: object.x + x * cosine - y * sine, y: object.y + x * sine + y * cosine };

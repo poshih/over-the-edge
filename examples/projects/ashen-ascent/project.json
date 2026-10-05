@@ -4,7 +4,7 @@
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
-    "mode": "shapes",
+    "mode": "meshes",
     "assets": [],
     "decorations": {}
   },

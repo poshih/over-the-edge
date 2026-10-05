@@ -184,7 +184,7 @@ in lowercase hex, of the level's **play layout** and the game's **physics**
 (`src/phantom-course.ts`). They hold only what moves the player. The layout, without object IDs
 and in a fixed order:
 
-- each terrain object's shape, position, size, angle, illusion and surface;
+- each terrain object's collision as mirrored, position, size, angle, illusion and surface;
 - each enemy's species, position, facing, patrol distance and speed;
 - each updraft: a trigger with launch events, its region, position, activation and launches;
 - the start's position, angle and reach.
@@ -195,9 +195,10 @@ handle length, maximum extension, minimum reach and default head. A model-librar
 own head is a cosmetic's and is left out: recordings made with any hammer share the course,
 and phantoms draw the default head.
 
-Decorations, labels, colours, depth, course artwork, other trigger events, control sensitivity
-and the cursor settings are left out. A recording replays only where its course holds, so
-editing any of those keeps a level's recordings, while moving terrain, changing a surface, an
+Decorations, labels, colours, depth, which mesh draws a collision, other trigger events, control
+sensitivity and the cursor settings are left out. A recording replays only where its course holds,
+so editing any of those, or swapping a mesh for one that collides alike, keeps a level's
+recordings, while moving terrain, changing its collision or a surface, an
 enemy, an updraft, the start or any physics setting starts a new course with none. Recordings
 made under a physics setting you go back to count again.
 

@@ -10,12 +10,8 @@ export const ART_LIMITS = {
 } as const;
 
 export class ArtError extends Error {}
+// How a release draws its course: its meshes, or every terrain object as its collision outline extruded.
 export type ArtMode = 'shapes' | 'meshes';
-export type ArtMirror = 'none' | 'x' | 'diagonal';
-export interface TerrainArt {
-  readonly assetId: string;
-  readonly mirror: ArtMirror;
-}
 export interface ArtResource {
   readonly id: string;
   readonly name: string;
@@ -35,12 +31,4 @@ export function artId(value: unknown): string {
 export function artName(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 80) throw new ArtError('Asset names need 1-80 characters.');
   return value.trim();
-}
-
-export function validateTerrainArt(value: unknown): TerrainArt {
-  const data = artRecord(value, 'Terrain artwork');
-  if (Object.keys(data).length !== 2 || (data.mirror !== 'none' && data.mirror !== 'x' && data.mirror !== 'diagonal')) {
-    throw new ArtError('Terrain artwork needs an asset ID and a supported mirror transform.');
-  }
-  return Object.freeze({ assetId: artId(data.assetId), mirror: data.mirror });
 }

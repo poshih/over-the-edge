@@ -1,6 +1,6 @@
 // Editor-only lookup of exposed terrain tops, used to rest set pieces on the surface under the pointer.
 import type { Point } from '../config';
-import { isTerrainObject, objectVertices } from '../level';
+import { isTerrainObject, meshIsCircle, objectLoops } from '../level';
 import type { LevelDefinition, TerrainObject } from '../level';
 
 const COLUMN_WIDTH = 4;
@@ -10,7 +10,8 @@ interface SurfaceEntry {
   readonly object: TerrainObject;
   readonly left: number;
   readonly right: number;
-  readonly vertices: readonly Point[];
+  // Its collision outlines in the course.
+  readonly loops: readonly (readonly Point[])[];
 }
 
 /**
@@ -64,14 +65,16 @@ export class SurfaceIndex {
     const columns = new Map<number, SurfaceEntry[]>();
     for (const object of this.source().objects) {
       if (!isTerrainObject(object)) continue;
-      const vertices = objectVertices(object);
+      const loops = objectLoops(object);
       let left = Infinity;
       let right = -Infinity;
-      for (const point of vertices) {
-        left = Math.min(left, point.x);
-        right = Math.max(right, point.x);
+      for (const loop of loops) {
+        for (const point of loop) {
+          left = Math.min(left, point.x);
+          right = Math.max(right, point.x);
+        }
       }
-      const entry: SurfaceEntry = { object, left, right, vertices };
+      const entry: SurfaceEntry = { object, left, right, loops };
       for (let column = Math.floor(left / COLUMN_WIDTH); column <= Math.floor(right / COLUMN_WIDTH); column++) {
         const list = columns.get(column);
         if (list === undefined) columns.set(column, [entry]);
@@ -85,8 +88,8 @@ export class SurfaceIndex {
 
 /** Appends the solid intervals where the vertical line through `x` crosses one terrain object. */
 function collectSpans(entry: SurfaceEntry, x: number, spans: [number, number][]): void {
-  const { object, vertices } = entry;
-  if (object.shape.type === 'circle') {
+  const { object, loops } = entry;
+  if (meshIsCircle(object.mesh)) {
     // Physics uses a true circle, so measure it analytically rather than from the render polygon.
     const radius = object.width / 2;
     const dx = x - object.x;
@@ -95,13 +98,16 @@ function collectSpans(entry: SurfaceEntry, x: number, spans: [number, number][])
     spans.push([object.y - half, object.y + half]);
     return;
   }
+  // Even-odd across every loop: loops never touch, so a hole's crossings close and reopen its outline's span.
   const crossings: number[] = [];
-  for (let index = 0, previous = vertices.length - 1; index < vertices.length; previous = index++) {
-    const a = vertices[previous];
-    const b = vertices[index];
-    // Half-open test: each crossing counts once and vertical edges are skipped.
-    if ((a.x > x) === (b.x > x)) continue;
-    crossings.push(a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x));
+  for (const vertices of loops) {
+    for (let index = 0, previous = vertices.length - 1; index < vertices.length; previous = index++) {
+      const a = vertices[previous];
+      const b = vertices[index];
+      // Half-open test: each crossing counts once and vertical edges are skipped.
+      if ((a.x > x) === (b.x > x)) continue;
+      crossings.push(a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x));
+    }
   }
   crossings.sort((p, q) => p - q);
   for (let index = 0; index + 1 < crossings.length; index += 2) spans.push([crossings[index], crossings[index + 1]]);

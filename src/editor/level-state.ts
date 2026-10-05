@@ -63,12 +63,12 @@ export class LevelState {
     if (triggers > TRIGGER_LIMITS.objects) throw new LevelError(`A level supports up to ${TRIGGER_LIMITS.objects} triggers.`);
     if (enemies > ENEMY_LIMITS.objects) throw new LevelError(`A level supports up to ${ENEMY_LIMITS.objects} enemies.`);
     if (decorations > DECORATION_LIMITS.objects) throw new LevelError(`A level supports up to ${DECORATION_LIMITS.objects} decorations.`);
-    const nextKey = object.kind === 'terrain' ? geometryKey(object.shape) : null;
-    const previousKey = previous?.kind === 'terrain' ? geometryKey(previous.shape) : null;
+    const nextKey = object.kind === 'terrain' ? geometryKey(object) : null;
+    const previousKey = previous?.kind === 'terrain' ? geometryKey(previous) : null;
     const freed = previousKey !== null && previousKey !== nextKey && this.geometryUse.get(previousKey) === 1;
     const kinds = this.geometryUse.size + (nextKey !== null && !this.geometryUse.has(nextKey) ? 1 : 0) - (freed ? 1 : 0);
     if (kinds > LEVEL_LIMITS.geometryKinds) {
-      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
+      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
     }
     if (previousKey !== null) this.removeGeometry(previousKey);
     if (nextKey !== null) this.addGeometry(nextKey);
@@ -85,7 +85,7 @@ export class LevelState {
     const object = this.object(id);
     if (object.kind === 'start') throw new LevelError('A level needs its start location. Move it instead of deleting it.');
     if (object.kind === 'terrain') {
-      this.removeGeometry(geometryKey(object.shape));
+      this.removeGeometry(geometryKey(object));
       this.terrainCount--;
     } else if (object.kind === 'trigger') this.triggerCount--;
     else if (object.kind === 'enemy') this.enemyCount--;
@@ -119,7 +119,7 @@ export class LevelState {
       if (object.kind === 'start') return;
       counts[object.kind] += change;
       if (object.kind !== 'terrain') return;
-      const key = geometryKey(object.shape);
+      const key = geometryKey(object);
       const next = (geometry.get(key) ?? 0) + change;
       if (next === 0) geometry.delete(key);
       else geometry.set(key, next);
@@ -131,7 +131,7 @@ export class LevelState {
     if (counts.enemy > ENEMY_LIMITS.objects) throw new LevelError(`A level supports up to ${ENEMY_LIMITS.objects} enemies.`);
     if (counts.decoration > DECORATION_LIMITS.objects) throw new LevelError(`A level supports up to ${DECORATION_LIMITS.objects} decorations.`);
     if (geometry.size > LEVEL_LIMITS.geometryKinds) {
-      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct geometry templates.`);
+      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
     }
     const labels = metadata !== null && JSON.stringify(metadata.labels) !== JSON.stringify(this.current.labels)
       ? metadata.labels : this.current.labels;
@@ -211,7 +211,7 @@ export class LevelState {
     for (const object of this.objects.values()) {
       if (object.kind === 'terrain') {
         this.terrainCount++;
-        this.addGeometry(geometryKey(object.shape));
+        this.addGeometry(geometryKey(object));
       } else if (object.kind === 'trigger') this.triggerCount++;
       else if (object.kind === 'enemy') this.enemyCount++;
       else if (object.kind === 'decoration') this.decorationCount++;

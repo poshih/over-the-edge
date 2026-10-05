@@ -1,15 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { constants } from 'node:fs';
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { GameSettings } from '../src/game-settings';
 import { LEVEL_LIMITS, validateLevel } from '../src/level';
 import type { LevelDefinition } from '../src/level';
 import { PHANTOM_COURSE_FORMAT } from '../src/phantom-course';
 import {
-  inSection, isProjectDataError, loadProjectContent, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, validateProjectId,
-  validateProjectManifest,
+  inSection, isProjectDataError, loadProjectContent, loadProjectDocuments, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError,
+  validateProjectId, validateProjectManifest,
 } from '../src/project';
-import type { ProjectContent, ProjectFileKind, ProjectFileRef, ProjectManifest } from '../src/project';
+import type { ProjectContent, ProjectDocuments, ProjectFileKind, ProjectFileRef, ProjectManifest } from '../src/project';
 import { pluginOfSection, pluginSection } from '../src/plugin-data';
 import { atomicWrite, missing } from './files';
 import { HttpError } from './http';
@@ -317,6 +318,38 @@ export class ProjectStore {
     return this.locked(id, async () => {
       const { manifest, state } = await this.current(id);
       return { content: await this.content(id, manifest), state };
+    });
+  }
+
+  // The project's documents, validated with every reference, without reading its binary files.
+  async documents(id: string): Promise<ProjectDocuments> {
+    return this.locked(id, async () => {
+      const { manifest } = await this.current(id);
+      const values = new Map<string, unknown>();
+      for (const ref of projectFileRefs(manifest)) if (!ref.binary) values.set(ref.path, await this.readJson(id, ref));
+      return loadProjectDocuments(manifest, (ref) => values.get(ref.path));
+    });
+  }
+
+  // Copies the project into the directory `target`, one file at a time and never into memory, while no change can
+  // commit: project.json, its level and characters, and the binary files `select` names for its manifest and level.
+  // Returns the revision copied. Level versions, recordings and the store's bookkeeping stay behind.
+  async copy(id: string, target: string, select: (manifest: ProjectManifest, level: LevelDefinition) => Iterable<string>): Promise<number> {
+    return this.locked(id, async () => {
+      const { manifest, state } = await this.current(id);
+      const binary = new Set(select(manifest, await this.storedLevel(id)));
+      const paths = projectFileRefs(manifest).filter((ref) => !ref.binary || binary.has(ref.path)).map((ref) => ref.path);
+      for (const path of [PROJECT_FILES.manifest, ...paths]) {
+        const destination = join(target, ...path.split('/'));
+        await mkdir(dirname(destination), { recursive: true });
+        try {
+          await copyFile(this.filePath(id, path), destination, constants.COPYFILE_FICLONE);
+        } catch (error) {
+          if (missing(error)) throw new ProjectError(`The project is missing ${path}.`, { section: path });
+          throw error;
+        }
+      }
+      return state.revision;
     });
   }
 

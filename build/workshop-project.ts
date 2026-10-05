@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Plugin } from 'vite';
 import { PROJECT_FILES, projectFileRefs, projectFileType } from '../src/project';
 import type { ProjectContent } from '../src/project';
@@ -21,16 +22,17 @@ function projectFiles(content: ProjectContent): WorkshopFile[] {
 }
 
 /**
- * Publishes GAME_PROJECT with the Workshop: the page downloads the project's files when it opens
- * the project. `virtual:workshop-project` lists the files with the project's content version, or is
+ * Publishes GAME_PROJECT with the Workshop: the page downloads each of the project's files when it uses it.
+ * `virtual:workshop-project` lists the files, each with its size and SHA-256, and the project's content version, or is
  * null without a project.
  */
 export function workshopProject(input: ProjectInput | null): Plugin {
   const files = input === null ? [] : projectFiles(input.content);
+  const digests = files.map((file) => createHash('sha256').update(file.bytes).digest('hex'));
   return workshopFiles({
     name: 'workshop-project', files,
     code: (urls, version) => input === null ? 'export default null;'
       : `export default {title:${JSON.stringify(input.content.manifest.title)},version:${JSON.stringify(version)},files:[${files.map((file, index) =>
-        `{path:${JSON.stringify(file.path)},url:${urls[index]},bytes:${file.bytes.byteLength}}`).join(',')}]};`,
+        `{path:${JSON.stringify(file.path)},url:${urls[index]},bytes:${file.bytes.byteLength},sha256:${JSON.stringify(digests[index])}}`).join(',')}]};`,
   });
 }

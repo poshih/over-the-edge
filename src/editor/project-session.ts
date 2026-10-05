@@ -7,7 +7,7 @@ import type { ArmIkSettings, VisualPartId } from '../character';
 import type { AvatarModelSettings } from '../character-profile';
 import { embeddedModel } from '../character-profile';
 import { checkCharacterModels } from '../character-model-check';
-import { ArtError } from '../art-types';
+import { ART_LIMITS, ArtError, artName } from '../art-types';
 import type { ArtMode } from '../art-types';
 import { NO_DECORATION_ART } from '../decoration-art';
 import type { DecorationArt } from '../decoration-art';
@@ -21,13 +21,15 @@ import type { HudSettings } from '../hud';
 import { validateLevel } from '../level';
 import type { LevelDefinition } from '../level';
 import { checkMediaBytes, MEDIA_LIMITS, mediaFile, mediaKind, mediaPathForFile, mediaType } from '../media';
+import { meshTerrain } from '../mesh-collision';
+import type { MeshTerrain } from '../mesh-collision';
 import {
-  appearanceFile, artFile, checkProjectReferences, defaultProjectManifest, inSection, isProjectDataError, loadProjectContent,
-  packProjectBundle, parseProjectCharacter, PROJECT_FILES, PROJECT_FORMAT, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION,
-  ProjectError, projectTitle, unpackProjectBundle, validateMediaIndex, validateProjectArt, validateProjectCharacter,
-  validateProjectId, validateProjectManifest,
+  appearanceFile, artFile, checkBundleSize, checkFileBudget, checkProjectReferences, defaultProjectManifest, inSection, isProjectDataError,
+  loadProjectContent, packProjectBundle, parseProjectCharacter, PROJECT_FILES, PROJECT_FORMAT, PROJECT_LIMITS,
+  PROJECT_SCHEMA_VERSION, projectFileRefs, projectFileType, ProjectError, projectTitle, unpackProjectBundle, validateMediaIndex,
+  validateProjectArt, validateProjectCharacter, validateProjectId, validateProjectManifest,
 } from '../project';
-import type { ProjectBundle, ProjectContent, ProjectManifest } from '../project';
+import type { ProjectArt, ProjectBundle, ProjectContent, ProjectManifest } from '../project';
 import { EMPTY_SPRITES } from '../sprite-data';
 import type { SpriteDocument } from '../sprite-data';
 import { decodeBase64 } from '../sprite-fields';
@@ -46,12 +48,13 @@ import type { GameTheme } from '../theme';
 import { NO_PLUGIN_DATA, pluginDataIn, pluginOfSection, pluginSection, validatePluginData, withPluginData } from '../plugin-data';
 import type { PluginData } from '../plugin-data';
 import { sameJson } from '../bounded-json';
+import { sha256Hex } from '../sha256';
 import { ProjectApiError, ProjectClient } from './project-client';
 import type { PublishRecord, ServerHealth, ServerProjectSummary, ServerRevisions } from './project-client';
 import { ProjectCopyStore } from './project-copy';
 import type { ProjectCopy } from './project-copy';
-import { loadPublishedProject } from './published-project';
-import type { PublishedProject } from './published-project';
+import { downloadPublishedFile, loadPublishedProject } from './published-project';
+import type { OpenedFile, OpenedProject, PublishedFile, PublishedProject } from './published-project';
 import { ServerModelError } from './server-models';
 
 // The engine's sections. Besides them, each Workshop plugin's data is a section of its own, `plugins/<id>`.
@@ -91,8 +94,8 @@ const COPY_MS = 1000;
 // reach the server is retried after SAVE_RETRY_MS; one the server refused waits for the sections to change.
 const SAVE_MS = 1000;
 const SAVE_RETRY_MS = 5000;
-// Sections whose files a server project keeps on the server, so only a project file or a browser copy loads them from
-// local bytes.
+// Sections whose files a server project keeps on the server; a project opened from anywhere else lists them from its own
+// files (openedMedia, openedArt and openedLibrary).
 const LOCAL_FILES: ReadonlySet<ProjectSectionName> = new Set(['media', 'art', 'models']);
 // A section reopened with unsaved changes: equal to no fingerprint, so it stays unsaved.
 const UNSAVED = Symbol('unsaved');
@@ -144,33 +147,44 @@ export interface ProjectLook {
   readonly mediaVersion: number;
 }
 
-interface MediaItem {
-  readonly path: string;
-  // Local bytes not yet on the server, or null for a file that only the server holds.
+// Where a binary file's bytes are. The page reads them only when it uses the file: to preview, upload or export it.
+interface FileSource {
+  // Bytes in this page (picked, imported or kept in this browser's copy), or null for a file only held elsewhere.
   readonly blob: Blob | null;
+  // The server project that holds the file, or null; the bound project holds it when this is its ID.
+  readonly server: string | null;
+  // The published project's file with these bytes, or null.
+  readonly published: PublishedFile | null;
+}
+
+interface MediaItem extends FileSource {
+  readonly path: string;
+  // What media elements play: an object URL of the page's bytes, or the server project's or published project's URL.
   readonly url: string;
   readonly bytes: number;
-  readonly uploaded: boolean;
 }
 
-interface ArtItem {
+interface ArtItem extends FileSource {
   readonly id: string;
   readonly name: string;
-  readonly blob: Blob | null;
-  readonly uploaded: boolean;
+  readonly bytes: number;
 }
 
-// One model in the project's library. A server project's files stay on the server until needed.
-interface LibraryItem {
+// The course artwork: the course look, the GLBs and the decoration models they draw.
+interface CourseArt {
+  mode: ArtMode;
+  assets: ArtItem[];
+  decorations: DecorationArt;
+}
+
+// One model in the project's library. A file the page does not hold stays on the server or the site until needed.
+interface LibraryItem extends FileSource {
   readonly role: PartRole;
   readonly entry: LibraryEntry | LibraryAvatarEntry;
   // Identifies the item's GLB in this page: it changes whenever the file may have.
   readonly key: number;
-  readonly blob: Blob | null;
-  // The GLB's size, as the server reported it for a file only the server holds.
+  // The GLB's size, as its holder reported it.
   readonly bytes: number;
-  // Whether the bound server holds this item's file.
-  readonly uploaded: boolean;
 }
 
 // A library model as the Workshop shows it.
@@ -314,13 +328,15 @@ export class ProjectSession {
   private readonly lifecycle = new AbortController();
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
   private readonly blobIds = new WeakMap<Blob, number>();
+  // Each course mesh's collision, worked out once: an asset ID names its GLB's bytes, so it never goes stale.
+  private readonly meshTerrains = new Map<string, Promise<MeshTerrain>>();
   private nextBlobId = 1;
   private title = 'Untitled game';
   private theme: GameTheme = DEFAULT_THEME;
   private hud: HudSettings = DEFAULT_HUD;
   private audio: AudioSettings = DEFAULT_AUDIO;
   private enemies: EnemyArtSettings = DEFAULT_ENEMY_ART;
-  private art: { mode: ArtMode; assets: ArtItem[]; decorations: DecorationArt } = { mode: 'shapes', assets: [], decorations: NO_DECORATION_ART };
+  private art: CourseArt = { mode: 'meshes', assets: [], decorations: NO_DECORATION_ART };
   private media = new Map<string, MediaItem>();
   private mediaVersion = 0;
   private library: LibraryItem[] = [];
@@ -331,6 +347,9 @@ export class ProjectSession {
   // Each plugin's data, the same object until it changes; data for a plugin this Workshop lacks stays as it came.
   private pluginData: Readonly<Record<string, PluginData>> = NO_PLUGIN_DATA;
   private binding: Binding | null = null;
+  // The project a Save as moves the page to, while that project lacks some of its sections: the page is bound to it, but
+  // remembers the project it came from and keeps this browser's copy until the move completes.
+  private moving: string | null = null;
   private synced: SectionRecord<unknown> | null = null;
   // Appearance files last saved to or loaded from the server, by part.
   private syncedModels = new Map<VisualPartId, Blob>();
@@ -377,7 +396,7 @@ export class ProjectSession {
     this.plugins = options.plugins ?? NO_PLUGINS;
     this.client = options.client ?? new ProjectClient();
     this.published = options.published ?? null;
-    this.copy = this.published === null ? null : new ProjectCopyStore();
+    this.copy = this.published === null ? null : new ProjectCopyStore(this.published);
   }
 
   // After the editors restore their browser-local state: find the server and open its project, the one this page
@@ -547,7 +566,7 @@ export class ProjectSession {
       validateMediaIndex([...[...this.media.keys()].filter((existing) => existing !== path).map((existing) => ({ path: existing })), { path }]);
       const total = [...this.media.values()].reduce((sum, item) => sum + (item.path === path ? 0 : item.bytes), file.size);
       if (total > MEDIA_LIMITS.totalBytes) throw new ProjectError(`The media library holds at most ${MEDIA_LIMITS.totalBytes / 1024 ** 2} MiB.`, { section: 'media' });
-      this.replaceMedia(path, { path, blob: file, url: URL.createObjectURL(file), bytes: file.size, uploaded: false });
+      this.replaceMedia(path, { path, blob: file, server: null, published: null, url: URL.createObjectURL(file), bytes: file.size });
       this.changed('content');
       return path;
     } catch (error) {
@@ -560,6 +579,85 @@ export class ProjectSession {
       const manifest = { ...this.draftManifest(), media: [...this.media.keys()].filter((existing) => existing !== path).map((existing) => ({ path: existing })) };
       checkProjectReferences(validateProjectManifest(manifest), this.workspace.level.get());
       this.replaceMedia(path, null);
+      this.changed('content');
+      return null;
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  // The course artwork's GLBs, which the level places as terrain meshes and course artwork maps onto decorations.
+  courseMeshes(): readonly { readonly id: string; readonly name: string }[] {
+    return this.art.assets.map(({ id, name }) => ({ id, name }));
+  }
+
+  // How the course draws: the project's meshes, or every terrain object as its collision extruded.
+  courseLook(): ArtMode {
+    return this.art.mode;
+  }
+
+  // A course mesh's GLB, from this page, the server project that holds it or the published project.
+  async courseMeshBlob(id: string): Promise<Blob> {
+    const asset = this.art.assets.find((candidate) => candidate.id === id);
+    if (asset === undefined) throw new ProjectError(`The course artwork has no mesh ${id}.`, { section: 'art' });
+    return this.artBlob(asset);
+  }
+
+  // A course mesh ready to place, with the collision its GLB declares or its slice on the obstacle line; or the refusal,
+  // reported, when its GLB cannot be read or sliced.
+  async courseMeshTerrain(id: string): Promise<MeshTerrain | Error> {
+    let terrain = this.meshTerrains.get(id);
+    if (terrain === undefined) {
+      const reading = this.courseMeshBlob(id).then(async (blob) => meshTerrain(id, await blob.arrayBuffer()));
+      // A GLB that could not be read is read again next time.
+      reading.catch(() => { if (this.meshTerrains.get(id) === reading) this.meshTerrains.delete(id); });
+      this.meshTerrains.set(id, reading);
+      terrain = reading;
+    }
+    try {
+      return await terrain;
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  // Adds a GLB to the course artwork as a mesh to place, checked like releases check it; the same GLB again adds
+  // nothing. The mesh ready to place, or the refusal.
+  async addCourseMesh(file: File): Promise<{ readonly id: string; readonly name: string; readonly terrain: MeshTerrain } | Error> {
+    try {
+      if (file.size === 0 || file.size > ART_LIMITS.bytes) {
+        throw new ArtError(`Choose a GLB file no larger than ${ART_LIMITS.bytes / 1024 ** 2} MiB.`);
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const id = `asset-${await sha256Hex(bytes)}`;
+      const terrain = meshTerrain(id, bytes.buffer);
+      this.meshTerrains.set(id, Promise.resolve(terrain));
+      const existing = this.art.assets.find((asset) => asset.id === id);
+      if (existing !== undefined) return { id, name: existing.name, terrain };
+      const name = artName(file.name.replace(/\.glb$/i, '').slice(0, 80) || 'Mesh');
+      const blob = new Blob([bytes], { type: 'model/gltf-binary' });
+      const assets = [...this.art.assets, { id, name, blob, server: null, published: null, bytes: blob.size }];
+      inSection('art', () => validateProjectArt({ mode: this.art.mode, assets: assets.map((asset) => ({ id: asset.id, name: asset.name })), decorations: this.art.decorations }));
+      checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
+      this.art = { ...this.art, assets };
+      this.changed('content');
+      return { id, name, terrain };
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  // Removes a GLB from the course artwork; the refusal while the level places it or a decoration draws it.
+  removeCourseMesh(id: string): Error | null {
+    try {
+      const assets = this.art.assets.filter((asset) => asset.id !== id);
+      const decorations = Object.entries(this.art.decorations).filter(([, asset]) => asset === id).map(([model]) => model);
+      if (decorations.length > 0) {
+        throw new ProjectError(`The mesh draws the decoration model ${decorations.join(', ')}; import a course package without it first.`, { section: 'art' });
+      }
+      const art = { mode: this.art.mode, assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
+      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art }), this.workspace.level.get());
+      this.art = { ...this.art, assets };
       this.changed('content');
       return null;
     } catch (error) {
@@ -583,10 +681,6 @@ export class ProjectSession {
       if (file.size === 0 || file.size > MODEL_LIMITS.bytes) {
         throw new ProjectError(`Choose a GLB file no larger than ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'models' });
       }
-      const total = this.library.reduce((sum, item) => sum + item.bytes, 0);
-      if (total + file.size > MODEL_LIBRARY_LIMITS.totalBytes) {
-        throw new ProjectError(`The model library holds at most ${MODEL_LIBRARY_LIMITS.totalBytes / 1024 ** 2} MiB.`, { section: 'models' });
-      }
       const bytes = new Uint8Array(await file.arrayBuffer());
       const taken = new Set(this.library.filter((item) => item.role === role).map((item) => item.entry.id));
       const stem = libraryIdForName(file.name);
@@ -601,7 +695,7 @@ export class ProjectSession {
           : { ...base, ...model, ...settings };
       inSection('models', () => checkLibraryModel(role, entry, bytes, this.avatarRigs));
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
-      const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, bytes: blob.size, uploaded: false }];
+      const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, server: null, published: null, bytes: blob.size }];
       inSection('models', () => libraryOf(items));
       this.library = items;
       this.changed('content');
@@ -683,12 +777,33 @@ export class ProjectSession {
     checkCharacterModels(document, label, this.avatarRigs);
   }
 
-  // A library model's GLB, from this page or the bound server project.
+  // A library model's GLB, from this page, the server project that holds it or the published project.
   async libraryBlob(role: PartRole, id: string): Promise<Blob> {
-    const item = this.libraryItem(role, id);
-    if (item.blob !== null) return item.blob;
-    if (this.binding === null) throw new ProjectError(`Library ${role} "${id}" is not available in this page.`, { section: 'models' });
-    return this.client.blob(this.client.libraryModelUrl(this.binding.id, role, id));
+    return this.libraryItemBlob(this.libraryItem(role, id));
+  }
+
+  private libraryItemBlob(item: LibraryItem): Promise<Blob> {
+    return this.fileBlob(item, (project) => this.client.libraryModelUrl(project, item.role, item.entry.id), 'model/gltf-binary',
+      { section: 'models', label: `Library ${item.role} "${item.entry.name}"` });
+  }
+
+  private mediaBlob(item: MediaItem): Promise<Blob> {
+    return this.fileBlob(item, (project) => this.client.mediaUrl(project, item.path), mediaType(item.path),
+      { section: 'media', label: `Media file ${item.path}` });
+  }
+
+  private artBlob(asset: ArtItem): Promise<Blob> {
+    return this.fileBlob(asset, (project) => this.client.artUrl(project, asset.id), 'model/gltf-binary',
+      { section: 'art', label: `Course artwork ${asset.name}` });
+  }
+
+  // A file's bytes: this page's, or downloaded now from the server project that holds it or the published project.
+  private async fileBlob(source: FileSource, serverUrl: (project: string) => string, type: string,
+    file: { readonly section: ProjectSectionName; readonly label: string }): Promise<Blob> {
+    if (source.blob !== null) return source.blob;
+    if (source.server !== null) return this.client.blob(serverUrl(source.server));
+    if (source.published !== null) return new Blob([await downloadPublishedFile(source.published, this.lifecycle.signal)], { type });
+    throw new ProjectError(`${file.label} is not available in this page.`, { section: file.section });
   }
 
   private libraryItem(role: PartRole, id: string): LibraryItem {
@@ -761,15 +876,16 @@ export class ProjectSession {
     return this.attempt('Importing course package', async () => {
       if (file.size > 96 * 1024 * 1024) throw new ArtError('Course packages are limited to 96 MiB.');
       const pack = validateCoursePackage(JSON.parse(await file.text()));
-      const assets = pack.assets.map((asset) => ({
-        id: asset.id, name: asset.name, uploaded: false,
-        blob: new Blob([decodeBase64(asset.source.slice('data:model/gltf-binary;base64,'.length))], { type: 'model/gltf-binary' }),
-      }));
+      const assets: ArtItem[] = pack.assets.map((asset) => {
+        const blob = new Blob([decodeBase64(asset.source.slice('data:model/gltf-binary;base64,'.length))], { type: 'model/gltf-binary' });
+        return { id: asset.id, name: asset.name, blob, server: null, published: null, bytes: blob.size };
+      });
       checkProjectReferences(validateProjectManifest({
         ...this.draftManifest(), art: { mode: pack.mode, assets: assets.map(({ id, name }) => ({ id, name })), decorations: pack.decorations },
       }), pack.level);
-      this.workspace.level.load(pack.level);
+      // The course meshes come before the level, which draws them as soon as it loads.
       this.art = { mode: pack.mode, assets, decorations: pack.decorations };
+      this.workspace.level.load(pack.level);
       this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${assets.length} GLBs.`, 'info');
       this.changed('content');
     });
@@ -799,7 +915,7 @@ export class ProjectSession {
   // Starts a new game from the built-in course and defaults, not yet saved anywhere.
   async newProject(): Promise<boolean> {
     return this.run('Starting a new project', async () => {
-      await this.applyContent(loadProjectContent(defaultProjectManifest('Untitled game'), () => DEFAULT_LEVEL), null);
+      await this.applyContent(openedContent(loadProjectContent(defaultProjectManifest('Untitled game'), () => DEFAULT_LEVEL)));
       await this.storeCopy();
       // A failed copy keeps its notice.
       if (this.error !== null) return;
@@ -829,7 +945,9 @@ export class ProjectSession {
     return this.run('Importing project file', async () => {
       if (file.size > PROJECT_LIMITS.bundleBytes) throw new ProjectError(`Project files are limited to ${PROJECT_LIMITS.bundleBytes / 1024 ** 2} MiB.`);
       const content = unpackProjectBundle(JSON.parse(await file.text()));
-      await this.applyContent(content, null);
+      // Library models a release would refuse fail here, before anything in the page changes.
+      inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
+      await this.applyContent(openedContent(content));
       await this.storeCopy();
       if (this.error !== null) return;
       this.workspace.notice(`Imported "${content.manifest.title}". ${this.copy === null ? 'Save it to the project server or export it to keep changes.'
@@ -847,7 +965,20 @@ export class ProjectSession {
     await this.run('Exporting project file', async () => {
       this.prepareLevel();
       const draft = this.captureDraft();
-      const content = await this.captureFiles(draft, this.workspace.appearance.parts(), [...this.media.values()], [...this.art.assets], this.library);
+      const parts = this.workspace.appearance.parts();
+      const media = [...this.media.values()];
+      const assets = [...this.art.assets];
+      const library = this.library;
+      // A project too large for one project file is refused before its files download.
+      const sizes = new Map<string, number>([
+        ...parts.map((part) => [appearanceFile(part.part), part.blob.size] as const),
+        ...media.map((item) => [mediaFile(item.path), item.bytes] as const),
+        ...assets.map((asset) => [artFile(asset.id), asset.bytes] as const),
+        ...library.map((item) => [libraryModelFile(item.role, item.entry.id), item.bytes] as const),
+      ]);
+      checkBundleSize({ manifest: draft.manifest, level: draft.level, characters: { primary: draft.primary, alternate: draft.alternate } },
+        (ref) => sizes.get(ref.path) ?? 0);
+      const content = await this.captureFiles(draft, parts, media, assets, library);
       result = { bundle: packProjectBundle(content), filename: `${this.binding?.id ?? projectFileName(this.title)}.project.json` };
     });
     return result;
@@ -945,34 +1076,43 @@ export class ProjectSession {
     });
   }
 
-  // Stores the whole project on the server under `id`, replacing any project with that ID.
+  // Stores the whole project on the server under `id`, replacing any project with that ID, which then saves itself. Its
+  // files go one at a time, each read from wherever this page has it as it is sent, so no request carries the whole
+  // project.
   async saveAs(id: string): Promise<boolean> {
     return this.run('Saving to the server', async () => {
       const valid = validateProjectId(id);
       this.prepareLevel();
-      const draft = this.captureDraft();
-      const baseline = this.fingerprints();
-      const savedLevel = this.workspace.level.get();
-      const parts = this.workspace.appearance.parts();
-      const library = this.library;
-      const content = await this.captureFiles(draft, parts, [...this.media.values()], [...this.art.assets], library);
-      const state = await this.client.putBundle(valid, packProjectBundle(content));
-      const binding: Binding = { id: valid, revision: state.revision, sections: { ...state.sections }, version: null };
-      this.binding = binding;
-      // Files that only the previous server project held are now served by this one.
-      this.media = new Map([...this.media].map(([path, item]) =>
-        [path, { ...item, uploaded: true, url: item.blob === null ? this.client.mediaUrl(valid, path) : item.url }]));
-      this.mediaVersion++;
-      this.art = { ...this.art, assets: this.art.assets.map((asset) => ({ ...asset, uploaded: true })) };
-      this.library = this.library.map((item) => library.includes(item) ? { ...item, uploaded: true } : item);
-      this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
+      // Every section is checked before anything is written.
+      this.captureDraft();
+      const names = new Set(this.sectionNames());
+      let binding: Binding;
+      if (this.binding !== null && this.binding.id === valid) binding = this.binding;
+      else {
+        // Replacing a project deletes its files, so the page needs its own source for every file it kept there.
+        const sources: FileSource[] = [...this.media.values(), ...this.art.assets, ...this.library];
+        if (sources.some((source) => source.server === valid && source.blob === null && source.published === null)) {
+          throw new ProjectError(`Some of this page's files are kept only in project "${valid}"; save as another project ID.`);
+        }
+        // The project starts as a new game, then takes this page's files and every section.
+        const state = await this.client.putBundle(valid, packProjectBundle(loadProjectContent(defaultProjectManifest(this.title), () => DEFAULT_LEVEL)));
+        // Files the page kept there are gone, so they are sent again from the page's own sources.
+        for (const [path, item] of this.media) if (item.server === valid) this.media.set(path, { ...item, server: null });
+        this.art = { ...this.art, assets: this.art.assets.map((asset) => asset.server === valid ? { ...asset, server: null } : asset) };
+        this.library = this.library.map((item) => item.server === valid ? { ...item, server: null } : item);
+        binding = { id: valid, revision: state.revision, sections: { ...state.sections }, version: null };
+        this.binding = binding;
+        this.moving = valid;
+        this.syncedModels.clear();
+        // Nothing of the page is in the new project yet, so a section the writes below do not reach stays unsaved and
+        // saves like any change; the move completes once every section is stored.
+        for (const name of names) this.synced![name] = UNSAVED;
+        this.workspace.level.markSaved(null);
+      }
+      // The page's version replaces the project's, conflicts included.
       this.conflicts.clear();
-      this.synced = baseline;
-      this.adoptVersion(binding, state);
-      this.remember(valid);
-      this.workspace.level.markSaved(savedLevel);
+      this.requireSaved(await this.write(binding, names, names));
       this.applyLook();
-      await this.storeCopy();
       this.projects = await this.client.list();
       this.workspace.notice(`Saved the whole project as "${valid}" on the project server.`, 'info');
     });
@@ -1056,6 +1196,8 @@ export class ProjectSession {
         this.saveFailure = null;
         this.changed('status');
       }
+      // A section loaded from the project, not written, may have been the last one a Save as was waiting for.
+      await this.settleMove(binding);
       return;
     }
     if (options.now !== true && (seen === null || pending.some((name) => seen[name] !== current[name]))) return;
@@ -1140,22 +1282,25 @@ export class ProjectSession {
     const adopt = (name: ProjectSectionName, state: ServerRevisions): void => {
       binding.sections[name] = state.sections[name] ?? 0;
     };
-    // New files first, so the sections that reference them validate on the server.
+    // New files first, so the sections that reference them validate on the server. A file the project lacks is read from
+    // wherever this page has it, one at a time.
     if (saving.has('media')) {
       for (const item of media) {
-        if (item.blob === null || item.uploaded) continue;
-        adopt('media', await this.client.putMedia(binding.id, item.path, item.blob, revision('media')));
-        if (this.media.get(item.path) === item) this.media.set(item.path, { ...item, uploaded: true });
+        if (item.server === binding.id) continue;
+        adopt('media', await this.client.putMedia(binding.id, item.path, await this.mediaBlob(item), revision('media')));
+        // A file only another server project held plays from this one now.
+        const url = item.blob === null && item.published === null ? this.client.mediaUrl(binding.id, item.path) : item.url;
+        if (this.media.get(item.path) === item) this.media.set(item.path, { ...item, server: binding.id, url });
       }
     }
     if (saving.has('art')) {
       const uploaded = new Set<string>();
       for (const asset of assets) {
-        if (asset.blob === null || asset.uploaded) continue;
-        adopt('art', await this.client.postArt(binding.id, asset.blob, asset.name, revision('art')));
+        if (asset.server === binding.id) continue;
+        adopt('art', await this.client.postArt(binding.id, await this.artBlob(asset), asset.name, revision('art')));
         uploaded.add(asset.id);
       }
-      this.art = { ...this.art, assets: this.art.assets.map((asset) => uploaded.has(asset.id) ? { ...asset, uploaded: true } : asset) };
+      this.art = { ...this.art, assets: this.art.assets.map((asset) => uploaded.has(asset.id) ? { ...asset, server: binding.id } : asset) };
     }
     if (saving.has('appearance')) {
       for (const part of parts) {
@@ -1166,10 +1311,21 @@ export class ProjectSession {
     }
     if (saving.has('models')) {
       for (const item of library) {
-        if (item.blob === null || item.uploaded) continue;
-        adopt('models', await this.client.putLibraryModel(binding.id, item.role, item.entry, item.blob, revision('models')));
-        this.library = this.library.map((candidate) => candidate === item ? { ...item, uploaded: true } : candidate);
+        if (item.server === binding.id) continue;
+        adopt('models', await this.client.putLibraryModel(binding.id, item.role, item.entry, await this.libraryItemBlob(item), revision('models')));
+        this.library = this.library.map((candidate) => candidate === item ? { ...item, server: binding.id } : candidate);
       }
+    }
+    // The server checks a level against the stored course artwork, which may lack decoration models the page's artwork
+    // maps, while the stored level may draw ones the page's artwork drops: both artworks together go first, so the level
+    // passes, and the page's own follows it.
+    if (saving.has('level') && saving.has('art')) {
+      const page = values.get('art') as ProjectArt;
+      const storedValue = (await this.client.section(binding.id, 'art')).value;
+      const stored = inSection('art', () => validateProjectArt(storedValue));
+      const combined = [...stored.assets, ...page.assets.filter((asset) => !stored.assets.some((known) => known.id === asset.id))];
+      const both = inSection('art', () => validateProjectArt({ mode: page.mode, assets: combined, decorations: { ...stored.decorations, ...page.decorations } }));
+      adopt('art', await this.client.putSection(binding.id, 'art', both, revision('art')));
     }
     // The server removes an alternate before the primary it depends on, and adds them the other way round.
     const order: ProjectSectionName[] = [...alternate !== null ? SAVE_ORDER : SAVE_ORDER.flatMap((name) =>
@@ -1186,7 +1342,17 @@ export class ProjectSession {
       if (name === 'appearance') this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
       this.changed('status');
     }
+    await this.settleMove(binding);
     return problems;
+  }
+
+  // A Save as completes once its project holds every section, however the last one got there: the page remembers the
+  // project, and this browser's copy goes.
+  private async settleMove(binding: Binding): Promise<void> {
+    if (this.moving !== binding.id || this.binding !== binding || this.dirtySections().length > 0) return;
+    this.moving = null;
+    this.remember(binding.id);
+    await this.storeCopy();
   }
 
   // The given sections as the server stores them, each checked on its own as the server checks it, so a section that
@@ -1283,7 +1449,7 @@ export class ProjectSession {
   private async openCopy(copy: ProjectCopy): Promise<boolean> {
     const published = this.published!;
     return this.run('Opening this browser\'s copy', async () => {
-      await this.applyContent(copy.content, null);
+      await this.applyContent(copy.content);
       this.origin = copy.origin;
       const dirty = copy.dirty.filter(isProjectSection);
       for (const name of dirty) this.synced![name] = UNSAVED;
@@ -1302,7 +1468,8 @@ export class ProjectSession {
     });
   }
 
-  // Downloads the published project and opens it as Import project file does, replacing any copy.
+  // Opens the published project as Import project file does, replacing any copy: it downloads what the editors use at
+  // once, and every other file when it is used.
   private async openPublished(): Promise<boolean> {
     const published = this.published!;
     const label = 'Opening the published project';
@@ -1319,7 +1486,7 @@ export class ProjectSession {
           this.changed('status');
         },
       });
-      await this.applyContent(content, null);
+      await this.applyContent(content);
       this.origin = published.version;
       await this.storeCopy();
       if (this.error !== null) return;
@@ -1339,9 +1506,9 @@ export class ProjectSession {
   }
 
   // Runs every second: stores changes once they have held still for one check, or at once when
-  // the page is being left.
+  // the page is being left. While a Save as moves the page, the copy stays as it was.
   private async keepCopy(options: { now?: boolean } = {}): Promise<void> {
-    if (this.copy === null || !this.keeping || this.busy !== null || this.copyTask !== null || this.disposed) return;
+    if (this.copy === null || !this.keeping || this.busy !== null || this.copyTask !== null || this.moving !== null || this.disposed) return;
     const state = this.copyState();
     if (!this.copyWanted(state)) {
       if (this.copyStored) await this.storeCopy();
@@ -1371,7 +1538,7 @@ export class ProjectSession {
 
   private async writeCopy(): Promise<void> {
     const copy = this.copy;
-    if (copy === null || !this.keeping || this.disposed) return;
+    if (copy === null || !this.keeping || this.moving !== null || this.disposed) return;
     const state = this.copyState();
     this.copySeen = null;
     if (!this.copyWanted(state)) {
@@ -1426,17 +1593,17 @@ export class ProjectSession {
     if (primary !== null) files.set(PROJECT_FILES.primary, primary);
     if (this.alternate !== null) files.set(PROJECT_FILES.alternate, this.alternate);
     for (const part of this.workspace.appearance.parts()) files.set(appearanceFile(part.part), part.blob);
-    for (const item of this.media.values()) {
-      if (item.blob === null) return null;
-      files.set(mediaFile(item.path), item.blob);
-    }
-    for (const asset of this.art.assets) {
-      if (asset.blob === null) return null;
-      files.set(artFile(asset.id), asset.blob);
-    }
-    for (const item of this.library) {
-      if (item.blob === null) return null;
-      files.set(libraryModelFile(item.role, item.entry.id), item.blob);
+    // A file the published project serves stays on the site; the copy keeps only the page's own bytes.
+    const sources = new Map<string, FileSource>([
+      ...[...this.media.values()].map((item) => [mediaFile(item.path), item] as const),
+      ...this.art.assets.map((asset) => [artFile(asset.id), asset] as const),
+      ...this.library.map((item) => [libraryModelFile(item.role, item.entry.id), item] as const),
+    ]);
+    for (const [path, source] of sources) {
+      const file = source.blob ?? source.published;
+      // Only a server project holds it, which a copy cannot refer to.
+      if (file === null) return null;
+      files.set(path, file);
     }
     return files;
   }
@@ -1511,8 +1678,11 @@ export class ProjectSession {
   }
 
   // Validates the incoming sections completely, loads the parts that can fail, then applies the rest.
+  // `opened` is the course artwork of a project opened from anywhere but a server, whose files the page holds or the
+  // published project does.
   private async applySections(manifest: ProjectManifest, names: readonly ProjectSectionName[], values: ReadonlyMap<ProjectSectionName, unknown>,
-    models: readonly Blob[], serverId: string | null, mode: 'load' | 'sync' = 'load', sizes: ReadonlyMap<string, number> = new Map()): Promise<void> {
+    models: readonly Blob[], serverId: string | null, mode: 'load' | 'sync' = 'load', sizes: ReadonlyMap<string, number> = new Map(),
+    opened: CourseArt | null = null): Promise<void> {
     const has = new Set(names);
     const level = has.has('level') ? validateLevel(values.get('level')) : null;
     const primary = has.has('characters/primary') ? values.get('characters/primary') === null ? EMPTY_SPRITES
@@ -1546,6 +1716,22 @@ export class ProjectSession {
     if (parts !== null && !await this.workspace.appearance.load(parts)) {
       throw new ProjectError('Some appearance models could not be loaded; see Appearance.', { section: 'appearance' });
     }
+    // The course meshes come before the level, which draws them as soon as it loads.
+    if (opened !== null) this.art = opened;
+    else if (has.has('art')) {
+      const existing = new Map(this.art.assets.map((asset) => [asset.id, asset]));
+      this.art = {
+        mode: manifest.art.mode, decorations: manifest.art.decorations,
+        // An asset is named by its content, so bytes the page already has for it stay usable.
+        assets: manifest.art.assets.map((asset) => {
+          const known = existing.get(asset.id);
+          return {
+            ...asset, blob: known?.blob ?? null, published: known?.published ?? null, server: serverId,
+            bytes: sizes.get(artFile(asset.id)) ?? known?.bytes ?? 0,
+          };
+        }),
+      };
+    }
     if (level !== null) {
       if (mode === 'sync') this.workspace.level.sync(level);
       else this.workspace.level.load(level);
@@ -1557,25 +1743,19 @@ export class ProjectSession {
     if (has.has('theme')) this.theme = manifest.theme;
     if (has.has('hud')) this.hud = manifest.hud;
     if (has.has('enemies')) this.enemies = manifest.enemies;
-    if (has.has('art')) {
-      const existing = new Map(this.art.assets.map((asset) => [asset.id, asset]));
-      this.art = {
-        mode: manifest.art.mode, decorations: manifest.art.decorations,
-        assets: manifest.art.assets.map((asset) => ({ ...asset, blob: existing.get(asset.id)?.blob ?? null, uploaded: serverId !== null })),
-      };
-    }
     // A server project's library files stay on the server until the Workshop needs them.
     if (has.has('models') && serverId !== null) {
       this.library = libraryEntries(manifest.models).map(({ role, entry }) => ({
-        role, entry, key: this.nextLibraryKey++, blob: null, bytes: sizes.get(libraryModelFile(role, entry.id)) ?? 0, uploaded: true,
+        role, entry, key: this.nextLibraryKey++, blob: null, server: serverId, published: null,
+        bytes: sizes.get(libraryModelFile(role, entry.id)) ?? 0,
       }));
     }
     if (has.has('media') && serverId !== null) {
       const next = new Map<string, MediaItem>();
       for (const entry of manifest.media) {
         next.set(entry.path, {
-          path: entry.path, blob: null, url: this.client.mediaUrl(serverId, entry.path),
-          bytes: sizes.get(mediaFile(entry.path)) ?? this.media.get(entry.path)?.bytes ?? 0, uploaded: true,
+          path: entry.path, blob: null, server: serverId, published: null, url: this.client.mediaUrl(serverId, entry.path),
+          bytes: sizes.get(mediaFile(entry.path)) ?? this.media.get(entry.path)?.bytes ?? 0,
         });
       }
       this.setMedia(next);
@@ -1594,15 +1774,16 @@ export class ProjectSession {
     this.applyLook();
   }
 
-  private async applyContent(content: ProjectContent, serverId: string | null): Promise<void> {
-    // Library models a release would refuse fail here, before anything in the page changes.
-    inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
+  // Replaces the page's game with a whole project opened from a project file, this browser's copy, the published project
+  // or the defaults. Files the page does not hold stay where they are until it uses them.
+  private async applyContent(content: OpenedProject): Promise<void> {
+    // Appearance models the page cannot show fail here, before anything in the page changes.
+    const appearance = appearanceBlobs(content);
     this.unbind();
     await this.applySections(content.manifest, this.wholeProject(content.manifest).filter((name) => !LOCAL_FILES.has(name)), contentValues(content),
-      appearanceBlobs(content), serverId);
-    this.setMedia(localMedia(content));
-    this.art = localArt(content);
-    this.library = this.localLibrary(content);
+      appearance, null, 'load', new Map(), openedArt(content));
+    this.setMedia(openedMedia(content));
+    this.library = this.openedLibrary(content);
     this.syncedModels.clear();
     this.synced = this.fingerprints();
     this.workspace.level.markSaved();
@@ -1612,30 +1793,29 @@ export class ProjectSession {
   }
 
   // Loads `names` from `content`, a browser copy, into the page as changes to the open project: they save like any edit.
-  private async applyChanges(content: ProjectContent, names: readonly ProjectSectionName[]): Promise<void> {
+  private async applyChanges(content: OpenedProject, names: readonly ProjectSectionName[]): Promise<void> {
     const has = new Set(names);
-    if (has.has('models')) inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
-    await this.applySections(content.manifest, names.filter((name) => !LOCAL_FILES.has(name)), contentValues(content), appearanceBlobs(content), null);
+    await this.applySections(content.manifest, names.filter((name) => !LOCAL_FILES.has(name)), contentValues(content), appearanceBlobs(content), null,
+      'load', new Map(), has.has('art') ? openedArt(content) : null);
     if (has.has('level')) this.workspace.level.markSaved(null);
-    if (has.has('media')) this.setMedia(localMedia(content));
-    if (has.has('art')) this.art = localArt(content);
-    if (has.has('models')) this.library = this.localLibrary(content);
+    if (has.has('media')) this.setMedia(openedMedia(content));
+    if (has.has('models')) this.library = this.openedLibrary(content);
     this.changed('content');
     this.applyLook();
   }
 
-  // A project file's or browser copy's library, held in this page until a server stores it.
-  private localLibrary(content: ProjectContent): LibraryItem[] {
-    return libraryEntries(content.manifest.models).map(({ role, entry }) => {
-      const blob = new Blob([content.files.get(libraryModelFile(role, entry.id))!], { type: 'model/gltf-binary' });
-      return { role, entry, key: this.nextLibraryKey++, uploaded: false, blob, bytes: blob.size };
-    });
+  // The library of a project opened from anywhere but a server: the page's bytes or the published project's files.
+  private openedLibrary(content: OpenedProject): LibraryItem[] {
+    return libraryEntries(content.manifest.models).map(({ role, entry }) => ({
+      role, entry, key: this.nextLibraryKey++, ...openedSource(content, libraryModelFile(role, entry.id)),
+    }));
   }
 
   // Before a whole project replaces the page's game: a failure part way must not leave the page
   // bound to the previous server project while holding the new project's data.
   private unbind(): void {
     this.binding = null;
+    this.moving = null;
     this.origin = null;
     this.conflicts.clear();
     this.forget();
@@ -1717,23 +1897,15 @@ export class ProjectSession {
     return level;
   }
 
-  // The binary files for a captured draft, read from local blobs or the bound server project.
+  // The binary files for a captured draft, each read from wherever this page has it.
   private async captureFiles(draft: ReturnType<ProjectSession['captureDraft']>, parts: readonly AppearanceFile[],
     media: readonly MediaItem[], assets: readonly ArtItem[], library: readonly LibraryItem[]): Promise<ProjectContent> {
-    const source = this.binding?.id ?? null;
     const files = new Map<string, Uint8Array>();
-    for (const part of parts) files.set(appearanceFile(part.part), new Uint8Array(await part.blob.arrayBuffer()));
-    for (const item of media) files.set(mediaFile(item.path), new Uint8Array(await (item.blob ?? await this.client.blob(item.url)).arrayBuffer()));
-    for (const asset of assets) {
-      const blob = asset.blob ?? (source === null ? null : await this.client.blob(this.client.artUrl(source, asset.id)));
-      if (blob === null) throw new ProjectError(`Course artwork ${asset.name} is not available in this page.`, { section: 'art' });
-      files.set(artFile(asset.id), new Uint8Array(await blob.arrayBuffer()));
-    }
-    for (const item of library) {
-      const blob = item.blob ?? (source === null ? null : await this.client.blob(this.client.libraryModelUrl(source, item.role, item.entry.id)));
-      if (blob === null) throw new ProjectError(`Library ${item.role} ${item.entry.name} is not available in this page.`, { section: 'models' });
-      files.set(libraryModelFile(item.role, item.entry.id), new Uint8Array(await blob.arrayBuffer()));
-    }
+    const bytes = async (blob: Blob): Promise<Uint8Array> => new Uint8Array(await blob.arrayBuffer());
+    for (const part of parts) files.set(appearanceFile(part.part), await bytes(part.blob));
+    for (const item of media) files.set(mediaFile(item.path), await bytes(await this.mediaBlob(item)));
+    for (const asset of assets) files.set(artFile(asset.id), await bytes(await this.artBlob(asset)));
+    for (const item of library) files.set(libraryModelFile(item.role, item.entry.id), await bytes(await this.libraryItemBlob(item)));
     return loadProjectContent(draft.manifest, (ref) => ref.kind === 'level' ? draft.level
       : ref.kind === 'character' ? (ref.path === PROJECT_FILES.primary ? draft.primary : draft.alternate) : files.get(ref.path));
   }
@@ -1914,11 +2086,20 @@ export class ProjectSession {
   }
 }
 
-// A project file's or browser copy's level and characters, as applySections takes them.
-function contentValues(content: ProjectContent): Map<ProjectSectionName, unknown> {
+// An opened project's level and characters, as applySections takes them.
+function contentValues(content: OpenedProject): Map<ProjectSectionName, unknown> {
   return new Map<ProjectSectionName, unknown>([
     ['level', content.level], ['characters/primary', content.characters.primary], ['characters/alternate', content.characters.alternate],
   ]);
+}
+
+// A project file's or new project's files, as bytes this page holds.
+function openedContent(content: ProjectContent): OpenedProject {
+  const files = new Map<string, OpenedFile>();
+  for (const ref of projectFileRefs(content.manifest)) {
+    if (ref.binary) files.set(ref.path, new Blob([content.files.get(ref.path)!], { type: projectFileType(ref, content.manifest) }));
+  }
+  return Object.freeze({ manifest: content.manifest, level: content.level, characters: content.characters, files });
 }
 
 // A plugin's refusal of its data as the project reports it, naming the plugin's section and its error code.
@@ -1928,23 +2109,34 @@ function pluginRefusal(id: string, refusal: Error): ProjectError {
     { section: pluginSection(id), cause: refusal });
 }
 
-function appearanceBlobs(content: ProjectContent): Blob[] {
-  return content.manifest.appearance.map((part) => new Blob([content.files.get(appearanceFile(part.part))!], { type: 'model/gltf-binary' }));
+// An opened project's appearance models, which the page holds: Appearance shows them as soon as the project opens.
+function appearanceBlobs(content: OpenedProject): Blob[] {
+  return content.manifest.appearance.map((part) => {
+    const file = content.files.get(appearanceFile(part.part));
+    if (!(file instanceof Blob)) throw new ProjectError(`${appearanceFile(part.part)} is not available in this page.`, { section: 'appearance' });
+    return file;
+  });
 }
 
-// A project file's or browser copy's media and course artwork, held in this page until a server stores them.
-function localMedia(content: ProjectContent): Map<string, MediaItem> {
+// A file of a project opened from anywhere but a server: the page's bytes or the published project's file, with its size.
+function openedSource(content: OpenedProject, path: string): FileSource & { readonly bytes: number } {
+  const file = content.files.get(path)!;
+  return file instanceof Blob ? { blob: file, server: null, published: null, bytes: file.size } : { blob: null, server: null, published: file, bytes: file.bytes };
+}
+
+// An opened project's media: the page's bytes play from object URLs, published files from the site.
+function openedMedia(content: OpenedProject): Map<string, MediaItem> {
   return new Map(content.manifest.media.map((entry) => {
-    const blob = new Blob([content.files.get(mediaFile(entry.path))!], { type: mediaType(entry.path) });
-    return [entry.path, { path: entry.path, blob, url: URL.createObjectURL(blob), bytes: blob.size, uploaded: false }];
+    const source = openedSource(content, mediaFile(entry.path));
+    return [entry.path, { path: entry.path, ...source, url: source.blob === null ? source.published!.url : URL.createObjectURL(source.blob) }];
   }));
 }
 
-function localArt(content: ProjectContent): { mode: ArtMode; assets: ArtItem[]; decorations: DecorationArt } {
+function openedArt(content: OpenedProject): CourseArt {
   const { art } = content.manifest;
   return {
     mode: art.mode, decorations: art.decorations,
-    assets: art.assets.map((asset) => ({ ...asset, uploaded: false, blob: new Blob([content.files.get(artFile(asset.id))!], { type: 'model/gltf-binary' }) })),
+    assets: art.assets.map((asset) => ({ ...asset, ...openedSource(content, artFile(asset.id)) })),
   };
 }
 

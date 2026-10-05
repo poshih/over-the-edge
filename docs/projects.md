@@ -43,12 +43,12 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `hud` | `project.json` | Release readout labels, unit, scale, decimals and visibility; how trigger messages appear |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
-| `art` | `project.json` + `art/<assetId>.glb` | Course artwork: release look, terrain GLBs and the GLBs replacing decoration models |
+| `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the course look, the GLB meshes terrain places and the GLBs replacing decoration models |
 | `media` | `project.json` + `media/<file>` | Videos and sounds, used as `/media/<file>` |
 | `plugins/<id>` | `project.json` | One [Workshop plugin](workshop-plugins.md)'s own data, for the Workshop only |
 
 Nothing else reaches a release, and plugin data never does: game builds do not copy
-`public/`, so a project release ships only its own content plus the site icon.
+`public/`, so a project release ships only the content its game uses plus the site icon.
 
 ## Project directory
 
@@ -76,7 +76,7 @@ The paths are fixed, so a manifest only says which files exist:
   "schemaVersion": 10,
   "title": "Lantern Cavern",
   "level": "level.json",
-  "art": { "mode": "shapes", "assets": [], "decorations": {} },
+  "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
     "schemaVersion": 8, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
@@ -125,7 +125,7 @@ release build already use. Additionally:
 - Every site-relative source in a level video or sound event, and every audio
   source, must be a `/media/` file in the project's media library. External
   HTTP(S) sources remain allowed.
-- Every terrain `art.assetId` must be a course artwork asset, and each asset's ID
+- Every terrain mesh's `assetId` must be a course artwork asset, and each asset's ID
   must match the SHA-256 of its GLB. Every decoration model must be in the built-in
   library or drawn by a course artwork asset in `art.decorations`.
 - Character GLBs, appearance GLBs and course GLBs pass the same structure,
@@ -135,7 +135,8 @@ release build already use. Additionally:
 - Media files must start with the signature of their extension, so a `.wav` path
   can never serve HTML or script.
 
-A project that fails any check neither builds nor saves; the error names the section.
+A project that fails any check does not save, and the error names the section. A game build
+checks everything it packages, and only that: a file the game never uses cannot fail it.
 
 ## Building a standalone game
 
@@ -149,18 +150,25 @@ The path must be inside this repository. The release's shell in `dist-game/` hol
 no project data: the validated level, settings and presentation, the character,
 appearance and course GLBs, and the media become content files in
 `dist-game-content/`, which the shell loads and verifies; see
-[content delivery](content-delivery.md). A project whose level events or audio name
+[content delivery](content-delivery.md). The build takes only what the game uses: the
+course meshes its level draws in the release's look, the media its level and audio
+play, and the art of the enemies its level places. From a project directory it never reads
+the other files, and copies each file it takes into the content one at a time. That content is the
+base game every player loads. Each model library entry, such as a cosmetic avatar, hammer
+or pot, is content of its own outside it, which a release downloads from the content URL
+only once the game's backend selects it for the player; a build without `GAME_MODULE` has
+no backend to select one, so it packages none. A project whose level events or audio name
 external URLs does not build: a game build packages everything it plays. Model and
 audio loaders are bundled only when the project uses them, and the build still fails
 if an editor module reaches the release. `npm run dev:game` restarts when a project
-file changes. A project directory's `phantoms/` folder holds the
+file it uses changes. A project directory's `phantoms/` folder holds the
 [phantom recordings](phantoms.md#bundled-recordings) the release bundles for its level.
 
 `GAME_PROJECT` is the whole game, so combining it with `GAME_LEVEL`,
 `GAME_SETTINGS`, `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES` fails. The project
 title replaces `GAME_TITLE`: a `GAME_TITLE` from `.env` files is ignored, and one
 passed on the command line fails. `GAME_ART_MODE` still overrides the project's
-course artwork look.
+course look.
 
 Deploy it like any other release: the shell, for example with
 `npx wrangler deploy --config wrangler.game.toml`, and the content to the host or CDN
@@ -189,7 +197,7 @@ Level's save is **Save to project**, at the top of the Level tab; each other edi
 Save also has one under it: Physics' **Save game settings**, Appearance's **Save alignment**
 (models and alignment) and **Save IK profile**, and the character profile's **Save** in
 Character and Sprites. It writes that part into the open server project at once and says so,
-instead of waiting for the automatic save; a level takes along the media and course artwork
+instead of waiting for the automatic save; a level takes along the media and course meshes
 it names. It is disabled until a server project is open, and a part that also changed in the
 project waits for **Keep my version** or **Use the project's**.
 
@@ -199,12 +207,16 @@ project waits for **Keep my version** or **Use the project's**.
   project that the project server holds (`GAME_PROJECT=projects/<id>` under
   `npm run dev` or `npm run studio`) opens that server project at start instead.
 - **Save as project ID** stores the whole game as a new project (or replaces the
-  project with that ID), which then saves itself.
+  project with that ID), which then saves itself. Its files go one at a time, each
+  downloaded from wherever the page has it as it is sent. If saving stops part way, the
+  rest saves like any change; until the new project holds everything, a reload opens the
+  project the page came from, and this browser's copy stays as it was.
 - **New project** starts from the built-in course and defaults.
 - **Export project file** downloads the whole game as one bundle; **Import project
   file** replaces the Workshop's game with one. Both work without a server.
 - **Publish standalone game** saves unsaved changes, builds the release on the
-  server and links to it at `/play/<id>/`, where the studio also serves its content.
+  server from a copy of the project's folder and links to it at `/play/<id>/`,
+  where the studio also serves its content.
 
 The remaining sections edit what only a project has, with a live preview:
 **Theme**, **HUD**, **Audio** (music and cue sounds from the media library, with
@@ -213,7 +225,8 @@ test buttons), **Enemy art** (JSON pixel art, starting from the built-in art),
 profile), **Model library** (add library avatars, hammers and pots from files or the Workshop's
 [server models](characters.md#server-models), then preview and remove them; see
 [imported 3D characters](characters.md#model-library-and-runtime-swaps)) and
-**Course artwork** (release look, or import a `pack:course` package).
+**Course artwork** (the course look, the meshes Level imported, with **Remove** for unused
+ones, or import a `pack:course` package).
 
 Everything else keeps its usual tab. Opening or importing a project replaces the
 page's current game, its sprite draft and its browser-saved appearance models; the
@@ -258,8 +271,8 @@ project folder holds them beside its files, and replacing the project keeps them
 While **Record** is on, the Workshop [records your play](phantoms.md#recording-in-the-workshop)
 on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phantom`, and
 **Level / Replays** plays each run back over the level. Versions
-that play the same share a course, so edits to decorations, labels, colours, artwork, control
-sensitivity or the cursor keep a level's recordings, while any physics setting starts a new
+that play the same share a course, so edits to decorations, labels, colours, which mesh draws a
+collision, control sensitivity or the cursor keep a level's recordings, while any physics setting starts a new
 course; a release bundles the recordings of its level and settings' course. Both folders grow
 with use: commit them to keep the history and recordings, and delete recordings you no longer
 need. Deleting `level-versions/` restarts the numbering when the project next opens.
@@ -274,23 +287,29 @@ GAME_PROJECT=projects/my-game npm run build
 npx wrangler deploy --config wrangler.toml --keep-vars
 ```
 
-The project is validated exactly as for `build:game`, and a failure names its section.
-Its files become hashed static assets next to the Workshop, downloaded when the page opens
-the project: the JavaScript does not grow with the game, and files that did not change keep
-their URLs across deployments, so browsers reuse them. Each file must fit your host's
-limit; Cloudflare Workers static assets hold at most 25 MiB per file. The page title comes
-from the project, with the same `GAME_TITLE` rules as releases. Without `GAME_PROJECT` the
-Workshop build is unchanged.
+Every file of the project is validated, and a failure names its section.
+Its files become hashed static assets next to the Workshop, each listed with its size and
+SHA-256 and downloaded only when the page uses it: the JavaScript does not grow with the game,
+and files that did not change keep their URLs across deployments, so browsers reuse them. Each
+file must fit your host's limit; Cloudflare Workers static assets hold at most 25 MiB per file.
+The page title comes from the project, with the same `GAME_TITLE` rules as releases. Without
+`GAME_PROJECT` the Workshop build is unchanged.
 
-- **Opening.** A page without a project of its own downloads the published project,
-  showing its progress, and opens it as **Import project file** does: every section, the
-  primary character in its own rigging type and the alternate under **Alternate character**.
+- **Opening.** A page without a project of its own opens the published project as **Import
+  project file** does: every section, the primary character in its own rigging type and the
+  alternate under **Alternate character**. It downloads, showing its progress, only what the
+  editors use at once: the manifest, the level, the characters and the appearance models.
+  Library models, media and course artwork download when the page uses them: a library model
+  when you preview or edit it, every file the page sends when you save it to a server or export
+  the project file, each checked against its size and SHA-256, while media play straight from
+  the site.
 - **This browser's copy.** Once the page holds something the published project does not (a
   change, or an imported or new project), it keeps the whole project with its unsaved
-  changes in this browser (IndexedDB) and reopens it after a reload. Changes are stored about
-  a second after you stop editing; leaving the page before that warns first. **Export project
-  file** takes the work out; **Reopen published project** discards the copy, asking first when
-  there are unsaved changes.
+  changes in this browser (IndexedDB) and reopens it after a reload. The copy stores the
+  files the page holds itself; a file of the published project stays on the site, and the copy
+  names it by its SHA-256. Changes are stored about a second after you stop editing; leaving the
+  page before that warns first. **Export project file** takes the work out; **Reopen published
+  project** discards the copy, asking first when there are unsaved changes.
 - **Older browser saves.** Here the editors' own browser saves (the character profile from
   **Save**, Appearance's models and the selected IK profile) do not open at start, and opening
   a project never changes them. The saved character profile remains the Revert target, and
@@ -298,7 +317,10 @@ Workshop build is unchanged.
   are kept in the project's copy instead of Appearance's own storage.
 - **New deployments.** A page without unsaved changes opens the new version. A page with
   unsaved changes keeps them and says that a newer version is published; **Reopen published
-  project** takes it.
+  project** takes it. A copy uses the published files it names from whichever deployment
+  serves them, so it opens only while the site still serves every one; otherwise the page opens
+  the published project, says which file is gone, and keeps the copy until you change the
+  project.
 - **Server levels.** **Workshop / Level / Server levels** lists the project's level first, then
   the `levels/` folder's levels. Loading the project's level brings it back after trying another
   one, without discarding the project's other changes.
@@ -416,6 +438,7 @@ Conventions:
 | GET, POST | `/api/projects/{id}/level/versions/{version}/phantoms?session=&clip=` | List or store recordings played on a version |
 | GET, DELETE | `/api/projects/{id}/level/versions/{version}/phantoms/{name}` | One recording |
 | POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB; returns its asset ID |
+| GET | `/api/projects/{id}/art/assets/{assetId}/terrain` | The GLB as terrain to place: its natural size and its `mesh` entry, with the collision it declares or its slice |
 | GET, PUT, DELETE | `/api/projects/{id}/appearance/{part}/model?name=` | A part's GLB |
 | GET, PATCH, DELETE | `/api/projects/{id}/appearance/{part}` | A part's name and alignment |
 | GET, PUT, DELETE | `/api/projects/{id}/models/{part}/{model}/model?name=&settings=` | A library GLB for `avatar`, `hammer` or `pot`, adding or replacing its entry |
@@ -441,6 +464,18 @@ curl -s -X POST localhost:5181/api/projects/night-climb/level/objects $H -d '{
   "kind":"trigger","id":"bell","name":"Bell","x":3,"y":2,"region":{"type":"circle","radius":1.5},
   "activation":"once","marker":"none","events":[{"type":"play-sound","source":"/media/bell.wav","volume":1}]}'
 curl -s -X POST localhost:5181/api/projects/night-climb/publish -H X-Studio-Request:1
+```
+
+To place a GLB mesh, upload it, read its terrain, and add a terrain object with its `mesh`, at
+its natural size or any other (see [course meshes](course-artwork.md#in-level-json)):
+
+```sh
+ASSET=$(curl -s -X POST 'localhost:5181/api/projects/night-climb/art/assets?name=Boulder' \
+  -H X-Studio-Request:1 -H Content-Type:model/gltf-binary --data-binary @boulder.glb | jq -r .id)
+MESH=$(curl -s localhost:5181/api/projects/night-climb/art/assets/$ASSET/terrain | jq -c .mesh)
+curl -s -X POST localhost:5181/api/projects/night-climb/level/objects $H -d "{
+  \"kind\":\"terrain\",\"id\":\"boulder-1\",\"mesh\":$MESH,\"x\":6,\"y\":1,\"width\":3,\"height\":2,
+  \"angle\":0,\"depth\":2,\"mirror\":false,\"color\":7438714,\"illusion\":false,\"surface\":\"rock\"}"
 ```
 
 An open Workshop page shows each change within two seconds.
@@ -489,9 +524,9 @@ behaviour and display size stay the same, and all enemies still share one draw b
 
 **Media.** Files are addressed as `/media/<name>` with a lowercase name ending in
 `.webm`, `.mp4`, `.mp3`, `.ogg`, `.wav` or `.m4a`; at most 64 files, 64 MiB each and
-160 MiB in total. Releases package them as content and resolve the authored paths
-to those files through the release's content access, so media keep working wherever
-the content is served.
+160 MiB in total. Releases package the ones the level and the audio play as content and
+resolve the authored paths to those files through the release's content access, so media
+keep working wherever the content is served.
 
 **Appearance, arm IK and characters.** Appearance parts are the Workshop's
 per-part GLB replacements (20 MiB each, 64 MiB in total), fitted with the same
@@ -509,8 +544,9 @@ model with `PUT .../model` adds its entry: an avatar takes `settings` (JSON with
 seven fields), keeps its existing entry's, or maps its joints automatically with a
 standard driver; a hammer keeps its existing entry's head or starts with the game's
 default head. Removing an entry, or leaving it out of a `PUT` of the section, deletes its GLB.
-Releases list the library but load an entry only when the game's backend selects it;
-see [runtime swaps](characters.md#model-library-and-runtime-swaps).
+Releases built with `GAME_MODULE` list the library but load an entry only when the game's
+backend selects it, and the Workshop downloads one only when it previews or edits it, so the
+library has no total size; see [runtime swaps](characters.md#model-library-and-runtime-swaps).
 
 **Plugin data.** `plugins` maps each [Workshop plugin](workshop-plugins.md)'s ID to its
 data, one JSON document of at most 64 KiB, nesting depth 16 and 8,192 values, for at most
@@ -518,17 +554,21 @@ data, one JSON document of at most 64 KiB, nesting depth 16 and 8,192 values, fo
 and the project checks hold it to those limits but never interpret it; the Workshop runs the
 plugin's own validation whenever the section loads or changes.
 
-**Course artwork.** `mode` is `shapes` or `meshes`; assets come from
-`npm run pack:course` packages or the API upload. `decorations` maps decoration model IDs
-to assets: in mesh releases each asset replaces its model's placeholder on every
-decoration, and can draw a model the built-in library lacks. See
-[course artwork](course-artwork.md#decoration-models).
+**Course artwork.** `mode` is `meshes` or `shapes`: how the Workshop and releases draw the
+course, its GLB meshes or every terrain object as its collision extruded (see
+[course look](course-artwork.md#course-look)). Assets come from **Level / Meshes**,
+`npm run pack:course` packages or the API upload; terrain places them as meshes. `decorations`
+maps decoration model IDs to assets: in mesh releases each asset replaces its model's
+placeholder on every decoration, and can draw a model the built-in library lacks. See
+[course meshes](course-artwork.md).
 
 ## Limits
 
-A project directory has no overall size limit beyond its sections. A project file
-is limited to 480 MiB: every file budget (course artwork, appearance models, media and the
-model library) together with the JSON files. Export larger games, such as ones with big
-character profiles, as directories instead. `project.json`
-is limited to 2 MiB, and each section keeps its existing limit. The model library holds
-at most 32 models per part, 20 MiB each and 64 MiB in total.
+A project directory has no overall size limit beyond its sections, and it moves file by
+file: **Save as project ID** uploads it and **Publish** copies it one file at a time, and the
+Workshop downloads a file only when it uses it. A project file is one JSON text, read and
+written whole, so it is limited to 480 MiB, below the longest text a browser holds, with every
+binary file base64-encoded. A game larger than that, for example one with a big model library,
+stays a project directory or a server project; exporting it as a project file fails before any
+of its files download. `project.json` is limited to 2 MiB, and each section keeps its existing
+limit. The model library holds at most 32 models per part and 20 MiB per model, with no total.

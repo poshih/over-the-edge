@@ -3,7 +3,7 @@ import {
 } from 'three';
 import type { BufferGeometry, Material } from 'three';
 import { ART_LIMITS, ArtError } from './art-types';
-import type { ArtMirror, ArtMode, ArtResource } from './art-types';
+import type { ArtMode } from './art-types';
 import { ILLUSION, LEVEL_LIMITS } from './level';
 import type { TerrainEvent, TerrainObject } from './level';
 import { markInstanceSlot } from './instancing';
@@ -12,16 +12,14 @@ import type { PhysicsFrame } from './simulation';
 import type { TerrainView } from './terrain-view';
 import { loadVisualModel } from './visual-model';
 import type { LoadedVisual } from './visual-model';
-import { fetchModelBlob } from './model-data';
 import { validateCourseModel } from './course-art-model';
-import { isContentRef } from './content-ref';
-import type { ContentLoader } from './content-ref';
 import type { DecorationMesh } from './decoration-view';
 
 interface Primitive { geometry: BufferGeometry; material: Material | Material[] }
 interface Asset {
   model: LoadedVisual;
-  templates: Map<ArtMirror, Primitive[]>;
+  // Its geometry fitted to the unit box, plain and mirrored.
+  templates: Map<boolean, Primitive[]>;
   // The asset as a decoration model, built when a decoration first draws it.
   decoration: DecorationMesh | null;
   pixels: number;
@@ -36,6 +34,11 @@ interface Batch {
   materials: Map<Material, number>;
 }
 interface State { object: TerrainObject; fade: number | null; active: boolean }
+
+// The asset a terrain object draws, or null for a built-in mesh or drawn outline.
+function meshAsset(object: TerrainObject): string | null {
+  return object.mesh.type === 'asset' ? object.mesh.assetId : null;
+}
 
 // A mesh's geometry in the asset's space with `transform` applied; a mirroring transform keeps its faces outward.
 function bake(node: Mesh, transform: Matrix4): BufferGeometry {
@@ -63,20 +66,34 @@ function disposeAsset(asset: Asset): void {
   asset.model.dispose();
 }
 
+/**
+ * Draws the course's meshes: each terrain object whose mesh is a GLB draws that GLB, fitted to its box and mirrored as
+ * placed, in place of its collision's extrusion, and decorations may draw GLBs in place of their placeholders. In the
+ * meshes look it loads each GLB the terrain uses as it first appears, and lets go of one nothing uses any more; terrain
+ * keeps drawing as its collision until its GLB loads, or if it cannot, and every terrain object does in the shapes look.
+ */
 export class CourseArtView {
   readonly root = new Group();
-  // Terrain artwork is the course's own look: it draws with the terrain it replaces.
+  // Course meshes are the course's own look: they draw with the terrain.
   readonly pass = 'course';
   private readonly terrain: TerrainView;
-  private readonly missing: (message: string) => void;
-  private readonly content: ContentLoader | null;
+  private readonly fetch: (assetId: string, signal: AbortSignal) => Promise<Blob>;
+  private readonly failure: (assetId: string, error: unknown) => void;
   private readonly assets = new Map<string, Asset>();
+  // GLBs being loaded, and those that could not be, which are not tried again.
+  private readonly loading = new Map<string, Promise<void>>();
+  private readonly failed = new Set<string>();
+  // How many terrain objects draw each GLB, and the GLBs loaded up front, kept while nothing draws them.
+  private readonly uses = new Map<string, number>();
+  private readonly pinned = new Set<string>();
+  // Loaded GLBs nothing draws any more, let go of on the next frame unless the course takes them back first, as it does
+  // when an edit replaces a placement.
+  private readonly unused = new Set<string>();
   private readonly states = new Map<string, State>();
   private readonly entries = new Map<string, Entry>();
   private readonly batches = new Map<string, Batch>();
   private readonly dirty = new Set<Batch>();
   private readonly fading = new Set<Batch>();
-  private readonly reported = new Set<string>();
   private readonly matrix = new Matrix4();
   private readonly unsubscribe: () => void;
   private readonly lifecycle = new AbortController();
@@ -89,73 +106,78 @@ export class CourseArtView {
   constructor(options: {
     terrain: TerrainView;
     subscribe: (listener: (event: TerrainEvent) => void) => () => void;
-    onMissing: (message: string) => void;
-    // Loads a release's packaged meshes (content: sources).
-    content?: ContentLoader;
+    // A GLB's bytes, by asset ID: a release's packaged content, or the Workshop's project file.
+    fetch: (assetId: string, signal: AbortSignal) => Promise<Blob>;
+    // A GLB the meshes look could not load on its own; its terrain keeps drawing as its collision.
+    onFailure: (assetId: string, error: unknown) => void;
   }) {
     this.terrain = options.terrain;
-    this.missing = options.onMissing;
-    this.content = options.content ?? null;
+    this.fetch = options.fetch;
+    this.failure = options.onFailure;
     this.root.name = 'course-artwork';
     this.root.matrixAutoUpdate = false;
     this.unsubscribe = options.subscribe((event) => this.apply(event));
   }
 
-  async load(resources: readonly ArtResource[], signal?: AbortSignal): Promise<void> {
-    signal = signal ? AbortSignal.any([signal, this.lifecycle.signal]) : this.lifecycle.signal;
-    if (resources.length > ART_LIMITS.assets) throw new ArtError('A course can use at most 64 distinct artwork assets.');
-    const retained = new Set(resources.map((resource) => resource.id));
-    for (const state of this.states.values()) {
-      if (state.object.art && this.assets.has(state.object.art.assetId)) retained.add(state.object.art.assetId);
-    }
-    for (const [id, asset] of this.assets) {
-      if (retained.has(id)) continue;
-      disposeAsset(asset);
-      this.assets.delete(id);
-    }
-    if (retained.size > ART_LIMITS.assets) throw new ArtError('A course can use at most 64 distinct artwork assets.');
-    for (const resource of resources) {
-      signal?.throwIfAborted();
-      if (this.disposed) throw new ArtError('The course artwork renderer was closed.');
-      if (this.assets.has(resource.id)) continue;
-      const blob = await this.fetchResource(resource, signal);
-      const bytes = [...this.assets.values()].reduce((sum, asset) => sum + asset.bytes, blob.size);
-      if (blob.size > ART_LIMITS.bytes || bytes > ART_LIMITS.totalBytes) throw new ArtError('Course artwork exceeds its download budget.');
-      const { pixels } = validateCourseModel(await blob.arrayBuffer());
-      if ([...this.assets.values()].reduce((sum, asset) => sum + asset.pixels, pixels) > ART_LIMITS.texturePixels) {
-        throw new ArtError('Course artwork exceeds 32 million decoded texture pixels. Reuse assets or reduce texture sizes.');
-      }
-      const model = await loadVisualModel(blob);
-      try {
-        signal?.throwIfAborted();
-        if (this.disposed) throw new ArtError('The course artwork renderer was closed.');
-        let meshes = 0;
-        model.scene.traverse((node) => {
-          if (!(node instanceof Mesh)) return;
-          if (node instanceof SkinnedMesh || node instanceof InstancedMesh || Object.keys(node.geometry.morphAttributes).length > 0) {
-            throw new ArtError('Course artwork must contain ordinary static meshes, not skins, morphs, or nested instances.');
-          }
-          meshes++;
-        });
-        if (meshes > ART_LIMITS.meshes || model.triangles > ART_LIMITS.triangles) {
-          throw new ArtError(`"${resource.name}" exceeds 16 meshes or 50,000 triangles. Optimize it before using it on the course.`);
-        }
-        const size = model.bounds.getSize(new Vector3());
-        if (Math.min(size.x, size.y, size.z) < 0.000001) throw new ArtError('Course meshes need nonzero width, height, and depth.');
-        this.assets.set(resource.id, { model, pixels, bytes: blob.size, templates: new Map(), decoration: null });
-        this.reported.delete(resource.id);
-      } catch (error) {
-        model.dispose();
-        throw error;
-      }
-    }
-    if (this.mode === 'meshes') for (const state of this.states.values()) this.sync(state);
+  // Loads `ids` and keeps them until the view closes, so a release draws every mesh, and the decorations drawn with
+  // them, from its first frame.
+  async load(ids: readonly string[], signal?: AbortSignal): Promise<void> {
+    if (ids.length > ART_LIMITS.assets) throw new ArtError(`A course can use at most ${ART_LIMITS.assets} distinct meshes.`);
+    for (const id of ids) this.pinned.add(id);
+    for (const id of ids) await this.request(id, signal ? AbortSignal.any([signal, this.lifecycle.signal]) : this.lifecycle.signal);
   }
 
-  private async fetchResource(resource: ArtResource, signal: AbortSignal): Promise<Blob> {
-    if (!isContentRef(resource.source)) return fetchModelBlob(resource.source, signal);
-    if (this.content === null) throw new ArtError(`"${resource.name}" is packaged release content, which this host cannot load.`);
-    return new Blob([await this.content(resource.source, signal)], { type: 'model/gltf-binary' });
+  // Loads a GLB once, however many ask for it, and draws the terrain waiting for it.
+  private request(id: string, signal: AbortSignal): Promise<void> {
+    if (this.assets.has(id)) return Promise.resolve();
+    let pending = this.loading.get(id);
+    if (pending === undefined) {
+      pending = this.loadAsset(id, signal).finally(() => this.loading.delete(id));
+      this.loading.set(id, pending);
+    }
+    return pending;
+  }
+
+  private async loadAsset(id: string, signal: AbortSignal): Promise<void> {
+    if (this.disposed) throw new ArtError('The course mesh renderer was closed.');
+    const blob = await this.fetch(id, signal);
+    signal.throwIfAborted();
+    const bytes = [...this.assets.values()].reduce((sum, asset) => sum + asset.bytes, blob.size);
+    if (this.assets.size >= ART_LIMITS.assets || blob.size > ART_LIMITS.bytes || bytes > ART_LIMITS.totalBytes) {
+      throw new ArtError('The course meshes exceed their download budget.');
+    }
+    const { pixels } = validateCourseModel(await blob.arrayBuffer());
+    if ([...this.assets.values()].reduce((sum, asset) => sum + asset.pixels, pixels) > ART_LIMITS.texturePixels) {
+      throw new ArtError('The course meshes exceed 32 million decoded texture pixels. Reuse meshes or reduce texture sizes.');
+    }
+    const model = await loadVisualModel(blob);
+    try {
+      signal.throwIfAborted();
+      if (this.disposed) throw new ArtError('The course mesh renderer was closed.');
+      let meshes = 0;
+      model.scene.traverse((node) => {
+        if (!(node instanceof Mesh)) return;
+        if (node instanceof SkinnedMesh || node instanceof InstancedMesh || Object.keys(node.geometry.morphAttributes).length > 0) {
+          throw new ArtError('Course meshes must be ordinary static meshes, not skins, morphs, or nested instances.');
+        }
+        meshes++;
+      });
+      if (meshes > ART_LIMITS.meshes || model.triangles > ART_LIMITS.triangles) {
+        throw new ArtError('A course mesh has more than 16 meshes or 50,000 triangles. Optimize it before using it on the course.');
+      }
+      const size = model.bounds.getSize(new Vector3());
+      if (Math.min(size.x, size.y, size.z) < 0.000001) throw new ArtError('Course meshes need nonzero width, height, and depth.');
+    } catch (error) {
+      model.dispose();
+      throw error;
+    }
+    // The terrain that wanted it may have gone while it loaded.
+    if (!this.uses.has(id) && !this.pinned.has(id)) {
+      model.dispose();
+      return;
+    }
+    this.assets.set(id, { model, pixels, bytes: blob.size, templates: new Map(), decoration: null });
+    if (this.mode === 'meshes') for (const state of this.states.values()) if (meshAsset(state.object) === id) this.sync(state);
   }
 
   /**
@@ -178,23 +200,7 @@ export class CourseArtView {
     return asset.decoration;
   }
 
-  hasAssets(ids: Iterable<string>): boolean {
-    for (const id of ids) if (!this.assets.has(id)) return false;
-    return true;
-  }
-
-  clearLoaded(): void {
-    if (this.mode !== 'shapes') throw new ArtError('Switch to editor shapes before releasing course artwork.');
-    for (const asset of this.assets.values()) disposeAsset(asset);
-    this.assets.clear();
-    this.reported.clear();
-  }
-
   setMode(mode: ArtMode): void {
-    if (mode === 'meshes') {
-      const absent = [...this.states.values()].find((state) => state.object.art && !this.assets.has(state.object.art.assetId));
-      if (absent) throw new ArtError(`Load artwork for "${absent.object.id}" before switching to meshes.`);
-    }
     if (this.mode === mode) return;
     this.mode = mode;
     for (const state of this.states.values()) this.sync(state);
@@ -202,6 +208,13 @@ export class CourseArtView {
 
   update(frame: PhysicsFrame): void {
     if (this.disposed) return;
+    for (const id of this.unused) {
+      const asset = this.assets.get(id);
+      if (asset === undefined || this.uses.has(id)) continue;
+      disposeAsset(asset);
+      this.assets.delete(id);
+    }
+    this.unused.clear();
     for (const batch of this.fading) {
       const opacity = Math.max(0, Math.min(1, 1 - (frame.time - batch.fade!) / ILLUSION.fadeSeconds));
       for (const [material, original] of batch.materials) {
@@ -220,7 +233,8 @@ export class CourseArtView {
 
   inspect() {
     return {
-      mode: this.mode, assets: this.assets.size, instances: this.entries.size, batches: this.batches.size,
+      mode: this.mode, assets: this.assets.size, loading: this.loading.size, failed: [...this.failed],
+      instances: this.entries.size, batches: this.batches.size,
       fadingBatches: this.fading.size, matrixWrites: this.matrixWrites, boundsUpdates: this.boundsUpdates,
       materialUpdates: this.materialUpdates,
     };
@@ -233,49 +247,80 @@ export class CourseArtView {
     for (const entry of [...this.entries.values()]) this.remove(entry);
     for (const id of this.states.keys()) this.terrain.setHidden(id, false);
     for (const asset of this.assets.values()) disposeAsset(asset);
-    this.assets.clear(); this.states.clear(); this.reported.clear();
+    this.assets.clear(); this.states.clear(); this.uses.clear(); this.pinned.clear(); this.unused.clear();
     this.root.removeFromParent();
     this.disposed = true;
   }
 
   private apply(event: TerrainEvent): void {
     if (event.type === 'reset') {
+      // A new course tries again the GLBs that could not load.
+      this.failed.clear();
       for (const entry of [...this.entries.values()]) this.remove(entry);
       for (const id of this.states.keys()) this.terrain.setHidden(id, false);
+      const previous = [...this.states.values()].map((state) => meshAsset(state.object));
       this.states.clear();
       for (const object of event.objects) this.apply({ type: 'upsert', object });
+      // Counted after the new objects, so a GLB the course keeps using stays loaded.
+      for (const asset of previous) this.release(asset);
     } else if (event.type === 'upsert') {
+      const previous = this.states.get(event.object.id);
       const state: State = { object: event.object, fade: null, active: true };
       this.states.set(event.object.id, state);
+      this.use(meshAsset(event.object));
       this.sync(state);
+      if (previous) this.release(meshAsset(previous.object));
     } else if (event.type === 'remove' || event.type === 'disappear') {
       const entry = this.entries.get(event.id);
       if (entry) this.remove(entry);
       const state = this.states.get(event.id);
       if (state) state.active = false;
-      if (event.type === 'remove') { this.states.delete(event.id); this.terrain.setHidden(event.id, false); }
+      if (event.type === 'remove' && state) {
+        this.states.delete(event.id);
+        this.terrain.setHidden(event.id, false);
+        this.release(meshAsset(state.object));
+      }
     } else if (event.type === 'fade') {
       const state = this.states.get(event.id);
       if (state?.object.illusion) { state.fade = event.startedAt; this.sync(state); }
     }
   }
 
+  private use(asset: string | null): void {
+    if (asset !== null) this.uses.set(asset, (this.uses.get(asset) ?? 0) + 1);
+  }
+
+  // Lets go of a GLB once no terrain draws it, unless it was loaded up front.
+  private release(asset: string | null): void {
+    if (asset === null) return;
+    const uses = (this.uses.get(asset) ?? 0) - 1;
+    if (uses > 0) {
+      this.uses.set(asset, uses);
+      return;
+    }
+    this.uses.delete(asset);
+    if (this.assets.has(asset) && !this.pinned.has(asset)) this.unused.add(asset);
+  }
+
   private sync(state: State): void {
     const { object, active, fade } = state;
-    const art = object.art;
-    const available = art !== undefined && this.assets.has(art.assetId);
+    const asset = meshAsset(object);
+    const available = asset !== null && this.assets.has(asset);
     const visible = this.mode === 'meshes' && active && available;
     this.terrain.setHidden(object.id, this.mode === 'meshes' && available);
     let entry = this.entries.get(object.id);
-    if (!visible || art === undefined) {
+    if (!visible || asset === null) {
       if (entry) this.remove(entry);
-      if (this.mode === 'meshes' && art && !available && !this.reported.has(art.assetId)) {
-        this.reported.add(art.assetId);
-        this.missing(`Artwork for "${object.id}" is not loaded. Its editor shape remains visible until its GLB is loaded.`);
+      if (this.mode === 'meshes' && asset !== null && !available && !this.failed.has(asset) && !this.loading.has(asset)) {
+        this.request(asset, this.lifecycle.signal).catch((error: unknown) => {
+          if (this.disposed) return;
+          this.failed.add(asset);
+          this.failure(asset, error);
+        });
       }
       return;
     }
-    const key = `${Math.floor(object.x / 32)},${Math.floor(object.y / 32)}:${art.assetId}:${art.mirror}:${fade ?? 'solid'}`;
+    const key = `${Math.floor(object.x / 32)},${Math.floor(object.y / 32)}:${asset}:${object.mirror}:${fade ?? 'solid'}`;
     if (entry?.batch.key === key) {
       const previous = entry.object;
       entry.object = object;
@@ -286,7 +331,7 @@ export class CourseArtView {
     if (entry) this.remove(entry);
     let batch = this.batches.get(key);
     if (!batch) {
-      const primitives = this.template(art.assetId, art.mirror);
+      const primitives = this.template(asset, object.mirror);
       const materials = new Map<Material, number>();
       const clones = new Map<Material, Material>();
       const material = (source: Material): Material => {
@@ -321,18 +366,18 @@ export class CourseArtView {
     this.write(entry);
   }
 
-  private template(id: string, mirror: ArtMirror): Primitive[] {
+  private template(id: string, mirror: boolean): Primitive[] {
     const asset = this.assets.get(id);
-    if (!asset) throw new ArtError('The artwork asset was not loaded.');
+    if (!asset) throw new ArtError('The mesh was not loaded.');
     const cached = asset.templates.get(mirror);
     if (cached) return cached;
     const size = asset.model.bounds.getSize(new Vector3());
     const center = asset.model.bounds.getCenter(new Vector3());
-    // A unit box centred on the origin, like the extruded shapes, so the mesh straddles the obstacle line.
+    // A unit box centred on the origin, like the extruded shapes, so the mesh's middle, where its collision is sliced,
+    // lies on the obstacle line.
     const normalize = new Matrix4().makeScale(1 / size.x, 1 / size.y, 1 / size.z)
       .multiply(new Matrix4().makeTranslation(-center.x, -center.y, -center.z));
-    const reflect = mirror === 'x' ? new Matrix4().makeScale(-1, 1, 1) :
-      mirror === 'diagonal' ? new Matrix4().set(0, -1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1) : new Matrix4();
+    const reflect = mirror ? new Matrix4().makeScale(-1, 1, 1) : new Matrix4();
     const primitives: Primitive[] = [];
     const transform = new Matrix4().multiplyMatrices(reflect, normalize);
     asset.model.scene.traverse((node) => {

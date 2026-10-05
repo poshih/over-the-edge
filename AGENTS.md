@@ -21,8 +21,9 @@
   level's leftmost terrain point.
 - Everything that collides is drawn centred on the obstacle line (`OBSTACLE_LINE`,
   z = 0, in `src/obstacle-line.ts`), where the 2D physics plays out, so collision
-  looks right in perspective: terrain and its artwork reach half their depth each
-  side of it, and the pot and enemies stand on it. Keep new collider visuals on it.
+  looks right in perspective: terrain meshes reach half their depth each side of
+  it, a GLB mesh colliding as its slice there, and the pot and enemies stand on it.
+  Keep new collider visuals on it.
   Characters and enemies draw in the actors pass, over the course, so colliders
   never hide them. Decorations on or in front of the line draw over the actors.
   A 3D character's arms (`ARM_LAYER`) then draw over its body, jar and head,
