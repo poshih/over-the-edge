@@ -40,7 +40,7 @@ export class Game {
   readonly triggers: TriggerRuntime;
   private readonly presenter: EventPresenter;
   private readonly canvas: HTMLCanvasElement;
-  private readonly fatal: HTMLElement;
+  private readonly onFatal: (message: string) => void;
   private readonly lifecycle = new AbortController();
   private readonly pauseReasons = new Set<string>();
   private readonly inputBlocks = new Set<string>();
@@ -73,7 +73,8 @@ export class Game {
 
   constructor(options: {
     canvas: HTMLCanvasElement;
-    fatal: HTMLElement;
+    // The complete fatal message; the owner chooses its display.
+    onFatal: (message: string) => void;
     eventMount: HTMLElement;
     level: LevelDefinition;
     settings?: Readonly<GameSettings>;
@@ -102,7 +103,7 @@ export class Game {
     onShortcut?: (event: KeyboardEvent) => void;
   }) {
     this.canvas = options.canvas;
-    this.fatal = options.fatal;
+    this.onFatal = options.onFatal;
     this.onAction = options.onAction;
     this.onCue = options.onCue ?? null;
     this.onPauseChange = options.onPauseChange ?? null;
@@ -417,14 +418,17 @@ export class Game {
     if (this.stopped) return;
     this.stopped = true;
     cancelAnimationFrame(this.animationFrame);
-    this.fatal.hidden = false;
-    this.fatal.textContent = `The game stopped: ${message}`;
-    this.lifecycle.abort();
-    this.triggers?.dispose();
-    this.presenter?.dispose();
-    this.view?.disposeCharacters();
-    this.input?.setInteraction({ enabled: false });
-    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+    try {
+      this.onFatal(`The game stopped: ${message}`);
+    } finally {
+      // A failing display cannot prevent the Game from stopping and releasing its interactions.
+      this.lifecycle.abort();
+      this.triggers?.dispose();
+      this.presenter?.dispose();
+      this.view?.disposeCharacters();
+      this.input?.setInteraction({ enabled: false });
+      if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+    }
   }
 
   private resetClock(): void {

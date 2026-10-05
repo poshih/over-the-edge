@@ -13,3 +13,5 @@ export { PhantomServiceError } from '../phantom-service-types';
 export type { PhantomQuery, PhantomService } from '../phantom-service-types';
 export { createNotice, DEFAULT_NOTICES, NOTICES } from '../notice';
 export type { Notices, NoticesFactory } from '../notice';
+export { DEFAULT_FATAL, FATAL } from '../fatal-display';
+export type { FatalDisplay, FatalDisplayFactory } from '../fatal-display';

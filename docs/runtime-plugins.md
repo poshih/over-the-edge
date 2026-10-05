@@ -1,7 +1,8 @@
 # Runtime plugins
 
-A plugin's **runtime facet** changes what play shows and sounds: HUD readouts, camera following,
-backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and event messages.
+A plugin's **runtime facet** changes what play shows and sounds: HUD readouts, character choice,
+camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and
+event messages.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
 so a game sees and hears its own presentation while it is authored. Its SDK is
 [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts). [Plugins](plugins.md) describes the
@@ -45,9 +46,10 @@ export default defineRuntime({
 
 ## HUD readouts
 
-The HUD shows three readouts, from left to right: `height`, `health` and `timer`, the points
-`HUD.height`, `HUD.health` and `HUD.timer`. The Workshop's play-test and releases, studio previews
-included, build them from the same readout slots, so a game's readouts show in all of them;
+The HUD's first three readouts, from left to right, are `height`, `health` and `timer`, the points
+`HUD.height`, `HUD.health` and `HUD.timer`. Plugins can add their own [extra readouts](#extra-readouts)
+after them. The Workshop's play-test and releases, studio previews included, build them from
+the same readout slots, so a game's readouts show in all of them;
 beside them the Workshop keeps its own chrome: PEAK, the input state and its buttons. A plugin
 draws any readout its own way, and the others stay the engine's. Each is a factory,
 `(mount, settings) => readout` (`HudReadoutFactory`):
@@ -87,6 +89,78 @@ The frame and its health reading are one object, reused every frame: read what y
   its point.
 
 The [complete example](#complete-example) draws the health readout as a bar.
+
+### Extra readouts
+
+`HUD.extras`, the runtime list point `hud.extras`, adds a game's own readouts, such as coins or
+deaths. It holds up to 32 `HudReadoutFactory` entries in total; the engine's default is an empty
+list. Use `add`, not `replace` or `wrap`:
+
+```ts
+import { add, defineRuntime, HUD } from '../../src/plugins/runtime-sdk';
+import { coins, deaths } from './readouts';
+
+export default defineRuntime({
+  start() {
+    return [add(HUD.extras, coins, deaths)];
+  },
+});
+```
+
+Each factory receives its own empty slot, with classes `hud-slot` and `hud-extra`, and the
+project's `HudSettings`. Slots follow height, health and timer in manifest order, and in the
+order of factories within each plugin's `add`. Extras use the same `update(frame)` and optional
+`dispose()` contract as the other readouts: their returned objects are checked where created,
+and a refusal names the contributing plugin and `hud.extras`.
+
+Extras decide their own visibility, for example by setting `mount.hidden`; the engine never
+hides them using the height/timer settings or `frame.health`. They still update every frame, including
+when hidden, and are disposed and rebuilt with the bar when HUD settings change. Keep a game's
+own counters in its session or factory closures; `HudFrame` remains the engine's read-only,
+reused frame, not a container for extra game state. No point resolution or factory invocation
+runs on the frame path.
+
+## Character choice
+
+`CHARACTER_CHOICE`, the runtime slot `ui.character-choice`, holds a `CharacterChoiceFactory`,
+`(mount: HTMLElement, choice: CharacterChoiceModel) => CharacterChoiceView`. A runtime facet
+uses `replace(CHARACTER_CHOICE, factory)` or `wrap(CHARACTER_CHOICE, decorate)`. The contract
+and default are exported from the runtime SDK; the creation checks live in
+[`src/character-choice.ts`](../src/character-choice.ts):
+
+```ts
+interface CharacterChoiceModel {
+  readonly labels: readonly string[];
+  readonly selected: number;
+  readonly select: (index: number) => void;
+}
+interface CharacterChoiceView {
+  setEnabled(enabled: boolean): void;
+  dispose(): void;
+}
+```
+
+The factory receives an empty mount and a read-only model. Its `labels` are the two profiles'
+display labels; `selected` reads the current index. Request a selection through `select(index)`,
+never by writing to the model. The play UI owns the index and its existing local-storage
+persistence, restores the player's last valid choice, and selects that profile once loading
+finishes. `select` requires an integer index within `labels`; an invalid index fails with
+`invalid-contribution`, naming the plugin and point.
+
+The play UI resolves the factory once per runtime session with `DEFAULT_CHARACTER_CHOICE` as
+its base. It creates a view only in releases and studio previews with **two profiles**; a
+single-profile game has no choice UI, and the Workshop keeps its own character controls.
+The Workshop never resolves `ui.character-choice`, so try its wraps and views with
+`npm run dev:game` or a studio preview.
+The engine calls `setEnabled(false)` when the view is created and `setEnabled(true)` once every
+profile has loaded. Keep controls disabled until then. `dispose()` releases listeners and
+anything the view keeps elsewhere; the engine removes the mount when the play UI is cleared
+or disposed. There is no per-frame method.
+
+`DEFAULT_CHARACTER_CHOICE` draws the engine's existing **CHARACTER** radio group, with the
+same 2D/3D labels, numbered when they repeat, and the restored selection. Creating a view
+checks both required methods; a malformed result fails with `invalid-contribution`, and a
+throwing factory fails with `plugin-failed`, each naming the plugin and `ui.character-choice`.
 
 ## Object looks
 
@@ -711,8 +785,8 @@ Defaults and replacements do work only while presenting; do not add an idle anim
 `wrap(point, decorate)` builds on what a point holds so far: `decorate` receives the previous
 factory, the engine's own or an earlier plugin's, and returns the factory the game uses. The
 previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS`,
-`DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP` and
-`DEFAULT_AIM_MARKS` are the engine's own factories, the points' bases, for a plugin that replaces
+`DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP`, `DEFAULT_AIM_MARKS` and
+`DEFAULT_CHARACTER_CHOICE` are the engine's own factories, the points' bases, for a plugin that replaces
 a point but draws the engine's part inside its own. Forward every contract method explicitly when wrapping an
 instance; its methods may live on a prototype, so spreading it does not copy them.
 Feature-gated defaults, such as audio and phantom drawing, are not SDK exports: extend them with `wrap`.
@@ -757,17 +831,18 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
 - Points reject non-function factories. Creating a readout, director, backdrop, marks, look,
-  layer, audio output or toast presenter checks the returned object's required and optional
+  layer, audio output, toast presenter or character choice checks the returned object's required and optional
   methods, roots and passes. A
   factory, or a wrap, that throws fails with `plugin-failed`; a malformed return fails with
-  `invalid-contribution`. Each names the plugin and point, including the contributor of a list
-  layer. A director that writes a non-finite aim or a non-positive height also fails explicitly.
+  `invalid-contribution`. Each names the plugin and point, including the contributor of an extra
+  readout or a list layer. A director that writes a non-finite aim or a non-positive height also fails explicitly.
 - Audio and toasts require their lifecycle methods, and an optional `inspect` must be a
   function. Popup/video results must be promises of a valid `EventOutcome`, and a toast's
   `show` must return a boolean; malformed results fail with `invalid-contribution`, naming
   the plugin and point.
-- As the Workshop or a release starts, any of these stops it with a fatal error naming the
-  plugin. The engine never falls back to its own presentation silently.
+- At facet startup, contribution validation, point resolution or consumer creation, a refusal
+  stops the environment that encounters it with a fatal error naming the plugin. The engine
+  never falls back to its own presentation silently.
 - An error a runtime presentation object throws while the game runs stops the game and shows
   the error, as any error in the game does. Workshop overlays retain their
   [isolated plugin lifecycle](workshop-plugins.md#lifecycle).

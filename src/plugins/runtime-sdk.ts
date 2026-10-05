@@ -7,6 +7,8 @@ export { defineRuntime } from './runtime';
 export type { RuntimeFacet, RuntimeHost } from './runtime';
 export { DEFAULT_HUD_READOUTS, HUD, HUD_READOUTS } from '../hud-readouts';
 export type { HudFrame, HudReadout, HudReadoutFactory, HudReadoutName } from '../hud-readouts';
+export { CHARACTER_CHOICE, DEFAULT_CHARACTER_CHOICE } from '../character-choice';
+export type { CharacterChoiceFactory, CharacterChoiceModel, CharacterChoiceView } from '../character-choice';
 export type { HealthReading } from '../health-meter';
 export { formatHeight } from '../hud';
 export type { HudSettings } from '../hud';

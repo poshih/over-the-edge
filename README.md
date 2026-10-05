@@ -304,8 +304,8 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health and timer), camera following, backdrop, aim marks, flags, updrafts, bonfires, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, audio and message presentation, in Workshop play-tests, studio previews and releases | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
-| Notices, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
+| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, bonfires, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, audio and message presentation, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
 Plugins are build inputs, the game's own trusted code, never project data, so nothing sent to a

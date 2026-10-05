@@ -2,10 +2,11 @@ import { createHudReadout, DEFAULT_HUD_READOUTS, HUD, HUD_READOUTS } from './hud
 import type { HudFrame, HudReadout, HudReadoutName } from './hud-readouts';
 import type { HudSettings } from './hud';
 import type { RuntimePlugins } from './plugins/runtime';
+import { Disposal } from './disposal';
 import './hud-bar.css';
 
 interface Shown {
-  readonly name: HudReadoutName;
+  readonly name: HudReadoutName | 'extras';
   readonly slot: HTMLElement;
   readonly readout: HudReadout;
 }
@@ -18,8 +19,10 @@ export function createHudBar(plugins: RuntimePlugins, settings: HudSettings) {
   root.setAttribute('aria-label', 'Climb statistics');
   const shown: Shown[] = [];
   const dispose = (): void => {
-    for (const { readout } of shown.splice(0)) readout.dispose?.();
-    root.remove();
+    const disposal = new Disposal();
+    for (const { readout } of shown.splice(0)) disposal.run(() => readout.dispose?.());
+    disposal.run(() => root.remove());
+    disposal.finish();
   };
   try {
     // Resolve the complete catalogue even when project settings hide a slot. A bad wrapper must not wait until a
@@ -40,9 +43,16 @@ export function createHudBar(plugins: RuntimePlugins, settings: HudSettings) {
       const readout = createHudReadout(name, factory, slot, settings, plugins.owner(point));
       shown.push({ name, slot, readout });
     }
+    for (const { plugin, value: factory } of plugins.list(HUD.extras)) {
+      const slot = document.createElement('div');
+      slot.className = 'hud-slot hud-extra';
+      root.append(slot);
+      const readout = createHudReadout('extras', factory, slot, settings, plugin);
+      shown.push({ name: 'extras', slot, readout });
+    }
   } catch (error) {
-    dispose();
-    throw error;
+    // Construction failed first; complete teardown without replacing that refusal.
+    try { dispose(); } finally { throw error; }
   }
   return {
     root,

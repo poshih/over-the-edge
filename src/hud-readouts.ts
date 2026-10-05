@@ -4,9 +4,9 @@ import type { HealthReading } from './health-meter';
 import { formatHeight } from './hud';
 import type { HudSettings } from './hud';
 import type { InputMode } from './config';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { listPoint, PluginError, slotPoint } from './plugins/kernel';
 
-// Shared play readouts: runtime facets replace or wrap these points (docs/runtime-plugins.md).
+// Shared play readouts: runtime facets replace or wrap the built-ins and add extras (docs/runtime-plugins.md).
 
 export const HUD_READOUTS = ['height', 'health', 'timer'] as const;
 export type HudReadoutName = (typeof HUD_READOUTS)[number];
@@ -47,6 +47,8 @@ export const HUD = Object.freeze({
   height: slotPoint('hud.height', 'runtime', readoutFactory),
   health: slotPoint('hud.health', 'runtime', readoutFactory),
   timer: slotPoint('hud.timer', 'runtime', readoutFactory),
+  // The engine adds no extras. Each plugin's factories follow the three built-in slots, in manifest order.
+  extras: listPoint('hud.extras', 'runtime', 32, readoutFactory),
 });
 
 // A labelled value, as the engine's readouts show it.
@@ -87,17 +89,20 @@ export const DEFAULT_HUD_READOUTS: Readonly<Record<HudReadoutName, HudReadoutFac
 });
 
 // Builds `name`'s readout from `factory` in `mount`, checking what it returns.
-export function createHudReadout(name: HudReadoutName, factory: HudReadoutFactory, mount: HTMLElement, settings: HudSettings,
+export function createHudReadout(name: HudReadoutName | 'extras', factory: HudReadoutFactory, mount: HTMLElement, settings: HudSettings,
   plugin: string | null): HudReadout {
   const point = HUD[name].id;
-  let readout: unknown;
-  try { readout = factory(mount, settings); } catch (error) {
+  try {
+    const readout: unknown = factory(mount, settings);
+    if (typeof readout !== 'object' || readout === null || Array.isArray(readout) ||
+      typeof Reflect.get(readout, 'update') !== 'function' ||
+      Reflect.get(readout, 'dispose') !== undefined && typeof Reflect.get(readout, 'dispose') !== 'function') {
+      throw new PluginError('invalid-contribution',
+        `Plugin "${plugin ?? 'engine'}": the HUD's ${name} readout must return update(frame) and, when given, dispose().`, plugin, point);
+    }
+    return readout as HudReadout;
+  } catch (error) {
+    if (error instanceof PluginError && error.plugin === plugin && error.point === point) throw error;
     throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${point}".`, plugin, point, { cause: error });
   }
-  if (typeof readout !== 'object' || readout === null || typeof Reflect.get(readout, 'update') !== 'function' ||
-    Reflect.get(readout, 'dispose') !== undefined && typeof Reflect.get(readout, 'dispose') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": the HUD's ${name} readout must return update(frame) and, when given, dispose().`, plugin, point);
-  }
-  return readout as HudReadout;
 }

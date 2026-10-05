@@ -2,8 +2,8 @@
 
 A plugin's **release facet** supplies the services only a release needs: signing players in and
 granting access to the game's content, the game's own phantom backend, the library models each
-player has, and callbacks through the load. It runs only in releases built with it, never in the
-Workshop or a [studio preview](#studio-previews). Its SDK is
+player has, callbacks through the load, and shell notices and fatal errors. It runs only in
+releases built with it, never in the Workshop or a [studio preview](#studio-previews). Its SDK is
 [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts). [Plugins](plugins.md) describes the
 manifest, points and verbs.
 
@@ -32,11 +32,12 @@ which returns the plugin's contributions, or a promise of them.
 
 The release starts its release facets first, one at a time in manifest order, awaiting each
 `start`, before it fetches anything: a plugin can sign the player in before the first grant is
-asked for. It then composes their contributions, resolves `NOTICES`, `ACCESS` and `FAILED`
+asked for. It then composes their contributions, resolves `FATAL`, `NOTICES`, `ACCESS` and `FAILED`
 once, and loads the game. In a build without phantoms it also resolves `PHANTOMS` against `null`, refusing only
 a non-null result. Runtime facets start after that, once for each load attempt. In a build with
 phantoms the optional consumer resolves `PHANTOMS` when it starts after the game loads; the
-release session caches that slot for its whole life. Release notices live across all load attempts.
+release session caches that slot for its whole life. Release notices and the fatal display live
+across all load attempts.
 
 ## The signal
 
@@ -267,8 +268,8 @@ export default defineRelease({
 ## Notices
 
 `NOTICES` is the release slot `release.notices`, holding a `NoticesFactory`,
-`(mount: HTMLElement) => Notices`. Its contract, default and creation checks live in
-[`src/notice.ts`](../src/notice.ts) and are exported from the release SDK:
+`(mount: HTMLElement) => Notices`. The contract and default are exported from the release SDK;
+the creation checks live in [`src/notice.ts`](../src/notice.ts):
 
 ```ts
 interface Notices {
@@ -298,13 +299,52 @@ a malformed object fails with `invalid-contribution`, and a throwing factory fai
 The Workshop keeps its engine notices. Studio previews have no release facets and therefore
 also keep `DEFAULT_NOTICES`.
 
+## Fatal display
+
+`FATAL` is the release slot `release.fatal`, holding a `FatalDisplayFactory`,
+`(element: HTMLElement) => FatalDisplay`. A release facet uses `replace(FATAL, factory)` or
+`wrap(FATAL, decorate)`. The contract and default are exported from the release SDK; the creation
+checks live in [`src/fatal-display.ts`](../src/fatal-display.ts):
+
+```ts
+interface FatalDisplay {
+  show(message: string): void;
+  dispose?(): void;
+}
+```
+
+`element` is the page's `#fatal-error` element, with `role="alert"`. `show` receives the complete
+message, including **The game could not load:** for release load failures or **The game
+stopped:** for a stopped Game. The display owns how that message appears; make errors visible
+and accessible. `DEFAULT_FATAL` unhides the element and sets its text to the message, exactly
+as the engine did before the point existed.
+
+The release starts with the engine's display, so a failure before release facets compose,
+including a throwing `start`, still has a fatal writer. After `ReleasePlugins.start` succeeds,
+`Release.run()` resolves `FATAL` once with `DEFAULT_FATAL` as its base, before resolving the
+other services. If the factory is unchanged the initial engine instance stays; otherwise the
+resolved factory creates the release's display. A malformed object fails with
+`invalid-contribution`, and a throwing factory fails with `plugin-failed`, naming the release
+plugin and `release.fatal`. A failed resolution or construction stops startup, rather than
+loading with a masking default.
+
+The chosen display handles both the release's own fatal paths and its Games' `onFatal`
+callback. It is neither cleared nor replaced between load attempts or Games, and remains
+available after a fatal error. Optional `dispose()` runs when the release closes, before its
+facet signals abort; release listeners and any nodes added by the display there. `show` is
+event-driven, with no per-frame update or idle animation loop.
+
+Studio previews have no release facets and keep `DEFAULT_FATAL`. The Workshop passes its own
+`#fatal-error` writer to Game's `onFatal` option and keeps the engine's text display; runtime facets
+cannot contribute to `FATAL`.
+
 ## Studio previews
 
 A [studio preview](plugins.md#studio-previews), which the project server's **Publish** builds,
 drops every release facet: `virtual:game-plugins/release` lists none. The preview therefore uses
-public access to its own content and the engine's notices, has no phantom backend and packages no library models, while
-the game's kinds and runtime facets still run. Try a release facet with `npm run dev:game` or a
-release build instead.
+public access to its own content and the engine's notices and fatal display, has no phantom
+backend and packages no library models, while the game's kinds and runtime facets still run.
+Try a release facet with `npm run dev:game` or a release build instead.
 
 ## Errors
 
@@ -313,8 +353,9 @@ release build instead.
 - A `start` that throws, or rejects, fails with `plugin-failed`, naming the plugin.
 - Contributions that break the rules fail with their [codes](plugins.md#errors), naming the
   plugin and the point. `ACCESS` refuses access without `grant()`, or with a `select` that is not
-  a function, `PHANTOMS` a service without `submit()` and `nearby()`, and `NOTICES` a factory
-  whose instance does not provide `show(text, kind)` and `dispose()`.
+  a function, `PHANTOMS` a service without `submit()` and `nearby()`, `NOTICES` a factory
+  whose instance does not provide `show(text, kind)` and `dispose()`, and `FATAL` a factory
+  whose instance lacks `show(message)` or supplies a non-function `dispose`.
 - An error a `PROGRESS`, `MODEL_FAILED` or `READY` callback throws fails with `plugin-failed`,
   naming the plugin and the point.
 

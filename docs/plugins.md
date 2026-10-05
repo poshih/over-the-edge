@@ -61,8 +61,8 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | Facet | Runs in | SDK | For | Virtual module |
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
-| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows and sounds: HUD readouts, camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and messages. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
-| `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
+| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows and sounds: HUD readouts and extras, camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and messages; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
+| `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
 - A facet imports the engine only through an SDK: its own environment's, or that of an
@@ -218,7 +218,7 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | `reserved-plugin` | A plugin is named `engine` |
 | `invalid-facet` | A facet's default export has the wrong shape; a build refused a facet file its boundary forbids; a build was asked for a virtual module it does not serve |
 | `unknown-point` | A contribution names a point its environment does not have |
-| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a readout, look, camera director, backdrop, aim marks, scene layer, audio output, toasts or notices; a message presenter returned a non-promise or invalid outcome, or a toast's show returned a non-boolean |
+| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a readout, look, camera director, backdrop, aim marks, scene layer, audio output, toasts, character choice view, notices or fatal display; a character choice view selected a non-integer index or an index outside its labels; a message presenter returned a non-promise or invalid outcome, or a toast's show returned a non-boolean |
 | `duplicate-contribution` | A plugin contributes to one point twice |
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
@@ -369,6 +369,8 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`hud.height`](runtime-plugins.md#hud-readouts) | `HUD.height` | `runtime` | Slot, `HudReadoutFactory` | `DEFAULT_HUD_READOUTS.height` |
 | [`hud.health`](runtime-plugins.md#hud-readouts) | `HUD.health` | `runtime` | Slot, `HudReadoutFactory` | `DEFAULT_HUD_READOUTS.health` |
 | [`hud.timer`](runtime-plugins.md#hud-readouts) | `HUD.timer` | `runtime` | Slot, `HudReadoutFactory` | `DEFAULT_HUD_READOUTS.timer` |
+| [`hud.extras`](runtime-plugins.md#extra-readouts) | `HUD.extras` | `runtime` | List, 32 `HudReadoutFactory` | None |
+| [`ui.character-choice`](runtime-plugins.md#character-choice) | `CHARACTER_CHOICE` | `runtime` | Slot, `CharacterChoiceFactory` | `DEFAULT_CHARACTER_CHOICE`; releases and studio previews with two profiles only |
 | [`looks.flag`](runtime-plugins.md#object-looks) | `LOOKS.flag` | `runtime` | Slot, `() => ObjectLook<TriggerObject>` | `DEFAULT_LOOKS.flag` |
 | [`looks.updraft`](runtime-plugins.md#object-looks) | `LOOKS.updraft` | `runtime` | Slot, `() => ObjectLook<TriggerObject>` | `DEFAULT_LOOKS.updraft` |
 | [`looks.bonfire`](runtime-plugins.md#object-looks) | `LOOKS.bonfire` | `runtime` | Slot, `() => BonfireLook` | `DEFAULT_LOOKS.bonfire` |
@@ -388,6 +390,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`messages.popup`](runtime-plugins.md#messages) | `MESSAGES.popup` | `runtime` | Slot, `PopupPresenter` | `DEFAULT_MESSAGE_POPUP` |
 | [`messages.video`](runtime-plugins.md#messages) | `MESSAGES.video` | `runtime` | Slot, `VideoPresenter` | `DEFAULT_MESSAGE_VIDEO` |
 | [`release.notices`](release-plugins.md#notices) | `NOTICES` | `release` | Slot, `NoticesFactory` | `DEFAULT_NOTICES`; studio previews keep the engine default |
+| [`release.fatal`](release-plugins.md#fatal-display) | `FATAL` | `release` | Slot, `FatalDisplayFactory` | `DEFAULT_FATAL`; studio previews and the Workshop keep the engine default |
 | [`release.access`](release-plugins.md#access-and-sign-in) | `ACCESS` | `release` | Slot, `ContentAccess` | `publicAccess(contentUrl)` |
 | [`release.phantoms`](release-plugins.md#phantom-backend) | `PHANTOMS` | `release` | Slot, `PhantomService \| null` | `httpPhantoms(phantomsUrl)` in a build with a phantom URL, otherwise `null` |
 | [`release.failed`](release-plugins.md#load-failures-and-progress) | `FAILED` | `release` | Slot, `(error: ContentError) => Promise<void>` | Rejects with the error, which stops the load |

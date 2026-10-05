@@ -1,4 +1,5 @@
 import { HUD } from '../hud-readouts';
+import { CHARACTER_CHOICE } from '../character-choice';
 import { LOOKS } from '../object-looks';
 import { CAMERA } from '../camera-director';
 import { BACKDROP } from '../backdrop';
@@ -21,7 +22,7 @@ export interface RuntimeFacet {
 export function defineRuntime<T extends RuntimeFacet>(facet: T): T { return facet; }
 
 export const RUNTIME = Object.freeze([
-  ...Object.values(HUD), ...Object.values(LOOKS), CAMERA, BACKDROP, AIM_MARKS, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES),
+  ...Object.values(HUD), CHARACTER_CHOICE, ...Object.values(LOOKS), CAMERA, BACKDROP, AIM_MARKS, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES),
 ]);
 
 function checkRuntime(value: unknown, plugin: string): RuntimeFacet {

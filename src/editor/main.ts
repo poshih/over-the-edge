@@ -53,6 +53,10 @@ const canvas = document.querySelector<HTMLCanvasElement>('#game');
 const mount = document.querySelector<HTMLElement>('#interface');
 const fatal = document.querySelector<HTMLElement>('#fatal-error');
 if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface mounts are required.');
+const showFatal = (message: string): void => {
+  fatal.hidden = false;
+  fatal.textContent = message;
+};
 
 // Runtime facets start before the UI exists; their notices are explicitly buffered until it mounts.
 const startupNotices: { message: string; kind: 'info' | 'error' }[] = [];
@@ -61,8 +65,7 @@ function startRuntime(): RuntimePlugins {
   try {
     return RuntimePlugins.start(runtimeFacets, { notice: (message, kind) => runtimeNotice(message, kind) });
   } catch (error) {
-    fatal!.hidden = false;
-    fatal!.textContent = `The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`;
+    showFatal(`The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
 }
@@ -74,8 +77,7 @@ function boot<T>(create: () => T, discard: () => void): T {
   try {
     return create();
   } catch (error) {
-    fatal!.hidden = false;
-    fatal!.textContent = `The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`;
+    showFatal(`The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`);
     try { discard(); } finally { runtimePlugins.dispose(); }
     throw error;
   }
@@ -104,7 +106,8 @@ const audio = boot(() => createGameAudio(runtimePlugins.slot(AUDIO, DEFAULT_AUDI
   notice: (message) => runtimeNotice(message, 'error'),
 }, runtimePlugins.owner(AUDIO)), () => audioDevice.dispose());
 const game = boot(() => new Game({
-  canvas, fatal, eventMount: mount, level: level.definition(),
+  canvas, eventMount: mount, level: level.definition(),
+  onFatal: showFatal,
   characterModels: createCharacterModelLoader(),
   decorations: createDecorationView,
   media,

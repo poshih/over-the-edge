@@ -14,8 +14,11 @@ import type { AppearanceSource } from './appearance-loader';
 import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
 import type { MediaHost } from './media-host';
+import { Disposal } from './disposal';
 import { createPlayUI } from './play-ui';
 import { DEFAULT_NOTICES, NOTICES } from './notice';
+import { createFatalDisplay, DEFAULT_FATAL, FATAL } from './fatal-display';
+import type { FatalDisplay } from './fatal-display';
 import { ACCESS, FAILED, MODEL_FAILED, PHANTOMS, PROGRESS, READY, ReleasePlugins } from './plugins/release';
 import type { ReleaseApi, ReleaseFacet } from './plugins/release';
 import { RuntimePlugins } from './plugins/runtime';
@@ -75,7 +78,8 @@ function isAbort(error: unknown): boolean {
 export class Release {
   private readonly canvas: HTMLCanvasElement;
   private readonly mount: HTMLElement;
-  private readonly fatal: HTMLElement;
+  private readonly fatalElement: HTMLElement;
+  private fatalDisplay: FatalDisplay;
   private readonly code: ReleaseCode;
   private readonly lifecycle = new AbortController();
   private readonly ui: ReturnType<typeof createPlayUI>;
@@ -87,7 +91,8 @@ export class Release {
   constructor(elements: { canvas: HTMLCanvasElement; mount: HTMLElement; fatal: HTMLElement }, code: ReleaseCode) {
     this.canvas = elements.canvas;
     this.mount = elements.mount;
-    this.fatal = elements.fatal;
+    this.fatalElement = elements.fatal;
+    this.fatalDisplay = createFatalDisplay(DEFAULT_FATAL, elements.fatal, null);
     this.code = code;
     this.ui = createPlayUI({ mount: elements.mount });
   }
@@ -106,6 +111,12 @@ export class Release {
         throw error;
       }
       const plugins = this.plugins;
+      const fatalFactory = plugins.slot(FATAL, DEFAULT_FATAL);
+      if (fatalFactory !== DEFAULT_FATAL) {
+        const display = createFatalDisplay(fatalFactory, this.fatalElement, plugins.owner(FATAL));
+        this.fatalDisplay.dispose?.();
+        this.fatalDisplay = display;
+      }
       this.ui.setNotices(plugins.slot(NOTICES, DEFAULT_NOTICES), plugins.owner(NOTICES));
       if (this.code.phantoms === null && plugins.slot(PHANTOMS, null) !== null) {
         const phantomPlugin = plugins.owner(PHANTOMS);
@@ -131,49 +142,61 @@ export class Release {
       }
       this.play(this.loaded);
     } catch (error) {
-      this.discardAttempt();
-      this.discardLoaded();
-      if (this.lifecycle.signal.aborted && isAbort(error)) return;
-      this.fatal.hidden = false;
-      this.fatal.textContent = `The game could not load: ${message(error)}`;
+      const disposal = new Disposal();
+      disposal.run(() => this.discardAttempt());
+      disposal.run(() => this.discardLoaded());
+      if (!this.lifecycle.signal.aborted || !isAbort(error)) {
+        disposal.run(() => this.fatalDisplay.show(`The game could not load: ${message(error)}`));
+      }
+      disposal.finish();
     }
   }
 
   dispose(): void {
-    this.lifecycle.abort(new DOMException('The release closed.', 'AbortError'));
-    this.discardAttempt();
-    this.discardLoaded();
-    this.ui.dispose();
-    this.plugins?.dispose();
+    const disposal = new Disposal();
+    disposal.run(() => this.lifecycle.abort(new DOMException('The release closed.', 'AbortError')));
+    disposal.run(() => this.discardAttempt());
+    disposal.run(() => this.discardLoaded());
+    disposal.run(() => this.ui.dispose());
+    disposal.run(() => this.fatalDisplay.dispose?.());
+    disposal.run(() => this.plugins?.dispose());
+    disposal.finish();
   }
 
   private discardLoaded(): void {
-    this.phantoms?.dispose();
+    const disposal = new Disposal();
+    const phantoms = this.phantoms;
+    const loaded = this.loaded;
     this.phantoms = null;
-    if (this.loaded !== null) {
-      this.loaded.lifecycle.abort(new DOMException('The game closed.', 'AbortError'));
-      this.loaded.audio.dispose();
-      this.loaded.audioDevice.dispose();
+    this.loaded = null;
+    disposal.run(() => phantoms?.dispose());
+    if (loaded !== null) {
+      disposal.run(() => loaded.lifecycle.abort(new DOMException('The game closed.', 'AbortError')));
+      disposal.run(() => loaded.audio.dispose());
+      disposal.run(() => loaded.audioDevice.dispose());
       // The game's views let go of library models before the library disposes them.
-      this.loaded.game.dispose();
-      this.loaded.library.dispose();
-      this.loaded.session.dispose();
-      this.ui.clear();
-      this.loaded.plugins.dispose();
-      this.loaded = null;
+      disposal.run(() => loaded.game.dispose());
+      disposal.run(() => loaded.library.dispose());
+      disposal.run(() => loaded.session.dispose());
+      disposal.run(() => this.ui.clear());
+      disposal.run(() => loaded.plugins.dispose());
     }
+    disposal.finish();
   }
 
   private discardAttempt(): void {
-    if (this.loading === null) return;
-    this.loading.audio?.dispose();
-    this.loading.audioDevice?.dispose();
-    this.loading.lifecycle.abort(new DOMException('The load attempt closed.', 'AbortError'));
-    this.loading.game?.dispose();
-    this.loading.library?.dispose();
-    this.loading.session.dispose();
-    this.loading.plugins.dispose();
+    const attempt = this.loading;
+    if (attempt === null) return;
     this.loading = null;
+    const disposal = new Disposal();
+    disposal.run(() => attempt.audio?.dispose());
+    disposal.run(() => attempt.audioDevice?.dispose());
+    disposal.run(() => attempt.lifecycle.abort(new DOMException('The load attempt closed.', 'AbortError')));
+    disposal.run(() => attempt.game?.dispose());
+    disposal.run(() => attempt.library?.dispose());
+    disposal.run(() => attempt.session.dispose());
+    disposal.run(() => attempt.plugins.dispose());
+    disposal.finish();
   }
 
   private async load(access: ContentAccess): Promise<Loaded> {
@@ -214,7 +237,8 @@ export class Release {
     attempt.audio = audio;
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
-      canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
+      canvas: this.canvas, onFatal: (message) => this.fatalDisplay.show(message),
+      eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
       theme: manifest.theme, enemyArt: manifest.enemies, messageStyle: manifest.hud.messages.style,
       onCue: receivesCues ? (cue) => audio.handle(cue) : undefined,
