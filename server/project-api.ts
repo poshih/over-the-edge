@@ -12,7 +12,8 @@ import { sameAvatarModelSettings } from '../src/character-profile';
 import { VISUAL_PART_IDS } from '../src/character';
 import type { VisualPartId } from '../src/character';
 import { validateCourseModel } from '../src/course-art-model';
-import { DEFAULT_LEVEL } from '../src/default-level';
+import { DEFAULT_LEVEL, defaultCourseManifest } from '../src/default-course';
+import { defaultCourseFile } from '../build/default-course';
 import { meshTerrain } from '../src/mesh-collision';
 import { validateEnemyArt } from '../src/enemy-art-data';
 import { validateGameSettings } from '../src/game-settings';
@@ -23,7 +24,7 @@ import { checkMediaBytes, MEDIA_LIMITS, mediaFile, mediaPath, mediaType } from '
 import { MODEL_LIMITS } from '../src/model-data';
 import { PHANTOM_LIMITS } from '../src/phantom-format';
 import {
-  appearanceFile, artAssetHashMatches, artFile, checkBundleSize, checkProjectReferences, defaultProjectManifest, inSection,
+  appearanceFile, artAssetHashMatches, artFile, checkBundleSize, checkProjectReferences, inSection,
   isProjectDataError, PROJECT_FILES, PROJECT_LIMITS, projectFileRefs, ProjectError, projectIdForTitle, projectTitle,
   unpackProjectBundle, validateMediaIndex, validateProjectArt, validateProjectCharacter, validateProjectId,
   validateProjectManifest, packProjectBundle, loadProjectContent,
@@ -390,8 +391,8 @@ export function createStudioHandler(config: StudioConfig) {
       id = base;
       for (let suffix = 2; taken.has(id as string); suffix++) id = `${base.slice(0, PROJECT_LIMITS.id - String(suffix).length - 1)}-${suffix}`;
     }
-    const manifest = defaultProjectManifest(title);
-    const content = loadProjectContent(manifest, () => DEFAULT_LEVEL);
+    // A new game is the built-in course, with its meshes.
+    const content = loadProjectContent(defaultCourseManifest(title), (ref) => ref.kind === 'level' ? DEFAULT_LEVEL : defaultCourseFile(ref.path));
     const state = await store.write(validateProjectId(id), content, { replace: false });
     sendJson(context.response, 201, { id, revision: state.revision, sections: state.sections, level: state.level });
   });

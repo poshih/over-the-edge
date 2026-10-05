@@ -2,7 +2,10 @@ import { loadProjectDocuments, PROJECT_FILES, ProjectError, projectFileRefs, val
 import type { ProjectDocuments, ProjectFileKind } from '../project';
 import { sha256Hex } from '../sha256';
 
-/** One of the published project's files: where it is served, and the size and SHA-256 it was built with. */
+/**
+ * A file this Workshop serves, its published project's or the built-in course's: where it is served, and the size and
+ * SHA-256 it was built with.
+ */
 export interface PublishedFile {
   readonly path: string;
   readonly url: string;
@@ -31,14 +34,14 @@ export interface OpenedProject extends ProjectDocuments {
 const OPENING: ReadonlySet<ProjectFileKind> = new Set(['level', 'character', 'appearance']);
 
 function unavailable(path: string, detail: string): ProjectError {
-  return new ProjectError(`The published project's ${path} could not be downloaded (${detail}). Check the connection, then try again.`, { section: path });
+  return new ProjectError(`${path} could not be downloaded from this Workshop (${detail}). Check the connection, then try again.`, { section: path });
 }
 
 function mismatch(path: string): ProjectError {
-  return new ProjectError(`The published project's ${path} does not match this Workshop; reload the page to get the current deployment.`, { section: path });
+  return new ProjectError(`${path} does not match this Workshop; reload the page to get the current deployment.`, { section: path });
 }
 
-/** Downloads one published file, checked against the size and SHA-256 this Workshop was built with. */
+/** Downloads one file this Workshop serves, checked against the size and SHA-256 it was built with. */
 export async function downloadPublishedFile(file: PublishedFile, signal: AbortSignal,
   received: (bytes: number) => void = () => undefined): Promise<Uint8Array<ArrayBuffer>> {
   // Sizes are known from the build, so the file streams into one buffer of its exact size.

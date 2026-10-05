@@ -168,7 +168,7 @@ Level tab, place that file inside the project (for example
 GAME_LEVEL=levels/my-level.json npm run build:game
 ```
 
-Without `GAME_LEVEL`, the build uses the built-in course. The selected data is
+Without `GAME_LEVEL`, the build uses the built-in course with its meshes. The selected data is
 validated and packaged as content at build time; the game needs no editor or external
 level service. The `/media/` files its events play are packaged from `public/media/`,
 and a game build fails on any source it cannot package, such as an external URL. Level exports do not contain gameplay settings, sprite layouts,
@@ -620,7 +620,7 @@ at the drawing zoom, so pointer samples do not become hundreds of physics edges.
 Tap the first point, press **Enter**, or choose **Finish shape** to close the
 outline. Clockwise and counterclockwise input both work; the shared terrain
 converter normalizes winding and rejects invalid geometry. Concave outlines,
-including ledges and notches, use the same outline format as the built-in course.
+including ledges and notches, are stored as one outline mesh like any drawn shape.
 
 **Undo point / stroke**, Backspace, or Ctrl/Cmd+Z removes the last point or
 completed stroke. During a stroke, undo cancels only that in-progress stroke.
@@ -642,13 +642,14 @@ authored level; the draft remains available for undo or cancellation. Curves are
 polygonal approximations, not Bezier surfaces. Separate objects can surround an
 opening, or a GLB mesh can bring a slice with holes.
 
-The built-in demo's large `ascent` obstacle is an **18-point hand-authored
-concave polygon** in `src/course.ts`, not a stack of blocks. Its extrusion has
-**68 triangles**, and its collision is one static closed chain with 18 edges.
-Geometry is cached and shared, and static objects do not rebuild geometry or
-rewrite instance transforms each frame. Drawing uses this same rendering and
-collision path; finished outlines cost according to their edge/template count,
-not their on-screen size.
+The built-in course is built from GLB meshes, as any course can be: its
+`ascent` is a **Cliff** mesh, not a stack of blocks, whose slice on the obstacle line is
+one static closed chain of 19 edges with the climb's ledges and overhang; its ground declares
+a box, and a boulder and a mirrored crag make the rest (see
+[the built-in course](docs/course-artwork.md#the-built-in-course)). Geometry is cached and
+shared, and static objects do not rebuild geometry or rewrite instance transforms each frame.
+Drawn outlines use the same rendering and collision path; they cost according to their
+edge/template count, not their on-screen size.
 
 ### Trigger objects and events
 

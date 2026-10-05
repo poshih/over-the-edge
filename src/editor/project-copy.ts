@@ -1,5 +1,5 @@
 import { loadProjectDocuments, PROJECT_FILES, ProjectError, projectFileRefs, validateProjectManifest } from '../project';
-import type { OpenedFile, OpenedProject, PublishedFile, PublishedProject } from './published-project';
+import type { OpenedFile, OpenedProject, PublishedFile } from './published-project';
 import { VisualStore, VisualStoreError } from './visual-store';
 
 // The record next to the project's files; no project file has this path.
@@ -58,13 +58,13 @@ function publishedReference(value: unknown): { sha256: string; bytes: number } |
 
 /**
  * This browser's copy of the open project, stored like a project directory: every file under its
- * path (JSON values; a Blob for each binary file the page holds, and the published file for each one
- * the published project serves, which stays on the site) next to one state record. A write stores only
+ * path (JSON values; a Blob for each binary file the page holds, and the served file for each one
+ * this Workshop serves, which stays on the site) next to one state record. A write stores only
  * the files that changed and removes the ones that are gone, in one transaction; after another
  * page (another tab) wrote the copy, it rewrites all of it, so the copy is always one page's project.
  */
 export class ProjectCopyStore {
-  private readonly published: PublishedProject;
+  private readonly served: readonly PublishedFile[];
   private readonly store = new VisualStore<CopyRecord>({ database: 'over-the-edge:project-copy', store: 'files', keyPath: 'path' });
   // getRandomValues, unlike randomUUID, also works on plain-HTTP addresses.
   private readonly writer = Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -75,10 +75,10 @@ export class ProjectCopyStore {
   private mark: WriteMark | null = null;
   private readMark: WriteMark | null = null;
 
-  // `published` resolves the copy's published files: a copy started from an older deployment opens while this one
-  // still serves the files it uses.
-  constructor(published: PublishedProject) {
-    this.published = published;
+  // `served`, the files this Workshop serves (its published project's and the built-in course's), resolves the copy's
+  // published files: a copy started from an older deployment opens while this one still serves the files it uses.
+  constructor(served: readonly PublishedFile[]) {
+    this.served = served;
   }
 
   // Reads the copy without its files' bytes: JSON files are validated as a project's, binary files stay Blobs this page
@@ -148,7 +148,7 @@ export class ProjectCopyStore {
 
   // The file this deployment serves with a stored published file's bytes, wherever it is.
   private publishedFile(path: string, reference: { sha256: string; bytes: number }): PublishedFile {
-    const file = this.published.files.find((candidate) => candidate.sha256 === reference.sha256 && candidate.bytes === reference.bytes);
+    const file = this.served.find((candidate) => candidate.sha256 === reference.sha256 && candidate.bytes === reference.bytes);
     if (file === undefined) {
       throw new ProjectError(`This browser's copy of the project uses ${path} from a published version this site no longer serves.`, { section: path });
     }

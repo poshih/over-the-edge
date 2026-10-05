@@ -1,9 +1,9 @@
 import type { Point } from '../config';
-import { DEFAULT_LEVEL } from '../default-level';
+import { STARTER_LEVEL } from '../default-course';
 import { ENEMY_BEHAVIOR, ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import {
-  DECORATION_LIMITS, ILLUSION, isDecorationObject, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, LevelError,
+  DECORATION_LIMITS, ILLUSION, isDecorationObject, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError,
   meshIsCircle, ROCK_COLOR, SHAPE_KINDS, objectContains, objectLoops, shapeMesh, shapeOutline, terrainFromOutline, TRIGGER_LIMITS,
   TRIGGER_MARKERS, validateLevel, validateLevelObject,
 } from '../level';
@@ -1809,14 +1809,11 @@ Export the level first if you want to keep them. Continue without saving?`);
   });
   action('.level-new', () => {
     const project = options.projectSave.openProject();
-    if (!window.confirm(`Start a new level? This restores the default ground and start location, and removes all other objects and labels. ${
+    if (!window.confirm(`Start a new level? This keeps flat ground and the start location, and removes all other objects and labels. ${
       project === null ? '' : `Project "${project}" keeps every saved version. `}${
       dirty() ? 'Your unsaved changes will be discarded; export first to keep them.' : ''}`)) return;
-    const ground = DEFAULT_LEVEL.objects.find((object) => object.kind === 'terrain' && object.id === 'ground');
-    const start = DEFAULT_LEVEL.objects.find((object) => object.kind === 'start');
-    if (ground === undefined || start === undefined) throw new Error('The starter level needs its authored ground and start.');
     resetSelection();
-    level.replace({ schemaVersion: LEVEL_SCHEMA_VERSION, labels: [], objects: [ground, start] });
+    level.replace(STARTER_LEVEL);
     fitCourse();
     onNotice(`New level started. Add terrain and place an ending trigger. ${keptNote()}`, 'info');
   });

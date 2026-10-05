@@ -15,7 +15,7 @@ import { validateCourseModel } from '../src/course-art-model';
 import { embeddedGlb, isCoursePackage, validateCoursePackage } from '../src/course-package';
 import { NO_DECORATION_ART, usedDecorationArt } from '../src/decoration-art';
 import type { DecorationArt } from '../src/decoration-art';
-import { DEFAULT_LEVEL } from '../src/default-level';
+import { DEFAULT_COURSE_ART, DEFAULT_COURSE_MESHES, DEFAULT_LEVEL } from '../src/default-course';
 import { DEFAULT_ENEMY_ART } from '../src/enemy-art-data';
 import type { EnemyArtSettings } from '../src/enemy-art-data';
 import { ENEMY_SPECIES } from '../src/enemy-types';
@@ -34,6 +34,7 @@ import { EMPTY_SPRITES, parseSpriteDocument, SPRITE_FILE_BYTES, validateSpriteAn
 import type { SpriteDocument } from '../src/sprite-data';
 import { DEFAULT_THEME } from '../src/theme';
 import type { GameTheme } from '../src/theme';
+import { defaultCourseMeshPath, readDefaultCourseMesh } from './default-course';
 import { openProjectSource } from './project-release';
 import type { TakenFile } from './project-release';
 import { releaseFile, sha256Hex } from './release-file';
@@ -161,24 +162,36 @@ function profile(path: string | null, variable: string, registry: AvatarRigRegis
   return character(parseSpriteDocument(readFileSync(path, 'utf8')), variable, registry);
 }
 
+// The level and course artwork of GAME_LEVEL, a level or course package, or else of the built-in course with its meshes.
+function fileCourse(path: string | null, selectedMode: string | undefined): { level: LevelDefinition; art: ReleaseInput['art'] } {
+  if (path === null) {
+    return {
+      level: DEFAULT_LEVEL,
+      art: courseArt(DEFAULT_LEVEL, artMode(selectedMode, DEFAULT_COURSE_ART.mode), DEFAULT_COURSE_MESHES.map(mesh => ({
+        id: mesh.id, name: mesh.name, read: () => ({ bytes: readDefaultCourseMesh(mesh), path: defaultCourseMeshPath(mesh) }),
+      })), DEFAULT_COURSE_ART.decorations),
+    };
+  }
+  const bytes = statSync(path).size;
+  if (bytes > ART_LIMITS.packageBytes) throw new Error('GAME_LEVEL exceeds the course package size limit.');
+  const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  const pack = isCoursePackage(raw) ? validateCoursePackage(raw) : null;
+  if (pack === null && bytes > LEVEL_LIMITS.fileBytes) throw new Error('GAME_LEVEL exceeds the level JSON size limit.');
+  const level = pack?.level ?? validateLevel(raw);
+  return {
+    level,
+    art: courseArt(level, artMode(selectedMode, pack?.mode ?? 'shapes'),
+      (pack?.assets ?? []).map(asset => ({ id: asset.id, name: asset.name, read: () => ({ bytes: embeddedGlb(asset.source), path: null }) })),
+      pack?.decorations ?? NO_DECORATION_ART),
+  };
+}
+
 // A build from the per-file inputs: a level or course package, settings and up to two profiles.
 // Its /media/ sources come from public/media/.
 export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode: string | undefined,
   avatarRigs: AvatarRigRegistry): ReleaseInput {
   const watched = [files.level, files.settings, files.sprites, files.alternateSprites].filter((path): path is string => path !== null);
-  let raw: unknown = DEFAULT_LEVEL;
-  let bytes = 0;
-  if (files.level !== null) {
-    bytes = statSync(files.level).size;
-    if (bytes > ART_LIMITS.packageBytes) throw new Error('GAME_LEVEL exceeds the course package size limit.');
-    raw = JSON.parse(readFileSync(files.level, 'utf8'));
-  }
-  const pack = isCoursePackage(raw) ? validateCoursePackage(raw) : null;
-  if (pack === null && bytes > LEVEL_LIMITS.fileBytes) throw new Error('GAME_LEVEL exceeds the level JSON size limit.');
-  const level = pack?.level ?? validateLevel(raw);
-  const art = courseArt(level, artMode(selectedMode, pack?.mode ?? 'shapes'),
-    (pack?.assets ?? []).map(asset => ({ id: asset.id, name: asset.name, read: () => ({ bytes: embeddedGlb(asset.source), path: null }) })),
-    pack?.decorations ?? NO_DECORATION_ART);
+  const { level, art } = fileCourse(files.level, selectedMode);
   let settings = DEFAULT_GAME_SETTINGS;
   if (files.settings !== null) {
     if (statSync(files.settings).size > GAME_SETTINGS_LIMITS.fileBytes) throw new Error('GAME_SETTINGS exceeds the file size limit.');

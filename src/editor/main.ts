@@ -4,7 +4,7 @@ import './style.css';
 import { Vector3 } from 'three';
 import { SPRITE_TARGET_IDS } from '../character';
 import type { PlayerSpawn, Point, UiActionOptions } from '../config';
-import { DEFAULT_LEVEL } from '../default-level';
+import { DEFAULT_LEVEL } from '../default-course';
 import { GameSettingsError, withRig } from '../game-settings';
 import type { GameSettings } from '../game-settings';
 import { Game } from '../game';
@@ -236,8 +236,8 @@ const courseMeshes = new CourseArtView({
   },
 });
 game.view.addLayer(courseMeshes);
-courseMeshes.setMode(project.courseLook());
-const unsubscribeCourseLook = project.subscribe(() => courseMeshes.setMode(project.courseLook()));
+// The course takes the project's look once the project has opened, so meshes of a course replaced at start never load.
+let unsubscribeCourseLook = (): void => undefined;
 // The figure Level / Replays poses: one held phantom, none played by the game.
 const replayFigure = new PhantomView({ figures: 0 });
 game.view.addLayer(replayFigure);
@@ -426,7 +426,11 @@ declare global {
 }
 window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
-void project.start().then(() => plugins.start());
+void project.start().then(() => {
+  courseMeshes.setMode(project.courseLook());
+  unsubscribeCourseLook = project.subscribe(() => courseMeshes.setMode(project.courseLook()));
+  plugins.start();
+});
 game.start((state) => {
   ui.update({
     ...state, debug, practice: practice(),

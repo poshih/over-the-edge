@@ -124,6 +124,23 @@ built-in meshes and drawn shapes, and a GLB drawn as its collision.
 Each distinct collision, mirrored or not, is one physics shape and one extruded template;
 a level has at most 64. A GLB that declares `box` shares the built-in block's.
 
+## The built-in course
+
+The course every new game starts from is built this way, from the engine's own GLBs in
+`src/default-course/meshes/`: a **Ground slab** that declares `box`, a **Cliff** that
+collides as its slice, the climb's ledges and its overhang, a **Boulder**, the vault, and a
+**Crag** closing each end of the course, mirrored on the right. `src/default-course/course.json`
+lists the GLBs with their asset IDs and holds the level, its collision included.
+
+`node scripts/default-course/generate.mjs` makes all of it. It models each rock from an
+outline: through the middle of its depth the walls are the outline itself, so the slice is
+that outline; toward the front and back they chamfer in and the faces bulge, roughened by
+seeded noise. The GLBs have rough, non-metallic PBR materials coloured per vertex and no
+normals, so they are drawn flat-shaded. The script slices them with the engine's own slicer,
+places them and validates the level. About 6,800 triangles and 100 KB together, they load in
+the Workshop when it draws them; new server projects copy them, and builds without
+`GAME_LEVEL` package them.
+
 ## Course look
 
 **Project / Course artwork / Course look** chooses how the Workshop and releases draw the
@@ -195,8 +212,9 @@ GAME_LEVEL=courses/my-course.json GAME_ART_MODE=shapes npm run build:game
 GAME_LEVEL=courses/my-course.json GAME_ART_MODE=meshes npm run build:game
 ```
 
-`GAME_ART_MODE` also works with `npm run dev:game`. Plain level JSON and the built-in
-course default to shapes. Meshes mode needs a package containing every placed GLB.
+`GAME_ART_MODE` also works with `npm run dev:game`. Plain level JSON defaults to shapes;
+the [built-in course](#the-built-in-course), built without `GAME_LEVEL`, to meshes, with its
+own GLBs. Meshes mode needs a package containing every placed GLB.
 Unknown modes, missing assets, invalid GLBs, and content/hash mismatches fail the build
 instead of producing a misleading release. Mesh releases package each drawn GLB once as
 release content and load all of them, in parallel and verified, before play starts. Both

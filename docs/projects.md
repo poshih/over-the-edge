@@ -211,7 +211,7 @@ project waits for **Keep my version** or **Use the project's**.
   downloaded from wherever the page has it as it is sent. If saving stops part way, the
   rest saves like any change; until the new project holds everything, a reload opens the
   project the page came from, and this browser's copy stays as it was.
-- **New project** starts from the built-in course and defaults.
+- **New project** starts from the [built-in course](course-artwork.md#the-built-in-course), with its meshes, and defaults.
 - **Export project file** downloads the whole game as one bundle; **Import project
   file** replaces the Workshop's game with one. Both work without a server.
 - **Publish standalone game** saves unsaved changes, builds the release on the

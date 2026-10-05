@@ -9,10 +9,9 @@ import { embeddedModel } from '../character-profile';
 import { checkCharacterModels } from '../character-model-check';
 import { ART_LIMITS, ArtError, artName } from '../art-types';
 import type { ArtMode } from '../art-types';
-import { NO_DECORATION_ART } from '../decoration-art';
 import type { DecorationArt } from '../decoration-art';
 import { validateCoursePackage } from '../course-package';
-import { DEFAULT_LEVEL } from '../default-level';
+import { STARTER_LEVEL } from '../default-course';
 import { DEFAULT_ENEMY_ART, validateEnemyArt } from '../enemy-art-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
 import type { GameSettings } from '../game-settings';
@@ -53,6 +52,7 @@ import { ProjectApiError, ProjectClient } from './project-client';
 import type { PublishRecord, ServerHealth, ServerProjectSummary, ServerRevisions } from './project-client';
 import { ProjectCopyStore } from './project-copy';
 import type { ProjectCopy } from './project-copy';
+import { DEFAULT_COURSE_FILES, openDefaultCourse } from './default-course-files';
 import { downloadPublishedFile, loadPublishedProject } from './published-project';
 import type { OpenedFile, OpenedProject, PublishedFile, PublishedProject } from './published-project';
 import { ServerModelError } from './server-models';
@@ -336,7 +336,8 @@ export class ProjectSession {
   private hud: HudSettings = DEFAULT_HUD;
   private audio: AudioSettings = DEFAULT_AUDIO;
   private enemies: EnemyArtSettings = DEFAULT_ENEMY_ART;
-  private art: CourseArt = { mode: 'meshes', assets: [], decorations: NO_DECORATION_ART };
+  // The page starts on the built-in course, which DEFAULT_LEVEL draws with these meshes.
+  private art: CourseArt = openedArt(openDefaultCourse(this.title));
   private media = new Map<string, MediaItem>();
   private mediaVersion = 0;
   private library: LibraryItem[] = [];
@@ -396,7 +397,7 @@ export class ProjectSession {
     this.plugins = options.plugins ?? NO_PLUGINS;
     this.client = options.client ?? new ProjectClient();
     this.published = options.published ?? null;
-    this.copy = this.published === null ? null : new ProjectCopyStore(this.published);
+    this.copy = this.published === null ? null : new ProjectCopyStore([...this.published.files, ...DEFAULT_COURSE_FILES]);
   }
 
   // After the editors restore their browser-local state: find the server and open its project, the one this page
@@ -915,7 +916,7 @@ export class ProjectSession {
   // Starts a new game from the built-in course and defaults, not yet saved anywhere.
   async newProject(): Promise<boolean> {
     return this.run('Starting a new project', async () => {
-      await this.applyContent(openedContent(loadProjectContent(defaultProjectManifest('Untitled game'), () => DEFAULT_LEVEL)));
+      await this.applyContent(openDefaultCourse('Untitled game'));
       await this.storeCopy();
       // A failed copy keeps its notice.
       if (this.error !== null) return;
@@ -1094,8 +1095,8 @@ export class ProjectSession {
         if (sources.some((source) => source.server === valid && source.blob === null && source.published === null)) {
           throw new ProjectError(`Some of this page's files are kept only in project "${valid}"; save as another project ID.`);
         }
-        // The project starts as a new game, then takes this page's files and every section.
-        const state = await this.client.putBundle(valid, packProjectBundle(loadProjectContent(defaultProjectManifest(this.title), () => DEFAULT_LEVEL)));
+        // The project starts as an empty game, then takes this page's files and every section.
+        const state = await this.client.putBundle(valid, packProjectBundle(loadProjectContent(defaultProjectManifest(this.title), () => STARTER_LEVEL)));
         // Files the page kept there are gone, so they are sent again from the page's own sources.
         for (const [path, item] of this.media) if (item.server === valid) this.media.set(path, { ...item, server: null });
         this.art = { ...this.art, assets: this.art.assets.map((asset) => asset.server === valid ? { ...asset, server: null } : asset) };
