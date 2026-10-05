@@ -1,6 +1,7 @@
 import type { Tuning } from '../config';
 import {
-  CURSOR_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS, TUNING_FIELDS, validateGameSettings, withRig,
+  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, CURSOR_RETURN_IDLE_SECONDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS,
+  TUNING_FIELDS, validateGameSettings, withRig,
 } from '../game-settings';
 import type { CursorSettings, GameSettings } from '../game-settings';
 import { minReachLimit, rigGeometry } from '../rig';
@@ -144,7 +145,8 @@ export function createUI(options: UiOptions): GameUi {
   const groups = new Map<string, HTMLFieldSetElement>();
   const controls = new Map<keyof Tuning, RangeControl>();
   const rigControls = new Map<keyof RigSettings, RangeControl>();
-  const cursorControls = new Map<keyof CursorSettings, RangeControl>();
+  const cursorControls = new Map<Exclude<keyof CursorSettings, 'returnToHammer'>, RangeControl>();
+  const returnToggle = document.createElement('input');
   const practiceButtons = new Map<PracticeId, HTMLButtonElement>();
   const tuningGroups = element<HTMLElement>(root, '.tuning-groups');
   const practiceGrid = element<HTMLElement>(root, '.practice-grid');
@@ -173,6 +175,14 @@ export function createUI(options: UiOptions): GameUi {
       if (!control) throw new Error(`Missing cursor control: ${field.key}`);
       if (field.key === 'maxTargetRadius') control.input.max = String(reach);
       control.setValue(settings.cursor[field.key]);
+    }
+    returnToggle.checked = settings.cursor.returnToHammer;
+    for (const field of CURSOR_RETURN_FIELDS) {
+      const control = cursorControls.get(field.key);
+      if (!control) throw new Error(`Missing cursor control: ${field.key}`);
+      // Off keeps the return's values for when it is turned on again.
+      control.setValue(settings.cursor[field.key], { disabled: !settings.cursor.returnToHammer });
+      control.row.classList.toggle('is-inactive', !settings.cursor.returnToHammer);
     }
   }
   function commitSettings(next: GameSettings): void {
@@ -257,15 +267,40 @@ export function createUI(options: UiOptions): GameUi {
   hammerHead.body.append(hammerHeadMount);
   tuningGroups.append(hammerHead.root);
   const cursorGroup = tuningSection({
-    id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius and dead zone',
+    id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius, dead zone and return',
   }, 'Cursor target', 'tuning-group cursor-settings');
   const cursorHelp = document.createElement('p');
   cursorHelp.className = 'cursor-target-help';
-  cursorHelp.textContent = 'The hammer aims inside a circle around its shoulder hinge. The target moves with the character and keeps your chosen offset until you aim again. ' +
-    'There is no return to the hammer or hinge. The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it. ' +
+  cursorHelp.textContent = 'The hammer aims inside a circle around its shoulder hinge. The target moves with the character and keeps your chosen offset until you aim again, ' +
+    'unless Return target to hammer, below, is on. The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it. ' +
     'The cursor moves freely within the dead zone around the target, then drags the target along, so it can reach the dead zone past the radius.';
   cursorGroup.append(cursorHelp);
   for (const field of CURSOR_FIELDS) {
+    const control = createRangeControl(field, {
+      id: `cursor-${field.key}`, name: field.key, signal: events.signal,
+      onInput: (value) => editSettings({ ...settings, cursor: { ...settings.cursor, [field.key]: value } }),
+    });
+    cursorControls.set(field.key, control);
+    cursorGroup.append(control.row);
+  }
+  returnToggle.type = 'checkbox';
+  returnToggle.id = 'cursor-returnToHammer';
+  const returnLabel = document.createElement('label');
+  returnLabel.className = 'cursor-return-toggle';
+  returnLabel.htmlFor = returnToggle.id;
+  returnLabel.append(returnToggle, document.createTextNode('Return target to hammer'));
+  const returnHelp = document.createElement('p');
+  returnHelp.id = 'cursor-return-help';
+  returnHelp.className = 'cursor-target-help';
+  returnHelp.textContent = `Off by default. On, once you stop aiming for ${CURSOR_RETURN_IDLE_SECONDS} s while the hammer head touches a surface, ` +
+    'the target eases toward the head plus the return offset, and the cursor moves with it; aiming always comes first. ' +
+    'X goes right and Y goes up, in world metres; the offset does not turn with the hammer.';
+  returnToggle.setAttribute('aria-describedby', returnHelp.id);
+  returnToggle.addEventListener('change', () => editSettings({
+    ...settings, cursor: { ...settings.cursor, returnToHammer: returnToggle.checked },
+  }), listen);
+  cursorGroup.append(returnLabel, returnHelp);
+  for (const field of CURSOR_RETURN_FIELDS) {
     const control = createRangeControl(field, {
       id: `cursor-${field.key}`, name: field.key, signal: events.signal,
       onInput: (value) => editSettings({ ...settings, cursor: { ...settings.cursor, [field.key]: value } }),

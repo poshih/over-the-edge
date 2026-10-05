@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 9,
+    "schemaVersion": 10,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -62,7 +62,11 @@
     },
     "cursor": {
       "maxTargetRadius": 2.65,
-      "deadZone": 0.1
+      "deadZone": 0.1,
+      "returnToHammer": false,
+      "returnRate": 8,
+      "returnOffsetX": 0,
+      "returnOffsetY": 0
     }
   },
   "characters": {

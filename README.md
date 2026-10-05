@@ -425,7 +425,8 @@ along, a dead zone behind it, and the target moves no farther than it must. The
 target stays within a configurable radius of the hinge, and the cursor can go the
 dead zone beyond it. Without input, both offsets stay unchanged: walking,
 falling, or being launched carries them with the character. They do not rotate
-with the pot, follow the hammer, or drift back to the hinge. Camera movement
+with the pot, follow the hammer, or drift back to the hinge, unless a game turns
+on **Return target to hammer** (see [game settings](#game-settings)). Camera movement
 does not modify them.
 
 Motion beyond the cursor's reach, the target radius plus the dead zone, is
@@ -547,6 +548,16 @@ smaller one pulls the cursor toward it. Neither setting restarts the attempt,
 alters body masses, or changes the rig's forces, mechanical reach, or collision
 rules.
 
+The section also has **Return target to hammer**, off by default, with a **Return
+speed** (0.5-24 /s, default **8 /s**) and **Return offset X** and **Y** in metres
+(default 0). When it is on and no aiming input has arrived for **0.15 seconds** of
+run time while the hammer head touches a surface, the target eases toward the
+head's centre plus the offset, staying inside the target radius, and the cursor
+moves with it, keeping its place in the dead zone. Input always comes first, and
+easing back never boosts a downswing. Positive X goes right and positive Y up; the
+offset does not turn with the hammer. Turning return off keeps its values. Like the
+other cursor settings, it never restarts the attempt or changes a phantom course.
+
 In **Workshop / Physics / Saved game settings**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
 profile containing every physics setting, the hammer rig, the target radius and
@@ -568,7 +579,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 9**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 10**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 

@@ -1,7 +1,7 @@
 import { Vec2, World, WorldManifold } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
-import { TUNING_FIELDS, validateGameSettings } from './game-settings';
+import { CURSOR_RETURN_IDLE_SECONDS, TUNING_FIELDS, validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
 import { sameHammerHead } from './hammer-head';
 import type { HammerHead } from './hammer-head';
@@ -17,7 +17,7 @@ import type { RigGeometry } from './rig';
 import { surfaceMaterials } from './surfaces';
 import type { LaunchSettings } from './trigger-events';
 import { angleDifference } from './math';
-import { aimAt, limitAim, moveAim } from './aim';
+import { aimAt, limitAim, moveAim, returnAim } from './aim';
 import type { Aim } from './aim';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
@@ -87,6 +87,8 @@ export class Simulation {
   private spawn: Readonly<PlayerSpawn>;
   // Hinge-relative: the cursor input moves, and the target the hammer drives toward.
   private aim: Aim;
+  // When, in run time, input last moved the aim, or the player was placed; the return to the hammer waits on it.
+  private lastAimInput = 0;
   private previous: PlayerFrame;
   private current: PlayerFrame;
   private command = { ...IDLE_COMMAND };
@@ -364,8 +366,15 @@ export class Simulation {
       }
       const previousY = this.aim.target.y;
       this.aim = moveAim(this.aim, pointerDelta, this.settings.cursor.maxTargetRadius, this.settings.cursor.deadZone);
+      this.lastAimInput = this.elapsed;
       // Input that lowers the target swings the hammer down.
       swinging = this.aim.target.y < previousY;
+    } else if (this.returning()) {
+      const { returnRate, returnOffsetX, returnOffsetY, maxTargetRadius } = this.settings.cursor;
+      const origin = this.cursorOrigin(this.rig.root.getPosition());
+      const tip = partPoint(this.rig.tool.head, this.headPoint);
+      this.aim = returnAim(this.aim, { x: tip.x + returnOffsetX - origin.x, y: tip.y + returnOffsetY - origin.y },
+        1 - Math.exp(-returnRate * PHYSICS.dt), maxTargetRadius);
     }
     this.command = drivePlayer(
       this.rig, this.worldPoint(this.cursorOrigin(this.rig.root.getPosition()), this.aim.target), this.settings.physics, { swinging },
@@ -538,6 +547,7 @@ export class Simulation {
     this.hurtTaken = false;
     this.placements++;
     this.aim = this.initialAim();
+    this.lastAimInput = this.elapsed;
     this.command = { ...IDLE_COMMAND };
     this.current = this.capture();
     this.previous = this.current;
@@ -601,6 +611,13 @@ export class Simulation {
       if (contact.isTouching() && contact.isEnabled()) count++;
     }
     return count;
+  }
+
+  // Whether the target returns to the hammer this step: the settings turn it on, aiming has paused, and the head
+  // touches something. Input always comes first.
+  private returning(): boolean {
+    return this.settings.cursor.returnToHammer && this.elapsed - this.lastAimInput >= CURSOR_RETURN_IDLE_SECONDS &&
+      this.headContactCount() > 0;
   }
 
   // An attempt starts aiming at the hammer head, with the cursor on the target.

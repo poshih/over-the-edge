@@ -9,23 +9,33 @@ export interface CursorSettings {
   readonly maxTargetRadius: number;
   // How far the cursor moves around the hammer's target before the hammer follows.
   readonly deadZone: number;
+  // Whether the target eases back toward the hammer head once aiming pauses while the head touches something. Off,
+  // the target keeps its offset from the hinge until the player aims again.
+  readonly returnToHammer: boolean;
+  // How fast it eases back, per second, and to where: this offset from the head's centre, in world metres.
+  readonly returnRate: number;
+  readonly returnOffsetX: number;
+  readonly returnOffsetY: number;
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 9;
+  readonly schemaVersion: 10;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
 }
 
 export const GAME_SETTINGS_LIMITS = { fileBytes: 64 * 1024 } as const;
+// How long aiming must pause, in run time, before the target returns to the hammer.
+export const CURSOR_RETURN_IDLE_SECONDS = 0.15;
 export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   maxTargetRadius: rigGeometry(DEFAULT_RIG_SETTINGS).maxReach,
   // About the hammer head's half-width, so small, unsteady input leaves the hammer where it is.
   deadZone: 0.1,
+  returnToHammer: false, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 9, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 10, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -45,7 +55,7 @@ interface TuningField extends NumericSetting {
 }
 
 type RigField = NumericSetting & { key: RigLength };
-type CursorField = NumericSetting & { key: keyof CursorSettings };
+type CursorField = NumericSetting & { key: Exclude<keyof CursorSettings, 'returnToHammer'> };
 
 export const RIG_FIELDS: readonly RigField[] = [
   { key: 'handleLength', label: 'Handle length', ...RIG_LIMITS.handleLength, step: 0.05, unit: 'm', description: 'From the butt to the centre of the head. Fully retracted, the head stops at the minimum reach from the shoulder hinge, so with none the butt travels this far behind it. Changing it rebuilds the player and restarts the run.' },
@@ -57,6 +67,13 @@ export const RIG_FIELDS: readonly RigField[] = [
 export const CURSOR_FIELDS: readonly CursorField[] = [
   { key: 'maxTargetRadius', label: 'Maximum target radius', min: 0.25, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Maximum distance from the shoulder hinge the hammer pivots on to the point the hammer aims at, up to the rig\'s reach (handle length plus maximum extension). Aiming moves this offset; character movement carries it along.' },
   { key: 'deadZone', label: 'Dead zone', min: 0, max: 0.5, step: 0.01, unit: 'm', description: 'How far the cursor can move around the point the hammer aims at before the hammer follows. Beyond it, the cursor drags that point along, so the cursor reaches this far past the maximum target radius; motion beyond that is discarded. Zero makes the hammer follow every movement.' },
+];
+
+// How the target returns to the hammer, used only while returnToHammer is on.
+export const CURSOR_RETURN_FIELDS: readonly CursorField[] = [
+  { key: 'returnRate', label: 'Return speed', min: 0.5, max: 24, step: 0.5, unit: '/s', description: 'How quickly the target eases toward the hammer head plus the return offset, once aiming pauses while the head touches a surface. The cursor moves with it.' },
+  { key: 'returnOffsetX', label: 'Return offset X', min: -MAX_RIG_REACH, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Where the target returns to, across from the hammer head\'s centre in world space. Positive goes right; it does not turn with the hammer.' },
+  { key: 'returnOffsetY', label: 'Return offset Y', min: -MAX_RIG_REACH, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Where the target returns to, above or below the hammer head\'s centre in world space. Positive goes up; it does not turn with the hammer.' },
 ];
 
 // The jar's and each terrain surface's friction coefficient.
@@ -164,14 +181,16 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 9) throw new GameSettingsError('Game settings require schema version 9.');
+  if (value.schemaVersion !== 10) throw new GameSettingsError('Game settings require schema version 10.');
   const rig = validateRig(value.rig);
-  settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
-  const cursor = { ...DEFAULT_CURSOR_SETTINGS };
-  for (const field of CURSOR_FIELDS) cursor[field.key] = settingNumber(value.cursor[field.key], field);
+  const numbers = [...CURSOR_FIELDS, ...CURSOR_RETURN_FIELDS];
+  settingsFields(value.cursor, ['returnToHammer', ...numbers.map((field) => field.key)], 'Cursor settings');
+  if (typeof value.cursor.returnToHammer !== 'boolean') throw new GameSettingsError('Return target to hammer must be true or false.');
+  const cursor = { ...DEFAULT_CURSOR_SETTINGS, returnToHammer: value.cursor.returnToHammer };
+  for (const field of numbers) cursor[field.key] = settingNumber(value.cursor[field.key], field);
   const reach = rigGeometry(rig).maxReach;
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 9, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 10, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

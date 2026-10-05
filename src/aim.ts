@@ -32,6 +32,18 @@ export function limitAim(aim: Aim, radius: number, deadZone: number): Aim {
   return { cursor: { x: target.x + offset.x, y: target.y + offset.y }, target };
 }
 
+/**
+ * The aim eased `blend` (0-1) of the way toward `point`, as the return to the hammer does: the target moves, staying
+ * inside the target radius, and the cursor moves with it, keeping its place in the dead zone.
+ */
+export function returnAim(aim: Aim, point: Readonly<Point>, blend: number, radius: number): Aim {
+  const target = clampLength({
+    x: aim.target.x + (point.x - aim.target.x) * blend,
+    y: aim.target.y + (point.y - aim.target.y) * blend,
+  }, radius);
+  return { cursor: { x: aim.cursor.x + target.x - aim.target.x, y: aim.cursor.y + target.y - aim.target.y }, target };
+}
+
 // The point nearest `target` that is within `radius` of the hinge and within `deadZone` of `cursor`.
 // The cursor is within `radius + deadZone` of the hinge, so such points exist.
 function followCursor(target: Readonly<Point>, cursor: Readonly<Point>, radius: number, deadZone: number): Point {
