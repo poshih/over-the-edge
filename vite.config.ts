@@ -40,5 +40,8 @@ export default defineConfig(async ({ mode, isPreview }) => {
     ],
     server: { host: '127.0.0.1', port: 5181, strictPort: true },
     preview: { host: '127.0.0.1', port: 4174, strictPort: true },
+    // The Workshop's only page. Scanning every HTML file would reach the game-only entry (play/), whose release
+    // facets the Workshop refuses.
+    optimizeDeps: { entries: ['index.html'] },
   };
 });
