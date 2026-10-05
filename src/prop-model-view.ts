@@ -36,10 +36,10 @@ export class PropModelView {
   }
 
   inspect() {
-    // Types of the materials drawn now, which shading may have swapped; diagnostic only.
+    // Types of the materials drawn; diagnostic only.
     const drawn = new Set<string>();
     this.model.scene.traverse((object) => {
-      if (!(object instanceof Mesh) || object.userData.characterOutline === true) return;
+      if (!(object instanceof Mesh)) return;
       for (const material of Array.isArray(object.material) ? object.material : [object.material]) drawn.add(material.type);
     });
     return {

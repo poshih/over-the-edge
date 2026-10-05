@@ -88,7 +88,7 @@ Appearance's GLB imports still customize independent parts. In Avatar mode
 only its separate pot and hammer use those imported replacements; torso/head/
 arm GLBs remain stored for Mesh parts mode. To replace the whole avatar, import
 a skinned GLB with a bone map in Character. The same section adds a one-model
-hammer and PBR or cel shading; see [imported 3D characters](characters.md).
+hammer and a pot model; see [imported 3D characters](characters.md).
 Imported animation clips are not played.
 
 ## Authoring
@@ -492,7 +492,7 @@ The portable JSON shape is:
 
 ```json
 {
-  "schemaVersion": 18,
+  "schemaVersion": 19,
   "characterRiggingType": "sprite-2d",
   "armForwardDistance": 0.25,
   "waistLean": 0,
@@ -547,7 +547,7 @@ Images can use embedded `data:image/png;base64,...`, public HTTP(S) URLs,
 or `/site-relative` paths. Imported files become embedded PNGs. Repeated layers
 reference the same image ID; IDs must be unique and unused images are rejected.
 Unknown anchors, fields, formats, or image references fail before replacement.
-Profiles use **schema version 18**; any other version is rejected, not converted.
+Profiles use **schema version 19**; any other version is rejected, not converted.
 `characterRiggingType` is `sprite-2d`, `model-3d` or `avatar-3d`;
 `armForwardDistance` is 0-2 m; `waistLean` is 0-45°; `grips` is
 `{ "placement", "left", "right", "slideAt", "slideRange", "rotation" }`, the
@@ -558,7 +558,7 @@ stretch sliding hands keep to, `{ "from", "to" }` as shares of the handle a hand
 3D hand's turn on its grip, `{ "left": { "x", "y", "z" }, "right": {...} }` in degrees (-180 to 180),
 which 2D grip targets ignore;
 `arms` is `null` or each side's `upper` and `forearm` length (0.1-2 m). The optional
-`models`, `avatar`, `hammer`, `pot` and `shading` fields for
+`models`, `avatar`, `hammer` and `pot` fields for
 [imported 3D characters](characters.md) are present only while used.
 
 `DirectionalPresentation` in `src/directional-data.ts` defines `hysteresis`,
@@ -593,7 +593,7 @@ depict its `upper` arm and `forearm`, so the arm lengths reach those 2D chains;
 `{ release() }`. The rig releases that lease in `finally` after success, failure or cancellation;
 the host retains separate ownership for committed views. Without this hook, model documents are
 rejected. This game's per-profile pool coalesces loads and admits at most nine models, including
-abandoned decoders until they finish; last release disposes resources or aborts their load. `setShading()` applies a shading change without reloading anything.
+abandoned decoders until they finish; last release disposes resources or aborts their load.
 This game uses that callback to update the shared grip depth, enable the connected
 avatar and disable the separate upper-body meshes; `VisualVisibility` retains
 the imported parts for switching back. Other hosts reject avatar profiles if

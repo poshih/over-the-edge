@@ -1,5 +1,5 @@
-// Character-profile fields for imported models, the avatar bone map, the one-model hammer, the pot
-// model and shading. DOM-free, so builds and Node tools share the validator.
+// Character-profile fields for imported models, the avatar bone map, the one-model hammer and the pot
+// model. DOM-free, so builds and Node tools share the validator.
 import { MODEL_LIMITS } from './model-data.ts';
 import { decodeBase64, encodeBase64, number, record, SpriteError, text } from './sprite-fields.ts';
 import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
@@ -97,41 +97,15 @@ export type PotModelProfile = PropModelProfile;
 export const PROP_MODEL_ROLES = ['hammer', 'pot'] as const;
 export type PropModelRole = (typeof PROP_MODEL_ROLES)[number];
 
-export const SHADING_MODES = ['pbr', 'cel'] as const;
-export type ShadingMode = (typeof SHADING_MODES)[number];
-
-export interface CelOutline {
-  readonly color: string;
-  readonly width: number;
-}
-
-// Cel settings are kept while PBR is selected, so the two looks can be compared losslessly.
-export interface CharacterShading {
-  readonly mode: ShadingMode;
-  readonly bands: number;
-  readonly outline: CelOutline | null;
-}
-
 // Each field is present only when the profile uses it.
 export interface CharacterAssets {
   readonly models?: readonly CharacterModel[];
   readonly avatar?: AvatarModelProfile;
   readonly hammer?: HammerModelProfile;
   readonly pot?: PotModelProfile;
-  readonly shading?: CharacterShading;
 }
 
-export const CHARACTER_ASSET_FIELDS = ['models', 'avatar', 'hammer', 'pot', 'shading'] as const;
-
-export const SHADING_LIMITS = {
-  bands: { min: 2, max: 8, step: 1 },
-  outlineWidth: { min: 0.002, max: 0.1, step: 0.001 },
-} as const;
-
-export const DEFAULT_CEL_OUTLINE: CelOutline = Object.freeze({ color: '#1f2428', width: 0.02 });
-export const DEFAULT_CHARACTER_SHADING: CharacterShading = Object.freeze({
-  mode: 'pbr', bands: 3, outline: DEFAULT_CEL_OUTLINE,
-});
+export const CHARACTER_ASSET_FIELDS = ['models', 'avatar', 'hammer', 'pot'] as const;
 
 const MODEL_PREFIX = 'data:model/gltf-binary;base64,';
 const MODEL_ENCODED_BYTES = MODEL_PREFIX.length + Math.ceil(MODEL_LIMITS.bytes / 3) * 4;
@@ -441,32 +415,6 @@ export function validatePropModelProfile(value: unknown, role: PropModelRole): P
   return Object.freeze({ model: text(prop.model, CHARACTER_MODEL_LIMITS.id, `${role[0]!.toUpperCase()}${role.slice(1)} model ID`) });
 }
 
-export function validateCelOutline(value: unknown): CelOutline {
-  const outline = record(value, ['color', 'width'], 'The cel outline');
-  if (typeof outline.color !== 'string' || !/^#[0-9a-f]{6}$/.test(outline.color)) {
-    throw new SpriteError('The outline colour must be a lowercase #rrggbb value.');
-  }
-  const { min, max } = SHADING_LIMITS.outlineWidth;
-  return Object.freeze({ color: outline.color, width: number(outline.width, min, max, 'Outline width') });
-}
-
-export function validateCharacterShading(value: unknown): CharacterShading {
-  const shading = record(value, ['mode', 'bands', 'outline'], 'Character shading');
-  const mode = SHADING_MODES.find(candidate => candidate === shading.mode);
-  if (mode === undefined) throw new SpriteError('Choose pbr or cel character shading.');
-  const { min, max } = SHADING_LIMITS.bands;
-  const bands = number(shading.bands, min, max, 'Cel band count');
-  if (!Number.isInteger(bands)) throw new SpriteError('The cel band count must be a whole number.');
-  const outline = shading.outline === null ? null : validateCelOutline(shading.outline);
-  return Object.freeze({ mode, bands, outline });
-}
-
-export function sameShading(left: CharacterShading, right: CharacterShading): boolean {
-  return left === right || left.mode === right.mode && left.bands === right.bands &&
-    (left.outline === right.outline || left.outline !== null && right.outline !== null &&
-      left.outline.color === right.outline.color && left.outline.width === right.outline.width);
-}
-
 export function sameBoneMap(left: PartialAvatarBoneMap, right: PartialAvatarBoneMap): boolean {
   return left === right || AVATAR_JOINT_IDS.every(id => left[id] === right[id]);
 }
@@ -482,7 +430,6 @@ export function characterAssets(value: CharacterAssets): CharacterAssets {
   if (value.avatar !== undefined) result.avatar = value.avatar;
   if (value.hammer !== undefined) result.hammer = value.hammer;
   if (value.pot !== undefined) result.pot = value.pot;
-  if (value.shading !== undefined) result.shading = value.shading;
   return result;
 }
 
@@ -499,9 +446,7 @@ export function sameCharacterAssets(left: CharacterAssets, right: CharacterAsset
   return sameModels &&
     (left.avatar === right.avatar || left.avatar !== undefined && right.avatar !== undefined &&
       left.avatar.model === right.avatar.model && sameAvatarModelSettings(left.avatar, right.avatar)) &&
-    sameProp(left.hammer, right.hammer) && sameProp(left.pot, right.pot) &&
-    (left.shading === right.shading || left.shading !== undefined && right.shading !== undefined &&
-      sameShading(left.shading, right.shading));
+    sameProp(left.hammer, right.hammer) && sameProp(left.pot, right.pot);
 }
 
 export function characterModel(assets: CharacterAssets, id: string): CharacterModel {
@@ -515,26 +460,22 @@ export function validateCharacterAssets(value: {
   readonly avatar?: unknown;
   readonly hammer?: unknown;
   readonly pot?: unknown;
-  readonly shading?: unknown;
 }): CharacterAssets {
   const models = value.models === undefined ? undefined : validateCharacterModels(value.models);
   const avatar = value.avatar === undefined ? undefined : validateAvatarModelProfile(value.avatar);
   const hammer = value.hammer === undefined ? undefined : validatePropModelProfile(value.hammer, 'hammer');
   const pot = value.pot === undefined ? undefined : validatePropModelProfile(value.pot, 'pot');
-  const validated = value.shading === undefined ? undefined : validateCharacterShading(value.shading);
-  // The default look is stored as the absent field.
-  const shading = validated === undefined || sameShading(validated, DEFAULT_CHARACTER_SHADING) ? undefined : validated;
   const ids = new Set(models?.map(model => model.id));
   const used = new Set<string>();
   for (const [label, profile] of [['avatar', avatar], ['hammer', hammer], ['pot', pot]] as const) {
     if (profile === undefined) continue;
     if (!ids.has(profile.model)) throw new SpriteError(`The ${label} references missing character model "${profile.model}".`);
-    // Each role binds and shades its own scene, so roles never share a model.
+    // Each role binds its own scene, so roles never share a model.
     if (used.has(profile.model)) throw new SpriteError('The avatar, hammer and pot need separate character models.');
     used.add(profile.model);
   }
   if (models !== undefined && models.some(model => !used.has(model.id))) {
     throw new SpriteError('Remove character models that no avatar, hammer or pot uses.');
   }
-  return characterAssets({ models, avatar, hammer, pot, shading });
+  return characterAssets({ models, avatar, hammer, pot });
 }

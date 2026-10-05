@@ -26,10 +26,8 @@ import { sameArms } from './character-arms';
 import type { ArmLengths, CharacterArms } from './character-arms';
 import { DEFAULT_GRIPS, sameGrips } from './grips';
 import type { Grips } from './grips';
-import {
-  characterAssets, DEFAULT_CHARACTER_SHADING, sameShading, validateCharacterShading,
-} from './character-profile';
-import type { CharacterAssets, CharacterShading } from './character-profile';
+import { characterAssets } from './character-profile';
+import type { CharacterAssets } from './character-profile';
 import { sameAvatarMotion, validateAvatarMotion } from './avatar-motion-data';
 import type { AvatarMotionEntry } from './avatar-motion-data';
 import { DirectionalError, validateDirectionalPresentation } from './directional-data';
@@ -560,18 +558,6 @@ export class SpriteRig {
     return this.naturalArms;
   }
 
-  // Applies shading to the loaded models without reloading them; the default look is stored as absent.
-  setShading(value: CharacterShading): void {
-    this.assertMutable();
-    const validated = validateCharacterShading(value);
-    const shading = sameShading(validated, DEFAULT_CHARACTER_SHADING) ? undefined : validated;
-    const current = this.assets.shading;
-    if (current === shading || current !== undefined && shading !== undefined && sameShading(current, shading)) return;
-    const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), shading });
-    this.assets = characterAssets({ ...this.assets, shading });
-    commit?.();
-  }
-
   // Replaces the imported avatar's motions without reloading anything. The host prepares them against the model first,
   // so a kind's refusal leaves the motions that were running.
   setAvatarMotion(value: readonly AvatarMotionEntry[]): void {
@@ -854,7 +840,6 @@ export class SpriteRig {
       waistLean: this.waistLean,
       grips: this.grips,
       arms: this.arms,
-      shading: this.assets.shading ?? DEFAULT_CHARACTER_SHADING,
       models: (this.assets.models ?? []).map(model => ({ id: model.id, name: model.name })),
       avatarModel: this.assets.avatar === undefined ? null : { model: this.assets.avatar.model, boneMap: { ...this.assets.avatar.boneMap } },
       hammerModel: this.assets.hammer?.model ?? null,
@@ -1048,8 +1033,7 @@ export class SpriteRig {
     this.assertCharacterRenderer(options.characterRiggingType);
     const nextAssets = characterAssets(options);
     const changedAssets = nextAssets.models !== this.assets.models || nextAssets.avatar !== this.assets.avatar ||
-      nextAssets.hammer !== this.assets.hammer || nextAssets.pot !== this.assets.pot ||
-      nextAssets.shading !== this.assets.shading;
+      nextAssets.hammer !== this.assets.hammer || nextAssets.pot !== this.assets.pot;
     const changedCharacter = options.characterRiggingType !== this.characterRiggingType ||
       options.armForwardDistance !== this.armForwardDistance || options.waistLean !== this.waistLean ||
       !sameGrips(options.grips, this.grips) || !sameArms(options.arms, this.arms) || changedAssets;

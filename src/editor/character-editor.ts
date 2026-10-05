@@ -5,10 +5,8 @@ import type { SpriteEditorState } from './sprite-state';
 import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
 import { UPPER_BODY_3D } from '../sprite-data';
 import { DEFAULT_WAIST_LEAN, WAIST_LEAN_LIMITS } from '../waist-lean';
-import {
-  AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS, DEFAULT_CEL_OUTLINE, SHADING_LIMITS,
-} from '../character-profile';
-import type { AvatarJointId, CelOutline, CharacterShading, ShadingMode } from '../character-profile';
+import { AVATAR_JOINT_IDS, CHARACTER_MODEL_LIMITS } from '../character-profile';
+import type { AvatarJointId } from '../character-profile';
 import { RIG } from '../config';
 import { ARM_LENGTH_LIMITS } from '../character-arms';
 import type { ArmLengths, CharacterArms } from '../character-arms';
@@ -282,26 +280,6 @@ export function createCharacterEditor(options: {
         </div>
       `)}
 
-      ${sectionMarkup({ id: 'character-shading', title: 'Avatar shading', hint: 'PBR or cel bands with outline' }, `
-        <fieldset class="tuning-group character-shading">
-          <legend class="visually-hidden">Avatar shading</legend>
-          <div class="character-shading-modes" role="radiogroup" aria-label="Shading mode">
-            <label><input type="radio" name="character-shading-mode" value="pbr" /> PBR</label>
-            <label><input type="radio" name="character-shading-mode" value="cel" /> Cel</label>
-          </div>
-          <div class="character-cel-bands"></div>
-          <label class="character-outline-toggle"><input type="checkbox" id="character-outline-enabled" /> Outline</label>
-          <label class="appearance-label" for="character-outline-color">Outline colour</label>
-          <input id="character-outline-color" type="color" />
-          <div class="character-outline-width"></div>
-          <p class="appearance-format">Styles Avatar mode: the connected avatar and its separate pot and hammer.
-            Flip between PBR and cel to compare the same model live; cel materials are built once and reused.
-            Save keeps the choice.</p>
-          <p class="appearance-format character-shading-inactive" hidden>Applies in Avatar mode. Other character
-            types keep their own materials.</p>
-        </fieldset>
-      `)}
-
       ${sectionMarkup({ id: 'character-rig', title: 'Authored sprite rig', hint: 'Summary of the 2D rig in Sprites' }, `
         <section class="character-rig-summary" aria-label="Authored sprite rig">
           <p class="character-rig-counts"></p>
@@ -326,7 +304,7 @@ export function createCharacterEditor(options: {
             <button type="button" class="button character-export">Export profile JSON</button>
           </div>
           <p class="appearance-format">Includes the character type, 3D arm forward distance, grip placement, sprite layout, 2D skeleton, directional settings,
-            embedded PNGs, the imported avatar, hammer and pot GLBs, bone map and shading. Public image URLs remain
+            embedded PNGs, the imported avatar, hammer and pot GLBs and bone map. Public image URLs remain
             references. Import limit: ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB. Exported profiles can be used
             as game sprite data.</p>
           <p class="appearance-format">Appearance's per-part GLB imports and their alignment stay browser-local;
@@ -436,7 +414,6 @@ export function createCharacterEditor(options: {
   const potFile = element<HTMLInputElement>(root, '#character-pot-file');
   const potStatus = element<HTMLParagraphElement>(root, '.character-pot-status');
   const potRemove = element<HTMLButtonElement>(root, '.character-pot-remove');
-  const shadingModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-shading-mode"]'));
   const gripModes = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="character-grips"]'));
   const gripReset = element<HTMLButtonElement>(root, '.character-grip-reset');
   const gripRotationReset = element<HTMLButtonElement>(root, '.character-grip-rotation-reset');
@@ -537,12 +514,8 @@ export function createCharacterEditor(options: {
     onInput: value => options.onHandleLength(value),
   });
   element(root, '.character-handle-control').append(handleLength.row);
-  const outlineEnabled = element<HTMLInputElement>(root, '#character-outline-enabled');
-  const outlineColor = element<HTMLInputElement>(root, '#character-outline-color');
-  const shadingInactive = element<HTMLParagraphElement>(root, '.character-shading-inactive');
   const boneSelects = new Map<AvatarJointId, HTMLSelectElement>();
   let describedJoints: readonly string[] | null = null;
-  let lastOutline: CelOutline = DEFAULT_CEL_OUTLINE;
   for (const joint of AVATAR_JOINT_IDS) {
     const label = document.createElement('label');
     label.className = 'appearance-label';
@@ -555,29 +528,6 @@ export function createCharacterEditor(options: {
     select.addEventListener('change', () => { void options.state.setAvatarBone(joint, select.value === '' ? null : select.value); }, listen);
     element(root, '.character-bone-grid').append(label, select);
     boneSelects.set(joint, select);
-  }
-  const editShading = (change: Partial<CharacterShading>): void => {
-    const current = options.state.snapshot().shading;
-    if (options.state.setShading({ ...current, ...change }) !== null) render();
-  };
-  const bands = createRangeControl({
-    ...SHADING_LIMITS.bands, label: 'Cel bands', unit: '',
-    description: 'Number of stepped light bands in cel shading.',
-  }, {
-    id: 'character-cel-bands', name: 'celBands', signal: events.signal,
-    onInput: value => editShading({ bands: value }),
-  });
-  element(root, '.character-cel-bands').append(bands.row);
-  const outlineWidth = createRangeControl({
-    ...SHADING_LIMITS.outlineWidth, label: 'Outline width', unit: 'm',
-    description: 'World-space width of the cel outline around the avatar, pot and hammer.',
-  }, {
-    id: 'character-outline-width', name: 'outlineWidth', signal: events.signal,
-    onInput: value => editShading({ outline: { ...lastOutline, width: value } }),
-  });
-  element(root, '.character-outline-width').append(outlineWidth.row);
-  for (const input of shadingModes) {
-    input.addEventListener('change', () => { if (input.checked) editShading({ mode: input.value as ShadingMode }); }, listen);
   }
   for (const input of gripModes) {
     input.addEventListener('change', () => {
@@ -593,8 +543,6 @@ export function createCharacterEditor(options: {
     options.state.setGrips({ ...options.state.snapshot().document.grips, rotation: DEFAULT_GRIPS.rotation });
   }, listen);
   armReset.addEventListener('click', () => { options.state.setArms(null); }, listen);
-  outlineEnabled.addEventListener('change', () => editShading({ outline: outlineEnabled.checked ? lastOutline : null }), listen);
-  outlineColor.addEventListener('input', () => editShading({ outline: { ...lastOutline, color: outlineColor.value } }), listen);
   avatarFile.addEventListener('change', () => {
     const file = avatarFile.files?.[0];
     avatarFile.value = '';
@@ -837,19 +785,6 @@ export function createCharacterEditor(options: {
     setText(potStatus, snapshot.potModel === null ? 'Using the default pot.' :
       `Using "${snapshot.potModel.name}" as the pot model.`);
     potRemove.disabled = disabled || snapshot.potModel === null;
-    const shading = snapshot.shading;
-    if (shading.outline !== null) lastOutline = shading.outline;
-    for (const input of shadingModes) {
-      input.checked = input.value === shading.mode;
-      input.disabled = disabled;
-    }
-    bands.setValue(shading.bands, { disabled });
-    outlineEnabled.checked = shading.outline !== null;
-    outlineEnabled.disabled = disabled;
-    if (outlineColor.value !== lastOutline.color) outlineColor.value = lastOutline.color;
-    outlineColor.disabled = disabled || shading.outline === null;
-    outlineWidth.setValue(lastOutline.width, { disabled: disabled || shading.outline === null });
-    shadingInactive.hidden = snapshot.document.characterRiggingType === 'avatar-3d';
   }
 
   function renderRig(): void {

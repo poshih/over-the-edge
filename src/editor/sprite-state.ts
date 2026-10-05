@@ -16,13 +16,12 @@ import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateSkeleton, va
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin } from '../skeleton-data';
 import { autoWeights, restPose } from '../skeleton-pose';
 import {
-  AVATAR_MODEL_ID, CharacterModelError, characterAssets, CHARACTER_MODEL_LIMITS, DEFAULT_CHARACTER_SHADING, encodeModel,
-  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, NO_AVATAR_HAIR, POT_MODEL_ID, sameCharacterAssets, sameShading,
-  validateCharacterShading,
+  AVATAR_MODEL_ID, CharacterModelError, characterAssets, CHARACTER_MODEL_LIMITS, encodeModel,
+  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, NO_AVATAR_HAIR, POT_MODEL_ID, sameCharacterAssets,
 } from '../character-profile';
 import type {
   AvatarBoneMap, AvatarHair, AvatarJointId, AvatarModelSettings, CharacterAssets, CharacterModel,
-  CharacterShading, PartialAvatarBoneMap, PropModelRole,
+  PartialAvatarBoneMap, PropModelRole,
 } from '../character-profile';
 import { NO_AVATAR_MOTION, sameAvatarMotion, validateAvatarMotion } from '../avatar-motion-data';
 import type { AvatarMotionEntry } from '../avatar-motion-data';
@@ -98,7 +97,6 @@ export interface SpriteEditorSnapshot {
   readonly avatarModel: AvatarModelState | null;
   readonly hammerModel: { readonly name: string } | null;
   readonly potModel: { readonly name: string } | null;
-  readonly shading: CharacterShading;
 }
 
 interface PendingAvatar {
@@ -367,7 +365,6 @@ export class SpriteEditorState {
       avatarModel: this.avatarModelState(),
       hammerModel: this.draft.hammer === undefined ? null : { name: this.model(this.draft.hammer.model).name },
       potModel: this.draft.pot === undefined ? null : { name: this.model(this.draft.pot.model).name },
-      shading: this.draft.shading ?? DEFAULT_CHARACTER_SHADING,
     };
   }
 
@@ -459,37 +456,6 @@ export class SpriteEditorState {
     });
   }
 
-  // Live, like arm forward distance: the loaded models switch materials without reloading.
-  setShading(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const shading = validateCharacterShading(value);
-      if (sameShading(shading, this.draft.shading ?? DEFAULT_CHARACTER_SHADING)) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      const assets = characterAssets({
-        ...characterAssets(this.draft), shading: sameShading(shading, DEFAULT_CHARACTER_SHADING) ? undefined : shading,
-      });
-      const document: SpriteDocument = Object.freeze({
-        schemaVersion: SPRITE_SCHEMA_VERSION, ...spriteFields(this.draft), ...assets,
-      });
-      this.validateDraft(document);
-      this.rig.setShading(shading);
-      this.draft = document;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
-  }
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -1235,7 +1201,6 @@ export class SpriteEditorState {
         : { model: avatar.model.id, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair, motion: avatar.motion },
       hammer: hammer === null ? undefined : { model: hammer.id },
       pot: pot === null ? undefined : { model: pot.id },
-      shading: this.draft.shading,
     });
     return validateSpriteDocument({
       schemaVersion: SPRITE_SCHEMA_VERSION, ...spriteFields(this.draft), ...assets,

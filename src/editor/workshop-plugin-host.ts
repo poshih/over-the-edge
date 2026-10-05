@@ -698,7 +698,6 @@ export class WorkshopPluginHost {
       waistLean: (value) => character.setWaistLean(value),
       grips: (value) => character.setGrips(value),
       arms: (value) => character.setArms(value),
-      shading: (value) => character.setShading(value),
       avatarMotion: (value) => character.setAvatarMotion(value),
       presentation: (value) => character.setPresentation(value),
     };

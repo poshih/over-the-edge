@@ -963,10 +963,9 @@ joints follow their nearest mapped ancestor, and chains of them can swing as
 [spring-bone hair](docs/characters.md#hair), such as a braid. Mixamo names map automatically,
 and invalid models or maps fail with typed error codes. The same tab adds a
 **one-model hammer** GLB on the physical tool frame, with its handle fitted to the
-game's, a **pot model** GLB that follows the physical pot body and hides the body
-inside it, and **PBR or cel shading** (stepped bands with an optional outline) that
-can be flipped live to compare. All of these are part of the character profile, so Save, JSON and
-`GAME_SPRITES` carry them. See [imported 3D characters](docs/characters.md).
+game's, and a **pot model** GLB that follows the physical pot body and hides the body
+inside it. Models render with their own PBR materials. All of these are part of the character
+profile, so Save, JSON and `GAME_SPRITES` carry them. See [imported 3D characters](docs/characters.md).
 Appearance's per-part GLB replacements are separate, browser-local assets that
 only a [project](docs/projects.md) carries into a release; imported animation clips
 are not played.
@@ -1218,7 +1217,7 @@ settings, selected profile, and save state.
 `window.gettingOver.level()` reports the immutable authored definition, current
 illusion/collider state, editor selection/mode, set piece placement state, and
 render/cache counts, including the imported avatar's joints and bone writes, the
-hammer model, shading, the active character profile, the arm chains it draws, and its
+hammer model, the active character profile, the arm chains it draws, and its
 grip placement and slide point with both grips' current distances from the butt.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state (including the message toast showing and how many wait), and the independent

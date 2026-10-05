@@ -30,10 +30,9 @@ import type { AvatarMotionModel } from './avatar-motion';
 import type { CharacterModelUsage, ResolvedAvatarJoints } from './character-model-inspect';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
 import {
-  characterModel, DEFAULT_CHARACTER_SHADING, PROP_MODEL_ROLES, sameAvatarModelSettings, sameAvatarMotions, sameBoneMap,
+  characterModel, PROP_MODEL_ROLES, sameAvatarModelSettings, sameAvatarMotions, sameBoneMap,
 } from './character-profile';
 import type { AvatarBoneMap, AvatarHair, AvatarModelSettings, CharacterAssets, PropModelRole } from './character-profile';
-import { CharacterShadingView } from './character-shading';
 import { PropModelView } from './prop-model-view';
 import { HammerHandleFit } from './hammer-handle-fit';
 import { SkinnedAvatarView } from './skinned-avatar-view';
@@ -361,7 +360,6 @@ export class GameView {
   private readonly content: ContentLoader | undefined;
   private readonly slots: CharacterSlot[] = [];
   private activeSlot = 0;
-  private readonly shading = new CharacterShadingView();
   private armChains: ArmChains = DEFAULT_ARM_CHAINS;
   private avatarRenderer: AvatarRenderer | null = null;
   // The prepared rig (if any) the active character shows, with its per-avatar pose history.
@@ -398,7 +396,6 @@ export class GameView {
   private headOutline: HammerHead = DEFAULT_HAMMER_HEAD;
   private hammerRadius = hammerHeadRadius(DEFAULT_HAMMER_HEAD);
   private headMargin = headGripMargin(DEFAULT_HAMMER_HEAD);
-  private headModel!: Group;
   private headMesh!: Mesh;
   // Each hand's grip rotation in its grip frame, or null for none.
   private gripRotations: Record<ArmSide, Quaternion | null> = { left: null, right: null };
@@ -589,7 +586,6 @@ export class GameView {
     this.targetMaterial.color.set(theme.aim.line);
     if (this.palette !== null) {
       for (const key of Object.keys(this.palette) as (keyof GameTheme['character'])[]) this.palette[key].color.set(theme.character[key]);
-      this.shading.refresh();
     }
   }
 
@@ -796,18 +792,15 @@ export class GameView {
         const prepared = this.avatarRigs.prepare(part.model.report, part.avatar);
         this.disposePart(role);
         const view = new SkinnedAvatarView(part.model, prepared.resolved, part.avatar.boneMap, prepared.binds, prepared.motions);
-        this.shading.register(view.root);
         this.parts.avatar = {
           id: part.id, model: part.model, settings: part.avatar, driver: part.avatar.driver, hair: part.avatar.hair,
           motion: part.avatar.motion, motions: prepared.motions, boneMap: part.avatar.boneMap, resolved: prepared.resolved, binds: prepared.binds,
           rig: prepared.rig, plan: createFramePlan(), pose: createPose(), view, previous: { left: null, right: null },
         };
       } else {
-        // Fitted before shading, whose outline hulls share the fitted geometry.
         const fit = role === 'hammer' ? new HammerHandleFit(part.model, this.rig.handleLength) : null;
         const view = new PropModelView(part.model, PROP_VIEW_NAMES[role]);
         this.disposePart(role);
-        this.shading.register(view.root);
         if (role === 'hammer') this.parts.hammer = { id: part.id, model: part.model, view, fit: fit! };
         else this.parts.pot = { id: part.id, model: part.model, view };
       }
@@ -858,7 +851,6 @@ export class GameView {
     const part = this.parts[role];
     if (part === null) return;
     part.view.root.removeFromParent();
-    this.shading.unregister(part.view.root);
     part.view.dispose();
     if (role === 'hammer') this.parts.hammer!.fit.dispose();
     this.parts[role] = null;
@@ -963,7 +955,6 @@ export class GameView {
     // never reaches zero references in the middle of the commit.
     const avatarLease = preparedAvatar === null ? null : slot.pool.hold(preparedAvatar.model);
     if (replaceAvatar) {
-      this.shading.unregister(current.view.root);
       current.view.dispose();
       current.lease.release();
       slot.avatar = null;
@@ -971,7 +962,6 @@ export class GameView {
     if (preparedAvatar !== null && avatarLease !== null) {
       const { prepared } = preparedAvatar;
       const view = new SkinnedAvatarView(preparedAvatar.model, prepared.resolved, preparedAvatar.boneMap, prepared.binds, prepared.motions);
-      this.shading.register(view.root);
       slot.avatar = {
         model: preparedAvatar.model, boneMap: preparedAvatar.boneMap, driver: preparedAvatar.driver, hair: preparedAvatar.hair,
         motion: preparedAvatar.motion, motions: prepared.motions, resolved: prepared.resolved, binds: prepared.binds,
@@ -993,12 +983,10 @@ export class GameView {
     }
   }
 
-  // Builds one committed prop view, fitting a hammer's handle to the game's rig before shading,
-  // whose outline hulls share the fitted geometry.
+  // Builds one committed prop view, fitting a hammer's handle to the game's rig.
   private mountProp(role: PropModelRole, model: LoadedCharacterModel, lease: CharacterModelLease): OwnedProp {
     const fit = role === 'hammer' ? new HammerHandleFit(model, this.rig.handleLength) : null;
     const view = new PropModelView(model, PROP_VIEW_NAMES[role]);
-    this.shading.register(view.root);
     return { model, lease, view, fit };
   }
 
@@ -1007,7 +995,6 @@ export class GameView {
   private releaseProp(slot: CharacterSlot, role: PropModelRole): void {
     const current = slot.props[role];
     if (current === null) return;
-    this.shading.unregister(current.view.root);
     current.view.dispose();
     current.fit?.dispose();
     current.lease.release();
@@ -1030,10 +1017,7 @@ export class GameView {
     if (maxWaistLean !== this.maxWaistLean) this.waistLean.reset();
     this.maxWaistLean = maxWaistLean;
     const imported = avatarMode ? partAvatar?.view ?? slot?.avatar?.view ?? null : null;
-    if (avatarMode && imported === null && this.avatar === null) {
-      this.avatar = new AvatarView();
-      this.shading.register(this.avatar.root);
-    }
+    if (avatarMode && imported === null && this.avatar === null) this.avatar = new AvatarView();
     this.avatarRenderer = !avatarMode ? null : imported ?? this.avatar;
     // The prepared rig the frame plan and pose phases use, or null for the built-in zero-offset avatar.
     const previousAvatar = this.activeAvatar;
@@ -1074,19 +1058,12 @@ export class GameView {
     const rotation = this.spriteArms ? null : this.grips.rotation;
     this.gripRotations = rotation === null ? { left: null, right: null }
       : { left: gripQuaternion(rotation.left), right: gripQuaternion(rotation.right) };
-    // Shading styles Avatar mode: the connected character and its separate pot and hammer.
-    this.shading.apply(presentation.shading ?? DEFAULT_CHARACTER_SHADING, avatarMode);
   }
 
   private attach(object: Object3D, parent: Object3D, attached: boolean): void {
     object.visible = attached;
     if (!attached) object.removeFromParent();
     else if (object.parent !== parent) parent.add(object);
-  }
-
-  private propReplacementChanged(next: Object3D | null, previous: Object3D | null): void {
-    if (previous !== null) this.shading.unregister(previous);
-    if (next !== null) this.shading.register(next);
   }
 
   render(physics: PhysicsFrame, options: CharacterState & { dt: number }): void {
@@ -1345,7 +1322,6 @@ export class GameView {
       },
       parts: this.partModels(),
       potModel: this.propModels.pot === null ? null : this.propModels.pot.inspect(),
-      shading: this.shading.inspect(),
       theme: { writes: this.themeWrites, sky: this.theme.sky, fog: { ...this.theme.fog }, backdrop: this.theme.backdrop.visible },
       camera: {
         perspective: this.camera === this.perspective, fieldOfView: this.perspective.fov, distance: this.distance,
@@ -1381,7 +1357,6 @@ export class GameView {
     this.avatar?.root.removeFromParent();
     this.avatar?.dispose();
     this.avatar = null;
-    this.shading.dispose();
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
     this.decorations?.dispose();
@@ -1609,10 +1584,8 @@ export class GameView {
       ),
       visibility: this.visibility('hammer-shaft', shaftSegments),
     });
-    for (const segment of shaftSegments) this.shading.register(segment);
     this.foreground.add(this.customShaft);
     const head = new Group();
-    this.headModel = head;
     this.headMesh = new Mesh(createHammerHeadGeometry(this.headOutline), dark);
     head.add(this.headMesh);
     const bolt = solid(new SphereGeometry(0.052, 10, 8), brass, [0, 0, 0.13]);
@@ -1637,17 +1610,14 @@ export class GameView {
       anchor, modelAnchor, defaults, bounds: new Box3().setFromObject(model, true),
       visibility: this.visibility(slot, defaults),
     });
-    if (PROP_PARTS.has(slot)) this.shading.register(model);
     if (ARM_PARTS.has(slot)) onArmLayer(model);
     return anchor;
   }
 
-  // Pot and hammer replacements from authoring tools follow the Avatar-mode shading too; arm
-  // replacements draw over the body like the built-in arms.
+  // Arm replacements from authoring tools draw over the body like the built-in arms.
   private visibility(slot: VisualPartId, defaults: readonly Object3D[]): VisualVisibility {
     if (ARM_PARTS.has(slot)) return new VisualVisibility(defaults, { onReplacement: (next) => { if (next !== null) onArmLayer(next); } });
-    return new VisualVisibility(defaults, PROP_PARTS.has(slot)
-      ? { onReplacement: (next, previous) => this.propReplacementChanged(next, previous) } : {});
+    return new VisualVisibility(defaults);
   }
 
   // Follows the physical head's outline when the hammer's head changes: the built-in head mesh, the framing and how
@@ -1655,11 +1625,8 @@ export class GameView {
   private syncHead(outline: HammerHead): void {
     if (outline === this.headOutline) return;
     this.headOutline = outline;
-    // The shading's outline hull shares the head's geometry, so it is made again around the new one.
-    this.shading.unregister(this.headModel);
     this.headMesh.geometry.dispose();
     this.headMesh.geometry = createHammerHeadGeometry(outline);
-    this.shading.register(this.headModel);
     this.hammerRadius = hammerHeadRadius(outline);
     this.headMargin = headGripMargin(outline);
   }

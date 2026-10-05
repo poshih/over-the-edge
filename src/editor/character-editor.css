@@ -121,7 +121,6 @@
   width: 100%;
 }
 
-.character-shading-modes,
 .character-grip-modes {
   display: flex;
   gap: 18px;
@@ -129,26 +128,9 @@
   font-size: 12px;
 }
 
-.character-shading-modes label,
-.character-grip-modes label,
-.character-outline-toggle {
+.character-grip-modes label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
-}
-
-.character-outline-toggle {
-  margin-top: 10px;
-  font-size: 12px;
-}
-
-.character-shading input[type="color"] {
-  display: block;
-  width: 64px;
-  height: var(--control-height);
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: #faf9f2;
 }

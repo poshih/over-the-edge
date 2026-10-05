@@ -18,7 +18,6 @@ import type { AudioSettings } from '../audio-settings';
 import type { AvatarMotionEntry } from '../avatar-motion-data';
 import type { AvatarMotionModel } from '../avatar-motion';
 import type { CharacterArms } from '../character-arms';
-import type { CharacterShading } from '../character-profile';
 import type { Point } from '../config';
 import type { DirectionalPresentation } from '../directional-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
@@ -48,7 +47,7 @@ export type { JsonValue } from '../bounded-json';
 export type { WorkshopGameState } from './game-state';
 export type {
   AppearancePart, ArmIkSettings, ArtMode, AudioSettings, AvatarMotionEntry, AvatarMotionModel, CharacterArms, CharacterRiggingType,
-  CharacterShading, DirectionalPresentation, EnemyArtSettings, EnemyPose, GameSettings, GameTheme, Grips, HammerHead, HudSettings,
+  DirectionalPresentation, EnemyArtSettings, EnemyPose, GameSettings, GameTheme, Grips, HammerHead, HudSettings,
   LevelDefinition, LevelLabel, LevelObject, LibraryAvatarSettings, MediaEntry, ModelLibrary, PartPose, PartRole, Point, ProjectArt,
   RigGeometry, SpriteDocument, VisualAlignment, VisualPartId,
 };
@@ -257,7 +256,6 @@ export interface WorkshopCharacterEdits {
   waistLean(value: number): WorkshopRefusal | null;
   grips(value: Grips): WorkshopRefusal | null;
   arms(value: CharacterArms | null): WorkshopRefusal | null;
-  shading(value: CharacterShading): WorkshopRefusal | null;
   avatarMotion(value: readonly AvatarMotionEntry[]): WorkshopRefusal | null;
   presentation(value: DirectionalPresentation | null): WorkshopRefusal | null;
 }

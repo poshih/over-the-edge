@@ -1,6 +1,6 @@
 # Imported 3D characters
 
-A game can ship its own GPU-skinned character, render it with PBR or cel shading,
+A game can ship its own GPU-skinned character, rendered with its own PBR materials,
 replace the hammer and the pot with their own models, and let players switch between
 that character and a 2D sprite character. The engine owns the machinery; a game supplies
 only data: GLBs, a bone map and a profile. Everything below is authored in
@@ -410,34 +410,15 @@ and refuses one whose size or digest differs from the build's.
 a release packages it with the game's content, and players download it from the game's
 CDN; see [content delivery](content-delivery.md).
 
-## Shading
+## Materials
 
-**Avatar shading** switches between **PBR**, the models' own materials, and
-**Cel**: stepped lighting with 2-8 bands and an optional outline. Change the mode,
-band count, outline colour and outline width live; the look updates on the same
-loaded models, so the two can be compared by flipping back and forth.
-
-Shading styles Avatar mode: the connected avatar (built-in or imported) and its
-separate pot and hammer, including the hammer and pot models and Appearance's pot
-and hammer imports. Other character types keep their materials, and the setting is
-stored for the next Avatar selection.
-
-- **Bands.** Each lit material gets one Three.js `MeshToonMaterial` twin, sharing
-  its colour, maps and alpha settings, and one shared stepped gradient. Metalness
-  and roughness do not apply to cel shading. Unlit materials stay unlit.
-- **Outline.** An inverted hull: a second, back-facing draw of each opaque mesh,
-  extruded along its normals by the width in world metres. Skinned hulls share
-  their mesh's geometry and skeleton, so the outline deforms with the IK. Hard
-  edges are closed by welding coincident normals. Transparent and alpha-tested
-  surfaces are not outlined.
-
-Twins, hulls and the gradient are created on the first switch to cel, then only
-swapped: later switches and cel edits create no materials, textures or geometry,
-and shading does no per-frame work.
+Every model renders with its own glTF PBR materials: base colour, metalness, roughness,
+normal, occlusion and emissive maps, under the theme's lights. Author the look in the
+models; the engine adds no alternative shading.
 
 ## Profile format
 
-Profiles use **schema version 18**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
+Profiles use **schema version 19**. Every profile has `waistLean`, the most a 3D character's upper body leans toward
 the hammer in degrees (0-45; see [waist lean](sprites.md#waist-lean)), and `grips`: the placement, each
 hand's distance from the butt (0-3 m) where it starts, the slide point `slideAt`, a share of each
 arm's length in the course plane that a sliding hand may ride from its shoulder, either way along the
@@ -446,11 +427,11 @@ and `to` as shares of the handle a hand can hold (0 the butt, 1 the nearest a ha
 `from` no greater than `to`), and `rotation`, each 3D hand's turn on its grip about `x`, `y`
 and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It also has
 `arms`, `null` for each type's own arm lengths or each side's `upper` and `forearm`
-(0.1-2 m). The model and shading fields below are present only while used.
+(0.1-2 m). The model fields below are present only while used.
 
 ```json
 {
-  "schemaVersion": 18,
+  "schemaVersion": 19,
   "characterRiggingType": "avatar-3d",
   "armForwardDistance": 0.25,
   "waistLean": 20,
@@ -477,8 +458,7 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
     "motion": []
   },
   "hammer": { "model": "hammer" },
-  "pot": { "model": "pot" },
-  "shading": { "mode": "cel", "bands": 3, "outline": { "color": "#1f2428", "width": 0.02 } }
+  "pot": { "model": "pot" }
 }
 ```
 
@@ -496,9 +476,6 @@ and `z` in degrees (-180 to 180; see [hand grips](../README.md#hand-grips)). It 
 - `avatar.hair` is the avatar's [hair](#hair), bound to its model's joints like the bone map.
 - `avatar.motion` lists the game's [motion kinds](#secondary-motion) the avatar runs, each
   `{ "id", "config" }`, also bound to its model.
-- `shading` is absent for the default look (`pbr`, 3 bands, outline `#1f2428` at
-  0.02 m). `outline` is `null` for none; colours are lowercase `#rrggbb`; widths
-  are 0.002-0.1 m.
 - Models have their own budget, so they do not count against the 24 MiB sprite
   budget. Each model can be up to 20 MiB, and a profile file up to about 104 MiB.
 
@@ -611,9 +588,8 @@ library as `models/<part>/<id>.glb` with its entries in `project.json`, with
 [API routes](projects.md#api-for-scripts-and-language-models) for each model.
 
 **What shows.** A library avatar replaces the avatar of an Avatar (3D) character and
-brings its own settings; the profile keeps everything else, such as its shading.
-Library hammers and pots show in every character type, fitted and shaded like the
-profile's own. The selection belongs to the player, so switching characters keeps it.
+brings its own settings; the profile keeps everything else, such as its waist lean.
+Library hammers and pots show in every character type, fitted like the profile's own. The selection belongs to the player, so switching characters keeps it.
 
 **Hammer heads.** Each library hammer carries its own head: a collision outline that
 replaces the game's default head while the hammer is shown, so a pick-shaped hammer can
@@ -687,8 +663,7 @@ game.characterSelection(); // { active: 1, count: 2, types: ['sprite-2d', 'avata
 returns the second profile's `SpriteRig`, and `selectCharacter(index)` switches
 profiles. `SpriteRig` stays independent of Three.js model loading: its
 `characterAssets.prepare(document, signal)` option loads and validates a
-document's models before the rig commits it, and `setShading()` applies a shading
-change without reloading anything. Without a host, documents with models are rejected.
+document's models before the rig commits it. Without a host, documents with models are rejected.
 
 ## Performance
 
@@ -703,5 +678,5 @@ In the editor, `window.gettingOver.level().rendering` reports `importedAvatar`
 (joints, unmapped joints, chains, cumulative `boneWrites`, and each motion's `claims` and cumulative
 claimed-joint `writes`, hair first), `hammerModel` and
 `potModel` (transform, drawn material types and cumulative `matrixWrites`; the
-hammer's `fit` gives its handle length and fitted bounds), `shading`, `characters`
+hammer's `fit` gives its handle length and fitted bounds), `characters`
 and `renders`.

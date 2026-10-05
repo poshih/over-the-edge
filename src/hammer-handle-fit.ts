@@ -2,7 +2,6 @@ import { Box3, BufferAttribute, Matrix3, Matrix4, Mesh, Vector3 } from 'three';
 import type { BufferGeometry, Object3D } from 'three';
 import { SHAFT_ARTWORK_LENGTH } from './character';
 import type { LoadedCharacterModel } from './character-model-types';
-import { refreshOutlineNormals } from './character-shading';
 import { HEAD_GRIP_MARGIN } from './grips';
 
 // A one-model hammer is authored on the reference handle all shaft artwork uses: its head centred at this x.
@@ -28,8 +27,7 @@ interface FittedMesh {
  * Fits a one-model hammer to the game's handle length. Up to HAMMER_MODEL_HEAD_END, where hands can hold, the
  * model's handle stretches along the handle; the head end keeps its size and moves with the physical head, and
  * anything behind the butt stays with it. Each mesh draws its own copy of the loaded geometry, rewritten only
- * when the handle length changes, so the model still costs one matrix copy per frame. Fit a model before shading
- * outlines it, since outline hulls share their mesh's geometry.
+ * when the handle length changes, so the model still costs one matrix copy per frame.
  */
 export class HammerHandleFit {
   private readonly meshes: FittedMesh[] = [];
@@ -38,7 +36,7 @@ export class HammerHandleFit {
   constructor(model: LoadedCharacterModel, handleLength: number) {
     model.scene.updateMatrixWorld(true);
     model.scene.traverse((object) => {
-      if (!(object instanceof Mesh) || object.userData.characterOutline === true) return;
+      if (!(object instanceof Mesh)) return;
       const authored: BufferGeometry = object.geometry;
       if (authored.getAttribute('position') === undefined) return;
       // Model space is the scene's parent space, whatever the scene is attached to.
@@ -154,7 +152,6 @@ export class HammerHandleFit {
         const attribute = fitted.getAttribute(name);
         if (attribute !== undefined) attribute.needsUpdate = true;
       }
-      refreshOutlineNormals(fitted);
       fitted.computeBoundingBox();
       fitted.computeBoundingSphere();
     }

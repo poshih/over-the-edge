@@ -68,7 +68,7 @@ export interface SpriteEditorOptions {
 
 // The character profile's edit operations, as Workshop plugins share them with the Character tab.
 export type CharacterEdits = Pick<SpriteEditorState, 'setDocument' | 'setCharacterRiggingType' | 'setArmForwardDistance' | 'setWaistLean' |
-  'setGrips' | 'setArms' | 'setShading' | 'setAvatarMotion' | 'setPresentation'>;
+  'setGrips' | 'setArms' | 'setAvatarMotion' | 'setPresentation'>;
 
 export interface SpriteEditorHandle {
   ready: Promise<void>;
@@ -244,7 +244,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       const text = state.exportDocument();
       if (text === null || events.signal.aborted) return;
       downloadJson('sprites.json', text);
-      options.onNotice('Exported sprites.json with character type, rig, directional settings, PNGs, imported avatar/hammer/pot GLBs, shading and authored URL references. Appearance GLB parts are stored separately.', 'info');
+      options.onNotice('Exported sprites.json with character type, rig, directional settings, PNGs, imported avatar/hammer/pot GLBs and authored URL references. Appearance GLB parts are stored separately.', 'info');
     },
   };
 
@@ -507,7 +507,6 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       setWaistLean: (value) => state.setWaistLean(value),
       setGrips: (value) => state.setGrips(value),
       setArms: (value) => state.setArms(value),
-      setShading: (value) => state.setShading(value),
       setAvatarMotion: (value) => state.setAvatarMotion(value),
       setPresentation: (value) => state.setPresentation(value),
     }),

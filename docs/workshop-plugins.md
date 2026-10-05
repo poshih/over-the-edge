@@ -77,8 +77,8 @@ batch of changes.
 `host.project.edit` holds every edit the built-in tabs make, through the same operations: the
 title, game settings, the level (`upsert`, `remove`, `edit`, `labels` and `replace`, which
 changes only the objects that differ, so a playtest goes on), the primary character (the whole
-profile, or its rigging type, arm forward distance, waist lean, grips, arms, shading, avatar
-motion and presentation), the alternate character, arm IK and appearance parts, theme, HUD,
+profile, or its rigging type, arm forward distance, waist lean, grips, arms, avatar motion and
+presentation), the alternate character, arm IK and appearance parts, theme, HUD,
 audio, enemy art, course artwork mode and packages, media and the model library. Each edit is
 validated, changes the draft, marks it unsaved and goes through Save, Revert, export and
 conflict handling as in its tab. Each returns the engine's typed error when it refuses, which
