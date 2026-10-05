@@ -1282,10 +1282,11 @@ export class GameView {
   }
 
   // Mouse gain follows the director's worldHeight; touch gain stays reach-based and independent of zoom.
-  pointerDelta(pixels: Point, sensitivity: number, mode: InputMode): Point {
+  pointerDelta(pixels: Readonly<Point>, sensitivity: number, mode: InputMode, out: Point): void {
     const scale = (mode === 'touch' ? this.rig.maxReach / VISUAL.touchPixelsPerReach :
       this.worldHeight / this.height) * sensitivity;
-    return { x: pixels.x * scale, y: -pixels.y * scale };
+    out.x = pixels.x * scale;
+    out.y = -pixels.y * scale;
   }
 
   project(point: Point): Point {

@@ -95,9 +95,9 @@ export class Simulation {
   // Damage points left, and until when in run time a hit cannot hurt.
   private health: number;
   private safeUntil = 0;
-  // Whether anything in the level can hurt the player, so health matters.
+  // Whether the authored level has hurt sources, so HUD health shows; removed shooters can still have shots in flight.
   private hurts: boolean;
-  private readonly hudHealth = { current: 0, max: 0 };
+  private readonly healthReading = { current: 0, max: 0 };
   // Whether a hit hurt the player, who survived it, since takeHurt last looked.
   private hurtTaken = false;
   // How many times the player has been placed: at every restart and every return to a bonfire.
@@ -299,6 +299,14 @@ export class Simulation {
     return this.health <= 0;
   }
 
+  // The simulation's health, independent of HUD visibility. Reused and read-only: consume immediately, never retain it.
+  readHealth(): HealthReading {
+    this.ensureLive();
+    this.healthReading.current = this.health;
+    this.healthReading.max = this.settings.physics.health;
+    return this.healthReading;
+  }
+
   // Whether a hit hurt the player, who survived it, since the previous call.
   takeHurt(): boolean {
     const taken = this.hurtTaken;
@@ -413,12 +421,10 @@ export class Simulation {
 
   // HUD-only data: no allocations, contact walk, motor queries or plugin callbacks.
   writeHudFrame(out: { height: number; bestHeight: number; health: HealthReading | null }): void {
-    this.ensureLive();
+    const health = this.readHealth();
     out.height = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
     out.bestHeight = this.bestHeight;
-    this.hudHealth.current = this.health;
-    this.hudHealth.max = this.settings.physics.health;
-    out.health = this.hurts ? this.hudHealth : null;
+    out.health = this.hurts ? health : null;
   }
 
   status() {

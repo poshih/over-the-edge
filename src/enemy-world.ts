@@ -462,6 +462,8 @@ export class EnemyWorld {
     record.phase = phase;
     record.changedAt = this.time;
     if (phase !== 'windup' && phase !== 'dive') record.target = null;
+    // Accepted surviving hits enter hurt once, after World.step unlocks. Publish the same pose snapshot as other upserts.
+    if (phase === 'hurt') this.emit({ type: 'upsert', pose: this.pose(record) });
   }
 
   private defeat(record: EnemyRecord, reason: 'hammer' | 'fall'): void {

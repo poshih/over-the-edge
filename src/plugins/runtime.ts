@@ -7,6 +7,8 @@ import { AIM_MARKS } from '../aim-marks';
 import { SCENE_LAYERS } from '../scene-layer';
 import { AUDIO } from '../game-audio';
 import { MESSAGES } from '../event-presenter';
+import { EVENTS } from '../game-events';
+import { INPUT_BINDINGS, INPUT_DEVICES } from '../input';
 import { checkFacetEntries, Composition, PluginError } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';
 
@@ -22,7 +24,9 @@ export interface RuntimeFacet {
 export function defineRuntime<T extends RuntimeFacet>(facet: T): T { return facet; }
 
 export const RUNTIME = Object.freeze([
-  ...Object.values(HUD), CHARACTER_CHOICE, ...Object.values(LOOKS), CAMERA, BACKDROP, AIM_MARKS, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES),
+  ...Object.values(HUD), CHARACTER_CHOICE, ...Object.values(LOOKS),
+  CAMERA, BACKDROP, AIM_MARKS, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES),
+  EVENTS, INPUT_BINDINGS, INPUT_DEVICES,
 ]);
 
 function checkRuntime(value: unknown, plugin: string): RuntimeFacet {
@@ -32,7 +36,7 @@ function checkRuntime(value: unknown, plugin: string): RuntimeFacet {
   return value as RuntimeFacet;
 }
 
-/** One Game's presentation. Owners dispose consumers first, then this session's signals in reverse order. */
+/** One Game's runtime extensions. Owners dispose consumers first, then this session's signals in reverse order. */
 export class RuntimePlugins {
   private readonly composition: Composition;
   private readonly controllers: readonly AbortController[];

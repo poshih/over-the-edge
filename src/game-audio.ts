@@ -50,7 +50,7 @@ export function createGameAudio(factory: GameAudioFactory, setup: GameAudioSetup
     const output = audio as GameAudio;
     let disposed = false;
     // The output's lifetime is independent of gameplay: editor previews can outlive a halted Game,
-    // but a queued cue must never call a plugin after its audio has been disposed.
+    // but neither a staged gameplay cue nor a preview may call a disposed output.
     const owned: GameAudio = {
       handle(cue) { if (!disposed) output.handle(cue); },
       setPaused(paused) { if (!disposed) output.setPaused(paused); },

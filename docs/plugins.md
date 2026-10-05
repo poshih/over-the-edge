@@ -61,7 +61,7 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | Facet | Runs in | SDK | For | Virtual module |
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
-| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows and sounds: HUD readouts and extras, camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and messages; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
+| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
 | `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
@@ -218,13 +218,13 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | `reserved-plugin` | A plugin is named `engine` |
 | `invalid-facet` | A facet's default export has the wrong shape; a build refused a facet file its boundary forbids; a build was asked for a virtual module it does not serve |
 | `unknown-point` | A contribution names a point its environment does not have |
-| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a readout, look, camera director, backdrop, aim marks, scene layer, audio output, toasts, character choice view, notices or fatal display; a character choice view selected a non-integer index or an index outside its labels; a message presenter returned a non-promise or invalid outcome, or a toast's show returned a non-boolean |
+| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a built-in or extra readout, look, camera director, backdrop, aim marks, scene layer, audio output, toasts, character choice view, notices, fatal display, gameplay observer or input device; a character choice view selected a non-integer index or an index outside its labels; input bindings are malformed or a device action is not bindable; an observer's `event` or a device's `poll` returned a promise-like value, or a device added non-finite movement; a message presenter returned a non-promise or invalid outcome, or a toast's show returned a non-boolean |
 | `duplicate-contribution` | A plugin contributes to one point twice |
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
 | `foreign-namespace` | A keyed item is not named `<plugin>/<name>` under its own plugin |
 | `too-many` | A point holds more items than its limit, or a session more than 32 plugins |
-| `plugin-failed` | A plugin's own code threw: a `start`, a wrap, a factory, a release callback or a Workshop plugin |
+| `plugin-failed` | A plugin's own code threw: a `start`, a wrap, a factory, a release callback or a Workshop plugin; a gameplay observer's `event` or `dispose`; an input device's `poll`, `dispose` or `host.action`; the audio output's `handle`; the enemy look's `apply` or the bonfire look's `setLit` |
 | `plugin-stopped` | A stopped Workshop plugin's host, or a closed release session, refused a call |
 
 A plugin may refuse with codes of its own, as a Workshop plugin's `validate` does for its data:
@@ -306,17 +306,21 @@ for a plugin beyond the plugin's own, and keeps per-frame work proportional to w
 - **Allocate nothing per frame.** `update` runs 60 or more times a second. Reuse vectors,
   matrices, arrays and objects, and write only what changed: a readout compares the frame with
   what it last drew, and a look uploads only the instances it moved.
-- **Never keep the frame.** HUD and scene frames, camera inputs/aims and phantom figure frames
-  are reused: read what you need during the call and treat nested references as borrowed.
+- **Never keep borrowed data.** HUD and scene frames, camera inputs/aims, phantom figure frames,
+  gameplay events, audio cues and input-device output are reused: read what you need during the
+  call and treat nested references as borrowed.
 - **Pay only while active.** A look's `update` runs only while the level has objects of its
   kind, so an unused look costs nothing per frame. The front pass draws only while some look's
   front is visible, so hide yours while it shows nothing. Enemy looks update only with enemies
   in the level, and phantom looks draw only while a figure shows. Scene layers and Workshop
-  overlays without `update` have no per-frame callback; others run only while added.
+  overlays without `update` have no per-frame callback; others run only while added. Gameplay
+  observers run only on events, and absent input devices have no polling call.
 - **Keep callbacks light.** `PROGRESS` runs as each piece of the boot downloads arrives.
   Audio handles cues and pause/settings changes, not frames. Toasts request frames only while
   showing; notices and modal presenters need no idle animation loop.
-- **Stay out of physics.** No plugin code runs inside the physics step. A motion kind's
+- **Stay out of physics.** No plugin code runs inside the physics step or its callbacks.
+  Devices poll before stepping; enemy and bonfire look notifications, audio and gameplay
+  observers flush after the step loop, before rendering. A motion kind's
   `update` and a [rig strategy's](characters.md#rig-strategies) frame phases run every frame:
   allocate nothing there either.
 
@@ -389,6 +393,9 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`messages.toasts`](runtime-plugins.md#messages) | `MESSAGES.toasts` | `runtime` | Slot, `ToastsFactory` | `DEFAULT_MESSAGE_TOASTS` |
 | [`messages.popup`](runtime-plugins.md#messages) | `MESSAGES.popup` | `runtime` | Slot, `PopupPresenter` | `DEFAULT_MESSAGE_POPUP` |
 | [`messages.video`](runtime-plugins.md#messages) | `MESSAGES.video` | `runtime` | Slot, `VideoPresenter` | `DEFAULT_MESSAGE_VIDEO` |
+| [`game.events`](runtime-plugins.md#gameplay-events) | `EVENTS` | `runtime` | List, 32 `GameObserverFactory` | None |
+| [`input.bindings`](runtime-plugins.md#input) | `INPUT_BINDINGS` | `runtime` | Slot, frozen `InputBindings` | `DEFAULT_INPUT_BINDINGS`: r / p / Space / c |
+| [`input.devices`](runtime-plugins.md#input) | `INPUT_DEVICES` | `runtime` | List, 32 `InputDeviceFactory` | None; pointer input remains built in |
 | [`release.notices`](release-plugins.md#notices) | `NOTICES` | `release` | Slot, `NoticesFactory` | `DEFAULT_NOTICES`; studio previews keep the engine default |
 | [`release.fatal`](release-plugins.md#fatal-display) | `FATAL` | `release` | Slot, `FatalDisplayFactory` | `DEFAULT_FATAL`; studio previews and the Workshop keep the engine default |
 | [`release.access`](release-plugins.md#access-and-sign-in) | `ACCESS` | `release` | Slot, `ContentAccess` | `publicAccess(contentUrl)` |

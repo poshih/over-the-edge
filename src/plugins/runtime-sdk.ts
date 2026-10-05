@@ -55,3 +55,7 @@ export type {
 export type { EventOutcome, MessageAction, PresentationAction, VideoAction } from '../trigger-events';
 export { EventExecutionError } from '../trigger-events';
 export type { MediaHost, MediaStream } from '../media-host';
+export { EVENTS, GAME_OBSERVER_LIMITS } from '../game-events';
+export type { GameEvent, GameObserver, GameObserverFactory } from '../game-events';
+export { DEFAULT_INPUT_BINDINGS, INPUT_BINDINGS, INPUT_DEVICES, INPUT_DEVICE_LIMITS } from '../input';
+export type { BindableAction, InputBindings, InputDevice, InputDeviceFactory, InputDeviceHost } from '../input';

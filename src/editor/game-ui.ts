@@ -1,7 +1,7 @@
 import gameTitle from 'virtual:game-title';
 import type { InputMode, UiAction, UiActionOptions } from '../config';
 import { element, setText } from '../dom';
-import { inputModeForPointer } from '../input';
+import { DEFAULT_INPUT_BINDINGS, INPUT_BINDINGS, inputModeForPointer } from '../input';
 import { createNotice } from '../notice';
 import { DEFAULT_HUD, formatHeight } from '../hud';
 import type { HudSettings } from '../hud';
@@ -20,6 +20,13 @@ export function createGameUI(options: {
   const events = new AbortController();
   const listen = { signal: events.signal };
   const desktop = window.matchMedia(DESKTOP_QUERY);
+  const bindings = options.plugins.slot(INPUT_BINDINGS, DEFAULT_INPUT_BINDINGS);
+  const shortcuts = { pause: '', reset: '' };
+  for (const [key, action] of Object.entries(bindings)) {
+    if (action !== 'pause' && action !== 'reset') continue;
+    const label = key === ' ' ? 'Space' : key.toUpperCase();
+    shortcuts[action] += `${shortcuts[action] === '' ? '' : ' / '}${label}`;
+  }
   let inputMode = options.initialInputMode;
   const root = document.createElement('div');
   root.className = 'game-ui';
@@ -55,7 +62,7 @@ export function createGameUI(options: {
         </div>
         <div class="key-guide">
           <span><kbd>DRAG</kbd>without capture</span>
-          <span><kbd>ESC</kbd>release mouse</span><span><kbd>SPACE</kbd>pause</span>
+          <span><kbd>ESC</kbd>release mouse</span><span data-key-hint="pause"><kbd></kbd>pause</span>
         </div>
         <p class="game-signature">TWO MOTORS. ONE MOUNTAIN. <span>YOUR WAY UP.</span></p>
       </footer>
@@ -85,6 +92,9 @@ export function createGameUI(options: {
   const mouseIcon = element<HTMLElement>(root, '.mouse-icon');
   const guideHeading = element<HTMLElement>(root, '.guide-heading');
   const keyGuide = element<HTMLElement>(root, '.key-guide');
+  const pauseHint = element<HTMLElement>(root, '[data-key-hint="pause"]');
+  pauseHint.hidden = shortcuts.pause === '';
+  setText(element<HTMLElement>(pauseHint, 'kbd'), shortcuts.pause.toUpperCase());
   for (const action of ['play', 'pause', 'reset'] as const) {
     element<HTMLButtonElement>(root, `[data-action="${action}"]`).addEventListener('click', (event) => {
       options.onAction(action, { inputMode: event instanceof PointerEvent ? inputModeForPointer(event.pointerType) : undefined });
@@ -102,8 +112,8 @@ export function createGameUI(options: {
     guideHeading.hidden = touch;
     keyGuide.hidden = touch;
     play.title = touch ? 'Resume touch controls' : 'Play and capture the mouse. Press Esc to release.';
-    pause.title = touch ? 'Pause or resume' : 'Pause or resume (Space)';
-    reset.title = touch ? 'Restart' : 'Restart (R)';
+    pause.title = !touch && shortcuts.pause !== '' ? `Pause or resume (${shortcuts.pause})` : 'Pause or resume';
+    reset.title = !touch && shortcuts.reset !== '' ? `Restart (${shortcuts.reset})` : 'Restart';
     setText(instructions, touch ? 'Drag anywhere with one finger. Lift and reposition to continue.' :
       'Move your mouse to guide the hammer. Plant, push, pull.');
   }

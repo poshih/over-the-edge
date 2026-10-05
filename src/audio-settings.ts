@@ -66,6 +66,7 @@ export function hasAudio(audio: AudioSettings): boolean {
 }
 
 // Sound requests the game raises for its host: a cue from gameplay, or an authored play-sound event.
+// Borrowed, read-only objects: handle them synchronously and never retain one, because the Game reuses them.
 export type GameCue =
   | { readonly type: 'cue'; readonly cue: AudioCue; readonly strength: number }
   | { readonly type: 'sound'; readonly source: string; readonly volume: number };

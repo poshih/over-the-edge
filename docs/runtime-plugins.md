@@ -1,8 +1,9 @@
 # Runtime plugins
 
-A plugin's **runtime facet** changes what play shows and sounds: HUD readouts, character choice,
-camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and
-event messages.
+A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
+camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio,
+event messages, gameplay observers, key bindings and additional input devices; character choice
+in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
 so a game sees and hears its own presentation while it is authored. Its SDK is
 [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts). [Plugins](plugins.md) describes the
@@ -70,7 +71,7 @@ draws any readout its own way, and the others stay the engine's. Each is a facto
 | `height`, `bestHeight` | The player's height now, and the best this run, in metres |
 | `elapsed` | The run's timer, in seconds |
 | `timerRunning` | Whether the timer still runs; a Stop timer event stops it |
-| `health` | The player's health, `{ current, max }` (`HealthReading`), or `null` in levels where nothing can hurt the player |
+| `health` | The player's health, `{ current, max }` (`HealthReading`), or `null` when the authored level has no hurt sources; shots already in flight can still hurt after their shooter is removed |
 | `paused` | Whether the game is paused |
 | `pointerLocked` | Whether the mouse is captured for play |
 | `inputMode` | `mouse` or `touch` |
@@ -186,7 +187,8 @@ look draws every object of its kind:
   has projectile traps or shots fly, then once more with none, so the look can clear its last
   shots.
 - `setLit(ids)`, the bonfire look's alone, receives the bonfires the player has reached this
-  run, which burn, whenever they change.
+  run, which burn, whenever they change. Changes during physics are staged: after the step loop,
+  it runs at most once per notification flush, with the latest lit set.
 - `dispose()` runs when the game closes, once the view has let go of the look's passes: free its
   geometries and materials. `inspect()`, optional, reports to the Workshop's diagnostics, in
   `window.gettingOver.level().rendering.looks`.
@@ -401,6 +403,12 @@ interface EnemyLook {
 `DEFAULT_LOOKS.enemies` creates `EnemyView`, the engine's shared atlas and instanced sprites,
 including animation, windup, hurt and death effects. The game forwards simulation membership
 events to `apply`: `reset` with every pose, `upsert` with one pose and `remove` with an ID.
+A surviving hammer hit publishes one `upsert` when the enemy enters hurt, so the look, the
+`enemy-hit` cue and gameplay observers all receive the hit. Hit cooldown and contact
+deduplication still apply; notifications are raised only for accepted hits.
+These notifications are staged and applied in order after the frame's step loop, before audio,
+gameplay observers and rendering; the look never runs inside physics. Event envelopes are reused
+and read-only: consume them during `apply`, never retain them.
 `update` receives only the active poses and simulation seconds, **only while the level has
 enemies**; sleeping sprites remain from `apply`. `setArt` receives the project's pixel-art
 settings when they change. `inspect`, optional, appears in the rendering diagnostics' `enemies`.
@@ -586,12 +594,15 @@ interface GameAudio {
   moment, or `{ type: 'sound', source: string, volume: number }` for a play-sound event. The
   closed cue list is `AUDIO_CUES`: `impact`, `enemy-hit`, `enemy-defeat`, `launch`, `finish`,
   `hurt`, `death`, `fall` and `bonfire`. Impact strength is 0-1; other cues have strength 1.
-  Gameplay cues arrive in source order through lifecycle-guarded microtasks, outside `Simulation.step`
-  and physics callbacks; closing or stopping the Game drops pending deliveries.
+  Gameplay cues arrive in source order after the frame's step loop and look notifications, before
+  gameplay observers and rendering, outside `Simulation.step` and physics callbacks. Closing or
+  stopping the Game drops staged deliveries. Cue objects are reused and read-only: consume during
+  `handle`, never retain them.
   **Game limits impacts at the source to one per 70 ms**, before any output or wrapper sees
-  them, checking delivery time so a long frame cannot bunch deferred impacts. The Workshop's
-  cue preview shares that limit but remains available after gameplay stops; previews are guarded
-  by the audio output's disposal, not the Game's lifecycle.
+  them, when staging the impact event, not in the output. The Workshop's cue preview shares
+  that limit but goes directly to the output, independently of gameplay staging and observers,
+  and remains available after gameplay stops; previews are guarded by the audio output's
+  disposal, not the Game's lifecycle.
 - `setPaused` receives the initial state when play starts, then only pause-state changes.
   `setSettings` previews new project audio settings in the Workshop, and `setMedia` tells the
   output to drop media cached for files that changed. Forward all three in a wrap so the
@@ -622,8 +633,10 @@ The Workshop always uses this base. A release
 whose content has no audio or sound events gets `null` from `virtual:game-audio` and uses
 `SILENT_AUDIO_OUTPUT` as its base instead. The lightweight `game-audio.ts` module has no
 dependency on `AudioDirector`. The release still resolves and creates `AUDIO`, so a replacement
-or a wrap works without authored audio. The unchanged silent base enables neither impact tracking nor a Web
-Audio context; a replacement or wrapper enables the shared device and cue delivery.
+or a wrap works without authored audio. Without gameplay observers, the unchanged silent base
+enables neither impact tracking nor a Web Audio context; a replacement or wrapper enables the
+shared device and cue delivery. Gameplay observers enable impact tracking even with silent
+audio, but do not enable a Web Audio context.
 
 To extend the engine's audio, use `wrap(AUDIO, previous => ...)`: `previous` is the engine's
 selected base or an earlier plugin's factory, so the wrap preserves music and every cue it
@@ -695,6 +708,207 @@ export default defineRuntime({
 
 The shared master gain applies project volume to the synthesized tone too. Its short-lived
 nodes exist only while sounding, and disposal stops any still in flight.
+
+## Gameplay events
+
+`EVENTS`, the list `game.events`, adds up to 32 `GameObserverFactory` values. The engine's base
+is an empty list. Each factory runs once per Game, in manifest order, with no engine objects:
+
+```ts
+type GameObserverFactory = () => GameObserver;
+interface GameObserver {
+  event(event: GameEvent): void;
+  dispose?(): void;
+}
+```
+
+`GameEvent` is a small discriminated union exported by the runtime SDK:
+
+| `type` | Additional fields and meaning |
+| --- | --- |
+| `hurt` | `health`, `max`: the simulation's remaining health and maximum after a nonlethal hurt in the step batch, independent of whether the HUD shows health |
+| `death` | Health ran out |
+| `fall` | The player fell out of the level; takes precedence over death if both occur in the same step |
+| `respawn` | `bonfire`: the checkpoint's ID, or `null` when the automatic reset path returns to the attempt's start |
+| `restart` | A new attempt: Reset, a rebuilt rig or a replacement level, not a checkpoint return |
+| `bonfire` | `id`: a newly reached checkpoint, including a previously lit bonfire other than the current checkpoint |
+| `enemy-hit` | `id`: an enemy transitioned to hurt after a surviving hit |
+| `enemy-defeat` | `id`: an enemy transitioned to defeated |
+| `impact` | `strength`: normalized 0–1 hammer-impact strength, limited at the source to one per 70 ms |
+| `launch` | An authored Launch player action executed |
+| `finish` | An authored Stop timer action executed |
+| `sound` | `source`, `volume`: an authored play-sound action executed |
+
+There is no boot `restart` event. An automatic return without a checkpoint uses the ordinary
+reset action, so it emits `death` or `fall`, then `restart`, then `respawn` with `bonfire: null`
+once the player has been placed. A checkpoint return emits `death` or `fall`, then `respawn`
+with its bonfire ID; its timer and attempt continue. Messages and videos keep their
+[presentation contracts](#messages); they are not additional `GameEvent` variants. Cue previews
+do not notify observers.
+
+**Schedule and ownership.** The Game stages notifications in reusable storage while its
+physics-step loop runs. After the loop, and before rendering, it flushes:
+
+1. Enemy look changes in order, and the bonfire look's latest lit set at most once.
+2. Audio, mapping those gameplay events to the existing cues and authored sounds in source order.
+   `restart` and `respawn` have no cues.
+3. Gameplay observers: each event in source order, with observers called in manifest order.
+
+Terrain changes stay synchronous and engine-only. No look, audio output, gameplay observer or
+input device runs inside `Simulation.step` or a physics callback. Notifications from asynchronous
+trigger continuations or a reset between frames join the next flush, even while paused.
+Notifications raised by delivery callbacks join the following flush, not the batch being
+delivered. Pools grow only when a burst exceeds their previous high-water capacity.
+
+Events are **read-only borrowed objects, reused by the engine**. Read them only during
+`event`; never retain one or compare it with an event from an earlier call. Save scalar fields
+into your own state instead. `event` must finish synchronously; promise-like returns are errors.
+Observers run only when events occur, never on idle frames. The engine checks factories and
+returned observers with `PluginError`, naming the plugin and point; a throwing observer stops
+the game with the same attribution, never silently removing it. `dispose`, when supplied,
+runs with Game cleanup; every part is attempted before the first cleanup error is rethrown.
+
+For example, report reached checkpoints without changing the gameplay rules:
+
+```ts
+import { add, defineRuntime, EVENTS } from '../../src/plugins/runtime-sdk';
+import type { GameObserverFactory } from '../../src/plugins/runtime-sdk';
+
+export default defineRuntime({
+  start(host) {
+    const checkpoints: GameObserverFactory = () => ({
+      event(event) {
+        if (event.type === 'bonfire') host.notice(`Reached checkpoint ${event.id}.`);
+      },
+    });
+    return [add(EVENTS, checkpoints)];
+  },
+});
+```
+
+For a game's own sound moments, keep the shared `setup.device` from an [audio factory](#audio)
+in the facet's closure and use it from an observer. Do not create another audio context or add
+an audio animation loop.
+
+## Input
+
+The engine's pointer input remains responsible for mouse capture, canvas drag and touch.
+Runtime plugins can change its keyboard bindings or add devices without replacing those controls.
+
+### Key bindings
+
+`INPUT_BINDINGS`, the slot `input.bindings`, resolves once per session with
+`DEFAULT_INPUT_BINDINGS` as its base:
+
+```ts
+type BindableAction = 'reset' | 'pause' | 'recenter';
+type InputBindings = Readonly<Record<string, BindableAction>>;
+
+// DEFAULT_INPUT_BINDINGS is frozen.
+const bindings: InputBindings = Object.freeze({ r: 'reset', p: 'pause', ' ': 'pause', c: 'recenter' });
+```
+
+Keys are nonempty, lowercase **`KeyboardEvent.key`** values, not physical `code` values;
+Space is `' '`, and named keys use forms such as `'arrowleft'`. The resolved record is
+validated and copied into a frozen snapshot: uppercase keys, symbols, non-record values and
+actions other than exactly `reset`, `pause` and `recenter` are errors naming the contributor.
+A replacement supplies the whole map, so omitted keys are unbound; a wrap can preserve
+previous bindings:
+
+```ts
+import { defineRuntime, INPUT_BINDINGS, wrap } from '../../src/plugins/runtime-sdk';
+
+export default defineRuntime({
+  start: () => [
+    wrap(INPUT_BINDINGS, previous => Object.freeze({ ...previous, q: 'reset' })),
+  ],
+});
+```
+
+The existing guards still apply: interaction blocks disable shortcuts; repeats, composing text
+and Meta/Ctrl/Alt shortcuts are ignored; text inputs and editable content keep their keys.
+Space still activates a focused button or summary rather than pausing. Escape releases a
+captured mouse before consulting the map. Unbound keys can still reach the Workshop's own
+shortcut handler, so the default D and practice-number shortcuts remain unchanged.
+The Workshop's pause/reset key hints use this same cached binding snapshot, listing its bound
+keys and hiding the keyboard hint when an action has none; the buttons remain available.
+
+### Additional input devices
+
+`INPUT_DEVICES`, the list `input.devices`, adds up to 32 `InputDeviceFactory` values to an
+empty engine base. Each is created once per Game, in manifest order:
+
+```ts
+type InputDeviceFactory = (host: InputDeviceHost) => InputDevice;
+
+interface InputDeviceHost {
+  action(action: BindableAction): void;
+  readonly signal: AbortSignal;
+}
+
+interface InputDevice {
+  poll(dt: number, out: { x: number; y: number }): void;
+  dispose?(): void;
+}
+```
+
+- `poll` runs once per visible frame before physics, including paused and input-blocked
+  frames, and only while devices exist. Paused polling lets `host.action('pause')` toggle
+  the user's pause reason and resume, just as the keyboard does. All devices are polled in
+  manifest order unless the Game stops. `dt` is frame seconds, clamped to the engine's
+  maximum physics-step budget.
+- **Add** course-plane hammer movement in **metres**, +x right and +y up, into `out`.
+  It starts at zero each frame and contains earlier devices' movement; never zero it or replace
+  another device's contribution. The Game adds the sum to the pointer's converted movement and divides it
+  across the physics steps. Mouse conversion follows camera world height, while touch
+  conversion remains reach-based; neither scale is applied to device movement.
+- Device movement is consumed only when that frame runs physics steps with input enabled.
+  Paused, hidden, input-blocked and zero-step frames discard it; it never carries into a
+  later frame. Player placements clear movement, and a reset during polling also discards
+  that polling frame's movement.
+- `out` is borrowed, reusable scratch: never retain it. Finish synchronously, never return a
+  promise, and add only finite movement. Invalid outputs and throwing polls stop the game with
+  a `PluginError` naming the plugin and `input.devices`.
+- Use `host.action` from polling or input listeners for the same reset, pause and recenter
+  actions as the keyboard, not while constructing the device. It is ignored while interaction
+  is blocked or the Game has stopped. `signal` aborts when the Game stops or is disposed; use
+  it to remove listeners and cancel work. Optional `dispose` runs with Game cleanup.
+- Factories and returned devices are checked where created. No device gets a Simulation,
+  view, canvas or engine internals; no device callback runs inside physics.
+
+### Gamepad example
+
+The left stick moves each hammer axis at up to 3 metres per second with a small dead zone;
+button 0 resets on its rising edge. The browser supplies the gamepad snapshot; the device
+creates no movement objects per poll:
+
+```ts
+import { add, defineRuntime, INPUT_DEVICES } from '../../src/plugins/runtime-sdk';
+import type { InputDeviceFactory } from '../../src/plugins/runtime-sdk';
+
+const gamepad: InputDeviceFactory = host => {
+  let resetDown = false;
+  return {
+    poll(dt, out) {
+      const pad = navigator.getGamepads()[0];
+      const reset = pad?.buttons[0]?.pressed === true;
+      const pressed = reset && !resetDown;
+      resetDown = reset;
+      if (pressed) {
+        host.action('reset');
+        return;
+      }
+      if (!pad) return;
+      const x = pad.axes[0] ?? 0;
+      const y = pad.axes[1] ?? 0;
+      if (Math.abs(x) > 0.15) out.x += x * 3 * dt;
+      if (Math.abs(y) > 0.15) out.y -= y * 3 * dt;
+    },
+  };
+};
+
+export default defineRuntime({ start: () => [add(INPUT_DEVICES, gamepad)] });
+```
 
 ## Messages
 
@@ -831,11 +1045,16 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
 - Points reject non-function factories. Creating a readout, director, backdrop, marks, look,
-  layer, audio output, toast presenter or character choice checks the returned object's required and optional
-  methods, roots and passes. A
-  factory, or a wrap, that throws fails with `plugin-failed`; a malformed return fails with
-  `invalid-contribution`. Each names the plugin and point, including the contributor of an extra
-  readout or a list layer. A director that writes a non-finite aim or a non-positive height also fails explicitly.
+  layer, audio output, toast presenter, character choice, gameplay observer or input device
+  checks the returned object's required and optional methods and, where applicable, roots
+  and passes. A factory, or a wrap, that throws fails with `plugin-failed`; a malformed return
+  fails with `invalid-contribution`. Each names the plugin and point, including the contributor
+  of an extra readout or other list item. A director that writes a non-finite aim or a
+  non-positive height also fails explicitly.
+- Key bindings must be a lowercase-key record of the three bindable actions. An observer's
+  `event` and a device's `poll` must complete synchronously, without a promise-like return;
+  a device must add finite movement. Violations fail with `invalid-contribution`, naming
+  the plugin and point; a thrown callback is `plugin-failed` with its cause.
 - Audio and toasts require their lifecycle methods, and an optional `inspect` must be a
   function. Popup/video results must be promises of a valid `EventOutcome`, and a toast's
   `show` must return a boolean; malformed results fail with `invalid-contribution`, naming

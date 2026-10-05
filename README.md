@@ -107,10 +107,11 @@ names. Each plugin has up to four facets, one for each place its code runs:
 
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
-- **runtime**, how play looks and sounds: HUD readouts, camera following, backdrop, aim marks,
-  object, enemy and phantom looks, scene layers, audio and message presentation, in the
-  Workshop's play-test, studio previews and releases;
-- **release**, notices and release-only services: a game whose content only some players may load signs
+- **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
+  aim marks, object, enemy and phantom looks, scene layers, audio, message presentation,
+  gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
+  studio previews and releases; character choice in releases and studio previews;
+- **release**, notices, fatal errors and release-only services: a game whose content only some players may load signs
   players in there with its own identity management and grants the release access to its
   content, typically short-lived signed CDN URLs from the game's backend, so the engine never
   sees accounts or credentials;
@@ -304,7 +305,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, bonfires, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, audio and message presentation, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, bonfires, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -330,6 +331,9 @@ new feature ships with its extension point.
 | C | Recenter the camera |
 | 1 / 2 / 3 / 4 | Ascent / ledge hold / ground push / vault (editor only) |
 | / | Find a Workshop control (editor only) |
+
+These are the engine's default controls. Runtime plugins can change the reset, pause and
+recenter key bindings or add devices; see [Input](docs/runtime-plugins.md#input).
 
 Touch gain is independent of camera zoom and orientation: at the default
 **Control sensitivity**, 100 CSS pixels move the world-space target one hammer
