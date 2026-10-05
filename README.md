@@ -41,20 +41,19 @@ complete games on disk and gives scripts and language models a JSON API for ever
 setting. See [game projects](docs/projects.md). A static deployment of `dist/` has
 no project server; its Workshop still opens and saves project files.
 
-To deploy the Workshop, upload `dist/` to the **gettingover** Cloudflare Worker
-defined in `wrangler.toml`. It is a static-assets Worker, not a Cloudflare Pages
-project. Deploying requires your own Cloudflare account:
+Every local server, these and the game-only release's below, listens on `127.0.0.1`
+only, so nothing is reachable from another machine and this repository hosts nothing
+online. When the server runs on a remote machine, forward its port to your own
+computer, for example with `ssh -L 5181:127.0.0.1:5181 <machine>` or VS Code's
+**Ports** view, and open **http://localhost:5181** there. To listen on another interface
+instead, pass Vite's `--host`, as in `npm run dev -- --host 0.0.0.0`; the project server
+still answers only this computer until you set [`STUDIO_TOKEN`](docs/projects.md#the-project-server).
 
-```sh
-npm run build
-npx wrangler deploy --config wrangler.toml --keep-vars
-```
-
-The deployment serves the level files in `levels/` as the Workshop's
-[server levels](#level-editing). To deploy a Workshop for one game, build it with `GAME_PROJECT=<project> npm run build`.
-The deployed Workshop then opens that game, keeps each visitor's changes in their browser
-and picks up redeployments; see [publishing a Workshop with its
-project](docs/projects.md#publishing-a-workshop-with-its-project).
+`dist/` is a static site that any static host can serve. It serves the level files in
+`levels/` as the Workshop's [server levels](#level-editing). A Workshop for one game is
+built with `GAME_PROJECT=<project> npm run build`; deployed, it opens that game, keeps
+each visitor's changes in their browser and picks up redeployments; see [publishing a
+Workshop with its project](docs/projects.md#publishing-a-workshop-with-its-project).
 
 The Workshop also offers the GLBs in `models/avatar/`, `models/hammer/` and `models/pot/`
 as [server models](docs/characters.md#server-models), which designers pick in the Character
@@ -66,12 +65,8 @@ Upload `dist-content/` there, with CORS for the Workshop's origin:
 
 ```sh
 WORKSHOP_CONTENT_URL=https://cdn.example.com/workshop/ npm run build
-npx wrangler deploy --config wrangler.toml --keep-vars
-# then upload dist-content/ to https://cdn.example.com/workshop/
+# then deploy dist/ and upload dist-content/ to https://cdn.example.com/workshop/
 ```
-
-A custom domain is optional. Attach it to the Worker in your Cloudflare account
-after deploying; domains are not stored in this repository.
 
 ### Game-only release
 
@@ -99,8 +94,7 @@ it loads the content from **`GAME_CONTENT_URL`** (default `content/`, beside the
 and verifies every file. `npm run preview:game` serves both locally at
 **http://localhost:4175**. `npm run dev:game` uses **http://localhost:5182**. Neither
 local server deploys anything; deploy both outputs as described below.
-The existing `npm run build` and `wrangler.toml` continue to target the
-editor/workshop in `dist/`, not this separate release.
+`npm run build` still builds the editor/workshop into `dist/`, not this separate release.
 
 A game adds its own code with **plugins**, listed in a JSON manifest that **`GAME_PLUGINS`**
 names. Each plugin has up to four facets, one for each place its code runs:
@@ -163,20 +157,17 @@ A command-line `GAME_TITLE` overrides the file. It can be combined with
 `GAME_LEVEL`, `GAME_SETTINGS`, `GAME_SPRITES`, and `GAME_ALTERNATE_SPRITES`. The setting changes display
 titles, not repository names, browser storage keys, or deployment identifiers.
 
-To deploy the game-only release, `wrangler.game.toml` uploads only the shell,
-`dist-game/`, to a separate **gettingover-play** Worker. Upload `dist-game-content/`
-to the static host or CDN that serves your content URL, with CORS headers for the
-shell's origin, and build with that URL:
+To deploy the game-only release, serve the shell, `dist-game/`, from any static host,
+on a site of its own rather than the Workshop's. Upload `dist-game-content/` to the
+static host or CDN that serves your content URL, with CORS headers for the shell's
+origin, and build with that URL:
 
 ```sh
 GAME_CONTENT_URL=https://cdn.example.com/my-game/ npm run build:game
-npx wrangler deploy --config wrangler.game.toml --keep-vars
-# then upload dist-game-content/ to https://cdn.example.com/my-game/
+# then deploy dist-game/ and upload dist-game-content/ to https://cdn.example.com/my-game/
 ```
 
-Deploying the shell alone never publishes content. This leaves the Workshop Worker
-and its domain unchanged. A custom domain is optional; attach a separate one to
-**gettingover-play** in your Cloudflare account after deploying.
+Deploying the shell alone never publishes content.
 
 To include an authored course in the game-only release, export its JSON from the
 Level tab, place that file inside the project (for example

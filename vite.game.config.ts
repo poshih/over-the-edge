@@ -99,7 +99,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
       gamePlugins({ manifest: servedManifest, environments }),
     ],
     build: { outDir: resolve(project, 'dist-game'), emptyOutDir: true },
-    server: { host: '0.0.0.0', port: 5182, strictPort: true, fs: { allow: [project] } },
-    preview: { host: '0.0.0.0', port: 4175, strictPort: true },
+    server: { host: '127.0.0.1', port: 5182, strictPort: true, fs: { allow: [project] } },
+    preview: { host: '127.0.0.1', port: 4175, strictPort: true },
   };
 });

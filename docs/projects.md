@@ -170,9 +170,8 @@ title replaces `GAME_TITLE`: a `GAME_TITLE` from `.env` files is ignored, and on
 passed on the command line fails. `GAME_ART_MODE` still overrides the project's
 course look.
 
-Deploy it like any other release: the shell, for example with
-`npx wrangler deploy --config wrangler.game.toml`, and the content to the host or CDN
-that serves `GAME_CONTENT_URL`. A game adds its own code with [plugins](plugins.md), named by
+Deploy it like any other release: the shell to any static host, and the content to the
+host or CDN that serves `GAME_CONTENT_URL`. A game adds its own code with [plugins](plugins.md), named by
 `GAME_PLUGINS` alongside `GAME_PROJECT`: one whose players must sign in or own it supplies its
 content access in a [release facet](release-plugins.md), and one that ships custom avatars
 registers its rig strategies and motion kinds in a [kinds facet](kinds-plugins.md).
@@ -285,15 +284,14 @@ need. Deleting `level-versions/` restarts the numbering when the project next op
 it belongs to instead of whatever an earlier visit left in the browser:
 
 ```sh
-GAME_PROJECT=projects/my-game npm run build
-npx wrangler deploy --config wrangler.toml --keep-vars
+GAME_PROJECT=projects/my-game npm run build   # then deploy dist/ to any static host
 ```
 
 Every file of the project is validated, and a failure names its section.
 Its files become hashed static assets next to the Workshop, each listed with its size and
 SHA-256 and downloaded only when the page uses it: the JavaScript does not grow with the game,
 and files that did not change keep their URLs across deployments, so browsers reuse them. Each
-file must fit your host's limit; Cloudflare Workers static assets hold at most 25 MiB per file.
+file must fit your host's per-file size limit.
 The page title comes from the project, with the same `GAME_TITLE` rules as releases. Without
 `GAME_PROJECT` the Workshop build is unchanged.
 
@@ -388,6 +386,13 @@ also send `X-Studio-Request: 1`, which browsers cannot add to cross-site request
 and requests with a foreign `Origin` are refused. The dev server never serves the
 project, release and server copy folders as plain files, so they are only reachable
 through these checks. Serve it over HTTPS if you expose it beyond a trusted network.
+
+`npm run dev` and `npm run studio` listen on `127.0.0.1` only. To use the studio from another
+computer, forward its port there instead of exposing it, for example with
+`ssh -L 5181:127.0.0.1:5181 <machine>` or VS Code's **Ports** view, and open
+**http://localhost:5181**: forwarded requests arrive from this computer, so they need no token.
+To listen on another interface, start the server with Vite's `--host`, as in
+`npm run dev -- --host 0.0.0.0`, and set `STUDIO_TOKEN`.
 
 A static Workshop deployment has no project server; its Project tab still opens,
 edits and exports project files, and a Workshop built with `GAME_PROJECT` opens its own

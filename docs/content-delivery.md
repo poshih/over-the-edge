@@ -85,12 +85,12 @@ can also choose each file's URL itself (see [grants](#grants)), which rebuilds n
 A game whose plugins supply no content access loads its content from the content URL, without
 cookies. Deploy both outputs:
 
-- the shell, for example with `npx wrangler deploy --config wrangler.game.toml --keep-vars`;
+- the shell, `dist-game/`, to any static host;
 - the content, uploaded to whatever static host or CDN serves the content URL. Serve it from
   another origin with CORS headers for the shell's origin, or under the shell's origin at the
   content URL.
 
-`wrangler.game.toml` deploys the shell only; publishing content is always a separate step.
+Deploying the shell never publishes content; that is always a separate step.
 
 ## Protected games: content access
 
