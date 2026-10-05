@@ -39,7 +39,10 @@ export const AUDIO = {
     'enemy-defeat': { source: '/media/soul.wav', volume: 0.8 },
     launch: { source: '/media/gust.wav', volume: 0.7 },
     finish: { source: '/media/triumph.wav', volume: 1 },
+    hurt: { source: '/media/thud.wav', volume: 0.7 },
+    death: { source: '/media/soul.wav', volume: 1 },
     fall: { source: '/media/boom.wav', volume: 0.75 },
+    bonfire: { source: '/media/ember.wav', volume: 0.8 },
   },
 };
 

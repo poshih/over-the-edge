@@ -171,6 +171,11 @@ export class SkinnedAvatarView {
     this.motions = runner;
   }
 
+  // The character was placed anew while time went on: its motions start again from rest.
+  interrupt(): void {
+    this.motions.interrupt();
+  }
+
   private runner(motions: PreparedAvatarMotions, previous: AvatarMotionRunner | null = null): AvatarMotionRunner {
     if (motions.model.joints.length !== this.bones.length) throw new Error('These motions were prepared for another model.');
     return new AvatarMotionRunner(motions, this.bones, this.avatarSpace, { nodes: this.mappedNodes, frames: this.mapped }, previous);

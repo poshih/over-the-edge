@@ -47,6 +47,15 @@ export interface Tuning {
   handleFrequency: number;
   handleDamping: number;
   mouseSensitivity: number;
+  // Hits the character takes before dying, in damage points.
+  health: number;
+  // Each liquid's buoyancy, in percent of the player's weight it holds up with the pot all under its surface, and its
+  // drag, the rate it then slows the player at, per second (src/liquids.ts); and the damage lava deals each second.
+  lavaBuoyancy: number;
+  lavaDrag: number;
+  lavaDamage: number;
+  swampBuoyancy: number;
+  swampDrag: number;
 }
 
 export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
@@ -83,6 +92,12 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   handleFrequency: 0,
   handleDamping: 0.9,
   mouseSensitivity: 1,
+  health: 5,
+  lavaBuoyancy: 160,
+  lavaDrag: 3,
+  lavaDamage: 1,
+  swampBuoyancy: 85,
+  swampDrag: 6,
 });
 
 export const PHYSICS = {

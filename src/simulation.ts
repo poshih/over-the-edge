@@ -5,7 +5,9 @@ import { TUNING_FIELDS, validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
 import { sameHammerHead } from './hammer-head';
 import type { HammerHead } from './hammer-head';
-import { isEnemyObject, isTerrainObject, levelFloor, levelSpawn } from './level';
+import {
+  isBonfireObject, isEnemyObject, isPoolObject, isTerrainObject, isTrapObject, levelFloor, levelHurts, levelSpawn, levelStart,
+} from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
@@ -19,7 +21,14 @@ import { aimAt, limitAim, moveAim } from './aim';
 import type { Aim } from './aim';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
+import { ENEMY_BEHAVIOR } from './enemy-types';
 import type { EnemyEvent, EnemyPose } from './enemy-types';
+import { HazardWorld } from './hazard-world';
+import type { ProjectilePose } from './hazard-world';
+import { Bonfires } from './bonfires';
+import type { BonfireState } from './bonfires';
+import { bonfireSpawn, HEALTH } from './hazards';
+import { LiquidWorld } from './liquid-world';
 
 export interface PartPose extends Point {
   id: string;
@@ -34,6 +43,7 @@ export interface PhysicsFrame {
   parts: PartPose[];
   cursor: Point;
   enemies: readonly EnemyPose[];
+  projectiles: readonly ProjectilePose[];
   // The geometry of the rig these parts belong to; replaced only when the rig settings change.
   rig: RigGeometry;
 }
@@ -52,12 +62,12 @@ export interface RigPose {
   buttY: number;
 }
 
-type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'cursor' | 'rig'> & { cursorOffset: Point };
+type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'projectiles' | 'cursor' | 'rig'> & { cursorOffset: Point };
 
 const IDLE_COMMAND: MotorCommand = {
   angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0, hingeBoost: 1, sliderBoost: 1,
 };
-// Falling this far below the lowest terrain or launch zone restarts the attempt.
+// Falling this far below the lowest terrain or launch zone ends the attempt.
 const OUT_OF_BOUNDS_DEPTH = 20;
 // A contact counts as standing on terrain when it pushes the player at least this steeply upward.
 const SUPPORT_NORMAL = 0.5;
@@ -67,6 +77,9 @@ export class Simulation {
   private rig: PlayerRig;
   private readonly terrain: TerrainWorld;
   private readonly enemies: EnemyWorld;
+  private readonly hazards: HazardWorld;
+  private readonly bonfires: Bonfires;
+  private readonly liquids: LiquidWorld;
   private level: LevelDefinition;
   private settings: GameSettings;
   // Where the current run started; a rebuilt rig restarts from here.
@@ -78,6 +91,15 @@ export class Simulation {
   private command = { ...IDLE_COMMAND };
   private elapsed = 0;
   private bestHeight = 0;
+  // Damage points left, and until when in run time a hit cannot hurt.
+  private health: number;
+  private safeUntil = 0;
+  // Whether anything in the level can hurt the player, so health matters.
+  private hurts: boolean;
+  // Whether a hit hurt the player, who survived it, since takeHurt last looked.
+  private hurtTaken = false;
+  // How many times the player has been placed: at every restart and every return to a bonfire.
+  private placements = 0;
   private disposed = false;
   private voidY: number | null;
   private supported = false;
@@ -97,6 +119,8 @@ export class Simulation {
     this.level = level;
     this.spawn = levelSpawn(level);
     this.voidY = this.outOfBoundsY(level);
+    this.health = this.settings.physics.health;
+    this.hurts = levelHurts(level);
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot,
@@ -107,8 +131,23 @@ export class Simulation {
       getHeadFixture: () => this.rig.tool.head.fixture,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
-      onBump: (delta) => changePlayerVelocity(this.rig, delta),
+      onBump: (delta) => {
+        changePlayerVelocity(this.rig, delta);
+        this.hurt(ENEMY_BEHAVIOR.bumpDamage);
+      },
     });
+    this.hazards = new HazardWorld(this.world, level.objects.filter(isTrapObject), {
+      shield: () => this.rig.tool.head.fixture,
+      isTerrain: (body) => this.terrain.isTerrain(body),
+      insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
+      vulnerable: () => this.vulnerable(),
+      hurt: (damage, push) => {
+        this.hurt(damage);
+        changePlayerVelocity(this.rig, push);
+      },
+    });
+    this.bonfires = new Bonfires(level.objects.filter(isBonfireObject));
+    this.liquids = new LiquidWorld(level.objects.filter(isPoolObject));
     this.aim = this.initialAim();
     this.current = this.capture();
     this.previous = this.current;
@@ -133,6 +172,7 @@ export class Simulation {
     const previous = this.settings;
     this.settings = next;
     const tuned = TUNING_FIELDS.some((field) => next.physics[field.key] !== previous.physics[field.key]);
+    this.health = Math.min(this.health, next.physics.health);
     if (tuned) {
       // The terrain outlives a rebuilt player, so it takes new surfaces either way.
       this.terrain.setMaterials(surfaceMaterials(next.physics));
@@ -177,12 +217,16 @@ export class Simulation {
     this.ensureLive();
     this.level = change.level;
     this.voidY = this.outOfBoundsY(change.level);
+    this.hurts = levelHurts(change.level);
     if (change.kind === 'replace') {
       this.spawn = levelSpawn(change.level);
       this.resetPlayer();
     }
     this.terrain.apply(change);
     this.enemies.apply(change, this.elapsed);
+    this.hazards.apply(change, this.elapsed);
+    this.bonfires.apply(change);
+    this.liquids.apply(change);
   }
 
   subscribeTerrain(listener: (event: TerrainEvent) => void): () => void {
@@ -195,10 +239,19 @@ export class Simulation {
     return this.enemies.subscribe(listener);
   }
 
+  subscribeBonfires(listener: (state: BonfireState) => void): () => void {
+    this.ensureLive();
+    return this.bonfires.subscribe(listener);
+  }
+
+  // Returns the level's objects to how the level places them: illusions back, enemies home, no projectiles in flight
+  // and every bonfire out.
   restoreLevelObjects(): void {
     this.ensureLive();
     this.terrain.reset();
     this.enemies.reset(this.elapsed);
+    this.hazards.reset(this.elapsed);
+    this.bonfires.reset();
   }
 
   terrainState() {
@@ -212,6 +265,9 @@ export class Simulation {
   }
 
   get time(): number { return this.elapsed; }
+
+  // Changes whenever the player is placed anew: at every restart and every return to a bonfire.
+  get placement(): number { return this.placements; }
 
   playerPosition(): Readonly<Point> {
     const root = this.rig.root.getPosition();
@@ -235,6 +291,29 @@ export class Simulation {
 
   fellOutOfLevel(): boolean {
     return this.supported && this.voidY !== null && this.rig.root.getPosition().y + RIG.potBottom < this.voidY;
+  }
+
+  dead(): boolean {
+    return this.health <= 0;
+  }
+
+  // Whether a hit hurt the player, who survived it, since the previous call.
+  takeHurt(): boolean {
+    const taken = this.hurtTaken;
+    this.hurtTaken = false;
+    return taken;
+  }
+
+  // Brings a fallen player back at the bonfire reached last, healed and unharmed for a moment, holding the hammer as
+  // at the start. The run goes on: its clock, best height and level objects carry on. False, changing nothing, when
+  // no bonfire has been reached.
+  respawn(): boolean {
+    this.ensureLive();
+    const bonfire = this.bonfires.currentBonfire();
+    if (bonfire === null) return false;
+    this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level)));
+    this.safeUntil = this.elapsed + HEALTH.respawnSeconds;
+    return true;
   }
 
   // Impact sounds need the hammer head's approach speed whenever it starts touching something.
@@ -282,6 +361,7 @@ export class Simulation {
       this.rig, this.worldPoint(this.cursorOrigin(this.rig.root.getPosition()), this.aim.target), this.settings.physics, { swinging },
     );
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
+    const bath = this.liquids.push(this.rig, this.settings.physics);
     const velocity = this.impactTracking ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
     const approachX = velocity?.x ?? 0;
     const approachY = velocity?.y ?? 0;
@@ -295,7 +375,12 @@ export class Simulation {
     this.elapsed += PHYSICS.dt;
     this.terrain.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
-    this.bestHeight = Math.max(this.bestHeight, this.rig.root.getPosition().y + RIG.potBottom);
+    this.hazards.afterStep(this.elapsed, this.rig.root.getPosition());
+    // Lava burns the character while the pot is in it; each burn, like any hit, leaves it unharmed for a second.
+    if (bath === 'lava') this.hurt(this.settings.physics.lavaDamage);
+    const foot = this.playerPosition();
+    this.bonfires.update(foot);
+    this.bestHeight = Math.max(this.bestHeight, foot.y);
     this.current = this.capture();
   }
 
@@ -319,6 +404,7 @@ export class Simulation {
         y: this.previous.cursorOffset.y + (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha,
       }),
       enemies: this.enemies.frame(alpha),
+      projectiles: this.hazards.frame(alpha),
       rig: this.rig.geometry,
     };
   }
@@ -340,6 +426,8 @@ export class Simulation {
       contacts,
       hingeLoad: Math.abs(hingeTorque) / (this.settings.physics.hingeTorque * this.command.hingeBoost),
       sliderLoad: Math.abs(sliderForce) / (this.settings.physics.sliderForce * this.command.sliderBoost),
+      // Null in levels where nothing can hurt the player.
+      health: this.hurts ? { current: this.health, max: this.settings.physics.health } : null,
     };
   }
 
@@ -370,11 +458,17 @@ export class Simulation {
       bodyCount: this.world.getBodyCount(),
       jointCount: this.world.getJointCount(),
       enemies: this.enemies.inspect(),
+      hazards: this.hazards.inspect(),
+      bonfires: this.bonfires.state(),
+      liquids: this.liquids.inspect(),
     };
   }
 
   dispose(): void {
     if (this.disposed) return;
+    this.liquids.dispose();
+    this.bonfires.dispose();
+    this.hazards.dispose();
     this.enemies.dispose();
     this.terrain.dispose();
     destroyPlayer(this.world, this.rig);
@@ -405,20 +499,42 @@ export class Simulation {
     };
   }
 
+  // A new run from the run's spawn.
   private resetPlayer(): void {
+    this.elapsed = 0;
+    this.safeUntil = 0;
+    this.placePlayer(this.spawn);
+    this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
+  }
+
+  // A new player at `spawn`, at full health.
+  private placePlayer(spawn: Readonly<PlayerSpawn>): void {
     destroyPlayer(this.world, this.rig);
     const geometry = sameRig(this.rig.geometry, this.settings.rig) && sameHammerHead(this.rig.geometry.head, this.settings.rig.head)
       ? this.rig.geometry : rigGeometry(this.settings.rig);
-    this.rig = createPlayer(this.world, this.spawn, this.settings.physics, geometry, this.hammerHead ?? this.settings.rig.head);
+    this.rig = createPlayer(this.world, spawn, this.settings.physics, geometry, this.hammerHead ?? this.settings.rig.head);
     this.supported = false;
     this.headTouching = false;
     this.impactSpeed = 0;
+    this.health = this.settings.physics.health;
+    this.hurtTaken = false;
+    this.placements++;
     this.aim = this.initialAim();
-    this.elapsed = 0;
-    this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
     this.command = { ...IDLE_COMMAND };
     this.current = this.capture();
     this.previous = this.current;
+  }
+
+  private vulnerable(): boolean {
+    return this.health > 0 && this.elapsed >= this.safeUntil;
+  }
+
+  // Takes `damage` from the player's health, unless a hit hurt it moments ago; each hit leaves it unharmed for a while.
+  private hurt(damage: number): void {
+    if (!this.vulnerable()) return;
+    this.health = Math.max(0, this.health - damage);
+    this.safeUntil = this.elapsed + HEALTH.hurtSeconds;
+    this.hurtTaken = this.health > 0;
   }
 
   private outOfBoundsY(level: LevelDefinition): number | null {

@@ -1,0 +1,27 @@
+.health-meter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 132px;
+}
+
+.health-pip {
+  width: 9px;
+  height: 13px;
+  border: 1px solid #8f2a22;
+  border-radius: 2px;
+  background: #d2463a;
+  transition: background-color 160ms ease, opacity 160ms ease;
+}
+
+.health-pip.is-lost {
+  border-color: currentColor;
+  background: transparent;
+  opacity: 0.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .health-pip {
+    transition: none;
+  }
+}

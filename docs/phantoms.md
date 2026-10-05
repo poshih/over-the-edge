@@ -18,7 +18,8 @@ Workshop records every run you play on a saved [level version](projects.md#level
 the open server project: its level together with its game settings. A pulsing red **REC**
 beside the game's controls shows when it is recording. Each run is a session of clips of up to
 10 seconds, each starting with the previous clip's last pose, so a run replays as one; a
-restart, Reset or fall starts the next session. A clip also ends when the handle length
+restart, Reset or death (a fall out of the level, or health running out) starts the next
+session. A clip also ends when the handle length
 changes, or the level or game settings stop being that saved version. Clips shorter than a
 second, or in which the character moved less than 0.5 m and the hammer head less than 3 m, are
 dropped.
@@ -81,8 +82,9 @@ game in another browser or a private window: a player is never sent their own re
 
 **Recording.** Only a release with a backend records. After a random 5 to 30 seconds of play,
 the release records the next 10
-seconds, hands the recording to the backend, then waits another 30 to 90 seconds. A restart
-discards the recording in progress, and the next one starts 3 to 10 seconds later. A recording
+seconds, hands the recording to the backend, then waits another 30 to 90 seconds. A restart,
+or a death that returns the player to a bonfire, discards the recording in progress, and the
+next one starts 3 to 10 seconds later. A recording
 in which the character moved less than 0.5 m and the hammer head less than 3 m is not sent, and
 neither is one the format cannot hold, such as an endless fall past its ±4096 m range.
 Recording runs on the game's time, so pauses neither record nor count toward a wait.
@@ -186,11 +188,15 @@ and in a fixed order:
 
 - each terrain object's collision as mirrored, position, size, angle, illusion and surface;
 - each enemy's species, position, facing, patrol distance and speed;
+- each bonfire's position;
+- each projectile trap's position, angle, shot interval, first shot, projectile speed and damage;
+- each swinging axe's pivot, length, swing period, swing offset and damage;
+- each liquid pool's liquid, position, width and height;
 - each updraft: a trigger with launch events, its region, position, activation and launches;
 - the start's position, angle and reach.
 
 The physics: every physics setting but control sensitivity, so the masses, motors, downswing
-boosts, response, friction, damping, bounciness and handle compliance, and the hammer rig's
+boosts, response, friction, damping, bounciness, handle compliance, health and liquids, and the hammer rig's
 handle length, maximum extension, minimum reach and default head. A model-library hammer's
 own head is a cosmetic's and is left out: recordings made with any hammer share the course,
 and phantoms draw the default head.
@@ -199,7 +205,7 @@ Decorations, labels, colours, depth, which mesh draws a collision, other trigger
 sensitivity and the cursor settings are left out. A recording replays only where its course holds,
 so editing any of those, or swapping a mesh for one that collides alike, keeps a level's
 recordings, while moving terrain, changing its collision or a surface, an
-enemy, an updraft, the start or any physics setting starts a new course with none. Recordings
+enemy, a bonfire, a trap, a pool, an updraft, the start or any physics setting starts a new course with none. Recordings
 made under a physics setting you go back to count again.
 
 `src/phantom-format.ts` implements all of this. It imports no DOM or three.js, and its imports
@@ -234,7 +240,7 @@ a backend that wants players' identities takes them from its own session, like
 
 ## The game's own backend
 
-A game's [module](content-delivery.md#protected-games-the-games-module) may carry phantoms its
+A game's [module](game-module.md) may carry phantoms its
 own way: `ReleaseModule.phantoms` replaces the reference client. `ReleaseHost.phantomsUrl` is the
 build's phantom URL, absolute, or `null` without a backend.
 

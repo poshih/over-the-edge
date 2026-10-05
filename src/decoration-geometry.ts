@@ -183,8 +183,8 @@ export class ModelKit {
     return this.add(geometry, color, {}, glow);
   }
 
-  /** Stands the model on its base centre and merges it. */
-  build(): DecorationGeometry {
+  /** Merges the model, standing it on its base centre; with `origin` 'own', it stays where its parts were placed. */
+  build(origin: 'base' | 'own' = 'base'): DecorationGeometry {
     const bounds = { min: new Vector3(Infinity, Infinity, Infinity), max: new Vector3(-Infinity, -Infinity, -Infinity) };
     for (const part of this.parts) {
       part.geometry.computeBoundingBox();
@@ -192,7 +192,8 @@ export class ModelKit {
       bounds.max.max(part.geometry.boundingBox!.max);
     }
     if (this.parts.length === 0) throw new Error('A decoration model needs at least one part.');
-    const offset = new Vector3(-(bounds.min.x + bounds.max.x) / 2, -bounds.min.y, -(bounds.min.z + bounds.max.z) / 2);
+    const offset = origin === 'own' ? new Vector3()
+      : new Vector3(-(bounds.min.x + bounds.max.x) / 2, -bounds.min.y, -(bounds.min.z + bounds.max.z) / 2);
     const lit = merge(this.parts.filter((part) => !part.glow), offset);
     const glow = merge(this.parts.filter((part) => part.glow), offset);
     for (const part of this.parts) part.geometry.dispose();

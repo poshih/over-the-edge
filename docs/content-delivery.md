@@ -92,8 +92,9 @@ outputs:
 
 ## Protected games: the game's module
 
-`GAME_MODULE` bundles one module of the game's own code into the shell. It must be a `.ts` or
-`.js` file inside this repository, and combines with `GAME_PROJECT` or the per-file inputs:
+`GAME_MODULE` bundles one module of the game's own code into the shell (see
+[the game's module](game-module.md)). It must be a `.ts` or `.js` file inside this repository,
+and combines with `GAME_PROJECT` or the per-file inputs:
 
 ```sh
 GAME_PROJECT=projects/my-game GAME_MODULE=games/my-game/module.ts \
@@ -135,38 +136,10 @@ export async function start(host: ReleaseHost): Promise<ReleaseModule> {
 }
 ```
 
-**`ReleaseHost`** (what `start` receives):
-
-| Member | Meaning |
-| --- | --- |
-| `mount` | The element the release mounts its interface in |
-| `contentUrl` | The build's content URL, absolute |
-| `phantomsUrl` | The build's [phantom](phantoms.md) URL (`GAME_PHANTOMS_URL`), absolute; `null` without a phantom backend |
-| `notice(message, kind?)` | The release's notice, `info` or `error` |
-
-**`ReleaseModule`** (what `start` returns; every member is optional):
-
-| Member | Meaning |
-| --- | --- |
-| `access` | The content access. Without it, content is public under the content URL |
-| `phantoms` | The [phantom](phantoms.md#the-games-own-backend) service. Without it, a build with phantoms uses the reference protocol at the phantom URL; a build without them refuses it |
-| `progress({ loaded, total })` | Bytes loaded before play |
-| `failed(error)` | A `ContentError`; resolve to retry the whole load, reject to stop with the rejection shown |
-| `modelFailed(error)` | A part that could not follow the backend's model selection outside a swap; it keeps its model, or starts with the profile's own |
-| `ready(api)` | Called once the game runs |
-| `dispose()` | Called when the release is disposed, for example on a development reload |
-
-**`ReleaseApi`** (what `ready` receives): `setPause(paused)` and `setInputBlock(blocked)`,
-under the module's own reason so they never undo the game's, `halted`, and `modelLibrary`,
-which swaps parts to [library models](characters.md#model-library-and-runtime-swaps) as the
-backend answers `access.select(request, signal)`.
-
-A release built without `GAME_MODULE` contains no downstream code. The module is a build input,
-never project data, so nothing sent to the project server can add code to a release. The
-release boundary covers it: a module that imports an editor module fails the build. The engine
-never imports anything the module brings, such as an identity provider's SDK, and puts neither
-the module's API nor anything else on a global. The shell is public, so the module must hold no
-secrets.
+The module's whole contract, what `start` receives and returns, the API the running game hands it
+and the HUD readouts it may draw its own way, is in [the game's module](game-module.md). A release
+built without `GAME_MODULE` contains no downstream code, and the shell is public, so the module
+must hold no secrets.
 
 ## Avatar rig strategies: the rig module
 

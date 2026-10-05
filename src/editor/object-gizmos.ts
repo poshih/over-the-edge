@@ -1,13 +1,15 @@
 // Editor-only rendering helpers for non-terrain objects at their authored positions.
 // Terrain keeps using shapeVertices/objectVertices/objectContains from ../level; these gizmos
 // share lightweight SVG geometry between persistent objects, selection, and placement previews.
+import type { Point } from '../config';
 import { ENEMY_DIRECTION, ENEMY_SPECS, enemyBounds } from '../enemy-types';
 import type { EnemyFacing, EnemySpecies } from '../enemy-types';
+import { AXE, BONFIRE, SHOOTER } from '../hazards';
 import { triggerBounds } from '../level';
-import type { EnemyObject, LevelObject, StartObject, TriggerObject } from '../level';
+import type { AxeObject, EnemyObject, LevelObject, PoolObject, ShooterObject, StartObject, TriggerObject } from '../level';
 
 export interface Bounds { left: number; right: number; bottom: number; top: number }
-// Starts, triggers and enemies; terrain and decorations draw themselves in the scene.
+// Starts, triggers, enemies, bonfires, traps and liquid pools; terrain and decorations draw themselves in the scene.
 export type GizmoObject = Exclude<LevelObject, { kind: 'terrain' } | { kind: 'decoration' }>;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -17,6 +19,12 @@ const HANDLE_RADIUS = 0.22;
 const FLAG_POLE_HEIGHT = 0.6;
 const FLAG_WIDTH = 0.36;
 const UPDRAFT_GLYPH = { halfWidth: 0.2, rise: 0.16, spacing: 0.24, rows: 2 } as const;
+// A flame standing on a bonfire's base, in metres.
+const FLAME_GLYPH = 'M 0 .15 C .32 .4 .36 .78 0 1.15 C -.08 .9 -.3 .78 -.2 .55 C -.3 .4 -.16 .25 0 .15 Z';
+// How far a projectile trap's aim shows when it is not selected; selected, it shows the projectiles' whole range.
+const AIM_GUIDE = 1.6;
+// The top of an axe's mount above its pivot.
+const AXE_MOUNT = 0.45;
 const ENEMY_GLYPHS: Record<EnemySpecies, { body: string; detail: string }> = {
   bird: {
     body: 'M -.49 .07 L -.18 .03 L -.3 .45 L -.06 .2 L .11 .11 C .13 .34 .37 .35 .37 .1 L .49 .03 L .35 -.06 C .23 -.32 -.06 -.4 -.22 -.15 L -.49 -.02 Z',
@@ -38,6 +46,16 @@ function line(x1: number, y1: number, x2: number, y2: number): SVGLineElement {
   element.setAttribute('y1', String(y1));
   element.setAttribute('x2', String(x2));
   element.setAttribute('y2', String(y2));
+  element.setAttribute('vector-effect', 'non-scaling-stroke');
+  return element;
+}
+
+function rect(x: number, y: number, width: number, height: number): SVGRectElement {
+  const element = svg('rect');
+  element.setAttribute('x', String(x));
+  element.setAttribute('y', String(y));
+  element.setAttribute('width', String(width));
+  element.setAttribute('height', String(height));
   element.setAttribute('vector-effect', 'non-scaling-stroke');
   return element;
 }
@@ -146,15 +164,90 @@ function enemyGizmo(object: EnemyObject, mode: GizmoMode): SVGElement[] {
   return children;
 }
 
-export function objectGizmoBounds(object: GizmoObject): Bounds {
-  if (object.kind === 'start') {
-    return {
-      left: object.x - START_MARKER_RADIUS, right: object.x + START_MARKER_RADIUS,
-      bottom: object.y - START_MARKER_RADIUS, top: object.y + START_MARKER_RADIUS,
-    };
+function bonfireGizmo(mode: GizmoMode): SVGElement[] {
+  const region = rect(-BONFIRE.width / 2, 0, BONFIRE.width, BONFIRE.height);
+  region.setAttribute('class', 'level-gizmo-region');
+  const flame = svg('path');
+  flame.setAttribute('class', 'level-gizmo-flame');
+  flame.setAttribute('d', FLAME_GLYPH);
+  const children: SVGElement[] = [region, flame];
+  if (mode !== 'normal') {
+    // Where the player's foot lights it.
+    const reach = circle(BONFIRE.reach);
+    reach.setAttribute('class', 'level-gizmo-reach');
+    children.unshift(reach);
   }
-  const region = object.kind === 'trigger' ? triggerBounds(object) : enemyBounds(object);
-  return { left: region.minX, right: region.maxX, bottom: region.minY, top: region.maxY };
+  return children;
+}
+
+// The trap's body, as its corners turned by its angle about the muzzle.
+function shooterCorners(object: ShooterObject): Point[] {
+  const cos = Math.cos(object.angle);
+  const sin = Math.sin(object.angle);
+  return ([[0, -SHOOTER.height / 2], [-SHOOTER.length, -SHOOTER.height / 2], [-SHOOTER.length, SHOOTER.height / 2], [0, SHOOTER.height / 2]] as const)
+    .map(([x, y]) => ({ x: x * cos - y * sin, y: x * sin + y * cos }));
+}
+
+function shooterGizmo(object: ShooterObject, mode: GizmoMode): SVGElement[] {
+  const body = svg('path');
+  body.setAttribute('class', 'level-gizmo-region');
+  body.setAttribute('d', `M ${shooterCorners(object).map((point) => `${point.x} ${point.y}`).join(' L ')} Z`);
+  const length = mode === 'normal' ? AIM_GUIDE : SHOOTER.range;
+  const aim = line(0, 0, Math.cos(object.angle) * length, Math.sin(object.angle) * length);
+  aim.setAttribute('class', 'level-gizmo-aim');
+  return [body, aim, circle(HANDLE_RADIUS)];
+}
+
+function axeGizmo(object: AxeObject): SVGElement[] {
+  const haft = line(0, 0, 0, -object.length);
+  haft.setAttribute('class', 'level-gizmo-haft');
+  // The blade where it crosses the obstacle line, hanging straight down.
+  const blade = rect(-AXE.bladeWidth / 2, -object.length - AXE.bladeHeight / 2, AXE.bladeWidth, AXE.bladeHeight);
+  blade.setAttribute('class', 'level-gizmo-region');
+  return [haft, blade, circle(HANDLE_RADIUS)];
+}
+
+// The pool's box, and its surface along the top.
+function poolGizmo(object: PoolObject): SVGElement[] {
+  const region = rect(-object.width / 2, -object.height / 2, object.width, object.height);
+  region.setAttribute('class', 'level-gizmo-region');
+  const surface = line(-object.width / 2, object.height / 2, object.width / 2, object.height / 2);
+  surface.setAttribute('class', 'level-gizmo-surface');
+  return [region, surface];
+}
+
+export function objectGizmoBounds(object: GizmoObject): Bounds {
+  switch (object.kind) {
+    case 'start':
+      return {
+        left: object.x - START_MARKER_RADIUS, right: object.x + START_MARKER_RADIUS,
+        bottom: object.y - START_MARKER_RADIUS, top: object.y + START_MARKER_RADIUS,
+      };
+    case 'bonfire':
+      return { left: object.x - BONFIRE.width / 2, right: object.x + BONFIRE.width / 2, bottom: object.y, top: object.y + BONFIRE.height };
+    case 'shooter': {
+      const corners = shooterCorners(object);
+      return {
+        left: object.x + Math.min(...corners.map((point) => point.x)), right: object.x + Math.max(...corners.map((point) => point.x)),
+        bottom: object.y + Math.min(...corners.map((point) => point.y)), top: object.y + Math.max(...corners.map((point) => point.y)),
+      };
+    }
+    case 'axe':
+      return {
+        left: object.x - AXE.bladeWidth / 2, right: object.x + AXE.bladeWidth / 2,
+        bottom: object.y - object.length - AXE.bladeHeight / 2, top: object.y + AXE_MOUNT,
+      };
+    case 'pool':
+      return {
+        left: object.x - object.width / 2, right: object.x + object.width / 2,
+        bottom: object.y - object.height / 2, top: object.y + object.height / 2,
+      };
+    case 'trigger':
+    case 'enemy': {
+      const region = object.kind === 'trigger' ? triggerBounds(object) : enemyBounds(object);
+      return { left: region.minX, right: region.maxX, bottom: region.minY, top: region.maxY };
+    }
+  }
 }
 
 export type GizmoMode = 'normal' | 'selected' | 'ghost';
@@ -165,10 +258,15 @@ function applyGizmo(node: SVGGElement, object: GizmoObject, mode: GizmoMode): vo
     case 'start': children = startGizmo(object); break;
     case 'trigger': children = triggerGizmo(object); break;
     case 'enemy': children = enemyGizmo(object, mode); break;
+    case 'bonfire': children = bonfireGizmo(mode); break;
+    case 'shooter': children = shooterGizmo(object, mode); break;
+    case 'axe': children = axeGizmo(object); break;
+    case 'pool': children = poolGizmo(object); break;
   }
   node.replaceChildren(...children);
   node.setAttribute('transform', `translate(${object.x} ${object.y})`);
-  node.setAttribute('class', `level-gizmo level-gizmo-${object.kind} level-gizmo-${mode}`);
+  const liquid = object.kind === 'pool' ? ` level-gizmo-${object.liquid}` : '';
+  node.setAttribute('class', `level-gizmo level-gizmo-${object.kind}${liquid} level-gizmo-${mode}`);
 }
 
 /** A standalone gizmo node, e.g. for multi-object previews that manage their own container. */

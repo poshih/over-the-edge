@@ -3,7 +3,8 @@ import {
   RingGeometry, ShaderMaterial, Sphere, Vector3,
 } from 'three';
 import { TRIGGER_LIMITS, triggerBounds } from './level';
-import { MarkerView } from './marker-view';
+import { ObjectView } from './object-view';
+import type { LevelObject, TriggerObject } from './level';
 
 const WIND = {
   depth: -0.08, color: 0x397f86, opacity: 0.75, speed: 0.65, travel: 0.85, bottom: 0.05,
@@ -39,7 +40,7 @@ function windGeometry(): BufferGeometry {
   return geometry;
 }
 
-export class UpdraftView extends MarkerView {
+export class UpdraftView extends ObjectView<TriggerObject> {
   private readonly clock: { value: number };
 
   constructor() {
@@ -72,7 +73,8 @@ export class UpdraftView extends MarkerView {
       `,
     });
     super({
-      kind: 'updraft',
+      matches: (object: LevelObject): object is TriggerObject => object.kind === 'trigger' && object.marker === 'updraft',
+      capacity: TRIGGER_LIMITS.objects, label: 'Updraft marker',
       meshes: [
         new InstancedMesh(ring, new MeshBasicMaterial({ color: WIND.color, side: DoubleSide, toneMapped: false }), TRIGGER_LIMITS.objects),
         new InstancedMesh(windGeometry(), flow, TRIGGER_LIMITS.objects),

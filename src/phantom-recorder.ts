@@ -177,10 +177,10 @@ export class PhantomCapture {
 
 /**
  * Chooses when to record: after a random stretch of play, it records the next 10 seconds and hands
- * the encoded recording to `onRecording`, then waits again. A restart discards the recording in
- * progress; so does a recording in which the player hardly moved, and one the format cannot hold,
- * such as an endless fall past its coordinate range. Time is the game's own, so pauses neither
- * record nor count toward the wait.
+ * the encoded recording to `onRecording`, then waits again. A restart, or a return to a bonfire,
+ * discards the recording in progress; so does a recording in which the player hardly moved, and
+ * one the format cannot hold, such as an endless fall past its coordinate range. Time is the
+ * game's own, so pauses neither record nor count toward the wait.
  */
 export class PhantomRecorder {
   private readonly capture = new PhantomCapture();
@@ -189,7 +189,7 @@ export class PhantomRecorder {
   private wait: number;
   // Steps left in the recording in progress; 0 while waiting.
   private remaining = 0;
-  private time = -Infinity;
+  private placement = -1;
 
   constructor(options: { onRecording: (recording: Uint8Array<ArrayBuffer>) => void; random?: () => number }) {
     this.onRecording = options.onRecording;
@@ -201,11 +201,11 @@ export class PhantomRecorder {
     return this.remaining > 0;
   }
 
-  // After every physics step: the game's time, which restarts with every attempt, and the rig.
-  step(time: number, rig: Readonly<RigPose>, handleLength: number): void {
-    const restarted = time <= this.time;
-    this.time = time;
-    if (this.remaining > 0 && (restarted || handleLength !== this.capture.handleLength)) {
+  // After every physics step: the simulation's placement, which changes whenever the player is placed anew, and the rig.
+  step(placement: number, rig: Readonly<RigPose>, handleLength: number): void {
+    const placed = placement !== this.placement;
+    this.placement = placement;
+    if (this.remaining > 0 && (placed || handleLength !== this.capture.handleLength)) {
       this.remaining = 0;
       this.wait = this.delay(PHANTOM_RECORDING.retryDelay);
     }

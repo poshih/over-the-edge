@@ -208,7 +208,7 @@ export function startPhantoms(options: {
   const unobserve = game.observeSteps(() => {
     const { simulation } = game;
     simulation.rigPose(pose);
-    recorder?.step(simulation.time, pose, simulation.rigGeometry.handleLength);
+    recorder?.step(simulation.placement, pose, simulation.rigGeometry.handleLength);
     for (const ask of sources) ask();
     untilStart--;
     if (untilStart <= 0 && waiting.length > 0 && view.playing < PHANTOM_LOOK.figures) startNext();

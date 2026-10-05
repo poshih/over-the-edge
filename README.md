@@ -5,6 +5,10 @@ two-motor mechanism described by Getting Over It's creator. The first version
 has a small climb, dedicated practice positions, procedural 3D artwork, and a
 live tuning workshop. It is not a port of Getting Over It's assets or code.
 
+It is also an engine: downstream games build on it and change what players see
+and play through their own content and plugins, without forking it. See
+[Customizing a game](#customizing-a-game).
+
 ## Run
 
 Requires Node.js 22.12 or newer and a modern browser with WebGL2.
@@ -94,10 +98,11 @@ local server deploys anything; deploy both outputs as described below.
 The existing `npm run build` and `wrangler.toml` continue to target the
 editor/workshop in `dist/`, not this separate release.
 
-A game whose content only some players may load bundles its own module with
-**`GAME_MODULE`**. The module signs players in with the game's own identity management
-and grants the release access to its content, typically short-lived signed CDN URLs
-from the game's backend; the engine never sees accounts or credentials. See
+A game bundles its own code into its release with **`GAME_MODULE`**. The module can draw
+the HUD's readouts and the level's objects its own way, and a game whose content only some players may load signs
+players in with its own identity management there and grants the release access to its
+content, typically short-lived signed CDN URLs from the game's backend; the engine never
+sees accounts or credentials. See [the game's module](docs/game-module.md) and
 [content delivery](docs/content-delivery.md).
 
 A game that ships custom avatars adds its own rig strategies and secondary-motion kinds with
@@ -275,6 +280,28 @@ reach and fairness before writing. Its builder, route tools and checks form a re
 [course kit](docs/course-kit.md) for your own generated courses. See the
 [course guide](docs/ashen-ascent.md) and the [map](docs/ashen-ascent-map.svg).
 
+## Customizing a game
+
+A downstream game changes the engine without forking it. Its [project](docs/projects.md)
+holds the data that sets most of what players see and hear, and three modules of the game's
+own code replace or extend the engine where data cannot. Each extension point has the
+engine's own look and behaviour as its default, so a game replaces only what it needs.
+
+| To change | Use |
+| --- | --- |
+| The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
+| How the release's HUD readouts look: height, health and timer | The game's module, `GAME_MODULE`: see [HUD readouts](docs/game-module.md#hud-readouts) |
+| How the release's flags, updrafts, bonfires, traps, projectiles and lava and swamp pools look | The game's module: see [object looks](docs/game-module.md#object-looks) |
+| Sign-in and content access, the phantom backend, and the library models each player has | The game's module: see [the game's module](docs/game-module.md) and [content delivery](docs/content-delivery.md) |
+| How imported avatars are rigged, and their secondary motion | The rig module, `AVATAR_RIG_MODULE`: see [rig strategies](docs/characters.md#rig-strategies) |
+| The Workshop: the game's own tabs, sections, data, overlays and previews | The Workshop module, `WORKSHOP_MODULE`: see [Workshop plugins](docs/workshop-plugins.md) |
+
+The modules are build inputs, the game's own trusted code, never project data, so nothing sent
+to a project server can add code to a game. Each runs where its code belongs: the game's module
+in the releases built with it, the rig module wherever the game runs and is validated, and the
+Workshop module in the Workshop alone. [`AGENTS.md`](AGENTS.md) makes this a requirement: every
+new feature ships with its extension point.
+
 ## Controls
 
 | Input | Action |
@@ -315,9 +342,10 @@ explicitly reposition the mechanism and restart the attempt, rather than
 introducing hidden checkpoints into the climb.
 
 Falling **20 m** below everything in a level (its lowest terrain or launch zone)
-restarts the attempt exactly like Reset. It only arms once the pot or hammer head
-has stood on terrain during that attempt, so a start with nothing beneath it keeps
-falling instead of restarting in a loop.
+is a death: it brings the player back at the [bonfire](#health-and-bonfires) reached
+last, or, before any, restarts the attempt exactly like Reset. It only arms once the
+pot or hammer head has stood on terrain since the player was placed, so a start with
+nothing beneath it keeps falling instead of restarting in a loop.
 
 ### Finding Workshop controls
 
@@ -441,8 +469,8 @@ the defaults remain 0.66 kg for the shaft and 0.5 kg for each hinge/carriage
 component. All masses stay positive.
 
 The other sections include motor strength and speed limits, the downswing boost,
-response gains, damping, contact friction, handle compliance, and control
-sensitivity. **Downswing** has a **Hinge downswing boost** and a **Slider
+response gains, damping, contact friction, handle compliance, control
+sensitivity, the player's [health](#health-and-bonfires) and [liquids](#liquid-pools). **Downswing** has a **Hinge downswing boost** and a **Slider
 downswing boost**, each 1-3x (default **1.3x**; 1 turns it off), multiplying that
 motor's strength while input moves the target down and the motor speeds the head
 up downward.
@@ -530,7 +558,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 8**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 9**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 
@@ -571,7 +599,7 @@ the editor's authored definition.
 
 To test one part of a course without moving its start, choose **Place player** and
 click/tap where the pot should stand. The player moves there in the start's hammer
-pose, and the level is not edited. Playtests, Reset and falls out of the level then
+pose, and the level is not edited. Playtests, Reset and deaths before any bonfire then
 start from the placed player until you choose **Use the level start** in the Level
 tab, pick a starting point in **Physics**, or load another level.
 
@@ -753,6 +781,8 @@ Their base rings and wind arrows use two shared instanced batches; only changed
 marker transforms are uploaded. Wind motion uses one shader clock instead of
 per-vent simulation, allocation, or particle updates, and pauses with gameplay.
 The same runtime works in editor-free builds; authoring controls stay in the Workshop.
+A game's module can draw flag and updraft markers its own way; see
+[object looks](docs/game-module.md#object-looks).
 
 ### Enemies
 
@@ -767,7 +797,7 @@ A **hammer-head strike** with a closing speed of **at least 0.8 m/s** defeats a
 bird in one hit; a hollow soldier takes **two separated strikes**. Damage has a
 **0.25 s anti-jitter cooldown**: brushing or holding the head against an enemy
 does not repeatedly deal damage. The shaft does not deal damage.
-Body collisions knock the player back; there is no player health system.
+Body collisions knock the player back and cost **1** [health](#health-and-bonfires).
 Dead enemies stay dead until Reset or an editor rebuild. Patrol positions,
 damage and deaths are runtime state: editor gizmos, saves and exports retain
 authored homes. Entering Level mode restores both authored enemy poses and terrain
@@ -783,6 +813,86 @@ illusion keeps a sleeping body so it drops if the illusion vanishes.
 Contact effects are deferred until the physics world unlocks. Exported enemies
 also work in editor-free releases using the updated runtime. No enemies are
 added to the built-in course.
+
+### Health and bonfires
+
+In levels with enemies, [traps](#traps) or [lava](#liquid-pools) the player has **health**,
+set in **Physics / Health**: 1-20 damage points, 5 by default, shown as a row of pips beside
+the readouts. An enemy's bump costs 1, a trap its own damage and lava its damage each second.
+A hit leaves the character unharmed for **1 s**, so one blow counts once. Levels without
+enemies, traps or lava show no health.
+
+Choose **Workshop / Level / Bonfire**, then click/tap: its base rests on the terrain top
+under the pointer. A bonfire lights when the player's foot comes within **1.5 m** of its
+base, and the one reached last is where a death returns the player. A death, health
+running out or a fall out of the level, brings the player back at that bonfire, healed
+and unharmed for **2 s**, holding the hammer as at the level's start. The run goes on:
+its clock, best height, triggers, enemies and illusions stay as they were. Before any
+bonfire is reached, a death restarts the attempt exactly like Reset; Reset always
+restarts from the start and puts every bonfire out. Bonfires never collide; they stand on
+the obstacle line, behind the player.
+
+Health, lit bonfires and deaths are runtime state: saves and exports keep only the
+authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/projects.md)
+sound them, and a [phantom](docs/phantoms.md) session ends at a death as at a restart. A
+game's module can draw the [health readout](docs/game-module.md#hud-readouts) and
+[bonfires](docs/game-module.md#object-looks) its own way.
+
+### Traps
+
+Traps hurt the character as it is drawn, the pot and the body standing in it. They never
+collide, so they can sit anywhere, and a hit knocks the player as well as costing health.
+Choose **Workshop / Level / Projectile trap** or **Swinging axe**, then click/tap.
+
+A **projectile trap** fires from its muzzle, its position, along its rotation: at
+**First shot** seconds into the run and every **Shot interval** after, at its
+**Projectile speed**, while the player is within **40 m**. Projectiles fly straight for
+up to 40 m. Terrain stops them, and so does the hammer head, which makes the hammer a
+shield. Terrain stops them only from outside, so a muzzle set into a wall's face shoots
+out of it. A hit costs the trap's **Damage** and knocks the player along the shot.
+
+A **swinging axe** hangs its blade **Length** below its pivot, its position, and swings in
+and out of the view, toward the camera and away, up to 63° either side, once every
+**Swing period**, rather than sideways along the climb. It passes through the play line
+at **Swing offset** seconds and every half period after. There a blade that meets the
+player costs its **Damage** and knocks the player away from it. The half of the swing in
+front of the obstacle line draws over the player, the half behind it under the player.
+Stagger neighbouring axes with their offsets.
+
+Traps run on the run's clock, so their rhythm is the same every attempt. Up to **256**
+projectiles fly at once across a level; a trap skips its shot while they all fly. A game's
+module can draw traps and projectiles its own way; see [object looks](docs/game-module.md#object-looks).
+
+### Liquid pools
+
+A liquid pool fills a box with still **lava** or **swamp**, its top the surface. Choose
+**Workshop / Level / Lava pool** or **Swamp pool**, then click/tap where the middle of its
+surface goes, and set its width, height and depth under Object properties. The liquid never
+collides, so fit the box into a basin of terrain, which holds the player where the pool ends.
+
+The liquid acts on the player as a thick liquid would. The pot is held up by the liquid it
+displaces, at the centre of what is under the surface, so a tilted pot floats tilted. Every part
+of the pot and hammer under the surface is slowed where it moves, so a hammer swept through the
+liquid pushes against it and rows the player along. Only the pot floats: a liquid slows the
+hammer but does not hold it up. **Physics / Liquids** sets each liquid's
+**buoyancy**, the share of the player's weight it holds up with the pot all under the
+surface, and its **drag**, the rate it then slows the player at:
+
+- **Lava** holds up more than the player weighs (160% by default), so the pot floats with part
+  of it out, and is fairly thick (3/s). It burns the character while the pot is in it: its
+  **Lava damage** (1 by default) on touching it, then each second the pot stays. The hammer
+  does not burn.
+- **Swamp** holds up less than the player weighs (85%), so the player sinks through it, and is
+  thick (6/s), so it sinks slowly and every move is slow. It does no damage.
+
+The half of a pool behind the obstacle line draws with the course, and the half in front draws
+translucent over the actors, so whatever is in the liquid looks in it. Like a decoration in front
+of the line, it draws under a 3D character's arms and the hammer, which keep their own depth so
+the hands hold the hammer. A game's module can draw lava and swamp its own way; see
+[object looks](docs/game-module.md#object-looks). Lava glows and crusts
+over as it flows; swamp is murky, with scum near its surface. Enemies and projectiles pass
+through liquids untouched. Pools count toward the level's floor: a fall out of the level is
+20 m below its lowest terrain, launch zone or pool.
 
 ### Illusions
 
@@ -875,7 +985,8 @@ outline while its contacts stay on the line.
 
 Colliders reach toward the camera, so the view draws in passes, each over the last: the course
 (terrain, its meshes and the decorations behind the line); then the actors (the characters, phantoms
-and enemies); then the decorations on or in front of the line; then a 3D character's
+and enemies); then the decorations on or in front of the line, the half of each swinging axe swung
+toward the camera and the liquid in front of whatever is in a pool; then a 3D character's
 [arms with the hammer](#custom-visuals), sharing one depth so the hands hold it, with the aim cursor
 and line, course labels and the collision overlay drawn over the arms but under the hammer. A
 character whose head or arms overlap a collider on screen, such as under a low roof, is never hidden
@@ -913,7 +1024,7 @@ format, packing, and limits.
 ### Performance boundaries
 
 The level format supports **1,000 terrain objects**, **128 triggers**, **64 enemies**,
-**1,000 decorations**, one start, **64 distinct terrain collision shapes**, up to
+**1,000 decorations**, **32 bonfires**, **128 traps**, **64 liquid pools**, one start, **64 distinct terrain collision shapes**, up to
 **64 points per drawn outline**, slices of up to **16 outlines and 256 points**, and **16 course labels**. Each trigger supports up to **8 ordered events**. Dimensions,
 coordinates, winding, intersections, IDs, and import size are validated.
 Preset objects reuse normalized geometry rather than allocating a new mesh and
@@ -930,6 +1041,13 @@ Trigger proximity uses a spatial index rather than scanning the level every
 physics tick. Flag markers share instanced geometry, and their buffers update
 only when marker positions change. Runtime event state is separate from authored
 objects and remains available in editor diagnostics.
+Traps cost what is active, not what is placed: shooters wait in a schedule ordered by
+their next shot, each projectile in flight casts one ray a physics step, and a spatial
+index of where blades reach finds only the axes near the player. Axes swing in their
+vertex shader, so frames write nothing for them; projectile instances are written only
+for those in flight, and bonfires find the player through a spatial index too. Liquid
+pools do as well: a step clips only the player's parts in the pools it is near, and the
+liquid moves in its shaders, so frames write nothing for pools.
 [Phantoms](docs/phantoms.md) cost only while they play: at most three, each drawing 12
 meshes that share one geometry set, about 0.05 ms a frame on the full Ashen Ascent course.
 Recording checks only the stretch since its last keyframe, a few microseconds per physics step.

@@ -73,12 +73,12 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 8, "physics": { "...": "..." },
+    "schemaVersion": 9, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
     "cursor": { "maxTargetRadius": 2.65, "deadZone": 0.1 }
   },
@@ -106,10 +106,10 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 5, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 6, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }
@@ -497,7 +497,9 @@ procedural Mesh parts character (pot, trim, dark details, suit, skin, handle);
 imported models keep their own materials. Theme changes restyle existing lights
 and materials in place.
 
-**HUD.** `height.label`, `height.unit` (may be empty), `height.scale` (metres are
+**HUD.** A game's [module](game-module.md#hud-readouts) can draw any of the release's readouts
+its own way; these settings still say which show, and with what labels and formats.
+`height.label`, `height.unit` (may be empty), `height.scale` (metres are
 multiplied by it; `3.28084` shows feet), `height.decimals` (0-3) and
 `timer.label`; either readout can be hidden. `messages.style` is how message events
 appear, in the Workshop and in releases: `toast` (the default) fades each message in
@@ -508,7 +510,10 @@ exactly the original one.
 **Audio.** `volume` (master) and each clip's `volume` are 0-1. `music` loops while
 the game runs and pauses with it. Cues: `impact` (hammer strikes, louder when
 faster), `enemy-hit`, `enemy-defeat`, `launch` (Launch player events), `finish`
-(Stop timer events) and `fall` (falling out of the level). Browsers start audio only
+(Stop timer events), `hurt` (an enemy, trap or lava hurts the player, who survives),
+`death` (health runs out), `fall` (falling out of the level) and `bonfire` (the
+player reaches a bonfire that becomes the place a death returns to; see
+[health and bonfires](../README.md#health-and-bonfires)). Browsers start audio only
 after the player first clicks, taps or presses a key; sounds are fetched ahead of
 time and decoded then. Releases without audio or sound events include no audio code.
 

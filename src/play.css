@@ -1,37 +1,40 @@
+/* The HUD lays out its readouts' slots; each readout, the engine's or a game's own, draws in its slot. */
 .play-hud {
   position: absolute;
   top: max(16px, env(safe-area-inset-top));
   right: max(16px, env(safe-area-inset-right));
   left: max(16px, env(safe-area-inset-left));
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin: 0;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
 }
 
-.play-hud > div {
+/* The engine's own readouts. */
+.play-readout {
+  margin: 0;
   padding: 8px 12px;
   border-radius: 6px;
   background: rgb(243 241 232 / 88%);
   box-shadow: 0 2px 8px rgb(32 50 39 / 10%);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
-.play-hud dt {
+.play-readout dt {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
   letter-spacing: 0.05em;
 }
 
-.play-hud dd {
+.play-readout dd {
   margin: 2px 0 0;
   font-size: 22px;
   line-height: 1.3;
 }
 
-.play-height-unit {
+.play-readout-unit {
   margin-left: 4px;
   font-size: 14px;
 }
@@ -113,4 +116,10 @@
 .play-character-option input:focus-visible + span {
   outline: 3px solid #94662b;
   outline-offset: 2px;
+}
+
+.play-readout-health dd {
+  display: flex;
+  align-items: center;
+  min-height: 29px;
 }

@@ -155,6 +155,11 @@ export class AvatarMotionRunner {
     }
   }
 
+  // The character was placed anew while time went on: every motion starts again from rest on the next frame.
+  interrupt(): void {
+    this.clock.interrupt();
+  }
+
   // Each motion's claimed joints and cumulative joint writes.
   inspect(): { id: string; claims: number; writes: number }[] {
     return this.runs.map(run => ({ id: run.id, claims: run.claims.length, writes: run.writes }));

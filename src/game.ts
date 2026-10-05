@@ -28,6 +28,7 @@ import type { AvatarRigRegistry } from './avatar-rig';
 import type { HammerHead } from './hammer-head';
 import type { PartRole } from './model-library';
 import type { PartModel } from './view';
+import type { Looks } from './object-looks';
 
 export class Game {
   readonly simulation: Simulation;
@@ -42,11 +43,14 @@ export class Game {
   private readonly inputBlocks = new Set<string>();
   private readonly unsubscribeTerrain: () => void;
   private readonly unsubscribeEnemies: () => void;
+  private readonly unsubscribeBonfires: () => void;
   private readonly onAction: (action: UiAction, options?: UiActionOptions) => void;
   private readonly onCue: ((cue: GameCue) => void) | null;
   private readonly stepObservers = new Set<() => void>();
   // Last phase of each enemy, so cues fire on hit and defeat transitions only.
   private readonly enemyPhases = new Map<string, EnemyPhase>();
+  // The bonfire a death returns to, so its cue plays when another becomes it.
+  private bonfire: string | null = null;
   private character: CharacterState = { armIk: DEFAULT_ARM_IK };
   private messageStyle: MessageStyle;
   private readonly videos: VideoPlayback;
@@ -73,6 +77,8 @@ export class Game {
     enemyArt?: EnemyArtSettings;
     // Creates the decoration view, when the game draws decorations.
     decorations?: (() => DecorationView) | null;
+    // How the level's objects look where the game draws them its own way.
+    looks?: Looks;
     // How message events appear; toasts by default.
     messageStyle?: MessageStyle;
     // Whether play-video events play or are skipped; they play by default. The Workshop skips them.
@@ -98,13 +104,18 @@ export class Game {
     this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
     this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
       characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
-      decorations: options.decorations, avatarRigs: options.avatarRigs,
+      decorations: options.decorations, avatarRigs: options.avatarRigs, looks: options.looks,
     });
     if (this.onCue !== null) this.simulation.trackImpacts(true);
     this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
     this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => {
       this.view.enemies.apply(event);
       if (this.onCue !== null) this.enemyCue(event);
+    });
+    this.unsubscribeBonfires = this.simulation.subscribeBonfires((state) => {
+      this.view.setLitBonfires(state.lit);
+      if (state.current !== null && state.current !== this.bonfire) this.cue('bonfire');
+      this.bonfire = state.current;
     });
     this.input = new PointerInput(options.canvas, {
       onAction: options.onAction, onNotice: options.onNotice, onShortcut: options.onShortcut,
@@ -145,7 +156,7 @@ export class Game {
           const movement = this.view.pointerDelta(this.input.takeMovement(), this.settings().physics.mouseSensitivity, this.input.mode);
           const perStep = { x: movement.x / steps, y: movement.y / steps };
           let completed = 0;
-          let restarted = false;
+          let placed = false;
           for (; completed < steps;) {
             this.simulation.step(perStep);
             if (this.timerRunning) this.timerElapsed += PHYSICS.dt;
@@ -153,16 +164,20 @@ export class Game {
             this.triggers.update(this.simulation.playerPosition(), this.simulation.time);
             if (this.stopped) return;
             for (const observer of this.stepObservers) observer();
-            if (this.simulation.fellOutOfLevel()) {
-              // Falling below everything in the level restarts the attempt exactly like Reset.
-              restarted = true;
-              this.cue('fall');
-              this.onAction('reset');
+            const fell = this.simulation.fellOutOfLevel();
+            if (fell || this.simulation.dead()) {
+              placed = true;
+              this.cue(fell ? 'fall' : 'death');
+              // A death returns the player to the bonfire reached last, the run going on; before any, it restarts the
+              // attempt exactly like Reset.
+              if (this.simulation.respawn()) this.respawned();
+              else this.onAction('reset');
               break;
             }
             if (this.pauseReasons.size > 0) break;
           }
-          if (!restarted && this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
+          if (!placed && this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
+          if (this.simulation.takeHurt()) this.cue('hurt');
           if (this.onCue !== null) {
             const impact = this.simulation.takeImpact();
             if (impact >= IMPACT_SPEED.minimum) this.onCue({ type: 'cue', cue: 'impact', strength: impactStrength(impact) });
@@ -277,7 +292,7 @@ export class Game {
     this.input.setInteraction({ enabled: this.inputBlocks.size === 0 });
   }
 
-  // Runs `observer` after every physics step, before a fall restarts the attempt. Returns its removal.
+  // Runs `observer` after every physics step, before a death brings the player back. Returns its removal.
   observeSteps(observer: () => void): () => void {
     this.stepObservers.add(observer);
     return () => { this.stepObservers.delete(observer); };
@@ -286,6 +301,16 @@ export class Game {
   reset(spawn?: Readonly<PlayerSpawn>): void {
     this.simulation.reset(spawn);
     this.restartRun();
+  }
+
+  // What follows the player back to a bonfire, the run going on: triggers forget the jump, and the character, input and
+  // camera start afresh there.
+  private respawned(): void {
+    this.triggers.jump();
+    this.view.resetPresentation();
+    this.accumulator = 0;
+    this.input.clear();
+    this.view.recenter(this.simulation.frame(1));
   }
 
   // Everything a reset restarts besides the player and level objects.
@@ -339,6 +364,7 @@ export class Game {
     this.presenter.dispose();
     this.unsubscribeTerrain();
     this.unsubscribeEnemies();
+    this.unsubscribeBonfires();
     this.input.dispose();
     this.view.dispose();
     this.simulation.dispose();

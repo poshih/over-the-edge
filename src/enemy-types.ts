@@ -28,7 +28,7 @@ export const ENEMY_SPECS = {
 export const ENEMY_BEHAVIOR = {
   wakeDistance: 18, sleepDistance: 26, queryMovement: 0.75, decisionSeconds: 0.12,
   hitSpeed: 0.8, hitSeconds: 0.25, hurtSeconds: 0.18, deathSeconds: 0.45,
-  bumpSeconds: 0.7, bumpSpeed: 3, bumpLift: 1.4,
+  bumpSeconds: 0.7, bumpSpeed: 3, bumpLift: 1.4, bumpDamage: 1,
   patrolTolerance: 0.15, ledgeAhead: 0.3, ledgeDepth: 0.55, probeRise: 0.2, minimumWallNormal: 0.5,
   birdSight: 6, birdWindupSeconds: 0.5, birdDiveSeconds: 1,
   birdRecoverSeconds: 1.6, birdDiveSpeed: 5, birdReturnSpeed: 2.8,

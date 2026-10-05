@@ -17,7 +17,7 @@ const BASE = {
   canvas: 0x8e3a31,
 };
 const palette = (overrides) => ({ ...BASE, ...overrides });
-const SOUND = { bonfire: '/media/ember.wav', bell: '/media/bell.wav', gate: '/media/mist.wav', secret: '/media/chime.wav' };
+const SOUND = { bell: '/media/bell.wav', gate: '/media/mist.wav', secret: '/media/chime.wav' };
 
 // Pieces keep their materials in each zone's colours.
 function place(t, id, options = {}) {
@@ -35,10 +35,11 @@ const say = (text) => (object) => object.kind === 'trigger' && object.events.som
 // Props are decorations, never terrain: small colliders close together trap the pot and the hammer head
 // (see crampedColliders in scripts/course-kit/checks.mjs), and the course passes straight through its props.
 
-// A bonfire landing: a blade in warm ash, and the zone's title the first time the player arrives.
+// A bonfire landing: a bonfire a fallen player comes back to, whose audio cue sounds as it is reached, and the zone's
+// title the first time the player arrives.
 function bonfire(b, x, y, key) {
-  b.decoration('bonfire', 'ember-cairn', x, y, -0.8, 1.6);
-  b.message(`bonfire-${key}`, x, y + 1.3, TEXT[key].title, TEXT[key].message, { sound: SOUND.bonfire, width: 4, height: 3 });
+  b.bonfire('bonfire', x, y);
+  b.message(`bonfire-${key}`, x, y + 1.3, TEXT[key].title, TEXT[key].message, { width: 4, height: 3 });
 }
 
 // A grave beside the path, its look drawn from the zone's random stream: leaning headstones, a mirrored

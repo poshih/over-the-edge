@@ -14,6 +14,10 @@ import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
 import type { MediaHost } from './media-host';
 import { createPlayUI } from './play-ui';
+import { validateHudReadouts } from './hud-readouts';
+import type { HudReadouts } from './hud-readouts';
+import { validateLooks } from './object-looks';
+import type { Looks } from './object-looks';
 import type { ReleaseApi, ReleaseHost, ReleaseModule, StartRelease } from './release-module';
 import type { PhantomBuild, Phantoms } from './phantoms';
 import { readSelection, ReleaseModelLibrary } from './release-library';
@@ -65,6 +69,9 @@ export class Release {
   private readonly lifecycle = new AbortController();
   private readonly ui: ReturnType<typeof createPlayUI>;
   private module: ReleaseModule | null = null;
+  // The HUD readouts and the level objects' looks the game's module draws its own way.
+  private readouts: HudReadouts = {};
+  private looks: Looks = {};
   private loading: Attempt | null = null;
   private loaded: Loaded | null = null;
   private phantoms: Phantoms | null = null;
@@ -98,6 +105,8 @@ export class Release {
         if (this.module?.phantoms !== undefined && this.code.phantoms === null) {
           throw new Error('The game\'s module supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL.');
         }
+        this.readouts = validateHudReadouts(this.module?.hud);
+        this.looks = validateLooks(this.module?.looks);
       }
       const access = this.module?.access ?? publicAccess(contentUrl);
       for (;;) {
@@ -180,7 +189,7 @@ export class Release {
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
       canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
-      characterModels, content, media, decorations: this.code.createDecorations, avatarRigs,
+      characterModels, content, media, decorations: this.code.createDecorations, avatarRigs, looks: this.looks,
       theme: manifest.theme, enemyArt: manifest.enemies, messageStyle: manifest.hud.messages.style,
       onCue: audio === null ? undefined : (cue) => audio.handle(cue),
       onAction: (action, options) => game.perform(action, options),
@@ -231,6 +240,7 @@ export class Release {
     const { primary, alternate } = manifest.characters;
     this.ui.show({
       hud: manifest.hud,
+      readouts: this.readouts,
       characters: alternate === null ? null : {
         types: [primary.characterRiggingType, alternate.characterRiggingType],
         onSelect: (index) => { if (!game.halted) game.selectCharacter(index); },

@@ -468,6 +468,89 @@
   color: #9a5c08;
 }
 
+.level-gizmo-bonfire {
+  color: #b5541c;
+}
+
+.level-gizmo-shooter,
+.level-gizmo-axe {
+  color: #8f2a22;
+}
+
+.level-gizmo-bonfire .level-gizmo-region,
+.level-gizmo-shooter .level-gizmo-region,
+.level-gizmo-axe .level-gizmo-region {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.level-gizmo-flame,
+.level-gizmo-shooter circle,
+.level-gizmo-axe circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.level-gizmo-reach {
+  fill: rgb(181 84 28 / 8%);
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.level-gizmo-aim {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.level-gizmo-haft {
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.level-gizmo-selected.level-gizmo-bonfire,
+.level-gizmo-selected.level-gizmo-shooter,
+.level-gizmo-selected.level-gizmo-axe {
+  color: #075a50;
+}
+
+.level-gizmo-ghost.level-gizmo-bonfire,
+.level-gizmo-ghost.level-gizmo-shooter,
+.level-gizmo-ghost.level-gizmo-axe {
+  color: #9a5c08;
+}
+
+.level-gizmo-lava {
+  color: #c2410c;
+}
+
+.level-gizmo-swamp {
+  color: #5a6b2a;
+}
+
+.level-gizmo-pool .level-gizmo-region {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.level-gizmo-surface {
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.level-gizmo-selected.level-gizmo-pool {
+  color: #075a50;
+}
+
+.level-gizmo-ghost.level-gizmo-pool {
+  color: #9a5c08;
+}
+
 .level-gizmo-selected {
   filter: drop-shadow(0 0 0 transparent);
 }

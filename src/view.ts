@@ -46,8 +46,8 @@ import type { LevelChange, LevelDefinition, LevelLabel } from './level';
 import type { RigGeometry } from './rig';
 import { DEFAULT_HAMMER_HEAD, hammerHeadRadius } from './hammer-head';
 import type { HammerHead } from './hammer-head';
-import { FlagView } from './flag-view';
-import { UpdraftView } from './updraft-view';
+import { LevelLooks } from './object-looks';
+import type { Looks } from './object-looks';
 import { EnemyView } from './enemy-view';
 import { clamp } from './math';
 import type { PartPose, PhysicsFrame } from './simulation';
@@ -314,13 +314,14 @@ export class GameView {
   readonly terrain = new TerrainView();
   readonly enemies: EnemyView;
   readonly sprites: SpriteRig;
-  private readonly flags = new FlagView();
-  private readonly updrafts = new UpdraftView();
+  // How the level's flags, updrafts, bonfires, traps, projectiles and liquid pools look.
+  private readonly looks: LevelLooks;
   private readonly renderer: WebGLRenderer;
   // Passes, each drawn over the last. The course: terrain, its artwork and the scenery behind the obstacle line.
   // Then, with depth cleared, the actors: the characters, phantoms and enemies, which the course's colliders,
   // reaching half their depth toward the camera, must never hide; a 3D character's arms (ARM_LAYER) are left out.
-  // Then, with depth cleared, the front: decorations on or in front of the line. Then, with depth cleared again,
+  // Then, with depth cleared, the front: decorations on or in front of the line and the looks' fronts, such as the
+  // halves of swinging axes and liquid pools in front of it. Then, with depth cleared again,
   // a 3D character's arms, so they never clip into its body, jar or head; the marks, which ignore depth and write
   // none (aim cursor and line, course labels, editor overlays); and last the foreground, the tool, which shares the
   // arms' depth so the hands hold it.
@@ -470,6 +471,8 @@ export class GameView {
     avatarRigs?: AvatarRigRegistry;
     // Creates the decoration view; without it the view draws no decorations.
     decorations?: (() => DecorationView) | null;
+    // How the level's objects look where the game draws them its own way; the engine's looks elsewhere.
+    looks?: Looks;
   } = {}) {
     this.canvas = canvas;
     this.characterModels = options.characterModels ?? null;
@@ -489,6 +492,8 @@ export class GameView {
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = theme.exposure;
     this.renderer.autoClear = false;
+    // Swinging axes keep the side of the obstacle line their pass draws.
+    this.renderer.localClippingEnabled = true;
     this.renderer.info.autoReset = false;
     this.renderer.setClearColor(theme.sky);
     this.fog = new Fog(theme.fog.color);
@@ -514,16 +519,20 @@ export class GameView {
     this.buildScenery();
     this.decorations = options.decorations?.() ?? null;
     this.decorations?.setObjects(level.objects);
-    this.course.add(this.terrain.root, this.flags.root, this.updrafts.root);
+    this.looks = new LevelLooks(options.looks ?? {}, level.objects);
+    this.course.add(this.terrain.root);
     this.actors.add(this.enemies.root);
+    for (const passes of this.looks.passes()) {
+      if (passes.course !== undefined) this.course.add(passes.course);
+      if (passes.actors !== undefined) this.actors.add(passes.actors);
+      if (passes.front !== undefined) this.front.add(passes.front);
+    }
     this.marks.add(this.labels);
     if (this.decorations !== null) {
       this.course.add(this.decorations.root);
       this.front.add(this.decorations.front);
     }
     this.setLabels(level.labels);
-    this.flags.setObjects(level.objects);
-    this.updrafts.setObjects(level.objects);
     this.buildPlayer();
     this.sprites = this.createSlot().rig;
 
@@ -1165,8 +1174,7 @@ export class GameView {
     this.targetLine.computeLineDistances();
     this.terrain.update(frame.time);
     this.decorations?.update();
-    this.flags.update();
-    this.updrafts.update(frame.time);
+    this.looks.update(frame.time, frame.projectiles);
     this.enemies.update(frame.enemies, frame.time);
     for (const layer of this.layers) layer.update(physics, armPoses);
     this.renderer.info.reset();
@@ -1175,9 +1183,10 @@ export class GameView {
     // The course's colliders reach toward the camera, so the actors draw over them with depth of their own.
     this.renderer.clearDepth();
     this.renderer.render(this.actors, this.camera);
-    // Decorations on or in front of the line draw over the actors, never hidden by a phantom's translucent depth.
-    // The front holds nothing else, so a course without them skips the pass and its depth clear.
-    if (this.decorations !== null && this.decorations.front.children.length > 0) {
+    // Decorations on or in front of the line, axes swung toward the camera and the liquid in front of whatever is in a
+    // pool draw over the actors, never hidden by a phantom's translucent depth. The front holds nothing else, so a
+    // course without them skips the pass and its depth clear.
+    if (this.drawsFront()) {
       this.renderer.clearDepth();
       this.renderer.render(this.front, this.camera);
     }
@@ -1212,12 +1221,14 @@ export class GameView {
     this.snapCamera();
   }
 
+  // Settles the character's presentation, for a player placed anew: at a restart, or back at a bonfire while time goes on.
   resetPresentation(): void {
     this.presentationPreview = null;
     this.headAim.reset();
     this.waistLean.reset();
     this.gripHold.reset();
     for (const slot of this.slots) slot.rig.resetPresentation();
+    if (this.avatarRenderer instanceof SkinnedAvatarView) this.avatarRenderer.interrupt();
     this.resetPoseHistory();
   }
 
@@ -1309,8 +1320,7 @@ export class GameView {
       textures: this.renderer.info.memory.textures,
       terrain: this.terrain.inspect(),
       decorations: this.decorations?.inspect() ?? null,
-      flags: this.flags.inspect(),
-      updrafts: this.updrafts.inspect(),
+      looks: this.looks.inspect(),
       enemies: this.enemies.inspect(),
       sprites: this.sprites.inspect(),
       headAim: { rotation: this.headAim.rotation.toArray() },
@@ -1360,8 +1370,7 @@ export class GameView {
     this.terrain.root.removeFromParent();
     this.terrain.dispose();
     this.decorations?.dispose();
-    this.flags.dispose();
-    this.updrafts.dispose();
+    this.looks.dispose();
     this.enemies.dispose();
     for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
     this.layers.clear();
@@ -1461,10 +1470,19 @@ export class GameView {
       bounds.maxY + VISUAL.framingMargin - halfHeight, bounds.minY - VISUAL.framingMargin + halfHeight);
   }
 
+  // Whether anything draws in front of the obstacle line, over the actors.
+  private drawsFront(): boolean {
+    return (this.decorations !== null && this.decorations.front.children.length > 0) || this.looks.drawsFront();
+  }
+
+  // Burns the bonfires the player has reached this run, and puts the rest out.
+  setLitBonfires(ids: readonly string[]): void {
+    this.looks.setLit(ids);
+  }
+
   applyLevel(change: LevelChange): void {
     this.setLabels(change.level.labels);
-    this.flags.apply(change);
-    this.updrafts.apply(change);
+    this.looks.setLevel(change.level.objects);
     this.decorations?.apply(change);
   }
 
@@ -1842,10 +1860,13 @@ export class GameView {
     const cursorX = frame.cursor.x - pivotX, cursorY = frame.cursor.y - pivotY;
     this.previewCursor.x = pivotX + cursorX * cos - cursorY * sin + offset.x;
     this.previewCursor.y = pivotY + cursorX * sin + cursorY * cos + offset.y;
-    const shown = this.previewFrame ??= { time: frame.time, parts: this.previewParts, cursor: this.previewCursor, enemies: frame.enemies, rig: frame.rig };
+    const shown = this.previewFrame ??= {
+      time: frame.time, parts: this.previewParts, cursor: this.previewCursor, enemies: frame.enemies, projectiles: frame.projectiles, rig: frame.rig,
+    };
     shown.time = frame.time;
     shown.parts = this.previewParts;
     shown.enemies = frame.enemies;
+    shown.projectiles = frame.projectiles;
     shown.rig = frame.rig;
     return shown;
   }

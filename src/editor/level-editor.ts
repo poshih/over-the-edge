@@ -8,9 +8,12 @@ import {
   TRIGGER_MARKERS, validateLevel, validateLevelObject,
 } from '../level';
 import type {
-  DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, ShapeKind, StartObject, TerrainMesh, TerrainObject,
-  TriggerObject, TriggerRegion,
+  AxeObject, BonfireObject, DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, PoolObject, ShapeKind, ShooterObject,
+  StartObject, TerrainMesh, TerrainObject, TriggerObject, TriggerRegion,
 } from '../level';
+import { AXE, AXE_FIELDS, BONFIRE, HAZARD_LIMITS, HEALTH, SHOOTER, SHOOTER_FIELDS } from '../hazards';
+import { LIQUID_LABELS, LIQUID_LIMITS, LIQUIDS } from '../liquids';
+import type { Liquid } from '../liquids';
 import type { MeshTerrain } from '../mesh-collision';
 import { builtInDecoration, builtInGeometry, DECORATION_CATEGORIES, DECORATION_MODELS } from '../decoration-models';
 import type { DecorationCategory, DecorationModel } from '../decoration-models';
@@ -42,7 +45,7 @@ import './level-editor.css';
 export type { LevelEditorOptions } from './level-editor-host';
 
 // 'player' moves the live player without editing the level; it previews in the start's pose.
-type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-set-piece' | 'place-decoration' | 'start' | 'player';
+type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-hazard' | 'place-set-piece' | 'place-decoration' | 'start' | 'player';
 // 'decorate' selects and moves decorations; 'select' never picks them, so scenery cannot get in the way of the course.
 type Tool = 'select' | 'decorate' | 'draw' | PlacementTool;
 interface Bounds { left: number; right: number; bottom: number; top: number }
@@ -161,10 +164,86 @@ function asEnemy(object: LevelObject | null): EnemyObject | null {
 function asDecoration(object: LevelObject | null): DecorationObject | null {
   return object !== null && object.kind === 'decoration' ? object : null;
 }
+function asBonfire(object: LevelObject | null): BonfireObject | null {
+  return object !== null && object.kind === 'bonfire' ? object : null;
+}
+function asShooter(object: LevelObject | null): ShooterObject | null {
+  return object !== null && object.kind === 'shooter' ? object : null;
+}
+function asAxe(object: LevelObject | null): AxeObject | null {
+  return object !== null && object.kind === 'axe' ? object : null;
+}
+function asPool(object: LevelObject | null): PoolObject | null {
+  return object !== null && object.kind === 'pool' ? object : null;
+}
 
 function isPlacementTool(tool: Tool): tool is PlacementTool {
-  return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'place-set-piece' ||
+  return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'place-hazard' || tool === 'place-set-piece' ||
     tool === 'place-decoration' || tool === 'start' || tool === 'player';
+}
+
+// Bonfires, traps and liquid pools: objects the palette places whole, each by its anchor (see placeHazard).
+type HazardObject = BonfireObject | ShooterObject | AxeObject | PoolObject;
+interface HazardPreset {
+  readonly id: string;
+  readonly label: string;
+  readonly icon: string;
+  // What it counts toward, and that count's limit.
+  readonly tally: 'bonfires' | 'traps' | 'pools';
+  readonly limit: number;
+  readonly create: (at: Point) => HazardObject;
+}
+
+const PREVIEW_ID = 'placement-preview';
+const POOL_ICONS: Readonly<Record<Liquid, string>> = {
+  lava: '<path d="M-0.56 -0.02 Q-0.37 -0.18 -0.19 -0.02 T0.19 -0.02 T0.56 -0.02 L0.56 0.5 L-0.56 0.5 Z" fill="currentColor" />' +
+    '<circle cx="-0.12" cy="-0.34" r="0.07" fill="currentColor" /><circle cx="0.22" cy="-0.5" r="0.05" fill="currentColor" />',
+  swamp: '<path d="M-0.56 0.02 Q-0.37 -0.1 -0.19 0.02 T0.19 0.02 T0.56 0.02 L0.56 0.5 L-0.56 0.5 Z" fill="currentColor" opacity="0.55" />' +
+    '<path d="M0.3 0.02 L0.26 -0.5 M0.42 0.02 L0.48 -0.38" fill="none" stroke="currentColor" stroke-width="0.07" stroke-linecap="round" />',
+};
+const HAZARD_PRESETS: readonly HazardPreset[] = [
+  {
+    id: 'bonfire', label: 'Bonfire', tally: 'bonfires', limit: HAZARD_LIMITS.bonfires,
+    icon: '<path d="M0 -0.52 C0.3 -0.25 0.3 0.05 0 0.22 C-0.3 0.05 -0.3 -0.25 0 -0.52 Z" fill="currentColor" />' +
+      '<path d="M-0.45 0.48 L0.45 0.28 M-0.45 0.28 L0.45 0.48" fill="none" stroke="currentColor" stroke-width="0.09" stroke-linecap="round" />',
+    create: (at) => ({ kind: 'bonfire', id: PREVIEW_ID, x: at.x, y: at.y }),
+  },
+  {
+    id: 'shooter', label: 'Projectile trap', tally: 'traps', limit: HAZARD_LIMITS.traps,
+    icon: '<rect x="-0.56" y="-0.26" width="0.44" height="0.52" fill="none" stroke="currentColor" stroke-width="0.08" />' +
+      '<path d="M-0.04 0 L0.52 0 M0.33 -0.16 L0.52 0 L0.33 0.16" fill="none" stroke="currentColor" stroke-width="0.08" ' +
+      'stroke-linecap="round" stroke-linejoin="round" />',
+    create: (at) => ({ kind: 'shooter', id: PREVIEW_ID, x: at.x, y: at.y, angle: 0, interval: 2, delay: 0, speed: 12, damage: 1 }),
+  },
+  {
+    id: 'axe', label: 'Swinging axe', tally: 'traps', limit: HAZARD_LIMITS.traps,
+    icon: '<circle cy="-0.48" r="0.08" fill="currentColor" /><path d="M0 -0.44 L0 0.2" stroke="currentColor" stroke-width="0.08" />' +
+      '<path d="M-0.44 0.14 Q0 0.32 0.44 0.14 Q0.3 0.52 0 0.56 Q-0.3 0.52 -0.44 0.14 Z" fill="currentColor" />',
+    create: (at) => ({ kind: 'axe', id: PREVIEW_ID, x: at.x, y: at.y, length: 4, period: 3, offset: 0, damage: 2 }),
+  },
+  ...LIQUIDS.map((liquid): HazardPreset => ({
+    id: liquid, label: `${LIQUID_LABELS[liquid]} pool`, tally: 'pools', limit: LIQUID_LIMITS.pools, icon: POOL_ICONS[liquid],
+    create: (at) => ({ kind: 'pool', id: PREVIEW_ID, liquid, x: at.x, y: at.y, width: 6, height: 2, depth: 2 }),
+  })),
+];
+
+function isHazard(object: LevelObject): object is HazardObject {
+  return object.kind === 'bonfire' || object.kind === 'shooter' || object.kind === 'axe' || object.kind === 'pool';
+}
+
+// The palette entry an object comes from: its liquid's for a pool, its kind's otherwise.
+function hazardPresetId(object: HazardObject): string {
+  return object.kind === 'pool' ? object.liquid : object.kind;
+}
+
+function hazardName(object: HazardObject): string {
+  const id = hazardPresetId(object);
+  return HAZARD_PRESETS.find((preset) => preset.id === id)?.label ?? id;
+}
+
+// A numeric field's label with its unit, if it has one.
+function fieldLabel(field: { readonly label: string; readonly unit: string }): string {
+  return field.unit === '' ? field.label : `${field.label} (${field.unit})`;
 }
 
 // Decorations are placed by their base anchor; their size on screen depends on depth and the camera.
@@ -322,6 +401,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
           </button>
         </div>
         <div class="level-enemy-palette" aria-label="Enemy palette"></div>
+        <p class="level-help level-palette-label">Bonfires, traps &amp; liquids</p>
+        <div class="level-hazard-palette" aria-label="Bonfire, trap and liquid palette"></div>
         <p class="level-help level-tool-help"></p>
       </fieldset>
       ${sectionMarkup({ id: 'level-inspector', title: 'Object properties', hint: 'The selected or new object', open: true }, `
@@ -377,10 +458,52 @@ export function createLevelEditor(options: LevelEditorOptions) {
           </div>
           <p class="level-help level-enemy-help"></p>
           <p class="level-help">Position X/Y is the authored center/home; placement uses the clicked base.
-            The guide shows the patrol radius on either side. Body collisions knock the player back;
-            there is no player health system. Dead enemies return on Reset or an editor rebuild,
+            The guide shows the patrol radius on either side. Body collisions knock the player back and cost
+            ${ENEMY_BEHAVIOR.bumpDamage} health (Physics / Health). Dead enemies return on Reset or an editor rebuild,
             including entering Level mode.
             Patrol motion and deaths never change saved positions.</p>
+        </div>
+        <div class="level-fields-bonfire">
+          <p class="level-help">Position is the centre of its base; placing it rests the base on the terrain top under the
+            pointer. It lights when the player's foot comes within ${BONFIRE.reach} m of the base, the dashed circle. A
+            death, from health running out or a fall out of the level, brings the player back at the bonfire reached
+            last, healed and unharmed for ${HEALTH.respawnSeconds} s; the run, its clock and the level go on. Before
+            any bonfire, a death restarts the run. Bonfires never collide.</p>
+        </div>
+        <div class="level-fields-shooter">
+          <div class="level-field-grid">
+            ${Object.entries(SHOOTER_FIELDS).map(([name, field]) =>
+              numericField(`shooter-${name}`, fieldLabel(field), field.min, field.max, field.step)).join('')}
+          </div>
+          <p class="level-help">Position is the muzzle; Rotation is the direction it fires. It fires at First shot and
+            every Shot interval after, in run time, while the player is within ${SHOOTER.range} m. Projectiles fly
+            straight up to ${SHOOTER.range} m; terrain and the hammer head stop them, so the hammer is a shield.
+            Set the muzzle into a wall's face to shoot out of it. A hit costs its damage and knocks the player along
+            the shot. The trap never collides.</p>
+        </div>
+        <div class="level-fields-axe">
+          <div class="level-field-grid">
+            ${Object.entries(AXE_FIELDS).map(([name, field]) =>
+              numericField(`axe-${name}`, fieldLabel(field), field.min, field.max, field.step)).join('')}
+          </div>
+          <p class="level-help">Position is the pivot. The blade hangs Length below it and swings in and out of the view,
+            toward the camera and away, up to ${Math.round(AXE.amplitude * DEGREES)}° either side. It passes through the
+            play line, where the box shows it, at Swing offset and every half period after; there a blade that meets the
+            player costs its damage and knocks the player away from it. Stagger neighbours with the offset. The axe
+            never collides.</p>
+        </div>
+        <div class="level-fields-pool">
+          <div class="level-field-grid">
+            ${selectField('pool-liquid', 'Liquid', LIQUIDS.map((liquid) => ({ value: liquid, label: LIQUID_LABELS[liquid] })))}
+            ${numericField('pool-width', 'Width', LIQUID_LIMITS.minimumSize, LIQUID_LIMITS.maximumSize)}
+            ${numericField('pool-height', 'Height', LIQUID_LIMITS.minimumSize, LIQUID_LIMITS.maximumSize)}
+            ${numericField('pool-depth', 'Depth', LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth)}
+          </div>
+          <p class="level-help">Position is the centre of the pool's box; its top is the liquid's surface, and placing it
+            puts the surface at the pointer. The liquid never collides: fit the box into a basin of terrain, which holds
+            the player up where the pool ends. Lava holds the player up and burns the character each second the pot is
+            in it; swamp lets the player sink and holds it back. Physics / Liquids sets how much. The half in front of
+            the play line draws over the player, so whatever is in the pool looks in it.</p>
         </div>
         <div class="level-fields-decoration">
           <div class="level-field-grid">
@@ -479,7 +602,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button level-import">Import level JSON</button>
         </div>
         <input class="level-file" type="file" accept=".json,application/json" aria-label="Import level JSON" hidden />
-        <p class="level-help">Exports level.json: terrain, start, triggers, enemies and labels only.
+        <p class="level-help">Exports level.json: terrain, start, triggers, enemies, decorations, bonfires, traps, liquid pools and labels only.
           Models, appearance, tuning and browser settings are never included. Import limit:
           ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Enemy motion/deaths are not saved.
           New enemy kinds and trigger actions need an updated game runtime.</p>
@@ -684,7 +807,9 @@ Export the level first if you want to keep them. Continue without saving?`);
   function renderStatus(): void {
     const counts = level.counts();
     saveStatus.textContent = `${counts.terrain} / ${LEVEL_LIMITS.objects} terrain · ${counts.triggers} / ${TRIGGER_LIMITS.objects} triggers · ${
-      counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${counts.decorations} / ${DECORATION_LIMITS.objects} decorations · ${saveState()}`;
+      counts.enemies} / ${ENEMY_LIMITS.objects} enemies · ${counts.decorations} / ${DECORATION_LIMITS.objects} decorations · ${
+      counts.bonfires} / ${HAZARD_LIMITS.bonfires} bonfires · ${counts.traps} / ${HAZARD_LIMITS.traps} traps · ${
+      counts.pools} / ${LIQUID_LIMITS.pools} pools · ${saveState()}`;
     saveStatus.dataset.dirty = String(dirty());
   }
 
@@ -695,22 +820,31 @@ Export the level first if you want to keep them. Continue without saving?`);
     const trigger = asTrigger(object);
     const enemy = asEnemy(object);
     const decoration = asDecoration(object);
+    const bonfire = asBonfire(object);
+    const shooter = asShooter(object);
+    const axe = asAxe(object);
+    const pool = asPool(object);
     inspector.disabled = object === null;
     element(root, '.level-fields-common').hidden = object === null;
-    element(root, '.level-fields-angle').hidden = terrain === null && start === null && decoration === null;
+    element(root, '.level-fields-angle').hidden = terrain === null && start === null && decoration === null && shooter === null;
     element(root, '.level-fields-decoration').hidden = decoration === null;
     element(root, '.level-fields-terrain').hidden = terrain === null;
     element(root, '.level-fields-start').hidden = start === null;
     element(root, '.level-fields-trigger').hidden = trigger === null;
     element(root, '.level-fields-enemy').hidden = enemy === null;
+    element(root, '.level-fields-bonfire').hidden = bonfire === null;
+    element(root, '.level-fields-shooter').hidden = shooter === null;
+    element(root, '.level-fields-axe').hidden = axe === null;
+    element(root, '.level-fields-pool').hidden = pool === null;
 
     const armedPiece = armedSetPiece();
     element(root, '.level-selection-name').textContent =
       armedPiece !== null ? `${armedPiece.name}${setPieceMirror ? ' (mirrored)' : ''} — click / tap the canvas to drop it` :
-      object === null ? 'Select an object, or place terrain, a start, a trigger or an enemy.' :
+      object === null ? 'Select an object, or place terrain, a start, a trigger, an enemy, a bonfire, a trap or a liquid pool.' :
       tool === 'place' && terrain !== null ? `New ${terrainName(terrain)}${terrain.mirror ? ' (mirrored)' : ''} — click / tap the canvas to place` :
       tool === 'place-trigger' ? `New ${presetId === 'ending-trigger' ? 'ending trigger' : 'trigger'} — click / tap the canvas to place` :
       tool === 'place-enemy' && enemy !== null ? `New ${ENEMY_SPECS[enemy.species].label} - click / tap its base to place` :
+      tool === 'place-hazard' && object !== null && isHazard(object) ? `New ${hazardName(object).toLowerCase()} — click / tap to place` :
       tool === 'place-decoration' && decoration !== null ? `New ${modelName(decoration.model)}${decoration.mirror ? ' (mirrored)' : ''} — click / tap its base to place` :
       tool === 'start' ? 'Start location — click / tap the canvas to place' :
       tool === 'player' ? 'Place player — click / tap where the pot should stand' :
@@ -718,7 +852,8 @@ Export the level first if you want to keep them. Continue without saving?`);
       start !== null ? `Start location · ${start.id}` :
       trigger !== null ? `Trigger "${trigger.name}" · ${trigger.id}` :
       enemy !== null ? `${ENEMY_SPECS[enemy.species].label} - ${enemy.id}` :
-      decoration !== null ? `${modelName(decoration.model)} · ${decoration.id}` : '';
+      decoration !== null ? `${modelName(decoration.model)} · ${decoration.id}` :
+      isHazard(object) ? `${hazardName(object)} · ${object.id}` : '';
 
     if (object !== null) {
       const coordLimit = trigger !== null ? TRIGGER_LIMITS.coordinate : LEVEL_LIMITS.coordinate;
@@ -756,6 +891,18 @@ Export the level first if you want to keep them. Continue without saving?`);
       input('decoration-height').value = String(Number(decoration.height.toFixed(4)));
       input('decoration-tint').value = `#${decoration.tint.toString(16).padStart(6, '0')}`;
       input('decoration-mirror').checked = decoration.mirror;
+    } else if (shooter !== null) {
+      input('angle').value = String(Number((shooter.angle * DEGREES).toFixed(4)));
+      for (const name of Object.keys(SHOOTER_FIELDS) as (keyof typeof SHOOTER_FIELDS)[]) {
+        input(`shooter-${name}`).value = String(Number(shooter[name].toFixed(4)));
+      }
+    } else if (axe !== null) {
+      for (const name of Object.keys(AXE_FIELDS) as (keyof typeof AXE_FIELDS)[]) {
+        input(`axe-${name}`).value = String(Number(axe[name].toFixed(4)));
+      }
+    } else if (pool !== null) {
+      select('pool-liquid').value = pool.liquid;
+      for (const name of ['width', 'height', 'depth'] as const) input(`pool-${name}`).value = String(Number(pool[name].toFixed(4)));
     } else if (enemy !== null) {
       const spec = ENEMY_SPECS[enemy.species];
       select('enemy-facing').value = enemy.facing;
@@ -819,11 +966,15 @@ Export the level first if you want to keep them. Continue without saving?`);
         button.disabled = full;
       }
     }
+    for (const button of root.querySelectorAll<HTMLButtonElement>('.level-hazard-palette [data-level-preset]')) {
+      const preset = HAZARD_PRESETS.find((candidate) => candidate.id === button.dataset.levelPreset);
+      button.disabled = preset === undefined || counts[preset.tally] >= preset.limit;
+    }
     const help: Record<Tool, string> = {
       select: 'Click / tap to select; drag to move. Drag empty space, or drag with the middle button from anywhere, to pan; the ' +
         'wheel and + / − zoom. On a touch screen, drag with two fingers to pan and pinch to zoom. Pick enemies on their bodies, ' +
-        'starts and triggers near their center handle. Escape cancels a drag without changing the level. Decorations are picked ' +
-        'with Select decorations.',
+        'starts and triggers near their center handle, and liquid pools in their box where no terrain is. Escape cancels a drag ' +
+        'without changing the level. Decorations are picked with Select decorations.',
       decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth, or drag empty space to ' +
         'pan. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
@@ -831,6 +982,9 @@ Export the level first if you want to keep them. Continue without saving?`);
       place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
+      'place-hazard': 'Click / tap to place it: a bonfire by its base, which rests on the terrain top under the pointer; a projectile ' +
+        'trap by its muzzle; a swinging axe by its pivot; a liquid pool by the middle of its surface. Tune it before or after ' +
+        'placing. Escape cancels.',
       'place-set-piece': 'Click / tap to drop the set piece. Its base rests on the terrain top nearest the pointer; move ' +
         'away from surfaces to place it freely. M mirrors it. Escape cancels.',
       'place-decoration': 'Click / tap to place the decoration. Its base follows the pointer at its depth and rests on nearby ' +
@@ -945,6 +1099,14 @@ Export the level first if you want to keep them. Continue without saving?`);
     const below = camera.unprojectDepth({ x: client.x, y: client.y + SNAP_PIXELS }, object.z);
     const top = Math.abs(object.z) > DECORATION_SNAP_DEPTH || below === null ? null : surfaces.nearestTop(at.x, at.y, at.y - below.y);
     return { ...object, x: at.x, y: top ?? at.y };
+  }
+
+  // Where a bonfire or trap being placed goes: under the pointer, a bonfire's base resting on the terrain top near it.
+  function placeHazard(object: HazardObject, world: Point): HazardObject {
+    if (object.kind === 'pool') return { ...object, x: world.x, y: world.y - object.height / 2 };
+    if (object.kind !== 'bonfire') return { ...object, x: world.x, y: world.y };
+    const top = surfaces.nearestTop(world.x, world.y, SNAP_PIXELS * camera.state().worldHeight / Math.max(1, rect.height));
+    return { ...object, x: world.x, y: top ?? world.y };
   }
 
   function setPieceButton(piece: SetPiece): HTMLButtonElement {
@@ -1562,6 +1724,28 @@ Export the level first if you want to keep them. Continue without saving?`);
     element(root, '.level-enemy-palette').append(button);
   }
 
+  for (const preset of HAZARD_PRESETS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button level-preset';
+    button.dataset.levelPreset = preset.id;
+    button.setAttribute('aria-pressed', 'false');
+    const icon = document.createElementNS(SVG_NS, 'svg');
+    icon.setAttribute('viewBox', '-0.65 -0.65 1.3 1.3');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = preset.icon;
+    button.append(icon, document.createTextNode(preset.label));
+    button.addEventListener('click', () => {
+      if (!active || released(button)) return;
+      cancelGesture();
+      tool = 'place-hazard'; presetId = preset.id; selectedId = null;
+      placement = placeHazard(preset.create(camera.state()), camera.state());
+      renderControls();
+      draw();
+    }, listen);
+    element(root, '.level-hazard-palette').append(button);
+  }
+
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-tool]')) {
     button.addEventListener('click', () => {
       if (!active || released(button)) return;
@@ -1582,7 +1766,7 @@ Export the level first if you want to keep them. Continue without saving?`);
   input('angle').addEventListener('change', () => {
     if (!active) return;
     const object = inspectorObject();
-    if (object === null || (object.kind !== 'terrain' && object.kind !== 'start' && object.kind !== 'decoration')) return;
+    if (object === null || (object.kind !== 'terrain' && object.kind !== 'start' && object.kind !== 'decoration' && object.kind !== 'shooter')) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, angle: input('angle').valueAsNumber / DEGREES }));
   }, listen);
@@ -1660,6 +1844,34 @@ Export the level first if you want to keep them. Continue without saving?`);
       if (object === null) return;
       cancelGesture();
       applyEdit(() => commitOrPreview({ ...object, [name]: input(`enemy-${name}`).valueAsNumber }));
+    }, listen);
+  }
+  const editTrap = <K extends 'shooter' | 'axe'>(kind: K, name: string): void => {
+    if (!active) return;
+    const object = inspectorObject();
+    if (object === null || object.kind !== kind) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, [name]: input(`${kind}-${name}`).valueAsNumber }));
+  };
+  for (const name of Object.keys(SHOOTER_FIELDS)) input(`shooter-${name}`).addEventListener('change', () => editTrap('shooter', name), listen);
+  for (const name of Object.keys(AXE_FIELDS)) input(`axe-${name}`).addEventListener('change', () => editTrap('axe', name), listen);
+  select('pool-liquid').addEventListener('change', () => {
+    if (!active) return;
+    const object = asPool(inspectorObject());
+    const liquid = LIQUIDS.find((candidate) => candidate === select('pool-liquid').value);
+    if (object === null || liquid === undefined) return;
+    cancelGesture();
+    // A pool being placed follows its new liquid in the palette.
+    if (tool === 'place-hazard') presetId = liquid;
+    applyEdit(() => commitOrPreview({ ...object, liquid }));
+  }, listen);
+  for (const name of ['width', 'height', 'depth'] as const) {
+    input(`pool-${name}`).addEventListener('change', () => {
+      if (!active) return;
+      const object = asPool(inspectorObject());
+      if (object === null) return;
+      cancelGesture();
+      applyEdit(() => commitOrPreview({ ...object, [name]: input(`pool-${name}`).valueAsNumber }));
     }, listen);
   }
   select('enemy-facing').addEventListener('change', () => {
@@ -1900,12 +2112,12 @@ Export the level first if you want to keep them. Continue without saving?`);
     hitTestCount++;
     const objects = level.definition().objects;
     const radius = handleRadius();
-    // Enemy bodies and small entity handles take priority; trigger regions never block terrain.
+    // Enemy, bonfire and trap bodies and small entity handles take priority; trigger regions never block terrain.
     for (let index = objects.length - 1; index >= 0; index--) {
       const object = objects[index];
-      if (isTerrainObject(object) || isDecorationObject(object)) continue;
+      if (isTerrainObject(object) || isDecorationObject(object) || object.kind === 'pool') continue;
       if (Math.hypot(world.x - object.x, world.y - object.y) <= radius) return object;
-      if (object.kind === 'enemy') {
+      if (object.kind === 'enemy' || isHazard(object)) {
         const bound = bounds.get(object.id);
         if (bound === undefined) throw new Error('Missing authored object bounds.');
         if (boundsContain(bound, world)) return object;
@@ -1917,6 +2129,14 @@ Export the level first if you want to keep them. Continue without saving?`);
       const bound = bounds.get(object.id);
       if (bound === undefined) throw new Error('Missing authored object bounds.');
       if (boundsContain(bound, world) && objectContains(object, world)) return object;
+    }
+    // Pools take what nothing else does, so the rock of their basins stays easy to pick.
+    for (let index = objects.length - 1; index >= 0; index--) {
+      const object = objects[index];
+      if (object.kind !== 'pool') continue;
+      const bound = bounds.get(object.id);
+      if (bound === undefined) throw new Error('Missing authored object bounds.');
+      if (boundsContain(bound, world)) return object;
     }
     return null;
   }
@@ -1968,6 +2188,8 @@ Export the level first if you want to keep them. Continue without saving?`);
       placement = preset === null ? moved : anchorTrigger(moved, preset);
     } else if (tool === 'place-enemy' && placement !== null && placement.kind === 'enemy') {
       placement = anchorEnemy({ ...placement, x: world.x, y: world.y });
+    } else if (tool === 'place-hazard' && placement !== null && isHazard(placement)) {
+      placement = placeHazard(placement, world);
     } else if (tool === 'place-set-piece' && setPieceId !== null) {
       moveSetPiece(world);
     } else if (tool === 'place-decoration' && placement !== null && placement.kind === 'decoration') {
@@ -2131,6 +2353,11 @@ Export the level first if you want to keep them. Continue without saving?`);
         chooseTool('select');
       } else if (finished.kind === 'place-enemy' && inside && placement !== null) {
         const object = { ...placement, id: `enemy-${crypto.randomUUID()}` };
+        level.upsert(object);
+        selectedId = object.id;
+        chooseTool('select');
+      } else if (finished.kind === 'place-hazard' && inside && placement !== null) {
+        const object = { ...placement, id: `${placement.kind}-${crypto.randomUUID()}` };
         level.upsert(object);
         selectedId = object.id;
         chooseTool('select');

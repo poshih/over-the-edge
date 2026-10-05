@@ -12,7 +12,7 @@ export interface CursorSettings {
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 8;
+  readonly schemaVersion: 9;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
@@ -25,7 +25,7 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   deadZone: 0.1,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 8, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 9, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -39,7 +39,9 @@ interface NumericSetting {
 
 interface TuningField extends NumericSetting {
   key: keyof Tuning;
-  group: 'Mass & recoil' | 'Motors' | 'Downswing' | 'Response' | 'Materials' | 'Input';
+  group: 'Mass & recoil' | 'Motors' | 'Downswing' | 'Response' | 'Materials' | 'Input' | 'Health' | 'Liquids';
+  // Whether the setting takes whole numbers only.
+  whole?: true;
 }
 
 type RigField = NumericSetting & { key: RigLength };
@@ -94,6 +96,12 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'handleFrequency', label: 'Handle compliance', group: 'Materials', min: 0, max: 30, step: 1, unit: 'Hz', description: 'Zero uses one rigid tool body. Positive values enable rotational spring compliance. Crossing zero rebuilds the rig and restarts the run.' },
   { key: 'handleDamping', label: 'Handle damping', group: 'Materials', min: 0.1, max: 1, step: 0.05, unit: '', description: 'Damping ratio of compliant handle welds; only active above zero Hz.' },
   { key: 'mouseSensitivity', label: 'Control sensitivity', group: 'Input', min: 0.3, max: 2.5, step: 0.05, unit: 'x', description: 'Relative pointer movement. Touch uses the same CSS-pixel gain in either orientation; mouse follows the scene scale.' },
+  { key: 'health', label: 'Health', group: 'Health', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Damage the character takes before dying. Enemies deal 1 a bump, traps their own damage and lava its damage each second; each hit leaves the character unharmed for a second. A death, like a fall out of the level, brings the player back at the bonfire reached last, or restarts the run when none was. Shown only in levels with enemies, traps or lava.' },
+  { key: 'lavaBuoyancy', label: 'Lava buoyancy', group: 'Liquids', min: 0, max: 300, step: 5, unit: '%', description: 'How much of the player\'s weight lava holds up with the pot all under its surface: above 100% the player floats with part of the pot out, below it sinks. Only the pot floats: lava slows the hammer but does not hold it up.' },
+  { key: 'lavaDrag', label: 'Lava drag', group: 'Liquids', min: 0, max: 20, step: 0.1, unit: '/s', description: 'How thick lava is: with the pot all under its surface the player slows at this rate, losing 63% of its speed in 1/rate seconds. The hammer meets it too, so swinging it through lava rows the player along.' },
+  { key: 'lavaDamage', label: 'Lava damage', group: 'Liquids', min: 1, max: 20, step: 1, unit: '/s', whole: true, description: 'Damage lava deals the character while the pot is in it: on touching it, then each second it stays. The hammer does not burn.' },
+  { key: 'swampBuoyancy', label: 'Swamp buoyancy', group: 'Liquids', min: 0, max: 300, step: 5, unit: '%', description: 'How much of the player\'s weight swamp holds up with the pot all under its surface: below 100% the player sinks through it, as slowly as its drag allows. Only the pot floats.' },
+  { key: 'swampDrag', label: 'Swamp drag', group: 'Liquids', min: 0, max: 20, step: 0.1, unit: '/s', description: 'How thick swamp is: with the pot all under its surface the player slows at this rate, and the hammer drags through it too. Swamp does no damage; a thick one holds the player back.' },
 ];
 
 export class GameSettingsError extends Error {}
@@ -117,6 +125,7 @@ function validateTuning(value: unknown): Tuning {
   const result = { ...DEFAULT_TUNING };
   for (const field of TUNING_FIELDS) {
     result[field.key] = settingNumber(value[field.key], field);
+    if (field.whole && !Number.isInteger(result[field.key])) throw new GameSettingsError(`${field.label} must be a whole number.`);
   }
   return Object.freeze(result);
 }
@@ -155,7 +164,7 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 8) throw new GameSettingsError('Game settings require schema version 8.');
+  if (value.schemaVersion !== 9) throw new GameSettingsError('Game settings require schema version 9.');
   const rig = validateRig(value.rig);
   settingsFields(value.cursor, CURSOR_FIELDS.map((field) => field.key), 'Cursor settings');
   const cursor = { ...DEFAULT_CURSOR_SETTINGS };
@@ -164,5 +173,5 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 8, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 9, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

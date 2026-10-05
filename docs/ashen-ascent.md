@@ -49,10 +49,11 @@ Each zone has its own palette, and pieces take their colours from it. The
 connectors between pieces change from zone to zone rather than repeating one
 pattern. Stairs switch back or run in line, mixing shelves, slabs, crates, rocks and
 columns; floors, walls, towers and wind stones fill the rest. The first zone opens
-with the intro. Each later zone begins at a **bonfire**, a blade planted in warm ash,
-whose message names the zone the first time you arrive. Bonfires are landmarks, not
-checkpoints. As in any Over the Edge course, falling never kills you; you just land
-lower down.
+with the intro. Each later zone begins at a [bonfire](../README.md#health-and-bonfires),
+whose message names the zone the first time you arrive. Bonfires are checkpoints: the
+crows and the hollowed cost health, and a death, from health running out or a fall out
+of the world, brings you back at the bonfire you reached last. A fall within the course
+never kills you; as in any Over the Edge course, you just land lower down.
 
 ## Fair falls
 
@@ -98,9 +99,9 @@ lowest terrain restarts the run, as in every level.
 
 ## Scenery
 
-193 decorations, using all 26 models of the decoration library, dress the climb from
+186 decorations, using all 26 models of the decoration library, dress the climb from
 1,000 m behind the course to 3 m in front of it. None of them collide: every prop is a
-decoration, from the graves by the path, the bonfires and the heap of skulls in the
+decoration, from the graves by the path and the heap of skulls in the
 catacombs to the stalactites, roots and icicles hanging below the route, the banners
 of the keep and the islets drifting past the Great Updraft. The only colliders are the
 course itself, so the pot never catches on a prop:
@@ -137,10 +138,11 @@ its backdrop hills, because the scenery is the landscape, and pushes the fog out
 | --- | ---: | --- |
 | Terrain | 422 | Including 12 illusions; blocks, ramps, triangles, circles and hexagons only |
 | Updrafts | 15 | 11 marked, 4 hidden; lift 5-96 m |
-| Other triggers | 17 | 16 messages (11 with a sound) and the ending, which stops the timer |
+| Other triggers | 17 | 16 messages (4 with a sound) and the ending, which stops the timer |
 | Enemies | 39 | 26 crows and 13 hollow soldiers |
+| Bonfires | 7 | One at the start of each later zone; their cue sounds the ember |
 | Labels | 15 | One below the level limit |
-| Decorations | 193 | Scenery only; all 26 library models |
+| Decorations | 186 | Scenery only; all 26 library models |
 
 That is 686 objects plus the start. The course uses the five built-in meshes, so
 all terrain shares **6 collision shapes**, the five and the mirrored ramp, and no drawn outlines. Measured on the earlier

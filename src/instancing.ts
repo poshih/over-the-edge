@@ -23,6 +23,11 @@ export class InstanceSlots<T extends { readonly id: string }> {
     return this.entries;
   }
 
+  find(id: string): { readonly slot: number; readonly object: T } | undefined {
+    const slot = this.slots.get(id);
+    return slot === undefined ? undefined : { slot, object: this.entries[slot] };
+  }
+
   upsert(entry: T): number {
     const existing = this.slots.get(entry.id);
     if (existing !== undefined) {

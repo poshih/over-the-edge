@@ -1,8 +1,8 @@
-import { element, formatElapsedTime, setText } from './dom';
 import { createNotice } from './notice';
 import type { CharacterRiggingType } from './sprite-data';
-import { DEFAULT_HUD, formatHeight } from './hud';
 import type { HudSettings } from './hud';
+import { createHudReadout, DEFAULT_HUD_READOUTS, HUD_READOUTS } from './hud-readouts';
+import type { HudFrame, HudReadout, HudReadoutName, HudReadouts } from './hud-readouts';
 
 const CHARACTER_KEY = 'over-the-edge:play:character';
 const CHARACTER_LABELS: Readonly<Record<CharacterRiggingType, string>> = {
@@ -38,6 +38,18 @@ export function characterLabels(types: readonly CharacterRiggingType[]): string[
   return labels.map((label, index) => labels.indexOf(label) !== labels.lastIndexOf(label) ? `${label} ${index + 1}` : label);
 }
 
+// A readout in its slot of the HUD.
+interface Shown {
+  readonly name: HudReadoutName;
+  readonly slot: HTMLElement;
+  readonly readout: HudReadout;
+}
+
+// Whether the project's HUD settings show `name`'s readout; health shows wherever something can hurt the player.
+function shows(hud: HudSettings, name: HudReadoutName): boolean {
+  return name === 'height' ? hud.height.visible : name === 'timer' ? hud.timer.visible : true;
+}
+
 // The release's interface. Notices work from the start; the readouts and the character choice appear
 // once the release's content has said what they show.
 export function createPlayUI(options: { mount: HTMLElement }) {
@@ -47,36 +59,26 @@ export function createPlayUI(options: { mount: HTMLElement }) {
   const inputs: HTMLInputElement[] = [];
   const notice = createNotice({ mount: root });
   options.mount.append(root);
-  let hud = DEFAULT_HUD;
-  let height: HTMLElement | null = null;
-  let elapsed: HTMLElement | null = null;
+  const readouts: Shown[] = [];
   let selected = 0;
   return {
-    show(settings: { hud: HudSettings; characters: PlayCharacterChoice | null }): void {
-      hud = settings.hud;
-      const readouts = document.createElement('dl');
-      readouts.className = 'play-hud';
-      readouts.setAttribute('aria-label', 'Climb statistics');
-      readouts.innerHTML = `
-        <div class="play-height">
-          <dt></dt>
-          <dd><span class="height-value"></span><span class="play-height-unit"></span></dd>
-        </div>
-        <div class="play-timer">
-          <dt></dt>
-          <dd class="elapsed-value">00:00</dd>
-        </div>
-      `;
-      // Labels come from the project's HUD settings as text, never markup.
-      element<HTMLElement>(readouts, '.play-height dt').textContent = hud.height.label;
-      element<HTMLElement>(readouts, '.play-height-unit').textContent = hud.height.unit;
-      element<HTMLElement>(readouts, '.play-timer dt').textContent = hud.timer.label;
-      height = hud.height.visible ? element<HTMLElement>(readouts, '.height-value') : null;
-      elapsed = hud.timer.visible ? element<HTMLElement>(readouts, '.elapsed-value') : null;
-      if (height !== null) height.textContent = formatHeight(hud, 0);
-      if (!hud.height.visible) element<HTMLElement>(readouts, '.play-height').remove();
-      if (!hud.timer.visible) element<HTMLElement>(readouts, '.play-timer').remove();
-      const shown: HTMLElement[] = hud.height.visible || hud.timer.visible ? [readouts] : [];
+    // `readouts` are the game's own, from its module; the rest are the engine's. The project's HUD settings say which
+    // show, and with what labels, units and formats.
+    show(settings: { hud: HudSettings; readouts: HudReadouts; characters: PlayCharacterChoice | null }): void {
+      const bar = document.createElement('div');
+      bar.className = 'play-hud';
+      bar.setAttribute('role', 'group');
+      bar.setAttribute('aria-label', 'Climb statistics');
+      for (const name of HUD_READOUTS) {
+        if (!shows(settings.hud, name)) continue;
+        const slot = document.createElement('div');
+        slot.className = `play-hud-slot play-hud-${name}`;
+        // Health waits for the first frame to say whether anything can hurt the player.
+        slot.hidden = name === 'health';
+        bar.append(slot);
+        readouts.push({ name, slot, readout: createHudReadout(name, settings.readouts[name] ?? DEFAULT_HUD_READOUTS[name], slot, settings.hud) });
+      }
+      const shown: HTMLElement[] = [bar];
       const characters = settings.characters;
       // A single-profile release shows no settings, exactly as before.
       if (characters !== null && characters.types.length > 1) {
@@ -115,9 +117,11 @@ export function createPlayUI(options: { mount: HTMLElement }) {
       }
       root.prepend(...shown);
     },
-    update(state: { height: number; elapsed: number }): void {
-      if (height !== null) setText(height, formatHeight(hud, state.height));
-      if (elapsed !== null) setText(elapsed, formatElapsedTime(state.elapsed));
+    update(frame: HudFrame): void {
+      for (const { name, slot, readout } of readouts) {
+        if (name === 'health' && slot.hidden !== (frame.health === null)) slot.hidden = frame.health === null;
+        readout.update(frame);
+      }
     },
     notice: notice.show,
     // Enables the character choice once every profile has loaded; returns the restored choice.
@@ -127,6 +131,7 @@ export function createPlayUI(options: { mount: HTMLElement }) {
     },
     dispose(): void {
       events.abort();
+      for (const { readout } of readouts.splice(0)) readout.dispose?.();
       notice.dispose();
       root.remove();
     },

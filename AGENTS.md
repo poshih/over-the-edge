@@ -7,6 +7,18 @@
 - Keep gameplay and editor code separate. Runtime modules must not import
   editor modules. Maintain distinct editor and game-only entry points, and
   enforce that the playable release contains no editor modules or editor assets.
+- Build for downstream games to customize without forking the engine. Whatever a
+  player sees, hears or plays by is either project content or a typed extension
+  point for the game's own code, with the engine's own look and behaviour as the
+  default implementation of that same contract, replaceable piece by piece: a
+  game swaps the health readout without redrawing the rest of the HUD. A feature
+  is complete only with its extension point and the docs saying how to use it.
+  Put each extension point where its code runs: the game's module (`GAME_MODULE`,
+  `src/release-module.ts`, `docs/game-module.md`) in releases, the rig module
+  (`AVATAR_RIG_MODULE`) for code that content selects by ID, the Workshop module
+  (`WORKSHOP_MODULE`) for authoring tools. Keep contracts small, typed, validated
+  where they load and free of engine internals and globals. Engine code, docs and
+  commits never name a downstream game.
 - Authored level data is shared by physics and rendering. Temporary gameplay
   effects must not mutate the authored level or its saved/exported definition.
 - Level design: never place small colliders (1.5 m or less on their longest side,

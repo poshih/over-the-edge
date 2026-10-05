@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 8,
+    "schemaVersion": 9,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -43,7 +43,13 @@
       "rubberBounciness": 80,
       "handleFrequency": 0,
       "handleDamping": 0.9,
-      "mouseSensitivity": 1
+      "mouseSensitivity": 1,
+      "health": 5,
+      "lavaBuoyancy": 160,
+      "lavaDrag": 3,
+      "lavaDamage": 1,
+      "swampBuoyancy": 85,
+      "swampDrag": 6
     },
     "rig": {
       "handleLength": 1.5,
@@ -202,9 +208,21 @@
         "source": "/media/triumph.wav",
         "volume": 1
       },
+      "hurt": {
+        "source": "/media/thud.wav",
+        "volume": 0.7
+      },
+      "death": {
+        "source": "/media/soul.wav",
+        "volume": 1
+      },
       "fall": {
         "source": "/media/boom.wav",
         "volume": 0.75
+      },
+      "bonfire": {
+        "source": "/media/ember.wav",
+        "volume": 0.8
       }
     }
   },

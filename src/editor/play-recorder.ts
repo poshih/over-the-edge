@@ -19,9 +19,9 @@ function sessionId(): string {
  * Records Workshop play as phantom recordings of the level version being played (see docs/phantoms.md). While it is
  * on and the page plays a saved version of the open project's level and game settings, each run becomes a session of
  * clips up to the longest a recording may be, each starting with the previous one's last pose, so a run replays as
- * one. A restart starts the next session. A clip also ends when the handle length changes, the level or settings stop
- * being that version or recording turns off; one shorter than a second, or in which the player hardly moved, is
- * dropped. Clips upload as they end, on the game's steps, so pauses record nothing.
+ * one. A restart, or a return to a bonfire, starts the next session. A clip also ends when the handle length changes,
+ * the level or settings stop being that version or recording turns off; one shorter than a second, or in which the
+ * player hardly moved, is dropped. Clips upload as they end, on the game's steps, so pauses record nothing.
  */
 export class PlayRecorder {
   private readonly game: Game;
@@ -36,7 +36,8 @@ export class PlayRecorder {
   private clip: { readonly target: PlayedVersion; readonly session: string; readonly index: number } | null = null;
   private session: string | null = null;
   private clips = 0;
-  private time = -Infinity;
+  // The simulation's placement the session follows.
+  private placement = -1;
   // Whether the latest upload failed: one notice per failing stretch.
   private failing = false;
 
@@ -77,12 +78,12 @@ export class PlayRecorder {
 
   private step(): void {
     const { simulation } = this.game;
-    // The game's time restarts with every attempt.
-    if (simulation.time <= this.time) {
+    // The player is placed anew at every restart and every return to a bonfire.
+    if (simulation.placement !== this.placement) {
       this.end();
       this.session = null;
+      this.placement = simulation.placement;
     }
-    this.time = simulation.time;
     const target = this.enabled ? this.target() : null;
     const handle = simulation.rigGeometry.handleLength;
     const clip = this.clip;

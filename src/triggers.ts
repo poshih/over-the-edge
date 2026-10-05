@@ -210,6 +210,14 @@ export class TriggerRuntime {
     this.drain();
   }
 
+  // The player moved without passing what lies between, such as coming back at a bonfire: the next update tests only
+  // where the player is then, so the jump enters no trigger on its way.
+  jump(): void {
+    this.ensureLive();
+    this.previousPosition = null;
+    this.previousTime = null;
+  }
+
   reset(): void {
     this.ensureLive();
     for (const record of this.records.values()) {

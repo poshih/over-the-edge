@@ -1,4 +1,6 @@
 import { AUDIO_CUE_DESCRIPTIONS, AUDIO_CUES, AUDIO_VOLUME } from '../src/audio-settings';
+import { AXE_FIELDS, BONFIRE, HAZARD_LIMITS, SHOOTER, SHOOTER_FIELDS } from '../src/hazards';
+import { LIQUID_LIMITS, LIQUIDS } from '../src/liquids';
 import { ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS } from '../src/appearance-profile';
 import { ART_LIMITS } from '../src/art-types';
 import { CHARACTER_RIGGING_TYPES, SPRITE_SCHEMA_VERSION } from '../src/sprite-data';
@@ -100,7 +102,7 @@ export function apiManual(auth: 'token' | 'loopback') {
     levelVersions: {
       description: 'A version is the stored level together with the game settings it plays with. Whenever either changes, they become the project\'s next version unless they match the latest: a change to the level, level/objects, level/labels or settings sections, a bundle, or a level.json or project.json changed on disk (numbered when the project is next read). '
         + 'Every answer about revisions (section changes, GET revision, GET project, bundles) carries "level": { "version", "course" }, null while the stored level is invalid; GET level answers with X-Level-Version and X-Level-Course headers.',
-      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
+      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, bonfires, traps and liquid pools, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
         + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level and settings\' course.',
       phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records play on the version it plays, one session per run, in consecutive clips.',
     },
@@ -109,7 +111,11 @@ export function apiManual(auth: 'token' | 'loopback') {
       level: {
         value: `level JSON, schemaVersion ${LEVEL_SCHEMA_VERSION}: { schemaVersion, labels, objects }`,
         description: 'The course. Prefer the level/objects endpoints for small edits.',
-        limits: { ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects },
+        limits: {
+          ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects,
+          bonfires: HAZARD_LIMITS.bonfires, traps: HAZARD_LIMITS.traps, pools: LIQUID_LIMITS.pools,
+          poolSize: { min: LIQUID_LIMITS.minimumSize, max: LIQUID_LIMITS.maximumSize },
+        },
         objects: {
           terrain: { kind: 'terrain', id: 'ledge-1', mesh: { type: 'shape', shape: SHAPE_KINDS.join(' | ') }, x: 4, y: 2, width: 3, height: 1, angle: 0, depth: 2, mirror: false, color: 7438714, illusion: false, surface: SURFACES.join(' | ') },
           start: { kind: 'start', id: 'start', x: 0, y: 0.53, angle: 0.4, reach: 2.3 },
@@ -119,7 +125,24 @@ export function apiManual(auth: 'token' | 'loopback') {
             events: [{ type: 'stop-timer' }, { type: 'message', title: 'Summit reached', message: '...' }],
           },
           enemy: { kind: 'enemy', id: 'bird-1', species: ENEMY_SPECIES.join(' | '), x: 3, y: 5, facing: 'left | right', patrolDistance: 3, speed: 1.4 },
+          bonfire: { kind: 'bonfire', id: 'bonfire-1', x: 12, y: 6 },
+          shooter: { kind: 'shooter', id: 'dart-trap-1', x: 20, y: 9, angle: 3.14159, interval: 2, delay: 0, speed: 12, damage: 1 },
+          axe: { kind: 'axe', id: 'axe-1', x: 26, y: 14, length: 4, period: 3, offset: 0, damage: 2 },
+          pool: { kind: 'pool', id: 'lava-1', liquid: LIQUIDS.join(' | '), x: 32, y: 1, width: 6, height: 2, depth: 2 },
         },
+        hazards: 'A bonfire (x, y: the centre of its base on the ground) lights when the player\'s foot comes within '
+          + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, brings the player back at the one reached last, the run going on, or restarts the run before any. `
+          + 'A shooter fires a projectile from its muzzle (x, y) along angle (radians, 0 = +x) at delay and every interval seconds of run time after, '
+          + `while the player is within ${SHOOTER.range} m; projectiles fly straight up to that far and stop on terrain or the hammer head. `
+          + 'An axe hangs its blade length below its pivot (x, y) and swings in and out of the view, through the play line at offset and every half period after. '
+          + 'Traps never collide; a hit costs its damage (whole numbers) from the player\'s health, settings physics.health. Bonfires and traps count toward the course.',
+        liquids: 'A pool fills its box (x, y: its centre; width, height; depth: how far it reaches across the play line, '
+          + 'only drawn) with still liquid, its top the surface. It never collides: fit it into a basin of terrain. The player\'s pot '
+          + 'is held up by the liquid it displaces, and the pot and hammer are slowed as they move through it, by the settings physics '
+          + 'lavaBuoyancy and lavaDrag, swampBuoyancy and swampDrag; lava also burns the character for physics.lavaDamage each '
+          + 'second the pot is in it. Pools count toward the course.',
+        shooterFields: SHOOTER_FIELDS,
+        axeFields: AXE_FIELDS,
         terrainMeshes: {
           shape: { type: 'shape', shape: SHAPE_KINDS.join(' | ') },
           outline: { type: 'outline', vertices: `3-${LEVEL_LIMITS.polygonVertices} { x, y } points of a simple counterclockwise outline in the unit box, -0.5 to 0.5 on both axes` },
@@ -137,7 +160,7 @@ export function apiManual(auth: 'token' | 'loopback') {
         notes: 'Coordinates are metres, y up; angle is radians. Terrain is a mesh in a box: the mesh\'s bounds fill width and height, and depth centred on the obstacle line, where the 2D physics plays out; mirror reflects it, collision included, left to right before it turns; a circle collision needs equal width and height. A built-in shape or drawn outline is extruded in color, a 0xRRGGBB integer, which also draws an asset mesh in the shapes look. Terrain surface is required, one of ' + SURFACES.join(', ') + ' (the Workshop starts new terrain as rock), and takes that surface\'s friction and bounciness from the game settings. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {
-        value: '{ schemaVersion: 8, physics: {...}, rig: { handleLength, maxExtension, minReach, head: [{ x, y }, ...] }, cursor: { maxTargetRadius, deadZone } }', patch: true,
+        value: '{ schemaVersion: 9, physics: {...}, rig: { handleLength, maxExtension, minReach, head: [{ x, y }, ...] }, cursor: { maxTargetRadius, deadZone } }', patch: true,
         fields: { physics: TUNING_FIELDS, rig: RIG_FIELDS, cursor: CURSOR_FIELDS },
         notes: 'The reach is rig.handleLength + rig.maxExtension; rig.minReach, the closest the head comes to the shoulder hinge (0 lets it reach the hinge), must stay at least 0.05 m short of it so the slider can move, and cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. The physics *Friction fields are contact friction coefficients: gripFriction the hammer head\'s, potFriction the pot\'s and rockFriction, woodFriction, metalFriction, iceFriction and rubberFriction each terrain surface\'s; a contact\'s friction is the geometric mean of its two sides\'. The *Bounciness fields are percentages: potBounciness the pot\'s, hammerBounciness the hammer head\'s and rockBounciness, woodBounciness, metalBounciness, iceBounciness and rubberBounciness each terrain surface\'s; a contact bounces as much as its bouncier side, and only above 1 m/s. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run, except rig.head. ' + HEAD_NOTES,
         head: HAMMER_HEAD_LIMITS,

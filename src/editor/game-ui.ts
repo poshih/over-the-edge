@@ -5,6 +5,8 @@ import { inputModeForPointer } from '../input';
 import { createNotice } from '../notice';
 import { DEFAULT_HUD, formatHeight } from '../hud';
 import type { HudSettings } from '../hud';
+import { createHealthMeter } from '../health-meter';
+import type { HealthReading } from '../health-meter';
 
 export const DESKTOP_QUERY = '(min-width: 1040px)';
 
@@ -16,6 +18,8 @@ export interface GameHudState {
   pointerLocked: boolean;
   inputMode: InputMode;
   timerRunning: boolean;
+  // Null in levels where nothing can hurt the player.
+  health: HealthReading | null;
   // Whether play is being recorded right now.
   capturing: boolean;
 }
@@ -59,6 +63,7 @@ export function createGameUI(options: {
         <div class="secondary-metrics">
           <div><p class="metric-label">PEAK</p><p class="metric-reading"><span class="peak-value">0.0</span><span class="small-unit">m</span></p></div>
           <div><p class="metric-label timer-label">ELAPSED</p><p class="metric-reading elapsed-value">00:00</p></div>
+          <div class="health-metric" hidden><p class="metric-label">HEALTH</p><div class="metric-reading"></div></div>
         </div>
       </section>
       <footer class="game-help" aria-label="How to play">
@@ -93,7 +98,10 @@ export function createGameUI(options: {
   const heightLabel = element<HTMLElement>(root, '.height-metric .eyebrow');
   const heightMetric = element<HTMLElement>(root, '.height-metric');
   const peakMetric = element<HTMLElement>(root, '.secondary-metrics > div:first-child');
-  const timerMetric = element<HTMLElement>(root, '.secondary-metrics > div:last-child');
+  const timerMetric = element<HTMLElement>(root, '.secondary-metrics > div:nth-child(2)');
+  const healthMetric = element<HTMLElement>(root, '.health-metric');
+  const healthMeter = createHealthMeter();
+  element<HTMLElement>(healthMetric, '.metric-reading').append(healthMeter.root);
   const units = [...root.querySelectorAll<HTMLElement>('.metric-unit, .small-unit')];
   let hud: HudSettings = DEFAULT_HUD;
   const instructions = element<HTMLElement>(root, '.input-instructions');
@@ -147,6 +155,8 @@ export function createGameUI(options: {
       setText(peak, formatHeight(hud, state.bestHeight));
       setText(elapsed, formatElapsedTime(state.elapsed));
       setText(timerLabel, state.timerRunning ? hud.timer.label : 'TIME STOPPED');
+      if (healthMetric.hidden !== (state.health === null)) healthMetric.hidden = state.health === null;
+      if (state.health !== null) healthMeter.update(state.health);
       setText(pauseLabel, state.paused ? 'Resume' : 'Pause');
       pause.classList.toggle('is-active', state.paused);
       play.classList.toggle('is-active', !state.paused && (state.pointerLocked || state.inputMode === 'touch'));

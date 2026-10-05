@@ -143,6 +143,11 @@ export class CourseBuilder {
     }, `${this.zone.code}:scenery`);
   }
 
+  // A bonfire whose base stands on (x, y): reached, it is where a fallen player comes back. It never collides.
+  bonfire(name, x, y) {
+    return this.add({ kind: 'bonfire', id: this.id(name), x: tidy(x), y: tidy(y) }, `${this.zone.code}:bonfires`);
+  }
+
   enemy(species, x, base, facing, patrolDistance, speed, options = {}) {
     const height = species === 'bird' ? 0.8 : 1.4;
     return this.add({

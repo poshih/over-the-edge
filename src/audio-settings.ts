@@ -2,11 +2,12 @@ import { exactRecord, numberValue } from './project-fields';
 import { mediaSource } from './media';
 
 // Gameplay moments that can play a sound effect.
-export const AUDIO_CUES = ['impact', 'enemy-hit', 'enemy-defeat', 'launch', 'finish', 'fall'] as const;
+export const AUDIO_CUES = ['impact', 'enemy-hit', 'enemy-defeat', 'launch', 'finish', 'hurt', 'death', 'fall', 'bonfire'] as const;
 export type AudioCue = (typeof AUDIO_CUES)[number];
 export const AUDIO_CUE_LABELS: Readonly<Record<AudioCue, string>> = {
   impact: 'Hammer impact', 'enemy-hit': 'Enemy hit', 'enemy-defeat': 'Enemy defeated',
-  launch: 'Updraft launch', finish: 'Timer stops', fall: 'Fall restart',
+  launch: 'Updraft launch', finish: 'Timer stops', hurt: 'Player hurt', death: 'Player death', fall: 'Fall out of the level',
+  bonfire: 'Bonfire reached',
 };
 export const AUDIO_CUE_DESCRIPTIONS: Readonly<Record<AudioCue, string>> = {
   impact: 'The hammer head strikes terrain or an enemy; louder for faster strikes.',
@@ -14,7 +15,10 @@ export const AUDIO_CUE_DESCRIPTIONS: Readonly<Record<AudioCue, string>> = {
   'enemy-defeat': 'An enemy is defeated.',
   launch: 'A Launch player event (for example an updraft) fires.',
   finish: 'A Stop timer event fires, usually at the summit.',
-  fall: 'Falling out of the level restarts the attempt.',
+  hurt: 'An enemy, a trap or lava hurts the player, who survives it.',
+  death: 'The player\'s health runs out.',
+  fall: 'The player falls out of the level.',
+  bonfire: 'The player reaches a bonfire other than the one a death returns to, which becomes that place.',
 };
 
 export interface AudioClip {

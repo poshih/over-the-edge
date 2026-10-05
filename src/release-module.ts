@@ -1,6 +1,9 @@
-// The contract between a release and the game's own module (GAME_MODULE). A module exports
-// `start(host)`; the release calls it once, before it fetches anything, and awaits it.
+// The contract between a release and the game's own module (GAME_MODULE): the game's own code in its release, which
+// replaces the engine's defaults where it chooses (docs/game-module.md). A module exports `start(host)`; the release calls
+// it once, before it fetches anything, and awaits it.
 import type { ContentAccess, ContentError, ContentProgress } from './content-session';
+import type { HudReadouts } from './hud-readouts';
+import type { Looks } from './object-looks';
 import type { PhantomService } from './phantom-service';
 import type { ModelLibraryApi } from './release-library';
 
@@ -12,6 +15,20 @@ export type { ModelLibraryApi } from './release-library';
 // A module that talks to its phantom backend its own way may start from the reference client.
 export { httpPhantoms, PhantomServiceError } from './phantom-service';
 export type { PhantomQuery, PhantomService } from './phantom-service';
+// HUD readouts a module draws its own way, and the engine's, which it may wrap.
+export { DEFAULT_HUD_READOUTS, HUD_READOUTS } from './hud-readouts';
+export type { HudFrame, HudReadout, HudReadoutFactory, HudReadoutName, HudReadouts } from './hud-readouts';
+export type { HealthReading } from './health-meter';
+export { formatHeight } from './hud';
+export type { HudSettings } from './hud';
+export { formatElapsedTime } from './dom';
+// How level objects look: the contract, the engine's looks a module may wrap, and what a look needs to match the play.
+export { DEFAULT_LOOKS, LOOKS } from './object-looks';
+export type { BonfireLook, LookName, LookPasses, Looks, ObjectLook, ObjectLooks, ProjectileLook } from './object-looks';
+export type { ProjectilePose } from './hazard-world';
+export { AXE, axeAngle, BONFIRE, SHOOTER } from './hazards';
+export { triggerBounds } from './level';
+export type { AxeObject, BonfireObject, LevelObject, PoolObject, ShooterObject, TriggerObject } from './level';
 
 // What the release offers before any content loads, so the module can sign the player in first.
 export interface ReleaseHost {
@@ -35,14 +52,17 @@ export interface ReleaseApi {
   readonly modelLibrary: ModelLibraryApi;
 }
 
-// What start() returns; every member is optional. Without `access`, content is public under the
-// content URL. `failed` receives each content failure: resolve to load again (for example after
+// What start() returns; every member is optional. `hud` draws any of the HUD's readouts the game's own way, and `looks`
+// any kind of level object's look; the others keep the engine's. Without `access`, content is public under the content
+// URL. `failed` receives each content failure: resolve to load again (for example after
 // the player signs in or buys the game), or reject to stop with that error shown. `modelFailed`
 // receives a part that could not follow the backend's selection outside a swap, at boot or after
 // another part's swap; that part keeps its model, or starts with the profile's own. Without
 // `phantoms`, a build with a phantom URL speaks the reference protocol to it; a module may supply
 // phantoms only to a build with phantoms, from a phantom URL or bundled recordings.
 export interface ReleaseModule {
+  readonly hud?: HudReadouts;
+  readonly looks?: Looks;
   readonly access?: ContentAccess;
   readonly phantoms?: PhantomService;
   progress?(progress: ContentProgress): void;

@@ -32,6 +32,8 @@ const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title
   Response: { id: 'physics-response', hint: 'How closely the hammer follows aim' },
   Materials: { id: 'physics-materials', hint: 'Friction, bounciness, damping and handle flex' },
   Input: { id: 'physics-input', hint: 'Control sensitivity' },
+  Health: { id: 'physics-health', hint: 'Hits the character can take' },
+  Liquids: { id: 'physics-liquids', hint: 'Lava and swamp: lift, drag and burn' },
 };
 
 export function createUI(options: UiOptions): GameUi {
