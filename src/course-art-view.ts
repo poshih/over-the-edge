@@ -8,7 +8,7 @@ import { ILLUSION, LEVEL_LIMITS } from './level';
 import type { TerrainEvent, TerrainObject } from './level';
 import { markInstanceSlot } from './instancing';
 import { OBSTACLE_LINE } from './obstacle-line';
-import type { PhysicsFrame } from './simulation';
+import type { SceneFrame, SceneLayer } from './scene-layer';
 import type { TerrainView } from './terrain-view';
 import { loadVisualModel } from './visual-model';
 import type { LoadedVisual } from './visual-model';
@@ -72,7 +72,7 @@ function disposeAsset(asset: Asset): void {
  * meshes look it loads each GLB the terrain uses as it first appears, and lets go of one nothing uses any more; terrain
  * keeps drawing as its collision until its GLB loads, or if it cannot, and every terrain object does in the shapes look.
  */
-export class CourseArtView {
+export class CourseArtView implements SceneLayer {
   readonly root = new Group();
   // Course meshes are the course's own look: they draw with the terrain.
   readonly pass = 'course';
@@ -206,7 +206,7 @@ export class CourseArtView {
     for (const state of this.states.values()) this.sync(state);
   }
 
-  update(frame: PhysicsFrame): void {
+  update(frame: SceneFrame): void {
     if (this.disposed) return;
     for (const id of this.unused) {
       const asset = this.assets.get(id);

@@ -61,7 +61,7 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | Facet | Runs in | SDK | For | Virtual module |
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
-| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows: HUD readouts and object looks. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
+| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows: HUD readouts, camera following, backdrop, aim marks, object, enemy and phantom looks, and scene layers. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
 | `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services: sign-in and content access, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
@@ -212,7 +212,7 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | `reserved-plugin` | A plugin is named `engine` |
 | `invalid-facet` | A facet's default export has the wrong shape; a build refused a facet file its boundary forbids; a build was asked for a virtual module it does not serve |
 | `unknown-point` | A contribution names a point its environment does not have |
-| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned a readout or look without what it needs |
+| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a readout, look, camera director, backdrop, aim marks or scene layer |
 | `duplicate-contribution` | A plugin contributes to one point twice |
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
@@ -300,12 +300,13 @@ for a plugin beyond the plugin's own, and keeps per-frame work proportional to w
 - **Allocate nothing per frame.** `update` runs 60 or more times a second. Reuse vectors,
   matrices, arrays and objects, and write only what changed: a readout compares the frame with
   what it last drew, and a look uploads only the instances it moved.
-- **Never keep the frame.** The HUD frame and its health reading are one reused object: read
-  what you need during the call.
+- **Never keep the frame.** HUD and scene frames, camera inputs/aims and phantom figure frames
+  are reused: read what you need during the call and treat nested references as borrowed.
 - **Pay only while active.** A look's `update` runs only while the level has objects of its
   kind, so an unused look costs nothing per frame. The front pass draws only while some look's
-  front is visible, so hide yours while it shows nothing. A Workshop overlay costs a frame only
-  while it is added.
+  front is visible, so hide yours while it shows nothing. Enemy looks update only with enemies
+  in the level, and phantom looks draw only while a figure shows. Scene layers and Workshop
+  overlays without `update` have no per-frame callback; others run only while added.
 - **Keep callbacks light.** `PROGRESS` runs as each piece of the boot downloads arrives.
 - **Stay out of physics.** No plugin code runs inside the physics step. A motion kind's
   `update` and a [rig strategy's](characters.md#rig-strategies) frame phases run every frame:
@@ -368,6 +369,12 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`looks.axe`](runtime-plugins.md#object-looks) | `LOOKS.axe` | `runtime` | Slot, `() => ObjectLook<AxeObject>` | `DEFAULT_LOOKS.axe` |
 | [`looks.lava`](runtime-plugins.md#object-looks) | `LOOKS.lava` | `runtime` | Slot, `() => ObjectLook<PoolObject>` | `DEFAULT_LOOKS.lava` |
 | [`looks.swamp`](runtime-plugins.md#object-looks) | `LOOKS.swamp` | `runtime` | Slot, `() => ObjectLook<PoolObject>` | `DEFAULT_LOOKS.swamp` |
+| [`camera.director`](runtime-plugins.md#camera-director) | `CAMERA` | `runtime` | Slot, `CameraDirectorFactory` | `DEFAULT_CAMERA_DIRECTOR` |
+| [`scene.backdrop`](runtime-plugins.md#backdrop) | `BACKDROP` | `runtime` | Slot, `BackdropFactory` | `DEFAULT_BACKDROP` |
+| [`scene.aim-marks`](runtime-plugins.md#aim-marks) | `AIM_MARKS` | `runtime` | Slot, `AimMarksFactory` | `DEFAULT_AIM_MARKS` |
+| [`looks.enemies`](runtime-plugins.md#enemy-looks) | `LOOKS.enemies` | `runtime` | Slot, `EnemyLookFactory` | `DEFAULT_LOOKS.enemies` |
+| [`looks.phantoms`](runtime-plugins.md#phantom-looks) | `LOOKS.phantoms` | `runtime` | Slot, `PhantomLookFactory` | `DEFAULT_PHANTOM_LOOK` |
+| [`scene.layers`](runtime-plugins.md#scene-layers) | `SCENE_LAYERS` | `runtime` | List, 32 `SceneLayerFactory` | None |
 | [`release.access`](release-plugins.md#access-and-sign-in) | `ACCESS` | `release` | Slot, `ContentAccess` | `publicAccess(contentUrl)` |
 | [`release.phantoms`](release-plugins.md#phantom-backend) | `PHANTOMS` | `release` | Slot, `PhantomService \| null` | `httpPhantoms(phantomsUrl)` in a build with a phantom URL, otherwise `null` |
 | [`release.failed`](release-plugins.md#load-failures-and-progress) | `FAILED` | `release` | Slot, `(error: ContentError) => Promise<void>` | Rejects with the error, which stops the load |

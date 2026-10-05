@@ -9,5 +9,5 @@ export { ContentError, publicAccess } from '../content-session';
 export type { ContentAccess, ContentErrorCode, ContentGrant, ContentGrantRequest, ContentProgress } from '../content-session';
 export type { ModelSelection, ModelSelectionRequest, PartRole } from '../model-library';
 export type { ModelLibraryApi } from '../release-library';
-export { httpPhantoms, PhantomServiceError } from '../phantom-service';
-export type { PhantomQuery, PhantomService } from '../phantom-service';
+export { PhantomServiceError } from '../phantom-service-types';
+export type { PhantomQuery, PhantomService } from '../phantom-service-types';

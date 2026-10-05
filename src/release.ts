@@ -20,8 +20,6 @@ import type { RuntimeFacet } from './plugins/runtime';
 import { PluginError } from './plugins/kernel';
 import type { PluginEntry } from './plugins/kernel';
 import type { Kinds } from './plugins/kinds';
-import { httpPhantoms } from './phantom-service';
-import type { PhantomService } from './phantom-service';
 import type { PhantomBuild, Phantoms } from './phantoms';
 import { readSelection, ReleaseModelLibrary } from './release-library';
 import { EMPTY_SELECTION } from './model-library';
@@ -77,7 +75,6 @@ export class Release {
   private readonly lifecycle = new AbortController();
   private readonly ui: ReturnType<typeof createPlayUI>;
   private plugins: ReleasePlugins | null = null;
-  private phantomService: PhantomService | null = null;
   private loading: Attempt | null = null;
   private loaded: Loaded | null = null;
   private phantoms: Phantoms | null = null;
@@ -99,13 +96,11 @@ export class Release {
       });
       this.lifecycle.signal.throwIfAborted();
       const plugins = this.plugins;
-      const phantomsUrl = this.phantomsUrl();
-      this.phantomService = plugins.slot(PHANTOMS, phantomsUrl === null ? null : httpPhantoms(phantomsUrl));
-      if (this.phantomService !== null && this.code.phantoms === null) {
-        const plugin = plugins.owner(PHANTOMS);
+      if (this.code.phantoms === null && plugins.slot(PHANTOMS, null) !== null) {
+        const phantomPlugin = plugins.owner(PHANTOMS);
         throw new PluginError('invalid-contribution',
-          `Plugin "${plugin}" supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL.`,
-          plugin, PHANTOMS.id);
+          `Plugin "${phantomPlugin}" supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL.`,
+          phantomPlugin, PHANTOMS.id);
       }
       const access = plugins.slot(ACCESS, publicAccess(contentUrl));
       const failed = plugins.slot(FAILED, async (error: ContentError) => { throw error; });
@@ -275,8 +270,10 @@ export class Release {
     });
     const phantoms = this.code.phantoms;
     if (phantoms !== null) {
+      const releasePlugins = this.plugins!;
       this.phantoms = phantoms.start({
-        game, course: phantoms.course, service: this.phantomService,
+        game, plugins: loaded.plugins, course: phantoms.course, url: this.phantomsUrl(),
+        phantomService: (base) => releasePlugins.slot(PHANTOMS, base),
         packs: manifest.phantoms, content: (source, request) => loaded.session.bytes(source, request),
       });
     }

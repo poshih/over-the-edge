@@ -11,7 +11,7 @@ import { Game } from '../game';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { CourseArtView } from '../course-art-view';
 import { levelSpawn } from '../level';
-import { PhantomView } from '../phantom-view';
+import { createPhantomPlayback } from '../phantom-playback';
 import { Appearance } from './appearance';
 import { AppearanceRig } from '../appearance-rig';
 import { createAppearanceUI } from './appearance-ui';
@@ -265,7 +265,7 @@ const spriteEditor = createSpriteEditor({
     return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
   }),
 });
-const collisionOverlay = new CollisionOverlay();
+const collisionOverlay = new CollisionOverlay(() => game.view.armPoses());
 game.view.addLayer(collisionOverlay);
 // The course draws as the project's look says, as its releases draw it: placed GLBs, loaded from the project as the level
 // uses them, or every terrain object as its collision.
@@ -282,8 +282,7 @@ game.view.addLayer(courseMeshes);
 // The course takes the project's look once the project has opened, so meshes of a course replaced at start never load.
 let unsubscribeCourseLook = (): void => undefined;
 // The figure Level / Replays poses: one held phantom, none played by the game.
-const replayFigure = new PhantomView({ figures: 0 });
-game.view.addLayer(replayFigure);
+const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins, 0), () => game.dispose());
 const unsubscribeOverlay = game.simulation.subscribeTerrain((event) => collisionOverlay.apply(event));
 const decorations = game.view.decorations;
 if (decorations === null) throw new Error('The Workshop draws decorations.');

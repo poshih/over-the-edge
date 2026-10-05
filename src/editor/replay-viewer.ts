@@ -16,7 +16,7 @@ export interface ReplaySource {
   recording(project: string, version: number, name: string, signal: AbortSignal): Promise<Uint8Array>;
 }
 
-// The figure the viewer poses, a phantom view's held figure (PhantomView.hold).
+// The figure the viewer poses: the engine playback's held slot (PhantomPlayback.hold), drawn by the runtime look.
 export interface ReplayFigure {
   hold(track: PhantomTrack | null, seconds: number, continues?: boolean): Readonly<PhantomPose> | null;
 }

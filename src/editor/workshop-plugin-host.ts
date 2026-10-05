@@ -10,7 +10,9 @@ import type { GameSettings } from '../game-settings';
 import type { PluginData } from '../plugin-data';
 import { isPluginId } from '../plugin-data';
 import { isProjectDataError } from '../project';
-import type { PresentationPreview, ViewLayer } from '../view';
+import type { PresentationPreview } from '../view';
+import { checkSceneLayer } from '../scene-layer';
+import type { SceneLayer } from '../scene-layer';
 import type { Appearance } from './appearance';
 import type { WorkshopGameState } from './game-state';
 import type { LevelState } from './level-state';
@@ -25,7 +27,7 @@ import { composeWorkshop } from './workshop';
 import type { AvatarMotionControls } from './avatar-motion-controls';
 import { WORKSHOP_PREVIEW_LIMITS } from './workshop-sdk';
 import type {
-  WorkshopCharacterEdits, WorkshopEdits, WorkshopGame, WorkshopHost, WorkshopLevelEdits, WorkshopMount, WorkshopOverlay,
+  WorkshopCharacterEdits, WorkshopEdits, WorkshopGame, WorkshopHost, WorkshopLevelEdits, WorkshopMount,
   WorkshopFacet, WorkshopPluginData, WorkshopPointerEvent, WorkshopPreview, WorkshopProject, WorkshopProjectSnapshot,
   WorkshopRefusal, WorkshopSectionTab,
 } from './workshop-sdk';
@@ -34,11 +36,9 @@ import { createWorkshopUiKit } from './workshop-ui-kit';
 import './workshop-plugins.css';
 
 const SECTION_TABS: readonly WorkshopSectionTab[] = ['character', 'level', 'physics', 'project'];
-const OVERLAY_PASSES: readonly WorkshopOverlay['pass'][] = ['course', 'actors', 'marks'];
 const POINTER_TYPES: Readonly<Record<string, WorkshopPointerEvent['type']>> = {
   pointerdown: 'down', pointermove: 'move', pointerup: 'up', pointercancel: 'cancel',
 };
-const NOTHING = (): void => {};
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -194,7 +194,7 @@ class RunningPlugin {
   readonly id: string;
   readonly controller = new AbortController();
   readonly mounts = new Map<string, MountRecord>();
-  readonly overlays = new Set<ViewLayer>();
+  readonly overlays = new Set<SceneLayer>();
   readonly pointerListeners = new Set<(event: WorkshopPointerEvent) => void>();
   readonly projectListeners = new Set<() => void>();
   readonly dataListeners = new Set<(data: PluginData | null) => void>();
@@ -520,14 +520,12 @@ export class WorkshopPluginHost {
     const { game, control } = this.options;
     const live = (): void => plugin.live();
     return Object.freeze({
-      addOverlay: (overlay: WorkshopOverlay) => {
+      addOverlay: (overlay: SceneLayer) => {
         live();
-        if (!OVERLAY_PASSES.includes(overlay.pass)) {
-          throw new PluginError('invalid-plugin', `Overlays draw in the ${OVERLAY_PASSES.join(', ')} pass, not "${overlay.pass}".`, plugin.id);
-        }
-        const layer: ViewLayer = {
+        checkSceneLayer(overlay, { plugin: plugin.id, code: 'invalid-plugin', point: null, label: 'an overlay' });
+        const layer: SceneLayer = {
           root: overlay.root, pass: overlay.pass,
-          update: overlay.update === undefined ? NOTHING : (frame) => {
+          update: overlay.update === undefined ? undefined : (frame) => {
             if (plugin.stopping) return;
             try {
               overlay.update!(frame);
@@ -536,7 +534,7 @@ export class WorkshopPluginHost {
             }
           },
           // Frees the overlay's resources even while the plugin stops.
-          dispose: () => {
+          dispose: overlay.dispose === undefined ? undefined : () => {
             try {
               overlay.dispose?.();
             } catch (error) {

@@ -107,7 +107,8 @@ names. Each plugin has up to four facets, one for each place its code runs:
 
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
-- **runtime**, how play looks, such as the HUD's readouts and the level's objects, in the
+- **runtime**, how play looks: HUD readouts, camera following, backdrop, aim marks, object,
+  enemy and phantom looks, and scene layers, in the
   Workshop's play-test, studio previews and releases;
 - **release**, release-only services: a game whose content only some players may load signs
   players in there with its own identity management and grants the release access to its
@@ -303,7 +304,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health and timer) and the level's flags, updrafts, bonfires, traps, projectiles and lava and swamp pools look, in Workshop play-tests, studio previews and releases | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (height, health and timer), camera following, backdrop, aim marks, flags, updrafts, bonfires, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, in Workshop play-tests, studio previews and releases | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 

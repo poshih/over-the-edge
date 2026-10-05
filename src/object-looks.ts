@@ -1,9 +1,15 @@
 import type { Object3D } from 'three';
 import { AxeView } from './axe-view';
 import { BonfireView } from './bonfire-view';
+import { Disposal } from './disposal';
+import type { EnemyArtSettings } from './enemy-art-data';
+import type { EnemyEvent, EnemyPose } from './enemy-types';
+import { EnemyView } from './enemy-view';
 import { FlagView } from './flag-view';
+import type { HammerHead } from './hammer-head';
 import type { ProjectilePose } from './hazard-world';
 import type { AxeObject, BonfireObject, LevelObject, PoolObject, ShooterObject, TriggerObject } from './level';
+import type { PhantomPose, PhantomTool } from './phantom-format';
 import { PoolView } from './pool-view';
 import { ProjectileView, ShooterView } from './shooter-view';
 import { UpdraftView } from './updraft-view';
@@ -48,6 +54,42 @@ export interface ProjectileLook {
   inspect?(): unknown;
 }
 
+// An aggregate look: event-driven membership, and only the active poses each drawn frame. Collider visuals stand
+// on the obstacle line and draw in actors; course/front passes may add scenery behind/in front of them.
+export interface EnemyLook {
+  readonly passes: LookPasses;
+  apply(event: EnemyEvent): void;
+  update(poses: readonly EnemyPose[], time: number): void;
+  setArt(art: EnemyArtSettings): void;
+  dispose(): void;
+  inspect?(): unknown;
+}
+export type EnemyLookFactory = (art: EnemyArtSettings) => EnemyLook;
+
+// One stable slot in engine-owned playback. Values, pose and tool are reused and read-only to a look.
+export interface PhantomFigureFrame {
+  readonly visible: boolean;
+  readonly pose: Readonly<PhantomPose>;
+  readonly tool: Readonly<PhantomTool>;
+  readonly handleLength: number;
+  // The engine's fade factor, 0..1; the look supplies its own base opacity.
+  readonly opacity: number;
+  // A new recording or a discontinuous seek resets the drawing's history. Pauses also have dt = 0, but are not fresh.
+  readonly fresh: boolean;
+  readonly dt: number;
+}
+
+export interface PhantomLook {
+  // Characters draw in actors, never hidden by the course. Playback owns this root's visibility.
+  readonly root: Object3D;
+  // Every slot, including hidden ones, while at least one shows. Head is the current rig settings' outline,
+  // as in SceneFrame.rig.head, not the recorded player's or a library hammer's own.
+  draw(figures: readonly PhantomFigureFrame[], head: HammerHead): void;
+  dispose(): void;
+}
+// The total number of stable slots, including the playback's held figure, is fixed for the look's lifetime.
+export type PhantomLookFactory = (options: { readonly figures: number }) => PhantomLook;
+
 export interface ObjectLooks {
   // Triggers marked with a flag, and with an updraft.
   readonly flag: () => ObjectLook<TriggerObject>;
@@ -60,10 +102,15 @@ export interface ObjectLooks {
   readonly lava: () => ObjectLook<PoolObject>;
   readonly swamp: () => ObjectLook<PoolObject>;
 }
-export type LookName = keyof ObjectLooks;
+export interface Looks extends ObjectLooks {
+  readonly enemies: EnemyLookFactory;
+  readonly phantoms: PhantomLookFactory;
+}
+export type LookName = keyof Looks;
+type PlacedLookName = Exclude<keyof ObjectLooks, 'projectile'>;
 
-function lookFactory<T extends () => unknown>(value: unknown): T {
-  if (typeof value !== 'function') throw new TypeError('An object look must be a factory.');
+function lookFactory<T extends (...args: never[]) => unknown>(value: unknown): T {
+  if (typeof value !== 'function') throw new TypeError('A look must be a factory.');
   return value as T;
 }
 
@@ -76,6 +123,8 @@ export const LOOKS = Object.freeze({
   axe: slotPoint('looks.axe', 'runtime', lookFactory<ObjectLooks['axe']>),
   lava: slotPoint('looks.lava', 'runtime', lookFactory<ObjectLooks['lava']>),
   swamp: slotPoint('looks.swamp', 'runtime', lookFactory<ObjectLooks['swamp']>),
+  enemies: slotPoint('looks.enemies', 'runtime', lookFactory<EnemyLookFactory>),
+  phantoms: slotPoint('looks.phantoms', 'runtime', lookFactory<PhantomLookFactory>),
 });
 
 // An engine view of one kind of object, as a look.
@@ -95,8 +144,9 @@ function viewLook<T extends LevelObject>(view: {
   };
 }
 
-// The engine's looks. A game may wrap one to add to it rather than draw it anew.
-export const DEFAULT_LOOKS: ObjectLooks = Object.freeze({
+// The engine's level-object looks. Phantom consumers import their default from phantom-view, so releases without
+// phantoms include neither their drawing nor playback. A game may wrap a look rather than draw it anew.
+export const DEFAULT_LOOKS: Omit<Looks, 'phantoms'> = Object.freeze({
   flag: () => viewLook<TriggerObject>(new FlagView()),
   updraft: () => viewLook<TriggerObject>(new UpdraftView()),
   bonfire: (): BonfireLook => {
@@ -120,10 +170,11 @@ export const DEFAULT_LOOKS: ObjectLooks = Object.freeze({
     const view = new PoolView('swamp');
     return viewLook<PoolObject>(view, view.front);
   },
+  enemies: (art: EnemyArtSettings) => new EnemyView(art),
 });
 
 // The level objects each look draws.
-const SELECTED: Readonly<Record<Exclude<LookName, 'projectile'>, (object: LevelObject) => boolean>> = {
+const SELECTED: Readonly<Record<PlacedLookName, (object: LevelObject) => boolean>> = {
   flag: (object) => object.kind === 'trigger' && object.marker === 'flag',
   updraft: (object) => object.kind === 'trigger' && object.marker === 'updraft',
   bonfire: (object) => object.kind === 'bonfire',
@@ -134,24 +185,29 @@ const SELECTED: Readonly<Record<Exclude<LookName, 'projectile'>, (object: LevelO
 };
 
 // Builds `name`'s look, checking what the factory returns.
-function create<L>(name: LookName, factory: () => L, plugins: RuntimePlugins): L {
+function create<L>(name: LookName, factory: () => L, plugin: string | null): L {
   const point = LOOKS[name];
-  const plugin = plugins.owner(point);
   let look: unknown;
   try { look = factory(); } catch (error) {
     throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${point.id}".`, plugin, point.id, { cause: error });
   }
-  const method = (key: string): boolean => typeof Reflect.get(look as object, key) === 'function';
-  const passes: unknown = typeof look === 'object' && look !== null ? Reflect.get(look, 'passes') : undefined;
-  const valid = typeof passes === 'object' && passes !== null &&
+  const object = typeof look === 'object' && look !== null;
+  const method = (key: string): boolean => object && typeof Reflect.get(look as object, key) === 'function';
+  const node = (value: unknown): boolean => typeof value === 'object' && value !== null && Reflect.get(value, 'isObject3D') === true;
+  const passes: unknown = object ? Reflect.get(look as object, 'passes') : undefined;
+  const validPasses = typeof passes === 'object' && passes !== null &&
     (['course', 'actors', 'front'] as const).every((pass) => {
       const group: unknown = Reflect.get(passes, pass);
-      return group === undefined || (typeof group === 'object' && group !== null && Reflect.get(group, 'isObject3D') === true);
-    }) &&
-    method('update') && method('dispose') && (name === 'projectile' || method('set')) && (name !== 'bonfire' || method('setLit'));
+      return group === undefined || node(group);
+    });
+  const methods = name === 'phantoms' ? ['draw', 'dispose'] : name === 'enemies' ? ['apply', 'update', 'setArt', 'dispose']
+    : name === 'projectile' ? ['update', 'dispose'] : name === 'bonfire' ? ['set', 'setLit', 'update', 'dispose'] : ['set', 'update', 'dispose'];
+  const valid = (name === 'phantoms' ? object && node(Reflect.get(look as object, 'root')) : validPasses) && methods.every(method) &&
+    (name === 'phantoms' || Reflect.get(look as object, 'inspect') === undefined || method('inspect'));
   if (!valid) {
-    throw new PluginError('invalid-contribution', `Plugin "${plugin ?? 'engine'}": the ${name} look must return its passes, as three.js objects, and ${
-      name === 'projectile' ? 'update and dispose' : name === 'bonfire' ? 'set, setLit, update and dispose' : 'set, update and dispose'}.`, plugin, point.id);
+    throw new PluginError('invalid-contribution',
+      `Plugin "${plugin ?? 'engine'}": the ${name} look must return ${name === 'phantoms' ? 'its root' : 'its passes'}, as three.js objects, and ${
+        methods.join(', ')}${name === 'phantoms' ? '' : ' and, when given, inspect()'}.`, plugin, point.id);
   }
   return look as L;
 }
@@ -161,7 +217,7 @@ function sameObjects(a: readonly LevelObject[], b: readonly LevelObject[]): bool
 }
 
 interface Placed {
-  readonly name: Exclude<LookName, 'projectile'>;
+  readonly name: PlacedLookName;
   readonly look: ObjectLook<LevelObject>;
   // The objects it was last given; null before the level loads.
   objects: readonly LevelObject[] | null;
@@ -173,6 +229,7 @@ const NO_PROJECTILES: readonly ProjectilePose[] = Object.freeze([]);
  * Each gets its kind's objects when the level loads and again only when one of them changes.
  */
 export class LevelLooks {
+  readonly enemies: EnemyLook;
   private readonly placed: readonly Placed[];
   private readonly bonfire: BonfireLook;
   private readonly projectile: ProjectileLook;
@@ -180,10 +237,11 @@ export class LevelLooks {
   private fronts: readonly Object3D[] = [];
   private active: readonly Placed[] = [];
   private hasShooters = false;
+  private hasEnemies = false;
   private projectileActive = false;
 
-  constructor(plugins: RuntimePlugins, objects: readonly LevelObject[]) {
-    const factories: ObjectLooks = {
+  constructor(plugins: RuntimePlugins, objects: readonly LevelObject[], art: EnemyArtSettings) {
+    const factories: ObjectLooks & { readonly enemies: EnemyLookFactory } = {
       flag: plugins.slot(LOOKS.flag, DEFAULT_LOOKS.flag),
       updraft: plugins.slot(LOOKS.updraft, DEFAULT_LOOKS.updraft),
       bonfire: plugins.slot(LOOKS.bonfire, DEFAULT_LOOKS.bonfire),
@@ -192,21 +250,23 @@ export class LevelLooks {
       axe: plugins.slot(LOOKS.axe, DEFAULT_LOOKS.axe),
       lava: plugins.slot(LOOKS.lava, DEFAULT_LOOKS.lava),
       swamp: plugins.slot(LOOKS.swamp, DEFAULT_LOOKS.swamp),
+      enemies: plugins.slot(LOOKS.enemies, DEFAULT_LOOKS.enemies),
     };
     const created: { dispose(): void }[] = [];
     const build = <L extends { dispose(): void }>(name: LookName, factory: () => L): L => {
-      const look = create(name, factory, plugins);
+      const look = create(name, factory, plugins.owner(LOOKS[name]));
       created.push(look);
       return look;
     };
     try {
+      this.enemies = build('enemies', () => factories.enemies(art));
       this.bonfire = build('bonfire', factories.bonfire);
       this.projectile = build('projectile', factories.projectile);
       this.placed = (['flag', 'updraft', 'bonfire', 'shooter', 'axe', 'lava', 'swamp'] as const).map((name): Placed => {
         const factory: () => ObjectLook<LevelObject> = factories[name];
         return { name, look: name === 'bonfire' ? this.bonfire : build(name, factory), objects: null };
       });
-      this.passList = Object.freeze([...this.placed.map(({ look }) => look.passes), this.projectile.passes]);
+      this.passList = Object.freeze([this.enemies.passes, ...this.placed.map(({ look }) => look.passes), this.projectile.passes]);
       this.setLevel(objects);
     } catch (error) {
       for (let index = created.length - 1; index >= 0; index--) created[index]!.dispose();
@@ -230,7 +290,9 @@ export class LevelLooks {
     }
     this.active = this.placed.filter(placed => placed.objects!.length > 0);
     this.hasShooters = this.active.some(placed => placed.name === 'shooter');
+    this.hasEnemies = objects.some(object => object.kind === 'enemy');
     const passes = this.active.map(({ look }) => look.passes);
+    if (this.hasEnemies) passes.push(this.enemies.passes);
     this.fronts = passes.flatMap(({ front }) => front === undefined ? [] : [front]);
   }
 
@@ -238,8 +300,9 @@ export class LevelLooks {
     this.bonfire.setLit(ids);
   }
 
-  update(time: number, projectiles: readonly ProjectilePose[]): void {
+  update(time: number, projectiles: readonly ProjectilePose[], enemies: readonly EnemyPose[]): void {
     for (const { look } of this.active) look.update(time);
+    if (this.hasEnemies) this.enemies.update(enemies, time);
     if (this.hasShooters || projectiles.length > 0) {
       this.projectile.update(projectiles, time);
       this.projectileActive = true;
@@ -263,10 +326,18 @@ export class LevelLooks {
   }
 
   dispose(): void {
+    const disposal = new Disposal();
     for (const passes of this.passes()) {
-      for (const group of [passes.course, passes.actors, passes.front]) group?.removeFromParent();
+      for (const pass of ['course', 'actors', 'front'] as const) disposal.run(() => passes[pass]?.removeFromParent());
     }
-    for (const { look } of this.placed) look.dispose();
-    this.projectile.dispose();
+    for (const { look } of this.placed) disposal.run(() => look.dispose());
+    disposal.run(() => this.projectile.dispose());
+    disposal.run(() => this.enemies.dispose());
+    disposal.finish();
   }
+}
+
+// Playback creates a look only when needed, using the factory resolved by its phantom consumer.
+export function createPhantomLook(factory: PhantomLookFactory, figures: number, plugin: string | null): PhantomLook {
+  return create('phantoms', () => factory({ figures }), plugin);
 }

@@ -21,7 +21,7 @@ import { LEVEL_LIMITS, terrainAssets, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 import { MEDIA_LIMITS, MEDIA_TYPES, mediaExtension, mediaPath } from './media';
 import { MODEL_LIMITS } from './model-data';
-import { PHANTOM_LIMITS, PHANTOM_PACK_BYTES } from './phantom-format';
+import { PHANTOM_LIMITS, PHANTOM_PACK_BYTES } from './phantom-limits';
 import type { PhantomBounds } from './phantom-format';
 import type { HammerHead } from './hammer-head';
 import { exactRecord } from './project-fields';

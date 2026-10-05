@@ -1,5 +1,5 @@
 import type { ContentAccess, ContentError, ContentProgress } from '../content-session';
-import type { PhantomService } from '../phantom-service';
+import type { PhantomService } from '../phantom-service-types';
 import type { ModelLibraryApi } from '../release-library';
 import { checkFacetEntries, Composition, listPoint, PLUGIN_LIMITS, PluginError, slotPoint } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';

@@ -10,7 +10,7 @@
  * A stopped plugin's host then refuses everything that would add or change something, with `plugin-stopped`.
  * Plugins are the game's trusted code, never content. Releases contain none of their code or data.
  */
-import type { Matrix4, Object3D } from 'three';
+import type { Matrix4 } from 'three';
 import type { ArmIkSettings, VisualPartId } from '../character';
 import type { AppearancePart, VisualAlignment } from '../appearance-profile';
 import type { ArtMode } from '../art-types';
@@ -37,6 +37,7 @@ import type { CharacterRiggingType, SpriteDocument } from '../sprite-data';
 import type { GameTheme } from '../theme';
 import type { WorkshopGameState } from './game-state';
 import type { Contribution } from '../plugins/kernel';
+import type { SceneLayer } from '../scene-layer';
 
 export {
   add, isNamespacedId, namespaceOf, PLUGIN_API_VERSION, PLUGIN_ERROR_CODES, PLUGIN_LIMITS, PluginError, pluginRefusal, replace, wrap,
@@ -50,6 +51,7 @@ export { PLUGIN_DATA_LIMITS } from '../plugin-data';
 export type { PluginData } from '../plugin-data';
 export type { JsonValue } from '../bounded-json';
 export type { WorkshopGameState } from './game-state';
+export type { SceneFrame, SceneLayer } from '../scene-layer';
 export type {
   AppearancePart, ArmIkSettings, ArtMode, AudioSettings, AvatarMotionEntry, AvatarMotionModel, CharacterArms, CharacterRiggingType,
   DirectionalPresentation, EnemyArtSettings, EnemyPose, GameSettings, GameTheme, Grips, HammerHead, HudSettings,
@@ -276,28 +278,6 @@ export interface WorkshopPluginData {
 // The running game. Presentation only: physics, gameplay, play recordings and the authored level and profiles never see
 // any of it.
 
-// A read-only view of the frame the game draws: the simulation's state at the drawn time.
-export interface WorkshopFrame {
-  // Simulation seconds; a restart rewinds them to 0.
-  readonly time: number;
-  readonly parts: readonly Readonly<PartPose>[];
-  readonly cursor: Readonly<Point>;
-  readonly enemies: readonly EnemyPose[];
-  readonly rig: RigGeometry;
-}
-
-// A scene layer of the plugin's own: `course` draws with the terrain, `actors` over it with the characters, and `marks`
-// over the characters and their arms, under the tool. Like the engine's own marks, a `marks` overlay's materials ignore
-// depth (`depthTest: false`), so it shows over the arms and leaves the depth the tool is drawn with alone.
-export interface WorkshopOverlay {
-  readonly root: Object3D;
-  readonly pass: 'course' | 'actors' | 'marks';
-  // Runs every drawn frame while the overlay is added; it must not allocate.
-  update?(frame: WorkshopFrame): void;
-  // Runs when the overlay is removed, to free its geometry and materials.
-  dispose?(): void;
-}
-
 // A pointer event on the game canvas. Events arrive while the canvas receives them and the mouse is not captured for play.
 export interface WorkshopPointerEvent {
   readonly type: 'down' | 'move' | 'up' | 'cancel';
@@ -339,7 +319,7 @@ export const WORKSHOP_PREVIEW_LIMITS = Object.freeze({ duration: 10, distance: 2
 
 export interface WorkshopGame {
   // Adds a scene layer; returns its removal.
-  addOverlay(overlay: WorkshopOverlay): () => void;
+  addOverlay(overlay: SceneLayer): () => void;
   // Tells `listener` about pointer events on the game canvas; returns its removal.
   onPointer(listener: (event: WorkshopPointerEvent) => void): () => void;
   // A course-plane point in client pixels, and the course-plane point under client pixels.

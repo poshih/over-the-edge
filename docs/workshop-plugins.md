@@ -164,12 +164,18 @@ the authored level and profiles never see it. Without plugins nothing runs per f
 plugin's per-frame work runs only while its overlays or previews are active, and the engine
 allocates nothing per frame on its behalf.
 
-- **Overlays.** `game.addOverlay({ root, pass, update?, dispose? })` adds a scene layer of three.js
-  objects: `course` draws with the terrain, `actors` over it with the characters, and `marks`
-  over the characters and their arms, under the tool. Like the engine's own marks, a `marks`
-  overlay's materials ignore depth (`depthTest: false`). `update(frame)` runs every drawn
-  frame with a read-only view of the simulation's frame (time, parts, cursor, enemies and rig)
-  and must not allocate; `dispose()` runs when the overlay is removed. It returns the removal.
+- **Overlays.** `game.addOverlay(layer: SceneLayer)` adds a scene layer of three.js objects:
+  `{ root, pass, update?, dispose? }`. It uses the same `SceneLayer` and `SceneFrame` contract
+  as [runtime scene layers](runtime-plugins.md#scene-layers), re-exported by the Workshop SDK,
+  not a Workshop-specific type. `course` draws with the terrain, `actors` over it with the
+  characters, and `marks` over the characters and their arms, under the tool. Collider
+  visuals stay centred on the obstacle line, z = 0, in actors; a marks overlay's materials
+  ignore depth (`depthTest: false`), leaving the arms/tool depth alone. Only overlays with
+  `update(frame: SceneFrame)` run each drawn frame. That frame is reused and read-only (time,
+  parts, cursor, enemies and rig), so never retain it as a snapshot and allocate nothing.
+  Static overlays have no frame callback. The host checks the root, pass and methods when
+  added, naming the plugin in a refusal. It returns the removal; removal or plugin stop
+  detaches the root and calls the optional `dispose()` once to free owned resources.
 - **Canvas input.** `game.onPointer(listener)` hears pointer events on the game canvas, unless
   the mouse is captured for play, with client pixels and the point under them on the course
   plane in metres. A listener of a `down` may `capture()` it to take the drag: the game sees

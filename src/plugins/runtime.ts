@@ -1,5 +1,9 @@
 import { HUD } from '../hud-readouts';
 import { LOOKS } from '../object-looks';
+import { CAMERA } from '../camera-director';
+import { BACKDROP } from '../backdrop';
+import { AIM_MARKS } from '../aim-marks';
+import { SCENE_LAYERS } from '../scene-layer';
 import { checkFacetEntries, Composition, PluginError } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';
 
@@ -14,7 +18,7 @@ export interface RuntimeFacet {
 
 export function defineRuntime<T extends RuntimeFacet>(facet: T): T { return facet; }
 
-export const RUNTIME = Object.freeze([...Object.values(HUD), ...Object.values(LOOKS)]);
+export const RUNTIME = Object.freeze([...Object.values(HUD), ...Object.values(LOOKS), CAMERA, BACKDROP, AIM_MARKS, SCENE_LAYERS]);
 
 function checkRuntime(value: unknown, plugin: string): RuntimeFacet {
   if (typeof value !== 'object' || value === null || Array.isArray(value) || typeof Reflect.get(value, 'start') !== 'function') {

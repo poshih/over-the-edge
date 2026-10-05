@@ -2,30 +2,8 @@
 // for other players' recordings near the player; the backend decides what it keeps and whom it shows
 // what. A release validates every recording it receives. See docs/phantoms.md.
 import { decodePhantomBatch, isPhantomCourse, PHANTOM_LIMITS } from './phantom-format';
-
-export interface PhantomQuery {
-  // Where the player's character is, in metres.
-  readonly x: number;
-  readonly y: number;
-  // The most recordings the release wants.
-  readonly limit: number;
-}
-
-export interface PhantomService {
-  // One recording, in the phantom format, of the player on the course. Resolves once handed over.
-  submit(course: string, recording: Uint8Array<ArrayBuffer>, signal: AbortSignal): Promise<void>;
-  // Other players' recordings on the course that pass near the point, in the phantom format.
-  nearby(course: string, query: PhantomQuery, signal: AbortSignal): Promise<readonly Uint8Array[]>;
-}
-
-export class PhantomServiceError extends Error {
-  readonly status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
+import { PhantomServiceError } from './phantom-service-types';
+import type { PhantomService } from './phantom-service-types';
 
 // The largest batch: its count, and each recording's length and bytes.
 const BATCH_BYTES = PHANTOM_LIMITS.batch * (PHANTOM_LIMITS.bytes + 5) + 5;

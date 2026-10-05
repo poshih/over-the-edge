@@ -1,12 +1,9 @@
-// Draws phantoms: other players' recorded movement, replayed as translucent white figures of the
-// default character. Figures are pooled and share their geometry, and a frame costs only the phantoms
-// that are playing. Arms are not recorded: each figure's hands take the default grips on its tool and
-// its arms reach them with the game's arm IK. See docs/phantoms.md.
+// The default phantom look: pooled translucent white figures with shared geometry and allocation-free arm IK.
+// Engine-owned playback supplies the poses and fades; a look never chooses tracks or advances time.
 import { CylinderGeometry, Group, Mesh, MeshLambertMaterial, SphereGeometry, Vector3 } from 'three';
 import type { BufferGeometry } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { DEFAULT_ARM_CHAINS, solveArmPose } from './arm-ik';
-import type { ArmPose } from './arm-ik';
+import { ArmPoseSolver, DEFAULT_ARM_CHAINS } from './arm-ik';
 import { ARM_SIDES, DEFAULT_ARM_IK } from './character';
 import type { ArmSide } from './character';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
@@ -15,27 +12,21 @@ import { DEFAULT_GRIPS, GripHold, headGripMargin } from './grips';
 import { DEFAULT_HAMMER_HEAD } from './hammer-head';
 import type { HammerHead } from './hammer-head';
 import type { GripDistances, GripShoulder } from './grips';
-import { phantomTool, samplePhantom } from './phantom-format';
-import type { PhantomPose, PhantomTool, PhantomTrack } from './phantom-format';
+import type { PhantomFigureFrame, PhantomLook, PhantomLookFactory } from './object-looks';
 import { createHammerHeadGeometry, createPotGeometry, placeLimb, PLAYER_FIGURE } from './player-figure';
-import type { PhysicsFrame } from './simulation';
-import type { ViewLayer } from './view';
 
 export const PHANTOM_LOOK = {
-  // Phantoms that can play at once.
-  figures: 3,
   opacity: 0.38,
-  // Seconds a phantom takes to appear at its start and to vanish at its end.
-  fadeIn: 0.5,
-  fadeOut: 0.8,
 } as const;
 
-// Game time a frame may advance playback; a longer step, like a restart's jump back, holds it.
-const MAX_FRAME_SECONDS = 0.25;
 // Nearer parts draw first and write depth, so a ghost covers what it hides once instead of doubling up.
 const DRAW_ORDER = { tool: 0, hand: 1, forearm: 2, elbow: 3, upperArm: 4, body: 5, pot: 6 } as const;
 // After the scene's other translucent objects, which a phantom's depth must not hide.
 const FIRST_DRAW = 100;
+const HINT_OFFSETS: Readonly<Record<ArmSide, readonly [number, number, number]>> = {
+  left: [DEFAULT_ARM_IK.leftHintX, DEFAULT_ARM_IK.leftHintY, DEFAULT_ARM_IK.leftHintZ],
+  right: [DEFAULT_ARM_IK.rightHintX, DEFAULT_ARM_IK.rightHintY, DEFAULT_ARM_IK.rightHintZ],
+};
 
 interface FigureGeometry {
   readonly pot: BufferGeometry;
@@ -54,7 +45,7 @@ interface Limbs {
   readonly lower: Mesh;
   readonly elbow: Mesh;
   readonly hand: Mesh;
-  pose: ArmPose | null;
+  readonly solver: ArmPoseSolver;
 }
 
 interface Figure {
@@ -67,9 +58,6 @@ interface Figure {
   readonly arms: Readonly<Record<ArmSide, Limbs>>;
   // Where its sliding hands hold the handle.
   readonly hold: GripHold;
-  track: PhantomTrack | null;
-  time: number;
-  keyframe: number;
 }
 
 function createFigureGeometry(): FigureGeometry {
@@ -107,149 +95,73 @@ function createFigure(geometry: FigureGeometry): Figure {
     root.add(mesh);
     return mesh;
   };
-  const limbs = (): Limbs => ({
+  const limbs = (side: ArmSide): Limbs => ({
     upper: part(geometry.upperArm, DRAW_ORDER.upperArm), lower: part(geometry.forearm, DRAW_ORDER.forearm),
-    elbow: part(geometry.elbow, DRAW_ORDER.elbow), hand: part(geometry.hand, DRAW_ORDER.hand), pose: null,
+    elbow: part(geometry.elbow, DRAW_ORDER.elbow), hand: part(geometry.hand, DRAW_ORDER.hand), solver: new ArmPoseSolver(side),
   });
   return {
     root, material,
     pot: part(geometry.pot, DRAW_ORDER.pot), body: part(geometry.body, DRAW_ORDER.body),
     shaft: part(geometry.shaft, DRAW_ORDER.tool), head: part(geometry.head, DRAW_ORDER.tool),
-    arms: { left: limbs(), right: limbs() },
+    arms: { left: limbs('left'), right: limbs('right') },
     hold: new GripHold(),
-    track: null, time: 0, keyframe: 0,
   };
 }
 
-export class PhantomView implements ViewLayer {
+export class PhantomView implements PhantomLook {
   readonly root = new Group();
-  // Phantoms are characters: the course's colliders never hide them.
-  readonly pass = 'actors';
   private readonly geometry = createFigureGeometry();
   private readonly figures: readonly Figure[];
-  // A figure outside playback that hold() poses, made when first needed.
-  private held: Figure | null = null;
-  // Phantoms draw the game's default hammer head, whatever hammer their players held.
+  // The game's current default hammer head, whatever hammer a recorded player held.
   private head: HammerHead = DEFAULT_HAMMER_HEAD;
   private headMargin = headGripMargin(DEFAULT_HAMMER_HEAD);
   private readonly toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
-  private time: number | null = null;
-  private readonly pose: PhantomPose = { x: 0, y: 0, pot: 0, angle: 0, along: 0, across: 0 };
-  private readonly tool: PhantomTool = { tipX: 0, tipY: 0, buttX: 0, buttY: 0 };
   private readonly shoulders: Record<ArmSide, GripShoulder> = {
     left: { along: 0, aside2: 0, arm: 0 }, right: { along: 0, aside2: 0, arm: 0 },
   };
   private readonly grips: GripDistances = { left: 0, right: 0 };
+  private readonly targets = {
+    shoulder: new Vector3(), hand: new Vector3(), hint: new Vector3(), shaftAxis: new Vector3(),
+  };
 
-  // `figures`: the phantoms that can play at once; a view that only holds one needs none.
-  constructor(options: { readonly figures?: number } = {}) {
+  constructor(figures: number) {
     this.root.name = 'phantoms';
-    this.figures = Array.from({ length: options.figures ?? PHANTOM_LOOK.figures }, () => createFigure(this.geometry));
+    this.figures = Array.from({ length: figures }, () => createFigure(this.geometry));
     for (const figure of this.figures) this.root.add(figure.root);
   }
 
-  // Phantoms playing now.
-  get playing(): number {
-    let count = 0;
-    for (const figure of this.figures) if (figure.track !== null) count++;
-    return count;
-  }
-
-  // Starts a phantom from its beginning; false when every figure is busy.
-  play(track: PhantomTrack): boolean {
-    const figure = this.figures.find((candidate) => candidate.track === null);
-    if (figure === undefined) return false;
-    figure.track = track;
-    figure.time = 0;
-    figure.keyframe = 0;
-    figure.hold.reset();
-    for (const side of ARM_SIDES) figure.arms[side].pose = null;
-    this.place(figure, 0, true);
-    figure.root.visible = true;
-    return true;
-  }
-
-  // Playback follows the game's time: it holds while the game is paused.
-  update(frame: PhysicsFrame): void {
-    if (frame.rig.head !== this.head) this.setHead(frame.rig.head);
-    const previous = this.time;
-    this.time = frame.time;
-    const elapsed = previous === null ? 0 : frame.time - previous;
-    const dt = elapsed >= 0 && elapsed <= MAX_FRAME_SECONDS ? elapsed : 0;
-    for (const figure of this.figures) {
-      if (figure.track === null) continue;
-      figure.time += dt;
-      if (figure.time >= figure.track.duration) this.stop(figure);
-      else this.place(figure, dt, true);
+  draw(frames: readonly PhantomFigureFrame[], head: HammerHead): void {
+    if (head !== this.head) this.setHead(head);
+    for (let index = 0; index < this.figures.length; index++) {
+      const figure = this.figures[index]!;
+      const frame = frames[index]!;
+      figure.root.visible = frame.visible;
+      if (!frame.visible) continue;
+      if (frame.fresh) {
+        figure.hold.reset();
+        for (const side of ARM_SIDES) figure.arms[side].solver.reset();
+      }
+      this.place(figure, frame);
     }
-  }
-
-  /**
-   * Shows `track` at `seconds` on a figure of its own, whatever the game's time does, and returns the pose it shows,
-   * valid until the next call; null hides the figure. Its hands and arms carry on from the previous call when time
-   * moved forward less than a frame's step, on the same track or into one that `continues` it, as a run's next clip
-   * does; any other move starts them afresh.
-   */
-  hold(track: PhantomTrack | null, seconds: number, continues = false): Readonly<PhantomPose> | null {
-    if (track === null) {
-      if (this.held !== null) this.stop(this.held);
-      return null;
-    }
-    let figure = this.held;
-    if (figure === null) {
-      figure = createFigure(this.geometry);
-      this.root.add(figure.root);
-      this.held = figure;
-    }
-    const time = Math.min(Math.max(seconds, 0), track.duration);
-    const step = figure.track === track ? time - figure.time : continues && figure.track !== null ? time : -1;
-    const smooth = step >= 0 && step <= MAX_FRAME_SECONDS;
-    if (figure.track !== track) figure.keyframe = 0;
-    if (!smooth) {
-      figure.hold.reset();
-      for (const side of ARM_SIDES) figure.arms[side].pose = null;
-    }
-    figure.track = track;
-    figure.time = time;
-    this.place(figure, smooth ? step : 0, false);
-    figure.root.visible = true;
-    return this.pose;
-  }
-
-  // Ends every phantom at once, and hides the held one.
-  clear(): void {
-    for (const figure of this.figures) this.stop(figure);
-    if (this.held !== null) this.stop(this.held);
   }
 
   dispose(): void {
     for (const figure of this.figures) figure.material.dispose();
-    this.held?.material.dispose();
     for (const geometry of Object.values(this.geometry)) geometry.dispose();
   }
 
   private setHead(head: HammerHead): void {
     const previous = this.geometry.head;
     this.geometry.head = createHammerHeadGeometry(head);
-    for (const figure of this.held === null ? this.figures : [...this.figures, this.held]) figure.head.geometry = this.geometry.head;
+    for (const figure of this.figures) figure.head.geometry = this.geometry.head;
     previous.dispose();
     this.head = head;
     this.headMargin = headGripMargin(head);
   }
 
-  private stop(figure: Figure): void {
-    figure.track = null;
-    figure.root.visible = false;
-  }
-
-  // Poses a figure at its track's time; a fading one appears at its start and vanishes at its end.
-  private place(figure: Figure, dt: number, fading: boolean): void {
-    const track = figure.track!;
-    const { pose, tool } = this;
-    figure.keyframe = samplePhantom(track, figure.time, pose, figure.keyframe);
-    phantomTool(pose, track.handleLength, tool);
-    const fade = fading ? Math.min(1, figure.time / PHANTOM_LOOK.fadeIn, (track.duration - figure.time) / PHANTOM_LOOK.fadeOut) : 1;
-    figure.material.opacity = PHANTOM_LOOK.opacity * Math.max(0, fade);
+  private place(figure: Figure, frame: PhantomFigureFrame): void {
+    const { pose, tool, handleLength, dt } = frame;
+    figure.material.opacity = PHANTOM_LOOK.opacity * frame.opacity;
     figure.pot.position.set(pose.x, pose.y, PLAYER_DEPTH.pot);
     figure.pot.rotation.z = pose.pot;
     figure.body.position.set(pose.x, pose.y, PLAYER_DEPTH.torso);
@@ -257,7 +169,7 @@ export class PhantomView implements ViewLayer {
     const sin = Math.sin(pose.angle);
     figure.shaft.position.set((tool.buttX + tool.tipX) / 2, (tool.buttY + tool.tipY) / 2, this.toolDepth);
     figure.shaft.rotation.z = pose.angle;
-    figure.shaft.scale.x = track.handleLength;
+    figure.shaft.scale.x = handleLength;
     figure.head.position.set(tool.tipX, tool.tipY, this.toolDepth);
     figure.head.rotation.z = pose.angle;
     for (const side of ARM_SIDES) {
@@ -271,23 +183,25 @@ export class PhantomView implements ViewLayer {
       shoulder.aside2 = Math.max(0, dx * dx + dy * dy - along * along);
       shoulder.arm = chain.upper + chain.forearm;
     }
-    figure.hold.place(DEFAULT_GRIPS, this.shoulders, track.handleLength, this.headMargin, this.grips);
+    figure.hold.place(DEFAULT_GRIPS, this.shoulders, handleLength, this.headMargin, this.grips);
     for (const side of ARM_SIDES) {
       const chain = DEFAULT_ARM_CHAINS[side];
       const limbs = figure.arms[side];
       const grip = this.grips[side];
-      const arm = solveArmPose(side, {
-        shoulder: new Vector3(pose.x + chain.shoulder[0], pose.y + chain.shoulder[1], PLAYER_DEPTH.torso + chain.shoulder[2]),
-        hand: new Vector3(tool.buttX + grip * cos, tool.buttY + grip * sin, this.toolDepth),
-        hint: new Vector3(pose.x + DEFAULT_ARM_IK[`${side}HintX`], pose.y + DEFAULT_ARM_IK[`${side}HintY`],
-          PLAYER_DEPTH.torso + DEFAULT_ARM_IK[`${side}HintZ`]),
-        shaftAxis: new Vector3(cos, sin, 0),
-      }, { previous: limbs.pose, dt, lengths: chain });
+      const targets = this.targets;
+      targets.shoulder.set(pose.x + chain.shoulder[0], pose.y + chain.shoulder[1], PLAYER_DEPTH.torso + chain.shoulder[2]);
+      targets.hand.set(tool.buttX + grip * cos, tool.buttY + grip * sin, this.toolDepth);
+      const hint = HINT_OFFSETS[side];
+      targets.hint.set(pose.x + hint[0], pose.y + hint[1], PLAYER_DEPTH.torso + hint[2]);
+      targets.shaftAxis.set(cos, sin, 0);
+      const arm = limbs.solver.solve(targets, dt, chain);
       placeLimb(limbs.upper, arm.shoulder, arm.elbow, arm.normal);
       placeLimb(limbs.lower, arm.elbow, arm.hand, arm.normal);
       limbs.elbow.position.copy(arm.elbow);
       limbs.hand.position.copy(arm.hand);
-      limbs.pose = arm;
     }
   }
 }
+
+// Kept with the drawing, not the point catalogue: only phantom consumers import this implementation.
+export const DEFAULT_PHANTOM_LOOK: PhantomLookFactory = ({ figures }) => new PhantomView(figures);

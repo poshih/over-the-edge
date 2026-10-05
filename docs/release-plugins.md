@@ -32,8 +32,11 @@ which returns the plugin's contributions, or a promise of them.
 
 The release starts its release facets first, one at a time in manifest order, awaiting each
 `start`, before it fetches anything: a plugin can sign the player in before the first grant is
-asked for. It then composes their contributions, resolves `ACCESS`, `PHANTOMS` and `FAILED` once,
-and loads the game. Runtime facets start after that, once for each load attempt.
+asked for. It then composes their contributions, resolves `ACCESS` and `FAILED` once, and loads
+the game. In a build without phantoms it also resolves `PHANTOMS` against `null`, refusing only
+a non-null result. Runtime facets start after that, once for each load attempt. In a build with
+phantoms the optional consumer resolves `PHANTOMS` when it starts after the game loads; the
+release session caches that slot for its whole life.
 
 ## The signal
 
@@ -100,35 +103,55 @@ The shell is public, so a plugin holds no secrets: its backend does.
 
 ## Phantom backend
 
-`PHANTOMS` is the release's [phantom](phantoms.md) service. Its base is `httpPhantoms(phantomsUrl)`,
-the [reference protocol](phantoms.md#the-protocol) at the build's phantom URL, or `null` in a build
-without one. A plugin replaces it to carry phantoms its own way:
+`PHANTOMS` is the release's [phantom](phantoms.md) service. Its engine base is the
+[reference protocol](phantoms.md#the-protocol) client at the build's phantom URL, or `null`
+without a URL.
+
+In a phantom-enabled build, the optional consumer constructs the engine base and resolves the
+slot through a resolver bound to the release session. The core release keeps the descriptor and the build-availability check,
+not an import of the HTTP client or codec. In a build with no phantoms the core resolves against
+`null` and refuses a non-null result, so a release with neither a phantom URL nor bundled
+recordings includes no phantom client or playback code.
+
+A plugin wraps the current service to extend it, for example with an availability notice:
 
 ```ts
-import { defineRelease, httpPhantoms, PHANTOMS, replace } from '../../src/plugins/release-sdk';
-import { signIn } from './sign-in';
+import { defineRelease, PHANTOMS, PhantomServiceError, wrap } from '../../src/plugins/release-sdk';
+import type { PhantomService } from '../../src/plugins/release-sdk';
 
 export default defineRelease({
-  async start(host) {
-    const url = host.phantomsUrl;
-    if (url === null) return [];
-    const session = await signIn(host.mount, host.signal);
-    // The reference protocol with the game's own authorization.
-    return [replace(PHANTOMS, httpPhantoms(url, {
-      headers: async () => ({ Authorization: `Bearer ${await session.token()}` }),
-    }))];
+  start(host) {
+    return [wrap(PHANTOMS, (base): PhantomService | null => {
+      if (base === null) return null;
+      return {
+        submit: (course, recording, signal) => base.submit(course, recording, signal),
+        async nearby(course, query, signal) {
+          try {
+            return await base.nearby(course, query, signal);
+          } catch (error) {
+            if (error instanceof PhantomServiceError && error.status === 401) {
+              host.notice('Sign in to see other players\' phantoms.', 'info');
+            }
+            throw error;
+          }
+        },
+      };
+    })];
   },
 });
 ```
 
-- `httpPhantoms(url, { credentials, headers })` is the reference client. `credentials: 'include'`
-  sends cookies to another origin, which then needs CORS with credentials. An answer other than
-  2xx fails as a `PhantomServiceError` with its HTTP `status`.
+- The reference client sends cookies to the same origin only. An answer other than 2xx fails
+  as a `PhantomServiceError` with its HTTP `status`. The gated client is not exported by the
+  SDK: `wrap(PHANTOMS, base => ...)` receives it, or an earlier plugin's service.
 - A plugin can instead implement `PhantomService` itself, over any transport:
   - `submit(course, recording, signal)` hands over one recording;
   - `nearby(course, { x, y, limit }, signal)` resolves to recordings in the phantom format.
-- A plugin may supply phantoms to a release with a phantom URL or bundled recordings. One that
-  supplies them to a release with neither stops it with `invalid-contribution`, naming the plugin.
+  Use `replace(PHANTOMS, service)` for its own authorization or transport. `PhantomService`,
+  `PhantomQuery` and `PhantomServiceError` are lightweight SDK exports with no client or codec import.
+- A non-null resolved service requires a release with a phantom URL or bundled recordings.
+  A non-null result in a release with neither stops it before loading with `invalid-contribution`,
+  naming the owner. A replacement or wrapper resolving to `null` remains valid.
 - The release validates every recording a service sends, and nothing a service does stops the
   game; see [what a release does](phantoms.md#what-a-release-does).
 

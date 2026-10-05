@@ -3,12 +3,12 @@ import {
   PlaneGeometry, ShaderMaterial, Vector2, Vector4,
 } from 'three';
 import { createEnemyAtlas } from './enemy-art';
-import { DEFAULT_ENEMY_ART } from './enemy-art-data';
 import type { EnemyArtSettings } from './enemy-art-data';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
 import type { EnemyEvent, EnemyPhase, EnemyPose, EnemySpecies } from './enemy-types';
 import { InstanceSlots, markInstanceSlot } from './instancing';
 import { OBSTACLE_LINE } from './obstacle-line';
+import type { EnemyLook } from './object-looks';
 
 const VISUAL = {
   alphaCutoff: 0.5, warningColor: 0xffae53,
@@ -33,8 +33,9 @@ function writeVector(attribute: InstancedBufferAttribute, slot: number, value: V
   return true;
 }
 
-export class EnemyView {
+export class EnemyView implements EnemyLook {
   readonly root = new Group();
+  readonly passes = { actors: this.root };
   private readonly instances = new InstanceSlots<EnemyPose>({ capacity: ENEMY_LIMITS.objects, label: 'Enemy sprite' });
   private art: EnemyArtSettings;
   private atlas: ReturnType<typeof createEnemyAtlas>;
@@ -54,7 +55,7 @@ export class EnemyView {
   private clockWrites = 0;
   private artChanges = 0;
 
-  constructor(art: EnemyArtSettings = DEFAULT_ENEMY_ART) {
+  constructor(art: EnemyArtSettings) {
     this.art = art;
     this.atlas = createEnemyAtlas(art);
     this.root.name = 'enemies';

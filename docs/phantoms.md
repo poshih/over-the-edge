@@ -96,6 +96,16 @@ apart, where they were recorded. Each fades in over half a second and out over 0
 playback follows the game's time, so pausing the game pauses its phantoms. A waiting recording
 the player has left behind, one whose path stays more than 25 m away, is dropped.
 
+**Drawing.** Phantoms draw through the runtime point
+[`LOOKS.phantoms`](runtime-plugins.md#phantom-looks), in the Workshop's replay viewer, studio
+previews and releases alike. Engine-owned `PhantomPlayback` chooses the figures, advances
+recordings, samples poses, fades them and provides the replay viewer's held pose; a
+`PhantomLook` only draws the reused `PhantomFigureFrame` slots and the game's current rig/default
+hammer head. `DEFAULT_PHANTOM_LOOK` creates the pooled translucent white `PhantomView`, with
+shared geometry, sliding grips and allocation-free arm IK. A game replaces or wraps its drawing without
+changing recording, timing or its backend. It draws only while at least one figure shows,
+in the actors pass over the course.
+
 The release validates every recording it receives, whoever sent it. Anything invalid is
 skipped. A source that fails, a backend or a pack that will not load, is retried at growing
 intervals up to 5 minutes, with one warning
@@ -117,10 +127,11 @@ A recording is the rig's pose at keyframes:
 Playback draws the hammer head at the recorded offset and the handle a handle's length behind
 it along the shaft. It interpolates every value linearly between keyframes.
 
-**Arms and hands are not recorded.** A phantom takes the default grips on its handle, and its
-arms reach them with the same grip placement and arm IK the game uses for its own character, so
-they are exact for the recorded tool and cost no space. Every phantom is the default character's
-silhouette, whatever character the recorded player used.
+**Arms and hands are not recorded.** The default phantom look takes the default grips on its
+handle, and its arms reach them with the same grip placement and arm IK the game uses for its
+own character, so they are exact for the recorded tool and cost no space. Its figures are the
+default character's silhouette, whatever character the recorded player used; a game's
+`LOOKS.phantoms` supplies its own drawing.
 
 The head is recorded by its offset rather than rebuilt from the hinge angle and extension
 because the handle gives under impacts. Rebuilding it from the joints misses by up to 10 cm
@@ -199,7 +210,7 @@ The physics: every physics setting but control sensitivity, so the masses, motor
 boosts, response, friction, damping, bounciness, handle compliance, health and liquids, and the hammer rig's
 handle length, maximum extension, minimum reach and default head. A model-library hammer's
 own head is a cosmetic's and is left out: recordings made with any hammer share the course,
-and phantoms draw the default head.
+and phantom looks receive the game's current default head rather than the recorded player's.
 
 Decorations, labels, colours, depth, which mesh draws a collision, other trigger events, control
 sensitivity and the cursor settings are left out. A recording replays only where its course holds,
@@ -240,12 +251,13 @@ a backend that wants players' identities takes them from its own session, like
 
 ## The game's own backend
 
-A plugin's [release facet](release-plugins.md) may carry phantoms its own way: its service at
-the `PHANTOMS` point replaces the reference client, with the game's own authorization or over a
-transport of its own, through the same `PhantomService` contract, `submit` and `nearby`.
-[Phantom backend](release-plugins.md#phantom-backend) shows how. A plugin may supply phantoms to
-a release with a phantom URL or bundled recordings; one that supplies them to a release without
-either stops it with an error.
+A plugin's [release facet](release-plugins.md) may carry phantoms its own way. It extends the
+current service with `wrap(PHANTOMS, base => ...)`, or replaces it with the game's own
+authorization or transport through the same `PhantomService` contract, `submit` and `nearby`.
+The release SDK exports that contract, `PhantomQuery` and the lightweight `PhantomServiceError`,
+not the gated reference client. [Phantom backend](release-plugins.md#phantom-backend) shows how.
+A non-null resolved service requires a release with a phantom URL or bundled recordings; a
+non-null result without either stops the release with an error, while `null` remains valid.
 
 ## The reference store
 

@@ -8,9 +8,11 @@ import type { Game } from './game';
 import { decodePhantom, decodePhantomPack, isPhantomNear } from './phantom-format';
 import type { PhantomTrack } from './phantom-format';
 import { PhantomRecorder } from './phantom-recorder';
-import type { PhantomService } from './phantom-service';
-import { PHANTOM_LOOK, PhantomView } from './phantom-view';
+import { httpPhantoms } from './phantom-service';
+import type { PhantomService } from './phantom-service-types';
+import { createPhantomPlayback, PHANTOM_TIMING } from './phantom-playback';
 import { PHYSICS } from './config';
+import type { RuntimePlugins } from './plugins/runtime';
 import type { RigPose } from './simulation';
 
 // Seconds of play, except where noted.
@@ -111,18 +113,23 @@ class PhantomPacks {
  */
 export function startPhantoms(options: {
   readonly game: Game;
+  readonly plugins: RuntimePlugins;
   readonly course: string;
-  readonly service: PhantomService | null;
+  // The build's phantom URL, resolved by the release; null without a backend.
+  readonly url: string | null;
+  // Bound to the release session: its PHANTOMS slot, cached once for that whole release.
+  readonly phantomService: (base: PhantomService | null) => PhantomService | null;
   readonly packs: readonly ContentPhantomPack[];
   readonly content: ContentLoader;
   readonly random?: () => number;
 }): Phantoms {
   const { game, course } = options;
-  const service = options.service;
+  // The HTTP client and codec stay in this optional consumer, never in releases without phantoms.
+  const base = options.url === null ? null : httpPhantoms(options.url);
+  const service = options.phantomService(base);
   const random = options.random ?? Math.random;
   const lifecycle = new AbortController();
-  const view = new PhantomView();
-  game.view.addLayer(view);
+  const playback = createPhantomPlayback(game.view, options.plugins, PHANTOM_TIMING.figures);
   const waiting: PhantomTrack[] = [];
   const pose: RigPose = { x: 0, y: 0, pot: 0, tipX: 0, tipY: 0, buttX: 0, buttY: 0 };
   let untilStart = 0;
@@ -196,7 +203,7 @@ export function startPhantoms(options: {
     while (waiting.length > 0) {
       const track = waiting.shift()!;
       if (!isPhantomNear(track.bounds, pose.x, pose.y)) continue;
-      view.play(track);
+      playback.play(track);
       const { min, max } = PHANTOM_PLAYBACK.stagger;
       untilStart = steps(min + (max - min) * random());
       return;
@@ -208,13 +215,13 @@ export function startPhantoms(options: {
     recorder?.step(simulation.placement, pose, simulation.rigGeometry.handleLength);
     for (const ask of sources) ask();
     untilStart--;
-    if (untilStart <= 0 && waiting.length > 0 && view.playing < PHANTOM_LOOK.figures) startNext();
+    if (untilStart <= 0 && waiting.length > 0 && playback.playing < PHANTOM_TIMING.figures) startNext();
   });
   return {
     dispose() {
       lifecycle.abort(new DOMException('The game closed.', 'AbortError'));
       unobserve();
-      view.clear();
+      game.view.removeLayer(playback);
     },
   };
 }

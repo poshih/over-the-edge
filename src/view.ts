@@ -1,9 +1,9 @@
 import {
-  ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry,
-  CanvasTexture, CircleGeometry, CylinderGeometry, DirectionalLight, Euler, ExtrudeGeometry,
-  Fog, Group, HemisphereLight, LatheGeometry, Line, LineDashedMaterial, MathUtils,
-  Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera, PerspectiveCamera,
-  Quaternion, RingGeometry, Scene, Shape, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
+  ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferGeometry,
+  CanvasTexture, CylinderGeometry, DirectionalLight, Euler,
+  Fog, Group, HemisphereLight, LatheGeometry, Line, MathUtils,
+  Matrix4, Mesh, MeshStandardMaterial, OrthographicCamera, PerspectiveCamera,
+  Quaternion, Scene, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry,
   Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D } from 'three';
@@ -47,13 +47,22 @@ import type { RigGeometry } from './rig';
 import { DEFAULT_HAMMER_HEAD, hammerHeadRadius } from './hammer-head';
 import type { HammerHead } from './hammer-head';
 import { LevelLooks } from './object-looks';
+import type { EnemyLook } from './object-looks';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
-import { EnemyView } from './enemy-view';
-import { clamp } from './math';
+import { PluginError } from './plugins/kernel';
+import { createCameraDirector, checkCameraAim, CAMERA } from './camera-director';
+import type { CameraAim, CameraDirector } from './camera-director';
+import { createBackdrop } from './backdrop';
+import type { Backdrop } from './backdrop';
+import { createAimMarks } from './aim-marks';
+import type { AimMarks } from './aim-marks';
+import { createSceneLayers } from './scene-layer';
+import type { SceneFrame, SceneLayer } from './scene-layer';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import type { DecorationView } from './decoration-view';
+import { Disposal } from './disposal';
 import { CharacterModelPool } from './character-model-pool';
 import type { CharacterModelLease } from './character-model-pool';
 import { SpriteRig } from './sprite-rig';
@@ -65,17 +74,11 @@ import type { RigTarget } from './skeleton-pose';
 import { DEFAULT_THEME } from './theme';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
+import { DEFAULT_ENEMY_ART } from './enemy-art-data';
 import type { ContentLoader } from './content-ref';
 import type { LibraryAvatarSettings, PartRole } from './model-library';
-// Plain data, so course scripts running in Node place scenery for the same framing.
-import VIEW_FRAME from './view-frame.json' with { type: 'json' };
 
 const VISUAL = {
-  viewHeight: VIEW_FRAME.viewHeight,
-  cameraLead: 0.9,
-  cameraLift: 1.15,
-  cameraMinimumY: 2.9,
-  cameraResponse: 3.5,
   // The orthographic camera's distance from the course plane (z = 0).
   depth: 20,
   // The depths either camera sees, from the course plane: in front of it and behind it.
@@ -83,25 +86,10 @@ const VISUAL = {
   // The deepest decoration's back, with room for its own depth.
   sceneBack: 1100,
   nearPlane: 0.1,
-  compactWidth: 680,
-  compactHeight: 580,
-  reachMargin: 0.5,
-  framingMargin: 0.2,
-  visibleGroundDepth: 1.3,
-  characterTop: 1.35,
   touchPixelsPerReach: 100,
 } as const;
-const POT_HALF_WIDTH = Math.max(...RIG.potVertices.map((point) => Math.abs(point.x)));
 // The brass sleeve near the start of each two-part hammer segment.
 const SLEEVE_INSET = 0.07;
-
-function polygonShape(vertices: readonly Point[]): Shape {
-  const shape = new Shape();
-  shape.moveTo(vertices[0].x, vertices[0].y);
-  for (const vertex of vertices.slice(1)) shape.lineTo(vertex.x, vertex.y);
-  shape.closePath();
-  return shape;
-}
 
 function solid(geometry: BoxGeometry | SphereGeometry | CylinderGeometry | LatheGeometry | TorusGeometry,
   material: MeshStandardMaterial, position: [number, number, number] = [0, 0, 0]): Mesh {
@@ -122,8 +110,6 @@ export interface CameraFraming extends Point {
   worldHeight: number;
 }
 
-export type ViewPass = 'course' | 'actors' | 'marks';
-
 // A preview that moves the character's whole presentation for a while: its body, pot and tool together, by `offset` in
 // the view's plane and turned about the player's root, over `duration` seconds of simulation time. Presentation only:
 // the camera, physics and overlays keep the simulation's frame. It ends early on a rewind, a restart or another preview.
@@ -139,15 +125,6 @@ export interface ImportedAvatarFacts {
   readonly model: AvatarMotionModel;
   readonly motions: readonly { readonly id: string; readonly claims: readonly number[] }[];
   jointWorld(index: number, out: Matrix4): Matrix4;
-}
-
-export interface ViewLayer {
-  readonly root: Object3D;
-  // `course` draws with the terrain; `actors` over it, with the characters; `marks` ignores depth and draws over
-  // the characters and their arms, under the tool (see GameView's passes).
-  readonly pass: ViewPass;
-  update: (frame: PhysicsFrame, arms: readonly ArmPose[]) => void;
-  dispose: () => void;
 }
 
 // A rendered avatar: the built-in skinned mesh, which builds its own frames from world arm poses,
@@ -293,10 +270,11 @@ function gripQuaternion(rotation: GripRotation): Quaternion | null {
 }
 
 function disposeResources(...roots: Object3D[]): void {
+  const disposal = new Disposal();
   const geometries = new Set<BufferGeometry>();
   const materials = new Set<Material>();
   const textures = new Set<CanvasTexture>();
-  for (const root of roots) root.traverse((object) => {
+  for (const root of roots) disposal.run(() => root.traverse((object) => {
     if (object instanceof Mesh || object instanceof Line || object instanceof Sprite) {
       if ('geometry' in object) geometries.add(object.geometry);
       for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
@@ -304,18 +282,19 @@ function disposeResources(...roots: Object3D[]): void {
         if ('map' in material && material.map instanceof CanvasTexture) textures.add(material.map);
       }
     }
-  });
-  for (const geometry of geometries) geometry.dispose();
-  for (const material of materials) material.dispose();
-  for (const texture of textures) texture.dispose();
+  }));
+  for (const geometry of geometries) disposal.run(() => geometry.dispose());
+  for (const material of materials) disposal.run(() => material.dispose());
+  for (const texture of textures) disposal.run(() => texture.dispose());
+  disposal.finish();
 }
 
 export class GameView {
   readonly canvas: HTMLCanvasElement;
   readonly terrain = new TerrainView();
-  readonly enemies: EnemyView;
+  readonly enemies: EnemyLook;
   readonly sprites: SpriteRig;
-  // How the level's flags, updrafts, bonfires, traps, projectiles and liquid pools look.
+  // How the level's flags, updrafts, bonfires, traps, projectiles, liquid pools and enemies look.
   private readonly looks: LevelLooks;
   private readonly renderer: WebGLRenderer;
   // Passes, each drawn over the last. The course: terrain, its artwork and the scenery behind the obstacle line.
@@ -326,6 +305,9 @@ export class GameView {
   // a 3D character's arms, so they never clip into its body, jar or head; the marks, which ignore depth and write
   // none (aim cursor and line, course labels, editor overlays); and last the foreground, the tool, which shares the
   // arms' depth so the hands hold it.
+  // The first part of the course pass. A separate render, without a depth clear before the rest of the course,
+  // guarantees that a backdrop draws first even when its root mixes opaque and transparent materials.
+  private readonly backdropScene = new Scene();
   private readonly course = new Scene();
   private readonly actors = new Scene();
   private readonly front = new Scene();
@@ -340,13 +322,24 @@ export class GameView {
   // shows it `worldHeight` tall, so the plane maps to the screen the same way in both.
   private camera: OrthographicCamera | PerspectiveCamera;
   private distance: number = VISUAL.depth;
-  private readonly scenery = new Group();
+  private readonly director: CameraDirector;
+  private readonly cameraPlugin: string | null;
+  private readonly cameraView = {
+    focus: { x: 0, y: 0 }, reach: { x: 0, y: 0 }, reachRadius: 0, maxReach: 0, width: 1, height: 1, dt: 0,
+  };
+  private readonly cameraAim: CameraAim = { x: 0, y: 0, worldHeight: 0 };
+  private readonly backdrop: Backdrop;
+  private readonly aimMarks: AimMarks;
   // Course labels.
   private readonly labels = new Group();
   // Null in a release whose level has no decorations; its shell then carries none of their code.
   readonly decorations: DecorationView | null;
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
-  private readonly layers = new Set<ViewLayer>();
+  private readonly layers = new Set<SceneLayer>();
+  private readonly updatingLayers = new Set<SceneLayer>();
+  private readonly sceneFrame: { -readonly [K in keyof SceneFrame]: SceneFrame[K] };
+  // Internal collision diagnostics read these after the player's arms are posed, outside the public layer contract.
+  private readonly posedArms: ArmPose[] = [];
   private readonly playerMeshes = new Map<string, Group>();
   private readonly torso = new Group();
   private readonly meshHead = new Group();
@@ -424,19 +417,13 @@ export class GameView {
   private readonly arms = new Map<ArmSide, Arm>();
   // The physical tool: origin at the butt, +X along the handle, in unscaled metres.
   private readonly toolFrame = new Matrix4();
-  private readonly cursor = new Group();
-  private readonly targetLine: Line;
-  private readonly targetPositions = new Float32Array(6);
   private readonly observer: ResizeObserver;
   private width = 1;
   private height = 1;
   // Zero until the first frustum update, which always runs.
   private worldHeight = 0;
-  private compact = false;
   private framing: CameraFraming | null = null;
   private labelDefinition: readonly LevelLabel[] | null = null;
-  private focus: Point;
-  private hammer: Point;
   private readonly projection = new Vector3();
   private readonly inverseBody = new Matrix4();
   private readonly avatarTool = new Matrix4();
@@ -454,10 +441,6 @@ export class GameView {
     readonly hemisphere: HemisphereLight[]; readonly ambient: AmbientLight[];
     readonly sun: DirectionalLight[]; readonly rim: DirectionalLight[];
   } = { hemisphere: [], ambient: [], sun: [], rim: [] };
-  private readonly mountains: Mesh<ExtrudeGeometry, MeshBasicMaterial>[] = [];
-  private readonly sunDisc: Mesh<CircleGeometry, MeshBasicMaterial>;
-  private readonly cursorMaterial: MeshBasicMaterial;
-  private readonly targetMaterial: LineDashedMaterial;
   private palette: Record<keyof GameTheme['character'], MeshStandardMaterial> | null = null;
   private themeWrites = 0;
 
@@ -476,85 +459,98 @@ export class GameView {
     this.canvas = canvas;
     this.characterModels = options.characterModels ?? null;
     this.avatarRigs = options.kinds.avatarRigs;
-    // Resolve and check plugin factories before creating a WebGL renderer or attaching any view listeners.
-    this.looks = new LevelLooks(options.plugins, level.objects);
     this.content = options.content;
     this.theme = options.theme ?? DEFAULT_THEME;
     const theme = this.theme;
     this.camera = theme.camera.perspective ? this.perspective : this.orthographic;
-    this.enemies = new EnemyView(options.enemyArt);
+    // Resolve and check plugin factories before creating a WebGL renderer or attaching any view listeners.
+    // A later factory failure frees every presentation object already made.
+    const created: { dispose(): void }[] = [];
+    let layers: readonly SceneLayer[];
+    try {
+      this.director = createCameraDirector(options.plugins);
+      this.cameraPlugin = options.plugins.owner(CAMERA);
+      this.looks = new LevelLooks(options.plugins, level.objects, options.enemyArt === undefined ? DEFAULT_ENEMY_ART : options.enemyArt);
+      created.push(this.looks);
+      this.enemies = this.looks.enemies;
+      this.backdrop = createBackdrop(options.plugins, theme);
+      created.push(this.backdrop);
+      this.aimMarks = createAimMarks(options.plugins, theme);
+      created.push(this.aimMarks);
+      layers = createSceneLayers(options.plugins);
+    } catch (error) {
+      for (let index = created.length - 1; index >= 0; index--) created[index]!.dispose();
+      this.terrain.dispose();
+      throw error;
+    }
     const root = this.part(initial, 'root');
     const head = this.part(initial, 'head');
-    this.focus = { x: root.x, y: root.y };
-    this.hammer = { x: head.x, y: head.y };
+    this.cameraView.focus.x = root.x;
+    this.cameraView.focus.y = root.y;
+    this.cameraView.reach.x = head.x;
+    this.cameraView.reach.y = head.y;
     this.rig = initial.rig;
-    this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = theme.exposure;
-    this.renderer.autoClear = false;
-    // Swinging axes keep the side of the obstacle line their pass draws.
-    this.renderer.localClippingEnabled = true;
-    this.renderer.info.autoReset = false;
-    this.renderer.setClearColor(theme.sky);
-    this.fog = new Fog(theme.fog.color);
-    // The marks are unlit; they only take the fog.
-    this.marks.fog = this.fog;
-    for (const pass of [this.course, this.actors, this.front, this.foreground]) {
-      pass.fog = this.fog;
-      const hemisphere = new HemisphereLight(theme.hemisphere.sky, theme.hemisphere.ground, theme.hemisphere.intensity);
-      const ambient = new AmbientLight(theme.ambient.color, theme.ambient.intensity);
-      const sunlight = new DirectionalLight(theme.sun.color, theme.sun.intensity);
-      sunlight.position.set(-5, 12, 10);
-      const rimLight = new DirectionalLight(theme.rim.color, theme.rim.intensity);
-      rimLight.position.set(8, 3, -4);
-      // The actors' lights also light their arms, which draw in a pass of their own.
-      if (pass === this.actors) for (const light of [hemisphere, ambient, sunlight, rimLight]) light.layers.enable(ARM_LAYER);
-      pass.add(hemisphere, ambient, sunlight, rimLight);
-      this.lights.hemisphere.push(hemisphere);
-      this.lights.ambient.push(ambient);
-      this.lights.sun.push(sunlight);
-      this.lights.rim.push(rimLight);
-    }
-    this.sunDisc = new Mesh(new CircleGeometry(1.8, 48), new MeshBasicMaterial({ color: theme.sunDisc.color, fog: false }));
-    this.buildScenery();
-    this.decorations = options.decorations?.() ?? null;
-    this.decorations?.setObjects(level.objects);
-    this.course.add(this.terrain.root);
-    this.actors.add(this.enemies.root);
-    for (const passes of this.looks.passes()) {
-      if (passes.course !== undefined) this.course.add(passes.course);
-      if (passes.actors !== undefined) this.actors.add(passes.actors);
-      if (passes.front !== undefined) this.front.add(passes.front);
-    }
-    this.marks.add(this.labels);
-    if (this.decorations !== null) {
-      this.course.add(this.decorations.root);
-      this.front.add(this.decorations.front);
-    }
-    this.setLabels(level.labels);
-    this.buildPlayer();
-    this.sprites = this.createSlot().rig;
+    this.sceneFrame = { time: initial.time, parts: initial.parts, cursor: initial.cursor, enemies: initial.enemies, rig: initial.rig };
+    // Keep unmounted runtime layers owned too, if subsequent renderer/player construction fails.
+    for (const layer of layers) this.layers.add(layer);
+    try {
+      this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.toneMapping = ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = theme.exposure;
+      this.renderer.autoClear = false;
+      // Swinging axes keep the side of the obstacle line their pass draws.
+      this.renderer.localClippingEnabled = true;
+      this.renderer.info.autoReset = false;
+      this.renderer.setClearColor(theme.sky);
+      this.fog = new Fog(theme.fog.color);
+      // The marks are unlit; they only take the fog.
+      this.marks.fog = this.fog;
+      for (const pass of [this.backdropScene, this.course, this.actors, this.front, this.foreground]) {
+        pass.fog = this.fog;
+        const hemisphere = new HemisphereLight(theme.hemisphere.sky, theme.hemisphere.ground, theme.hemisphere.intensity);
+        const ambient = new AmbientLight(theme.ambient.color, theme.ambient.intensity);
+        const sunlight = new DirectionalLight(theme.sun.color, theme.sun.intensity);
+        sunlight.position.set(-5, 12, 10);
+        const rimLight = new DirectionalLight(theme.rim.color, theme.rim.intensity);
+        rimLight.position.set(8, 3, -4);
+        // The actors' lights also light their arms, which draw in a pass of their own.
+        if (pass === this.actors) for (const light of [hemisphere, ambient, sunlight, rimLight]) light.layers.enable(ARM_LAYER);
+        pass.add(hemisphere, ambient, sunlight, rimLight);
+        this.lights.hemisphere.push(hemisphere);
+        this.lights.ambient.push(ambient);
+        this.lights.sun.push(sunlight);
+        this.lights.rim.push(rimLight);
+      }
+      this.backdropScene.add(this.backdrop.root);
+      this.decorations = options.decorations?.() ?? null;
+      this.decorations?.setObjects(level.objects);
+      this.course.add(this.terrain.root);
+      for (const passes of this.looks.passes()) {
+        if (passes.course !== undefined) this.course.add(passes.course);
+        if (passes.actors !== undefined) this.actors.add(passes.actors);
+        if (passes.front !== undefined) this.front.add(passes.front);
+      }
+      this.marks.add(this.labels);
+      if (this.decorations !== null) {
+        this.course.add(this.decorations.root);
+        this.front.add(this.decorations.front);
+      }
+      this.setLabels(level.labels);
+      this.buildPlayer();
+      this.sprites = this.createSlot().rig;
 
-    const cursorMaterial = new MeshBasicMaterial({ color: theme.aim.cursor, transparent: true, opacity: 0.9, depthTest: false });
-    this.cursorMaterial = cursorMaterial;
-    this.cursor.add(new Mesh(new RingGeometry(0.075, 0.09, 24), cursorMaterial));
-    this.cursor.add(new Mesh(new CircleGeometry(0.018, 12), cursorMaterial));
-    this.cursor.renderOrder = 20;
-    this.marks.add(this.cursor);
-    const targetGeometry = new BufferGeometry();
-    targetGeometry.setAttribute('position', new BufferAttribute(this.targetPositions, 3));
-    this.targetMaterial = new LineDashedMaterial({
-      color: theme.aim.line, transparent: true, opacity: 0.45, dashSize: 0.07, gapSize: 0.05, depthTest: false,
-    });
-    this.targetLine = new Line(targetGeometry, this.targetMaterial);
-    this.targetLine.frustumCulled = false;
-    this.marks.add(this.targetLine);
+      this.marks.add(this.aimMarks.root);
+      for (const layer of layers) this.addLayer(layer);
 
-    this.observer = new ResizeObserver(() => this.resize());
-    this.observer.observe(canvas);
-    this.resize();
-    this.recenter(initial);
+      this.observer = new ResizeObserver(() => this.resize());
+      this.observer.observe(canvas);
+      this.resize();
+      this.recenter(initial);
+    } catch (error) {
+      this.dispose();
+      throw error;
+    }
   }
 
   get visuals(): ReadonlyMap<VisualPartId, VisualBinding> {
@@ -584,32 +580,32 @@ export class GameView {
         light.intensity = setting.intensity;
       }
     }
-    this.sunDisc.visible = theme.sunDisc.visible;
-    this.sunDisc.material.color.set(theme.sunDisc.color);
-    const backdrop = [theme.backdrop.far, theme.backdrop.middle, theme.backdrop.near];
-    for (const [index, mountains] of this.mountains.entries()) {
-      mountains.visible = theme.backdrop.visible;
-      mountains.material.color.set(backdrop[index]!);
-    }
-    this.cursorMaterial.color.set(theme.aim.cursor);
-    this.targetMaterial.color.set(theme.aim.line);
+    this.backdrop.setTheme(theme);
+    this.aimMarks.setTheme(theme);
     if (this.palette !== null) {
       for (const key of Object.keys(this.palette) as (keyof GameTheme['character'])[]) this.palette[key].color.set(theme.character[key]);
     }
   }
 
-  addLayer(layer: ViewLayer): void {
+  addLayer(layer: SceneLayer): void {
     this.layers.add(layer);
-    const passes: Readonly<Record<ViewPass, Scene>> = { course: this.course, actors: this.actors, marks: this.marks };
-    passes[layer.pass].add(layer.root);
+    if (layer.update !== undefined) this.updatingLayers.add(layer);
+    const pass = layer.pass === 'course' ? this.course : layer.pass === 'actors' ? this.actors : this.marks;
+    pass.add(layer.root);
   }
 
   // Removes a layer added with addLayer() and disposes it.
-  removeLayer(layer: ViewLayer): void {
+  removeLayer(layer: SceneLayer): void {
     if (!this.layers.delete(layer)) return;
+    this.updatingLayers.delete(layer);
     layer.root.removeFromParent();
-    layer.dispose();
+    layer.dispose?.();
   }
+
+  // The current rig's read-only geometry, for a layer's initial state before its first drawn frame.
+  get rigGeometry(): RigGeometry { return this.rig; }
+
+  armPoses(): readonly ArmPose[] { return this.posedArms; }
 
   // Adds the release's second character profile; only the active profile renders and updates.
   createAlternateCharacter(): SpriteRig {
@@ -655,13 +651,15 @@ export class GameView {
 
   // Cancels and releases every profile, for example when the game stops.
   disposeCharacters(): void {
+    const disposal = new Disposal();
     for (const slot of this.slots) {
       // Disposing the rig commits the default presentation, which releases every committed view
       // lease; the pool then aborts anything still in flight and disposes anything left.
-      slot.rig.dispose();
-      slot.pool.dispose();
+      disposal.run(() => slot.rig.dispose());
+      disposal.run(() => slot.pool.dispose());
     }
-    for (const role of ['avatar', 'hammer', 'pot'] as const) this.disposePart(role);
+    for (const role of ['avatar', 'hammer', 'pot'] as const) disposal.run(() => this.disposePart(role));
+    disposal.finish();
   }
 
   private createSlot(): CharacterSlot {
@@ -859,10 +857,13 @@ export class GameView {
   private disposePart(role: PartRole): void {
     const part = this.parts[role];
     if (part === null) return;
-    part.view.root.removeFromParent();
-    part.view.dispose();
-    if (role === 'hammer') this.parts.hammer!.fit.dispose();
+    const fit = role === 'hammer' ? this.parts.hammer!.fit : null;
     this.parts[role] = null;
+    const disposal = new Disposal();
+    disposal.run(() => part.view.root.removeFromParent());
+    disposal.run(() => part.view.dispose());
+    disposal.run(() => fit?.dispose());
+    disposal.finish();
   }
 
   // A single-flight acquisition of one model for an operation. The lease is registered before the
@@ -1082,20 +1083,15 @@ export class GameView {
     // The camera follows the simulation; the character draws where a presentation preview moves it.
     const focus = this.part(physics, 'root');
     const reach = this.part(physics, 'head');
-    this.focus = { x: focus.x, y: focus.y };
-    this.hammer = { x: reach.x, y: reach.y };
+    this.cameraView.focus.x = focus.x;
+    this.cameraView.focus.y = focus.y;
+    this.cameraView.reach.x = reach.x;
+    this.cameraView.reach.y = reach.y;
     const frame = this.presentedFrame(physics);
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
-    this.updateFrustum();
-    const target = this.cameraTarget();
-    const blend = this.framing === null ? 1 - Math.exp(-VISUAL.cameraResponse * options.dt) : 1;
-    this.camera.position.x += (target.x - this.camera.position.x) * blend;
-    this.camera.position.y += (target.y - this.camera.position.y) * blend;
-    this.keepRigVisible();
-    this.camera.updateMatrixWorld();
-    this.scenery.position.x = this.camera.position.x * 0.6;
-    this.scenery.position.y = this.camera.position.y * 0.25;
+    this.updateCamera(options.dt, false);
+    this.backdrop.follow(this.cameraAim);
     for (const part of frame.parts) {
       const mesh = this.playerMeshes.get(part.id);
       if (!mesh) continue;
@@ -1138,7 +1134,6 @@ export class GameView {
     this.headOffset.copy(this.headPivot).applyQuaternion(this.headAim.rotation).negate().add(this.headPivot);
     this.meshHead.matrix.makeRotationFromQuaternion(this.headAim.rotation).setPosition(this.headOffset);
     this.meshHead.matrixWorldNeedsUpdate = true;
-    this.cursor.position.set(frame.cursor.x, frame.cursor.y, 1);
     this.customShaft.position.set(shaftCenter.x, shaftCenter.y, this.toolDepth);
     this.customShaft.rotation.z = shaftAngle;
     this.customShaft.scale.x = shaftLength / SHAFT_ARTWORK_LENGTH;
@@ -1169,16 +1164,22 @@ export class GameView {
     spriteAim.x = aim.x * turnCos + aim.y * turnSin;
     spriteAim.y = aim.y * turnCos - aim.x * turnSin;
     this.slots[this.activeSlot]!.rig.update({ time: frame.time, dt: options.dt, aim: spriteAim, targets: this.spriteTargets });
-    this.targetPositions.set([tip.x, tip.y, 0.8, frame.cursor.x, frame.cursor.y, 0.8]);
-    this.targetLine.geometry.attributes.position.needsUpdate = true;
-    this.targetLine.computeLineDistances();
+    this.aimMarks.update(tip, frame.cursor);
     this.terrain.update(frame.time);
     this.decorations?.update();
-    this.looks.update(frame.time, frame.projectiles);
-    this.enemies.update(frame.enemies, frame.time);
-    for (const layer of this.layers) layer.update(physics, armPoses);
+    this.looks.update(frame.time, frame.projectiles, frame.enemies);
+    if (this.updatingLayers.size > 0) {
+      const shown = this.sceneFrame;
+      shown.time = physics.time;
+      shown.parts = physics.parts;
+      shown.cursor = physics.cursor;
+      shown.enemies = physics.enemies;
+      shown.rig = physics.rig;
+      for (const layer of this.updatingLayers) layer.update!(shown);
+    }
     this.renderer.info.reset();
     this.renderer.clear();
+    if (this.backdrop.root.visible) this.renderer.render(this.backdropScene, this.camera);
     this.renderer.render(this.course, this.camera);
     // The course's colliders reach toward the camera, so the actors draw over them with depth of their own.
     this.renderer.clearDepth();
@@ -1215,9 +1216,10 @@ export class GameView {
     const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
     this.syncHead(tip.vertices);
-    this.focus = { x: root.x, y: root.y };
-    this.hammer = { x: tip.x, y: tip.y };
-    this.updateFrustum();
+    this.cameraView.focus.x = root.x;
+    this.cameraView.focus.y = root.y;
+    this.cameraView.reach.x = tip.x;
+    this.cameraView.reach.y = tip.y;
     this.snapCamera();
   }
 
@@ -1246,12 +1248,40 @@ export class GameView {
   }
 
   private snapCamera(): void {
-    const target = this.cameraTarget();
-    this.camera.position.set(target.x, target.y, this.distance);
-    this.keepRigVisible();
+    this.updateCamera(0, true);
+  }
+
+  private updateCamera(dt: number, snap: boolean): void {
+    const view = this.cameraView;
+    view.reachRadius = this.hammerRadius;
+    view.maxReach = this.rig.maxReach;
+    view.width = this.width;
+    view.height = this.height;
+    view.dt = dt;
+    const aim = this.cameraAim;
+    aim.x = this.camera.position.x;
+    aim.y = this.camera.position.y;
+    aim.worldHeight = this.worldHeight;
+    if (this.framing !== null) {
+      aim.x = this.framing.x;
+      aim.y = this.framing.y;
+      aim.worldHeight = this.framing.worldHeight;
+    } else {
+      try {
+        if (snap) this.director.snap(view, aim);
+        else this.director.aim(view, aim);
+      } catch (error) {
+        throw new PluginError('plugin-failed', `Plugin "${this.cameraPlugin ?? 'engine'}" failed directing "${CAMERA.id}".`,
+          this.cameraPlugin, CAMERA.id, { cause: error });
+      }
+      checkCameraAim(aim, this.cameraPlugin);
+    }
+    this.updateFrustum();
+    this.camera.position.set(aim.x, aim.y, this.distance);
     this.camera.updateMatrixWorld();
   }
 
+  // Mouse gain follows the director's worldHeight; touch gain stays reach-based and independent of zoom.
   pointerDelta(pixels: Point, sensitivity: number, mode: InputMode): Point {
     const scale = (mode === 'touch' ? this.rig.maxReach / VISUAL.touchPixelsPerReach :
       this.worldHeight / this.height) * sensitivity;
@@ -1306,7 +1336,6 @@ export class GameView {
       throw new Error('Camera framing must have finite coordinates and a positive height.');
     }
     this.framing = framing === null ? null : { ...framing };
-    this.updateFrustum();
     this.snapCamera();
   }
 
@@ -1321,7 +1350,7 @@ export class GameView {
       terrain: this.terrain.inspect(),
       decorations: this.decorations?.inspect() ?? null,
       looks: this.looks.inspect(),
-      enemies: this.enemies.inspect(),
+      enemies: this.enemies.inspect?.() ?? null,
       sprites: this.sprites.inspect(),
       headAim: { rotation: this.headAim.rotation.toArray() },
       avatar: this.avatar === null ? null : { ...this.avatar.inspect(), visible: this.avatar.root.visible },
@@ -1334,6 +1363,7 @@ export class GameView {
       potModel: this.propModels.pot === null ? null : this.propModels.pot.inspect(),
       theme: { writes: this.themeWrites, sky: this.theme.sky, fog: { ...this.theme.fog }, backdrop: this.theme.backdrop.visible },
       camera: {
+        ...this.cameraState(),
         perspective: this.camera === this.perspective, fieldOfView: this.perspective.fov, distance: this.distance,
         near: this.camera.near, far: this.camera.far, fog: { near: this.fog.near, far: this.fog.far },
       },
@@ -1357,26 +1387,36 @@ export class GameView {
   cameraState() {
     return {
       x: this.camera.position.x, y: this.camera.position.y, width: this.width, height: this.height,
-      worldHeight: this.worldHeight, compact: this.compact,
+      worldHeight: this.worldHeight, director: this.director.inspect?.() ?? null,
     };
   }
 
   dispose(): void {
-    this.observer.disconnect();
-    this.disposeCharacters();
-    this.avatar?.root.removeFromParent();
-    this.avatar?.dispose();
+    const disposal = new Disposal();
+    disposal.run(() => this.observer?.disconnect());
+    disposal.run(() => this.disposeCharacters());
+    const avatar = this.avatar;
     this.avatar = null;
-    this.terrain.root.removeFromParent();
-    this.terrain.dispose();
-    this.decorations?.dispose();
-    this.looks.dispose();
-    this.enemies.dispose();
-    for (const layer of this.layers) { layer.root.removeFromParent(); layer.dispose(); }
+    disposal.run(() => avatar?.root.removeFromParent());
+    disposal.run(() => avatar?.dispose());
+    disposal.run(() => this.terrain.root.removeFromParent());
+    disposal.run(() => this.terrain.dispose());
+    disposal.run(() => this.decorations?.dispose());
+    disposal.run(() => this.looks.dispose());
+    disposal.run(() => this.backdrop.root.removeFromParent());
+    disposal.run(() => this.backdrop.dispose());
+    disposal.run(() => this.aimMarks.root.removeFromParent());
+    disposal.run(() => this.aimMarks.dispose());
+    for (const layer of this.layers) {
+      disposal.run(() => layer.root.removeFromParent());
+      disposal.run(() => layer.dispose?.());
+    }
     this.layers.clear();
-    disposeResources(this.course, this.actors, this.front, this.marks, this.foreground);
+    this.updatingLayers.clear();
+    disposal.run(() => disposeResources(this.backdropScene, this.course, this.actors, this.front, this.marks, this.foreground));
     this.bindings.clear();
-    this.renderer.dispose();
+    disposal.run(() => this.renderer?.dispose());
+    disposal.finish();
   }
 
   private resize(): void {
@@ -1384,30 +1424,13 @@ export class GameView {
     if (rect.width <= 0 || rect.height <= 0) throw new Error('The game canvas must have a visible size.');
     this.width = rect.width;
     this.height = rect.height;
-    this.updateFrustum();
     this.snapCamera();
     this.renderer.setSize(this.width, this.height, false);
   }
 
-  private framingBounds() {
-    return {
-      minX: Math.min(this.focus.x - POT_HALF_WIDTH, this.hammer.x - this.hammerRadius),
-      maxX: Math.max(this.focus.x + POT_HALF_WIDTH, this.hammer.x + this.hammerRadius),
-      minY: Math.min(this.focus.y + RIG.potBottom, this.hammer.y - this.hammerRadius),
-      maxY: Math.max(this.focus.y + VISUAL.characterTop, this.hammer.y + this.hammerRadius),
-    };
-  }
-
   private updateFrustum(): void {
     const aspect = this.width / this.height;
-    this.compact = this.width < VISUAL.compactWidth || this.height < VISUAL.compactHeight || aspect < 1;
-    const bounds = this.framingBounds();
-    const span = 2 * (this.rig.maxReach + VISUAL.reachMargin);
-    const padding = 2 * VISUAL.framingMargin;
-    const worldHeight = this.framing !== null ? this.framing.worldHeight : this.compact ? Math.max(
-      span, span / aspect, bounds.maxY - bounds.minY + padding,
-      (bounds.maxX - bounds.minX + padding) / aspect,
-    ) : VISUAL.viewHeight;
+    const worldHeight = this.cameraAim.worldHeight;
     const halfHeight = worldHeight / 2;
     const halfWidth = halfHeight * aspect;
     const { perspective, fieldOfView } = this.theme.camera;
@@ -1449,27 +1472,6 @@ export class GameView {
     return { halfWidth: halfHeight * this.width / this.height, halfHeight };
   }
 
-  private cameraTarget(): Point {
-    if (this.framing !== null) return this.framing;
-    return this.compact ? {
-      x: this.focus.x + RIG.shoulder.x,
-      y: Math.max(this.focus.y + RIG.shoulder.y, this.worldHeight / 2 - VISUAL.visibleGroundDepth),
-    } : {
-      x: this.focus.x + VISUAL.cameraLead,
-      y: Math.max(VISUAL.cameraMinimumY, this.focus.y + VISUAL.cameraLift),
-    };
-  }
-
-  private keepRigVisible(): void {
-    if (!this.compact || this.framing !== null) return;
-    const bounds = this.framingBounds();
-    const { halfWidth, halfHeight } = this.halfExtents();
-    this.camera.position.x = clamp(this.camera.position.x,
-      bounds.maxX + VISUAL.framingMargin - halfWidth, bounds.minX - VISUAL.framingMargin + halfWidth);
-    this.camera.position.y = clamp(this.camera.position.y,
-      bounds.maxY + VISUAL.framingMargin - halfHeight, bounds.minY - VISUAL.framingMargin + halfHeight);
-  }
-
   // Whether anything draws in front of the obstacle line, over the actors.
   private drawsFront(): boolean {
     return (this.decorations !== null && this.decorations.front.children.length > 0) || this.looks.drawsFront();
@@ -1492,34 +1494,6 @@ export class GameView {
     disposeResources(this.labels);
     this.labels.clear();
     for (const label of labels) this.addLabel(label.text, label);
-  }
-
-  private buildScenery(): void {
-    const { backdrop } = this.theme;
-    const layers = [
-      { color: backdrop.far, z: -24, base: -5, height: 14 },
-      { color: backdrop.middle, z: -16, base: -6, height: 11 },
-      { color: backdrop.near, z: -10, base: -8, height: 9 },
-    ];
-    for (const [layerIndex, layer] of layers.entries()) {
-      const vertices: Point[] = [{ x: -70, y: layer.base }, { x: 70, y: layer.base }];
-      for (let index = 20; index >= 0; index--) {
-        vertices.push({
-          x: -70 + index * 7,
-          y: layer.base + layer.height * (0.55 + 0.23 * Math.sin(index * 1.7 + layerIndex) + 0.22 * Math.cos(index * 0.71)),
-        });
-      }
-      const mountains = new Mesh(new ExtrudeGeometry(polygonShape(vertices), { depth: 0.1, bevelEnabled: false }),
-        new MeshBasicMaterial({ color: layer.color }));
-      mountains.position.z = layer.z;
-      mountains.visible = backdrop.visible;
-      this.mountains.push(mountains);
-      this.scenery.add(mountains);
-    }
-    this.sunDisc.position.set(-4.2, 8, -35);
-    this.sunDisc.visible = this.theme.sunDisc.visible;
-    this.scenery.add(this.sunDisc);
-    this.course.add(this.scenery);
   }
 
   private buildPlayer(): void {
@@ -1656,7 +1630,6 @@ export class GameView {
     this.layoutShaft();
     for (const slot of this.slots) slot.props.hammer?.fit?.setHandleLength(this.rig.handleLength);
     this.parts.hammer?.fit.setHandleLength(this.rig.handleLength);
-    this.updateFrustum();
   }
 
   private layoutShaft(): void {
@@ -1696,7 +1669,8 @@ export class GameView {
       projectGripShoulder(shoulder, butt, shaftAxis, lengths.upper + lengths.forearm, this.gripShoulders[side]);
     }
     this.gripHold.place(this.grips, this.gripShoulders, shaftLength, this.headMargin, this.gripDistances);
-    const poses: ArmPose[] = [];
+    const poses = this.posedArms;
+    poses.length = 0;
     for (const side of ARM_SIDES) {
       const arm = this.arms.get(side);
       if (!arm) throw new Error(`Missing visual arm: ${side}`);

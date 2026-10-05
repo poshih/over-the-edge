@@ -1,8 +1,9 @@
 # Runtime plugins
 
-A plugin's **runtime facet** changes what play shows: the HUD's readouts and the looks of the
-level's objects. It runs wherever the game plays: in the Workshop's play-test, in studio previews
-and in releases, so a game sees its own HUD and looks while it is authored. Its SDK is
+A plugin's **runtime facet** changes what play shows: the HUD's readouts, camera following,
+backdrop, aim marks, object, enemy and phantom looks, and scene layers of its own. It runs
+wherever the game plays: in the Workshop's play-test, in studio previews and in releases, so a
+game sees its own presentation while it is authored. Its SDK is
 [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts). [Plugins](plugins.md) describes the
 manifest, points and verbs.
 
@@ -128,13 +129,361 @@ to one of the engine's looks rather than draw it anew, [wrap](#wrapping-a-defaul
 
 The [complete example](#complete-example) draws projectiles as glowing orbs.
 
+### Pass rules for presentation points
+
+The engine keeps the renderer and the pass sequence. Each pass draws over the last:
+
+1. **Course:** backdrop first, then terrain, its artwork, decorations behind the obstacle line
+   and looks' course roots.
+2. **Actors**, with depth cleared: characters, enemies and phantoms, never hidden by colliders.
+3. **Front**, with depth cleared, only while something shows there: decorations on or in front
+   of the obstacle line, axes swung toward the camera and the front of liquid pools.
+4. A 3D player's **arms** (`ARM_LAYER`), with depth cleared, over its body, jar and head.
+5. **Marks**, ignoring depth, over the arms.
+6. The **tool**, sharing the arms' depth, over the marks so the hands hold it.
+
+Everything that collides is centred on `OBSTACLE_LINE`, z = 0: terrain reaches half its depth
+each side, and the pot and enemies stand there. Do not move collider visuals away from it.
+Decorations never collide; a prop standing on a collider stays within that collider's depth.
+New 3D player-arm visuals use `ARM_LAYER`. Every marks material must use `depthTest: false`,
+leaving the depth shared by arms and tool alone; `depthWrite: false` may make that intent
+explicit too. The SDK exports `OBSTACLE_LINE` and `ARM_LAYER`.
+
+## Camera director
+
+`CAMERA`, the slot `camera.director`, holds a `CameraDirectorFactory`, `() => CameraDirector`:
+
+```ts
+interface CameraDirector {
+  aim(view: CameraView, out: CameraAim): void;
+  snap(view: CameraView, out: CameraAim): void;
+  inspect?(): unknown;
+}
+interface CameraAim { x: number; y: number; worldHeight: number }
+```
+
+`CameraView` is reused and read-only:
+
+| Field | Meaning |
+| --- | --- |
+| `focus` | The pot root, `{ x, y }`, in metres on the obstacle line |
+| `reach` | The hammer head's centre on that same plane |
+| `reachRadius` | The head's collision radius in metres |
+| `maxReach` | The rig's maximum reach in metres |
+| `width`, `height` | Canvas size in CSS pixels |
+| `dt` | The drawn frame's elapsed real seconds |
+
+`out` holds the current aim on entry. Write the next coordinates and a finite, positive
+`worldHeight` in place; allocate nothing in either method. `aim` runs each drawn frame, and
+`snap` on a resize, a recenter or a player placed anew. `DEFAULT_CAMERA_DIRECTOR` preserves the
+engine's full/compact framing, exponential follow and compact keep-the-rig-visible clamp.
+The engine still owns the theme's perspective/FOV or orthographic projection, near/far, fog,
+matrices and the [pass sequence](#pass-rules-for-presentation-points).
+
+The Workshop's `setFraming` override bypasses both director methods; returning to play snaps
+through the director again. Diagnostics report the current aim and `director.inspect()`, which
+reports `{ compact }` for the default. The input is the simulation, not a temporary character
+presentation preview.
+
+**Input coupling:** mouse `pointerDelta` uses the resulting `worldHeight / height` to turn
+pixels into metres. A wider framing also increases mouse gain. Touch gain remains based on
+`maxReach`, independent of zoom.
+
+For example, wrap the current director to show ten percent more height:
+
+```ts
+import { CAMERA, defineRuntime, wrap } from '../../src/plugins/runtime-sdk';
+import type { CameraAim, CameraView } from '../../src/plugins/runtime-sdk';
+
+export default defineRuntime({
+  start() {
+    return [wrap(CAMERA, previous => () => {
+      const director = previous();
+      return {
+        aim(view: CameraView, out: CameraAim) {
+          director.aim(view, out);
+          out.worldHeight *= 1.1;
+        },
+        snap(view: CameraView, out: CameraAim) {
+          director.snap(view, out);
+          out.worldHeight *= 1.1;
+        },
+        inspect: () => director.inspect?.(),
+      };
+    })];
+  },
+});
+```
+
+## Backdrop
+
+`BACKDROP`, the slot `scene.backdrop`, holds a `BackdropFactory`, `(theme: GameTheme) => Backdrop`:
+
+```ts
+interface Backdrop {
+  readonly root: Object3D;
+  setTheme(theme: GameTheme): void;
+  follow(camera: Readonly<Point>): void;
+  dispose(): void;
+}
+```
+
+The game creates one backdrop, draws its root first in the **course** pass and detaches it before
+`dispose`. It renders before the rest of the course without clearing depth between them, so
+three.js's opaque/transparent sorting cannot put it later. `DEFAULT_BACKDROP` is the engine's
+mountains and sun disc, at their original depths and colours. `setTheme` restyles them in place.
+`follow` runs each drawn frame with the reused,
+read-only camera aim; the default parallax is `(camera.x * 0.6, camera.y * 0.25)`.
+Hide `root.visible` when the backdrop shows nothing, so the engine skips its render. The default
+does this when both the mountains and sun disc are hidden, in its constructor and on theme changes.
+Build geometry and materials once, never retain the camera as a snapshot and allocate nothing
+in `follow`. A backdrop is scenery, never a collider, and stays behind the actors; the engine
+keeps the sky clear colour, lighting, fog and [pass rules](#pass-rules-for-presentation-points).
+
+This wrapper slows horizontal parallax while keeping the current backdrop and its theming:
+
+```ts
+import { BACKDROP, defineRuntime, wrap } from '../../src/plugins/runtime-sdk';
+import type { Backdrop } from '../../src/plugins/runtime-sdk';
+
+export default defineRuntime({
+  start() {
+    return [wrap(BACKDROP, previous => (theme): Backdrop => {
+      const backdrop = previous(theme);
+      return {
+        root: backdrop.root,
+        setTheme: theme => backdrop.setTheme(theme),
+        follow(camera) {
+          backdrop.follow(camera);
+          backdrop.root.position.x = camera.x * 0.4;
+        },
+        dispose: () => backdrop.dispose(),
+      };
+    })];
+  },
+});
+```
+
+## Aim marks
+
+`AIM_MARKS`, the slot `scene.aim-marks`, holds an `AimMarksFactory`,
+`(theme: GameTheme) => AimMarks`:
+
+```ts
+interface AimMarks {
+  readonly root: Object3D;
+  setTheme(theme: GameTheme): void;
+  update(tip: Readonly<Point>, cursor: Readonly<Point>): void;
+  dispose(): void;
+}
+```
+
+The root draws in **marks**, over the characters and their arms, under the tool.
+**All its materials must ignore depth (`depthTest: false`), leaving the arms/tool depth
+alone**, as the [pass rules](#pass-rules-for-presentation-points) require. This point changes
+drawing only, never aiming or input. `DEFAULT_AIM_MARKS` is the original ring and centre dot
+and dashed line from the hammer tip to the cursor, recoloured from `theme.aim`. It reuses both
+position and line-distance attributes. `update` receives borrowed, read-only points each drawn
+frame, including a character presentation preview's movement. Reuse geometry, materials and
+scratch; allocate nothing per frame. The engine detaches the root before `dispose`.
+
+For a dot without the line:
+
+```ts
+import { CircleGeometry, Mesh, MeshBasicMaterial } from 'three';
+import { AIM_MARKS, defineRuntime, replace } from '../../src/plugins/runtime-sdk';
+import type { AimMarksFactory } from '../../src/plugins/runtime-sdk';
+
+const dot: AimMarksFactory = theme => {
+  const mesh = new Mesh(new CircleGeometry(0.09, 24),
+    new MeshBasicMaterial({ color: theme.aim.cursor, depthTest: false, depthWrite: false }));
+  return {
+    root: mesh,
+    setTheme(theme) { mesh.material.color.set(theme.aim.cursor); },
+    update(_tip, cursor) { mesh.position.set(cursor.x, cursor.y, 1); },
+    dispose() { mesh.geometry.dispose(); mesh.material.dispose(); },
+  };
+};
+
+export default defineRuntime({ start: () => [replace(AIM_MARKS, dot)] });
+```
+
+## Enemy looks
+
+`LOOKS.enemies`, the slot `looks.enemies`, holds an `EnemyLookFactory`,
+`(art: EnemyArtSettings) => EnemyLook`:
+
+```ts
+interface EnemyLook {
+  readonly passes: LookPasses;
+  apply(event: EnemyEvent): void;
+  update(poses: readonly EnemyPose[], time: number): void;
+  setArt(art: EnemyArtSettings): void;
+  dispose(): void;
+  inspect?(): unknown;
+}
+```
+
+`DEFAULT_LOOKS.enemies` creates `EnemyView`, the engine's shared atlas and instanced sprites,
+including animation, windup, hurt and death effects. The game forwards simulation membership
+events to `apply`: `reset` with every pose, `upsert` with one pose and `remove` with an ID.
+`update` receives only the active poses and simulation seconds, **only while the level has
+enemies**; sleeping sprites remain from `apply`. `setArt` receives the project's pixel-art
+settings when they change. `inspect`, optional, appears in the rendering diagnostics' `enemies`.
+
+Collider visuals stand on `OBSTACLE_LINE` and draw in **actors**, never hidden by terrain.
+`passes.course` and `passes.front` may add scenery behind or in front of them, following
+`LookPasses` and the [pass rules](#pass-rules-for-presentation-points); hide an empty front.
+Keep membership changes incremental, batch/shared geometry and materials, reuse scratch and
+allocate nothing in `update`. The look draws only: species, collision, hits and decisions stay
+the engine's. The SDK exports `EnemyEvent`, `EnemyPose`, `EnemyArtSettings`, `ENEMY_SPECS`,
+`ENEMY_LIMITS`, `ENEMY_DIRECTION` and `ENEMY_BEHAVIOR`. Pass roots are detached before disposal.
+
+A game's own aggregate sprite renderer can replace it without replacing any object look:
+
+```ts
+import { defineRuntime, LOOKS, replace } from '../../src/plugins/runtime-sdk';
+import type { EnemyLookFactory } from '../../src/plugins/runtime-sdk';
+import { enemySprites } from './enemy-sprites';
+
+const enemies: EnemyLookFactory = art => enemySprites(art);
+export default defineRuntime({ start: () => [replace(LOOKS.enemies, enemies)] });
+```
+
+## Phantom looks
+
+`LOOKS.phantoms`, the slot `looks.phantoms`, holds a `PhantomLookFactory`,
+`(options: { readonly figures: number }) => PhantomLook`:
+
+```ts
+interface PhantomLook {
+  readonly root: Object3D;
+  draw(figures: readonly PhantomFigureFrame[], head: HammerHead): void;
+  dispose(): void;
+}
+```
+
+The factory is resolved once per runtime session when a phantom consumer starts. Only those
+consumers import playback and the default drawing: a release with neither a phantom backend
+nor bundled recordings includes neither. The runtime catalogue still lists `LOOKS.phantoms`,
+without importing its implementation. A look is created with a fixed slot count: up to three
+playing figures plus a held slot in releases, or just a held slot for the Workshop's replay
+viewer. `PhantomPlayback` owns which recordings play, sampling, timing, fades, `hold` and
+`clear`; the look only draws. The Workshop resolves the look from its runtime session too.
+
+Every `draw` receives **all slots**, in stable order, as reused, read-only `PhantomFigureFrame`
+values:
+
+| Field | Meaning |
+| --- | --- |
+| `visible` | Whether this slot shows; hide the drawing of a hidden slot |
+| `pose` | A reused `PhantomPose`: `x`, `y`, `pot`, `angle`, `along`, `across` |
+| `tool` | A reused `PhantomTool`: `tipX`, `tipY`, `buttX`, `buttY` |
+| `handleLength` | The recording's handle length, in metres |
+| `opacity` | The engine's fade factor, 0..1; multiply by the look's own base opacity |
+| `fresh` | A new recording or discontinuous seek: reset the slot's drawing history |
+| `dt` | Playback seconds for drawing history, 0 when fresh; a pause also has 0 but is not fresh |
+
+`head` is the current rig settings' `HammerHead` (`SceneFrame.rig.head`), as in the engine's
+original phantoms: not the recorded player's or a selected library hammer's own outline.
+Playback calls `draw` **only while at least one slot shows** and controls the root's visibility, hiding it when the
+last slot ends without a final empty draw. It may also draw when `play` or `hold` changes a
+slot between game frames; other slots then get `dt = 0`, never a second advance.
+
+`DEFAULT_PHANTOM_LOOK` creates the pooled `PhantomView`: the original translucent white
+silhouettes, opacity 0.38 times the fade, with default sliding grips and arm IK. Geometry is
+shared and target vectors, solver scratch, poses and quaternions are reused: no per-frame
+allocation. Keep your own figures pooled too; never retain the input as a snapshot.
+The root draws in **actors**, over the course; phantoms never collide and the input preserves
+the recorded course-plane positions. The default translucent parts retain their nearer-part-first
+depth ordering; the [front, arms, marks and tool passes](#pass-rules-for-presentation-points) are
+unchanged. The engine detaches the root before `dispose`. Recording and network services stay
+outside this point; see [phantoms](phantoms.md).
+
+To raise the default ghosts slightly, without changing playback:
+
+```ts
+import { defineRuntime, LOOKS, wrap } from '../../src/plugins/runtime-sdk';
+
+export default defineRuntime({
+  start() {
+    return [wrap(LOOKS.phantoms, previous => options => {
+      const look = previous(options);
+      look.root.position.y = 0.1;
+      return look;
+    })];
+  },
+});
+```
+
+The phantom default is engine-only, not exported by the SDK. Wrap the previous factory to
+extend it without importing a feature that a release may omit.
+
+## Scene layers
+
+`SCENE_LAYERS`, the list `scene.layers`, holds up to 32 `SceneLayerFactory` values
+(`SCENE_LAYER_LIMITS.layers`), `() => SceneLayer`. The engine default is an empty list.
+
+```ts
+interface SceneLayer {
+  readonly root: Object3D;
+  readonly pass: 'course' | 'actors' | 'marks';
+  update?(frame: SceneFrame): void;
+  dispose?(): void;
+}
+interface SceneFrame {
+  readonly time: number;
+  readonly parts: readonly Readonly<PartPose>[];
+  readonly cursor: Readonly<Point>;
+  readonly enemies: readonly EnemyPose[];
+  readonly rig: RigGeometry;
+}
+```
+
+Factories run once per Game, and their roots are added in manifest order to the selected pass.
+The returned root, pass and methods stay the same for the layer's lifetime.
+Only layers with `update` receive a per-frame callback; static layers are still drawn.
+`SceneFrame` is one reused, read-only view of the simulation at the drawn time, unaffected by
+a temporary character presentation preview. `time` is simulation seconds and rewinds on a
+restart; all member references are borrowed. Read during the call, never keep the frame as a
+previous snapshot, allocate nothing and update changed objects only.
+
+Layers obey the [obstacle-line and pass rules](#pass-rules-for-presentation-points): collider
+visuals stay on the obstacle line in actors, and all marks materials ignore depth. Layers
+never change physics or authored data, and cannot introduce a new pass. Roots detach before
+the optional `dispose`, when removed or when the Game closes; free owned geometry/materials
+there. [Workshop overlays](workshop-plugins.md#the-running-game) use exactly the same
+`SceneLayer` and `SceneFrame` contract, re-exported by the Workshop SDK.
+
+An extra cursor guide, built once and moved without allocating:
+
+```ts
+import { Mesh, MeshBasicMaterial, RingGeometry } from 'three';
+import { add, defineRuntime, OBSTACLE_LINE, SCENE_LAYERS } from '../../src/plugins/runtime-sdk';
+import type { SceneLayerFactory } from '../../src/plugins/runtime-sdk';
+
+const guide: SceneLayerFactory = () => {
+  const mesh = new Mesh(new RingGeometry(0.2, 0.22, 32),
+    new MeshBasicMaterial({ color: 0x35ffbe, depthTest: false, depthWrite: false }));
+  return {
+    root: mesh, pass: 'marks',
+    update(frame) { mesh.position.set(frame.cursor.x, frame.cursor.y, OBSTACLE_LINE); },
+    dispose() { mesh.geometry.dispose(); mesh.material.dispose(); },
+  };
+};
+export default defineRuntime({ start: () => [add(SCENE_LAYERS, guide)] });
+```
+
 ## Wrapping a default
 
 `wrap(point, decorate)` builds on what a point holds so far: `decorate` receives the previous
 factory, the engine's own or an earlier plugin's, and returns the factory the game uses. The
-previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS` and
-`DEFAULT_LOOKS` are the engine's own factories, the points' bases, for a plugin that replaces a
-point but draws the engine's part inside its own.
+previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS`,
+`DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP` and
+`DEFAULT_AIM_MARKS` are the engine's own factories, the points' bases, for a plugin that replaces
+a point but draws the engine's part inside its own. Forward every contract method explicitly when wrapping an
+instance; its methods may live on a prototype, so spreading it does not copy them.
+Feature-gated defaults, such as phantom drawing, are not SDK exports: extend them with `wrap`.
 
 The engine's health readout, flashing whenever the player is hurt:
 
@@ -175,14 +524,16 @@ see [order and conflicts](plugins.md#order-and-conflicts).
 - A `start` that throws fails with `plugin-failed`, naming the plugin, and the plugins that
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
-- Creating a readout or a look checks it. A factory, or a wrap, that throws fails with
-  `plugin-failed`. A readout without `update(frame)`, or with a `dispose` that is not a function,
-  and a look without passes of three.js objects or a method its kind needs, fail with
-  `invalid-contribution`. Each names the plugin and the point.
+- Points reject non-function factories. Creating a readout, director, backdrop, marks, look or
+  layer checks the returned object's required and optional methods, roots and passes. A
+  factory, or a wrap, that throws fails with `plugin-failed`; a malformed return fails with
+  `invalid-contribution`. Each names the plugin and point, including the contributor of a list
+  layer. A director that writes a non-finite aim or a non-positive height also fails explicitly.
 - As the Workshop or a release starts, any of these stops it with a fatal error naming the
   plugin. The engine never falls back to its own readouts or looks silently.
-- An error a readout or look throws while the game runs stops the game and shows the error, as
-  any error in the game does.
+- An error a runtime presentation object throws while the game runs stops the game and shows
+  the error, as any error in the game does. Workshop overlays retain their
+  [isolated plugin lifecycle](workshop-plugins.md#lifecycle).
 
 ## Complete example
 

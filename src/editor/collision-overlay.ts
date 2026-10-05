@@ -6,8 +6,7 @@ import { objectLoops } from '../level';
 import type { TerrainEvent } from '../level';
 import { transformPoint } from '../math';
 import { OBSTACLE_LINE } from '../obstacle-line';
-import type { PhysicsFrame } from '../simulation';
-import type { ViewLayer } from '../view';
+import type { SceneFrame, SceneLayer } from '../scene-layer';
 
 const MARKER_RADIUS = 0.07;
 const GUIDE_RADIUS = 0.09;
@@ -16,7 +15,7 @@ const DYNAMIC_EDGES = 64;
 // Collision outlines draw on the obstacle line, where the physics is and every collider's visual is centred,
 // so in perspective each outline runs through the middle of what it shows. The arm guides draw at their own
 // 3D points, like the arms.
-export class CollisionOverlay implements ViewLayer {
+export class CollisionOverlay implements SceneLayer {
   readonly root = new Group();
   // Over the course, the characters and their arms; the tool still draws on top.
   readonly pass = 'marks';
@@ -25,9 +24,11 @@ export class CollisionOverlay implements ViewLayer {
   private readonly moving = new LineSegments(new BufferGeometry(), this.material);
   private readonly positions = new Float32Array(DYNAMIC_EDGES * 6);
   private readonly outlines = new Map<string, readonly (readonly Point[])[]>();
+  private readonly armPoses: () => readonly ArmPose[];
   private dirty = true;
 
-  constructor() {
+  constructor(armPoses: () => readonly ArmPose[]) {
+    this.armPoses = armPoses;
     this.root.visible = false;
     this.moving.geometry.setAttribute('position', new BufferAttribute(this.positions, 3));
     for (const lines of [this.fixed, this.moving]) { lines.frustumCulled = false; lines.renderOrder = 30; }
@@ -57,7 +58,7 @@ export class CollisionOverlay implements ViewLayer {
     this.dirty = true;
   }
 
-  update(frame: PhysicsFrame, arms: readonly ArmPose[]): void {
+  update(frame: SceneFrame): void {
     if (!this.root.visible) return;
     if (this.dirty) {
       const positions: number[] = [];
@@ -94,7 +95,7 @@ export class CollisionOverlay implements ViewLayer {
         line({ x: part.x, y: part.y - GUIDE_RADIUS }, { x: part.x, y: part.y + GUIDE_RADIUS });
       }
     }
-    for (const arm of arms) {
+    for (const arm of this.armPoses()) {
       const { hint } = arm;
       guide(arm.shoulder, arm.elbow);
       guide(arm.elbow, arm.hand);
