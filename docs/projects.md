@@ -518,7 +518,12 @@ faster), `enemy-hit`, `enemy-defeat`, `launch` (Launch player events), `finish`
 player reaches a bonfire that becomes the place a death returns to; see
 [health and bonfires](../README.md#health-and-bonfires)). Browsers start audio only
 after the player first clicks, taps or presses a key; sounds are fetched ahead of
-time and decoded then. Releases without audio or sound events include no audio code.
+time and decoded then. Impact cues reach the output at most once per 70 ms. A game's
+[runtime audio plugin](runtime-plugins.md#audio) can replace or wrap the output in the
+Workshop, studio previews and releases, for example synthesizing just impacts while
+music and the other cues keep their authored clips. Releases without audio or sound
+events omit the engine's `AudioDirector`, but still resolve the audio point with a
+silent base, so plugin audio works there too.
 
 **Play sound event.** Triggers can play a sound without pausing:
 `{ "type": "play-sound", "source": "/media/bell.wav", "volume": 1 }`. The next event

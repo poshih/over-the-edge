@@ -39,3 +39,17 @@ export type { ProjectilePose } from '../hazard-world';
 export { AXE, axeAngle, BONFIRE, SHOOTER } from '../hazards';
 export { triggerBounds } from '../level';
 export type { AxeObject, BonfireObject, LevelObject, PoolObject, ShooterObject, TriggerObject } from '../level';
+export { AUDIO, SILENT_AUDIO_OUTPUT } from '../game-audio';
+export type { GameAudio, GameAudioFactory, GameAudioSetup } from '../game-audio';
+export type { AudioDevice } from '../audio-device';
+export { AUDIO_CUES, DEFAULT_AUDIO } from '../audio-settings';
+export type { AudioClip, AudioCue, AudioSettings, GameCue } from '../audio-settings';
+export {
+  DEFAULT_MESSAGE_POPUP, DEFAULT_MESSAGE_TOASTS, DEFAULT_MESSAGE_VIDEO, MESSAGES,
+} from '../event-presenter';
+export type {
+  EventPresenterState, PopupPresenter, PresentationContext, PresentationState, Toasts, ToastsFactory, VideoPresenter,
+} from '../event-presenter';
+export type { EventOutcome, MessageAction, PresentationAction, VideoAction } from '../trigger-events';
+export { EventExecutionError } from '../trigger-events';
+export type { MediaHost, MediaStream } from '../media-host';

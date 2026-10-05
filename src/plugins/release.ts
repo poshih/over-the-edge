@@ -1,6 +1,7 @@
 import type { ContentAccess, ContentError, ContentProgress } from '../content-session';
 import type { PhantomService } from '../phantom-service-types';
 import type { ModelLibraryApi } from '../release-library';
+import { NOTICES } from '../notice';
 import { checkFacetEntries, Composition, listPoint, PLUGIN_LIMITS, PluginError, slotPoint } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';
 
@@ -50,7 +51,7 @@ export const FAILED = slotPoint('release.failed', 'release', callback<(error: Co
 export const PROGRESS = listPoint('release.progress', 'release', PLUGIN_LIMITS.plugins, callback<(progress: ContentProgress) => void>);
 export const MODEL_FAILED = listPoint('release.model-failed', 'release', PLUGIN_LIMITS.plugins, callback<(error: Error) => void>);
 export const READY = listPoint('release.ready', 'release', PLUGIN_LIMITS.plugins, callback<(api: ReleaseApi) => void>);
-export const RELEASE = Object.freeze([ACCESS, PHANTOMS, FAILED, PROGRESS, MODEL_FAILED, READY]);
+export const RELEASE = Object.freeze([NOTICES, ACCESS, PHANTOMS, FAILED, PROGRESS, MODEL_FAILED, READY]);
 
 function checkRelease(value: unknown, plugin: string): ReleaseFacet {
   if (typeof value !== 'object' || value === null || Array.isArray(value) || typeof Reflect.get(value, 'start') !== 'function') {
@@ -94,6 +95,8 @@ export class ReleasePlugins {
       }
       options.signal.throwIfAborted();
       session.composition = new Composition('release', RELEASE, plugins);
+      // Once startup succeeds the release owner disposes consumers before aborting facet signals.
+      options.signal.removeEventListener('abort', session.stop);
       return session;
     } catch (error) {
       session.dispose();

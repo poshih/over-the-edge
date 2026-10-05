@@ -61,8 +61,8 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | Facet | Runs in | SDK | For | Virtual module |
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
-| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows: HUD readouts, camera following, backdrop, aim marks, object, enemy and phantom looks, and scene layers. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
-| `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services: sign-in and content access, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
+| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows and sounds: HUD readouts, camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and messages. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
+| `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
 - A facet imports the engine only through an SDK: its own environment's, or that of an
@@ -116,7 +116,7 @@ GAME_PLUGINS=games/my-game/plugins.json npm run dev
 
 The Workshop's play-test shows the new readout, and so do studio previews and releases built
 with the manifest. The health and timer readouts stay the engine's. [Runtime plugins](runtime-plugins.md)
-describes the readouts, the looks and a complete example.
+describes the readouts, looks, audio and messages, with complete examples.
 
 ## Points and contributions
 
@@ -145,6 +145,12 @@ one of three types:
   point does not take, or a value the point refuses (`invalid-contribution`).
 - The engine resolves each point once per session and keeps the result: nothing is looked up
   per frame. A wrap runs, and its result is checked, when its point is first resolved.
+
+To extend the engine's audio, use `wrap(AUDIO, previous => ...)`, as the
+[audio example](runtime-plugins.md#synthesizing-one-cue) does: `previous` supplies the engine's
+selected base or an earlier plugin's factory.
+Feature-gated defaults, such as the audio director and the phantom look, are reached through
+`wrap`, not imported from the runtime SDK.
 
 ### Order and conflicts
 
@@ -212,7 +218,7 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | `reserved-plugin` | A plugin is named `engine` |
 | `invalid-facet` | A facet's default export has the wrong shape; a build refused a facet file its boundary forbids; a build was asked for a virtual module it does not serve |
 | `unknown-point` | A contribution names a point its environment does not have |
-| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a readout, look, camera director, backdrop, aim marks or scene layer |
+| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a readout, look, camera director, backdrop, aim marks, scene layer, audio output, toasts or notices; a message presenter returned a non-promise or invalid outcome, or a toast's show returned a non-boolean |
 | `duplicate-contribution` | A plugin contributes to one point twice |
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
@@ -308,6 +314,8 @@ for a plugin beyond the plugin's own, and keeps per-frame work proportional to w
   in the level, and phantom looks draw only while a figure shows. Scene layers and Workshop
   overlays without `update` have no per-frame callback; others run only while added.
 - **Keep callbacks light.** `PROGRESS` runs as each piece of the boot downloads arrives.
+  Audio handles cues and pause/settings changes, not frames. Toasts request frames only while
+  showing; notices and modal presenters need no idle animation loop.
 - **Stay out of physics.** No plugin code runs inside the physics step. A motion kind's
   `update` and a [rig strategy's](characters.md#rig-strategies) frame phases run every frame:
   allocate nothing there either.
@@ -375,6 +383,11 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`looks.enemies`](runtime-plugins.md#enemy-looks) | `LOOKS.enemies` | `runtime` | Slot, `EnemyLookFactory` | `DEFAULT_LOOKS.enemies` |
 | [`looks.phantoms`](runtime-plugins.md#phantom-looks) | `LOOKS.phantoms` | `runtime` | Slot, `PhantomLookFactory` | `DEFAULT_PHANTOM_LOOK` |
 | [`scene.layers`](runtime-plugins.md#scene-layers) | `SCENE_LAYERS` | `runtime` | List, 32 `SceneLayerFactory` | None |
+| [`audio.output`](runtime-plugins.md#audio) | `AUDIO` | `runtime` | Slot, `GameAudioFactory` | `DEFAULT_AUDIO_OUTPUT`; `SILENT_AUDIO_OUTPUT` in releases without content audio |
+| [`messages.toasts`](runtime-plugins.md#messages) | `MESSAGES.toasts` | `runtime` | Slot, `ToastsFactory` | `DEFAULT_MESSAGE_TOASTS` |
+| [`messages.popup`](runtime-plugins.md#messages) | `MESSAGES.popup` | `runtime` | Slot, `PopupPresenter` | `DEFAULT_MESSAGE_POPUP` |
+| [`messages.video`](runtime-plugins.md#messages) | `MESSAGES.video` | `runtime` | Slot, `VideoPresenter` | `DEFAULT_MESSAGE_VIDEO` |
+| [`release.notices`](release-plugins.md#notices) | `NOTICES` | `release` | Slot, `NoticesFactory` | `DEFAULT_NOTICES`; studio previews keep the engine default |
 | [`release.access`](release-plugins.md#access-and-sign-in) | `ACCESS` | `release` | Slot, `ContentAccess` | `publicAccess(contentUrl)` |
 | [`release.phantoms`](release-plugins.md#phantom-backend) | `PHANTOMS` | `release` | Slot, `PhantomService \| null` | `httpPhantoms(phantomsUrl)` in a build with a phantom URL, otherwise `null` |
 | [`release.failed`](release-plugins.md#load-failures-and-progress) | `FAILED` | `release` | Slot, `(error: ContentError) => Promise<void>` | Rejects with the error, which stops the load |

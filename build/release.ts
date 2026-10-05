@@ -32,7 +32,7 @@ const LOADERS = {
   models: `export { createCharacterModelLoader as default } from ${JSON.stringify(runtime('character-model-loader.ts'))};`,
   art: `export { loadCourseArt as default } from ${JSON.stringify(runtime('release-art.ts'))};`,
   appearance: `export { loadAppearance as default } from ${JSON.stringify(runtime('appearance-loader.ts'))};`,
-  audio: `export { AudioDirector as default } from ${JSON.stringify(runtime('audio.ts'))};`,
+  audio: `export { DEFAULT_AUDIO_OUTPUT as default } from ${JSON.stringify(runtime('audio.ts'))};`,
   decorations: `export { createDecorationView as default } from ${JSON.stringify(runtime('decoration-library.ts'))};`,
 } as const;
 const FAVICON = fileURLToPath(new URL('../public/favicon.svg', import.meta.url));

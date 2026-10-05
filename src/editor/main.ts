@@ -24,7 +24,10 @@ import type { PracticeId } from './practices';
 import { createUI } from './ui';
 import { createSpriteEditor } from './sprite-editor';
 import type { EditorAction, GameUi, HudState, WorkshopState } from './ui-types';
-import { AudioDirector } from '../audio';
+import { DEFAULT_AUDIO_OUTPUT } from '../audio';
+import { AUDIO, createGameAudio } from '../game-audio';
+import { AudioDevice } from '../audio-device';
+import { levelSoundSources } from '../content';
 import { urlMediaHost } from '../media-host';
 import { DEFAULT_AUDIO } from '../audio-settings';
 import { isDarkSky } from '../theme';
@@ -95,9 +98,11 @@ let resolveMedia = (source: string): string => source;
 let mediaVersion = 0;
 // The Workshop plays media from the open project's files, or from the URLs a level names.
 const media = urlMediaHost((source) => resolveMedia(source));
-const audio = new AudioDirector({
-  settings: DEFAULT_AUDIO, media, onError: (message) => ui.notice(message, 'error'),
-});
+const audioDevice = new AudioDevice(DEFAULT_AUDIO.volume);
+const audio = boot(() => createGameAudio(runtimePlugins.slot(AUDIO, DEFAULT_AUDIO_OUTPUT), {
+  settings: DEFAULT_AUDIO, media, sounds: levelSoundSources(level.definition()), device: audioDevice,
+  notice: (message) => runtimeNotice(message, 'error'),
+}, runtimePlugins.owner(AUDIO)), () => audioDevice.dispose());
 const game = boot(() => new Game({
   canvas, fatal, eventMount: mount, level: level.definition(),
   characterModels: createCharacterModelLoader(),
@@ -108,6 +113,7 @@ const game = boot(() => new Game({
   videos: 'skip',
   kinds, plugins: runtimePlugins,
   onCue: (cue) => audio.handle(cue),
+  onPauseChange: (paused) => audio.setPaused(paused),
   onAction: perform,
   onNotice: (message) => ui.notice(message, 'error'),
   onShortcut: (event) => {
@@ -120,7 +126,10 @@ const game = boot(() => new Game({
       resetPractice(PRACTICES[Number(key) - 1].id);
     }
   },
-}), () => audio.dispose());
+}), () => {
+  audio.dispose();
+  audioDevice.dispose();
+});
 const unsubscribeLevel = level.subscribe((change) => {
   game.applyLevel(change);
   if (change.kind === 'replace') origin = 'start';
@@ -162,6 +171,7 @@ const project: ProjectSession = new ProjectSession({
       game.setEnemyArt(look.enemies);
       ui.setHud(look.hud);
       game.setMessageStyle(look.hud.messages.style);
+      audioDevice.setVolume(look.audio.volume);
       audio.setSettings(look.audio);
     },
     notice: (message, kind) => ui.notice(message, kind),
@@ -224,6 +234,7 @@ const ui: GameUi = boot(() => createUI({
   serverCopies.dispose();
   project.dispose();
   audio.dispose();
+  audioDevice.dispose();
   unsubscribeLevel();
   game.dispose();
 });
@@ -282,7 +293,11 @@ game.view.addLayer(courseMeshes);
 // The course takes the project's look once the project has opened, so meshes of a course replaced at start never load.
 let unsubscribeCourseLook = (): void => undefined;
 // The figure Level / Replays poses: one held phantom, none played by the game.
-const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins, 0), () => game.dispose());
+const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins, 0), () => {
+  audio.dispose();
+  audioDevice.dispose();
+  game.dispose();
+});
 const unsubscribeOverlay = game.simulation.subscribeTerrain((event) => collisionOverlay.apply(event));
 const decorations = game.view.decorations;
 if (decorations === null) throw new Error('The Workshop draws decorations.');
@@ -349,7 +364,7 @@ hammerHeads = createHammerHeadEditor({
 const unsubscribeHammerHeads = project.subscribe((event) => { if (event.kind === 'content') hammerHeads?.refresh(); });
 const projectEditor = createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,
-  onTestCue: (cue) => audio.handle({ type: 'cue', cue, strength: 1 }),
+  onTestCue: (cue) => game.playCue(cue),
   parts: game,
   serverModels,
 });
@@ -450,7 +465,7 @@ const diagnostics = Object.freeze({
   appearance: () => appearance.snapshot(),
   sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.sprites.inspect() }),
   events: () => game.eventState(),
-  gameProject: () => ({ ...project.snapshot(), playback: audio.inspect(), parts: game.view.partModels() }),
+  gameProject: () => ({ ...project.snapshot(), playback: audio.inspect?.() ?? null, parts: game.view.partModels() }),
   plugins: () => plugins.inspect(),
   level: () => ({
     definition: level.definition(),
@@ -482,7 +497,6 @@ game.start((state) => {
   hudState.recordingNote = recordingNote();
   ui.update(state, hudState);
   spriteEditor.updatePreview();
-  audio.setPaused(state.paused);
 });
 
 if (import.meta.hot) {
@@ -496,6 +510,7 @@ if (import.meta.hot) {
     serverCopies.dispose();
     project.dispose();
     audio.dispose();
+    audioDevice.dispose();
     unsubscribeLevel();
     unsubscribeAppearance();
     unsubscribeOverlay();

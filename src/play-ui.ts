@@ -1,4 +1,5 @@
-import { createNotice } from './notice';
+import { createNotices, DEFAULT_NOTICES } from './notice';
+import type { NoticesFactory } from './notice';
 import type { CharacterRiggingType } from './sprite-data';
 import type { HudSettings } from './hud';
 import { createHudBar } from './hud-bar';
@@ -46,7 +47,9 @@ export function createPlayUI(options: { mount: HTMLElement }) {
   root.className = 'game-ui play-ui';
   const events = new AbortController();
   const inputs: HTMLInputElement[] = [];
-  const notice = createNotice({ mount: root });
+  // Release facets can report notices while starting, before their contributions compose.
+  // The resolved replacement, if any, then serves the release until the UI is disposed.
+  let notice = createNotices(DEFAULT_NOTICES, root, null);
   options.mount.append(root);
   let bar: ReturnType<typeof createHudBar> | null = null;
   let selected = 0;
@@ -58,6 +61,13 @@ export function createPlayUI(options: { mount: HTMLElement }) {
     inputs.length = 0;
   };
   return {
+    // Called once after the release facets compose, never for an individual load attempt.
+    setNotices(factory: NoticesFactory, plugin: string | null): void {
+      if (factory === DEFAULT_NOTICES) return;
+      const next = createNotices(factory, root, plugin);
+      notice.dispose();
+      notice = next;
+    },
     // The project's settings choose visibility and labels; the runtime session chooses implementations.
     show(settings: { hud: HudSettings; plugins: RuntimePlugins; characters: PlayCharacterChoice | null }): void {
       clear();
@@ -106,7 +116,9 @@ export function createPlayUI(options: { mount: HTMLElement }) {
     update(frame: HudFrame): void {
       bar?.update(frame);
     },
-    notice: notice.show,
+    notice(text: string, kind: 'info' | 'error'): void {
+      notice.show(text, kind);
+    },
     clear,
     // Enables the character choice once every profile has loaded; returns the restored choice.
     enableCharacters(): number {

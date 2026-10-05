@@ -31,6 +31,8 @@ import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { HudFrame } from './hud-readouts';
 
+const IMPACT_INTERVAL = 0.07;
+
 export class Game {
   readonly simulation: Simulation;
   readonly view: GameView;
@@ -47,6 +49,8 @@ export class Game {
   private readonly unsubscribeBonfires: () => void;
   private readonly onAction: (action: UiAction, options?: UiActionOptions) => void;
   private readonly onCue: ((cue: GameCue) => void) | null;
+  private readonly onPauseChange: ((paused: boolean) => void) | null;
+  private lastImpact = -Infinity;
   private readonly stepObservers = new Set<() => void>();
   // Last phase of each enemy, so cues fire on hit and defeat transitions only.
   private readonly enemyPhases = new Map<string, EnemyPhase>();
@@ -89,8 +93,10 @@ export class Game {
     videos?: VideoPlayback;
     // Streams authored video sources; by default sources are URLs.
     media?: MediaHost;
-    // Receives sound cues and play-sound events; without it the game tracks no impacts.
+    // Receives cues in source-order microtasks outside physics; without it the game tracks no impacts.
     onCue?: (cue: GameCue) => void;
+    // The initial pause state at start(), then changes only, so audio needs no per-frame polling.
+    onPauseChange?: (paused: boolean) => void;
     onAction: (action: UiAction, options?: UiActionOptions) => void;
     onNotice: (message: string) => void;
     onShortcut?: (event: KeyboardEvent) => void;
@@ -99,6 +105,7 @@ export class Game {
     this.fatal = options.fatal;
     this.onAction = options.onAction;
     this.onCue = options.onCue ?? null;
+    this.onPauseChange = options.onPauseChange ?? null;
     this.messageStyle = options.messageStyle ?? DEFAULT_MESSAGE_STYLE;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     const listen = { signal: this.lifecycle.signal };
@@ -130,19 +137,36 @@ export class Game {
     this.input = new PointerInput(options.canvas, {
       onAction: options.onAction, onNotice: options.onNotice, onShortcut: options.onShortcut,
     });
-    this.presenter = new EventPresenter({
-      mount: options.eventMount,
-      media: options.media,
-      onModalChange: ({ active }) => {
-        this.setPause({ reason: 'event', paused: active });
-        this.setInputBlock({ reason: 'event', blocked: active });
-      },
-    });
-    this.triggers = new TriggerRuntime(options.level.objects.filter(isTriggerObject), {
-      execute: (action, signal) => this.executeEvent(action, signal),
-      onFailure: ({ triggerId, eventIndex, message }) => options.onNotice(`Trigger "${triggerId}", event ${eventIndex + 1}: ${message}`),
-      onFault: (error) => this.stop(error instanceof Error ? error.message : String(error)),
-    });
+    let presenter: EventPresenter | null = null;
+    try {
+      presenter = new EventPresenter({
+        mount: options.eventMount,
+        plugins: options.plugins,
+        media: options.media,
+        onModalChange: ({ active }) => {
+          this.setPause({ reason: 'event', paused: active });
+          this.setInputBlock({ reason: 'event', blocked: active });
+        },
+      });
+      this.presenter = presenter;
+      this.triggers = new TriggerRuntime(options.level.objects.filter(isTriggerObject), {
+        execute: (action, signal) => this.executeEvent(action, signal),
+        onFailure: ({ triggerId, eventIndex, message }) => options.onNotice(`Trigger "${triggerId}", event ${eventIndex + 1}: ${message}`),
+        onFault: (error) => this.stop(error instanceof Error ? error.message : String(error)),
+      });
+    } catch (error) {
+      this.lifecycle.abort();
+      try {
+        presenter?.dispose();
+      } finally {
+        this.unsubscribeTerrain();
+        this.unsubscribeEnemies();
+        this.unsubscribeBonfires();
+        this.input.dispose();
+        try { this.view.dispose(); } finally { this.simulation.dispose(); }
+      }
+      throw error;
+    }
     document.addEventListener('visibilitychange', () => {
       this.accumulator = 0;
       this.previousTime = performance.now();
@@ -153,6 +177,7 @@ export class Game {
   start(onFrame: (state: HudFrame) => void): void {
     if (this.started) throw new Error('The game loop is already running.');
     this.started = true;
+    this.onPauseChange?.(this.pauseReasons.size > 0);
     this.previousTime = performance.now();
     const animate = (now: number): void => {
       if (this.stopped) return;
@@ -190,7 +215,7 @@ export class Game {
           if (this.simulation.takeHurt()) this.cue('hurt');
           if (this.onCue !== null) {
             const impact = this.simulation.takeImpact();
-            if (impact >= IMPACT_SPEED.minimum) this.onCue({ type: 'cue', cue: 'impact', strength: impactStrength(impact) });
+            if (impact >= IMPACT_SPEED.minimum) this.cue('impact', impactStrength(impact));
           }
         }
       } else {
@@ -288,14 +313,20 @@ export class Game {
 
   setMedia(media: MediaHost): void { this.presenter.setMedia(media); }
 
+  // Editor previews remain available after gameplay stops, but share the gameplay impact limit.
+  playCue(cue: AudioCue): void { this.outputCue({ type: 'cue', cue, strength: 1 }, null); }
+
   // Applies to future message events; toasts already showing or queued finish as toasts.
   setMessageStyle(style: MessageStyle): void { this.messageStyle = style; }
 
   setPause(options: { reason: string; paused: boolean }): void {
+    const wasPaused = this.pauseReasons.size > 0;
     if (options.paused) this.pauseReasons.add(options.reason);
     else this.pauseReasons.delete(options.reason);
     this.accumulator = 0;
     this.input.clear();
+    const paused = this.pauseReasons.size > 0;
+    if (this.started && !this.stopped && paused !== wasPaused) this.onPauseChange?.(paused);
   }
 
   setInputBlock(options: { reason: string; blocked: boolean }): void {
@@ -414,7 +445,7 @@ export class Game {
       return 'completed';
     }
     if (action.type === 'play-sound') {
-      this.onCue?.({ type: 'sound', source: action.source, volume: action.volume });
+      if (this.onCue !== null) this.outputCue({ type: 'sound', source: action.source, volume: action.volume });
       return 'completed';
     }
     // A toast never holds up the triggers: the next event, or the next trigger, starts at once.
@@ -427,8 +458,26 @@ export class Game {
     return this.presenter.present(action, signal);
   }
 
-  private cue(cue: AudioCue): void {
-    this.onCue?.({ type: 'cue', cue, strength: 1 });
+  private cue(cue: AudioCue, strength = 1): void {
+    if (this.onCue === null) return;
+    this.outputCue({ type: 'cue', cue, strength });
+  }
+
+  private outputCue(cue: GameCue, signal: AbortSignal | null = this.lifecycle.signal): void {
+    const onCue = this.onCue;
+    if (onCue === null) return;
+    // Enemy and bonfire subscriptions fire from Simulation.step. Deliver in source order after the
+    // stack unwinds, never run plugin audio in physics, and add no per-frame queue scan.
+    queueMicrotask(() => {
+      if (signal?.aborted === true) return;
+      if (cue.type === 'cue' && cue.cue === 'impact') {
+        // Check delivery time, not enqueue time: a long frame must not bunch deferred impacts.
+        const now = performance.now() / 1000;
+        if (now - this.lastImpact < IMPACT_INTERVAL) return;
+        this.lastImpact = now;
+      }
+      onCue(cue);
+    });
   }
 
   private enemyCue(event: EnemyEvent): void {

@@ -32,11 +32,11 @@ which returns the plugin's contributions, or a promise of them.
 
 The release starts its release facets first, one at a time in manifest order, awaiting each
 `start`, before it fetches anything: a plugin can sign the player in before the first grant is
-asked for. It then composes their contributions, resolves `ACCESS` and `FAILED` once, and loads
-the game. In a build without phantoms it also resolves `PHANTOMS` against `null`, refusing only
+asked for. It then composes their contributions, resolves `NOTICES`, `ACCESS` and `FAILED`
+once, and loads the game. In a build without phantoms it also resolves `PHANTOMS` against `null`, refusing only
 a non-null result. Runtime facets start after that, once for each load attempt. In a build with
 phantoms the optional consumer resolves `PHANTOMS` when it starts after the game loads; the
-release session caches that slot for its whole life.
+release session caches that slot for its whole life. Release notices live across all load attempts.
 
 ## The signal
 
@@ -264,11 +264,45 @@ export default defineRelease({
 | `swap(role, id)` | Asks the backend to use `id`, or the profile's own model for `null`, for one part; resolves with the selection in use once the backend's answer shows |
 | `refresh()` | Reads the backend's selection again, for example after it changed elsewhere |
 
+## Notices
+
+`NOTICES` is the release slot `release.notices`, holding a `NoticesFactory`,
+`(mount: HTMLElement) => Notices`. Its contract, default and creation checks live in
+[`src/notice.ts`](../src/notice.ts) and are exported from the release SDK:
+
+```ts
+interface Notices {
+  show(text: string, kind: 'info' | 'error'): void;
+  dispose(): void;
+}
+```
+
+Notices are release-shell chrome, not one Game's presentation. They serve release sign-in,
+content loading, runtime notices, the gap between load attempts and the period after a fatal
+error. A release facet replaces or wraps `NOTICES`; runtime facets do not contribute to it.
+
+`DEFAULT_NOTICES` calls `createNotice`: the dismissible live-region notice, with **A QUICK
+NOTE** for `info` and **NEEDS ATTENTION** for `error`. The play UI starts with that engine
+instance, so release facets can call `host.notice` while their `start` is still running. Once
+the release facets have composed, `Release.run()` resolves the point with `DEFAULT_NOTICES` as
+its base and the play UI swaps once if the resolved factory differs. With the unchanged default
+the boot instance stays. The selected instance is neither cleared nor replaced between Games
+or load attempts; it is disposed only when the release closes.
+
+`show` is event-driven: no per-frame update or idle animation loop. Use only nodes you append
+to `mount`, preserve the distinction between info and errors and make errors accessible.
+`dispose` removes those nodes and listeners. Creating an instance checks both required methods:
+a malformed object fails with `invalid-contribution`, and a throwing factory fails with
+`plugin-failed`, each naming the release plugin and `release.notices`.
+
+The Workshop keeps its engine notices. Studio previews have no release facets and therefore
+also keep `DEFAULT_NOTICES`.
+
 ## Studio previews
 
 A [studio preview](plugins.md#studio-previews), which the project server's **Publish** builds,
 drops every release facet: `virtual:game-plugins/release` lists none. The preview therefore uses
-public access to its own content, has no phantom backend and packages no library models, while
+public access to its own content and the engine's notices, has no phantom backend and packages no library models, while
 the game's kinds and runtime facets still run. Try a release facet with `npm run dev:game` or a
 release build instead.
 
@@ -279,7 +313,8 @@ release build instead.
 - A `start` that throws, or rejects, fails with `plugin-failed`, naming the plugin.
 - Contributions that break the rules fail with their [codes](plugins.md#errors), naming the
   plugin and the point. `ACCESS` refuses access without `grant()`, or with a `select` that is not
-  a function, and `PHANTOMS` a service without `submit()` and `nearby()`.
+  a function, `PHANTOMS` a service without `submit()` and `nearby()`, and `NOTICES` a factory
+  whose instance does not provide `show(text, kind)` and `dispose()`.
 - An error a `PROGRESS`, `MODEL_FAILED` or `READY` callback throws fails with `plugin-failed`,
   naming the plugin and the point.
 

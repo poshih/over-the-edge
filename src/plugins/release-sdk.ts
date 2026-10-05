@@ -11,3 +11,5 @@ export type { ModelSelection, ModelSelectionRequest, PartRole } from '../model-l
 export type { ModelLibraryApi } from '../release-library';
 export { PhantomServiceError } from '../phantom-service-types';
 export type { PhantomQuery, PhantomService } from '../phantom-service-types';
+export { createNotice, DEFAULT_NOTICES, NOTICES } from '../notice';
+export type { Notices, NoticesFactory } from '../notice';

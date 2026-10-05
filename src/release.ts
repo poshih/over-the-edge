@@ -1,7 +1,9 @@
 // Release boot: release facets compose access and load-flow services; each load attempt owns its runtime session.
 // Nothing here decides who may load what. See docs/release-plugins.md.
 import type { DecorationView } from './decoration-view';
-import type { AudioDirector } from './audio';
+import { AUDIO, createGameAudio, SILENT_AUDIO_OUTPUT } from './game-audio';
+import type { GameAudio, GameAudioFactory } from './game-audio';
+import { AudioDevice } from './audio-device';
 import { bootSources, levelSoundSources } from './content';
 import type { ContentArt, ContentManifest, ContentPins } from './content';
 import type { ContentLoader } from './content-ref';
@@ -13,6 +15,7 @@ import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
 import type { MediaHost } from './media-host';
 import { createPlayUI } from './play-ui';
+import { DEFAULT_NOTICES, NOTICES } from './notice';
 import { ACCESS, FAILED, MODEL_FAILED, PHANTOMS, PROGRESS, READY, ReleasePlugins } from './plugins/release';
 import type { ReleaseApi, ReleaseFacet } from './plugins/release';
 import { RuntimePlugins } from './plugins/runtime';
@@ -32,7 +35,7 @@ export interface ReleaseCode {
   readonly loadCourseArt: ((game: Game, art: ContentArt, content: ContentLoader, signal: AbortSignal) => Promise<void>) | null;
   readonly loadAppearance: ((visuals: ReadonlyMap<VisualPartId, VisualBinding>, parts: readonly AppearanceSource[],
     options: { signal?: AbortSignal; content?: ContentLoader }) => Promise<unknown>) | null;
-  readonly AudioDirector: typeof AudioDirector | null;
+  readonly audioOutput: GameAudioFactory | null;
   readonly createDecorations: (() => DecorationView) | null;
   readonly phantoms: PhantomBuild | null;
   readonly runtimePlugins: readonly PluginEntry<RuntimeFacet>[];
@@ -44,7 +47,8 @@ interface Loaded {
   readonly session: ContentSession;
   readonly manifest: ContentManifest;
   readonly game: Game;
-  readonly audio: AudioDirector | null;
+  readonly audio: GameAudio;
+  readonly audioDevice: AudioDevice;
   readonly library: ReleaseModelLibrary;
   readonly plugins: RuntimePlugins;
   readonly lifecycle: AbortController;
@@ -53,7 +57,8 @@ interface Loaded {
 interface Attempt {
   readonly session: ContentSession;
   game: Game | null;
-  audio: AudioDirector | null;
+  audio: GameAudio | null;
+  audioDevice: AudioDevice | null;
   library: ReleaseModelLibrary | null;
   readonly plugins: RuntimePlugins;
   readonly lifecycle: AbortController;
@@ -94,8 +99,14 @@ export class Release {
         mount: this.mount, contentUrl, phantomsUrl: this.phantomsUrl(), signal: this.lifecycle.signal,
         notice: (text: string, kind: 'info' | 'error' = 'info') => this.ui.notice(text, kind),
       });
-      this.lifecycle.signal.throwIfAborted();
+      try { this.lifecycle.signal.throwIfAborted(); } catch (error) {
+        // dispose() can run after startup succeeds but before this await hands the session to us.
+        // It already disposed the UI; finish handing off the session by disposing its signals too.
+        this.plugins.dispose();
+        throw error;
+      }
       const plugins = this.plugins;
+      this.ui.setNotices(plugins.slot(NOTICES, DEFAULT_NOTICES), plugins.owner(NOTICES));
       if (this.code.phantoms === null && plugins.slot(PHANTOMS, null) !== null) {
         const phantomPlugin = plugins.owner(PHANTOMS);
         throw new PluginError('invalid-contribution',
@@ -141,7 +152,8 @@ export class Release {
     this.phantoms = null;
     if (this.loaded !== null) {
       this.loaded.lifecycle.abort(new DOMException('The game closed.', 'AbortError'));
-      this.loaded.audio?.dispose();
+      this.loaded.audio.dispose();
+      this.loaded.audioDevice.dispose();
       // The game's views let go of library models before the library disposes them.
       this.loaded.game.dispose();
       this.loaded.library.dispose();
@@ -155,6 +167,7 @@ export class Release {
   private discardAttempt(): void {
     if (this.loading === null) return;
     this.loading.audio?.dispose();
+    this.loading.audioDevice?.dispose();
     this.loading.lifecycle.abort(new DOMException('The load attempt closed.', 'AbortError'));
     this.loading.game?.dispose();
     this.loading.library?.dispose();
@@ -172,7 +185,7 @@ export class Release {
     const session = new ContentSession({
       access, pins: this.code.pins, onProgress: (progress) => this.plugins!.notify(PROGRESS, (callback) => callback(progress)),
     });
-    const attempt: Attempt = { session, game: null, audio: null, library: null, plugins, lifecycle };
+    const attempt: Attempt = { session, game: null, audio: null, audioDevice: null, library: null, plugins, lifecycle };
     this.loading = attempt;
     // The backend's selection is read alongside the game group's grant, so it adds no round trip.
     const selectionRead = readSelection(access, signal).then(
@@ -191,16 +204,21 @@ export class Release {
       stream: (source, request) => session.stream(packaged(source), request),
     };
     const notice = (text: string): void => this.ui.notice(text, 'error');
-    const audio = this.code.AudioDirector === null ? null : new this.code.AudioDirector({
-      settings: manifest.audio, sounds: levelSoundSources(manifest.level), media, onError: notice,
-    });
+    const audioFactory = plugins.slot(AUDIO, this.code.audioOutput === null ? SILENT_AUDIO_OUTPUT : this.code.audioOutput);
+    const receivesCues = audioFactory !== SILENT_AUDIO_OUTPUT;
+    const audioDevice = new AudioDevice(manifest.audio.volume, receivesCues);
+    attempt.audioDevice = audioDevice;
+    const audio = createGameAudio(audioFactory, {
+      settings: manifest.audio, sounds: levelSoundSources(manifest.level), media, device: audioDevice, notice,
+    }, plugins.owner(AUDIO));
     attempt.audio = audio;
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
       canvas: this.canvas, fatal: this.fatal, eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
       theme: manifest.theme, enemyArt: manifest.enemies, messageStyle: manifest.hud.messages.style,
-      onCue: audio === null ? undefined : (cue) => audio.handle(cue),
+      onCue: receivesCues ? (cue) => audio.handle(cue) : undefined,
+      onPauseChange: receivesCues ? (paused) => audio.setPaused(paused) : undefined,
       onAction: (action, options) => game.perform(action, options),
       onNotice: notice,
     });
@@ -232,7 +250,7 @@ export class Release {
     for (const failure of selectionError === null ? failures : [selectionError, ...failures]) this.modelFailed(failure);
     session.forgetDownloads();
     this.loading = null;
-    return { session, manifest, game, audio, library, plugins, lifecycle };
+    return { session, manifest, game, audio, audioDevice, library, plugins, lifecycle };
   }
 
   private phantomsUrl(): string | null {
@@ -246,7 +264,7 @@ export class Release {
   }
 
   private play(loaded: Loaded): void {
-    const { game, manifest, audio, library, plugins } = loaded;
+    const { game, manifest, library, plugins } = loaded;
     const { primary, alternate } = manifest.characters;
     this.ui.show({
       hud: manifest.hud,
@@ -277,9 +295,6 @@ export class Release {
         packs: manifest.phantoms, content: (source, request) => loaded.session.bytes(source, request),
       });
     }
-    game.start((state) => {
-      this.ui.update(state);
-      audio?.setPaused(state.paused);
-    });
+    game.start((state) => this.ui.update(state));
   }
 }

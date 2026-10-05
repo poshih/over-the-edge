@@ -1,10 +1,10 @@
-import { AUDIO_CUES, DEFAULT_AUDIO } from './audio-settings';
+import { AUDIO_CUES } from './audio-settings';
 import type { AudioClip, AudioSettings, GameCue } from './audio-settings';
-import { urlMediaHost } from './media-host';
 import type { MediaHost } from './media-host';
+import type { AudioDevice } from './audio-device';
+import type { GameAudio, GameAudioFactory, GameAudioSetup } from './game-audio';
 
-const IMPACT_INTERVAL = 0.07;
-const UNLOCK_EVENTS = ['pointerdown', 'keydown', 'touchend'] as const;
+export const DEFAULT_AUDIO_OUTPUT: GameAudioFactory = (setup) => new AudioDirector(setup);
 
 interface LoadedSound {
   readonly source: string;
@@ -16,18 +16,17 @@ interface LoadedSound {
 /**
  * Plays a project's music and sound effects. Files are fetched ahead of time and decoded once the
  * player first interacts with the page, because browsers only start audio after a user gesture.
- * Per-frame work is a pause-state comparison; sounds allocate only when they actually play.
+ * Pause updates are event-driven; sounds allocate only when they actually play.
  */
-export class AudioDirector {
-  private settings: AudioSettings = DEFAULT_AUDIO;
+export class AudioDirector implements GameAudio {
+  private settings: AudioSettings;
   private media: MediaHost;
+  private readonly device: AudioDevice;
   private readonly onError: (message: string) => void;
   private readonly sounds = new Map<string, LoadedSound>();
   private readonly reported = new Set<string>();
   private readonly lifecycle = new AbortController();
-  private readonly unlockHandler = (): void => this.unlock();
-  private context: AudioContext | null = null;
-  private output: GainNode | null = null;
+  private readonly unsubscribeUnlock: () => void;
   private music: HTMLAudioElement | null = null;
   private musicSource: string | null = null;
   // Whether the music element has its streamed URL yet; it plays only once it has.
@@ -35,32 +34,27 @@ export class AudioDirector {
   private musicRequest = 0;
   private unlocked = false;
   private paused = true;
-  private lastImpact = -Infinity;
   private played = 0;
   private disposed = false;
 
-  constructor(options: {
-    settings: AudioSettings;
-    // Loads sounds and streams music; by default sources are URLs.
-    media?: MediaHost;
-    // Sources used by authored play-sound events, preloaded with the cues.
-    sounds?: readonly string[];
-    onError?: (message: string) => void;
-  }) {
-    this.media = options.media ?? urlMediaHost((source) => source);
-    this.onError = options.onError ?? (() => {});
-    for (const type of UNLOCK_EVENTS) {
-      window.addEventListener(type, this.unlockHandler, { capture: true, signal: this.lifecycle.signal });
-    }
-    this.setSettings(options.settings);
-    this.preload(options.sounds ?? []);
+  constructor(setup: GameAudioSetup) {
+    this.settings = setup.settings;
+    this.media = setup.media;
+    this.device = setup.device;
+    this.onError = setup.notice;
+    this.setSettings(setup.settings);
+    this.preload(setup.sounds);
+    this.unsubscribeUnlock = this.device.onUnlock(() => {
+      this.unlocked = true;
+      for (const sound of this.sounds.values()) void this.decode(sound);
+      this.syncMusic();
+    });
   }
 
   setSettings(settings: AudioSettings): void {
     if (this.disposed) return;
     this.settings = settings;
     this.preload(AUDIO_CUES.flatMap((cue) => settings.cues[cue] === null ? [] : [settings.cues[cue]!.source]));
-    if (this.output !== null) this.output.gain.value = settings.volume;
     this.syncMusic();
   }
 
@@ -73,7 +67,7 @@ export class AudioDirector {
     this.setSettings(this.settings);
   }
 
-  preload(sources: readonly string[]): void {
+  private preload(sources: readonly string[]): void {
     for (const source of sources) this.sound(source);
   }
 
@@ -86,9 +80,6 @@ export class AudioDirector {
     const clip = this.settings.cues[cue.cue];
     if (clip === null) return;
     if (cue.cue === 'impact') {
-      const now = this.context?.currentTime ?? performance.now() / 1000;
-      if (now - this.lastImpact < IMPACT_INTERVAL) return;
-      this.lastImpact = now;
       this.play(clip.source, clip.volume * (0.25 + 0.75 * cue.strength));
     } else {
       this.play(clip.source, clip.volume);
@@ -114,26 +105,11 @@ export class AudioDirector {
     if (this.disposed) return;
     this.disposed = true;
     this.lifecycle.abort();
+    this.unsubscribeUnlock();
     this.music?.pause();
     this.music?.removeAttribute('src');
     this.music = null;
     this.sounds.clear();
-    void this.context?.close();
-    this.context = null;
-  }
-
-  private unlock(): void {
-    if (this.unlocked || this.disposed) return;
-    this.unlocked = true;
-    for (const type of UNLOCK_EVENTS) window.removeEventListener(type, this.unlockHandler, { capture: true });
-    if (typeof AudioContext !== 'undefined') {
-      this.context = new AudioContext();
-      this.output = this.context.createGain();
-      this.output.gain.value = this.settings.volume;
-      this.output.connect(this.context.destination);
-      for (const sound of this.sounds.values()) void this.decode(sound);
-    }
-    this.syncMusic();
   }
 
   private sound(source: string): LoadedSound {
@@ -142,7 +118,7 @@ export class AudioDirector {
       sound = { source, bytes: null, buffer: null, decoding: null };
       this.sounds.set(source, sound);
       sound.bytes = this.load(source);
-      if (this.context !== null) void this.decode(sound);
+      if (this.device.context !== null) void this.decode(sound);
     }
     return sound;
   }
@@ -159,7 +135,7 @@ export class AudioDirector {
 
   private decode(sound: LoadedSound): Promise<AudioBuffer | null> {
     if (sound.decoding !== null) return sound.decoding;
-    const context = this.context;
+    const context = this.device.context;
     if (context === null || sound.bytes === null) return Promise.resolve(null);
     sound.decoding = sound.bytes.then(async (bytes) => {
       if (bytes === null || this.disposed) return null;
@@ -176,15 +152,16 @@ export class AudioDirector {
   }
 
   private play(source: string, volume: number): void {
-    if (!this.unlocked || this.context === null || this.output === null) return;
+    if (!this.unlocked || this.device.context === null || this.device.output === null) return;
     const sound = this.sound(source);
     const start = (buffer: AudioBuffer | null): void => {
-      if (buffer === null || this.disposed || this.context === null || this.output === null) return;
-      const node = this.context.createBufferSource();
+      const { context, output } = this.device;
+      if (buffer === null || this.disposed || context === null || output === null) return;
+      const node = context.createBufferSource();
       node.buffer = buffer;
-      const gain = this.context.createGain();
+      const gain = context.createGain();
       gain.gain.value = volume;
-      node.connect(gain).connect(this.output);
+      node.connect(gain).connect(output);
       node.start();
       this.played++;
     };

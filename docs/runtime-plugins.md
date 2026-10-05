@@ -1,9 +1,9 @@
 # Runtime plugins
 
-A plugin's **runtime facet** changes what play shows: the HUD's readouts, camera following,
-backdrop, aim marks, object, enemy and phantom looks, and scene layers of its own. It runs
-wherever the game plays: in the Workshop's play-test, in studio previews and in releases, so a
-game sees its own presentation while it is authored. Its SDK is
+A plugin's **runtime facet** changes what play shows and sounds: HUD readouts, camera following,
+backdrop, aim marks, object, enemy and phantom looks, scene layers, audio and event messages.
+It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
+so a game sees and hears its own presentation while it is authored. Its SDK is
 [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts). [Plugins](plugins.md) describes the
 manifest, points and verbs.
 
@@ -32,8 +32,8 @@ export default defineRuntime({
   facets again.
 - `start` returns its contributions at once; it cannot wait for anything. Keep the session's
   state in its closures and in the factories' own.
-- The engine resolves each point once per session and calls the factories it holds as it builds
-  the HUD and the game's view.
+- The engine resolves each point once per session and keeps direct references to its factories
+  and presenters; it never resolves a point on a frame or a cue.
 
 **`RuntimeHost`** (what `start` receives):
 
@@ -474,6 +474,238 @@ const guide: SceneLayerFactory = () => {
 export default defineRuntime({ start: () => [add(SCENE_LAYERS, guide)] });
 ```
 
+## Audio
+
+`AUDIO` is the slot `audio.output`, holding a `GameAudioFactory`. A plugin replaces the audio
+output or wraps it to change just one cue, while music and the other cues keep working.
+The point, contracts, silent base and creation checks live in
+[`src/game-audio.ts`](../src/game-audio.ts), independently of the optional
+[`src/audio.ts`](../src/audio.ts) implementation.
+
+```ts
+type GameAudioFactory = (setup: GameAudioSetup) => GameAudio;
+
+interface GameAudioSetup {
+  readonly settings: AudioSettings;
+  readonly media: MediaHost;
+  readonly sounds: readonly string[];
+  readonly device: AudioDevice;
+  notice(message: string): void;
+}
+
+interface GameAudio {
+  handle(cue: GameCue): void;
+  setPaused(paused: boolean): void;
+  setSettings(settings: AudioSettings): void;
+  setMedia(media: MediaHost): void;
+  dispose(): void;
+  inspect?(): unknown;
+}
+```
+
+- `settings` are the project's [audio settings](projects.md#section-reference): master volume,
+  looping music and a clip or `null` for each cue. `sounds` lists the initial level's authored
+  play-sound sources to preload. `media` loads authored sound bytes and streams music; a release
+  resolves these sources through its packaged content and access grants. `notice(message)`
+  reports an audio failure without stopping play.
+- `handle` receives a `GameCue`: `{ type: 'cue', cue: AudioCue, strength: number }` for a gameplay
+  moment, or `{ type: 'sound', source: string, volume: number }` for a play-sound event. The
+  closed cue list is `AUDIO_CUES`: `impact`, `enemy-hit`, `enemy-defeat`, `launch`, `finish`,
+  `hurt`, `death`, `fall` and `bonfire`. Impact strength is 0-1; other cues have strength 1.
+  Gameplay cues arrive in source order through lifecycle-guarded microtasks, outside `Simulation.step`
+  and physics callbacks; closing or stopping the Game drops pending deliveries.
+  **Game limits impacts at the source to one per 70 ms**, before any output or wrapper sees
+  them, checking delivery time so a long frame cannot bunch deferred impacts. The Workshop's
+  cue preview shares that limit but remains available after gameplay stops; previews are guarded
+  by the audio output's disposal, not the Game's lifecycle.
+- `setPaused` receives the initial state when play starts, then only pause-state changes.
+  `setSettings` previews new project audio settings in the Workshop, and `setMedia` tells the
+  output to drop media cached for files that changed. Forward all three in a wrap so the
+  previous output's music, settings and caches stay correct.
+- `dispose` releases the output's sources, media elements and subscriptions. The host disposes
+  the shared device after the output, and the runtime session after its consumers.
+  `inspect`, optional, supplies `window.gettingOver.gameProject().playback` in the Workshop.
+
+The engine provides **one `AudioDevice` per Game**:
+
+| Member | Meaning |
+| --- | --- |
+| `context` | The shared `AudioContext`, or `null` until the first gesture or when Web Audio is unavailable |
+| `output` | The master `GainNode`, or `null` with the context; connect effect nodes here, never straight to `context.destination` |
+| `onUnlock(listener)` | Calls the listener after the first pointer, key or touch gesture, including when Web Audio is unavailable; a late subscriber runs immediately. Returns an unsubscribe function |
+| `setVolume(volume)`, `dispose()` | Host-owned: the engine keeps project volume in sync independently of the chosen output, then closes the device. Plugins must not call these |
+
+Never create another `AudioContext`, close the shared one or bypass its output. Allocate and
+connect effect nodes only when a cue plays, preload and decode sources once, and keep no
+animation loop for audio. The SDK exports `AudioDevice` only as a type; use `setup.device`,
+never construct a device. Abort your loads and stop/disconnect your nodes on disposal.
+
+**Defaults.** `DEFAULT_AUDIO_OUTPUT` builds the engine's `AudioDirector`: sounds fetched ahead
+of time and decoded on unlock, streamed looping music that pauses with play, and the authored
+cue clips, with impact volume scaled by strength. This implementation factory stays in
+`src/audio.ts` for `virtual:game-audio` and the Workshop; the runtime SDK does not export it.
+The Workshop always uses this base. A release
+whose content has no audio or sound events gets `null` from `virtual:game-audio` and uses
+`SILENT_AUDIO_OUTPUT` as its base instead. The lightweight `game-audio.ts` module has no
+dependency on `AudioDirector`. The release still resolves and creates `AUDIO`, so a replacement
+or a wrap works without authored audio. The unchanged silent base enables neither impact tracking nor a Web
+Audio context; a replacement or wrapper enables the shared device and cue delivery.
+
+To extend the engine's audio, use `wrap(AUDIO, previous => ...)`: `previous` is the engine's
+selected base or an earlier plugin's factory, so the wrap preserves music and every cue it
+passes on without importing the director.
+Feature-gated defaults, such as the audio director and the phantom look, are reached through
+`wrap`, not imported from the runtime SDK.
+
+### Synthesizing one cue
+
+This complete runtime facet extends the engine's audio through `wrap(AUDIO, ...)`, composing
+with whichever output precedes it, even the silent release base.
+Hammer impacts thud with a synthesized tone; music, authored sounds and every other cue stay
+with the previous output. Add it as the `runtime` facet of a plugin in your manifest.
+
+```ts
+// games/my-game/runtime.ts
+import { AUDIO, defineRuntime, wrap } from '../../src/plugins/runtime-sdk';
+import type { GameAudio } from '../../src/plugins/runtime-sdk';
+
+export default defineRuntime({
+  start() {
+    return [wrap(AUDIO, (previous) => (setup) => {
+      const inner = previous(setup);
+      const tones = new Map<OscillatorNode, GainNode>();
+      return {
+        handle(cue) {
+          if (cue.type !== 'cue' || cue.cue !== 'impact') {
+            inner.handle(cue);
+            return;
+          }
+          const { context, output } = setup.device; // null until the player's first gesture
+          if (context === null || output === null) return;
+          const tone = context.createOscillator();
+          const gain = context.createGain();
+          const now = context.currentTime;
+          tone.frequency.value = 70;
+          // An exponential envelope stays positive, including for the weakest impact.
+          gain.gain.setValueAtTime(Math.max(0.001, 0.6 * cue.strength), now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+          tone.connect(gain).connect(output);
+          tones.set(tone, gain);
+          tone.onended = () => {
+            tone.disconnect();
+            gain.disconnect();
+            tones.delete(tone);
+          };
+          tone.start();
+          tone.stop(now + 0.25);
+        },
+        setPaused: (paused) => inner.setPaused(paused),
+        setSettings: (settings) => inner.setSettings(settings),
+        setMedia: (media) => inner.setMedia(media),
+        inspect: () => inner.inspect?.(),
+        dispose() {
+          for (const [tone, gain] of tones) {
+            tone.onended = null;
+            tone.stop();
+            tone.disconnect();
+            gain.disconnect();
+          }
+          tones.clear();
+          inner.dispose();
+        },
+      } satisfies GameAudio;
+    })];
+  },
+});
+```
+
+The shared master gain applies project volume to the synthesized tone too. Its short-lived
+nodes exist only while sounding, and disposal stops any still in flight.
+
+## Messages
+
+The three independent slots are `MESSAGES.toasts` (`messages.toasts`), `MESSAGES.popup`
+(`messages.popup`) and `MESSAGES.video` (`messages.video`). The project's message style still
+chooses toasts or popups. The Workshop still skips trigger videos; releases and studio previews
+play them. All three points resolve once per session, even when that policy skips videos.
+
+### Toasts
+
+`ToastsFactory` is `(mount: HTMLElement) => Toasts`:
+
+```ts
+interface Toasts {
+  show(message: MessageAction): boolean;
+  clear(): void;
+  setHeld(held: boolean): void;
+  dispose(): void;
+  inspect?(): unknown;
+}
+```
+
+`MessageAction` is `{ type: 'message', title: string, message: string }`.
+
+- `show` accepts or queues a message and returns `true`; return `false` when no more can wait.
+  The engine reports that as an event failure; any non-boolean result is `invalid-contribution`,
+  naming the plugin. A toast never pauses play, takes input or holds up a trigger's next event.
+- `clear` starts a new run: drop waiting messages and dismiss the one showing.
+- `setHeld(true)` holds the toast while a popup or video owns the player's attention; `false`
+  resumes it. The engine owns this hold regardless of which modal presenter is chosen.
+- `dispose` cancels animation, removes owned nodes and releases listeners when the Game closes.
+  `inspect`, optional, supplies the `toasts` field of the Workshop's presentation diagnostics.
+
+`DEFAULT_MESSAGE_TOASTS` creates the engine's `MessageToasts`: one procedural toast at a time,
+duplicate messages coalesced, at most three waiting, and a fade for reduced motion. It requests
+frames only while a toast shows and is not held; it costs no animation frames when idle.
+Keep that active-only rule in replacements, bound the queue and reuse drawing resources.
+
+### Popups and videos
+
+`PopupPresenter` is `(action: MessageAction, context: PresentationContext) => Promise<EventOutcome>`.
+`VideoPresenter` has the same contract with `VideoAction`, `{ type: 'play-video', source: string }`.
+
+```ts
+interface PresentationContext {
+  readonly mount: HTMLElement;
+  readonly signal: AbortSignal;
+  readonly media: MediaHost;
+  readonly previouslyFocused: HTMLElement | null;
+  setState(state: PresentationState): void;
+  onClose(): void;
+}
+```
+
+- `EventPresenter` keeps the modal state machine: exactly one presentation at a time, pausing
+  gameplay, blocking game input and holding toasts until it closes. An active video covers the
+  game view, so rendering that view stops until the video closes. Replacing a presenter does
+  not change these rules.
+- Append only your own nodes to `mount`, and remove only those nodes. Stream authored videos
+  with `media.stream(source, signal)`; it returns `Promise<MediaStream>`, with
+  `{ readonly url: string; readonly crossOrigin: 'anonymous' | 'use-credentials' | null }`.
+- `setState` reports diagnostic progression: `popup`, `loading`, `awaiting-input` or `playing`
+  (`PresentationState`). The host starts a popup in `popup`, a video in `loading`; a custom
+  presenter need not report further states unless its UI has them.
+- Settle with `completed`, `skipped` or `cancelled` (`EventOutcome`). After synchronous cleanup,
+  `onClose()` releases the modal before you restore focus, just before settling the promise.
+  `previouslyFocused` is captured before modal input blocking; restore it if it is still in the
+  document and is not the body. A presenter that does not call `onClose` is closed when its
+  promise settles.
+- `signal` cancels the presentation when its event aborts or the presenter is disposed, even if
+  a plugin's promise has not settled; remove UI and listeners and stop media synchronously on
+  abort. The host also aborts it to clean up a failed presentation. Successful closing does not
+  abort the signal: release resources on normal settlement too, as the defaults do with their
+  own listener controller. Late results cannot close a newer modal.
+- Use `EventExecutionError` for an expected media/presentation refusal: the trigger reports it
+  and play continues. Unexpected throws or rejections are `PluginError` with the plugin and
+  point; a non-promise result or invalid outcome is `invalid-contribution`, never a silent
+  fallback to the default.
+
+`DEFAULT_MESSAGE_POPUP` and `DEFAULT_MESSAGE_VIDEO` use the engine's `Presentation`: the same
+ARIA dialogs, focus trap and restoration, Tab cycling and Escape behavior, Continue/Skip
+controls, and streamed HTML video with gesture-required playback and fullscreen controls.
+Video loading, playback refusals and media errors retain their event failure paths.
+Defaults and replacements do work only while presenting; do not add an idle animation loop.
+
 ## Wrapping a default
 
 `wrap(point, decorate)` builds on what a point holds so far: `decorate` receives the previous
@@ -483,7 +715,7 @@ previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS`
 `DEFAULT_AIM_MARKS` are the engine's own factories, the points' bases, for a plugin that replaces
 a point but draws the engine's part inside its own. Forward every contract method explicitly when wrapping an
 instance; its methods may live on a prototype, so spreading it does not copy them.
-Feature-gated defaults, such as phantom drawing, are not SDK exports: extend them with `wrap`.
+Feature-gated defaults, such as audio and phantom drawing, are not SDK exports: extend them with `wrap`.
 
 The engine's health readout, flashing whenever the player is hurt:
 
@@ -524,16 +756,23 @@ see [order and conflicts](plugins.md#order-and-conflicts).
 - A `start` that throws fails with `plugin-failed`, naming the plugin, and the plugins that
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
-- Points reject non-function factories. Creating a readout, director, backdrop, marks, look or
-  layer checks the returned object's required and optional methods, roots and passes. A
+- Points reject non-function factories. Creating a readout, director, backdrop, marks, look,
+  layer, audio output or toast presenter checks the returned object's required and optional
+  methods, roots and passes. A
   factory, or a wrap, that throws fails with `plugin-failed`; a malformed return fails with
   `invalid-contribution`. Each names the plugin and point, including the contributor of a list
   layer. A director that writes a non-finite aim or a non-positive height also fails explicitly.
+- Audio and toasts require their lifecycle methods, and an optional `inspect` must be a
+  function. Popup/video results must be promises of a valid `EventOutcome`, and a toast's
+  `show` must return a boolean; malformed results fail with `invalid-contribution`, naming
+  the plugin and point.
 - As the Workshop or a release starts, any of these stops it with a fatal error naming the
-  plugin. The engine never falls back to its own readouts or looks silently.
+  plugin. The engine never falls back to its own presentation silently.
 - An error a runtime presentation object throws while the game runs stops the game and shows
   the error, as any error in the game does. Workshop overlays retain their
   [isolated plugin lifecycle](workshop-plugins.md#lifecycle).
+- An expected `EventExecutionError`, such as a video that cannot load or a full toast queue,
+  instead fails that trigger event and reports a notice, without stopping play.
 
 ## Complete example
 

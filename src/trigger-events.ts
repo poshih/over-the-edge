@@ -21,6 +21,7 @@ export type TriggerAction =
 
 export type PresentationAction = Extract<TriggerAction, { readonly type: 'message' | 'play-video' }>;
 export type MessageAction = Extract<TriggerAction, { readonly type: 'message' }>;
+export type VideoAction = Extract<TriggerAction, { readonly type: 'play-video' }>;
 
 // How message events appear: a toast that fades in and away while play goes on, or a popup that
 // pauses the game until the player continues.

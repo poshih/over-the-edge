@@ -26,8 +26,8 @@ declare module 'virtual:game-appearance' {
 }
 
 declare module 'virtual:game-audio' {
-  const Director: typeof import('./audio').AudioDirector | null;
-  export default Director;
+  const create: import('./game-audio').GameAudioFactory | null;
+  export default create;
 }
 
 declare module 'virtual:game-decorations' {
