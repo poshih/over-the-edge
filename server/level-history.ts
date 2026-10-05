@@ -226,13 +226,16 @@ export async function listRecordings(directory: string, version: LevelVersion): 
   return recordings;
 }
 
-// How many recordings each version has, reading each course's folder once.
+// How many recordings each version has, reading each course's folder once. As listRecordings finds them, a recording
+// counts only toward the version its name gives when that version plays the folder's course: recordings outlive a
+// history that restarts or that another checkout saved.
 export async function countRecordings(directory: string, list: readonly LevelVersion[]): Promise<Map<number, number>> {
+  const courses = new Map<number, string>(list.map((entry) => [entry.version, entry.course]));
   const counts = new Map<number, number>();
-  for (const course of new Set(list.map((entry) => entry.course))) {
+  for (const course of new Set(courses.values())) {
     for (const name of await courseNames(directory, course)) {
       const version = recordingVersion(name)!;
-      counts.set(version, (counts.get(version) ?? 0) + 1);
+      if (courses.get(version) === course) counts.set(version, (counts.get(version) ?? 0) + 1);
     }
   }
   return counts;
