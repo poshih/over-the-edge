@@ -64,7 +64,7 @@ my-game/
   art/asset-<sha256>.glb        terrain meshes, named by their content hash
   media/intro.webm
   media/clink.wav
-  level-versions/               the project server's saved levels; see Level versions
+  level-versions/               the project server's saved levels, kept out of Git; see Level versions
   phantoms/<course>/            phantom recordings played on them
 ```
 
@@ -274,9 +274,14 @@ on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phan
 **Level / Replays** plays each run back over the level. Versions
 that play the same share a course, so edits to decorations, labels, colours, which mesh draws a
 collision, control sensitivity or the cursor keep a level's recordings, while any physics setting starts a new
-course; a release bundles the recordings of its level and settings' course. Both folders grow
-with use: commit them to keep the history and recordings, and delete recordings you no longer
-need. Deleting `level-versions/` restarts the numbering when the project next opens.
+course; a release bundles the recordings of its level and settings' course. `phantoms/` grows
+with use: commit it to keep the recordings, and delete those you no longer need.
+
+`level-versions/` stays with the checkout that saved it: Git ignores it wherever the project
+lives, so a fresh clone starts the numbering at 1, as deleting the folder does when the project
+next opens. **Level / Replays** lists a recording under the version its name gives only when
+this checkout's version of that number plays the same course; releases bundle every recording
+of their course either way.
 
 ## Publishing a Workshop with its project
 

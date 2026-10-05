@@ -39,3 +39,5 @@ artifacts
 
 /projects/
 /releases/
+# Each checkout's own level history, wherever a project lives; see docs/projects.md.
+level-versions/
