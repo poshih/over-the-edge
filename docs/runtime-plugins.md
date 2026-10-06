@@ -389,7 +389,7 @@ export default defineRuntime({ start: () => [replace(AIM_MARKS, dot)] });
 ## Hurt effects
 
 `HURT_EFFECTS`, the slot `scene.hurt-effects`, holds a `HurtEffectsFactory`,
-`() => HurtEffects`: what shows on the character when something hurts it, by what did.
+`() => HurtEffects`: what shows when something hurts the character, by what did, where and how hard.
 
 ```ts
 interface HurtEffects {
@@ -403,23 +403,30 @@ interface HurtEffects {
 interface HurtCause {
   readonly source: HurtSource; // 'enemy' | 'projectile' | 'axe' | 'lava'
   readonly id: string;
+  readonly x: number;      // where it struck, in world metres
+  readonly y: number;
+  readonly pushX: number;  // the velocity it knocked the player with, in m/s
+  readonly pushY: number;
 }
 ```
 
 - `hurt` takes each hit that cost health, `fatal` for the killing one. `cause.source` says what
   dealt it, an enemy's bump, a trap's projectile, an axe's blade or lava (swamp never hurts), and
   `cause.id` names the level object that did: the enemy, the trap that fired the projectile, the
-  axe or the pool. A hit lands at most once a second, as the character is then unharmed for a
-  while, so lava burns once a second while the pot stays in it.
+  axe or the pool. `x` and `y` are where it struck: midway between the enemy and the pot, where
+  the projectile's path entered the character, the middle of where the blade met the character,
+  or the character's centre in lava. `pushX` and `pushY` are the velocity the hit added to the
+  player, along the shot, away from the blade or the enemy and upward; lava pushes nothing. A hit
+  lands at most once a second, as the character is then unharmed for a while, so lava burns once
+  a second while the pot stays in it.
 - `clear` follows every placement of the player anew, a restart or a return to a bonfire: end what
   follows the character. A death returns the player at once, so its fatal `hurt` comes just
-  before a `clear`. To leave something where the character fell, keep the place it last had from
-  `update`.
+  before a `clear`. What shows where a blow landed, at the cause's `x` and `y`, can play on.
 - `update` runs on each drawn frame from a `hurt` or a `clear` until it returns `false`, and then
   not again until the next one, so an idle point costs nothing. It receives the borrowed
-  [`SceneFrame`](#scene-layers): the drawn time and the character's `parts`, whose `root` is the
-  character's centre. Return `true` while anything still shows; anything else than a boolean is
-  an error.
+  [`SceneFrame`](#scene-layers): the drawn time, which a restart rewinds, and the character's
+  `parts`, whose `root` is the character's centre. Return `true` while anything still shows;
+  anything else than a boolean is an error.
 
 `hurt` and `clear` arrive with the [gameplay events](#gameplay-events), after the frame's physics
 steps and before the frame is drawn, in the order they happened; never inside a physics step. The
@@ -428,25 +435,36 @@ and their arms, under the tool, so **all its materials must ignore depth (`depth
 as the [pass rules](#pass-rules-for-presentation-points) require. Reuse geometry, materials and
 scratch, and allocate nothing on a frame. The engine detaches the root before `dispose`.
 
-`DEFAULT_HURT_EFFECTS` sets the character alight while lava burns it: tongues of flame shaded from
-turbulence rising through them and warped by itself, deep red to a white-hot core, that lick up
-the character, bend away from its motion and flare at each burn, with embers rising from it, smoke
-above it and a flickering glow about it. Each burn keeps the fire going a little over a second;
-then the flames die down and the last embers and smoke finish rising. Embers and smoke each live
-their own life from where they were born, so a later burn grows the flames again from where they
-are and starts new embers and smoke at the character, without anything appearing mid-flight. It
-needs no textures, draws only
-while it burns and allocates nothing on a frame. Other hits show nothing more. To keep the fire
-and add a flash for every other hit, wrap it:
+`DEFAULT_HURT_EFFECTS` shows:
+
+- **Lava:** the character alight while it burns: tongues of flame shaded from turbulence rising
+  through them and warped by itself, deep red to a white-hot core, that lick up the character,
+  bend away from its motion and flare at each burn, with embers rising from it, smoke above it and
+  a flickering glow about it. Each burn keeps the fire going a little over a second; then the
+  flames die down and the last embers and smoke finish rising. Embers and smoke each live their
+  own life from where they were born, so a later burn grows the flames again from where they are
+  and starts new embers and smoke at the character, without anything appearing mid-flight.
+- **An axe:** where the blade struck, a cold steel flash with a glint, a ring rushing outward, a
+  bright slash across the character bowed the way the blow knocks it, and a spray of sparks
+  thrown that way, cooling from white through orange to red as they slow and fall.
+- **A projectile:** where it struck, a hot flash and ring, sparks sprayed back from the impact and
+  on along its flight, and the burning bolt broken into glowing chips that tumble away.
+
+Blows play out where they landed, also when a death returns the player to a bonfire. Enemy bumps
+show nothing more. It all needs no textures, draws only while something shows and allocates
+nothing on a frame.
+
+To keep the engine's effects and add one of your own, wrap the point and forward every hit to the
+base. This adds a flash where an enemy bumps the character:
 
 ```ts
 import { CircleGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
 import { defineRuntime, HURT_EFFECTS, wrap } from '../../src/plugins/runtime-sdk';
 import type { HurtEffectsFactory } from '../../src/plugins/runtime-sdk';
 
-const withFlash = (previous: HurtEffectsFactory): HurtEffectsFactory => () => {
+const withBumpFlash = (previous: HurtEffectsFactory): HurtEffectsFactory => () => {
   const base = previous();
-  const flash = new Mesh(new CircleGeometry(0.7, 24),
+  const flash = new Mesh(new CircleGeometry(0.5, 24),
     new MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false }));
   flash.visible = false;
   const root = new Group().add(base.root, flash);
@@ -457,27 +475,23 @@ const withFlash = (previous: HurtEffectsFactory): HurtEffectsFactory => () => {
     root,
     hurt(cause, fatal) {
       base.hurt(cause, fatal);
-      if (cause.source !== 'lava') pending = true;
+      if (cause.source !== 'enemy') return;
+      // Copy what is kept: the cause is borrowed.
+      flash.position.set(cause.x, cause.y, 1);
+      pending = true;
     },
     clear() {
       base.clear();
-      pending = false;
-      start = null;
-      flash.visible = false;
     },
     update(frame) {
-      const burning = base.update(frame);
+      const showing = base.update(frame);
       if (pending) { pending = false; start = frame.time; }
-      if (start === null) return burning;
+      if (start === null) return showing;
       const age = frame.time - start;
-      for (let index = 0; index < frame.parts.length; index++) {
-        const part = frame.parts[index]!;
-        if (part.kind === 'root') flash.position.set(part.x, part.y + 0.4, 1);
-      }
       flash.material.opacity = Math.max(0, 0.6 - age * 2);
-      flash.visible = age < 0.3;
+      flash.visible = age >= 0 && age < 0.3;
       if (!flash.visible) start = null;
-      return burning || flash.visible;
+      return showing || flash.visible;
     },
     dispose() {
       base.dispose();
@@ -487,11 +501,13 @@ const withFlash = (previous: HurtEffectsFactory): HurtEffectsFactory => () => {
   };
 };
 
-export default defineRuntime({ start: () => [wrap(HURT_EFFECTS, withFlash)] });
+export default defineRuntime({ start: () => [wrap(HURT_EFFECTS, withBumpFlash)] });
 ```
 
-Replace the point instead to draw every cause your own way. The same causes reach
-[gameplay observers](#gameplay-events) on `hurt` and `death`, for sounds or scores of a game's own.
+To draw one source your own way and keep the others, wrap the point the same way but leave that
+source's hits out of what you forward to the base. Replace the point instead to draw every cause
+your own way. The same causes reach [gameplay observers](#gameplay-events) on `hurt` and `death`,
+for sounds or scores of a game's own.
 
 ## Enemy looks
 
@@ -835,7 +851,7 @@ interface GameObserver {
 
 | `type` | Additional fields and meaning |
 | --- | --- |
-| `hurt` | `health`, `max`: the simulation's remaining health and maximum after a nonlethal hurt in the step batch, independent of whether the HUD shows health; `cause`: what dealt the hit, a [`HurtCause`](#hurt-effects) with its `source` (`enemy`, `projectile`, `axe` or `lava`) and the `id` of the level object that dealt it |
+| `hurt` | `health`, `max`: the simulation's remaining health and maximum after a nonlethal hurt in the step batch, independent of whether the HUD shows health; `cause`: what dealt the hit, a [`HurtCause`](#hurt-effects) with its `source` (`enemy`, `projectile`, `axe` or `lava`), the `id` of the level object that dealt it, where it struck (`x`, `y`) and the velocity it knocked the player with (`pushX`, `pushY`) |
 | `death` | Health ran out; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The player fell out of the level; takes precedence over death if both occur in the same step |
 | `respawn` | `bonfire`: the checkpoint's ID, or `null` when the automatic reset path returns to the attempt's start |

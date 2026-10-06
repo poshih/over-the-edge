@@ -30,7 +30,8 @@ interface EnemyCallbacks {
   readonly getHeadFixture: () => Fixture;
   readonly isTransientTerrain: (body: Body) => boolean;
   readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
-  readonly onBump: (velocityChange: Readonly<Point>, enemy: string) => void;
+  // A bump: the velocity it adds to the player, the enemy that dealt it and where they met, in world metres.
+  readonly onBump: (velocityChange: Readonly<Point>, enemy: string, atX: number, atY: number) => void;
 }
 
 const ENEMY_FRICTION = 0.15;
@@ -455,7 +456,8 @@ export class EnemyWorld {
     this.nextBumpAt = this.time + ENEMY_BEHAVIOR.bumpSeconds;
     this.bumpCount++;
     this.transition(nearest, 'recover');
-    this.callbacks.onBump({ x: direction * ENEMY_BEHAVIOR.bumpSpeed, y: ENEMY_BEHAVIOR.bumpLift }, nearest.object.id);
+    this.callbacks.onBump({ x: direction * ENEMY_BEHAVIOR.bumpSpeed, y: ENEMY_BEHAVIOR.bumpLift }, nearest.object.id,
+      (player.x + nearest.current.x) / 2, (player.y + nearest.current.y) / 2);
   }
 
   private transition(record: EnemyRecord, phase: EnemyPhase): void {

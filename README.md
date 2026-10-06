@@ -869,10 +869,11 @@ authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/p
 sound them, and a [phantom](docs/phantoms.md) session ends at a death as at a restart. A
 game's runtime plugin can draw the [health readout](docs/runtime-plugins.md#hud-readouts) and
 [bonfires](docs/runtime-plugins.md#object-looks) its own way. Each hit says what dealt it, an
-enemy, a trap's projectile, an axe or lava, and which level object did, so a game's
-[hurt effects](docs/runtime-plugins.md#hurt-effects) can show its own effect for each and its
-[gameplay observers](docs/runtime-plugins.md#gameplay-events) can tell them apart; the engine's
-sets the character alight while lava burns it.
+enemy, a trap's projectile, an axe or lava, which level object did, where it struck and how hard
+it knocked the player, so a game's [hurt effects](docs/runtime-plugins.md#hurt-effects) can show
+its own effect for each and its [gameplay observers](docs/runtime-plugins.md#gameplay-events) can
+tell them apart. The engine's sets the character alight while lava burns it, and shows a blade's
+or a projectile's blow where it lands.
 
 ### Traps
 
@@ -885,7 +886,8 @@ A **projectile trap** fires from its muzzle, its position, along its rotation: a
 **Projectile speed**, while the player is within **40 m**. Projectiles fly straight for
 up to 40 m. Terrain stops them, and so does the hammer head, which makes the hammer a
 shield. Terrain stops them only from outside, so a muzzle set into a wall's face shoots
-out of it. A hit costs the trap's **Damage** and knocks the player along the shot.
+out of it. A hit costs the trap's **Damage** and knocks the player along the shot, and
+where it strikes the burning bolt bursts in a hot flash, sparks and glowing chips.
 
 A **swinging axe** hangs its blade **Length** below its pivot, its position, and swings in
 and out of the view, toward the camera and away, up to 63° either side, once every
@@ -893,7 +895,8 @@ and out of the view, toward the camera and away, up to 63° either side, once ev
 swing, its curved edge below, so it swings edge first and is edge-on to the camera: 1.3 m
 toward the camera and away, 0.7 m tall and 6 cm thick along the climb. It cuts through the
 play line at **Swing offset** seconds and every half period after. There a blade that meets
-the player costs its **Damage** and knocks the player away from it. The half of the swing in
+the player costs its **Damage** and knocks the player hard away from where it struck, 9 m/s
+along the climb and 4 m/s up, with a steel flash, a slash and a spray of sparks. The half of the swing in
 front of the obstacle line draws over the player, the half behind it under the player.
 Stagger neighbouring axes with their offsets.
 

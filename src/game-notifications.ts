@@ -5,12 +5,17 @@ import type { HurtCause, HurtSource } from './hazards';
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type EventType = GameEvent['type'];
 type EventOf<T extends EventType> = Mutable<Extract<GameEvent, { readonly type: T }>>;
-type StagedCause = { source: HurtSource; id: string };
+type StagedCause = { source: HurtSource; id: string; x: number; y: number; pushX: number; pushY: number };
+
+// A staged cause before it is first written.
+function noCause(): StagedCause {
+  return { source: 'enemy', id: '', x: 0, y: 0, pushX: 0, pushY: 0 };
+}
 
 // Each pooled event is made whole, so no two share a nested object such as a cause.
 const EVENT_SEEDS: { readonly [T in EventType]: () => EventOf<T> } = {
-  hurt: () => ({ type: 'hurt', health: 0, max: 0, cause: { source: 'enemy', id: '' } }),
-  death: () => ({ type: 'death', cause: { source: 'enemy', id: '' } }),
+  hurt: () => ({ type: 'hurt', health: 0, max: 0, cause: noCause() }),
+  death: () => ({ type: 'death', cause: noCause() }),
   fall: () => ({ type: 'fall' }),
   respawn: () => ({ type: 'respawn', bonfire: null }),
   restart: () => ({ type: 'restart' }),
@@ -29,6 +34,10 @@ export function stageCause(target: Readonly<HurtCause>, cause: Readonly<HurtCaus
   const staged: StagedCause = target;
   staged.source = cause.source;
   staged.id = cause.id;
+  staged.x = cause.x;
+  staged.y = cause.y;
+  staged.pushX = cause.pushX;
+  staged.pushY = cause.pushY;
 }
 
 // For the hurt effects, in the order they happened: a hit, with what dealt it and whether it killed, or a placement of
@@ -129,7 +138,7 @@ export class GameNotifications {
   private hurtNotice(): Mutable<HurtNotice> {
     let notice = this.hurts[this.hurtCount] as Mutable<HurtNotice> | undefined;
     if (notice === undefined) {
-      notice = { clear: false, fatal: false, cause: { source: 'enemy', id: '' } };
+      notice = { clear: false, fatal: false, cause: noCause() };
       this.hurts[this.hurtCount] = notice;
     }
     this.hurtCount++;

@@ -1,5 +1,7 @@
+import { Group } from 'three';
 import type { Object3D } from 'three';
 import type { HurtCause } from './hazards';
+import { HitBursts } from './hit-bursts';
 import { LavaFire } from './lava-fire';
 import { PluginError, slotPoint } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
@@ -32,8 +34,40 @@ function effectsFactory(value: unknown): HurtEffectsFactory {
 
 export const HURT_EFFECTS = slotPoint('scene.hurt-effects', 'runtime', effectsFactory);
 
-// The engine's: flames over the character while lava burns it. Other hits show nothing more.
-export const DEFAULT_HURT_EFFECTS: HurtEffectsFactory = () => new LavaFire();
+// The engine's: flames over the character while lava burns it, and a burst where a blade or a projectile strikes it.
+// Enemy bumps show nothing more.
+class EngineHurtEffects implements HurtEffects {
+  readonly root = new Group();
+  private readonly fire = new LavaFire();
+  private readonly bursts = new HitBursts();
+
+  constructor() {
+    this.root.add(this.fire.root, this.bursts.root);
+  }
+
+  hurt(cause: Readonly<HurtCause>): void {
+    this.fire.hurt(cause);
+    this.bursts.hurt(cause);
+  }
+
+  clear(): void {
+    this.fire.clear();
+    this.bursts.clear();
+  }
+
+  update(frame: SceneFrame): boolean {
+    const burning = this.fire.update(frame);
+    const striking = this.bursts.update(frame);
+    return burning || striking;
+  }
+
+  dispose(): void {
+    this.fire.dispose();
+    this.bursts.dispose();
+  }
+}
+
+export const DEFAULT_HURT_EFFECTS: HurtEffectsFactory = () => new EngineHurtEffects();
 
 export function createHurtEffects(plugins: RuntimePlugins): HurtEffects {
   const factory = plugins.slot(HURT_EFFECTS, DEFAULT_HURT_EFFECTS);

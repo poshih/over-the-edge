@@ -346,6 +346,11 @@ export class LavaFire implements HurtEffects {
 
   update(frame: SceneFrame): boolean {
     const time = frame.time;
+    // Out and not lit: nothing to do, as while only other effects show.
+    if (!this.showing && !this.igniting) {
+      this.lastTime = time;
+      return false;
+    }
     let root: SceneFrame['parts'][number] | undefined;
     for (let index = 0; index < frame.parts.length; index++) {
       if (frame.parts[index]!.kind === 'root') root = frame.parts[index];

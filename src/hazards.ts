@@ -11,10 +11,15 @@ export const HAZARD_LIMITS = { bonfires: 32, traps: 128 } as const;
 export const HURT_SOURCES = ['enemy', 'projectile', 'axe', 'lava'] as const;
 export type HurtSource = (typeof HURT_SOURCES)[number];
 
-// A hit's cause: its source and the ID of the level object that dealt it, for a projectile the trap that fired it.
+// A hit's cause: its source and the ID of the level object that dealt it, for a projectile the trap that fired it;
+// where it struck, in world metres; and the velocity it knocked the player with, in m/s, none for lava.
 export interface HurtCause {
   readonly source: HurtSource;
   readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly pushX: number;
+  readonly pushY: number;
 }
 
 export const HEALTH = {
@@ -64,8 +69,8 @@ export const AXE = {
   // width runs across the obstacle line, toward the camera and away, its height along the haft, centred the axe's
   // length below the pivot, and its thickness along the line.
   bladeWidth: 1.3, bladeHeight: 0.7, bladeThickness: 0.06,
-  // Velocity a hit adds to the player, away from the blade's centre and upward, in m/s.
-  push: 5, lift: 2.5,
+  // Velocity a hit adds to the player, away from where the blade struck and upward, in m/s: a heavy blow.
+  push: 9, lift: 4,
 } as const;
 
 export const AXE_FIELDS = {

@@ -20,8 +20,8 @@ export interface HazardHooks {
   readonly insideTerrain: (body: Body, point: Readonly<Point>) => boolean;
   // Whether a hit would hurt the player now; traps pass through a player who cannot be hurt.
   readonly vulnerable: () => boolean;
-  // A hit: its damage, the velocity it adds to the player, and the trap that dealt it.
-  readonly hurt: (damage: number, push: Readonly<Point>, source: 'projectile' | 'axe', trap: string) => void;
+  // A hit: its damage, the velocity it adds to the player, the trap that dealt it and where it struck, in world metres.
+  readonly hurt: (damage: number, push: Readonly<Point>, source: 'projectile' | 'axe', trap: string, atX: number, atY: number) => void;
 }
 
 interface Shooter {
@@ -214,9 +214,11 @@ export class HazardWorld {
       if (vulnerable && this.enters(shot.x, shot.y, toX - shot.x, toY - shot.y)) {
         // Only the first hit of a step hurts: the player then cannot be hurt for a while.
         vulnerable = false;
+        // It strikes where its path enters the character.
+        const along = this.span.near;
         this.hooks.hurt(shot.damage, {
           x: shot.directionX * SHOOTER.push, y: shot.directionY * SHOOTER.push + SHOOTER.lift,
-        }, 'projectile', shot.trap);
+        }, 'projectile', shot.trap, shot.x + (toX - shot.x) * along, shot.y + (toY - shot.y) * along);
         this.discard(index);
         continue;
       }
@@ -274,7 +276,10 @@ export class HazardWorld {
       const pass = Math.round(2 * (time - object.offset) / object.period);
       if (pass === axe.pass) continue;
       axe.pass = pass;
-      this.hooks.hurt(object.damage, { x: (root.x < object.x ? -1 : 1) * AXE.push, y: AXE.lift }, 'axe', object.id);
+      // It strikes in the middle of where the blade meets the character, and knocks the character away from there.
+      const atX = (Math.max(this.blade.minX, this.box.minX) + Math.min(this.blade.maxX, this.box.maxX)) / 2;
+      const atY = (Math.max(this.blade.minY, this.box.minY) + Math.min(this.blade.maxY, this.box.maxY)) / 2;
+      this.hooks.hurt(object.damage, { x: (root.x < atX ? -1 : 1) * AXE.push, y: AXE.lift }, 'axe', object.id, atX, atY);
       break;
     }
     this.nearby.length = 0;

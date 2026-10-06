@@ -104,7 +104,7 @@ export class Simulation {
   // Whether a hit hurt the player, who survived it, since takeHurt last looked.
   private hurtTaken = false;
   // What dealt the latest hit that took health: reused, and read at once by whoever is given it.
-  private readonly cause: { source: HurtSource; id: string } = { source: 'enemy', id: '' };
+  private readonly cause: { -readonly [K in keyof HurtCause]: HurtCause[K] } = { source: 'enemy', id: '', x: 0, y: 0, pushX: 0, pushY: 0 };
   // How many times the player has been placed: at every restart and every return to a bonfire.
   private placements = 0;
   private disposed = false;
@@ -138,9 +138,9 @@ export class Simulation {
       getHeadFixture: () => this.rig.tool.head.fixture,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
-      onBump: (delta, enemy) => {
+      onBump: (delta, enemy, atX, atY) => {
         changePlayerVelocity(this.rig, delta);
-        this.hurt(ENEMY_BEHAVIOR.bumpDamage, 'enemy', enemy);
+        this.hurt(ENEMY_BEHAVIOR.bumpDamage, 'enemy', enemy, atX, atY, delta.x, delta.y);
       },
     });
     this.hazards = new HazardWorld(this.world, level.objects.filter(isTrapObject), {
@@ -148,8 +148,8 @@ export class Simulation {
       isTerrain: (body) => this.terrain.isTerrain(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       vulnerable: () => this.vulnerable(),
-      hurt: (damage, push, source, trap) => {
-        this.hurt(damage, source, trap);
+      hurt: (damage, push, source, trap, atX, atY) => {
+        this.hurt(damage, source, trap, atX, atY, push.x, push.y);
         changePlayerVelocity(this.rig, push);
       },
     });
@@ -410,7 +410,10 @@ export class Simulation {
     this.enemies.afterStep(this.elapsed);
     this.hazards.afterStep(this.elapsed, this.rig.root.getPosition());
     // Lava burns the character while the pot is in it; each burn, like any hit, leaves it unharmed for a second.
-    if (bath?.liquid === 'lava') this.hurt(this.settings.physics.lavaDamage, 'lava', bath.id);
+    if (bath?.liquid === 'lava') {
+      const root = this.rig.root.getPosition();
+      this.hurt(this.settings.physics.lavaDamage, 'lava', bath.id, root.x, root.y, 0, 0);
+    }
     const foot = this.playerPosition();
     this.bonfires.update(foot);
     this.bestHeight = Math.max(this.bestHeight, foot.y);
@@ -571,15 +574,19 @@ export class Simulation {
     return this.health > 0 && this.elapsed >= this.safeUntil;
   }
 
-  // Takes `damage` from the player's health, dealt by the level object `id`, unless a hit hurt it moments ago; each hit
-  // leaves it unharmed for a while.
-  private hurt(damage: number, source: HurtSource, id: string): void {
+  // Takes `damage` from the player's health, dealt by the level object `id` striking at (x, y) and knocking the player
+  // with (pushX, pushY), unless a hit hurt it moments ago; each hit leaves it unharmed for a while.
+  private hurt(damage: number, source: HurtSource, id: string, x: number, y: number, pushX: number, pushY: number): void {
     if (!this.vulnerable()) return;
     this.health = Math.max(0, this.health - damage);
     this.safeUntil = this.elapsed + HEALTH.hurtSeconds;
     this.hurtTaken = this.health > 0;
     this.cause.source = source;
     this.cause.id = id;
+    this.cause.x = x;
+    this.cause.y = y;
+    this.cause.pushX = pushX;
+    this.cause.pushY = pushY;
   }
 
   private outOfBoundsY(level: LevelDefinition): number | null {
