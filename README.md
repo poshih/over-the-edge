@@ -423,11 +423,12 @@ width), the target and the hammer hold still, so small or unsteady input does no
 disturb a delicate hold. Once the cursor leaves the dead zone it drags the target
 along, a dead zone behind it, and the target moves no farther than it must. The
 target stays within a configurable radius of the hinge, and the cursor can go the
-dead zone beyond it. Without input, both offsets stay unchanged: walking,
-falling, or being launched carries them with the character. They do not rotate
+dead zone beyond it. Without input, both offsets stay unchanged by default: walking,
+falling, or being launched carries them with the character. A game's **Follow
+character** setting can make them follow only part of that movement, staying partly
+where they were in the world (see [game settings](#game-settings)). They do not rotate
 with the pot, follow the hammer, or drift back to the hinge, unless a game turns
-on **Return target to hammer** (see [game settings](#game-settings)). Camera movement
-does not modify them.
+on **Return target to hammer**. Camera movement does not modify them.
 
 Motion beyond the cursor's reach, the target radius plus the dead zone, is
 discarded, so reversing input only has to cross the dead zone again, without
@@ -544,9 +545,14 @@ immediately pulls an out-of-range target straight in, including while paused;
 increasing it preserves the current offset. Its **Dead zone** slider (0-0.5 m,
 default **0.1 m**) sets the slack between the cursor and the target; 0 makes the
 hammer follow every movement. Changing the dead zone never moves the target: a
-smaller one pulls the cursor toward it. Neither setting restarts the attempt,
-alters body masses, or changes the rig's forces, mechanical reach, or collision
-rules.
+smaller one pulls the cursor toward it. Its **Follow character** slider (0-100%,
+default **100%**) sets how much of the character's movement the cursor and target
+share. At 100% they keep their offset from the shoulder hinge, so a jar that sinks or
+bounces drives the hammer into what it rests on, which can bounce the character with
+no input; lower values leave them partly where they were in the world, and at 0% only
+aiming and the return to the hammer move them, always within the radius. None of
+these settings restarts the attempt, alters body masses, or changes the rig's forces,
+mechanical reach, or collision rules.
 
 The section also has **Return target to hammer**, off by default, with a **Return
 delay** (0.05-5 s, default **0.15 s**), a **Return speed** (0.1-60 /s, default **8
@@ -582,7 +588,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 11**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 12**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 

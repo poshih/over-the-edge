@@ -33,15 +33,17 @@ export function limitAim(aim: Aim, radius: number, deadZone: number): Aim {
 }
 
 /**
- * The aim eased `blend` (0-1) of the way toward `point`, as the return to the hammer does: the target moves, staying
- * inside the target radius, and the cursor moves with it, keeping its place in the dead zone.
+ * The aim with its target moved by (dx, dy), staying inside the target radius, and the cursor moved as far, keeping its
+ * place in the dead zone. The return to the hammer and a target that does not wholly follow the character move it so.
  */
-export function returnAim(aim: Aim, point: Readonly<Point>, blend: number, radius: number): Aim {
-  const target = clampLength({
-    x: aim.target.x + (point.x - aim.target.x) * blend,
-    y: aim.target.y + (point.y - aim.target.y) * blend,
-  }, radius);
+export function shiftAim(aim: Aim, dx: number, dy: number, radius: number): Aim {
+  const target = clampLength({ x: aim.target.x + dx, y: aim.target.y + dy }, radius);
   return { cursor: { x: aim.cursor.x + target.x - aim.target.x, y: aim.cursor.y + target.y - aim.target.y }, target };
+}
+
+/** The aim eased `blend` (0-1) of the way toward `point`, as the return to the hammer does. */
+export function returnAim(aim: Aim, point: Readonly<Point>, blend: number, radius: number): Aim {
+  return shiftAim(aim, (point.x - aim.target.x) * blend, (point.y - aim.target.y) * blend, radius);
 }
 
 // The point nearest `target` that is within `radius` of the hinge and within `deadZone` of `cursor`.

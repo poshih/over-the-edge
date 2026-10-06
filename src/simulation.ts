@@ -17,7 +17,7 @@ import type { RigGeometry } from './rig';
 import { surfaceMaterials } from './surfaces';
 import type { LaunchSettings } from './trigger-events';
 import { angleDifference } from './math';
-import { aimAt, limitAim, moveAim, returnAim } from './aim';
+import { aimAt, limitAim, moveAim, returnAim, shiftAim } from './aim';
 import type { Aim } from './aim';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
@@ -384,7 +384,11 @@ export class Simulation {
     const velocity = this.impactTracking ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
     const approachX = velocity?.x ?? 0;
     const approachY = velocity?.y ?? 0;
+    // Planck moves the body's own position vector, so keep where the root was.
+    const root = this.rig.root.getPosition();
+    const rootX = root.x, rootY = root.y;
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
+    this.lagCharacter(rootX, rootY);
     if (!this.supported) this.detectSupport();
     if (this.impactTracking) {
       const touching = this.headContactCount() > 0;
@@ -611,6 +615,17 @@ export class Simulation {
       if (contact.isTouching() && contact.isEnabled()) count++;
     }
     return count;
+  }
+
+  // A cursor and target that follow only part of the character's movement stay behind, in the world, by the rest of
+  // the step it just moved; the hinge is a fixed offset from the root, so the root's movement is the hinge's.
+  private lagCharacter(fromX: number, fromY: number): void {
+    const { followCharacter, maxTargetRadius } = this.settings.cursor;
+    if (followCharacter >= 100) return;
+    const root = this.rig.root.getPosition();
+    const lag = 1 - followCharacter / 100;
+    const dx = (fromX - root.x) * lag, dy = (fromY - root.y) * lag;
+    if (dx !== 0 || dy !== 0) this.aim = shiftAim(this.aim, dx, dy, maxTargetRadius);
   }
 
   // Whether the target returns to the hammer this step: the settings turn it on, aiming has paused for the return

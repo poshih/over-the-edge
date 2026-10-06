@@ -9,6 +9,9 @@ export interface CursorSettings {
   readonly maxTargetRadius: number;
   // How far the cursor moves around the hammer's target before the hammer follows.
   readonly deadZone: number;
+  // How much of the character's movement, in percent, the cursor and target share: 100 keeps their offset from the
+  // shoulder hinge, 0 leaves them where they were in the world.
+  readonly followCharacter: number;
   // Whether the target eases back toward the hammer head once aiming pauses while the head touches something. Off,
   // the target keeps its offset from the hinge until the player aims again.
   readonly returnToHammer: boolean;
@@ -21,7 +24,7 @@ export interface CursorSettings {
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 11;
+  readonly schemaVersion: 12;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
@@ -32,10 +35,11 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   maxTargetRadius: rigGeometry(DEFAULT_RIG_SETTINGS).maxReach,
   // About the hammer head's half-width, so small, unsteady input leaves the hammer where it is.
   deadZone: 0.1,
+  followCharacter: 100,
   returnToHammer: false, returnDelay: 0.15, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 11, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 12, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
 });
 
 interface NumericSetting {
@@ -67,6 +71,7 @@ export const RIG_FIELDS: readonly RigField[] = [
 export const CURSOR_FIELDS: readonly CursorField[] = [
   { key: 'maxTargetRadius', label: 'Maximum target radius', min: 0.25, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Maximum distance from the shoulder hinge the hammer pivots on to the point the hammer aims at, up to the rig\'s reach (handle length plus maximum extension). Aiming moves this offset; character movement carries it along.' },
   { key: 'deadZone', label: 'Dead zone', min: 0, max: 0.5, step: 0.01, unit: 'm', description: 'How far the cursor can move around the point the hammer aims at before the hammer follows. Beyond it, the cursor drags that point along, so the cursor reaches this far past the maximum target radius; motion beyond that is discarded. Zero makes the hammer follow every movement.' },
+  { key: 'followCharacter', label: 'Follow character', min: 0, max: 100, step: 1, unit: '%', description: 'How much of the character\'s movement the cursor and target share. At 100% they keep their offset from the shoulder hinge and ride along with the jar, so a jar that sinks or bounces drives the hammer into what it rests on, which can bounce the character with no input. Lower values leave them partly where they were in the world; at 0% only aiming and the return to the hammer move them. The target still stays within the maximum target radius.' },
 ];
 
 // How the target returns to the hammer, used only while returnToHammer is on.
@@ -182,7 +187,7 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 11) throw new GameSettingsError('Game settings require schema version 11.');
+  if (value.schemaVersion !== 12) throw new GameSettingsError('Game settings require schema version 12.');
   const rig = validateRig(value.rig);
   const numbers = [...CURSOR_FIELDS, ...CURSOR_RETURN_FIELDS];
   settingsFields(value.cursor, ['returnToHammer', ...numbers.map((field) => field.key)], 'Cursor settings');
@@ -193,5 +198,5 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 11, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  return Object.freeze({ schemaVersion: 12, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
 }

@@ -271,8 +271,9 @@ export function createUI(options: UiOptions): GameUi {
   }, 'Cursor target', 'tuning-group cursor-settings');
   const cursorHelp = document.createElement('p');
   cursorHelp.className = 'cursor-target-help';
-  cursorHelp.textContent = 'The hammer aims inside a circle around its shoulder hinge. The target moves with the character and keeps your chosen offset until you aim again, ' +
-    'unless Return target to hammer, below, is on. The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it. ' +
+  cursorHelp.textContent = 'The hammer aims inside a circle around its shoulder hinge. The target moves with the character, as much as ' +
+    'Follow character says, and otherwise keeps its place until you aim again, unless Return target to hammer, below, is on. ' +
+    'The default radius is the hammer\'s full reach; a smaller one limits how far input can extend it. ' +
     'The cursor moves freely within the dead zone around the target, then drags the target along, so it can reach the dead zone past the radius.';
   cursorGroup.append(cursorHelp);
   for (const field of CURSOR_FIELDS) {
