@@ -26,8 +26,11 @@ export interface HazardHooks {
 
 interface Shooter {
   object: ShooterObject;
-  // When it fires next, in run time.
+  // When its timer fires next, in run time.
   next: number;
+  // Triggered shots still owed, and when the next one fires.
+  burstShots: number;
+  burstNext: number;
 }
 
 interface Axe {
@@ -136,7 +139,11 @@ export class HazardWorld {
   reset(time: number): void {
     this.ensureLive();
     this.projectiles.length = 0;
-    for (const shooter of this.shooters.values()) shooter.next = shotFrom(shooter.object, time);
+    for (const shooter of this.shooters.values()) {
+      shooter.next = shooter.object.firing === 'timer' ? shotFrom(shooter.object, time) : Infinity;
+      shooter.burstShots = 0;
+      shooter.burstNext = Infinity;
+    }
     for (const axe of this.axes.values()) axe.pass = -Infinity;
     this.reschedule();
   }
@@ -170,6 +177,16 @@ export class HazardWorld {
     };
   }
 
+  burst(id: string, shots: number, time: number): void {
+    this.ensureLive();
+    if (!Number.isInteger(shots) || shots < 1) throw new Error('Trap burst shots must be a positive whole number.');
+    const shooter = this.shooters.get(id);
+    if (shooter === undefined) throw new Error(`Unknown projectile trap: ${id}.`);
+    if (shooter.burstShots === 0) shooter.burstNext = time + shooter.object.delay;
+    shooter.burstShots += shots;
+    this.reschedule();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     for (const id of [...this.shooters.keys(), ...this.axes.keys()]) this.remove(id);
@@ -180,7 +197,10 @@ export class HazardWorld {
 
   private add(object: TrapObject, time: number): void {
     if (object.kind === 'shooter') {
-      this.shooters.set(object.id, { object, next: shotFrom(object, time) });
+      this.shooters.set(object.id, {
+        object, next: object.firing === 'timer' ? shotFrom(object, time) : Infinity,
+        burstShots: 0, burstNext: Infinity,
+      });
       return;
     }
     const reach = axeReach(object, HURT_BOX.halfDepth);
@@ -242,23 +262,35 @@ export class HazardWorld {
   }
 
   private fire(time: number, root: Readonly<Point>): void {
-    while (this.schedule.length > 0 && this.schedule[0].next <= time) {
+    while (this.schedule.length > 0 && this.due(this.schedule[0]) <= time) {
       const shooter = this.schedule[0];
       const { object } = shooter;
-      if (this.projectiles.length < SHOOTER.projectiles &&
-        (root.x - object.x) ** 2 + (root.y - object.y) ** 2 <= SHOOTER.range ** 2) {
-        const directionX = Math.cos(object.angle);
-        const directionY = Math.sin(object.angle);
-        this.projectiles.push({
-          x: object.x, y: object.y, fromX: object.x, fromY: object.y, directionX, directionY,
-          angle: object.angle, speed: object.speed, damage: object.damage, trap: object.id, travelled: 0,
-        });
+      const timerDue = shooter.next <= time;
+      const burstDue = shooter.burstNext <= time;
+      this.shoot(shooter, root);
+      // Advance every due schedule strictly later, so each shooter fires at most once a step and the loop ends.
+      if (burstDue) {
+        shooter.burstShots--;
+        shooter.burstNext = shooter.burstShots > 0 ? time + object.interval : Infinity;
       }
-      // Strictly later, so each shooter fires at most once a step and the loop ends.
-      const next = shotFrom(object, time);
-      shooter.next = next > time ? next : next + object.interval;
+      if (timerDue) {
+        const next = shotFrom(object, time);
+        shooter.next = next > time ? next : next + object.interval;
+      }
       this.sink(0);
     }
+  }
+
+  private shoot(shooter: Shooter, root: Readonly<Point>): void {
+    const { object } = shooter;
+    if (this.projectiles.length >= SHOOTER.projectiles ||
+      (root.x - object.x) ** 2 + (root.y - object.y) ** 2 > SHOOTER.range ** 2) return;
+    const directionX = Math.cos(object.angle);
+    const directionY = Math.sin(object.angle);
+    this.projectiles.push({
+      x: object.x, y: object.y, fromX: object.x, fromY: object.y, directionX, directionY,
+      angle: object.angle, speed: object.speed, damage: object.damage, trap: object.id, travelled: 0,
+    });
   }
 
   private swing(time: number, root: Readonly<Point>): void {
@@ -317,12 +349,16 @@ export class HazardWorld {
       const left = 2 * index + 1;
       const right = left + 1;
       let first = index;
-      if (left < heap.length && heap[left].next < heap[first].next) first = left;
-      if (right < heap.length && heap[right].next < heap[first].next) first = right;
+      if (left < heap.length && this.due(heap[left]) < this.due(heap[first])) first = left;
+      if (right < heap.length && this.due(heap[right]) < this.due(heap[first])) first = right;
       if (first === index) return;
       [heap[index], heap[first]] = [heap[first], heap[index]];
       index = first;
     }
+  }
+
+  private due(shooter: Shooter): number {
+    return Math.min(shooter.next, shooter.burstNext);
   }
 
   private ensureLive(): void {

@@ -74,6 +74,7 @@ export class Game {
   private readonly audioPlugin: string | null;
   private readonly enemyPlugin: string | null;
   private readonly bonfirePlugin: string | null;
+  private readonly switchPlugin: string | null;
   private readonly hurtPlugin: string | null;
   private readonly observers: Attributed<GameObserver>[] = [];
   private readonly devices: Attributed<InputDevice>[] = [];
@@ -85,6 +86,7 @@ export class Game {
   private readonly deviceMovement: Point = { x: 0, y: 0 };
   private readonly audioCue: { type: 'cue'; cue: AudioCue; strength: number } = { type: 'cue', cue: 'impact', strength: 1 };
   private readonly previewCue: { type: 'cue'; cue: AudioCue; strength: number } = { type: 'cue', cue: 'impact', strength: 1 };
+  private readonly pressedSwitches: string[] = [];
   private lastImpact = -Infinity;
   private readonly stepObservers = new Set<() => void>();
   // Last phase of each enemy, so cues fire on hit and defeat transitions only.
@@ -147,6 +149,7 @@ export class Game {
     this.audioPlugin = options.plugins.owner(AUDIO);
     this.enemyPlugin = options.plugins.owner(LOOKS.enemies);
     this.bonfirePlugin = options.plugins.owner(LOOKS.bonfire);
+    this.switchPlugin = options.plugins.owner(LOOKS.switch);
     this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
     this.messageStyle = options.messageStyle ?? DEFAULT_MESSAGE_STYLE;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
@@ -231,6 +234,7 @@ export class Game {
         this.clearMovement();
       }, listen);
       // Seed the looks before the first frame. There are no boot gameplay events.
+      this.stageSwitches();
       this.flushNotifications();
     } catch (error) {
       const disposal = new Disposal();
@@ -274,6 +278,7 @@ export class Game {
             if (this.timerRunning) this.timerElapsed += PHYSICS.dt;
             completed++;
             this.triggers.update(this.simulation.playerPosition(), this.simulation.time);
+            this.stageSwitches();
             if (this.stopped) return;
             for (const observer of this.stepObservers) observer();
             const fell = this.simulation.fellOutOfLevel();
@@ -464,6 +469,7 @@ export class Game {
   // camera start afresh there.
   private respawned(): void {
     this.triggers.jump();
+    this.stageSwitches();
     this.view.resetPresentation();
     this.accumulator = 0;
     this.clearMovement();
@@ -484,10 +490,12 @@ export class Game {
     this.view.recenter(this.simulation.frame(1));
     this.stageHurtClear();
     this.stageEvent('restart');
+    this.stageSwitches();
   }
 
   applyLevel(change: LevelChange): void {
     this.triggers.apply(change);
+    this.stageSwitches();
     this.simulation.applyLevel(change);
     this.view.applyLevel(change);
     if (change.kind === 'replace') {
@@ -605,6 +613,14 @@ export class Game {
       this.stageEvent('launch');
       return 'completed';
     }
+    if (action.type === 'fire-trap') {
+      this.simulation.fireTrap(action.trap, action.shots);
+      return 'completed';
+    }
+    if (action.type === 'toggle-platform') {
+      this.simulation.togglePlatform(action.platform);
+      return 'completed';
+    }
     if (action.type === 'play-sound') {
       const event = this.stageEvent('sound');
       if (event !== null) {
@@ -658,6 +674,11 @@ export class Game {
 
   private stageHurtClear(): void {
     if (!this.stopped) this.pending.clearHurt();
+  }
+
+  private stageSwitches(): void {
+    if (this.stopped || !this.triggers.writePressedSwitches(this.pressedSwitches)) return;
+    this.pending.switches = this.pressedSwitches.slice();
   }
 
   // Called synchronously by the simulation: copy only into engine-owned staging, never call a look or a plugin here.
@@ -715,6 +736,12 @@ export class Game {
         try { this.view.setLitBonfires(batch.lit); } catch (error) {
           throw new PluginError('plugin-failed', `Plugin "${this.bonfirePlugin ?? 'engine'}" failed applying "${LOOKS.bonfire.id}".`,
             this.bonfirePlugin, LOOKS.bonfire.id, { cause: error });
+        }
+      }
+      if (batch.switches !== null && !this.lifecycle.signal.aborted) {
+        try { this.view.setPressedSwitches(batch.switches); } catch (error) {
+          throw new PluginError('plugin-failed', `Plugin "${this.switchPlugin ?? 'engine'}" failed applying "${LOOKS.switch.id}".`,
+            this.switchPlugin, LOOKS.switch.id, { cause: error });
         }
       }
       // Then hits and placements for the hurt effects, in the order they happened.

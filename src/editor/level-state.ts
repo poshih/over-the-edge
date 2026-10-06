@@ -1,7 +1,8 @@
 import {
-  DECORATION_LIMITS, geometryKey, LEVEL_LIMITS, LevelError, levelStart, TRIGGER_LIMITS, validateLevel, validateLevelMetadata, validateLevelObject,
+  DECORATION_LIMITS, geometryKey, LEVEL_LIMITS, LevelError, levelStart, PLATFORM_LIMITS, TRIGGER_LIMITS,
+  validateLevel, validateLevelMetadata, validateLevelObject, validateTriggerTargets,
 } from '../level';
-import type { LevelChange, LevelDefinition, LevelObject, StartObject } from '../level';
+import type { LevelChange, LevelDefinition, LevelObject, StartObject, TriggerObject } from '../level';
 import { ENEMY_LIMITS } from '../enemy-types';
 import { HAZARD_LIMITS } from '../hazards';
 import { LIQUID_LIMITS } from '../liquids';
@@ -15,6 +16,7 @@ const TALLIES = {
   bonfires: { limit: HAZARD_LIMITS.bonfires, noun: 'bonfires' },
   traps: { limit: HAZARD_LIMITS.traps, noun: 'traps' },
   pools: { limit: LIQUID_LIMITS.pools, noun: 'liquid pools' },
+  platforms: { limit: PLATFORM_LIMITS.objects, noun: 'platforms' },
 } as const;
 type Tally = keyof typeof TALLIES;
 type Counts = Record<Tally, number>;
@@ -29,17 +31,32 @@ function tally(object: LevelObject): Tally | null {
     case 'bonfire': return 'bonfires';
     case 'shooter': case 'axe': return 'traps';
     case 'pool': return 'pools';
+    case 'platform': return 'platforms';
   }
 }
 
 function emptyCounts(): Counts {
-  return { terrain: 0, triggers: 0, enemies: 0, decorations: 0, bonfires: 0, traps: 0, pools: 0 };
+  return { terrain: 0, triggers: 0, enemies: 0, decorations: 0, bonfires: 0, traps: 0, pools: 0, platforms: 0 };
 }
 
 function checkCounts(counts: Readonly<Counts>): void {
   for (const [name, { limit, noun }] of Object.entries(TALLIES)) {
     if (counts[name as Tally] > limit) throw new LevelError(`A level supports up to ${limit} ${noun}.`);
   }
+}
+
+function removeTriggerTargets(objects: Iterable<LevelObject>, removed: ReadonlySet<string>): TriggerObject[] {
+  const upsert: TriggerObject[] = [];
+  if (removed.size === 0) return upsert;
+  for (const object of objects) {
+    if (object.kind !== 'trigger' || removed.has(object.id)) continue;
+    const events = object.events.filter((event) => event.type === 'fire-trap' ? !removed.has(event.trap)
+      : event.type === 'toggle-platform' ? !removed.has(event.platform) : true);
+    if (events.length !== object.events.length) {
+      upsert.push(Object.freeze({ ...object, events: Object.freeze(events) }));
+    }
+  }
+  return upsert;
 }
 
 export interface LevelBatchEdit {
@@ -87,6 +104,13 @@ export class LevelState {
     if ((object.kind === 'start') !== (previous?.kind === 'start')) {
       throw new LevelError('A level needs one start location. Move the existing start instead of replacing or duplicating it.');
     }
+    const lookup = (id: string): LevelObject | undefined => id === object.id ? object : this.objects.get(id);
+    if (object.kind === 'trigger') validateTriggerTargets(object, lookup);
+    if (previous !== undefined && previous.kind !== object.kind) {
+      for (const trigger of this.objects.values()) {
+        if (trigger.kind === 'trigger' && trigger.id !== object.id) validateTriggerTargets(trigger, lookup);
+      }
+    }
     const counts = { ...this.tallies };
     const added = tally(object);
     const replaced = previous === undefined ? null : tally(previous);
@@ -111,11 +135,14 @@ export class LevelState {
   remove(id: string): void {
     const object = this.object(id);
     if (object.kind === 'start') throw new LevelError('A level needs its start location. Move it instead of deleting it.');
+    const upsert = object.kind === 'shooter' || object.kind === 'platform'
+      ? removeTriggerTargets(this.objects.values(), new Set([id])) : [];
     if (object.kind === 'terrain') this.removeGeometry(geometryKey(object));
     const removed = tally(object);
     if (removed !== null) this.tallies = { ...this.tallies, [removed]: this.tallies[removed] - 1 };
     this.objects.delete(id);
-    this.publish({ ...this.current, objects: Object.freeze([...this.objects.values()]) }, [], [id]);
+    for (const trigger of upsert) this.objects.set(trigger.id, trigger);
+    this.publish({ ...this.current, objects: Object.freeze([...this.objects.values()]) }, upsert, [id]);
   }
 
   /**
@@ -131,12 +158,15 @@ export class LevelState {
       if (object.kind === 'start') throw new LevelError('A level needs its start location. Move it instead of deleting it.');
       removed.set(id, object);
     }
-    const ids = new Set<string>();
+    const additions = new Map<string, LevelObject>();
     for (const object of added) {
       if (object.kind === 'start') throw new LevelError('A level needs one start location. Move the existing start instead of adding another.');
-      if (this.objects.has(object.id) || ids.has(object.id)) throw new LevelError('Every object needs a unique ID.');
-      ids.add(object.id);
+      if (this.objects.has(object.id) || additions.has(object.id)) throw new LevelError('Every object needs a unique ID.');
+      additions.set(object.id, object);
     }
+    const lookup = (id: string): LevelObject | undefined => additions.get(id) ?? (removed.has(id) ? undefined : this.objects.get(id));
+    for (const object of added) if (object.kind === 'trigger') validateTriggerTargets(object, lookup);
+    const cleaned = removeTriggerTargets(this.objects.values(), new Set(removed.keys()));
     const geometry = new Map(this.geometryUse);
     const counts = { ...this.tallies };
     const count = (object: LevelObject, change: 1 | -1): void => {
@@ -158,11 +188,12 @@ export class LevelState {
       ? metadata.labels : this.current.labels;
     if (added.length === 0 && removed.size === 0 && labels === this.current.labels) return [];
     for (const id of removed.keys()) this.objects.delete(id);
+    for (const trigger of cleaned) this.objects.set(trigger.id, trigger);
     for (const object of added) this.objects.set(object.id, object);
     this.tallies = counts;
     this.geometryUse.clear();
     for (const [key, count] of geometry) this.geometryUse.set(key, count);
-    this.publish({ ...this.current, labels, objects: Object.freeze([...this.objects.values()]) }, added, [...removed.keys()]);
+    this.publish({ ...this.current, labels, objects: Object.freeze([...this.objects.values()]) }, [...added, ...cleaned], [...removed.keys()]);
     return added;
   }
 

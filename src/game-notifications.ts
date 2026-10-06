@@ -58,6 +58,7 @@ export class GameNotifications {
   readonly enemies: EnemyEvent[] = [];
   enemyCount = 0;
   lit: readonly string[] | null = null;
+  switches: readonly string[] | null = null;
   readonly hurts: HurtNotice[] = [];
   hurtCount = 0;
   private readonly pools: { [T in EventType]: EventOf<T>[] } = {
@@ -76,7 +77,7 @@ export class GameNotifications {
   private removeCount = 0;
 
   get pending(): boolean {
-    return this.eventCount > 0 || this.enemyCount > 0 || this.lit !== null || this.hurtCount > 0;
+    return this.eventCount > 0 || this.enemyCount > 0 || this.lit !== null || this.switches !== null || this.hurtCount > 0;
   }
 
   event<T extends EventType>(type: T): EventOf<T> {
@@ -130,6 +131,7 @@ export class GameNotifications {
     this.eventCount = 0;
     this.enemyCount = 0;
     this.lit = null;
+    this.switches = null;
     this.hurtCount = 0;
     this.resetCount = this.upsertCount = this.removeCount = 0;
     for (const type of EVENT_TYPES) this.used[type] = 0;

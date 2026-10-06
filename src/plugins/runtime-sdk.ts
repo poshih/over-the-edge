@@ -16,7 +16,7 @@ export { formatElapsedTime } from '../dom';
 export { DEFAULT_LOOKS, LOOKS } from '../object-looks';
 export type {
   BonfireLook, EnemyLook, EnemyLookFactory, LookName, LookPasses, Looks, ObjectLook, ObjectLooks, PhantomFigureFrame, PhantomLook,
-  PhantomLookFactory, ProjectileLook,
+  PhantomLookFactory, PlatformLook, ProjectileLook, SwitchLook,
 } from '../object-looks';
 export { CAMERA, DEFAULT_CAMERA_DIRECTOR } from '../camera-director';
 export type { CameraAim, CameraDirector, CameraDirectorFactory, CameraView } from '../camera-director';
@@ -39,11 +39,12 @@ export type { PhantomPose, PhantomTool } from '../phantom-format';
 export type { HammerHead } from '../hammer-head';
 export type { RigGeometry } from '../rig';
 export type { PartPose } from '../simulation';
+export type { PlatformPose } from '../platform-world';
 export type { ProjectilePose } from '../hazard-world';
 export { AXE, axeAngle, BONFIRE, HURT_SOURCES, SHOOTER } from '../hazards';
 export type { HurtCause, HurtSource } from '../hazards';
 export { triggerBounds } from '../level';
-export type { AxeObject, BonfireObject, LevelObject, PoolObject, ShooterObject, TriggerObject } from '../level';
+export type { AxeObject, BonfireObject, LevelObject, PlatformObject, PoolObject, ShooterObject, TriggerObject } from '../level';
 export { AUDIO, SILENT_AUDIO_OUTPUT } from '../game-audio';
 export type { GameAudio, GameAudioFactory, GameAudioSetup } from '../game-audio';
 export type { AudioDevice } from '../audio-device';

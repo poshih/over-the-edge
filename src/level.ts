@@ -3,7 +3,7 @@ import { transformPoint } from './math';
 import { fields, LevelError, number, point, text } from './level-validation';
 import { MAX_RIG_REACH } from './rig';
 import type { TriggerAction } from './trigger-events';
-import { LAUNCH_FIELDS, SOUND_VOLUME } from './trigger-events';
+import { FIRE_TRAP_FIELDS, LAUNCH_FIELDS, SOUND_VOLUME } from './trigger-events';
 import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
 import type { EnemyFacing, EnemySpecies } from './enemy-types';
 import { AXE_FIELDS, HAZARD_LIMITS, SHOOTER_FIELDS } from './hazards';
@@ -16,7 +16,7 @@ import type { Surface } from './surfaces';
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
-export const LEVEL_SCHEMA_VERSION = 6;
+export const LEVEL_SCHEMA_VERSION = 7;
 export const LEVEL_LIMITS = {
   objects: 1000,
   // Distinct collision geometry across a level's terrain: one physics shape and one extruded template each.
@@ -60,9 +60,19 @@ export const DECORATION_LIMITS = {
   modelId: 40,
 } as const;
 export const DECORATION_MODEL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const PLATFORM_LIMITS = {
+  objects: 64,
+  minimumWidth: 0.5,
+  maximumWidth: 20,
+  minimumHeight: 0.1,
+  maximumHeight: 4,
+  minimumSpeed: 0.1,
+  maximumSpeed: 10,
+  maximumTravel: 200,
+} as const;
 export const LEVEL_OBJECT_LIMIT = LEVEL_LIMITS.objects + TRIGGER_LIMITS.objects + ENEMY_LIMITS.objects + DECORATION_LIMITS.objects +
-  HAZARD_LIMITS.bonfires + HAZARD_LIMITS.traps + LIQUID_LIMITS.pools + 1;
-export const TRIGGER_MARKERS = ['none', 'flag', 'updraft'] as const;
+  HAZARD_LIMITS.bonfires + HAZARD_LIMITS.traps + LIQUID_LIMITS.pools + PLATFORM_LIMITS.objects + 1;
+export const TRIGGER_MARKERS = ['none', 'flag', 'updraft', 'switch'] as const;
 export const ROCK_COLOR = 0x71817a;
 // The simple outlines the engine knows, each filling the unit box: the built-in meshes, and the collision types a mesh
 // may declare.
@@ -168,11 +178,12 @@ export interface BonfireObject extends Readonly<Point> {
   readonly id: string;
 }
 
-// A trap that fires a projectile along `angle` from its muzzle at its position, `delay` seconds into a run and every
-// `interval` seconds after.
+// A trap that fires along `angle` from its muzzle. Its timer starts at `delay` seconds into the run; a triggered burst
+// starts `delay` seconds after its event. Both use `interval` between shots.
 export interface ShooterObject extends Readonly<Point> {
   readonly kind: 'shooter';
   readonly id: string;
+  readonly firing: 'timer' | 'trigger';
   readonly angle: number;
   readonly interval: number;
   readonly delay: number;
@@ -204,8 +215,21 @@ export interface PoolObject extends Readonly<Point> {
   readonly depth: number;
 }
 
+// A kinematic slab whose other end is (travelX, travelY) metres from its start centre (x, y).
+export interface PlatformObject extends Readonly<Point> {
+  readonly kind: 'platform';
+  readonly id: string;
+  readonly travelX: number;
+  readonly travelY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly depth: number;
+  readonly speed: number;
+  readonly surface: Surface;
+}
+
 export type LevelObject =
-  | TerrainObject | StartObject | TriggerObject | EnemyObject | DecorationObject | BonfireObject | TrapObject | PoolObject;
+  | TerrainObject | StartObject | TriggerObject | EnemyObject | DecorationObject | BonfireObject | TrapObject | PoolObject | PlatformObject;
 
 export interface LevelLabel extends Readonly<Point> {
   readonly text: string;
@@ -587,11 +611,29 @@ export function validateLevelObject(value: unknown): LevelObject {
   if (kind === 'shooter') return validateShooter(value);
   if (kind === 'axe') return validateAxe(value);
   if (kind === 'pool') return validatePool(value);
+  if (kind === 'platform') return validatePlatform(value);
   if (kind !== 'terrain') throw new LevelError(OBJECT_KINDS);
   return validateTerrain(value);
 }
 
-const OBJECT_KINDS = 'Choose a terrain, start, trigger, enemy, decoration, bonfire, projectile trap, swinging axe or liquid pool object.';
+const OBJECT_KINDS = 'Choose a terrain, start, trigger, enemy, decoration, bonfire, projectile trap, swinging axe, liquid pool or platform object.';
+
+function validatePlatform(value: unknown): PlatformObject {
+  fields(value, ['kind', 'id', 'x', 'y', 'travelX', 'travelY', 'width', 'height', 'depth', 'speed', 'surface'], 'Platform object');
+  if (!isSurface(value.surface)) throw new LevelError(`Surface must be one of ${SURFACES.join(', ')}.`);
+  return Object.freeze({
+    kind: 'platform', id: objectId(value.id),
+    x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Platform X'),
+    y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Platform Y'),
+    travelX: number(value.travelX, -PLATFORM_LIMITS.maximumTravel, PLATFORM_LIMITS.maximumTravel, 'Platform travel X'),
+    travelY: number(value.travelY, -PLATFORM_LIMITS.maximumTravel, PLATFORM_LIMITS.maximumTravel, 'Platform travel Y'),
+    width: number(value.width, PLATFORM_LIMITS.minimumWidth, PLATFORM_LIMITS.maximumWidth, 'Platform width'),
+    height: number(value.height, PLATFORM_LIMITS.minimumHeight, PLATFORM_LIMITS.maximumHeight, 'Platform height'),
+    depth: number(value.depth, LEVEL_LIMITS.minimumDepth, LEVEL_LIMITS.maximumDepth, 'Platform depth'),
+    speed: number(value.speed, PLATFORM_LIMITS.minimumSpeed, PLATFORM_LIMITS.maximumSpeed, 'Platform speed'),
+    surface: value.surface,
+  });
+}
 
 function validatePool(value: unknown): PoolObject {
   fields(value, ['kind', 'id', 'liquid', 'x', 'y', 'width', 'height', 'depth'], 'Liquid pool object');
@@ -608,9 +650,10 @@ function validatePool(value: unknown): PoolObject {
 }
 
 function validateShooter(value: unknown): ShooterObject {
-  fields(value, ['kind', 'id', 'x', 'y', 'angle', 'interval', 'delay', 'speed', 'damage'], 'Projectile trap object');
+  fields(value, ['kind', 'id', 'firing', 'x', 'y', 'angle', 'interval', 'delay', 'speed', 'damage'], 'Projectile trap object');
+  if (value.firing !== 'timer' && value.firing !== 'trigger') throw new LevelError('Projectile trap firing must be timer or trigger.');
   return Object.freeze({
-    kind: 'shooter', id: objectId(value.id),
+    kind: 'shooter', id: objectId(value.id), firing: value.firing,
     x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Trap X'),
     y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Trap Y'),
     angle: number(value.angle, -Math.PI, Math.PI, 'Firing direction'),
@@ -718,6 +761,17 @@ export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'la
   return { labels: Object.freeze(labels) };
 }
 
+export function validateTriggerTargets(trigger: TriggerObject, lookup: (id: string) => LevelObject | undefined): void {
+  for (const event of trigger.events) {
+    if (event.type === 'fire-trap' && lookup(event.trap)?.kind !== 'shooter') {
+      throw new LevelError(`Trigger "${trigger.id}" fires unknown projectile trap "${event.trap}".`);
+    }
+    if (event.type === 'toggle-platform' && lookup(event.platform)?.kind !== 'platform') {
+      throw new LevelError(`Trigger "${trigger.id}" toggles unknown platform "${event.platform}".`);
+    }
+  }
+}
+
 export function validateLevel(value: unknown): LevelDefinition {
   fields(value, ['schemaVersion', 'labels', 'objects'], 'Level');
   if (value.schemaVersion !== LEVEL_SCHEMA_VERSION) {
@@ -727,7 +781,7 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (!Array.isArray(value.objects) || value.objects.length > LEVEL_OBJECT_LIMIT) {
     throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, ${ENEMY_LIMITS.objects} enemies, ` +
       `${DECORATION_LIMITS.objects} decorations, ${HAZARD_LIMITS.bonfires} bonfires, ${HAZARD_LIMITS.traps} traps, ${LIQUID_LIMITS.pools} liquid pools, ` +
-      'and one start.');
+      `${PLATFORM_LIMITS.objects} platforms, and one start.`);
   }
   const objects = value.objects.map(validateLevelObject);
   if (new Set(objects.map((object) => object.id)).size !== objects.length) throw new LevelError('Every object needs a unique ID.');
@@ -740,6 +794,9 @@ export function validateLevel(value: unknown): LevelDefinition {
   if (objects.filter(isBonfireObject).length > HAZARD_LIMITS.bonfires) throw new LevelError(`A level supports up to ${HAZARD_LIMITS.bonfires} bonfires.`);
   if (objects.filter(isTrapObject).length > HAZARD_LIMITS.traps) throw new LevelError(`A level supports up to ${HAZARD_LIMITS.traps} traps.`);
   if (objects.filter(isPoolObject).length > LIQUID_LIMITS.pools) throw new LevelError(`A level supports up to ${LIQUID_LIMITS.pools} liquid pools.`);
+  if (objects.filter(isPlatformObject).length > PLATFORM_LIMITS.objects) throw new LevelError(`A level supports up to ${PLATFORM_LIMITS.objects} platforms.`);
+  const lookup = new Map(objects.map((object) => [object.id, object]));
+  for (const object of objects) if (isTriggerObject(object)) validateTriggerTargets(object, (id) => lookup.get(id));
   if (new Set(terrain.map(geometryKey)).size > LEVEL_LIMITS.geometryKinds) {
     throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
   }
@@ -765,9 +822,9 @@ function validateTrigger(value: unknown): TriggerObject {
   } else throw new LevelError('Choose a circle or box trigger region.');
   if (value.activation !== 'once' && value.activation !== 'on-enter') throw new LevelError('Choose once per run or on each entry.');
   const marker = TRIGGER_MARKERS.find((candidate) => candidate === value.marker);
-  if (marker === undefined) throw new LevelError('Choose no marker, a flag, or an updraft.');
-  if (!Array.isArray(value.events) || value.events.length === 0 || value.events.length > TRIGGER_LIMITS.events) {
-    throw new LevelError(`A trigger needs 1 to ${TRIGGER_LIMITS.events} events.`);
+  if (marker === undefined) throw new LevelError('Choose no marker, a flag, an updraft or a switch.');
+  if (!Array.isArray(value.events) || value.events.length > TRIGGER_LIMITS.events) {
+    throw new LevelError(`A trigger has at most ${TRIGGER_LIMITS.events} events.`);
   }
   return Object.freeze({
     kind: 'trigger', id: objectId(value.id), name: text(value.name, LEVEL_LIMITS.text, 'Trigger name'),
@@ -793,6 +850,16 @@ export function validateTriggerAction(value: unknown): TriggerAction {
       strength: number(value.strength, LAUNCH_FIELDS.strength.min, LAUNCH_FIELDS.strength.max, LAUNCH_FIELDS.strength.label),
     });
   }
+  if (type === 'fire-trap') {
+    fields(value, ['type', 'trap', 'shots'], 'Fire trap event');
+    const shots = number(value.shots, FIRE_TRAP_FIELDS.shots.min, FIRE_TRAP_FIELDS.shots.max, FIRE_TRAP_FIELDS.shots.label);
+    if (!Number.isInteger(shots)) throw new LevelError(`${FIRE_TRAP_FIELDS.shots.label} must be a whole number.`);
+    return Object.freeze({ type, trap: objectId(value.trap), shots });
+  }
+  if (type === 'toggle-platform') {
+    fields(value, ['type', 'platform'], 'Toggle platform event');
+    return Object.freeze({ type, platform: objectId(value.platform) });
+  }
   if (type === 'message') {
     fields(value, ['type', 'title', 'message'], 'Message event');
     return Object.freeze({
@@ -811,7 +878,7 @@ export function validateTriggerAction(value: unknown): TriggerAction {
       volume: number(value.volume, SOUND_VOLUME.min, SOUND_VOLUME.max, SOUND_VOLUME.label),
     });
   }
-  throw new LevelError('Choose message, play video, play sound, stop timer, or launch player.');
+  throw new LevelError('Choose message, play video, play sound, stop timer, launch player, fire trap, or toggle platform.');
 }
 
 function mediaSource(value: unknown, kind: 'video' | 'sound'): string {
@@ -839,6 +906,7 @@ export function isDecorationObject(object: LevelObject): object is DecorationObj
 export function isBonfireObject(object: LevelObject): object is BonfireObject { return object.kind === 'bonfire'; }
 export function isTrapObject(object: LevelObject): object is TrapObject { return object.kind === 'shooter' || object.kind === 'axe'; }
 export function isPoolObject(object: LevelObject): object is PoolObject { return object.kind === 'pool'; }
+export function isPlatformObject(object: LevelObject): object is PlatformObject { return object.kind === 'platform'; }
 
 // Whether anything in the level can hurt the player: an enemy, a trap or lava.
 export function levelHurts(level: LevelDefinition): boolean {
@@ -856,7 +924,7 @@ export function levelSpawn(level: LevelDefinition): Readonly<PlayerSpawn> {
   return { position: { x: start.x, y: start.y }, angle: start.angle, reach: start.reach };
 }
 
-// Lowest authored point that could still catch the player: terrain, a zone that launches upward, or a liquid pool.
+// Lowest authored point that could still catch the player: terrain, a zone that launches upward, a liquid pool or a platform.
 export function levelFloor(level: LevelDefinition): number | null {
   let floor = Infinity;
   for (const object of level.objects) {
@@ -865,13 +933,15 @@ export function levelFloor(level: LevelDefinition): number | null {
       ? object.y - object.width / 2
       : Math.min(...objectLoops(object).flat().map((vertex) => vertex.y)));
   }
-  if (floor === Infinity) return null;
   for (const object of level.objects) {
     if (object.kind === 'trigger' && object.events.some((event) => event.type === 'launch-player')) {
       floor = Math.min(floor, triggerBounds(object).minY);
     } else if (object.kind === 'pool') floor = Math.min(floor, object.y - object.height / 2);
+    else if (object.kind === 'platform') {
+      floor = Math.min(floor, object.y + Math.min(0, object.travelY) - object.height / 2);
+    }
   }
-  return floor;
+  return floor === Infinity ? null : floor;
 }
 
 export function triggerBounds(object: TriggerObject) {

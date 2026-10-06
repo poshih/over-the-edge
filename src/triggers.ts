@@ -146,6 +146,7 @@ export class TriggerRuntime {
   private time = 0;
   private orderCounter = 0;
   private draining = false;
+  private switchesDirty = true;
   private disposed = false;
 
   constructor(objects: readonly TriggerObject[], callbacks: TriggerRuntimeCallbacks) {
@@ -205,15 +206,20 @@ export class TriggerRuntime {
         this.createRecord(object, previous);
       }
     }
+    this.switchesDirty = true;
     this.previousPosition = null;
     this.previousTime = null;
     this.drain();
   }
 
-  // The player moved without passing what lies between, such as coming back at a bonfire: the next update tests only
-  // where the player is then, so the jump enters no trigger on its way.
+  // A jump, such as coming back at a bonfire, leaves every trigger the player was in. The next update tests only
+  // where the player is now, without entering any trigger on the way.
   jump(): void {
     this.ensureLive();
+    for (const record of this.records.values()) {
+      if (record.object.marker === 'switch' && record.inside) this.switchesDirty = true;
+      record.inside = false;
+    }
     this.previousPosition = null;
     this.previousTime = null;
   }
@@ -229,6 +235,7 @@ export class TriggerRuntime {
       record.lastActivatedAt = null;
       record.run = null;
     }
+    this.switchesDirty = true;
     this.previousPosition = null;
     this.previousTime = null;
     this.time = 0;
@@ -258,6 +265,16 @@ export class TriggerRuntime {
     };
   }
 
+  writePressedSwitches(out: string[]): boolean {
+    this.ensureLive();
+    if (!this.switchesDirty) return false;
+    out.length = 0;
+    const records = [...this.records.values()].sort((a, b) => a.order - b.order);
+    for (const record of records) if (record.object.marker === 'switch' && record.inside) out.push(record.object.id);
+    this.switchesDirty = false;
+    return true;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -274,6 +291,7 @@ export class TriggerRuntime {
     const nowInside = triggerContains(trigger, to, wasInside ? TRIGGER_LIMITS.exitMargin : 0);
     const swept = !nowInside && !wasInside && sweepEligible && segmentIntersectsTrigger(trigger, from, to);
     record.inside = nowInside;
+    if (trigger.marker === 'switch' && nowInside !== wasInside) this.switchesDirty = true;
     if ((nowInside && !wasInside) || swept) this.fire(record);
   }
 
@@ -480,6 +498,7 @@ export class TriggerRuntime {
     this.cancelRecord(record);
     this.index.destroyProxy(record.proxyId);
     this.records.delete(id);
+    if (record.object.marker === 'switch') this.switchesDirty = true;
   }
 
   private rebuild(triggers: readonly TriggerObject[]): void {
@@ -489,6 +508,7 @@ export class TriggerRuntime {
       if (this.records.has(object.id)) throw new Error(`Duplicate trigger ID: ${object.id}.`);
       this.createRecord(object);
     }
+    this.switchesDirty = true;
   }
 
   private ensureLive(): void {

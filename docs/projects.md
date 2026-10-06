@@ -112,7 +112,7 @@ files as base64 data URLs:
   "schemaVersion": 11,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 6, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 7, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }

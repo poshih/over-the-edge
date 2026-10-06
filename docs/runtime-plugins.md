@@ -166,10 +166,11 @@ throwing factory fails with `plugin-failed`, each naming the plugin and `ui.char
 ## Object looks
 
 A plugin draws any kind of level object its own way: `LOOKS.flag` and `LOOKS.updraft`, the
-triggers marked with them, `LOOKS.bonfire`, `LOOKS.shooter` (projectile traps),
-`LOOKS.projectile`, `LOOKS.axe`, and the pools of `LOOKS.lava` and `LOOKS.swamp`. The others stay
-the engine's. Each is a factory, `() => look`, which the game calls once as it starts, and the
-look draws every object of its kind:
+triggers marked with them, `LOOKS.switch` (pressure switches), `LOOKS.bonfire`,
+`LOOKS.platform`, `LOOKS.shooter` (projectile traps), `LOOKS.projectile`, `LOOKS.axe`,
+and the pools of `LOOKS.lava` and `LOOKS.swamp`. The others stay the engine's. Each is a
+factory, `() => look`, which the game calls once as it starts, and the look draws every object
+of its kind:
 
 - `passes` are the three.js objects it adds to the view's passes, each drawn over the last:
   `course`, with the course and behind the actors; `actors`, with the characters and enemies;
@@ -189,6 +190,13 @@ look draws every object of its kind:
 - `setLit(ids)`, the bonfire look's alone, receives the bonfires the player has reached this
   run, which burn, whenever they change. Changes during physics are staged: after the step loop,
   it runs at most once per notification flush, with the latest lit set.
+- `setPressed(ids)`, the switch look's alone, receives the switch triggers the player's foot is
+  inside. Reset, restart and respawn release switches through the same staged looks phase.
+- The platform look's `set(objects)` receives the authored platforms, and its
+  `update(poses, time)` receives their drawn poses, `{ id, x, y }` (`PlatformPose`), each frame
+  while the level has platforms. `travelX`/`travelY` are offsets in metres from the authored
+  start to the other end; draw the runtime poses without changing those definitions. Do not
+  keep the borrowed pose array.
 - `dispose()` runs when the game closes, once the view has let go of the look's passes: free its
   geometries and materials. `inspect()`, optional, reports to the Workshop's diagnostics, in
   `window.gettingOver.level().rendering.looks`.
@@ -200,10 +208,12 @@ edge below: `AXE.bladeWidth` across the obstacle line, toward the camera and awa
 `AXE.bladeHeight` along the haft and `AXE.bladeThickness` along the line. It hangs `axe.length`
 below its pivot and turns about the x axis by `axeAngle(axe, time)` radians, positive away from
 the camera. `BONFIRE`, `SHOOTER` and `triggerBounds(trigger)` give the engine's sizes and a
-trigger's region. The view enables three.js local clipping, so a look can split itself at the
-obstacle line with clipping planes, as the engine's axes do; its pools are built as two half
-boxes instead. Import three.js from the `three` package, which is the engine's own copy. To add
-to one of the engine's looks rather than draw it anew, [wrap](#wrapping-a-default) its point.
+trigger's region. Platforms collide, so draw their slabs centred at z = 0. A switch plate is
+drawn on its trigger's floor and never collides. The view enables three.js local clipping, so
+a look can split itself at the obstacle line with clipping planes, as the engine's axes do;
+its pools are built as two half boxes instead. Import three.js from the `three` package, which
+is the engine's own copy. To add to one of the engine's looks rather than draw it anew,
+[wrap](#wrapping-a-default) its point.
 
 The [complete example](#complete-example) draws projectiles as glowing orbs.
 

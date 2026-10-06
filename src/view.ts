@@ -1178,7 +1178,7 @@ export class GameView {
     this.aimMarks.update(tip, frame.cursor);
     this.terrain.update(frame.time);
     this.decorations?.update();
-    this.looks.update(frame.time, frame.projectiles, frame.enemies);
+    this.looks.update(frame.time, frame.projectiles, frame.enemies, frame.platforms);
     if (this.updatingLayers.size > 0 || this.hurtShowing) {
       const shown = this.sceneFrame;
       shown.time = physics.time;
@@ -1516,6 +1516,10 @@ export class GameView {
   // Burns the bonfires the player has reached this run, and puts the rest out.
   setLitBonfires(ids: readonly string[]): void {
     this.looks.setLit(ids);
+  }
+
+  setPressedSwitches(ids: readonly string[]): void {
+    this.looks.setPressedSwitches(ids);
   }
 
   applyLevel(change: LevelChange): void {
@@ -1871,12 +1875,14 @@ export class GameView {
     this.previewCursor.x = pivotX + cursorX * cos - cursorY * sin + offset.x;
     this.previewCursor.y = pivotY + cursorX * sin + cursorY * cos + offset.y;
     const shown = this.previewFrame ??= {
-      time: frame.time, parts: this.previewParts, cursor: this.previewCursor, enemies: frame.enemies, projectiles: frame.projectiles, rig: frame.rig,
+      time: frame.time, parts: this.previewParts, cursor: this.previewCursor, enemies: frame.enemies,
+      projectiles: frame.projectiles, platforms: frame.platforms, rig: frame.rig,
     };
     shown.time = frame.time;
     shown.parts = this.previewParts;
     shown.enemies = frame.enemies;
     shown.projectiles = frame.projectiles;
+    shown.platforms = frame.platforms;
     shown.rig = frame.rig;
     return shown;
   }

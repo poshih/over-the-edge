@@ -9,12 +9,17 @@ export const LAUNCH_FIELDS = {
 } as const;
 export const DEFAULT_LAUNCH: Readonly<LaunchSettings> = Object.freeze({ height: 8, strength: 1 });
 export const SOUND_VOLUME = { label: 'Sound volume', min: 0, max: 1, step: 0.05, unit: '' } as const;
+export const FIRE_TRAP_FIELDS = {
+  shots: { label: 'Shots', min: 1, max: 20, step: 1, unit: '' },
+} as const;
 
 export type TriggerAction =
   // Shows a title and message in the project's message style: a toast, or a popup that pauses the game.
   | { readonly type: 'message'; readonly title: string; readonly message: string }
   | { readonly type: 'play-video'; readonly source: string }
   | ({ readonly type: 'launch-player' } & LaunchSettings)
+  | { readonly type: 'fire-trap'; readonly trap: string; readonly shots: number }
+  | { readonly type: 'toggle-platform'; readonly platform: string }
   | { readonly type: 'stop-timer' }
   // Plays a sound effect without pausing the game; the next event starts immediately.
   | { readonly type: 'play-sound'; readonly source: string; readonly volume: number };

@@ -296,7 +296,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, bonfires, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -729,6 +729,8 @@ Supported events:
 | Stop timer | Freezes the run timer without stopping physics or illusion effects |
 | Launch player | Applies a mass-aware upward impulse with configurable lift height and strength |
 | Play sound | Plays a sound (0-1 volume) from a public URL or site-relative media path, without pausing; the next event starts immediately |
+| Fire trap | Starts a burst of 1-20 shots from a selected projectile trap |
+| Toggle platform | Sends a selected platform toward its other end; toggling mid-trip turns it back |
 
 Events execute in their authored order. Only one presentation runs at a time;
 simultaneous triggers queue deterministically. Popups and videos pause gameplay and
@@ -774,8 +776,10 @@ requested through a user-operated fullscreen control. The Workshop skips every v
 you test (see [Finding Workshop controls](#finding-workshop-controls)); videos play in the
 game-only release.
 
-Level JSON uses **schema version 5**, with typed terrain, start, trigger and enemy
-objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`, `ice` and `rubber`.
+Level JSON uses **schema version 7**, with typed terrain, start, trigger, enemy,
+decoration, bonfire, projectile trap (`shooter`), swinging axe (`axe`), liquid pool
+(`pool`) and platform objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`,
+`ice` and `rubber`.
 A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
 Files in any other version are rejected, not converted.
 
@@ -883,8 +887,11 @@ Choose **Workshop / Level / Projectile trap** or **Swinging axe**, then click/ta
 
 A **projectile trap** fires from its muzzle, its position, along its rotation: at
 **First shot** seconds into the run and every **Shot interval** after, at its
-**Projectile speed**, while the player is within **40 m**. Projectiles fly straight for
-up to 40 m. Terrain stops them, and so does the hammer head, which makes the hammer a
+**Projectile speed**, while the player is within **40 m**, when **Fires** is **On its timer**.
+Set **Fires** to **Only when triggered** for a trap that never shoots on its own: a trigger can
+start a burst, where First shot is the delay after the trigger and Shot interval is the time
+between burst shots. Projectiles fly straight for up to 40 m. Terrain and elevator platforms
+stop them, and so does the hammer head, which makes the hammer a
 shield. Terrain stops them only from outside, so a muzzle set into a wall's face shoots
 out of it. A hit costs the trap's **Damage** and knocks the player along the shot, and
 where it strikes the burning bolt bursts in a hot flash, sparks and glowing chips.
@@ -903,6 +910,27 @@ Stagger neighbouring axes with their offsets.
 Traps run on the run's clock, so their rhythm is the same every attempt. Up to **256**
 projectiles fly at once across a level; a trap skips its shot while they all fly. A game's
 runtime plugin can draw traps and projectiles its own way; see [object looks](docs/runtime-plugins.md#object-looks).
+
+### Pressure switches and elevator platforms
+
+Choose **Workshop / Level / Pressure switch** to place a small trigger with the **switch**
+marker and **On each entry** activation. It has no events until you add them. In **Trigger
+events**, **Fire trap** starts a burst on a projectile trap (default **3** shots, 1-20), and
+**Toggle platform** sends an elevator platform toward its other end; stepping on the switch
+again can fire another burst or turn the platform back.
+
+Choose **Workshop / Level / Elevator platform** to place a colliding slab. **Position X/Y** is
+its start centre; **Travel X/Y** is the offset in metres to its other centre, up to ±200 m on
+each axis (`travelX`/`travelY` in JSON). **Width**, **Height**, **Depth**, **Speed** and
+**Surface** set its box, motion and material. The Workshop draws the start slab, a dashed end
+preview and travel line. Dragging the slab moves the whole platform, both ends together;
+dragging the end handle changes only the travel.
+
+Keep its path clear: a platform moves through terrain and can push the player into rock.
+Reset returns platforms to their starts; returning to a bonfire leaves them where the run
+moved them. Use a trigger's **switch** marker for its pressure plate. A game's runtime plugin
+can draw switches and platforms through `LOOKS.switch` and `LOOKS.platform`; see
+[object looks](docs/runtime-plugins.md#object-looks).
 
 ### Liquid pools
 

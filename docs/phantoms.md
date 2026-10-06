@@ -200,10 +200,13 @@ and in a fixed order:
 - each terrain object's collision as mirrored, position, size, angle, illusion and surface;
 - each enemy's species, position, facing, patrol distance and speed;
 - each bonfire's position;
-- each projectile trap's position, angle, shot interval, first shot, projectile speed and damage;
+- each projectile trap's firing mode, position, angle, shot interval, first shot, projectile speed
+  and damage;
 - each swinging axe's pivot, length, swing period, swing offset and damage;
 - each liquid pool's liquid, position, width and height;
-- each updraft: a trigger with launch events, its region, position, activation and launches;
+- each platform's position, travel, width, height, speed and surface;
+- each trigger whose events launch the player, fire a trap or toggle a platform: its region,
+  position, activation and those actions, with each target's entry in place of its ID;
 - the start's position, angle and reach.
 
 The physics: every physics setting but control sensitivity, so the masses, motors, downswing
@@ -212,12 +215,13 @@ handle length, maximum extension, minimum reach and default head. A model-librar
 own head is a cosmetic's and is left out: recordings made with any hammer share the course,
 and phantom looks receive the game's current default head rather than the recorded player's.
 
-Decorations, labels, colours, depth, which mesh draws a collision, other trigger events, control
-sensitivity and the cursor settings are left out. A recording replays only where its course holds,
-so editing any of those, or swapping a mesh for one that collides alike, keeps a level's
-recordings, while moving terrain, changing its collision or a surface, an
-enemy, a bonfire, a trap, a pool, an updraft, the start or any physics setting starts a new course with none. Recordings
-made under a physics setting you go back to count again.
+Decorations, labels, colours, depth, which mesh draws a collision, trigger events other than
+launches, trap bursts and platform toggles, control sensitivity and the cursor settings are
+left out. A recording replays only where its course holds, so editing those details, or
+swapping a mesh for one that collides alike, keeps a level's recordings. Changing the play
+layout above—terrain, enemies, bonfires, traps, pools, platforms, those triggers or the
+start—or a physics setting that counts starts a new course with none. Recordings made under
+a physics setting you go back to count again.
 
 `src/phantom-format.ts` implements all of this. It imports no DOM or three.js, and its imports
 carry extensions, so a JavaScript backend can validate recordings with `decodePhantom`, which

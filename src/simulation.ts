@@ -7,6 +7,7 @@ import { sameHammerHead } from './hammer-head';
 import type { HammerHead } from './hammer-head';
 import {
   isBonfireObject, isEnemyObject, isPoolObject, isTerrainObject, isTrapObject, levelFloor, levelHurts, levelSpawn, levelStart,
+  isPlatformObject,
 } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
@@ -31,6 +32,8 @@ import { bonfireSpawn, HEALTH } from './hazards';
 import type { HurtCause, HurtSource } from './hazards';
 import { LiquidWorld } from './liquid-world';
 import type { HealthReading } from './health-meter';
+import { PlatformWorld } from './platform-world';
+import type { PlatformPose } from './platform-world';
 
 export interface PartPose extends Point {
   id: string;
@@ -46,6 +49,7 @@ export interface PhysicsFrame {
   cursor: Point;
   enemies: readonly EnemyPose[];
   projectiles: readonly ProjectilePose[];
+  platforms: readonly PlatformPose[];
   // The geometry of the rig these parts belong to; replaced only when the rig settings change.
   rig: RigGeometry;
 }
@@ -64,7 +68,7 @@ export interface RigPose {
   buttY: number;
 }
 
-type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'projectiles' | 'cursor' | 'rig'> & { cursorOffset: Point };
+type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'projectiles' | 'platforms' | 'cursor' | 'rig'> & { cursorOffset: Point };
 
 const IDLE_COMMAND: MotorCommand = {
   angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0, hingeBoost: 1, sliderBoost: 1,
@@ -80,6 +84,7 @@ export class Simulation {
   private readonly terrain: TerrainWorld;
   private readonly enemies: EnemyWorld;
   private readonly hazards: HazardWorld;
+  private readonly platforms: PlatformWorld;
   private readonly bonfires: Bonfires;
   private readonly liquids: LiquidWorld;
   private level: LevelDefinition;
@@ -132,6 +137,7 @@ export class Simulation {
     this.world.setContinuousPhysics(true);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot,
       surfaceMaterials(this.settings.physics));
+    this.platforms = new PlatformWorld(this.world, level.objects.filter(isPlatformObject), surfaceMaterials(this.settings.physics));
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
@@ -145,8 +151,8 @@ export class Simulation {
     });
     this.hazards = new HazardWorld(this.world, level.objects.filter(isTrapObject), {
       shield: () => this.rig.tool.head.fixture,
-      isTerrain: (body) => this.terrain.isTerrain(body),
-      insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
+      isTerrain: (body) => this.terrain.isTerrain(body) || this.platforms.isPlatform(body),
+      insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point) || this.platforms.isInside(terrain, point),
       vulnerable: () => this.vulnerable(),
       hurt: (damage, push, source, trap, atX, atY) => {
         this.hurt(damage, source, trap, atX, atY, push.x, push.y);
@@ -183,6 +189,7 @@ export class Simulation {
     if (tuned) {
       // The terrain outlives a rebuilt player, so it takes new surfaces either way.
       this.terrain.setMaterials(surfaceMaterials(next.physics));
+      this.platforms.setMaterials(surfaceMaterials(next.physics));
       // Existing contacts cache mixed material values independently of fixtures.
       for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
         contact.resetFriction();
@@ -230,6 +237,7 @@ export class Simulation {
       this.resetPlayer();
     }
     this.terrain.apply(change);
+    this.platforms.apply(change);
     this.enemies.apply(change, this.elapsed);
     this.hazards.apply(change, this.elapsed);
     this.bonfires.apply(change);
@@ -251,11 +259,12 @@ export class Simulation {
     return this.bonfires.subscribe(listener);
   }
 
-  // Returns the level's objects to how the level places them: illusions back, enemies home, no projectiles in flight
-  // and every bonfire out.
+  // Returns the level's objects to how the level places them: illusions back, platforms at their starts,
+  // enemies home, no projectiles in flight and every bonfire out.
   restoreLevelObjects(): void {
     this.ensureLive();
     this.terrain.reset();
+    this.platforms.reset();
     this.enemies.reset(this.elapsed);
     this.hazards.reset(this.elapsed);
     this.bonfires.reset();
@@ -363,6 +372,18 @@ export class Simulation {
     return launchPlayer(this.rig, settings, this.settings.physics);
   }
 
+  fireTrap(id: string, shots: number): void {
+    this.ensureLive();
+    if (this.world.isLocked()) throw new Error('Trap bursts must execute after the physics step.');
+    this.hazards.burst(id, shots, this.elapsed);
+  }
+
+  togglePlatform(id: string): void {
+    this.ensureLive();
+    if (this.world.isLocked()) throw new Error('Platform toggles must execute after the physics step.');
+    this.platforms.toggle(id);
+  }
+
   step(pointerDelta: Point): void {
     this.ensureLive();
     if (!Number.isFinite(pointerDelta.x) || !Number.isFinite(pointerDelta.y)) {
@@ -397,7 +418,9 @@ export class Simulation {
     // Planck moves the body's own position vector, so keep where the root was.
     const root = this.rig.root.getPosition();
     const rootX = root.x, rootY = root.y;
+    this.platforms.beforeStep();
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
+    this.platforms.afterStep();
     this.lagCharacter(rootX, rootY);
     if (!this.supported) this.detectSupport();
     if (this.impactTracking) {
@@ -441,6 +464,7 @@ export class Simulation {
       }),
       enemies: this.enemies.frame(alpha),
       projectiles: this.hazards.frame(alpha),
+      platforms: this.platforms.frame(alpha),
       rig: this.rig.geometry,
     };
   }
@@ -503,6 +527,7 @@ export class Simulation {
       jointCount: this.world.getJointCount(),
       enemies: this.enemies.inspect(),
       hazards: this.hazards.inspect(),
+      platforms: this.platforms.inspect(),
       bonfires: this.bonfires.state(),
       liquids: this.liquids.inspect(),
     };
@@ -513,6 +538,7 @@ export class Simulation {
     this.liquids.dispose();
     this.bonfires.dispose();
     this.hazards.dispose();
+    this.platforms.dispose();
     this.enemies.dispose();
     this.terrain.dispose();
     destroyPlayer(this.world, this.rig);
@@ -602,7 +628,8 @@ export class Simulation {
       for (let edge = body.getContactList(); edge; edge = edge.next) {
         const contact = edge.contact;
         if (contact.getFixtureA() !== fixture && contact.getFixtureB() !== fixture) continue;
-        if (edge.other === null || !contact.isTouching() || !contact.isEnabled() || !this.terrain.isTerrain(edge.other)) continue;
+        if (edge.other === null || !contact.isTouching() || !contact.isEnabled() ||
+          (!this.terrain.isTerrain(edge.other) && !this.platforms.isPlatform(edge.other))) continue;
         const manifold = contact.getWorldManifold(this.manifold);
         if (!manifold || manifold.pointCount === 0) continue;
         // The manifold normal points from fixture A to fixture B; support pushes the player upward.

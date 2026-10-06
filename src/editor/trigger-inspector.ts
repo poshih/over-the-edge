@@ -4,13 +4,15 @@
 // typed data (e.g. a half-typed video URL) out of LevelState, while still guaranteeing that valid
 // pending edits are never silently dropped when the author moves on to save their level.
 import { TRIGGER_LIMITS } from '../level';
-import { DEFAULT_LAUNCH, LAUNCH_FIELDS, SOUND_VOLUME } from '../trigger-events';
+import type { LevelObject } from '../level';
+import { DEFAULT_LAUNCH, FIRE_TRAP_FIELDS, LAUNCH_FIELDS, SOUND_VOLUME } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
 
-const EVENT_TYPES = ['message', 'play-video', 'play-sound', 'stop-timer', 'launch-player'] as const;
+const EVENT_TYPES = ['message', 'play-video', 'play-sound', 'stop-timer', 'launch-player', 'fire-trap', 'toggle-platform'] as const;
 type EventType = TriggerAction['type'];
 const EVENT_LABELS: Record<EventType, string> = {
   message: 'Message', 'play-video': 'Play video', 'play-sound': 'Play sound', 'stop-timer': 'Stop timer', 'launch-player': 'Launch player',
+  'fire-trap': 'Fire trap', 'toggle-platform': 'Toggle platform',
 };
 
 function defaultEvent(type: EventType): TriggerAction {
@@ -20,6 +22,8 @@ function defaultEvent(type: EventType): TriggerAction {
     case 'play-sound': return { type, source: '', volume: 1 };
     case 'stop-timer': return { type };
     case 'launch-player': return { type, ...DEFAULT_LAUNCH };
+    case 'fire-trap': return { type, trap: '', shots: 3 };
+    case 'toggle-platform': return { type, platform: '' };
   }
 }
 
@@ -29,6 +33,10 @@ function cloneEvents(events: readonly TriggerAction[]): TriggerAction[] {
 
 function sameEvents(a: readonly TriggerAction[], b: readonly TriggerAction[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function targetLabel(object: LevelObject): string {
+  return `${object.id} (${Number(object.x.toFixed(2))}, ${Number(object.y.toFixed(2))})`;
 }
 
 export function describeEvents(events: readonly TriggerAction[]): string {
@@ -44,6 +52,7 @@ export interface TriggerEventEditorOptions {
    *  whether it succeeded (a LevelError has already been reported to the author on failure). */
   onApply: (id: string, events: readonly TriggerAction[]) => boolean;
   onNotice: (message: string, kind: 'info' | 'error') => void;
+  objects: () => readonly LevelObject[];
 }
 
 export interface TriggerEventEditor {
@@ -64,7 +73,7 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
   const { mount } = options;
   const listen = { signal: options.signal };
   mount.innerHTML = `
-    <p class="level-help">Ordered events run in sequence when the trigger fires. Add 1 to ${TRIGGER_LIMITS.events}.</p>
+    <p class="level-help">Ordered events run in sequence when the trigger fires. Add up to ${TRIGGER_LIMITS.events}.</p>
     <ol class="level-event-list" aria-label="Trigger events"></ol>
     <div class="level-action-row level-event-add">
       <label class="level-field level-event-new-type-label" for="level-event-new-type">New event type
@@ -241,6 +250,76 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
         'Strength scales the upward launch speed; impulse automatically accounts for player and tool mass. ' +
         'Falling momentum is cancelled; faster upward motion is never slowed. Terrain and hammer pose can change the exact apex.';
       item.append(fields, help);
+    } else if (action.type === 'fire-trap') {
+      const trap = document.createElement('label');
+      trap.className = 'level-field';
+      trap.textContent = 'Projectile trap';
+      const trapInput = document.createElement('select');
+      const shooters = options.objects().filter((object) => object.kind === 'shooter');
+      trapInput.append(...shooters.map((object) => {
+        const option = document.createElement('option');
+        option.value = object.id;
+        option.textContent = targetLabel(object);
+        return option;
+      }));
+      if (shooters.length === 0 || !shooters.some((object) => object.id === action.trap)) {
+        const option = document.createElement('option');
+        option.value = action.trap;
+        option.textContent = shooters.length === 0 ? 'No projectile traps in the level' : `${action.trap} (missing)`;
+        trapInput.prepend(option);
+      }
+      trapInput.value = action.trap;
+      trap.append(trapInput);
+      const shots = document.createElement('label');
+      shots.className = 'level-field';
+      shots.textContent = FIRE_TRAP_FIELDS.shots.label;
+      const shotsInput = document.createElement('input');
+      shotsInput.type = 'number'; shotsInput.inputMode = 'numeric';
+      shotsInput.min = String(FIRE_TRAP_FIELDS.shots.min);
+      shotsInput.max = String(FIRE_TRAP_FIELDS.shots.max);
+      shotsInput.step = String(FIRE_TRAP_FIELDS.shots.step);
+      shotsInput.value = String(action.shots);
+      shots.append(shotsInput);
+      const updateFireTrap = (): void => {
+        entry.draft[index] = { type: 'fire-trap', trap: trapInput.value, shots: shotsInput.valueAsNumber };
+        renderStatus();
+      };
+      trapInput.addEventListener('change', updateFireTrap, listen);
+      shotsInput.addEventListener('input', updateFireTrap, listen);
+      const help = document.createElement('p');
+      help.className = 'level-help';
+      help.textContent = shooters.length === 0 ? 'Add a projectile trap before this event can be valid.' :
+        'Starts a burst on the selected projectile trap.';
+      item.append(trap, shots, help);
+    } else if (action.type === 'toggle-platform') {
+      const platform = document.createElement('label');
+      platform.className = 'level-field';
+      platform.textContent = 'Platform';
+      const input = document.createElement('select');
+      const platforms = options.objects().filter((object) => object.kind === 'platform');
+      input.append(...platforms.map((object) => {
+        const option = document.createElement('option');
+        option.value = object.id;
+        option.textContent = targetLabel(object);
+        return option;
+      }));
+      if (platforms.length === 0 || !platforms.some((object) => object.id === action.platform)) {
+        const option = document.createElement('option');
+        option.value = action.platform;
+        option.textContent = platforms.length === 0 ? 'No platforms in the level' : `${action.platform} (missing)`;
+        input.prepend(option);
+      }
+      input.value = action.platform;
+      input.addEventListener('change', () => {
+        entry.draft[index] = { type: 'toggle-platform', platform: input.value };
+        renderStatus();
+      }, listen);
+      platform.append(input);
+      const help = document.createElement('p');
+      help.className = 'level-help';
+      help.textContent = platforms.length === 0 ? 'Add an elevator platform before this event can be valid.' :
+        'Sends that platform toward its other end; pressing again turns it back.';
+      item.append(platform, help);
     } else {
       const note = document.createElement('p');
       note.className = 'level-help';
@@ -271,7 +350,14 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
     if (entry === null || entry.draft.length >= TRIGGER_LIMITS.events) return;
     const type = EVENT_TYPES.find((candidate) => candidate === newType.value);
     if (type === undefined) throw new Error('Unknown trigger event type.');
-    entry.draft.push(defaultEvent(type));
+    const event = defaultEvent(type);
+    if (event.type === 'fire-trap') {
+      const shooter = options.objects().find((object) => object.kind === 'shooter');
+      entry.draft.push(shooter === undefined ? event : { ...event, trap: shooter.id });
+    } else if (event.type === 'toggle-platform') {
+      const platform = options.objects().find((object) => object.kind === 'platform');
+      entry.draft.push(platform === undefined ? event : { ...event, platform: platform.id });
+    } else entry.draft.push(event);
     renderList();
   }, listen);
   applyButton.addEventListener('click', () => {

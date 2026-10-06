@@ -83,7 +83,7 @@ const LABELS = [
 // - a lava lake filling the basin past the summit's far edge, between the cliff and the right crag.
 const HAZARDS = [
   { kind: 'bonfire', id: 'ledge-bonfire', x: 3.75, y: 2.1 },
-  { kind: 'shooter', id: 'crag-shooter', x: -17.95, y: 4.2, angle: 0, interval: 3, delay: 1, speed: 10, damage: 1 },
+  { kind: 'shooter', id: 'crag-shooter', firing: 'timer', x: -17.95, y: 4.2, angle: 0, interval: 3, delay: 1, speed: 10, damage: 1 },
   { kind: 'pool', id: 'bog', liquid: 'swamp', x: 12.34, y: 9.25, width: 1.28, height: 0.5, depth: 1.2 },
   { kind: 'axe', id: 'top-axe', x: 14, y: 13.9, length: 2.6, period: 4, offset: 0, damage: 1 },
   { kind: 'pool', id: 'lava-lake', liquid: 'lava', x: 24.175, y: 0.6, width: 11.65, height: 1.2, depth: 2 },

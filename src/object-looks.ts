@@ -8,10 +8,14 @@ import { EnemyView } from './enemy-view';
 import { FlagView } from './flag-view';
 import type { HammerHead } from './hammer-head';
 import type { ProjectilePose } from './hazard-world';
-import type { AxeObject, BonfireObject, LevelObject, PoolObject, ShooterObject, TriggerObject } from './level';
+import { isPlatformObject } from './level';
+import type { AxeObject, BonfireObject, LevelObject, PlatformObject, PoolObject, ShooterObject, TriggerObject } from './level';
 import type { PhantomPose, PhantomTool } from './phantom-format';
 import { PoolView } from './pool-view';
+import { PlatformView } from './platform-view';
+import type { PlatformPose } from './platform-world';
 import { ProjectileView, ShooterView } from './shooter-view';
+import { SwitchView } from './switch-view';
 import { UpdraftView } from './updraft-view';
 import { PluginError, slotPoint } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
@@ -43,6 +47,20 @@ export interface ObjectLook<T extends LevelObject> {
 export interface BonfireLook extends ObjectLook<BonfireObject> {
   // The bonfires the player has reached this run, which burn: called whenever they change.
   setLit(ids: readonly string[]): void;
+}
+
+export interface SwitchLook extends ObjectLook<TriggerObject> {
+  setPressed(ids: readonly string[]): void;
+}
+
+export interface PlatformLook {
+  readonly passes: LookPasses;
+  // Authored platforms at load and only when they change; never change the objects themselves.
+  set(objects: readonly PlatformObject[]): void;
+  // Borrowed drawn poses, reused each frame while the level has platforms.
+  update(poses: readonly PlatformPose[], time: number): void;
+  dispose(): void;
+  inspect?(): unknown;
 }
 
 export interface ProjectileLook {
@@ -94,7 +112,9 @@ export interface ObjectLooks {
   // Triggers marked with a flag, and with an updraft.
   readonly flag: () => ObjectLook<TriggerObject>;
   readonly updraft: () => ObjectLook<TriggerObject>;
+  readonly switch: () => SwitchLook;
   readonly bonfire: () => BonfireLook;
+  readonly platform: () => PlatformLook;
   readonly shooter: () => ObjectLook<ShooterObject>;
   readonly projectile: () => ProjectileLook;
   readonly axe: () => ObjectLook<AxeObject>;
@@ -107,7 +127,7 @@ export interface Looks extends ObjectLooks {
   readonly phantoms: PhantomLookFactory;
 }
 export type LookName = keyof Looks;
-type PlacedLookName = Exclude<keyof ObjectLooks, 'projectile'>;
+type PlacedLookName = Exclude<keyof ObjectLooks, 'projectile' | 'platform'>;
 
 function lookFactory<T extends (...args: never[]) => unknown>(value: unknown): T {
   if (typeof value !== 'function') throw new TypeError('A look must be a factory.');
@@ -117,7 +137,9 @@ function lookFactory<T extends (...args: never[]) => unknown>(value: unknown): T
 export const LOOKS = Object.freeze({
   flag: slotPoint('looks.flag', 'runtime', lookFactory<ObjectLooks['flag']>),
   updraft: slotPoint('looks.updraft', 'runtime', lookFactory<ObjectLooks['updraft']>),
+  switch: slotPoint('looks.switch', 'runtime', lookFactory<ObjectLooks['switch']>),
   bonfire: slotPoint('looks.bonfire', 'runtime', lookFactory<ObjectLooks['bonfire']>),
+  platform: slotPoint('looks.platform', 'runtime', lookFactory<ObjectLooks['platform']>),
   shooter: slotPoint('looks.shooter', 'runtime', lookFactory<ObjectLooks['shooter']>),
   projectile: slotPoint('looks.projectile', 'runtime', lookFactory<ObjectLooks['projectile']>),
   axe: slotPoint('looks.axe', 'runtime', lookFactory<ObjectLooks['axe']>),
@@ -149,10 +171,15 @@ function viewLook<T extends LevelObject>(view: {
 export const DEFAULT_LOOKS: Omit<Looks, 'phantoms'> = Object.freeze({
   flag: () => viewLook<TriggerObject>(new FlagView()),
   updraft: () => viewLook<TriggerObject>(new UpdraftView()),
+  switch: (): SwitchLook => {
+    const view = new SwitchView();
+    return { ...viewLook<TriggerObject>(view), setPressed: (ids) => view.setPressed(ids) };
+  },
   bonfire: (): BonfireLook => {
     const view = new BonfireView();
     return { ...viewLook<BonfireObject>(view), setLit: (ids) => view.setLit(ids) };
   },
+  platform: () => new PlatformView(),
   shooter: () => viewLook<ShooterObject>(new ShooterView()),
   projectile: (): ProjectileLook => {
     const view = new ProjectileView();
@@ -177,6 +204,7 @@ export const DEFAULT_LOOKS: Omit<Looks, 'phantoms'> = Object.freeze({
 const SELECTED: Readonly<Record<PlacedLookName, (object: LevelObject) => boolean>> = {
   flag: (object) => object.kind === 'trigger' && object.marker === 'flag',
   updraft: (object) => object.kind === 'trigger' && object.marker === 'updraft',
+  switch: (object) => object.kind === 'trigger' && object.marker === 'switch',
   bonfire: (object) => object.kind === 'bonfire',
   shooter: (object) => object.kind === 'shooter',
   axe: (object) => object.kind === 'axe',
@@ -201,7 +229,8 @@ function create<L>(name: LookName, factory: () => L, plugin: string | null): L {
       return group === undefined || node(group);
     });
   const methods = name === 'phantoms' ? ['draw', 'dispose'] : name === 'enemies' ? ['apply', 'update', 'setArt', 'dispose']
-    : name === 'projectile' ? ['update', 'dispose'] : name === 'bonfire' ? ['set', 'setLit', 'update', 'dispose'] : ['set', 'update', 'dispose'];
+    : name === 'projectile' ? ['update', 'dispose'] : name === 'bonfire' ? ['set', 'setLit', 'update', 'dispose']
+      : name === 'switch' ? ['set', 'setPressed', 'update', 'dispose'] : ['set', 'update', 'dispose'];
   const valid = (name === 'phantoms' ? object && node(Reflect.get(look as object, 'root')) : validPasses) && methods.every(method) &&
     (name === 'phantoms' || Reflect.get(look as object, 'inspect') === undefined || method('inspect'));
   if (!valid) {
@@ -232,19 +261,25 @@ export class LevelLooks {
   readonly enemies: EnemyLook;
   private readonly placed: readonly Placed[];
   private readonly bonfire: BonfireLook;
+  private readonly switch: SwitchLook;
+  private readonly platform: PlatformLook;
+  private platformObjects: readonly PlatformObject[] | null = null;
   private readonly projectile: ProjectileLook;
   private readonly passList: readonly LookPasses[];
   private fronts: readonly Object3D[] = [];
   private active: readonly Placed[] = [];
   private hasShooters = false;
   private hasEnemies = false;
+  private hasPlatforms = false;
   private projectileActive = false;
 
   constructor(plugins: RuntimePlugins, objects: readonly LevelObject[], art: EnemyArtSettings) {
     const factories: ObjectLooks & { readonly enemies: EnemyLookFactory } = {
       flag: plugins.slot(LOOKS.flag, DEFAULT_LOOKS.flag),
       updraft: plugins.slot(LOOKS.updraft, DEFAULT_LOOKS.updraft),
+      switch: plugins.slot(LOOKS.switch, DEFAULT_LOOKS.switch),
       bonfire: plugins.slot(LOOKS.bonfire, DEFAULT_LOOKS.bonfire),
+      platform: plugins.slot(LOOKS.platform, DEFAULT_LOOKS.platform),
       shooter: plugins.slot(LOOKS.shooter, DEFAULT_LOOKS.shooter),
       projectile: plugins.slot(LOOKS.projectile, DEFAULT_LOOKS.projectile),
       axe: plugins.slot(LOOKS.axe, DEFAULT_LOOKS.axe),
@@ -261,12 +296,18 @@ export class LevelLooks {
     try {
       this.enemies = build('enemies', () => factories.enemies(art));
       this.bonfire = build('bonfire', factories.bonfire);
+      this.switch = build('switch', factories.switch);
+      this.platform = build('platform', factories.platform);
       this.projectile = build('projectile', factories.projectile);
-      this.placed = (['flag', 'updraft', 'bonfire', 'shooter', 'axe', 'lava', 'swamp'] as const).map((name): Placed => {
+      this.placed = (['flag', 'updraft', 'switch', 'bonfire', 'shooter', 'axe', 'lava', 'swamp'] as const).map((name): Placed => {
+        if (name === 'bonfire') return { name, look: this.bonfire, objects: null };
+        if (name === 'switch') return { name, look: this.switch, objects: null };
         const factory: () => ObjectLook<LevelObject> = factories[name];
-        return { name, look: name === 'bonfire' ? this.bonfire : build(name, factory), objects: null };
+        return { name, look: build(name, factory), objects: null };
       });
-      this.passList = Object.freeze([this.enemies.passes, ...this.placed.map(({ look }) => look.passes), this.projectile.passes]);
+      this.passList = Object.freeze([
+        this.enemies.passes, ...this.placed.map(({ look }) => look.passes), this.platform.passes, this.projectile.passes,
+      ]);
       this.setLevel(objects);
     } catch (error) {
       for (let index = created.length - 1; index >= 0; index--) created[index]!.dispose();
@@ -288,11 +329,18 @@ export class LevelLooks {
       placed.objects = next;
       placed.look.set(next);
     }
+    const platforms = objects.filter(isPlatformObject);
+    if (this.platformObjects === null || !sameObjects(this.platformObjects, platforms)) {
+      this.platformObjects = platforms;
+      this.platform.set(platforms);
+    }
     this.active = this.placed.filter(placed => placed.objects!.length > 0);
     this.hasShooters = this.active.some(placed => placed.name === 'shooter');
     this.hasEnemies = objects.some(object => object.kind === 'enemy');
+    this.hasPlatforms = platforms.length > 0;
     const passes = this.active.map(({ look }) => look.passes);
     if (this.hasEnemies) passes.push(this.enemies.passes);
+    if (this.hasPlatforms) passes.push(this.platform.passes);
     this.fronts = passes.flatMap(({ front }) => front === undefined ? [] : [front]);
   }
 
@@ -300,8 +348,13 @@ export class LevelLooks {
     this.bonfire.setLit(ids);
   }
 
-  update(time: number, projectiles: readonly ProjectilePose[], enemies: readonly EnemyPose[]): void {
+  setPressedSwitches(ids: readonly string[]): void {
+    this.switch.setPressed(ids);
+  }
+
+  update(time: number, projectiles: readonly ProjectilePose[], enemies: readonly EnemyPose[], platforms: readonly PlatformPose[]): void {
     for (const { look } of this.active) look.update(time);
+    if (this.hasPlatforms) this.platform.update(platforms, time);
     if (this.hasEnemies) this.enemies.update(enemies, time);
     if (this.hasShooters || projectiles.length > 0) {
       this.projectile.update(projectiles, time);
@@ -321,6 +374,7 @@ export class LevelLooks {
   inspect() {
     return Object.fromEntries([
       ...this.placed.map(({ name, look }) => [name, look.inspect?.() ?? null] as const),
+      ['platform', this.platform.inspect?.() ?? null] as const,
       ['projectile', this.projectile.inspect?.() ?? null] as const,
     ]);
   }
@@ -331,6 +385,7 @@ export class LevelLooks {
       for (const pass of ['course', 'actors', 'front'] as const) disposal.run(() => passes[pass]?.removeFromParent());
     }
     for (const { look } of this.placed) disposal.run(() => look.dispose());
+    disposal.run(() => this.platform.dispose());
     disposal.run(() => this.projectile.dispose());
     disposal.run(() => this.enemies.dispose());
     disposal.finish();

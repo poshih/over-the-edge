@@ -380,6 +380,7 @@
    living in world-space inside .level-camera-group, so panning/zooming only repaints via the
    group's transform matrix; per-object geometry is rebuilt only on LevelChange deltas. */
 .level-gizmo-layer,
+.level-gizmo-connection-layer,
 .level-gizmo-selection-layer,
 .level-gizmo-ghost-layer {
   pointer-events: none;
@@ -513,14 +514,33 @@
 
 .level-gizmo-selected.level-gizmo-bonfire,
 .level-gizmo-selected.level-gizmo-shooter,
-.level-gizmo-selected.level-gizmo-axe {
+.level-gizmo-selected.level-gizmo-axe,
+.level-gizmo-selected.level-gizmo-platform {
   color: #075a50;
 }
 
 .level-gizmo-ghost.level-gizmo-bonfire,
 .level-gizmo-ghost.level-gizmo-shooter,
-.level-gizmo-ghost.level-gizmo-axe {
+.level-gizmo-ghost.level-gizmo-axe,
+.level-gizmo-ghost.level-gizmo-platform {
   color: #9a5c08;
+}
+
+.level-gizmo-platform .level-gizmo-region,
+.level-gizmo-switch-plate {
+  fill: rgb(96 102 106 / 18%);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.level-gizmo-connection {
+  opacity: 0.75;
+  stroke-dasharray: 4 3;
+}
+
+.level-gizmo-platform-end {
+  opacity: 0.6;
+  stroke-dasharray: 6 4;
 }
 
 .level-gizmo-lava {

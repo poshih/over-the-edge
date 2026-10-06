@@ -26,7 +26,7 @@
     }
   ],
   "level": {
-    "schemaVersion": 6,
+    "schemaVersion": 7,
     "labels": [
       {
         "x": 4.2,
@@ -518,6 +518,7 @@
       {
         "kind": "shooter",
         "id": "crag-shooter",
+        "firing": "timer",
         "x": -17.95,
         "y": 4.2,
         "angle": 0,

@@ -12,7 +12,7 @@ import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
 import { CURSOR_FIELDS, CURSOR_RETURN_FIELDS, RIG_FIELDS, TUNING_FIELDS } from '../src/game-settings';
 import { HUD_FIELDS } from '../src/hud';
-import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
+import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, PLATFORM_LIMITS, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
 import { BOARD_CELL } from '../src/level-board';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
 import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
@@ -113,8 +113,10 @@ export function apiManual(auth: 'token' | 'loopback') {
         description: 'The course. Prefer the level/objects endpoints for small edits.',
         limits: {
           ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects,
-          bonfires: HAZARD_LIMITS.bonfires, traps: HAZARD_LIMITS.traps, pools: LIQUID_LIMITS.pools,
+          bonfires: HAZARD_LIMITS.bonfires, traps: HAZARD_LIMITS.traps, pools: LIQUID_LIMITS.pools, platforms: PLATFORM_LIMITS.objects,
           poolSize: { min: LIQUID_LIMITS.minimumSize, max: LIQUID_LIMITS.maximumSize },
+          platformSize: { width: [PLATFORM_LIMITS.minimumWidth, PLATFORM_LIMITS.maximumWidth], height: [PLATFORM_LIMITS.minimumHeight, PLATFORM_LIMITS.maximumHeight] },
+          platformTravel: { min: -PLATFORM_LIMITS.maximumTravel, max: PLATFORM_LIMITS.maximumTravel },
         },
         objects: {
           terrain: { kind: 'terrain', id: 'ledge-1', mesh: { type: 'shape', shape: SHAPE_KINDS.join(' | ') }, x: 4, y: 2, width: 3, height: 1, angle: 0, depth: 2, mirror: false, color: 7438714, illusion: false, surface: SURFACES.join(' | ') },
@@ -126,21 +128,30 @@ export function apiManual(auth: 'token' | 'loopback') {
           },
           enemy: { kind: 'enemy', id: 'bird-1', species: ENEMY_SPECIES.join(' | '), x: 3, y: 5, facing: 'left | right', patrolDistance: 3, speed: 1.4 },
           bonfire: { kind: 'bonfire', id: 'bonfire-1', x: 12, y: 6 },
-          shooter: { kind: 'shooter', id: 'dart-trap-1', x: 20, y: 9, angle: 3.14159, interval: 2, delay: 0, speed: 12, damage: 1 },
+          shooter: { kind: 'shooter', id: 'dart-trap-1', firing: 'timer | trigger', x: 20, y: 9, angle: 3.14159, interval: 2, delay: 0, speed: 12, damage: 1 },
           axe: { kind: 'axe', id: 'axe-1', x: 26, y: 14, length: 4, period: 3, offset: 0, damage: 2 },
           pool: { kind: 'pool', id: 'lava-1', liquid: LIQUIDS.join(' | '), x: 32, y: 1, width: 6, height: 2, depth: 2 },
+          platform: { kind: 'platform', id: 'lift-1', x: 8, y: 4, travelX: 0, travelY: 6, width: 3, height: 0.4, depth: 2, speed: 1.5, surface: SURFACES.join(' | ') },
         },
         hazards: 'A bonfire (x, y: the centre of its base on the ground) lights when the player\'s foot comes within '
           + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, brings the player back at the one reached last, the run going on, or restarts the run before any. `
-          + 'A shooter fires a projectile from its muzzle (x, y) along angle (radians, 0 = +x) at delay and every interval seconds of run time after, '
-          + `while the player is within ${SHOOTER.range} m; projectiles fly straight up to that far and stop on terrain or the hammer head. `
+          + 'A shooter fires a projectile from its muzzle (x, y) along angle (radians, 0 = +x). Firing "timer" shoots at delay and every interval seconds of run time after; '
+          + 'firing "trigger" shoots only bursts from trigger events, using delay after the trigger and interval between burst shots. '
+          + `Shots require the player within ${SHOOTER.range} m; projectiles fly straight up to that far and stop on terrain, platforms or the hammer head. `
           + 'An axe hangs its blade length below its pivot (x, y) and swings in and out of the view, through the play line at offset and every half period after. '
-          + 'Traps never collide; a hit costs its damage (whole numbers) from the player\'s health, settings physics.health. Bonfires and traps count toward the course.',
+          + 'Traps never collide; a hit costs its damage (whole numbers) from the player\'s health, settings physics.health. '
+          + 'Bonfires, traps, platforms and the trigger actions that fire traps or toggle platforms count toward the course.',
         liquids: 'A pool fills its box (x, y: its centre; width, height; depth: how far it reaches across the play line, '
           + 'only drawn) with still liquid, its top the surface. It never collides: fit it into a basin of terrain. The player\'s pot '
           + 'is held up by the liquid it displaces, and the pot and hammer are slowed as they move through it, by the settings physics '
           + 'lavaBuoyancy and lavaDrag, swampBuoyancy and swampDrag; lava also burns the character for physics.lavaDamage each '
           + 'second the pot is in it. Pools count toward the course.',
+        platforms: 'A platform is a colliding box centred on the obstacle line. It starts at x/y; travelX/travelY are the '
+          + 'offsets in metres to its other centre, up to ±200 m on each axis. Toggling alternates its destination, even mid-trip. '
+          + 'Dragging its body moves both ends together; its end handle changes only travel. It moves at speed, carries the player '
+          + 'by contact friction, and returns to its start on reset. Keep its path clear: it moves through terrain and can push the '
+          + 'player into rock. Its surface uses the same material settings as terrain.',
+        triggerActions: 'Trigger events include fire-trap { trap, shots } for 1-20 burst shots from a projectile trap, and toggle-platform { platform } to send a platform toward its other end. A trigger marker "switch" draws a pressure plate; use activation "on-enter" to fire each time the player steps onto it.',
         shooterFields: SHOOTER_FIELDS,
         axeFields: AXE_FIELDS,
         terrainMeshes: {

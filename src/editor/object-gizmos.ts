@@ -6,10 +6,10 @@ import { ENEMY_DIRECTION, ENEMY_SPECS, enemyBounds } from '../enemy-types';
 import type { EnemyFacing, EnemySpecies } from '../enemy-types';
 import { AXE, BONFIRE, SHOOTER } from '../hazards';
 import { triggerBounds } from '../level';
-import type { AxeObject, EnemyObject, LevelObject, PoolObject, ShooterObject, StartObject, TriggerObject } from '../level';
+import type { AxeObject, EnemyObject, LevelObject, PlatformObject, PoolObject, ShooterObject, StartObject, TriggerObject } from '../level';
 
 export interface Bounds { left: number; right: number; bottom: number; top: number }
-// Starts, triggers, enemies, bonfires, traps and liquid pools; terrain and decorations draw themselves in the scene.
+// Starts, triggers, enemies, bonfires, traps, liquid pools and platforms; terrain and decorations draw themselves in the scene.
 export type GizmoObject = Exclude<LevelObject, { kind: 'terrain' } | { kind: 'decoration' }>;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -19,6 +19,7 @@ const HANDLE_RADIUS = 0.22;
 const FLAG_POLE_HEIGHT = 0.6;
 const FLAG_WIDTH = 0.36;
 const UPDRAFT_GLYPH = { halfWidth: 0.2, rise: 0.16, spacing: 0.24, rows: 2 } as const;
+const SWITCH_HEIGHT = 0.08;
 // A flame standing on a bonfire's base, in metres.
 const FLAME_GLYPH = 'M 0 .15 C .32 .4 .36 .78 0 1.15 C -.08 .9 -.3 .78 -.2 .55 C -.3 .4 -.16 .25 0 .15 Z';
 // How far a projectile trap's aim shows when it is not selected; selected, it shows the projectiles' whole range.
@@ -140,6 +141,13 @@ function triggerGizmo(object: TriggerObject): SVGElement[] {
     const baseY = object.region.type === 'circle' ? -object.region.radius : -object.region.height / 2;
     children.push(flagGlyph(baseY));
   } else if (object.marker === 'updraft') children.push(updraftGlyph());
+  else if (object.marker === 'switch') {
+    const width = object.region.type === 'circle' ? object.region.radius * 2 : object.region.width;
+    const bottom = object.region.type === 'circle' ? -object.region.radius : -object.region.height / 2;
+    const plate = rect(-width / 2, bottom, width, SWITCH_HEIGHT);
+    plate.setAttribute('class', 'level-gizmo-region level-gizmo-switch-plate');
+    children.push(plate);
+  }
   return children;
 }
 
@@ -217,6 +225,19 @@ function poolGizmo(object: PoolObject): SVGElement[] {
   return [region, surface];
 }
 
+function platformGizmo(object: PlatformObject): SVGElement[] {
+  const start = rect(-object.width / 2, -object.height / 2, object.width, object.height);
+  start.setAttribute('class', 'level-gizmo-region');
+  const travel = line(0, 0, object.travelX, object.travelY);
+  travel.setAttribute('class', 'level-gizmo-aim');
+  const end = rect(object.travelX - object.width / 2, object.travelY - object.height / 2, object.width, object.height);
+  end.setAttribute('class', 'level-gizmo-region level-gizmo-platform-end');
+  const endHandle = circle(HANDLE_RADIUS);
+  endHandle.setAttribute('cx', String(object.travelX));
+  endHandle.setAttribute('cy', String(object.travelY));
+  return [start, end, travel, circle(HANDLE_RADIUS), endHandle];
+}
+
 export function objectGizmoBounds(object: GizmoObject): Bounds {
   switch (object.kind) {
     case 'start':
@@ -243,6 +264,11 @@ export function objectGizmoBounds(object: GizmoObject): Bounds {
         left: object.x - object.width / 2, right: object.x + object.width / 2,
         bottom: object.y - object.height / 2, top: object.y + object.height / 2,
       };
+    case 'platform':
+      return {
+        left: object.x - object.width / 2, right: object.x + object.width / 2,
+        bottom: object.y - object.height / 2, top: object.y + object.height / 2,
+      };
     case 'trigger':
     case 'enemy': {
       const region = object.kind === 'trigger' ? triggerBounds(object) : enemyBounds(object);
@@ -263,6 +289,7 @@ function applyGizmo(node: SVGGElement, object: GizmoObject, mode: GizmoMode): vo
     case 'shooter': children = shooterGizmo(object, mode); break;
     case 'axe': children = axeGizmo(object); break;
     case 'pool': children = poolGizmo(object); break;
+    case 'platform': children = platformGizmo(object); break;
   }
   node.replaceChildren(...children);
   node.setAttribute('transform', `translate(${object.x} ${object.y})`);
@@ -286,17 +313,20 @@ export function createGizmo(object: GizmoObject, mode: GizmoMode): SVGGElement {
 export class EntityGizmos {
   private readonly persistent = new Map<string, SVGGElement>();
   private readonly layer: SVGGElement;
+  private readonly connectionNode: SVGGElement;
   private readonly selectionNode: SVGGElement;
   private readonly ghostNode: SVGGElement;
 
   constructor(cameraGroup: SVGGElement) {
     this.layer = svg('g');
     this.layer.setAttribute('class', 'level-gizmo-layer');
+    this.connectionNode = svg('g');
+    this.connectionNode.setAttribute('class', 'level-gizmo-connection-layer');
     this.selectionNode = svg('g');
     this.selectionNode.setAttribute('class', 'level-gizmo-selection-layer');
     this.ghostNode = svg('g');
     this.ghostNode.setAttribute('class', 'level-gizmo-ghost-layer');
-    cameraGroup.append(this.layer, this.selectionNode, this.ghostNode);
+    cameraGroup.append(this.layer, this.connectionNode, this.selectionNode, this.ghostNode);
   }
 
   sync(upsert: readonly LevelObject[], remove: readonly string[]): void {
@@ -323,6 +353,16 @@ export class EntityGizmos {
     applyGizmo(this.selectionNode, object, 'selected');
   }
 
+  setConnections(lines: readonly { readonly from: Point; readonly to: Point }[]): void {
+    const children: SVGElement[] = [];
+    for (const segment of lines) {
+      const edge = line(segment.from.x, segment.from.y, segment.to.x, segment.to.y);
+      edge.setAttribute('class', 'level-gizmo-aim level-gizmo-connection');
+      children.push(edge);
+    }
+    this.connectionNode.replaceChildren(...children);
+  }
+
   setGhost(object: GizmoObject | null): void {
     if (object === null) { this.ghostNode.replaceChildren(); return; }
     applyGizmo(this.ghostNode, object, 'ghost');
@@ -330,6 +370,7 @@ export class EntityGizmos {
 
   destroy(): void {
     this.layer.remove();
+    this.connectionNode.remove();
     this.selectionNode.remove();
     this.ghostNode.remove();
     this.persistent.clear();
