@@ -549,15 +549,17 @@ alters body masses, or changes the rig's forces, mechanical reach, or collision
 rules.
 
 The section also has **Return target to hammer**, off by default, with a **Return
-speed** (0.1-60 /s, default **8 /s**; the target closes 63% of the gap in 1/speed
-seconds) and **Return offset X** and **Y** in metres (default 0). When it is on and no
-aiming input has arrived for **0.15 seconds** of run time while the hammer head
-touches a surface, the target eases toward the head's centre plus the offset, staying
-inside the target radius, and the cursor moves with it, keeping its place in the dead
-zone. Input always comes first, and easing back never boosts a downswing. Positive X
-goes right and positive Y up; the offset does not turn with the hammer. Turning return
-off keeps its values. Like the other cursor settings, it never restarts the attempt or
-changes a phantom course.
+delay** (0.05-5 s, default **0.15 s**), a **Return speed** (0.1-60 /s, default **8
+/s**; the target closes 63% of the gap in 1/speed seconds) and **Return offset X** and
+**Y** in metres (default 0). When it is on and no aiming input has arrived for the
+return delay, in run time, while the hammer head touches a surface, the target eases
+toward the head's centre plus the offset, staying inside the target radius, and the
+cursor moves with it, keeping its place in the dead zone. Any aiming input restarts
+the wait; the delay is at least 0.05 s so the target never eases back between pointer
+updates while you aim. Input always comes first, and easing back never boosts a
+downswing. Positive X goes right and positive Y up; the offset does not turn with the
+hammer. Turning return off keeps its values. Like the other cursor settings, it never
+restarts the attempt or changes a phantom course.
 
 In **Workshop / Physics / Saved game settings**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
@@ -580,7 +582,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 10**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 11**, with `physics`, `rig` and `cursor` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 

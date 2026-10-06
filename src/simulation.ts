@@ -1,7 +1,7 @@
 import { Vec2, World, WorldManifold } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
-import { CURSOR_RETURN_IDLE_SECONDS, TUNING_FIELDS, validateGameSettings } from './game-settings';
+import { TUNING_FIELDS, validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
 import { sameHammerHead } from './hammer-head';
 import type { HammerHead } from './hammer-head';
@@ -613,11 +613,11 @@ export class Simulation {
     return count;
   }
 
-  // Whether the target returns to the hammer this step: the settings turn it on, aiming has paused, and the head
-  // touches something. Input always comes first.
+  // Whether the target returns to the hammer this step: the settings turn it on, aiming has paused for the return
+  // delay, and the head touches something. Input always comes first.
   private returning(): boolean {
-    return this.settings.cursor.returnToHammer && this.elapsed - this.lastAimInput >= CURSOR_RETURN_IDLE_SECONDS &&
-      this.headContactCount() > 0;
+    const { returnToHammer, returnDelay } = this.settings.cursor;
+    return returnToHammer && this.elapsed - this.lastAimInput >= returnDelay && this.headContactCount() > 0;
   }
 
   // An attempt starts aiming at the hammer head, with the cursor on the target.

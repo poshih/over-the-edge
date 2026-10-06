@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 10,
+    "schemaVersion": 11,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -64,6 +64,7 @@
       "maxTargetRadius": 2.65,
       "deadZone": 0.1,
       "returnToHammer": false,
+      "returnDelay": 0.15,
       "returnRate": 8,
       "returnOffsetX": 0,
       "returnOffsetY": 0

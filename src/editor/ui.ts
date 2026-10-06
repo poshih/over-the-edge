@@ -1,7 +1,7 @@
 import type { Tuning } from '../config';
 import {
-  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, CURSOR_RETURN_IDLE_SECONDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS,
-  TUNING_FIELDS, validateGameSettings, withRig,
+  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS, TUNING_FIELDS,
+  validateGameSettings, withRig,
 } from '../game-settings';
 import type { CursorSettings, GameSettings } from '../game-settings';
 import { minReachLimit, rigGeometry } from '../rig';
@@ -292,7 +292,7 @@ export function createUI(options: UiOptions): GameUi {
   const returnHelp = document.createElement('p');
   returnHelp.id = 'cursor-return-help';
   returnHelp.className = 'cursor-target-help';
-  returnHelp.textContent = `Off by default. On, once you stop aiming for ${CURSOR_RETURN_IDLE_SECONDS} s while the hammer head touches a surface, ` +
+  returnHelp.textContent = 'Off by default. On, once you stop aiming for the return delay while the hammer head touches a surface, ' +
     'the target eases toward the head plus the return offset, and the cursor moves with it; aiming always comes first. ' +
     'X goes right and Y goes up, in world metres; the offset does not turn with the hammer.';
   returnToggle.setAttribute('aria-describedby', returnHelp.id);
