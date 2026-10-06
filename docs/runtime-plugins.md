@@ -426,9 +426,13 @@ and their arms, under the tool, so **all its materials must ignore depth (`depth
 as the [pass rules](#pass-rules-for-presentation-points) require. Reuse geometry, materials and
 scratch, and allocate nothing on a frame. The engine detaches the root before `dispose`.
 
-`DEFAULT_HURT_EFFECTS` sets the character alight while lava burns it: a pool of flames rising over
-the character, kept going by each burn and dying down a moment after the last. Other hits show
-nothing more. To keep the fire and add a flash for every other hit, wrap it:
+`DEFAULT_HURT_EFFECTS` sets the character alight while lava burns it: tongues of flame shaded from
+turbulence rising through them and warped by itself, deep red to a white-hot core, that lick up
+the character, bend away from its motion and flare at each burn, with embers rising from it, smoke
+above it and a flickering glow about it. Each burn keeps the fire going a little over a second;
+then the flames die down and the last embers and smoke clear. It needs no textures, draws only
+while it burns and allocates nothing on a frame. Other hits show nothing more. To keep the fire
+and add a flash for every other hit, wrap it:
 
 ```ts
 import { CircleGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
