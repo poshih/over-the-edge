@@ -249,6 +249,34 @@ That is the engine's millimetre-scale fixture approximation. The kit measures
 engine-authored collision (`terrainCollision`, `objectLoops`, containment), does not
 copy welding, and does not promise identity with those final welded fixtures.
 
+### Reading collision in your own tools
+
+The kit's former `outline` helper, its `UNIT` shape table and `CourseShapeError` are
+gone. Exporters, previews and other course tooling read terrain collision from the
+engine and the job instead, never from a hand-maintained outline table, a convex hull or
+a bounding box:
+
+- While building, before any snapshot exists, `job.worldBounds(objects)` returns the
+  bounds (`{ left, right, bottom, top }`) around the placed engine collision of the
+  given terrain objects, or `null` when there are none. It validates each object with
+  the engine; pass a one-element list for one object's extents.
+- After `job.prepare(level)`, `snapshot.solids` holds one frozen record per terrain
+  object: `{ order, object, solid, components, bounds }`. A `solid` of type `'circle'`
+  has a `center` and `radius`. One of type `'loops'` has world-space closed `loops` of
+  `{ x, y }` points, placed by the engine's `objectLoops`: solid boundaries run
+  counterclockwise and holes clockwise, mirrored placements included, and they read
+  even-odd. `components` lists the object's connected solids in the same form, and
+  `bounds` are its placed collision's bounds. These are the placements the checks and
+  maps use; treat them as read-only.
+- Without a job, the engine's level module (`engine.level`, from `loadCourseEngine`)
+  offers `terrainCollision(object)`, the collision in the object's unit box, and
+  `objectLoops(object)`, its world-space loops. A circle's loops are its polygon
+  approximation: for the exact disk, check that `terrainCollision(object).type` is
+  `'circle'` and use `object.x`, `object.y` and a radius of `object.width / 2`.
+
+These are the authored collision. Physics differs from them only by the welding
+described above.
+
 ## Checks
 
 Run every check against the same snapshot before exporting:
