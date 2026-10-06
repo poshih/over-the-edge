@@ -5,7 +5,6 @@ import type { Tuning } from './config';
 import { isPoolObject, polygonArea } from './level';
 import type { LevelChange, PoolObject } from './level';
 import { LIQUID_SETTINGS } from './liquids';
-import type { Liquid } from './liquids';
 import type { PlayerRig } from './player';
 
 interface Pool {
@@ -91,9 +90,9 @@ export class LiquidWorld {
     }
   }
 
-  // Before each physics step: lifts and slows the player's parts in liquid. Returns the liquid the pot is in, lava
+  // Before each physics step: lifts and slows the player's parts in liquid. Returns the pool the pot is in, lava
   // before swamp, or null.
-  push(rig: PlayerRig, tuning: Readonly<Tuning>): Liquid | null {
+  push(rig: PlayerRig, tuning: Readonly<Tuning>): PoolObject | null {
     this.ensureLive();
     if (this.pools.size === 0) return null;
     const { lowerBound, upperBound } = this.query;
@@ -114,7 +113,7 @@ export class LiquidWorld {
     if (this.nearby.length === 0) return null;
     let mass = 0;
     for (const { body } of rig.bodies) mass += body.getMass();
-    let bath: Liquid | null = null;
+    let bath: PoolObject | null = null;
     for (const pool of this.nearby) {
       const { liquid } = pool.object;
       const settings = LIQUID_SETTINGS[liquid];
@@ -127,7 +126,7 @@ export class LiquidWorld {
           if (!this.submerge(fixture, pool)) continue;
           const pot = fixture === rig.potFixture;
           this.press(body, pot ? lift : 0, thickness);
-          if (pot && bath !== 'lava') bath = liquid;
+          if (pot && bath?.liquid !== 'lava') bath = pool.object;
         }
       }
     }

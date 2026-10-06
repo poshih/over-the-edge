@@ -1,9 +1,9 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, object, enemy and phantom looks, scene layers, audio,
-event messages, gameplay observers, key bindings and additional input devices; character choice
-in releases and studio previews.
+camera following, backdrop, aim marks, hurt effects, object, enemy and phantom looks, scene layers,
+audio, event messages, gameplay observers, key bindings and additional input devices; character
+choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
 so a game sees and hears its own presentation while it is authored. Its SDK is
 [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts). [Plugins](plugins.md) describes the
@@ -384,6 +384,106 @@ const dot: AimMarksFactory = theme => {
 export default defineRuntime({ start: () => [replace(AIM_MARKS, dot)] });
 ```
 
+## Hurt effects
+
+`HURT_EFFECTS`, the slot `scene.hurt-effects`, holds a `HurtEffectsFactory`,
+`() => HurtEffects`: what shows on the character when something hurts it, by what did.
+
+```ts
+interface HurtEffects {
+  readonly root: Object3D;
+  hurt(cause: Readonly<HurtCause>, fatal: boolean): void;
+  clear(): void;
+  update(frame: SceneFrame): boolean;
+  dispose(): void;
+}
+
+interface HurtCause {
+  readonly source: HurtSource; // 'enemy' | 'projectile' | 'axe' | 'lava'
+  readonly id: string;
+}
+```
+
+- `hurt` takes each hit that cost health, `fatal` for the killing one. `cause.source` says what
+  dealt it, an enemy's bump, a trap's projectile, an axe's blade or lava (swamp never hurts), and
+  `cause.id` names the level object that did: the enemy, the trap that fired the projectile, the
+  axe or the pool. A hit lands at most once a second, as the character is then unharmed for a
+  while, so lava burns once a second while the pot stays in it.
+- `clear` follows every placement of the player anew, a restart or a return to a bonfire: end what
+  follows the character. A death returns the player at once, so its fatal `hurt` comes just
+  before a `clear`. To leave something where the character fell, keep the place it last had from
+  `update`.
+- `update` runs on each drawn frame from a `hurt` or a `clear` until it returns `false`, and then
+  not again until the next one, so an idle point costs nothing. It receives the borrowed
+  [`SceneFrame`](#scene-layers): the drawn time and the character's `parts`, whose `root` is the
+  character's centre. Return `true` while anything still shows; anything else than a boolean is
+  an error.
+
+`hurt` and `clear` arrive with the [gameplay events](#gameplay-events), after the frame's physics
+steps and before the frame is drawn, in the order they happened; never inside a physics step. The
+cause is borrowed: copy its fields to keep them. The root draws in **marks**, over the characters
+and their arms, under the tool, so **all its materials must ignore depth (`depthTest: false`)**,
+as the [pass rules](#pass-rules-for-presentation-points) require. Reuse geometry, materials and
+scratch, and allocate nothing on a frame. The engine detaches the root before `dispose`.
+
+`DEFAULT_HURT_EFFECTS` sets the character alight while lava burns it: a pool of flames rising over
+the character, kept going by each burn and dying down a moment after the last. Other hits show
+nothing more. To keep the fire and add a flash for every other hit, wrap it:
+
+```ts
+import { CircleGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
+import { defineRuntime, HURT_EFFECTS, wrap } from '../../src/plugins/runtime-sdk';
+import type { HurtEffectsFactory } from '../../src/plugins/runtime-sdk';
+
+const withFlash = (previous: HurtEffectsFactory): HurtEffectsFactory => () => {
+  const base = previous();
+  const flash = new Mesh(new CircleGeometry(0.7, 24),
+    new MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false }));
+  flash.visible = false;
+  const root = new Group().add(base.root, flash);
+  // When the flash started; a new one starts on the next drawn frame.
+  let start: number | null = null;
+  let pending = false;
+  return {
+    root,
+    hurt(cause, fatal) {
+      base.hurt(cause, fatal);
+      if (cause.source !== 'lava') pending = true;
+    },
+    clear() {
+      base.clear();
+      pending = false;
+      start = null;
+      flash.visible = false;
+    },
+    update(frame) {
+      const burning = base.update(frame);
+      if (pending) { pending = false; start = frame.time; }
+      if (start === null) return burning;
+      const age = frame.time - start;
+      for (let index = 0; index < frame.parts.length; index++) {
+        const part = frame.parts[index]!;
+        if (part.kind === 'root') flash.position.set(part.x, part.y + 0.4, 1);
+      }
+      flash.material.opacity = Math.max(0, 0.6 - age * 2);
+      flash.visible = age < 0.3;
+      if (!flash.visible) start = null;
+      return burning || flash.visible;
+    },
+    dispose() {
+      base.dispose();
+      flash.geometry.dispose();
+      flash.material.dispose();
+    },
+  };
+};
+
+export default defineRuntime({ start: () => [wrap(HURT_EFFECTS, withFlash)] });
+```
+
+Replace the point instead to draw every cause your own way. The same causes reach
+[gameplay observers](#gameplay-events) on `hurt` and `death`, for sounds or scores of a game's own.
+
 ## Enemy looks
 
 `LOOKS.enemies`, the slot `looks.enemies`, holds an `EnemyLookFactory`,
@@ -726,8 +826,8 @@ interface GameObserver {
 
 | `type` | Additional fields and meaning |
 | --- | --- |
-| `hurt` | `health`, `max`: the simulation's remaining health and maximum after a nonlethal hurt in the step batch, independent of whether the HUD shows health |
-| `death` | Health ran out |
+| `hurt` | `health`, `max`: the simulation's remaining health and maximum after a nonlethal hurt in the step batch, independent of whether the HUD shows health; `cause`: what dealt the hit, a [`HurtCause`](#hurt-effects) with its `source` (`enemy`, `projectile`, `axe` or `lava`) and the `id` of the level object that dealt it |
+| `death` | Health ran out; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The player fell out of the level; takes precedence over death if both occur in the same step |
 | `respawn` | `bonfire`: the checkpoint's ID, or `null` when the automatic reset path returns to the attempt's start |
 | `restart` | A new attempt: Reset, a rebuilt rig or a replacement level, not a checkpoint return |
@@ -749,7 +849,9 @@ do not notify observers.
 **Schedule and ownership.** The Game stages notifications in reusable storage while its
 physics-step loop runs. After the loop, and before rendering, it flushes:
 
-1. Enemy look changes in order, and the bonfire look's latest lit set at most once.
+1. Enemy look changes in order, the bonfire look's latest lit set at most once, then hits and
+   placements for the [hurt effects](#hurt-effects) in order, whether or not anything else
+   consumes events.
 2. Audio, mapping those gameplay events to the existing cues and authored sounds in source order.
    `restart` and `respawn` have no cues.
 3. Gameplay observers: each event in source order, with observers called in manifest order.
@@ -999,8 +1101,8 @@ Defaults and replacements do work only while presenting; do not add an idle anim
 `wrap(point, decorate)` builds on what a point holds so far: `decorate` receives the previous
 factory, the engine's own or an earlier plugin's, and returns the factory the game uses. The
 previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS`,
-`DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP`, `DEFAULT_AIM_MARKS` and
-`DEFAULT_CHARACTER_CHOICE` are the engine's own factories, the points' bases, for a plugin that replaces
+`DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP`, `DEFAULT_AIM_MARKS`,
+`DEFAULT_HURT_EFFECTS` and `DEFAULT_CHARACTER_CHOICE` are the engine's own factories, the points' bases, for a plugin that replaces
 a point but draws the engine's part inside its own. Forward every contract method explicitly when wrapping an
 instance; its methods may live on a prototype, so spreading it does not copy them.
 Feature-gated defaults, such as audio and phantom drawing, are not SDK exports: extend them with `wrap`.
@@ -1044,8 +1146,8 @@ see [order and conflicts](plugins.md#order-and-conflicts).
 - A `start` that throws fails with `plugin-failed`, naming the plugin, and the plugins that
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
-- Points reject non-function factories. Creating a readout, director, backdrop, marks, look,
-  layer, audio output, toast presenter, character choice, gameplay observer or input device
+- Points reject non-function factories. Creating a readout, director, backdrop, marks, hurt
+  effects, look, layer, audio output, toast presenter, character choice, gameplay observer or input device
   checks the returned object's required and optional methods and, where applicable, roots
   and passes. A factory, or a wrap, that throws fails with `plugin-failed`; a malformed return
   fails with `invalid-contribution`. Each names the plugin and point, including the contributor
@@ -1057,8 +1159,8 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   the plugin and point; a thrown callback is `plugin-failed` with its cause.
 - Audio and toasts require their lifecycle methods, and an optional `inspect` must be a
   function. Popup/video results must be promises of a valid `EventOutcome`, and a toast's
-  `show` must return a boolean; malformed results fail with `invalid-contribution`, naming
-  the plugin and point.
+  `show` must return a boolean, as hurt effects' `update` must; malformed results fail with
+  `invalid-contribution`, naming the plugin and point.
 - At facet startup, contribution validation, point resolution or consumer creation, a refusal
   stops the environment that encounters it with a fatal error naming the plugin. The engine
   never falls back to its own presentation silently.

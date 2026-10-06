@@ -20,7 +20,8 @@ export interface HazardHooks {
   readonly insideTerrain: (body: Body, point: Readonly<Point>) => boolean;
   // Whether a hit would hurt the player now; traps pass through a player who cannot be hurt.
   readonly vulnerable: () => boolean;
-  readonly hurt: (damage: number, push: Readonly<Point>) => void;
+  // A hit: its damage, the velocity it adds to the player, and the trap that dealt it.
+  readonly hurt: (damage: number, push: Readonly<Point>, source: 'projectile' | 'axe', trap: string) => void;
 }
 
 interface Shooter {
@@ -47,6 +48,8 @@ interface Projectile {
   readonly angle: number;
   readonly speed: number;
   readonly damage: number;
+  // The trap that fired it.
+  readonly trap: string;
   travelled: number;
 }
 
@@ -213,7 +216,7 @@ export class HazardWorld {
         vulnerable = false;
         this.hooks.hurt(shot.damage, {
           x: shot.directionX * SHOOTER.push, y: shot.directionY * SHOOTER.push + SHOOTER.lift,
-        });
+        }, 'projectile', shot.trap);
         this.discard(index);
         continue;
       }
@@ -246,7 +249,7 @@ export class HazardWorld {
         const directionY = Math.sin(object.angle);
         this.projectiles.push({
           x: object.x, y: object.y, fromX: object.x, fromY: object.y, directionX, directionY,
-          angle: object.angle, speed: object.speed, damage: object.damage, travelled: 0,
+          angle: object.angle, speed: object.speed, damage: object.damage, trap: object.id, travelled: 0,
         });
       }
       // Strictly later, so each shooter fires at most once a step and the loop ends.
@@ -271,7 +274,7 @@ export class HazardWorld {
       const pass = Math.round(2 * (time - object.offset) / object.period);
       if (pass === axe.pass) continue;
       axe.pass = pass;
-      this.hooks.hurt(object.damage, { x: (root.x < object.x ? -1 : 1) * AXE.push, y: AXE.lift });
+      this.hooks.hurt(object.damage, { x: (root.x < object.x ? -1 : 1) * AXE.push, y: AXE.lift }, 'axe', object.id);
       break;
     }
     this.nearby.length = 0;

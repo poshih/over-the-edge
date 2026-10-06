@@ -102,7 +102,7 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
 - **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
-  aim marks, object, enemy and phantom looks, scene layers, audio, message presentation,
+  aim marks, hurt effects, object, enemy and phantom looks, scene layers, audio, message presentation,
   gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
   studio previews and releases; character choice in releases and studio previews;
 - **release**, notices, fatal errors and release-only services: a game whose content only some players may load signs
@@ -868,7 +868,11 @@ Health, lit bonfires and deaths are runtime state: saves and exports keep only t
 authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/projects.md)
 sound them, and a [phantom](docs/phantoms.md) session ends at a death as at a restart. A
 game's runtime plugin can draw the [health readout](docs/runtime-plugins.md#hud-readouts) and
-[bonfires](docs/runtime-plugins.md#object-looks) its own way.
+[bonfires](docs/runtime-plugins.md#object-looks) its own way. Each hit says what dealt it, an
+enemy, a trap's projectile, an axe or lava, and which level object did, so a game's
+[hurt effects](docs/runtime-plugins.md#hurt-effects) can show its own effect for each and its
+[gameplay observers](docs/runtime-plugins.md#gameplay-events) can tell them apart; the engine's
+sets the character alight while lava burns it.
 
 ### Traps
 
@@ -912,8 +916,8 @@ surface, and its **drag**, the rate it then slows the player at:
 
 - **Lava** holds up more than the player weighs (160% by default), so the pot floats with part
   of it out, and is fairly thick (3/s). It burns the character while the pot is in it: its
-  **Lava damage** (1 by default) on touching it, then each second the pot stays. The hammer
-  does not burn.
+  **Lava damage** (1 by default) on touching it, then each second the pot stays, and sets the
+  character alight while it does. The hammer does not burn.
 - **Swamp** holds up less than the player weighs (85%), so the player sinks through it, and is
   thick (6/s), so it sinks slowly and every move is slow. It does no damage.
 

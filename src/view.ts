@@ -57,6 +57,9 @@ import { createBackdrop } from './backdrop';
 import type { Backdrop } from './backdrop';
 import { createAimMarks } from './aim-marks';
 import type { AimMarks } from './aim-marks';
+import type { HurtCause } from './hazards';
+import { createHurtEffects, HURT_EFFECTS } from './hurt-effects';
+import type { HurtEffects } from './hurt-effects';
 import { createSceneLayers } from './scene-layer';
 import type { SceneFrame, SceneLayer } from './scene-layer';
 import type { PartPose, PhysicsFrame } from './simulation';
@@ -330,6 +333,10 @@ export class GameView {
   private readonly cameraAim: CameraAim = { x: 0, y: 0, worldHeight: 0 };
   private readonly backdrop: Backdrop;
   private readonly aimMarks: AimMarks;
+  private readonly hurtEffects: HurtEffects;
+  private readonly hurtPlugin: string | null;
+  // Whether the hurt effects update on drawn frames: from a hurt or a clear until they say nothing shows.
+  private hurtShowing = false;
   // Course labels.
   private readonly labels = new Group();
   // Null in a release whose level has no decorations; its shell then carries none of their code.
@@ -477,12 +484,15 @@ export class GameView {
       created.push(this.backdrop);
       this.aimMarks = createAimMarks(options.plugins, theme);
       created.push(this.aimMarks);
+      this.hurtEffects = createHurtEffects(options.plugins);
+      created.push(this.hurtEffects);
       layers = createSceneLayers(options.plugins);
     } catch (error) {
       for (let index = created.length - 1; index >= 0; index--) created[index]!.dispose();
       this.terrain.dispose();
       throw error;
     }
+    this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
     const root = this.part(initial, 'root');
     const head = this.part(initial, 'head');
     this.cameraView.focus.x = root.x;
@@ -541,6 +551,7 @@ export class GameView {
       this.sprites = this.createSlot().rig;
 
       this.marks.add(this.aimMarks.root);
+      this.marks.add(this.hurtEffects.root);
       for (const layer of layers) this.addLayer(layer);
 
       this.observer = new ResizeObserver(() => this.resize());
@@ -1168,7 +1179,7 @@ export class GameView {
     this.terrain.update(frame.time);
     this.decorations?.update();
     this.looks.update(frame.time, frame.projectiles, frame.enemies);
-    if (this.updatingLayers.size > 0) {
+    if (this.updatingLayers.size > 0 || this.hurtShowing) {
       const shown = this.sceneFrame;
       shown.time = physics.time;
       shown.parts = physics.parts;
@@ -1176,6 +1187,7 @@ export class GameView {
       shown.enemies = physics.enemies;
       shown.rig = physics.rig;
       for (const layer of this.updatingLayers) layer.update!(shown);
+      if (this.hurtShowing) this.hurtShowing = this.updateHurt(shown);
     }
     this.renderer.info.reset();
     this.renderer.clear();
@@ -1209,6 +1221,27 @@ export class GameView {
     // The marks ignore depth and write none, so they show over the arms and the tool still tests against the arms.
     this.renderer.render(this.marks, this.camera);
     this.renderer.render(this.foreground, this.camera);
+  }
+
+  // A hit took health, the killing one when `fatal`: the hurt effects take it, then update on drawn frames until done.
+  hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
+    this.hurtEffects.hurt(cause, fatal);
+    this.hurtShowing = true;
+  }
+
+  // The player was placed anew: the hurt effects following the character end.
+  clearHurt(): void {
+    this.hurtEffects.clear();
+    this.hurtShowing = true;
+  }
+
+  private updateHurt(frame: SceneFrame): boolean {
+    const showing: unknown = this.hurtEffects.update(frame);
+    if (typeof showing !== 'boolean') {
+      throw new PluginError('invalid-contribution', `Plugin "${this.hurtPlugin ?? 'engine'}": hurt effects' update(frame) must return true or false.`,
+        this.hurtPlugin, HURT_EFFECTS.id);
+    }
+    return showing;
   }
 
   recenter(frame: PhysicsFrame): void {
@@ -1408,6 +1441,8 @@ export class GameView {
     disposal.run(() => this.backdrop.dispose());
     disposal.run(() => this.aimMarks.root.removeFromParent());
     disposal.run(() => this.aimMarks.dispose());
+    disposal.run(() => this.hurtEffects.root.removeFromParent());
+    disposal.run(() => this.hurtEffects.dispose());
     for (const layer of this.layers) {
       disposal.run(() => layer.root.removeFromParent());
       disposal.run(() => layer.dispose?.());

@@ -7,6 +7,16 @@ import type { AxeObject, StartObject } from './level';
 
 export const HAZARD_LIMITS = { bonfires: 32, traps: 128 } as const;
 
+// What hurt the player: an enemy's bump, a trap's projectile, an axe's blade or a lava pool. Swamp never hurts.
+export const HURT_SOURCES = ['enemy', 'projectile', 'axe', 'lava'] as const;
+export type HurtSource = (typeof HURT_SOURCES)[number];
+
+// A hit's cause: its source and the ID of the level object that dealt it, for a projectile the trap that fired it.
+export interface HurtCause {
+  readonly source: HurtSource;
+  readonly id: string;
+}
+
 export const HEALTH = {
   // A hit leaves the player unharmed this long, so one blow counts once.
   hurtSeconds: 1,

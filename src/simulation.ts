@@ -28,6 +28,7 @@ import type { ProjectilePose } from './hazard-world';
 import { Bonfires } from './bonfires';
 import type { BonfireState } from './bonfires';
 import { bonfireSpawn, HEALTH } from './hazards';
+import type { HurtCause, HurtSource } from './hazards';
 import { LiquidWorld } from './liquid-world';
 import type { HealthReading } from './health-meter';
 
@@ -102,6 +103,8 @@ export class Simulation {
   private readonly healthReading = { current: 0, max: 0 };
   // Whether a hit hurt the player, who survived it, since takeHurt last looked.
   private hurtTaken = false;
+  // What dealt the latest hit that took health: reused, and read at once by whoever is given it.
+  private readonly cause: { source: HurtSource; id: string } = { source: 'enemy', id: '' };
   // How many times the player has been placed: at every restart and every return to a bonfire.
   private placements = 0;
   private disposed = false;
@@ -135,9 +138,9 @@ export class Simulation {
       getHeadFixture: () => this.rig.tool.head.fixture,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
-      onBump: (delta) => {
+      onBump: (delta, enemy) => {
         changePlayerVelocity(this.rig, delta);
-        this.hurt(ENEMY_BEHAVIOR.bumpDamage);
+        this.hurt(ENEMY_BEHAVIOR.bumpDamage, 'enemy', enemy);
       },
     });
     this.hazards = new HazardWorld(this.world, level.objects.filter(isTrapObject), {
@@ -145,8 +148,8 @@ export class Simulation {
       isTerrain: (body) => this.terrain.isTerrain(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       vulnerable: () => this.vulnerable(),
-      hurt: (damage, push) => {
-        this.hurt(damage);
+      hurt: (damage, push, source, trap) => {
+        this.hurt(damage, source, trap);
         changePlayerVelocity(this.rig, push);
       },
     });
@@ -309,11 +312,18 @@ export class Simulation {
     return this.healthReading;
   }
 
-  // Whether a hit hurt the player, who survived it, since the previous call.
-  takeHurt(): boolean {
+  // What dealt a hit that hurt the player, who survived it, since the previous call; null when none did. Reused and
+  // read-only: consume it immediately.
+  takeHurt(): Readonly<HurtCause> | null {
     const taken = this.hurtTaken;
     this.hurtTaken = false;
-    return taken;
+    return taken ? this.cause : null;
+  }
+
+  // What dealt the latest hit that took health; after a death, the killing one. Reused and read-only: consume it
+  // immediately.
+  hurtCause(): Readonly<HurtCause> {
+    return this.cause;
   }
 
   // Brings a fallen player back at the bonfire reached last, healed and unharmed for a moment, holding the hammer as
@@ -400,7 +410,7 @@ export class Simulation {
     this.enemies.afterStep(this.elapsed);
     this.hazards.afterStep(this.elapsed, this.rig.root.getPosition());
     // Lava burns the character while the pot is in it; each burn, like any hit, leaves it unharmed for a second.
-    if (bath === 'lava') this.hurt(this.settings.physics.lavaDamage);
+    if (bath?.liquid === 'lava') this.hurt(this.settings.physics.lavaDamage, 'lava', bath.id);
     const foot = this.playerPosition();
     this.bonfires.update(foot);
     this.bestHeight = Math.max(this.bestHeight, foot.y);
@@ -561,12 +571,15 @@ export class Simulation {
     return this.health > 0 && this.elapsed >= this.safeUntil;
   }
 
-  // Takes `damage` from the player's health, unless a hit hurt it moments ago; each hit leaves it unharmed for a while.
-  private hurt(damage: number): void {
+  // Takes `damage` from the player's health, dealt by the level object `id`, unless a hit hurt it moments ago; each hit
+  // leaves it unharmed for a while.
+  private hurt(damage: number, source: HurtSource, id: string): void {
     if (!this.vulnerable()) return;
     this.health = Math.max(0, this.health - damage);
     this.safeUntil = this.elapsed + HEALTH.hurtSeconds;
     this.hurtTaken = this.health > 0;
+    this.cause.source = source;
+    this.cause.id = id;
   }
 
   private outOfBoundsY(level: LevelDefinition): number | null {

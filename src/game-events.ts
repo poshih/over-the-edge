@@ -1,3 +1,4 @@
+import type { HurtCause } from './hazards';
 import { listPoint, PluginError } from './plugins/kernel';
 
 /**
@@ -6,8 +7,10 @@ import { listPoint, PluginError } from './plugins/kernel';
  * Copy individual values into the observer's own state if they are needed later.
  */
 export type GameEvent =
-  | { readonly type: 'hurt'; readonly health: number; readonly max: number }
-  | { readonly type: 'death' }
+  // A hit took health and the player survived it: what dealt it, and the health left.
+  | { readonly type: 'hurt'; readonly health: number; readonly max: number; readonly cause: Readonly<HurtCause> }
+  // Health ran out: what dealt the killing hit.
+  | { readonly type: 'death'; readonly cause: Readonly<HurtCause> }
   | { readonly type: 'fall' }
   // An automatic return after death/fall; null when the reset path returns to the attempt's start.
   | { readonly type: 'respawn'; readonly bonfire: string | null }

@@ -33,7 +33,9 @@ import type { RuntimePlugins } from './plugins/runtime';
 import type { HudFrame } from './hud-readouts';
 import { checkGameObserver, EVENTS } from './game-events';
 import type { GameEvent, GameObserver } from './game-events';
-import { GameNotifications } from './game-notifications';
+import { GameNotifications, stageCause } from './game-notifications';
+import type { HurtCause } from './hazards';
+import { HURT_EFFECTS } from './hurt-effects';
 import { AUDIO } from './game-audio';
 import { LOOKS } from './object-looks';
 import { PluginError } from './plugins/kernel';
@@ -72,6 +74,7 @@ export class Game {
   private readonly audioPlugin: string | null;
   private readonly enemyPlugin: string | null;
   private readonly bonfirePlugin: string | null;
+  private readonly hurtPlugin: string | null;
   private readonly observers: Attributed<GameObserver>[] = [];
   private readonly devices: Attributed<InputDevice>[] = [];
   private readonly eventConsumers: boolean;
@@ -144,6 +147,7 @@ export class Game {
     this.audioPlugin = options.plugins.owner(AUDIO);
     this.enemyPlugin = options.plugins.owner(LOOKS.enemies);
     this.bonfirePlugin = options.plugins.owner(LOOKS.bonfire);
+    this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
     this.messageStyle = options.messageStyle ?? DEFAULT_MESSAGE_STYLE;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     const listen = { signal: this.lifecycle.signal };
@@ -275,7 +279,13 @@ export class Game {
             const fell = this.simulation.fellOutOfLevel();
             if (fell || this.simulation.dead()) {
               placed = true;
-              this.stageEvent(fell ? 'fall' : 'death');
+              if (fell) this.stageEvent('fall');
+              else {
+                const cause = this.simulation.hurtCause();
+                this.stageHurt(cause, true);
+                const event = this.stageEvent('death');
+                if (event !== null) stageCause(event.cause, cause);
+              }
               // A death returns the player to the bonfire reached last, the run going on; before any, it restarts the
               // attempt exactly like Reset.
               if (this.simulation.respawn()) this.respawned();
@@ -292,12 +302,15 @@ export class Game {
             if (this.pauseReasons.size > 0) break;
           }
           if (!placed && this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
-          if (this.simulation.takeHurt()) {
+          const hurt = this.simulation.takeHurt();
+          if (hurt !== null) {
+            this.stageHurt(hurt, false);
             const event = this.stageEvent('hurt');
             if (event !== null) {
               const health = this.simulation.readHealth();
               event.health = health.current;
               event.max = health.max;
+              stageCause(event.cause, hurt);
             }
           }
           if (this.eventConsumers) {
@@ -455,6 +468,7 @@ export class Game {
     this.accumulator = 0;
     this.clearMovement();
     this.view.recenter(this.simulation.frame(1));
+    this.stageHurtClear();
     const event = this.stageEvent('respawn');
     if (event !== null) event.bonfire = this.bonfire;
   }
@@ -468,6 +482,7 @@ export class Game {
     this.accumulator = 0;
     this.clearMovement();
     this.view.recenter(this.simulation.frame(1));
+    this.stageHurtClear();
     this.stageEvent('restart');
   }
 
@@ -482,6 +497,7 @@ export class Game {
       this.accumulator = 0;
       this.clearMovement();
       this.view.recenter(this.simulation.frame(1));
+      this.stageHurtClear();
       this.stageEvent('restart');
     }
   }
@@ -635,6 +651,15 @@ export class Game {
     return this.eventConsumers && !this.stopped ? this.pending.event(type) : null;
   }
 
+  // The hurt effects always show, so their hits and clears are staged whoever else consumes events.
+  private stageHurt(cause: Readonly<HurtCause>, fatal: boolean): void {
+    if (!this.stopped) this.pending.hurt(cause, fatal);
+  }
+
+  private stageHurtClear(): void {
+    if (!this.stopped) this.pending.clearHurt();
+  }
+
   // Called synchronously by the simulation: copy only into engine-owned staging, never call a look or a plugin here.
   private stageEnemy(event: EnemyEvent): void {
     if (this.stopped) return;
@@ -690,6 +715,18 @@ export class Game {
         try { this.view.setLitBonfires(batch.lit); } catch (error) {
           throw new PluginError('plugin-failed', `Plugin "${this.bonfirePlugin ?? 'engine'}" failed applying "${LOOKS.bonfire.id}".`,
             this.bonfirePlugin, LOOKS.bonfire.id, { cause: error });
+        }
+      }
+      // Then hits and placements for the hurt effects, in the order they happened.
+      for (let index = 0; index < batch.hurtCount; index++) {
+        if (this.lifecycle.signal.aborted) return;
+        const notice = batch.hurts[index]!;
+        try {
+          if (notice.clear) this.view.clearHurt();
+          else this.view.hurt(notice.cause, notice.fatal);
+        } catch (error) {
+          throw new PluginError('plugin-failed', `Plugin "${this.hurtPlugin ?? 'engine'}" failed applying "${HURT_EFFECTS.id}".`,
+            this.hurtPlugin, HURT_EFFECTS.id, { cause: error });
         }
       }
       // b. Audio: the same source order as the gameplay notifications, with impacts already limited.

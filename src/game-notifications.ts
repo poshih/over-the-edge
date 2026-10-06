@@ -1,25 +1,43 @@
 import type { EnemyEvent } from './enemy-types';
 import type { GameEvent } from './game-events';
+import type { HurtCause, HurtSource } from './hazards';
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type EventType = GameEvent['type'];
 type EventOf<T extends EventType> = Mutable<Extract<GameEvent, { readonly type: T }>>;
+type StagedCause = { source: HurtSource; id: string };
 
-const EVENT_SEEDS: { readonly [T in EventType]: EventOf<T> } = {
-  hurt: { type: 'hurt', health: 0, max: 0 },
-  death: { type: 'death' },
-  fall: { type: 'fall' },
-  respawn: { type: 'respawn', bonfire: null },
-  restart: { type: 'restart' },
-  bonfire: { type: 'bonfire', id: '' },
-  'enemy-hit': { type: 'enemy-hit', id: '' },
-  'enemy-defeat': { type: 'enemy-defeat', id: '' },
-  impact: { type: 'impact', strength: 0 },
-  launch: { type: 'launch' },
-  finish: { type: 'finish' },
-  sound: { type: 'sound', source: '', volume: 0 },
+// Each pooled event is made whole, so no two share a nested object such as a cause.
+const EVENT_SEEDS: { readonly [T in EventType]: () => EventOf<T> } = {
+  hurt: () => ({ type: 'hurt', health: 0, max: 0, cause: { source: 'enemy', id: '' } }),
+  death: () => ({ type: 'death', cause: { source: 'enemy', id: '' } }),
+  fall: () => ({ type: 'fall' }),
+  respawn: () => ({ type: 'respawn', bonfire: null }),
+  restart: () => ({ type: 'restart' }),
+  bonfire: () => ({ type: 'bonfire', id: '' }),
+  'enemy-hit': () => ({ type: 'enemy-hit', id: '' }),
+  'enemy-defeat': () => ({ type: 'enemy-defeat', id: '' }),
+  impact: () => ({ type: 'impact', strength: 0 }),
+  launch: () => ({ type: 'launch' }),
+  finish: () => ({ type: 'finish' }),
+  sound: () => ({ type: 'sound', source: '', volume: 0 }),
 };
 const EVENT_TYPES = Object.keys(EVENT_SEEDS) as EventType[];
+
+// Copies a borrowed cause into a staged event's own.
+export function stageCause(target: Readonly<HurtCause>, cause: Readonly<HurtCause>): void {
+  const staged: StagedCause = target;
+  staged.source = cause.source;
+  staged.id = cause.id;
+}
+
+// For the hurt effects, in the order they happened: a hit, with what dealt it and whether it killed, or a placement of
+// the player anew, which ends the effects following the character.
+export interface HurtNotice {
+  readonly clear: boolean;
+  readonly fatal: boolean;
+  readonly cause: Readonly<HurtCause>;
+}
 
 /**
  * One reusable batch. Pools and ordered storage retain their high-water capacity, growing only on larger bursts.
@@ -31,6 +49,8 @@ export class GameNotifications {
   readonly enemies: EnemyEvent[] = [];
   enemyCount = 0;
   lit: readonly string[] | null = null;
+  readonly hurts: HurtNotice[] = [];
+  hurtCount = 0;
   private readonly pools: { [T in EventType]: EventOf<T>[] } = {
     hurt: [], death: [], fall: [], respawn: [], restart: [], bonfire: [],
     'enemy-hit': [], 'enemy-defeat': [], impact: [], launch: [], finish: [], sound: [],
@@ -47,7 +67,7 @@ export class GameNotifications {
   private removeCount = 0;
 
   get pending(): boolean {
-    return this.eventCount > 0 || this.enemyCount > 0 || this.lit !== null;
+    return this.eventCount > 0 || this.enemyCount > 0 || this.lit !== null || this.hurtCount > 0;
   }
 
   event<T extends EventType>(type: T): EventOf<T> {
@@ -55,7 +75,7 @@ export class GameNotifications {
     const index = this.used[type]++;
     let event = pool[index];
     if (event === undefined) {
-      event = { ...EVENT_SEEDS[type] };
+      event = EVENT_SEEDS[type]();
       pool[index] = event;
     }
     this.events[this.eventCount++] = event;
@@ -84,11 +104,35 @@ export class GameNotifications {
     }
   }
 
+  hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
+    const notice = this.hurtNotice();
+    notice.clear = false;
+    notice.fatal = fatal;
+    stageCause(notice.cause, cause);
+  }
+
+  clearHurt(): void {
+    const notice = this.hurtNotice();
+    notice.clear = true;
+    notice.fatal = false;
+  }
+
   clear(): void {
     this.eventCount = 0;
     this.enemyCount = 0;
     this.lit = null;
+    this.hurtCount = 0;
     this.resetCount = this.upsertCount = this.removeCount = 0;
     for (const type of EVENT_TYPES) this.used[type] = 0;
+  }
+
+  private hurtNotice(): Mutable<HurtNotice> {
+    let notice = this.hurts[this.hurtCount] as Mutable<HurtNotice> | undefined;
+    if (notice === undefined) {
+      notice = { clear: false, fatal: false, cause: { source: 'enemy', id: '' } };
+      this.hurts[this.hurtCount] = notice;
+    }
+    this.hurtCount++;
+    return notice;
   }
 }
