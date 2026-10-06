@@ -17,7 +17,8 @@ const IRON = 0x3b3b40;
 const IRON_DARK = 0x29292d;
 const STEEL = 0x9a9ea4;
 
-// A broad head square to the camera, its curved cutting edge below, centred on the origin.
+// A broad head, its curved cutting edge below, centred on the origin. The swing model turns it into the plane of the
+// swing, edge-on to the camera, so the edge leads the cut.
 const BLADE: readonly Point[] = [
   { x: -0.18, y: 0.35 }, { x: 0.18, y: 0.35 }, { x: 0.42, y: 0.12 }, { x: 0.65, y: -0.05 }, { x: 0.45, y: -0.22 },
   { x: 0.2, y: -0.32 }, { x: 0, y: -0.35 }, { x: -0.2, y: -0.32 }, { x: -0.45, y: -0.22 }, { x: -0.65, y: -0.05 },
@@ -52,8 +53,8 @@ function swingModel(): BufferGeometry {
   const ring = new ModelKit(1).torus(0.11, 0.035, IRON, { ry: Math.PI / 2 }, 10, 4);
   const haft = new ModelKit(2).box(0.07, 1, 0.07, WOOD, { y: -0.5 });
   const blade = new ModelKit(3)
-    .extrude(BLADE, 0.06, STEEL, { y: -1 })
-    .box(0.2, 0.3, 0.12, IRON, { y: -1 + AXE.bladeHeight / 2 - 0.13 });
+    .extrude(BLADE, AXE.bladeThickness, STEEL, { y: -1, ry: Math.PI / 2 })
+    .box(0.12, 0.3, 0.2, IRON, { y: -1 + AXE.bladeHeight / 2 - 0.13 });
   const geometry = mergeGeometries([stretched(ring, () => 0), stretched(haft, (y) => y), stretched(blade, () => -1)]);
   // Culling covers the longest axe through its whole swing, not the 1 m model.
   geometry.boundingSphere = new Sphere(new Vector3(), AXE_FIELDS.length.max + AXE.bladeHeight);

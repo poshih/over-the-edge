@@ -889,9 +889,11 @@ out of it. A hit costs the trap's **Damage** and knocks the player along the sho
 
 A **swinging axe** hangs its blade **Length** below its pivot, its position, and swings in
 and out of the view, toward the camera and away, up to 63° either side, once every
-**Swing period**, rather than sideways along the climb. It passes through the play line
-at **Swing offset** seconds and every half period after. There a blade that meets the
-player costs its **Damage** and knocks the player away from it. The half of the swing in
+**Swing period**, rather than sideways along the climb. The blade lies in the plane of its
+swing, its curved edge below, so it swings edge first and is edge-on to the camera: 1.3 m
+toward the camera and away, 0.7 m tall and 6 cm thick along the climb. It cuts through the
+play line at **Swing offset** seconds and every half period after. There a blade that meets
+the player costs its **Damage** and knocks the player away from it. The half of the swing in
 front of the obstacle line draws over the player, the half behind it under the player.
 Stagger neighbouring axes with their offsets.
 

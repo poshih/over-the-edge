@@ -486,9 +486,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
             ${Object.entries(AXE_FIELDS).map(([name, field]) =>
               numericField(`axe-${name}`, fieldLabel(field), field.min, field.max, field.step)).join('')}
           </div>
-          <p class="level-help">Position is the pivot. The blade hangs Length below it and swings in and out of the view,
-            toward the camera and away, up to ${Math.round(AXE.amplitude * DEGREES)}° either side. It passes through the
-            play line, where the box shows it, at Swing offset and every half period after; there a blade that meets the
+          <p class="level-help">Position is the pivot. The blade hangs Length below it, edge-on to the camera with its curved
+            edge below, and swings in and out of the view edge first, toward the camera and away, up to
+            ${Math.round(AXE.amplitude * DEGREES)}° either side. It cuts through the play line, where the box shows it,
+            at Swing offset and every half period after; there a blade that meets the
             player costs its damage and knocks the player away from it. Stagger neighbours with the offset. The axe
             never collides.</p>
         </div>

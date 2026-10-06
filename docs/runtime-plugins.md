@@ -195,9 +195,11 @@ look draws every object of its kind:
 
 A look only draws: collision, hits and buoyancy stay the engine's, from the objects' own
 fields, so draw what the play does. Objects stand on the obstacle line, z = 0, where they are
-placed. An axe's blade, `AXE.bladeWidth` by `AXE.bladeHeight`, hangs `axe.length` below its
-pivot and turns about the x axis by `axeAngle(axe, time)` radians, positive away from the
-camera. `BONFIRE`, `SHOOTER` and `triggerBounds(trigger)` give the engine's sizes and a
+placed. An axe's blade lies in the plane of its swing, edge-on to the camera with its curved
+edge below: `AXE.bladeWidth` across the obstacle line, toward the camera and away,
+`AXE.bladeHeight` along the haft and `AXE.bladeThickness` along the line. It hangs `axe.length`
+below its pivot and turns about the x axis by `axeAngle(axe, time)` radians, positive away from
+the camera. `BONFIRE`, `SHOOTER` and `triggerBounds(trigger)` give the engine's sizes and a
 trigger's region. The view enables three.js local clipping, so a look can split itself at the
 obstacle line with clipping planes, as the engine's axes do; its pools are built as two half
 boxes instead. Import three.js from the `three` package, which is the engine's own copy. To add

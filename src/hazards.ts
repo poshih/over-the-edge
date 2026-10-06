@@ -60,9 +60,10 @@ export const SHOOTER_FIELDS = {
 export const AXE = {
   // The widest swing either side of hanging straight down, in radians.
   amplitude: 1.1,
-  // The blade, square to the camera: its width along the obstacle line and its height along the haft, centred the
-  // axe's length below the pivot.
-  bladeWidth: 1.3, bladeHeight: 0.7,
+  // The blade lies in the plane of its swing, its curved edge below leading the cut, so it is edge-on to the camera: its
+  // width runs across the obstacle line, toward the camera and away, its height along the haft, centred the axe's
+  // length below the pivot, and its thickness along the line.
+  bladeWidth: 1.3, bladeHeight: 0.7, bladeThickness: 0.06,
   // Velocity a hit adds to the player, away from the blade's centre and upward, in m/s.
   push: 5, lift: 2.5,
 } as const;
@@ -90,26 +91,59 @@ export function axeAngle(axe: Pick<AxeObject, 'period' | 'offset'>, time: number
 
 // The part of the blade within `halfDepth` of the obstacle line at `angle`, as the camera sees it, written to `out`;
 // false when the whole blade is further from the line.
+// The blade's corners, in order around it: along the haft (-1 nearer the pivot), and across the obstacle line.
+const BLADE_ALONG = [-1, -1, 1, 1] as const;
+const BLADE_ACROSS = [-1, 1, 1, -1] as const;
+
 export function axeBlade(axe: AxeObject, angle: number, halfDepth: number, out: Bounds): boolean {
-  const near = axe.length - AXE.bladeHeight / 2;
-  const sin = Math.abs(Math.sin(angle));
-  const far = Math.min(axe.length + AXE.bladeHeight / 2, sin === 0 ? Infinity : halfDepth / sin);
-  if (far < near) return false;
-  const cos = Math.cos(angle);
-  out.minX = axe.x - AXE.bladeWidth / 2;
-  out.maxX = axe.x + AXE.bladeWidth / 2;
-  out.minY = axe.y - far * cos;
-  out.maxY = axe.y - near * cos;
+  // The blade turns in the plane across the line, so what lies within reach of the line is its rectangle clipped to the
+  // slab |z| <= halfDepth: the corners inside it and where its sides cross the slab's faces.
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let lastY = 0;
+  let lastZ = 0;
+  for (let index = 0; index <= BLADE_ALONG.length; index++) {
+    const corner = index % BLADE_ALONG.length;
+    const along = axe.length + BLADE_ALONG[corner]! * AXE.bladeHeight / 2;
+    const across = BLADE_ACROSS[corner]! * AXE.bladeWidth / 2;
+    // Hanging at (0, -along, across) from the pivot, turned about the x axis as the axes' shader turns it.
+    const y = -along * cos - across * sin;
+    const z = -along * sin + across * cos;
+    if (index > 0) {
+      for (let face = -1; face <= 1; face += 2) {
+        const bound = face * halfDepth;
+        if ((lastZ - bound) * (z - bound) >= 0) continue;
+        const crossing = lastY + (y - lastY) * (bound - lastZ) / (z - lastZ);
+        minY = Math.min(minY, crossing);
+        maxY = Math.max(maxY, crossing);
+      }
+    }
+    if (index < BLADE_ALONG.length && Math.abs(z) <= halfDepth) {
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+    lastY = y;
+    lastZ = z;
+  }
+  if (minY > maxY) return false;
+  out.minX = axe.x - AXE.bladeThickness / 2;
+  out.maxX = axe.x + AXE.bladeThickness / 2;
+  out.minY = axe.y + minY;
+  out.maxY = axe.y + maxY;
   return true;
 }
 
 // Everywhere the blade passes within `halfDepth` of the obstacle line.
 export function axeReach(axe: AxeObject, halfDepth: number): Bounds {
   const near = axe.length - AXE.bladeHeight / 2;
-  const steepest = Math.min(AXE.amplitude, Math.asin(Math.min(1, halfDepth / near)));
+  const far = axe.length + AXE.bladeHeight / 2;
+  const across = AXE.bladeWidth / 2;
+  // Swung further than this, even the blade's corner nearest the line is beyond the slab.
+  const steepest = Math.min(AXE.amplitude, Math.atan2(across, near) + Math.asin(Math.min(1, halfDepth / Math.hypot(near, across))));
   return {
-    minX: axe.x - AXE.bladeWidth / 2, maxX: axe.x + AXE.bladeWidth / 2,
-    minY: axe.y - axe.length - AXE.bladeHeight / 2, maxY: axe.y - near * Math.cos(steepest),
+    minX: axe.x - AXE.bladeThickness / 2, maxX: axe.x + AXE.bladeThickness / 2,
+    minY: axe.y - Math.hypot(far, across), maxY: axe.y - near * Math.cos(steepest) + across * Math.sin(steepest),
   };
 }
 

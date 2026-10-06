@@ -23,8 +23,9 @@ const UPDRAFT_GLYPH = { halfWidth: 0.2, rise: 0.16, spacing: 0.24, rows: 2 } as 
 const FLAME_GLYPH = 'M 0 .15 C .32 .4 .36 .78 0 1.15 C -.08 .9 -.3 .78 -.2 .55 C -.3 .4 -.16 .25 0 .15 Z';
 // How far a projectile trap's aim shows when it is not selected; selected, it shows the projectiles' whole range.
 const AIM_GUIDE = 1.6;
-// The top of an axe's mount above its pivot.
+// The top of an axe's mount above its pivot, and half its width, which the blade, edge-on, never exceeds.
 const AXE_MOUNT = 0.45;
+const AXE_MOUNT_HALF_WIDTH = 0.4;
 const ENEMY_GLYPHS: Record<EnemySpecies, { body: string; detail: string }> = {
   bird: {
     body: 'M -.49 .07 L -.18 .03 L -.3 .45 L -.06 .2 L .11 .11 C .13 .34 .37 .35 .37 .1 L .49 .03 L .35 -.06 C .23 -.32 -.06 -.4 -.22 -.15 L -.49 -.02 Z',
@@ -201,8 +202,8 @@ function shooterGizmo(object: ShooterObject, mode: GizmoMode): SVGElement[] {
 function axeGizmo(object: AxeObject): SVGElement[] {
   const haft = line(0, 0, 0, -object.length);
   haft.setAttribute('class', 'level-gizmo-haft');
-  // The blade where it crosses the obstacle line, hanging straight down.
-  const blade = rect(-AXE.bladeWidth / 2, -object.length - AXE.bladeHeight / 2, AXE.bladeWidth, AXE.bladeHeight);
+  // The blade where it crosses the obstacle line, hanging straight down: edge-on, as thin as the blade.
+  const blade = rect(-AXE.bladeThickness / 2, -object.length - AXE.bladeHeight / 2, AXE.bladeThickness, AXE.bladeHeight);
   blade.setAttribute('class', 'level-gizmo-region');
   return [haft, blade, circle(HANDLE_RADIUS)];
 }
@@ -234,7 +235,7 @@ export function objectGizmoBounds(object: GizmoObject): Bounds {
     }
     case 'axe':
       return {
-        left: object.x - AXE.bladeWidth / 2, right: object.x + AXE.bladeWidth / 2,
+        left: object.x - AXE_MOUNT_HALF_WIDTH, right: object.x + AXE_MOUNT_HALF_WIDTH,
         bottom: object.y - object.length - AXE.bladeHeight / 2, top: object.y + AXE_MOUNT,
       };
     case 'pool':
