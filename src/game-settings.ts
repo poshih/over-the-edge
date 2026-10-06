@@ -71,7 +71,7 @@ export const CURSOR_FIELDS: readonly CursorField[] = [
 
 // How the target returns to the hammer, used only while returnToHammer is on.
 export const CURSOR_RETURN_FIELDS: readonly CursorField[] = [
-  { key: 'returnRate', label: 'Return speed', min: 0.5, max: 24, step: 0.5, unit: '/s', description: 'How quickly the target eases toward the hammer head plus the return offset, once aiming pauses while the head touches a surface. The cursor moves with it.' },
+  { key: 'returnRate', label: 'Return speed', min: 0.1, max: 60, step: 0.1, unit: '/s', description: 'How quickly the target eases toward the hammer head plus the return offset, once aiming pauses while the head touches a surface: it closes 63% of the gap in 1/speed seconds, so 1 /s takes about a second and 60 /s is all but instant. The cursor moves with it.' },
   { key: 'returnOffsetX', label: 'Return offset X', min: -MAX_RIG_REACH, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Where the target returns to, across from the hammer head\'s centre in world space. Positive goes right; it does not turn with the hammer.' },
   { key: 'returnOffsetY', label: 'Return offset Y', min: -MAX_RIG_REACH, max: MAX_RIG_REACH, step: 0.05, unit: 'm', description: 'Where the target returns to, above or below the hammer head\'s centre in world space. Positive goes up; it does not turn with the hammer.' },
 ];

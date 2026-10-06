@@ -549,14 +549,15 @@ alters body masses, or changes the rig's forces, mechanical reach, or collision
 rules.
 
 The section also has **Return target to hammer**, off by default, with a **Return
-speed** (0.5-24 /s, default **8 /s**) and **Return offset X** and **Y** in metres
-(default 0). When it is on and no aiming input has arrived for **0.15 seconds** of
-run time while the hammer head touches a surface, the target eases toward the
-head's centre plus the offset, staying inside the target radius, and the cursor
-moves with it, keeping its place in the dead zone. Input always comes first, and
-easing back never boosts a downswing. Positive X goes right and positive Y up; the
-offset does not turn with the hammer. Turning return off keeps its values. Like the
-other cursor settings, it never restarts the attempt or changes a phantom course.
+speed** (0.1-60 /s, default **8 /s**; the target closes 63% of the gap in 1/speed
+seconds) and **Return offset X** and **Y** in metres (default 0). When it is on and no
+aiming input has arrived for **0.15 seconds** of run time while the hammer head
+touches a surface, the target eases toward the head's centre plus the offset, staying
+inside the target radius, and the cursor moves with it, keeping its place in the dead
+zone. Input always comes first, and easing back never boosts a downswing. Positive X
+goes right and positive Y up; the offset does not turn with the hammer. Turning return
+off keeps its values. Like the other cursor settings, it never restarts the attempt or
+changes a phantom course.
 
 In **Workshop / Physics / Saved game settings**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
