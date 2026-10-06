@@ -7,6 +7,7 @@ import { TRIGGER_LIMITS } from '../level';
 import type { LevelObject } from '../level';
 import { DEFAULT_LAUNCH, FIRE_TRAP_FIELDS, LAUNCH_FIELDS, SOUND_VOLUME } from '../trigger-events';
 import type { TriggerAction } from '../trigger-events';
+import { connectionTargetId } from './connection-links';
 
 const EVENT_TYPES = ['message', 'play-video', 'play-sound', 'stop-timer', 'launch-player', 'fire-trap', 'toggle-platform'] as const;
 type EventType = TriggerAction['type'];
@@ -65,6 +66,8 @@ export interface TriggerEventEditor {
   clear(): void;
   /** Applies every dirty-but-valid draft; stops and returns false at the first invalid one. */
   flush(): boolean;
+  /** Appends to the current draft and applies the whole list; an invalid list stays in the draft. */
+  appendEvent(id: string, action: TriggerAction): boolean;
   /** Whether any tracked trigger has unapplied draft edits, valid or not. */
   hasPendingDrafts(): boolean;
 }
@@ -110,6 +113,18 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
 
   function isDirty(entry: Draft): boolean {
     return !sameEvents(entry.committed, entry.draft);
+  }
+
+  function draftFor(id: string, events: readonly TriggerAction[]): Draft {
+    let entry = drafts.get(id);
+    if (entry === undefined) {
+      entry = { committed: cloneEvents(events), draft: cloneEvents(events) };
+      drafts.set(id, entry);
+    } else if (!isDirty(entry) && !sameEvents(entry.committed, events)) {
+      entry.committed = cloneEvents(events);
+      entry.draft = cloneEvents(events);
+    }
+    return entry;
   }
 
   function renderStatus(): void {
@@ -377,11 +392,7 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
   return {
     show(id, events) {
       currentId = id;
-      let entry = drafts.get(id);
-      if (entry === undefined) {
-        entry = { committed: cloneEvents(events), draft: cloneEvents(events) };
-        drafts.set(id, entry);
-      }
+      draftFor(id, events);
       renderList();
     },
     hide() {
@@ -403,6 +414,27 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
       }
       renderList();
       return true;
+    },
+    appendEvent(id, action) {
+      const trigger = options.objects().find((object) => object.id === id);
+      if (trigger?.kind !== 'trigger') {
+        options.onNotice('The trigger no longer exists. No event was added.', 'error');
+        return false;
+      }
+      const entry = draftFor(id, trigger.events);
+      const targetId = connectionTargetId(action);
+      if (targetId !== null && entry.draft.some((event) => connectionTargetId(event) === targetId)) {
+        options.onNotice('Already connected. Edit or remove the link in Trigger events.', 'info');
+        return false;
+      }
+      if (entry.draft.length >= TRIGGER_LIMITS.events) {
+        options.onNotice(`A trigger has at most ${TRIGGER_LIMITS.events} events. Remove an event before connecting another target.`, 'error');
+        return false;
+      }
+      entry.draft.push({ ...action });
+      const applied = commit(id, entry, true);
+      if (currentId === id) renderList();
+      return applied;
     },
     hasPendingDrafts() {
       for (const entry of drafts.values()) if (isDirty(entry)) return true;

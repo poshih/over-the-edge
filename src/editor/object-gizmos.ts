@@ -7,6 +7,7 @@ import type { EnemyFacing, EnemySpecies } from '../enemy-types';
 import { AXE, BONFIRE, SHOOTER } from '../hazards';
 import { triggerBounds } from '../level';
 import type { AxeObject, EnemyObject, LevelObject, PlatformObject, PoolObject, ShooterObject, StartObject, TriggerObject } from '../level';
+import type { ConnectionLink, ConnectionTarget } from './connection-links';
 
 export interface Bounds { left: number; right: number; bottom: number; top: number }
 // Starts, triggers, enemies, bonfires, traps, liquid pools and platforms; terrain and decorations draw themselves in the scene.
@@ -16,6 +17,10 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 export const START_MARKER_RADIUS = 0.6;
 const START_CROSS = 0.42;
 const HANDLE_RADIUS = 0.22;
+const LINK_HANDLE_PIXELS = 6;
+const LINK_HANDLE_OFFSET_PIXELS = 32;
+const CONNECTION_GAP_PIXELS = 4;
+const ARROW_PIXELS = { length: 9, halfWidth: 4 } as const;
 const FLAG_POLE_HEIGHT = 0.6;
 const FLAG_WIDTH = 0.36;
 const UPDRAFT_GLYPH = { halfWidth: 0.2, rise: 0.16, spacing: 0.24, rows: 2 } as const;
@@ -304,11 +309,82 @@ export function createGizmo(object: GizmoObject, mode: GizmoMode): SVGGElement {
   return node;
 }
 
+export function triggerLinkHandle(object: TriggerObject, unitsPerPixel: number): Point {
+  const right = object.region.type === 'circle' ? object.region.radius : object.region.width / 2;
+  return { x: object.x + Math.max(HANDLE_RADIUS, right) + LINK_HANDLE_OFFSET_PIXELS * unitsPerPixel, y: object.y };
+}
+
+interface ConnectionView {
+  readonly selectedId: string | null;
+  readonly overview: boolean;
+  readonly unitsPerPixel: number;
+  readonly handleRadius: number;
+}
+
+interface ConnectionNodes {
+  readonly root: SVGGElement;
+  readonly path: SVGPathElement;
+  readonly arrow: SVGPathElement;
+  readonly label: SVGTextElement;
+}
+
+function connectionNodes(): ConnectionNodes {
+  const root = svg('g');
+  const path = svg('path');
+  path.setAttribute('class', 'level-gizmo-connection');
+  path.setAttribute('vector-effect', 'non-scaling-stroke');
+  const arrow = svg('path');
+  arrow.setAttribute('class', 'level-gizmo-connection-arrow');
+  const label = svg('text');
+  label.setAttribute('class', 'level-gizmo-connection-label');
+  label.setAttribute('text-anchor', 'middle');
+  label.setAttribute('y', '-6');
+  root.append(path, arrow, label);
+  return { root, path, arrow, label };
+}
+
+function placeConnection(nodes: ConnectionNodes, link: ConnectionLink, view: ConnectionView, preview: LevelObject | null): void {
+  const from = preview?.id === link.trigger.id ? preview : link.trigger;
+  const to = preview?.id === link.target.id ? preview : link.target;
+  const scale = view.unitsPerPixel;
+  const clearance = Math.max(HANDLE_RADIUS, view.handleRadius) + CONNECTION_GAP_PIXELS * scale;
+  const arrowLength = ARROW_PIXELS.length * scale;
+  const halfWidth = ARROW_PIXELS.halfWidth * scale;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.hypot(dx, dy);
+  let end: Point;
+  let direction: Point;
+  let centre: Point;
+  if (distance > clearance * 2 + arrowLength) {
+    direction = { x: dx / distance, y: dy / distance };
+    const start = { x: from.x + direction.x * clearance, y: from.y + direction.y * clearance };
+    end = { x: to.x - direction.x * clearance, y: to.y - direction.y * clearance };
+    centre = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    nodes.path.setAttribute('d', `M ${start.x} ${start.y} L ${end.x} ${end.y}`);
+  } else {
+    // Close or coincident endpoints need a loop, not a reversed line through their handles.
+    const rise = clearance + 24 * scale;
+    const start = { x: from.x, y: from.y + clearance };
+    end = { x: to.x + clearance, y: to.y };
+    const a = { x: start.x, y: start.y + rise };
+    const b = { x: end.x + rise, y: end.y };
+    direction = { x: -1, y: 0 };
+    centre = { x: (start.x + 3 * a.x + 3 * b.x + end.x) / 8, y: (start.y + 3 * a.y + 3 * b.y + end.y) / 8 };
+    nodes.path.setAttribute('d', `M ${start.x} ${start.y} C ${a.x} ${a.y} ${b.x} ${b.y} ${end.x} ${end.y}`);
+  }
+  const base = { x: end.x - direction.x * arrowLength, y: end.y - direction.y * arrowLength };
+  nodes.arrow.setAttribute('d', `M ${end.x} ${end.y} L ${base.x - direction.y * halfWidth} ${base.y + direction.x * halfWidth} ` +
+    `L ${base.x + direction.y * halfWidth} ${base.y - direction.x * halfWidth} Z`);
+  // Inverse camera scale keeps the guide's pixel-sized text upright in the world-space layer.
+  nodes.label.setAttribute('transform', `translate(${centre.x} ${centre.y}) scale(${scale} ${-scale})`);
+  if (nodes.label.textContent !== link.label) nodes.label.textContent = link.label;
+}
+
 /**
- * Manages the SVG representation of every non-terrain object plus one bounded selection node
- * and one bounded ghost (drag/placement preview) node. All nodes live in world-space coordinates
- * inside a single camera-transformed group, so panning/zooming never touches per-object geometry;
- * only `sync` (driven by LevelChange deltas) rebuilds the handful of nodes that actually changed.
+ * Authored gizmos share one camera-transformed world-space group; only `sync` rebuilds changed
+ * objects. Connections reuse their nodes as selection or zoom changes, and moving an endpoint
+ * updates only its links. Selection, ghost, link handle and connect preview are bounded overlays.
  */
 export class EntityGizmos {
   private readonly persistent = new Map<string, SVGGElement>();
@@ -316,6 +392,17 @@ export class EntityGizmos {
   private readonly connectionNode: SVGGElement;
   private readonly selectionNode: SVGGElement;
   private readonly ghostNode: SVGGElement;
+  private connectionEdges = new Map<ConnectionLink, ConnectionNodes>();
+  private connectionView: ConnectionView | null = null;
+  private readonly linkHandleNode = svg('g');
+  private linkHandleObject: TriggerObject | null = null;
+  private linkHandleScale = 0;
+  private readonly connectPreviewNode = svg('path');
+  private readonly connectTargetNode = svg('g');
+  private connectPreview: {
+    readonly trigger: TriggerObject | null; readonly pointer: Point | null; readonly target: ConnectionTarget | null;
+    readonly unitsPerPixel: number; readonly handleRadius: number;
+  } | null = null;
 
   constructor(cameraGroup: SVGGElement) {
     this.layer = svg('g');
@@ -326,7 +413,20 @@ export class EntityGizmos {
     this.selectionNode.setAttribute('class', 'level-gizmo-selection-layer');
     this.ghostNode = svg('g');
     this.ghostNode.setAttribute('class', 'level-gizmo-ghost-layer');
-    cameraGroup.append(this.layer, this.connectionNode, this.selectionNode, this.ghostNode);
+    this.linkHandleNode.setAttribute('class', 'level-gizmo-link-handle');
+    this.linkHandleNode.setAttribute('hidden', '');
+    const title = svg('title');
+    title.textContent = 'Drag to a projectile trap or platform to connect';
+    const handle = circle(LINK_HANDLE_PIXELS);
+    const glyph = svg('path');
+    glyph.setAttribute('d', 'M -3 0 H 3 M 0 -3 L 3 0 L 0 3');
+    this.linkHandleNode.append(title, handle, glyph);
+    this.connectPreviewNode.setAttribute('class', 'level-gizmo-connection level-gizmo-connection-preview');
+    this.connectPreviewNode.setAttribute('vector-effect', 'non-scaling-stroke');
+    this.connectPreviewNode.setAttribute('hidden', '');
+    this.connectTargetNode.setAttribute('hidden', '');
+    cameraGroup.append(this.layer, this.connectionNode, this.selectionNode, this.ghostNode,
+      this.connectTargetNode, this.connectPreviewNode, this.linkHandleNode);
   }
 
   sync(upsert: readonly LevelObject[], remove: readonly string[]): void {
@@ -353,14 +453,67 @@ export class EntityGizmos {
     applyGizmo(this.selectionNode, object, 'selected');
   }
 
-  setConnections(lines: readonly { readonly from: Point; readonly to: Point }[]): void {
+  setConnections(links: readonly ConnectionLink[], view: ConnectionView, preview: LevelObject | null): void {
     const children: SVGElement[] = [];
-    for (const segment of lines) {
-      const edge = line(segment.from.x, segment.from.y, segment.to.x, segment.to.y);
-      edge.setAttribute('class', 'level-gizmo-aim level-gizmo-connection');
-      children.push(edge);
+    const edges = new Map<ConnectionLink, ConnectionNodes>();
+    this.connectionView = view;
+    for (const link of links) {
+      const nodes = this.connectionEdges.get(link) ?? connectionNodes();
+      const selected = link.trigger.id === view.selectedId || link.target.id === view.selectedId;
+      nodes.root.setAttribute('class', `level-gizmo-connection-link${selected ? ' level-gizmo-connection-selected' :
+        view.overview && view.selectedId !== null ? ' level-gizmo-connection-muted' : ''}`);
+      placeConnection(nodes, link, view, preview);
+      edges.set(link, nodes);
+      children.push(nodes.root);
     }
+    this.connectionEdges = edges;
     this.connectionNode.replaceChildren(...children);
+  }
+
+  moveConnections(links: readonly ConnectionLink[], preview: LevelObject | null): void {
+    if (this.connectionView === null) throw new Error('Connection view is not initialised.');
+    for (const link of links) {
+      const nodes = this.connectionEdges.get(link);
+      if (nodes !== undefined) placeConnection(nodes, link, this.connectionView, preview);
+    }
+  }
+
+  setLinkHandle(object: TriggerObject | null, unitsPerPixel: number): void {
+    if (object === this.linkHandleObject && unitsPerPixel === this.linkHandleScale) return;
+    this.linkHandleObject = object;
+    this.linkHandleScale = unitsPerPixel;
+    this.linkHandleNode.toggleAttribute('hidden', object === null);
+    if (object === null) return;
+    const at = triggerLinkHandle(object, unitsPerPixel);
+    this.linkHandleNode.setAttribute('transform', `translate(${at.x} ${at.y}) scale(${unitsPerPixel} ${-unitsPerPixel})`);
+  }
+
+  setConnectPreview(trigger: TriggerObject | null, pointer: Point | null, target: ConnectionTarget | null,
+    unitsPerPixel: number, handleRadius: number): void {
+    const previous = this.connectPreview;
+    if (previous !== null && previous.trigger === trigger && previous.pointer?.x === pointer?.x &&
+      previous.pointer?.y === pointer?.y && previous.target === target && previous.unitsPerPixel === unitsPerPixel &&
+      previous.handleRadius === handleRadius) return;
+    this.connectPreview = { trigger, pointer, target, unitsPerPixel, handleRadius };
+    if (previous?.target !== target) {
+      this.connectTargetNode.toggleAttribute('hidden', target === null);
+      if (target !== null) {
+        applyGizmo(this.connectTargetNode, target, 'selected');
+        this.connectTargetNode.classList.add('level-gizmo-connect-target');
+      }
+    }
+    if (trigger === null || pointer === null) {
+      this.connectPreviewNode.setAttribute('hidden', '');
+      return;
+    }
+    const dx = pointer.x - trigger.x;
+    const dy = pointer.y - trigger.y;
+    const distance = Math.hypot(dx, dy);
+    const clearance = Math.max(HANDLE_RADIUS, handleRadius) + CONNECTION_GAP_PIXELS * unitsPerPixel;
+    this.connectPreviewNode.toggleAttribute('hidden', distance <= clearance);
+    if (distance <= clearance) return;
+    this.connectPreviewNode.setAttribute('d', `M ${trigger.x + dx / distance * clearance} ${trigger.y + dy / distance * clearance} ` +
+      `L ${pointer.x} ${pointer.y}`);
   }
 
   setGhost(object: GizmoObject | null): void {
@@ -373,6 +526,10 @@ export class EntityGizmos {
     this.connectionNode.remove();
     this.selectionNode.remove();
     this.ghostNode.remove();
+    this.linkHandleNode.remove();
+    this.connectPreviewNode.remove();
+    this.connectTargetNode.remove();
+    this.connectionEdges.clear();
     this.persistent.clear();
   }
 }

@@ -207,7 +207,7 @@
 
 .level-board-controls {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 8px;
   margin-top: 8px;
 }
@@ -382,7 +382,9 @@
 .level-gizmo-layer,
 .level-gizmo-connection-layer,
 .level-gizmo-selection-layer,
-.level-gizmo-ghost-layer {
+.level-gizmo-ghost-layer,
+.level-gizmo-connection-preview,
+.level-gizmo-connect-target {
   pointer-events: none;
 }
 
@@ -533,9 +535,61 @@
   stroke-width: 1.5;
 }
 
+.level-gizmo-connection-link {
+  color: #94662b;
+  opacity: 0.8;
+}
+
+.level-gizmo-connection-selected {
+  color: #075a50;
+  opacity: 1;
+}
+
+.level-gizmo-connection-muted {
+  opacity: 0.3;
+}
+
 .level-gizmo-connection {
-  opacity: 0.75;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
   stroke-dasharray: 4 3;
+}
+
+.level-gizmo-connection-selected .level-gizmo-connection {
+  stroke-width: 2.5;
+}
+
+.level-gizmo-connection-arrow {
+  fill: currentColor;
+}
+
+.level-guides .level-gizmo-connection-label {
+  fill: currentColor;
+  pointer-events: none;
+}
+
+.level-gizmo-connection-preview {
+  color: #9a5c08;
+  stroke-width: 2;
+}
+
+.level-gizmo-connect-target .level-gizmo-region {
+  fill: rgb(26 115 103 / 20%);
+}
+
+.level-gizmo-link-handle {
+  fill: #f8f3e4;
+  stroke: #075a50;
+  stroke-width: 1.5;
+  pointer-events: all;
+  cursor: crosshair;
+}
+
+.level-gizmo-link-handle path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .level-gizmo-platform-end {

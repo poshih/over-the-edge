@@ -937,6 +937,20 @@ events**, **Fire trap** starts a burst on a projectile trap (default **3** shots
 **Toggle platform** sends an elevator platform toward its other end; stepping on the switch
 again can fire another burst or turn the platform back.
 
+Select a switch or trigger to see its outgoing connections; select a projectile trap or
+platform to see incoming connections from every trigger that controls it. **Links**, beside
+**Board**, shows all connections, emphasising the selected object's links and dimming the
+others. Arrowheads point towards the target. Midpoint labels show **×N** shots or **toggle**;
+several events for the same target share one line, labelled in order, such as **×3 · ×2**.
+Arrowheads and labels stay readable as you zoom, and connections follow objects you drag.
+
+Drag the selected trigger's small link handle, beside its region's right edge, onto a
+projectile trap or platform to connect it. This adds a **Fire trap** event with **3** shots or a
+**Toggle platform** event, applying it together with any pending Trigger events edits. Invalid
+edits stay in the draft for you to fix and apply. An existing connection or a full event list
+adds nothing; release elsewhere or press **Escape** to cancel. Edit or remove a link in
+**Trigger events**, then **Apply events**.
+
 Choose **Workshop / Level / Elevator platform** to place a colliding slab. **Position X/Y** is
 its start centre; **Travel X/Y** is the offset in metres to its other centre, up to ±200 m on
 each axis (`travelX`/`travelY` in JSON). **Width**, **Height**, **Depth**, **Speed** and

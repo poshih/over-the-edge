@@ -29,7 +29,9 @@ import { LevelBoardView, niceStep } from './level-board-view';
 import type { BoardViewport } from './level-board-view';
 import { createJsonDownload } from './json-download';
 import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
-import { EntityGizmos, enemyGlyph, objectGizmoBounds, updraftGlyph } from './object-gizmos';
+import { EntityGizmos, enemyGlyph, objectGizmoBounds, triggerLinkHandle, updraftGlyph } from './object-gizmos';
+import { deriveConnectionLinks } from './connection-links';
+import type { ConnectionLink, ConnectionLinks, ConnectionTarget } from './connection-links';
 import { createSetPieceGhost, createSetPieceThumbnail, loopsPath } from './set-piece-view';
 import { placeSetPiece, SET_PIECE_CATALOG, SET_PIECE_CATEGORIES, SET_PIECES, setPieceById } from './set-pieces';
 import type { SetPiece, SetPieceCategory, SetPieceCounts } from './set-pieces';
@@ -59,6 +61,7 @@ type Gesture =
   // `selected` is the selection the press replaced, restored if a second finger turns the press into a pinch.
   | { kind: 'move'; pointerId: number; start: Point; world: Point; original: LevelObject; preview: LevelObject; selected: string | null }
   | { kind: 'platform-end'; pointerId: number; start: Point; original: PlatformObject; preview: PlatformObject; selected: string | null }
+  | { kind: 'connect'; pointerId: number; trigger: TriggerObject; world: Point; target: ConnectionTarget | null }
   // Drags the view: with the middle button from anywhere, or from empty space while selecting, where a click that never
   // moved selects nothing instead.
   | { kind: 'pan'; pointerId: number; start: Point; last: Point; camera: EditorCamera; unitsPerPixel: number; moved: boolean; deselects: boolean }
@@ -97,6 +100,12 @@ const PRESETS: readonly TerrainPreset[] = SHAPE_KINDS.flatMap((type): TerrainPre
     ? [preset, { id: 'platform', label: 'Platform', shape: type, width: 4, height: 0.4 }]
     : [preset];
 });
+const TRIGGER_MARKER_LABELS: Readonly<Record<(typeof TRIGGER_MARKERS)[number], string>> = {
+  none: 'None',
+  flag: 'Flag',
+  updraft: 'Updraft',
+  switch: 'Pressure switch',
+};
 const TRIGGER_PRESETS: readonly TriggerPreset[] = [
   {
     id: 'trigger', label: 'Trigger', name: 'Trigger', anchorBottom: false,
@@ -283,6 +292,7 @@ function boundsContain(bounds: Bounds, point: Point): boolean {
 }
 
 const BOARD_KEY = 'over-the-edge:level-board:v1';
+const LINKS_KEY = 'over-the-edge:level-links:v1';
 
 function midpoint(a: Point, b: Point): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -300,6 +310,15 @@ function readBoardShown(): boolean {
     return localStorage.getItem(BOARD_KEY) !== 'hidden';
   } catch (error) {
     if (error instanceof DOMException) return true;
+    throw error;
+  }
+}
+
+function readLinksShown(): boolean {
+  try {
+    return localStorage.getItem(LINKS_KEY) === 'shown';
+  } catch (error) {
+    if (error instanceof DOMException) return false;
     throw error;
   }
 }
@@ -383,6 +402,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <form class="level-board-controls" aria-label="Level board">
           <button type="button" class="button level-board-toggle" aria-pressed="true"
             title="Name 10 m squares like a chessboard: columns A, B… from the left, rows 1, 2… up from the ground">Board</button>
+          <button type="button" class="button level-links-toggle" aria-pressed="false"
+            title="Show all trigger connections; the selected object's links are emphasised">Links</button>
           <input id="level-board-square" type="text" maxlength="8" placeholder="Square, e.g. D7" aria-label="Board square to go to"
             autocomplete="off" spellcheck="false" />
           <button type="submit" class="button">Go to</button>
@@ -503,7 +524,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
             fire only bursts that trigger events start, using First shot as the delay after the switch and Shot interval
             between shots. Projectiles fly straight up to ${SHOOTER.range} m; terrain, platforms and the hammer head stop them, so the hammer is a shield.
             Set the muzzle into a wall's face to shoot out of it. A hit costs its damage and knocks the player along
-            the shot. The trap never collides.</p>
+            the shot. The trap never collides. Select it to see its incoming trigger links; Links shows every connection.</p>
         </div>
         <div class="level-fields-axe">
           <div class="level-field-grid">
@@ -544,7 +565,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
             other centre. Dragging the slab moves both ends; its end handle changes only the travel. The editor draws
             the start slab, a dashed end preview and the travel line. A toggle-platform trigger sends it toward its other
             end; pressing again mid-trip turns it back. Keep its path clear: it moves through terrain and can push the
-            player into rock. Reset returns it to the start, but returning to a bonfire leaves it where the run has moved it.</p>
+            player into rock. Reset returns it to the start, but returning to a bonfire leaves it where the run has moved it.
+            Select the platform to see its incoming trigger links; Links shows every connection.</p>
         </div>
         <div class="level-fields-decoration">
           <div class="level-field-grid">
@@ -577,13 +599,17 @@ export function createLevelEditor(options: LevelEditorOptions) {
           </div>
           <div class="level-field-grid">
             ${selectField('trigger-activation', 'Activation', [{ value: 'once', label: 'Once per run' }, { value: 'on-enter', label: 'Every entry' }])}
-            ${selectField('trigger-marker', 'Marker', [
-              { value: 'none', label: 'None' }, { value: 'flag', label: 'Flag' }, { value: 'updraft', label: 'Updraft' },
-            ])}
+            ${selectField('trigger-marker', 'Marker', TRIGGER_MARKERS.map((marker) => ({
+              value: marker, label: TRIGGER_MARKER_LABELS[marker],
+            })))}
           </div>
-          <p class="level-help">Trigger regions are centered on Position X/Y and axis-aligned (no rotation).
+          <p class="level-help">Trigger regions are centred on Position X/Y and axis-aligned (no rotation).
             Proximity uses the player's foot position; "Once per run" fires a single time, "Every entry" fires
-            again each time the player re-enters after leaving.</p>
+            again each time the player re-enters after leaving. A pressure switch uses the switch marker and Every entry.
+            Select a trigger to see its outgoing links, or a trap or platform to see incoming links; Links shows all.
+            Arrowheads point to the target; labels show ×N shots or toggle, in event order.
+            Drag the trigger's link handle onto a projectile trap or platform to connect.
+            Edit or remove a link in Trigger events.</p>
           <p class="level-help level-trigger-preview-events" hidden></p>
           <div class="level-trigger-events"></div>
         </div>
@@ -711,8 +737,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
   board.setLeft(boardLeft(terrainLeft));
   const boardReadout = element<HTMLParagraphElement>(root, '.level-board-readout');
   const boardToggle = element<HTMLButtonElement>(root, '.level-board-toggle');
+  const linksToggle = element<HTMLButtonElement>(root, '.level-links-toggle');
   const boardInput = input('board-square');
   let boardShown = readBoardShown();
+  let linksShown = readLinksShown();
   // The square under the pointer, or the one Go to chose; null for none.
   let boardSquare: BoardSquare | null = null;
   entityGizmos.sync(level.definition().objects, []);
@@ -742,6 +770,11 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let meshRequest = 0;
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
+  let connections = deriveConnectionLinks(level.definition().objects);
+  let connectionDrawing: {
+    readonly model: ConnectionLinks; readonly selectedId: string | null; readonly shown: boolean;
+    readonly unitsPerPixel: number; readonly moved: LevelObject | null;
+  } | null = null;
   // Fingers on the canvas, so a second one turns the first's gesture into a pinch.
   const touches = new Map<number, Point>();
   let drawingCursor: Point | null = null;
@@ -1023,14 +1056,16 @@ Export the level first if you want to keep them. Continue without saving?`);
     const help: Record<Tool, string> = {
       select: 'Click / tap to select; drag to move. Drag empty space, or drag with the middle button from anywhere, to pan; the ' +
         'wheel and + / − zoom. On a touch screen, drag with two fingers to pan and pinch to zoom. Pick enemies on their bodies, ' +
-        'starts and triggers near their center handle, and liquid pools in their box where no terrain is. Escape cancels a drag ' +
-        'without changing the level. Decorations are picked with Select decorations.',
+        'starts and triggers near their centre handle, and liquid pools in their box where no terrain is. Select a trigger to see ' +
+        'outgoing links, or a projectile trap or platform for incoming links. Links shows all; drag a trigger\'s link handle onto ' +
+        'a trap or platform to connect. Escape cancels a drag without changing the level. Decorations are picked with Select decorations.',
       decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth, or drag empty space to ' +
         'pan. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
         'Escape cancels. Pan with the middle button or two fingers and zoom as usual; your unfinished outline is kept.',
       place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it. Escape cancels placement.',
-      'place-trigger': 'Click / tap to place this trigger. Escape cancels placement.',
+      'place-trigger': 'Click / tap to place this trigger or pressure switch. Select it after placing, then drag its link handle ' +
+        'onto a projectile trap or platform to connect; edit or remove links in Trigger events. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
       'place-hazard': 'Click / tap to place it: a bonfire by its base, which rests on the terrain top under the pointer; a projectile ' +
         'trap by its muzzle; a swinging axe by its pivot; a liquid pool by the middle of its surface; a platform by its start centre. Tune it before or after ' +
@@ -1276,20 +1311,36 @@ Export the level first if you want to keep them. Continue without saving?`);
     }
     entityGizmos.setSelection(selected !== null && !isTerrainObject(selected) && !isDecorationObject(selected) ? selected : null);
     entityGizmos.setGhost(ghost !== null && !isTerrainObject(ghost) && !isDecorationObject(ghost) ? ghost : null);
-    entityGizmos.setConnections(triggerConnections(selected));
+    drawConnections(selected);
     drawSetPieceGhost();
     drawOutline();
   }
 
-  function triggerConnections(object: LevelObject | null): readonly { readonly from: Point; readonly to: Point }[] {
-    if (object === null || object.kind !== 'trigger') return [];
-    const lines: { from: Point; to: Point }[] = [];
-    for (const event of object.events) {
-      if (event.type !== 'fire-trap' && event.type !== 'toggle-platform') continue;
-      const target = level.object(event.type === 'fire-trap' ? event.trap : event.platform);
-      lines.push({ from: object, to: target });
+  function objectConnections(id: string | null): readonly ConnectionLink[] {
+    return id === null ? [] : connections.outgoing.get(id) ?? connections.incoming.get(id) ?? [];
+  }
+
+  function drawConnections(selected: LevelObject | null): void {
+    const unitsPerPixel = camera.state().worldHeight / Math.max(1, rect.height);
+    const moved = gesture?.kind === 'move' &&
+      (connections.outgoing.has(gesture.preview.id) || connections.incoming.has(gesture.preview.id)) ? gesture.preview : null;
+    const previous = connectionDrawing;
+    if (previous === null || previous.model !== connections || previous.selectedId !== selectedId ||
+      previous.shown !== linksShown || previous.unitsPerPixel !== unitsPerPixel) {
+      entityGizmos.setConnections(linksShown ? connections.all : objectConnections(selectedId),
+        { selectedId, overview: linksShown, unitsPerPixel, handleRadius: handleRadius() }, moved);
+    } else if (previous.moved?.id !== moved?.id || previous.moved?.x !== moved?.x || previous.moved?.y !== moved?.y) {
+      if (previous.moved !== null && previous.moved.id !== moved?.id) {
+        entityGizmos.moveConnections(objectConnections(previous.moved.id), null);
+      }
+      if (moved !== null) entityGizmos.moveConnections(objectConnections(moved.id), moved);
     }
-    return lines;
+    connectionDrawing = { model: connections, selectedId, shown: linksShown, unitsPerPixel, moved };
+    const selectedPreview = gesture?.kind === 'move' && gesture.preview.id === selectedId ? gesture.preview : selected;
+    entityGizmos.setLinkHandle(tool === 'select' ? asTrigger(selectedPreview) : null, unitsPerPixel);
+    const connect = gesture?.kind === 'connect' ? gesture : null;
+    entityGizmos.setConnectPreview(connect?.trigger ?? null, connect?.world ?? null, connect?.target ?? null,
+      unitsPerPixel, handleRadius());
   }
 
   function drawCamera(): void {
@@ -1372,6 +1423,17 @@ Export the level first if you want to keep them. Continue without saving?`);
     hoverBoard(null);
     renderBoardReadout(null);
     drawBoard();
+  }
+
+  function setLinksShown(shown: boolean): void {
+    linksShown = shown;
+    linksToggle.setAttribute('aria-pressed', String(shown));
+    try {
+      localStorage.setItem(LINKS_KEY, shown ? 'shown' : 'hidden');
+    } catch (error) {
+      if (!(error instanceof DOMException)) throw error;
+    }
+    draw();
   }
 
   // Keeps the leftmost terrain point, and so column A, current from an edit's changed objects; the terrain is scanned
@@ -2081,8 +2143,10 @@ Export the level first if you want to keep them. Continue without saving?`);
     setCamera({ ...camera.state(), x, y });
   });
   boardToggle.setAttribute('aria-pressed', String(boardShown));
+  linksToggle.setAttribute('aria-pressed', String(linksShown));
   renderBoardReadout(null);
   action('.level-board-toggle', () => setBoardShown(!boardShown));
+  action('.level-links-toggle', () => setLinksShown(!linksShown));
   element<HTMLFormElement>(root, '.level-board-controls').addEventListener('submit', (event) => {
     event.preventDefault();
     if (!active) return;
@@ -2232,6 +2296,20 @@ Export the level first if you want to keep them. Continue without saving?`);
     return null;
   }
 
+  function hitConnectionTarget(world: Point): ConnectionTarget | null {
+    const radius = handleRadius();
+    for (let index = connections.targets.length - 1; index >= 0; index--) {
+      const target = connections.targets[index];
+      if (Math.hypot(world.x - target.x, world.y - target.y) <= radius) return target;
+      if (target.kind === 'platform' &&
+        Math.hypot(world.x - target.x - target.travelX, world.y - target.y - target.travelY) <= radius) return target;
+      const bound = bounds.get(target.id);
+      if (bound === undefined) throw new Error('Missing authored connection target bounds.');
+      if (boundsContain(bound, world)) return target;
+    }
+    return null;
+  }
+
   function movePreview(event: PointerEvent): void {
     const client = pointFromEvent(event);
     const world = camera.unproject(client);
@@ -2251,7 +2329,10 @@ Export the level first if you want to keep them. Continue without saving?`);
       return;
     }
     if (gesture?.kind === 'pinch') return;
-    if (gesture?.kind === 'draw') {
+    if (gesture?.kind === 'connect') {
+      gesture.world = world;
+      gesture.target = hitConnectionTarget(world);
+    } else if (gesture?.kind === 'draw') {
       const previous = gesture.samples[gesture.samples.length - 1];
       if (Math.hypot(world.x - previous.x, world.y - previous.y) >= DRAWING.samplePixels * gesture.unitsPerPixel) {
         if (gesture.samples.length >= DRAWING.samples - 1) {
@@ -2368,22 +2449,29 @@ Export the level first if you want to keep them. Continue without saving?`);
       gesture = panFrom(event, false);
     } else if (tool === 'select' || tool === 'decorate') {
       overlay.focus({ preventScroll: true });
-      const decoration = tool === 'decorate' ? hitDecoration(client) : null;
-      const object = tool === 'decorate' ? decoration : hitTest(world);
-      if (object === null) {
-        gesture = panFrom(event, true);
+      const trigger = tool === 'select' ? asTrigger(selectedObject()) : null;
+      const handle = trigger === null ? null : triggerLinkHandle(trigger, camera.state().worldHeight / Math.max(1, rect.height));
+      if (trigger !== null && handle !== null && Math.hypot(world.x - handle.x, world.y - handle.y) <= handleRadius()) {
+        gesture = { kind: 'connect', pointerId: event.pointerId, trigger, world, target: hitConnectionTarget(world) };
+        draw();
       } else {
-        const selected = selectedId;
-        selectedId = object.id;
-        const platform = asPlatform(object);
-        if (platform !== null &&
-          Math.hypot(world.x - (platform.x + platform.travelX), world.y - (platform.y + platform.travelY)) <= handleRadius()) {
-          gesture = { kind: 'platform-end', pointerId: event.pointerId, start: client, original: platform, preview: platform, selected };
+        const decoration = tool === 'decorate' ? hitDecoration(client) : null;
+        const object = tool === 'decorate' ? decoration : hitTest(world);
+        if (object === null) {
+          gesture = panFrom(event, true);
         } else {
-          const grab = decoration === null ? world : camera.unprojectDepth(client, decoration.z);
-          if (grab !== null) gesture = { kind: 'move', pointerId: event.pointerId, start: client, world: grab, original: object, preview: object, selected };
+          const selected = selectedId;
+          selectedId = object.id;
+          const platform = asPlatform(object);
+          if (platform !== null &&
+            Math.hypot(world.x - (platform.x + platform.travelX), world.y - (platform.y + platform.travelY)) <= handleRadius()) {
+            gesture = { kind: 'platform-end', pointerId: event.pointerId, start: client, original: platform, preview: platform, selected };
+          } else {
+            const grab = decoration === null ? world : camera.unprojectDepth(client, decoration.z);
+            if (grab !== null) gesture = { kind: 'move', pointerId: event.pointerId, start: client, world: grab, original: object, preview: object, selected };
+          }
+          renderControls(); draw();
         }
-        renderControls(); draw();
       }
     } else if (tool === 'draw') {
       overlay.focus({ preventScroll: true });
@@ -2434,6 +2522,10 @@ Export the level first if you want to keep them. Continue without saving?`);
         if (finished.preview !== finished.original) level.upsert(finished.preview);
       } else if (finished.kind === 'platform-end') {
         if (finished.preview !== finished.original) level.upsert(finished.preview);
+      } else if (finished.kind === 'connect' && inside && finished.target !== null) {
+        triggerEvents.appendEvent(finished.trigger.id, finished.target.kind === 'shooter'
+          ? { type: 'fire-trap', trap: finished.target.id, shots: 3 }
+          : { type: 'toggle-platform', platform: finished.target.id });
       } else if (finished.kind === 'pan') {
         if (finished.deselects && !finished.moved) selectedId = null;
       } else if (finished.kind === 'draw' && inside) {
@@ -2519,7 +2611,10 @@ Export the level first if you want to keep them. Continue without saving?`);
       return;
     }
     switch (event.key.toLowerCase()) {
-      case 'escape': selectedId = null; cancelDrawing(); break;
+      case 'escape':
+        if (gesture?.kind === 'connect') cancelGesture();
+        else { selectedId = null; cancelDrawing(); }
+        break;
       case 'v': chooseTool('select'); break;
       case 'm':
         if (tool === 'place-set-piece') toggleSetPieceMirror();
@@ -2567,6 +2662,7 @@ Export the level first if you want to keep them. Continue without saving?`);
   const unsubscribe = level.subscribe((change) => {
     commitCount++;
     surfaces.invalidate();
+    connections = deriveConnectionLinks(change.level.objects);
     for (const id of change.remove) { bounds.delete(id); triggerEvents.forget(id); }
     for (const object of change.upsert) {
       bounds.set(object.id, objectBounds(object));
