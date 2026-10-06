@@ -430,7 +430,10 @@ scratch, and allocate nothing on a frame. The engine detaches the root before `d
 turbulence rising through them and warped by itself, deep red to a white-hot core, that lick up
 the character, bend away from its motion and flare at each burn, with embers rising from it, smoke
 above it and a flickering glow about it. Each burn keeps the fire going a little over a second;
-then the flames die down and the last embers and smoke clear. It needs no textures, draws only
+then the flames die down and the last embers and smoke finish rising. Embers and smoke each live
+their own life from where they were born, so a later burn grows the flames again from where they
+are and starts new embers and smoke at the character, without anything appearing mid-flight. It
+needs no textures, draws only
 while it burns and allocates nothing on a frame. Other hits show nothing more. To keep the fire
 and add a flash for every other hit, wrap it:
 

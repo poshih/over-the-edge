@@ -9,9 +9,11 @@ import type { SceneFrame } from './scene-layer';
 // A fire that takes the character while lava burns it: tongues of flame shaded from a turbulence field, licking up the
 // character, bending away from its motion and flaring at each burn, with embers rising from it, smoke above it and a
 // glow about it. Lava burns once a second while the pot stays in it, so each burn keeps the fire going a little longer
-// than that; once the burns stop, the flames die down, the last embers rise and the smoke clears.
+// than that. While it burns, the flames grow and embers and smoke are born at the character, each living its own life in
+// the world; once the burns stop, the flames die down and the last embers and smoke finish rising. A new burn grows the
+// flames again from where they are and starts new embers and smoke at the base, so nothing appears mid-flight.
 const FIRE = {
-  // How long a burn keeps the fire going; how long the flames take to flare up, and to die down.
+  // How long a burn keeps the fire going; how long the flames take to grow from nothing, and to die down.
   burn: 1.15, kindle: 0.15, fade: 0.5,
   // How much brighter a burn makes the fire for a moment, and how fast that flare fades, in seconds.
   flare: 0.35, flareFade: 0.18,
@@ -23,10 +25,10 @@ const FIRE = {
     { x: -0.16, y: -0.52, width: 0.62, height: 0.95 },
     { x: 0.2, y: -0.52, width: 0.6, height: 0.9 },
   ],
-  embers: 28, emberLife: [0.7, 1.3], emberRise: [1.3, 2.3], emberSize: [0.035, 0.07],
-  smoke: 10, smokeLife: [1.4, 2], smokeRise: [1.2, 2], smokeSize: [0.9, 1.3],
-  // Embers and smoke outlive the flames by at most this long.
-  linger: 2.1,
+  // Embers and smoke: how many can show at once, how many are born a second at the fire's height, and each one's
+  // life, rise and size, in seconds and metres, picked per particle.
+  embers: 28, emberRate: 24, emberLife: [0.7, 1.3], emberRise: [1.3, 2.3], emberSize: [0.035, 0.07],
+  smoke: 10, smokeRate: 5.5, smokeLife: [1.4, 2], smokeRise: [1.2, 2], smokeSize: [0.9, 1.3],
   // How much the flames lean, per metre a second the character moves, and at most.
   lean: 0.1, maxLean: 0.45,
   // Each layer's depth in front of the obstacle line, so in perspective it lies over the character.
@@ -193,6 +195,86 @@ function layerMaterial(vertexShader: string, fragmentShader: string, uniforms: S
   });
 }
 
+// The ranges each particle's life, rise and size are picked from, in seconds and metres.
+interface ParticleRanges {
+  readonly life: readonly [number, number];
+  readonly rise: readonly [number, number];
+  readonly size: readonly [number, number];
+}
+
+// Embers or smoke: a fixed set of particles, each born at the character and living its own life in the world.
+class Particles {
+  // Each particle's birth in run time, -1 while its slot is free; where the character's root was then; its life, rise,
+  // size, offset across the fire (-1 to 1) and phase.
+  readonly born: Float64Array;
+  readonly x: Float32Array;
+  readonly y: Float32Array;
+  readonly life: Float32Array;
+  readonly rise: Float32Array;
+  readonly size: Float32Array;
+  readonly across: Float32Array;
+  readonly phase: Float32Array;
+  readonly count: number;
+  private readonly ranges: ParticleRanges;
+  // Births owed but not yet made, so slow frames still bear the right number.
+  private owed = 0;
+
+  constructor(count: number, ranges: ParticleRanges) {
+    this.count = count;
+    this.ranges = ranges;
+    this.born = new Float64Array(count).fill(-1);
+    this.x = new Float32Array(count);
+    this.y = new Float32Array(count);
+    this.life = new Float32Array(count);
+    this.rise = new Float32Array(count);
+    this.size = new Float32Array(count);
+    this.across = new Float32Array(count);
+    this.phase = new Float32Array(count);
+  }
+
+  // Bears `rate` a second for `dt` seconds at the character's root, into free slots; `seed` counts every birth so far.
+  bear(rate: number, dt: number, time: number, root: Readonly<{ x: number; y: number }>, seed: number): number {
+    this.owed += rate * dt;
+    for (let index = 0; index < this.count && this.owed >= 1; index++) {
+      if (this.born[index]! >= 0) continue;
+      this.owed -= 1;
+      this.born[index] = time;
+      this.x[index] = root.x;
+      this.y[index] = root.y;
+      this.life[index] = between(this.ranges.life, seeded(seed, 1));
+      this.rise[index] = between(this.ranges.rise, seeded(seed, 2));
+      this.size[index] = between(this.ranges.size, seeded(seed, 3));
+      this.across[index] = seeded(seed, 4) * 2 - 1;
+      this.phase[index] = seeded(seed, 5) * Math.PI * 2;
+      seed++;
+    }
+    // A full set waits for free slots rather than saving births up.
+    this.owed = Math.min(this.owed, 1);
+    return seed;
+  }
+
+  // How far through its life the particle in `index` is, 0-1, or -1 once its slot is free.
+  progress(index: number, time: number): number {
+    const born = this.born[index]!;
+    if (born < 0) return -1;
+    const progress = (time - born) / this.life[index]!;
+    if (progress < 1) return progress;
+    this.born[index] = -1;
+    return -1;
+  }
+
+  // Ends every particle and every birth owed.
+  reset(): void {
+    this.born.fill(-1);
+    this.owed = 0;
+  }
+
+  // Stops owing births once the fire no longer bears any.
+  rest(): void {
+    this.owed = 0;
+  }
+}
+
 /** The engine's hurt effects: the character catches fire while lava burns it. Other hits show nothing more. */
 export class LavaFire implements HurtEffects {
   readonly root = new Group();
@@ -205,27 +287,24 @@ export class LavaFire implements HurtEffects {
   private readonly glow: Mesh;
   private readonly emberTint: InstancedBufferAttribute;
   private readonly smokeFade: InstancedBufferAttribute;
-  // Each ember's and puff's life and delay after the fire starts, and how far it rises and how big it is.
-  private readonly emberLife = new Float32Array(FIRE.embers);
-  private readonly emberDelay = new Float32Array(FIRE.embers);
-  private readonly emberRise = new Float32Array(FIRE.embers);
-  private readonly emberSize = new Float32Array(FIRE.embers);
-  private readonly smokeLife = new Float32Array(FIRE.smoke);
-  private readonly smokeDelay = new Float32Array(FIRE.smoke);
-  private readonly smokeRise = new Float32Array(FIRE.smoke);
-  private readonly smokeSize = new Float32Array(FIRE.smoke);
+  private readonly emberParticles = new Particles(FIRE.embers, { life: FIRE.emberLife, rise: FIRE.emberRise, size: FIRE.emberSize });
+  private readonly smokeParticles = new Particles(FIRE.smoke, { life: FIRE.smokeLife, rise: FIRE.smokeRise, size: FIRE.smokeSize });
   private readonly matrix = new Matrix4();
   private readonly hidden = new Matrix4().makeScale(0, 0, 0);
+  // Every particle born so far, which seeds what the next one is born with.
+  private births = 0;
   // A burn arrived since the last drawn frame.
   private igniting = false;
-  private burning = false;
-  // In run time: when the fire started, when its latest burn stops keeping it going, and when that burn flared.
-  private start = 0;
-  private burnUntil = 0;
-  private flaredAt = 0;
-  // Where the character was on the previous drawn frame, and how far the flames lean from its motion.
-  private lastX = 0;
+  // The flames' strength before a burn's flare, 0-1: it grows while the fire burns and dies down after.
+  private heat = 0;
+  // In run time: until when the latest burn keeps the fire going, and when that burn flared.
+  private burnUntil = -Infinity;
+  private flaredAt = -Infinity;
+  // Whether anything showed on the last drawn frame; when that was, where the character was, and how far the flames
+  // lean from its motion.
+  private showing = false;
   private lastTime = 0;
+  private lastX = 0;
   private lean = 0;
 
   constructor() {
@@ -252,18 +331,6 @@ export class LavaFire implements HurtEffects {
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
       for (let index = 0; index < mesh.count; index++) mesh.setMatrixAt(index, this.hidden);
     }
-    for (let index = 0; index < FIRE.embers; index++) {
-      this.emberLife[index] = between(FIRE.emberLife, seeded(index, 1));
-      this.emberDelay[index] = seeded(index, 2) * this.emberLife[index]!;
-      this.emberRise[index] = between(FIRE.emberRise, seeded(index, 3));
-      this.emberSize[index] = between(FIRE.emberSize, seeded(index, 4));
-    }
-    for (let index = 0; index < FIRE.smoke; index++) {
-      this.smokeLife[index] = between(FIRE.smokeLife, seeded(index, 5));
-      this.smokeDelay[index] = 0.25 + seeded(index, 6) * this.smokeLife[index]!;
-      this.smokeRise[index] = between(FIRE.smokeRise, seeded(index, 7));
-      this.smokeSize[index] = between(FIRE.smokeSize, seeded(index, 8));
-    }
     this.root.add(...layers);
     this.root.visible = false;
   }
@@ -274,8 +341,7 @@ export class LavaFire implements HurtEffects {
 
   clear(): void {
     this.igniting = false;
-    this.burning = false;
-    this.root.visible = false;
+    this.reset();
   }
 
   update(frame: SceneFrame): boolean {
@@ -284,50 +350,49 @@ export class LavaFire implements HurtEffects {
     for (let index = 0; index < frame.parts.length; index++) {
       if (frame.parts[index]!.kind === 'root') root = frame.parts[index];
     }
+    // Without a character, or with its run time rewound, the fire is out.
+    if (root === undefined || time < this.lastTime) this.reset();
     if (root === undefined) {
-      this.clear();
+      this.igniting = false;
       return false;
     }
+    // Time passes for the fire only while it shows: a fire just lit starts here.
+    const dt = this.showing ? time - this.lastTime : 0;
+    if (!this.showing) this.lean = 0;
     if (this.igniting) {
       this.igniting = false;
-      // A new fire, or one whose run time was rewound, starts afresh.
-      if (!this.burning || time < this.start) {
-        this.start = time;
-        this.lastX = root.x;
-        this.lastTime = time;
-        this.lean = 0;
-      }
-      this.burning = true;
       this.burnUntil = time + FIRE.burn;
       this.flaredAt = time;
     }
-    if (!this.burning) return false;
-    if (time < this.start || time > this.burnUntil + FIRE.linger) {
-      this.clear();
-      return false;
-    }
-    const kindled = Math.min(1, (time - this.start) / FIRE.kindle);
-    const dying = time <= this.burnUntil ? 1 : Math.max(0, 1 - (time - this.burnUntil) / FIRE.fade);
-    const intensity = kindled * dying * (1 + FIRE.flare * Math.exp(-(time - this.flaredAt) / FIRE.flareFade));
+    const burning = time <= this.burnUntil;
+    this.heat = burning ? Math.min(1, this.heat + dt / FIRE.kindle) : Math.max(0, this.heat - dt / FIRE.fade);
+    const intensity = this.heat * (1 + FIRE.flare * Math.exp(-(time - this.flaredAt) / FIRE.flareFade));
     // The flames trail the character's motion, easing toward the lean it calls for.
-    const dt = time - this.lastTime;
     if (dt > 0) {
       const target = Math.max(-FIRE.maxLean, Math.min(FIRE.maxLean, -(root.x - this.lastX) / dt * FIRE.lean));
       this.lean += (target - this.lean) * Math.min(1, dt * 5);
     }
     this.lastX = root.x;
     this.lastTime = time;
+    if (burning) {
+      this.births = this.emberParticles.bear(FIRE.emberRate * this.heat, dt, time, root, this.births);
+      this.births = this.smokeParticles.bear(FIRE.smokeRate * this.heat, dt, time, root, this.births);
+    } else {
+      this.emberParticles.rest();
+      this.smokeParticles.rest();
+    }
     this.flameUniforms.time.value = this.glowUniforms.time.value = this.smokeUniforms.time.value = time;
     this.flameUniforms.intensity.value = intensity;
     this.flameUniforms.lean.value = this.lean;
     this.glowUniforms.intensity.value = intensity;
     this.placeFlames(root, time, intensity);
-    this.placeEmbers(root, time);
-    this.placeSmoke(root, time);
+    const embers = this.placeEmbers(time);
+    const smoke = this.placeSmoke(time);
     this.glow.position.set(root.x, root.y + 0.45, FIRE.depth.glow);
-    this.flames.visible = this.glow.visible = intensity > 0;
-    this.root.visible = true;
-    return true;
+    this.flames.visible = this.glow.visible = this.heat > 0;
+    this.showing = burning || this.heat > 0 || embers + smoke > 0;
+    this.root.visible = this.showing;
+    return this.showing;
   }
 
   dispose(): void {
@@ -338,6 +403,16 @@ export class LavaFire implements HurtEffects {
     this.flames.dispose();
     this.embers.dispose();
     this.smoke.dispose();
+  }
+
+  // Puts the fire out at once: no flames, embers or smoke, and nothing owed.
+  private reset(): void {
+    this.heat = 0;
+    this.burnUntil = this.flaredAt = -Infinity;
+    this.emberParticles.reset();
+    this.smokeParticles.reset();
+    this.showing = false;
+    this.root.visible = false;
   }
 
   // Each flame stands on its offset from the character and breathes, growing with the fire.
@@ -352,56 +427,54 @@ export class LavaFire implements HurtEffects {
     this.flames.instanceMatrix.needsUpdate = true;
   }
 
-  // Embers rise, speeding up, drift away from the character's motion and twinkle out; only those born while the fire
-  // burns show.
-  private placeEmbers(root: Readonly<{ x: number; y: number }>, time: number): void {
-    const elapsed = time - this.start;
+  // Embers rise from where they were born, speeding up and wavering, and twinkle out. Returns how many show.
+  private placeEmbers(time: number): number {
+    const particles = this.emberParticles;
     const tint = this.emberTint.array as Float32Array;
-    for (let index = 0; index < FIRE.embers; index++) {
-      const life = this.emberLife[index]!;
-      const lived = elapsed - this.emberDelay[index]!;
-      const cycle = Math.floor(lived / life);
-      const progress = lived / life - cycle;
-      if (lived < 0 || time - progress * life > this.burnUntil) {
+    let showing = 0;
+    for (let index = 0; index < particles.count; index++) {
+      const progress = particles.progress(index, time);
+      if (progress < 0) {
         this.embers.setMatrixAt(index, this.hidden);
         continue;
       }
-      const across = seeded(index * 97 + cycle, 11) * 2 - 1;
-      const x = root.x + across * 0.35 + Math.sin(time * (3 + index % 3) + index) * 0.12 * progress - this.lean * 0.8 * progress;
-      const y = root.y - 0.2 + this.emberRise[index]! * (progress + 0.6 * progress * progress);
-      const size = this.emberSize[index]! * (1 - 0.6 * progress);
+      showing++;
+      const phase = particles.phase[index]!;
+      const x = particles.x[index]! + particles.across[index]! * 0.35 + Math.sin(time * 3 + phase) * 0.12 * progress;
+      const y = particles.y[index]! - 0.2 + particles.rise[index]! * (progress + 0.6 * progress * progress);
+      const size = particles.size[index]! * (1 - 0.6 * progress);
       this.embers.setMatrixAt(index, this.matrix.makeScale(size, size, 1).setPosition(x, y, FIRE.depth.embers));
-      const glow = (1 - progress) ** 1.6 * (0.7 + 0.3 * Math.sin(time * 25 + index * 3.1)) * 2.2;
+      const glow = Math.min(1, progress / 0.08) * (1 - progress) ** 1.6 * (0.7 + 0.3 * Math.sin(time * 25 + phase * 5)) * 2.2;
       tint[index * 3] = glow;
       tint[index * 3 + 1] = glow * (0.55 - 0.25 * progress);
       tint[index * 3 + 2] = glow * 0.12;
     }
     this.embers.instanceMatrix.needsUpdate = true;
     this.emberTint.needsUpdate = true;
+    return showing;
   }
 
-  // Smoke rises above the flames, spreading and drifting away from the character's motion, and thins away.
-  private placeSmoke(root: Readonly<{ x: number; y: number }>, time: number): void {
-    const elapsed = time - this.start;
+  // Smoke rises above where it was born, spreading and wavering, and thins away. Returns how many puffs show.
+  private placeSmoke(time: number): number {
+    const particles = this.smokeParticles;
     const fade = this.smokeFade.array as Float32Array;
-    for (let index = 0; index < FIRE.smoke; index++) {
-      const life = this.smokeLife[index]!;
-      const lived = elapsed - this.smokeDelay[index]!;
-      const cycle = Math.floor(lived / life);
-      const progress = lived / life - cycle;
-      if (lived < 0 || time - progress * life > this.burnUntil) {
+    let showing = 0;
+    for (let index = 0; index < particles.count; index++) {
+      const progress = particles.progress(index, time);
+      if (progress < 0) {
         this.smoke.setMatrixAt(index, this.hidden);
         fade[index] = 0;
         continue;
       }
-      const across = seeded(index * 53 + cycle, 12) * 2 - 1;
-      const x = root.x + across * 0.25 + Math.sin(time * 0.9 + index) * 0.1 * progress - this.lean * 1.2 * progress;
-      const y = root.y + 0.7 + this.smokeRise[index]! * progress;
-      const size = this.smokeSize[index]! * (0.45 + 0.85 * progress);
+      showing++;
+      const x = particles.x[index]! + particles.across[index]! * 0.25 + Math.sin(time * 0.9 + particles.phase[index]!) * 0.1 * progress;
+      const y = particles.y[index]! + 0.7 + particles.rise[index]! * progress;
+      const size = particles.size[index]! * (0.45 + 0.85 * progress);
       this.smoke.setMatrixAt(index, this.matrix.makeScale(size, size, 1).setPosition(x, y, FIRE.depth.smoke));
       fade[index] = Math.min(1, progress / 0.2) * (1 - progress) ** 1.3 * 0.32;
     }
     this.smoke.instanceMatrix.needsUpdate = true;
     this.smokeFade.needsUpdate = true;
+    return showing;
   }
 }
