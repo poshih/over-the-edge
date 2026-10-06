@@ -473,6 +473,23 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
   };
 }
 
+/** @param {ReturnType<typeof reachGraph>} result @returns {string[]} */
+export function reachSuggestions(result) {
+  if (result?.model !== 'conservative-authoring-model') {
+    throw new ReachModelError('result.model', result?.model, 'reachSuggestions requires a reachGraph result.');
+  }
+  const suggestions = [];
+  if (!result.ending) {
+    suggestions.push(`Suggestion: The ending is not reachable; the highest reached point is (${result.highest.x.toFixed(1)}, ${result.highest.y.toFixed(1)}) in ${result.highest.group}.`);
+  }
+  if (result.unreachedPieces.length > 0) suggestions.push(`Suggestion: Pieces never reached: ${result.unreachedPieces.join(', ')}`);
+  if (result.traps.length > 0) {
+    suggestions.push(`Suggestion: Traps (reachable, but the ending is not reachable from them): ${result.traps.map((trap) =>
+      `${trap.group} x${trap.count} near (${trap.x.toFixed(1)}, ${trap.y.toFixed(1)})`).join('; ')}`);
+  }
+  return suggestions;
+}
+
 /** @param {CourseSnapshot} snapshot */
 export function budget(snapshot) {
   const level = snapshot.level, count = (kind) => level.objects.filter((object) => object.kind === kind).length;

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Builds the Ashen Ascent example: node scripts/ashen-ascent/generate.mjs [--preview]
-// It places every set piece of the Workshop's library once, along a continuous route checked for
-// reach, and writes examples/projects/ashen-ascent/ and docs/ashen-ascent-map.svg.
+// It places every set piece of the Workshop's library once along a continuous route,
+// checks geometry, reports reach suggestions and writes examples/projects/ashen-ascent/
+// and docs/ashen-ascent-map.svg.
 // --preview also writes map crops and the reach overlay to artifacts/ashen-ascent/.
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ import { CourseBuilder } from '../course-kit/course.mjs';
 import { loadCourseEngine } from '../course-kit/engine.mjs';
 import { createCourseJob } from '../course-kit/job.mjs';
 import { CourseError } from '../course-kit/errors.mjs';
-import { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, ventShafts } from '../course-kit/checks.mjs';
+import { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, reachSuggestions, ventShafts } from '../course-kit/checks.mjs';
 import { courseMap, renderCrops } from '../course-kit/map.mjs';
 import { buildCourse } from './zones.mjs';
 import { projectManifest, TITLE } from './project.mjs';
@@ -40,16 +41,13 @@ try {
   problems.push(...overlaps(snapshot, builder.groups, builder.supports), ...keepOut(snapshot, builder.groups, builder.pieces, builder.allowed),
     ...ventShafts(snapshot, builder.groups), ...crampedColliders(snapshot, builder.groups, builder.pieces));
   const reach = reachGraph(snapshot, builder.groups, builder.pieces, builder.links, ENGINE_DEFAULT_REACH, { x: trail.x, y: trail.y });
-  if (!reach.ending) {
-    problems.push(`The ending is not reachable; the highest reached point is (${reach.highest.x.toFixed(1)}, ${reach.highest.y.toFixed(1)}) in ${reach.highest.group}.`);
-  }
-  if (reach.unreachedPieces.length > 0) problems.push(`Pieces never reached: ${reach.unreachedPieces.join(', ')}`);
-  if (reach.traps.length > 0) {
-    problems.push(`Traps (reachable, but the ending is not reachable from them): ${reach.traps.map((trap) =>
-      `${trap.group} x${trap.count} near (${trap.x.toFixed(1)}, ${trap.y.toFixed(1)})`).join('; ')}`);
-  }
   const totals = budget(snapshot);
   console.log(JSON.stringify({ budget: totals, pieces: builder.pieces.length, reach: { reached: reach.reached, total: reach.total, ending: reach.ending } }));
+  const suggestions = reachSuggestions(reach);
+  if (suggestions.length > 0) {
+    console.warn('Reach suggestions (non-blocking): the model cannot prove or disprove physics-based play.');
+    console.warn(suggestions.join('\n'));
+  }
   const zones = builder.zones.map((zone) => ({ name: zone.name, from: zone.from }));
   if (flags.has('--preview')) {
     const directory = join(root, 'artifacts/ashen-ascent');

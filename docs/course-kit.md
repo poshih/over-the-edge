@@ -14,7 +14,7 @@ API. [Ashen Ascent](ashen-ascent.md) is an in-repository consumer.
 | `course.mjs` | `CourseBuilder(library, job)`, terrain, triggers, enemies, scenery, set pieces and group metadata; seeded `random` |
 | `trail.mjs` | `Trail`, a route cursor for floors, steps, stairs and set pieces |
 | `pieces.mjs` | `PIECE_PATHS`, designed entry, exit and ground for library pieces |
-| `checks.mjs` | Overlap, reservation, vent, component-clearance and conservative reach checks; `budget` |
+| `checks.mjs` | Blocking overlap, reservation, vent and component-clearance checks; advisory reach modelling and suggestions; `budget` |
 | `scenery.mjs` | Perspective-camera depth placement for non-colliding decorations |
 | `map.mjs` | Collision SVG maps and optional Playwright PNG crops |
 
@@ -35,7 +35,8 @@ import { createCourseJob } from '../course-kit/job.mjs';
 import { CourseBuilder, random } from '../course-kit/course.mjs';
 import { Trail } from '../course-kit/trail.mjs';
 import {
-  overlaps, keepOut, ventShafts, crampedColliders, reachGraph, ENGINE_DEFAULT_REACH,
+  overlaps, keepOut, ventShafts, crampedColliders, reachGraph, reachSuggestions,
+  ENGINE_DEFAULT_REACH,
 } from '../course-kit/checks.mjs';
 import { courseMap } from '../course-kit/map.mjs';
 
@@ -64,11 +65,21 @@ try {
   ];
   const reach = reachGraph(snapshot, builder.groups, builder.pieces, builder.links,
     ENGINE_DEFAULT_REACH, { x: trail.x, y: trail.y });
-  const map = courseMap(snapshot, {
-    sky: ['#1d1b1f', '#2b2a33', '#4a3f3a'], reach,
-  });
-  // Check problems, reach.ending, reach.unreachedPieces and reach.traps before exporting.
-  // Export snapshot.level, not the job, snapshot indexes or builder metadata.
+  const suggestions = reachSuggestions(reach);
+  if (suggestions.length > 0) {
+    console.warn('Reach suggestions (non-blocking): ' +
+      'the model cannot prove or disprove physics-based play.');
+    console.warn(suggestions.join('\n'));
+  }
+  if (problems.length > 0) {
+    console.error(problems.join('\n'));
+    process.exitCode = 1;
+  } else {
+    const map = courseMap(snapshot, {
+      sky: ['#1d1b1f', '#2b2a33', '#4a3f3a'], reach,
+    });
+    // Export snapshot.level, not the job, snapshot indexes or builder metadata.
+  }
 } finally {
   await server.close();
 }
@@ -279,7 +290,11 @@ described above.
 
 ## Checks
 
-Run every check against the same snapshot before exporting:
+`overlaps`, `keepOut`, `ventShafts` and `crampedColliders` are blocking geometry
+gates: they must report no problems before exporting, and engine validation must
+pass. Run them against the same prepared snapshot. `standPoints` and `reachGraph`
+are advisory authoring tools, not export gates; report their reach findings with
+`reachSuggestions` without blocking export. `budget` reports counts and work usage.
 
 | Check | Finds |
 | --- | --- |
@@ -287,8 +302,9 @@ Run every check against the same snapshot before exporting:
 | `keepOut(snapshot, groups, pieces, allowed)` | External terrain entering a piece's deliberately reserved bounds |
 | `ventShafts(snapshot, groups)` | Non-illusion terrain above an external draft's trigger region, below its first launch event's apex |
 | `crampedColliders(snapshot, groups, pieces)` | Two small connected components at or within 1.2 m, except actual parts of one recorded set-piece placement |
-| `standPoints(snapshot, groups, reach)` | Sampled eligible resting surfaces with modeled clearance |
-| `reachGraph(snapshot, groups, pieces, links, reach, goal)` | Modeled start-to-ending reach, unreached pieces and reachable points with no modeled route to the ending |
+| `standPoints(snapshot, groups, reach)` | Advisory sampled eligible resting surfaces with modelled clearance |
+| `reachGraph(snapshot, groups, pieces, links, reach, goal)` | Advisory modelled start-to-ending reach, unreached pieces and reachable points with no modelled route to the ending |
+| `reachSuggestions(result)` | Non-blocking suggestions for an unreachable ending, pieces never reached and traps in a `reachGraph` result |
 | `budget(snapshot)` | Object counts, collision extent (nullable), mesh kinds and work usage |
 
 `CRAMPED.small` is 1.5 m on a component's longest world-bounds side;
@@ -308,6 +324,13 @@ The result is labelled `model: 'conservative-authoring-model'` and
 `playabilityProof: false`. Exact terrain queries do not turn sampled footholds,
 body-column clearance, movement heuristics or trusted authored moves into a physics
 simulation or playability proof.
+
+Its findings are advisory suggestions only: a conservative geometric model cannot
+prove or disprove physics-based play. Report them with `reachSuggestions(result)` and
+never gate export on ending reachability, unreached pieces or traps. The helper
+requires a `reachGraph` result with the matching `model` label and throws
+`ReachModelError` for a different or missing label. It returns an empty array when
+there are no suggestions.
 
 `reachGraph` and `standPoints` require the **complete caller-supplied** model.
 They do not fill missing fields or merge defaults. `ENGINE_DEFAULT_REACH` explicitly
@@ -437,7 +460,7 @@ error messages.
 | `CourseQueryError` | `QUERY_CAPABILITY_UNSUPPORTED` | Missing capability, loader failure or invalid query options; load matching exports or correct the named input |
 | `CourseQueryError` | `QUERY_WORK_LIMIT` | Counter/request/limit record, or kernel query error; simplify/partition the job or explicitly raise the budget |
 | `CourseQueryError` | `QUERY_NO_STAND_POINT` | `{ x, y, radius }`; move the anchor or revise its explicit model |
-| `ReachModelError` | `REACH_MODEL_INVALID` | Field/value record; supply the complete valid model |
+| `ReachModelError` | `REACH_MODEL_INVALID` | Field/value record; supply the complete valid model, or a `reachGraph` result to `reachSuggestions` |
 | `CourseMapError` | `MAP_OPTIONS_INVALID` | Field/value record; correct options or supply a viewport for empty terrain |
 | `SceneryCameraError` | `SCENERY_CAMERA_INVALID` | Camera field/value record; use a valid perspective camera |
 
@@ -456,7 +479,9 @@ try {
 ### Gate changes when regenerating existing courses
 
 The builder's valid authored output is unchanged, but the checks are deliberately
-more faithful. Review future regeneration rather than assuming old gates are identical:
+more faithful. Review blocking geometric gates and advisory reach suggestions on
+future regeneration rather than assuming their findings are identical. The
+reach-related changes below affect suggestions only, never export gates:
 
 - Exact disks replace inscribed 32-gons: contact, small-component gaps, standing
   samples and, for rotated circles, bounds/reservations may change.
@@ -483,8 +508,8 @@ more faithful. Review future regeneration rather than assuming old gates are ide
   rather than masking or running unbounded.
 
 Trusted piece traversal, designed links, policy allowance values and the engine-default
-model's numerical assumptions are retained. None of these model results proves a
-regenerated course playable.
+model's numerical assumptions are retained. Reach findings remain suggestions:
+none proves or disproves physics-based play or blocks regeneration.
 
 ## Scenery
 

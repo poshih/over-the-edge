@@ -57,13 +57,14 @@ never kills you; as in any Over the Edge course, you just land lower down.
 
 ## Fair falls
 
-Every fall lands on an earlier part of the route. Mountain masses are solid, upper
+Every fall is designed to land on an earlier part of the route. Mountain masses are solid, upper
 walkways float over earlier ground, and walls at the edge of the world stand flush
-against the pieces beside them. The generator checks this before it writes anything.
-Under its conservative authoring model, the ending must still be reachable from every
-sampled foothold that model reaches. This is a route-design gate, not a physics or
-playability proof: it samples resting surfaces and trusts the pieces' designed moves.
-Falling below the lowest terrain restarts the run, as in every level.
+against the pieces beside them. The generator reports suggestions for sampled
+footholds its conservative authoring model reaches but from which it finds no route
+to the ending. These are route-design prompts, never a writing gate: a conservative
+geometric model cannot prove or disprove physics-based play. It samples resting
+surfaces and trusts the pieces' designed moves. Falling below the lowest terrain
+restarts the run, as in every level.
 
 ## Surprises
 
@@ -163,7 +164,8 @@ node scripts/ashen-ascent/generate.mjs --preview  # also write zone crops and a 
 Change the generator, not `level.json`, and regenerate: hand edits are lost the next time
 the generator runs. The generator places
 each piece with the library's own `placeSetPiece`, so part IDs follow
-`<piece>-<zone>-<part>`. Before it writes anything, it checks all of the following:
+`<piece>-<zone>-<part>`. Before writing the project and its map, the generator requires
+these geometric and engine checks to pass:
 
 - every library piece is used exactly once;
 - no connector overlaps a piece's parts or intrudes into its footprint;
@@ -173,11 +175,18 @@ each piece with the library's own `placeSetPiece`, so part IDs follow
   lie at or within 1.2 m of each other, touching included, except actual parts of one
   recorded set-piece placement: a narrower slot traps the
   pot or the hammer head;
-- the ending is reachable under the course kit's conservative
-  [reach model](course-kit.md#the-reach-model) for the engine's default physics (2.35 m
-  hammer pull, 2.5 m rise, 1.9 m hops, drops up to 9 m, faces up to 40°);
-- no sampled point reachable under that model lacks a modeled route to the ending;
 - the level and the whole project pass the engine's validation.
+
+Separately, it reports non-blocking suggestions from the course kit's conservative
+[reach model](course-kit.md#the-reach-model), using the engine's default reach settings
+(2.35 m hammer pull, 2.5 m rise, 1.9 m hops, drops up to 9 m, faces up to 40°):
+
+- an ending the model cannot reach, with the highest reached point and its group;
+- pieces the model never reaches;
+- traps: reachable sampled points with no modelled route to the ending.
+
+These suggestions never block writing or change the exit code: the model cannot
+prove or disprove physics-based play.
 
 | File | Contents |
 | --- | --- |
@@ -197,8 +206,8 @@ the check.
 
 The kit now measures exact circles and loop solids and uses analytic transit/fall
 queries, owning-object ceiling clearance, component-based spacing and explicit work
-budgets. These can change gates on a future regeneration even though existing valid
-builder calls emit the same level objects. See
+budgets. These can change geometric gates and advisory reach suggestions on a future
+regeneration even though existing valid builder calls emit the same level objects. See
 [gate changes](course-kit.md#gate-changes-when-regenerating-existing-courses) and
 [work budgets](course-kit.md#work-budgets-and-failure). The committed course has not
 been regenerated as part of this API change.
