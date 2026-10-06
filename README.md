@@ -272,6 +272,14 @@ The default demo remains unchanged. See the [course guide](docs/skyward-ruins.md
 for the object allocation, district progression, and media requirements, or
 open the [full-height map](docs/skyward-ruins-map.svg).
 
+**Showcase** is a short, labelled left-to-right tour of all five terrain surfaces,
+illusion terrain, a bonfire, timer and switch-fired projectile traps, a swinging
+axe, swamp and lava pools, both enemy species, an updraft and a rideable lift with
+landing call switches, ending at a timer-stopping flag. Open **showcase** in
+**Workshop / Level / Server levels**, or select `GAME_LEVEL=levels/showcase.json`
+for a game-only build. Regenerate it with `node scripts/showcase/generate.mjs`;
+change the generator, not the generated JSON.
+
 ### Included souls-like example game
 
 **Ashen Ascent** is a complete project that uses all 67 set pieces from the
