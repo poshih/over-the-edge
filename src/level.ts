@@ -3,7 +3,7 @@ import { transformPoint } from './math';
 import { fields, LevelError, number, point, text } from './level-validation';
 import { MAX_RIG_REACH } from './rig';
 import type { TriggerAction } from './trigger-events';
-import { FIRE_TRAP_FIELDS, LAUNCH_FIELDS, SOUND_VOLUME } from './trigger-events';
+import { FIRE_TRAP_FIELDS, LAUNCH_FIELDS, PLATFORM_DESTINATIONS, SOUND_VOLUME } from './trigger-events';
 import { ENEMY_FACINGS, ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from './enemy-types';
 import type { EnemyFacing, EnemySpecies } from './enemy-types';
 import { AXE_FIELDS, HAZARD_LIMITS, SHOOTER_FIELDS } from './hazards';
@@ -16,7 +16,7 @@ import type { Surface } from './surfaces';
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
-export const LEVEL_SCHEMA_VERSION = 7;
+export const LEVEL_SCHEMA_VERSION = 8;
 export const LEVEL_LIMITS = {
   objects: 1000,
   // Distinct collision geometry across a level's terrain: one physics shape and one extruded template each.
@@ -216,9 +216,11 @@ export interface PoolObject extends Readonly<Point> {
 }
 
 // A kinematic slab whose other end is (travelX, travelY) metres from its start centre (x, y).
+// With ride enabled, the pot boarding its resting top sends it toward the other end.
 export interface PlatformObject extends Readonly<Point> {
   readonly kind: 'platform';
   readonly id: string;
+  readonly ride: boolean;
   readonly travelX: number;
   readonly travelY: number;
   readonly width: number;
@@ -634,10 +636,11 @@ export function validateLevelObject(value: unknown): LevelObject {
 const OBJECT_KINDS = 'Choose a terrain, start, trigger, enemy, decoration, bonfire, projectile trap, swinging axe, liquid pool or platform object.';
 
 function validatePlatform(value: unknown): PlatformObject {
-  fields(value, ['kind', 'id', 'x', 'y', 'travelX', 'travelY', 'width', 'height', 'depth', 'speed', 'surface'], 'Platform object');
+  fields(value, ['kind', 'id', 'x', 'y', 'ride', 'travelX', 'travelY', 'width', 'height', 'depth', 'speed', 'surface'], 'Platform object');
+  if (typeof value.ride !== 'boolean') throw new LevelError('Platform ride must be true or false.');
   if (!isSurface(value.surface)) throw new LevelError(`Surface must be one of ${SURFACES.join(', ')}.`);
   return Object.freeze({
-    kind: 'platform', id: objectId(value.id),
+    kind: 'platform', id: objectId(value.id), ride: value.ride,
     x: number(value.x, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Platform X'),
     y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Platform Y'),
     travelX: number(value.travelX, -PLATFORM_LIMITS.maximumTravel, PLATFORM_LIMITS.maximumTravel, 'Platform travel X'),
@@ -781,8 +784,8 @@ export function validateTriggerTargets(trigger: TriggerObject, lookup: (id: stri
     if (event.type === 'fire-trap' && lookup(event.trap)?.kind !== 'shooter') {
       throw new LevelError(`Trigger "${trigger.id}" fires unknown projectile trap "${event.trap}".`);
     }
-    if (event.type === 'toggle-platform' && lookup(event.platform)?.kind !== 'platform') {
-      throw new LevelError(`Trigger "${trigger.id}" toggles unknown platform "${event.platform}".`);
+    if (event.type === 'move-platform' && lookup(event.platform)?.kind !== 'platform') {
+      throw new LevelError(`Trigger "${trigger.id}" moves unknown platform "${event.platform}".`);
     }
   }
 }
@@ -871,9 +874,11 @@ export function validateTriggerAction(value: unknown): TriggerAction {
     if (!Number.isInteger(shots)) throw new LevelError(`${FIRE_TRAP_FIELDS.shots.label} must be a whole number.`);
     return Object.freeze({ type, trap: objectId(value.trap), shots });
   }
-  if (type === 'toggle-platform') {
-    fields(value, ['type', 'platform'], 'Toggle platform event');
-    return Object.freeze({ type, platform: objectId(value.platform) });
+  if (type === 'move-platform') {
+    fields(value, ['type', 'platform', 'to'], 'Move platform event');
+    const to = PLATFORM_DESTINATIONS.find((candidate) => candidate === value.to);
+    if (to === undefined) throw new LevelError(`Platform destination must be one of ${PLATFORM_DESTINATIONS.join(', ')}.`);
+    return Object.freeze({ type, platform: objectId(value.platform), to });
   }
   if (type === 'message') {
     fields(value, ['type', 'title', 'message'], 'Message event');
@@ -893,7 +898,7 @@ export function validateTriggerAction(value: unknown): TriggerAction {
       volume: number(value.volume, SOUND_VOLUME.min, SOUND_VOLUME.max, SOUND_VOLUME.label),
     });
   }
-  throw new LevelError('Choose message, play video, play sound, stop timer, launch player, fire trap, or toggle platform.');
+  throw new LevelError('Choose message, play video, play sound, stop timer, launch player, fire trap, or move platform.');
 }
 
 function mediaSource(value: unknown, kind: 'video' | 'sound'): string {

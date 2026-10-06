@@ -738,8 +738,8 @@ export class Game {
       this.simulation.fireTrap(action.trap, action.shots);
       return 'completed';
     }
-    if (action.type === 'toggle-platform') {
-      this.simulation.togglePlatform(action.platform);
+    if (action.type === 'move-platform') {
+      this.simulation.movePlatform(action.platform, action.to);
       return 'completed';
     }
     if (action.type === 'play-sound') {

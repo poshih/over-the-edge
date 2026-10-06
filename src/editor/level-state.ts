@@ -51,7 +51,7 @@ function removeTriggerTargets(objects: Iterable<LevelObject>, removed: ReadonlyS
   for (const object of objects) {
     if (object.kind !== 'trigger' || removed.has(object.id)) continue;
     const events = object.events.filter((event) => event.type === 'fire-trap' ? !removed.has(event.trap)
-      : event.type === 'toggle-platform' ? !removed.has(event.platform) : true);
+      : event.type === 'move-platform' ? !removed.has(event.platform) : true);
     if (events.length !== object.events.length) {
       upsert.push(Object.freeze({ ...object, events: Object.freeze(events) }));
     }

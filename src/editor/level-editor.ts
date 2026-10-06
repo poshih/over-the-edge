@@ -249,7 +249,7 @@ const HAZARD_PRESETS: readonly HazardPreset[] = [
       '<path d="M0 -0.5 L0 0.5 M-0.16 -0.34 L0 -0.5 L0.16 -0.34 M-0.16 0.34 L0 0.5 L0.16 0.34" ' +
       'fill="none" stroke="currentColor" stroke-width="0.08" stroke-linecap="round" stroke-linejoin="round" />',
     create: (at) => ({
-      kind: 'platform', id: PREVIEW_ID, x: at.x, y: at.y, travelX: 0, travelY: 4,
+      kind: 'platform', id: PREVIEW_ID, x: at.x, y: at.y, ride: true, travelX: 0, travelY: 4,
       width: 3, height: 0.4, depth: 2, speed: 1.5, surface: 'metal',
     }),
   },
@@ -561,10 +561,17 @@ export function createLevelEditor(options: LevelEditorOptions) {
             ${numericField('platform-speed', 'Speed (m/s)', PLATFORM_LIMITS.minimumSpeed, PLATFORM_LIMITS.maximumSpeed)}
             ${selectField('platform-surface', 'Surface', SURFACES.map((surface) => ({ value: surface, label: SURFACE_LABELS[surface] })))}
           </div>
+          <label class="level-checkbox" for="level-platform-ride">
+            <input id="level-platform-ride" type="checkbox" aria-describedby="level-platform-ride-help" /> Starts when stepped on
+          </label>
+          <p id="level-platform-ride-help" class="level-help">When it rests, the pot boarding its top sends it to the other
+            end, carrying the player. Step off briefly before boarding again to return; staying aboard or bouncing on
+            arrival does not turn it back. The default look draws a pressure plate on its deck, moving with it.</p>
           <p class="level-help">Position X/Y is the platform's start centre. Travel X/Y is the offset in metres to its
             other centre. Dragging the slab moves both ends; its end handle changes only the travel. The editor draws
-            the start slab, a dashed end preview and the travel line. A toggle-platform trigger sends it toward its other
-            end; pressing again mid-trip turns it back. Keep its path clear: it moves through terrain and can push the
+            the start slab, a dashed end preview and the travel line. A Move platform trigger can toggle its destination
+            or send it to start / end, reversing if it is moving away. For landing calls, use a switch set To start at
+            the bottom and To end at the top. Keep its path clear: it moves through terrain and can push the
             player into rock. Reset returns it to the start, but returning to a bonfire leaves it where the run has moved it.
             Select the platform to see its incoming trigger links; Links shows every connection.</p>
         </div>
@@ -986,6 +993,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         input(`platform-${name}`).value = String(Number(platform[name].toFixed(4)));
       }
       select('platform-surface').value = platform.surface;
+      input('platform-ride').checked = platform.ride;
     } else if (enemy !== null) {
       const spec = ENEMY_SPECS[enemy.species];
       select('enemy-facing').value = enemy.facing;
@@ -2024,6 +2032,13 @@ Export the level first if you want to keep them. Continue without saving?`);
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, surface }));
   }, listen);
+  input('platform-ride').addEventListener('change', () => {
+    if (!active) return;
+    const object = asPlatform(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, ride: input('platform-ride').checked }));
+  }, listen);
   select('enemy-facing').addEventListener('change', () => {
     if (!active) return;
     const object = asEnemy(inspectorObject());
@@ -2525,7 +2540,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       } else if (finished.kind === 'connect' && inside && finished.target !== null) {
         triggerEvents.appendEvent(finished.trigger.id, finished.target.kind === 'shooter'
           ? { type: 'fire-trap', trap: finished.target.id, shots: 3 }
-          : { type: 'toggle-platform', platform: finished.target.id });
+          : { type: 'move-platform', platform: finished.target.id, to: 'toggle' });
       } else if (finished.kind === 'pan') {
         if (finished.deselects && !finished.moved) selectedId = null;
       } else if (finished.kind === 'draw' && inside) {

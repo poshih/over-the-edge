@@ -735,7 +735,7 @@ Supported events:
 | Launch player | Applies a mass-aware upward impulse with configurable lift height and strength |
 | Play sound | Plays a sound (0-1 volume) from a public URL or site-relative media path, without pausing; the next event starts immediately |
 | Fire trap | Starts a burst of 1-20 shots from a selected projectile trap |
-| Toggle platform | Sends a selected platform toward its other end; toggling mid-trip turns it back |
+| Move platform | Toggle alternates a selected platform's destination; To start / To end call it to that end, reversing if it is moving away |
 
 Events execute in their authored order. Only one presentation runs at a time;
 simultaneous triggers queue deterministically. Popups and videos pause gameplay and
@@ -781,7 +781,7 @@ requested through a user-operated fullscreen control. The Workshop skips every v
 you test (see [Finding Workshop controls](#finding-workshop-controls)); videos play in the
 game-only release.
 
-Level JSON uses **schema version 7**, with typed terrain, start, trigger, enemy,
+Level JSON uses **schema version 8**, with typed terrain, start, trigger, enemy,
 decoration, bonfire, projectile trap (`shooter`), swinging axe (`axe`), liquid pool
 (`pool`) and platform objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`,
 `ice` and `rubber`.
@@ -934,21 +934,23 @@ runtime plugin can draw traps and projectiles its own way; see [object looks](do
 Choose **Workshop / Level / Pressure switch** to place a small trigger with the **switch**
 marker and **On each entry** activation. It has no events until you add them. In **Trigger
 events**, **Fire trap** starts a burst on a projectile trap (default **3** shots, 1-20), and
-**Toggle platform** sends an elevator platform toward its other end; stepping on the switch
-again can fire another burst or turn the platform back.
+**Move platform** sends an elevator platform to the selected destination: **Toggle**
+alternates its ends, even mid-trip; **To start** and **To end** call it to that end, reversing
+if it is moving away and doing nothing if it is already resting or heading there.
 
 Select a switch or trigger to see its outgoing connections; select a projectile trap or
 platform to see incoming connections from every trigger that controls it. **Links**, beside
 **Board**, shows all connections, emphasising the selected object's links and dimming the
-others. Arrowheads point towards the target. Midpoint labels show **×N** shots or **toggle**;
-several events for the same target share one line, labelled in order, such as **×3 · ×2**.
+others. Arrowheads point towards the target. Midpoint labels show **×N** shots, **toggle**,
+**→ start** or **→ end**; several events for the same target share one line, labelled in order,
+such as **×3 · ×2**.
 Arrowheads and labels stay readable as you zoom, and connections follow objects you drag.
 
 Drag the selected trigger's small link handle, beside its region's right edge, onto a
 projectile trap or platform to connect it. This adds a **Fire trap** event with **3** shots or a
-**Toggle platform** event, applying it together with any pending Trigger events edits. Invalid
-edits stay in the draft for you to fix and apply. An existing connection or a full event list
-adds nothing; release elsewhere or press **Escape** to cancel. Edit or remove a link in
+**Move platform** event set to **Toggle**, applying it together with any pending Trigger events
+edits. Invalid edits stay in the draft for you to fix and apply. An existing connection or a
+full event list adds nothing; release elsewhere or press **Escape** to cancel. Edit or remove a link in
 **Trigger events**, then **Apply events**.
 
 Choose **Workshop / Level / Elevator platform** to place a colliding slab. **Position X/Y** is
@@ -958,10 +960,28 @@ each axis (`travelX`/`travelY` in JSON). **Width**, **Height**, **Depth**, **Spe
 preview and travel line. Dragging the slab moves the whole platform, both ends together;
 dragging the end handle changes only the travel.
 
+**Starts when stepped on** (`ride`, a required boolean in JSON) makes it a rideable lift.
+The preset has this checked and travels **4 m up**. When the platform rests, the pot landing
+on its top sends it to the other end, carrying the player. The hammer, sides and underside
+do not start it. Staying aboard at arrival does not turn it back; step off for at least
+**0.3 s** while it rests, then board again to return. Brief bounces at departure or arrival
+do not rearm it, and a dying player cannot start it. The default platform look draws a thin,
+darker metal pressure plate on the deck of a `ride` platform; it moves with the slab, without
+a separate trigger.
+
+To call an upward lift, put a pressure switch at each landing, outside its travel path.
+Give the bottom switch a **Move platform / To start** event and the top switch a
+**Move platform / To end** event, both targeting that lift. A landing switch calls it to
+you without sending it away when it is already there; step onto the deck to ride.
+Do not put a separate switch over the deck or under the lift's path: trigger zones stay
+at their authored positions and do not move with platforms.
+
 Keep its path clear: a platform moves through terrain and can push the player into rock.
 Reset returns platforms to their starts; returning to a bonfire leaves them where the run
-moved them. Use a trigger's **switch** marker for its pressure plate. A game's runtime plugin
-can draw switches and platforms through `LOOKS.switch` and `LOOKS.platform`; see
+moved them. Both placements rearm boarding as though the player had been off every platform.
+Use a trigger's **switch** marker for a landing's pressure plate. A game's runtime plugin
+can draw switches and platforms, including their deck plates, through `LOOKS.switch` and
+`LOOKS.platform`; see
 [object looks](docs/runtime-plugins.md#object-looks).
 
 ### Liquid pools

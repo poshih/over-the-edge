@@ -389,7 +389,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`looks.updraft`](runtime-plugins.md#object-looks) | `LOOKS.updraft` | `runtime` | Slot, `() => ObjectLook<TriggerObject>` | `DEFAULT_LOOKS.updraft` |
 | [`looks.switch`](runtime-plugins.md#object-looks) | `LOOKS.switch` | `runtime` | Slot, `() => SwitchLook` | `DEFAULT_LOOKS.switch` |
 | [`looks.bonfire`](runtime-plugins.md#object-looks) | `LOOKS.bonfire` | `runtime` | Slot, `() => BonfireLook` | `DEFAULT_LOOKS.bonfire` |
-| [`looks.platform`](runtime-plugins.md#object-looks) | `LOOKS.platform` | `runtime` | Slot, `() => PlatformLook` | `DEFAULT_LOOKS.platform` |
+| [`looks.platform`](runtime-plugins.md#object-looks) | `LOOKS.platform` | `runtime` | Slot, `() => PlatformLook` | `DEFAULT_LOOKS.platform`: slabs, with moving deck plates when `ride` is true |
 | [`looks.shooter`](runtime-plugins.md#object-looks) | `LOOKS.shooter` | `runtime` | Slot, `() => ObjectLook<ShooterObject>` | `DEFAULT_LOOKS.shooter` |
 | [`looks.projectile`](runtime-plugins.md#object-looks) | `LOOKS.projectile` | `runtime` | Slot, `() => ProjectileLook` | `DEFAULT_LOOKS.projectile` |
 | [`looks.axe`](runtime-plugins.md#object-looks) | `LOOKS.axe` | `runtime` | Slot, `() => ObjectLook<AxeObject>` | `DEFAULT_LOOKS.axe` |

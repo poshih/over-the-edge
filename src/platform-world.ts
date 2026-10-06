@@ -1,10 +1,14 @@
 import { Box, Vec2 } from 'planck';
-import type { Body, World } from 'planck';
+import type { Body, Fixture, World, WorldManifold } from 'planck';
 import { PHYSICS } from './config';
 import { isPlatformObject } from './level';
 import type { LevelChange, PlatformObject } from './level';
 import { sameSurfaceMaterials } from './surfaces';
 import type { SurfaceMaterial, SurfaceMaterials } from './surfaces';
+import type { PlatformDestination } from './trigger-events';
+
+export const PLATFORM_RIDE = { awaySeconds: 0.3 } as const;
+const RIDE_AWAY_STEPS = Math.ceil(PLATFORM_RIDE.awaySeconds / PHYSICS.dt);
 
 export interface PlatformPose {
   readonly id: string;
@@ -18,6 +22,8 @@ interface PlatformRecord {
   toEnd: boolean;
   arriving: boolean;
   arrivedAt: number;
+  supportedAt: number;
+  awaySteps: number;
   previousX: number;
   previousY: number;
   currentX: number;
@@ -50,6 +56,7 @@ export class PlatformWorld {
   private readonly bodies = new Map<Body, PlatformRecord>();
   private readonly moving = new Set<PlatformRecord>();
   private readonly arrived = new Set<PlatformRecord>();
+  private readonly ridePlatforms: PlatformRecord[] = [];
   private readonly poses: { id: string; x: number; y: number }[] = [];
   private readonly position = new Vec2();
   private materials: SurfaceMaterials;
@@ -86,13 +93,31 @@ export class PlatformWorld {
       record.toEnd = false;
       this.place(record, record.object.x, record.object.y);
     }
+    this.resetRiders();
   }
 
-  toggle(id: string): void {
+  resetRiders(): void {
+    this.ensureMutable();
+    for (let index = 0; index < this.ridePlatforms.length; index++) {
+      const record = this.ridePlatforms[index]!;
+      record.supportedAt = -1;
+      record.awaySteps = RIDE_AWAY_STEPS;
+    }
+  }
+
+  move(id: string, to: PlatformDestination): void {
     this.ensureMutable();
     const record = this.records.get(id);
     if (record === undefined) throw new Error(`Unknown platform: ${id}.`);
-    record.toEnd = !record.toEnd;
+    let toEnd: boolean;
+    switch (to) {
+      case 'toggle': toEnd = !record.toEnd; break;
+      case 'start': toEnd = false; break;
+      case 'end': toEnd = true; break;
+      default: throw new Error(`Unknown platform destination: ${to}.`);
+    }
+    if (record.toEnd === toEnd) return;
+    record.toEnd = toEnd;
     record.arriving = false;
     if (this.arrived.has(record) && record.arrivedAt !== this.step) this.settlePose(record);
     this.arrived.delete(record);
@@ -126,6 +151,36 @@ export class PlatformWorld {
         const position = record.body.getPosition();
         record.currentX = position.x;
         record.currentY = position.y;
+      }
+    }
+  }
+
+  board(pot: Fixture, manifold: WorldManifold, minimumTopNormal: number): void {
+    this.ensureMutable();
+    if (this.ridePlatforms.length === 0) return;
+    const body = pot.getBody();
+    for (let edge = body.getContactList(); edge; edge = edge.next) {
+      if (edge.other === null) continue;
+      const record = this.bodies.get(edge.other);
+      if (record === undefined || !record.object.ride || this.moving.has(record) || record.arrivedAt === this.step) continue;
+      const contact = edge.contact;
+      if ((contact.getFixtureA() !== pot && contact.getFixtureB() !== pot) || !contact.isTouching() || !contact.isEnabled()) continue;
+      const support = contact.getWorldManifold(manifold);
+      if (!support || support.pointCount === 0) continue;
+      const up = contact.getFixtureA().getBody() === body ? -support.normal.y : support.normal.y;
+      if (up >= minimumTopNormal) record.supportedAt = this.step;
+    }
+    for (let index = 0; index < this.ridePlatforms.length; index++) {
+      const record = this.ridePlatforms[index]!;
+      if (this.moving.has(record) || record.arrivedAt === this.step) {
+        // Travel cannot rearm boarding: a descending deck can briefly lose the pot's support contact.
+        record.awaySteps = 0;
+      } else if (record.supportedAt === this.step) {
+        const boarded = record.awaySteps >= RIDE_AWAY_STEPS;
+        record.awaySteps = 0;
+        if (boarded) this.move(record.object.id, 'toggle');
+      } else if (record.awaySteps < RIDE_AWAY_STEPS) {
+        record.awaySteps++;
       }
     }
   }
@@ -183,11 +238,13 @@ export class PlatformWorld {
     this.createFixture(body, object);
     const record: PlatformRecord = {
       object, body, toEnd: false, arriving: false, arrivedAt: -1,
+      supportedAt: -1, awaySteps: RIDE_AWAY_STEPS,
       previousX: object.x, previousY: object.y, currentX: object.x, currentY: object.y,
       pose: { id: object.id, x: object.x, y: object.y }, velocity: new Vec2(),
     };
     this.records.set(object.id, record);
     this.bodies.set(body, record);
+    if (object.ride) this.ridePlatforms.push(record);
     this.poses.push(record.pose);
   }
 
@@ -199,6 +256,11 @@ export class PlatformWorld {
     }
     const previous = record.object;
     record.object = object;
+    if (previous.ride !== object.ride) this.setRide(record, object.ride);
+    if (reset || previous.ride !== object.ride) {
+      record.supportedAt = -1;
+      record.awaySteps = RIDE_AWAY_STEPS;
+    }
     if (previous.width !== object.width || previous.height !== object.height) {
       for (let fixture = record.body.getFixtureList(); fixture !== null; fixture = record.body.getFixtureList()) {
         record.body.destroyFixture(fixture);
@@ -223,6 +285,14 @@ export class PlatformWorld {
       filterCategoryBits: PHYSICS.terrainCategory,
       filterMaskBits: PHYSICS.playerCategory | PHYSICS.toolCategory | PHYSICS.enemyCategory,
     });
+  }
+
+  private setRide(record: PlatformRecord, ride: boolean): void {
+    if (ride) this.ridePlatforms.push(record);
+    else {
+      const index = this.ridePlatforms.indexOf(record);
+      if (index >= 0) this.ridePlatforms.splice(index, 1);
+    }
   }
 
   private stop(record: PlatformRecord, x: number, y: number): void {
@@ -261,6 +331,7 @@ export class PlatformWorld {
     this.bodies.delete(record.body);
     this.moving.delete(record);
     this.arrived.delete(record);
+    this.setRide(record, false);
     this.poses.splice(index, 1);
   }
 

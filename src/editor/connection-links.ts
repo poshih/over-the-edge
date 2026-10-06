@@ -1,9 +1,12 @@
 import { LevelError } from '../level';
 import type { LevelObject, PlatformObject, ShooterObject, TriggerObject } from '../level';
-import type { TriggerAction } from '../trigger-events';
+import type { PlatformDestination, TriggerAction } from '../trigger-events';
 
-export type ConnectionAction = Extract<TriggerAction, { readonly type: 'fire-trap' | 'toggle-platform' }>;
+export type ConnectionAction = Extract<TriggerAction, { readonly type: 'fire-trap' | 'move-platform' }>;
 export type ConnectionTarget = ShooterObject | PlatformObject;
+const PLATFORM_LABELS: Readonly<Record<PlatformDestination, string>> = {
+  toggle: 'toggle', start: '→ start', end: '→ end',
+};
 
 export interface ConnectionLink {
   readonly trigger: TriggerObject;
@@ -23,7 +26,7 @@ export function connectionTargetId(action: ConnectionAction): string;
 export function connectionTargetId(action: TriggerAction): string | null;
 export function connectionTargetId(action: TriggerAction): string | null {
   if (action.type === 'fire-trap') return action.trap;
-  if (action.type === 'toggle-platform') return action.platform;
+  if (action.type === 'move-platform') return action.platform;
   return null;
 }
 
@@ -40,7 +43,7 @@ export function deriveConnectionLinks(objects: readonly LevelObject[]): Connecti
   for (const trigger of triggers) {
     const groups = new Map<string, ConnectionAction[]>();
     for (const event of trigger.events) {
-      if (event.type !== 'fire-trap' && event.type !== 'toggle-platform') continue;
+      if (event.type !== 'fire-trap' && event.type !== 'move-platform') continue;
       const id = connectionTargetId(event);
       const target = targets.get(id);
       if (target === undefined || target.kind !== (event.type === 'fire-trap' ? 'shooter' : 'platform')) {
@@ -54,7 +57,7 @@ export function deriveConnectionLinks(objects: readonly LevelObject[]): Connecti
     for (const [id, events] of groups) {
       const link: ConnectionLink = {
         trigger, target: targets.get(id)!, events,
-        label: events.map((event) => event.type === 'fire-trap' ? `×${event.shots}` : 'toggle').join(' · '),
+        label: events.map((event) => event.type === 'fire-trap' ? `×${event.shots}` : PLATFORM_LABELS[event.to]).join(' · '),
       };
       links.push(link);
       all.push(link);

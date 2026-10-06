@@ -24,7 +24,7 @@ import type { SharedKind } from '../src/shared-copies';
 import { HAMMER_HEAD_LIMITS } from '../src/hammer-head';
 import { SURFACES } from '../src/surfaces';
 import { THEME_FIELDS } from '../src/theme';
-import { LAUNCH_FIELDS, SOUND_VOLUME } from '../src/trigger-events';
+import { LAUNCH_FIELDS, PLATFORM_DESTINATIONS, SOUND_VOLUME } from '../src/trigger-events';
 
 const endpoint = (method: string, path: string, description: string, body?: string) => ({ method, path, description, ...(body ? { body } : {}) });
 
@@ -105,7 +105,7 @@ export function apiManual(auth: 'token' | 'loopback') {
     levelVersions: {
       description: 'A version is the stored level together with the game settings it plays with. Whenever either changes, they become the project\'s next version unless they match the latest: a change to the level, level/objects, level/labels or settings sections, a bundle, or a level.json or project.json changed on disk (numbered when the project is next read). '
         + 'Every answer about revisions (section changes, GET revision, GET project, bundles) carries "level": { "version", "course" }, null while the stored level is invalid; GET level answers with X-Level-Version and X-Level-Course headers.',
-      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, bonfires, traps and liquid pools, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
+      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, bonfires, traps, liquid pools and platforms (including ride), the triggers that launch the player, fire traps or move platforms (including to), and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
         + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level and settings\' course.',
       phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records alive play on the version it plays, one session per run, in consecutive clips. Death ends the clip and session before the terminal step; dying movement, teleport and placement poses are never sampled.',
     },
@@ -134,7 +134,7 @@ export function apiManual(auth: 'token' | 'loopback') {
           shooter: { kind: 'shooter', id: 'dart-trap-1', firing: 'timer | trigger', x: 20, y: 9, angle: 3.14159, interval: 2, delay: 0, speed: 12, damage: 1 },
           axe: { kind: 'axe', id: 'axe-1', x: 26, y: 14, length: 4, period: 3, offset: 0, damage: 2 },
           pool: { kind: 'pool', id: 'lava-1', liquid: LIQUIDS.join(' | '), x: 32, y: 1, width: 6, height: 2, depth: 2 },
-          platform: { kind: 'platform', id: 'lift-1', x: 8, y: 4, travelX: 0, travelY: 6, width: 3, height: 0.4, depth: 2, speed: 1.5, surface: SURFACES.join(' | ') },
+          platform: { kind: 'platform', id: 'lift-1', x: 8, y: 4, ride: true, travelX: 0, travelY: 6, width: 3, height: 0.4, depth: 2, speed: 1.5, surface: SURFACES.join(' | ') },
         },
         hazards: 'A bonfire (x, y: the centre of its base on the ground) lights when the player\'s foot comes within '
           + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, first animates the character and shows hud.death.text over hud.death.fadeIn + hud.death.hold seconds of physics time. The world and timer (unless stopped) carry on but the player's aim is frozen, it takes no damage, hits no enemies and lights no bonfires; Reset stays available, and Pause and a hidden tab hold the sequence. It then brings the player back at the one reached last, the run going on, or restarts the run before any. `
@@ -143,18 +143,26 @@ export function apiManual(auth: 'token' | 'loopback') {
           + `Shots require the player within ${SHOOTER.range} m; projectiles fly straight up to that far and stop on terrain, platforms or the hammer head. `
           + 'An axe hangs its blade length below its pivot (x, y) and swings in and out of the view, through the play line at offset and every half period after. '
           + 'Traps never collide; a hit costs its damage (whole numbers) from the player\'s health, settings physics.health. '
-          + 'Bonfires, traps, platforms and the trigger actions that fire traps or toggle platforms count toward the course.',
+          + 'Bonfires, traps, platforms and the trigger actions that fire traps or move platforms count toward the course.',
         liquids: 'A pool fills its box (x, y: its centre; width, height; depth: how far it reaches across the play line, '
           + 'only drawn) with still liquid, its top the surface. It never collides: fit it into a basin of terrain. The player\'s pot '
           + 'is held up by the liquid it displaces, and the pot and hammer are slowed as they move through it, by the settings physics '
           + 'lavaBuoyancy and lavaDrag, swampBuoyancy and swampDrag; lava also burns the character for physics.lavaDamage each '
           + 'second the pot is in it. Pools count toward the course.',
         platforms: 'A platform is a colliding box centred on the obstacle line. It starts at x/y; travelX/travelY are the '
-          + 'offsets in metres to its other centre, up to ±200 m on each axis. Toggling alternates its destination, even mid-trip. '
+          + 'offsets in metres to its other centre, up to ±200 m on each axis. The required boolean ride starts it toward its '
+          + 'other end when the pot boards its top while it rests; the default look draws a moving pressure plate on its deck. '
+          + 'Staying aboard or bouncing at arrival does not turn it back: step off briefly while it rests, then board again. '
+          + 'Boarding while dying is ignored. Move platform events toggle its destination or send it to start / end, even mid-trip. '
           + 'Dragging its body moves both ends together; its end handle changes only travel. It moves at speed, carries the player '
           + 'by contact friction, and returns to its start on reset. Keep its path clear: it moves through terrain and can push the '
           + 'player into rock. Its surface uses the same material settings as terrain.',
-        triggerActions: 'Trigger events include fire-trap { trap, shots } for 1-20 burst shots from a projectile trap, and toggle-platform { platform } to send a platform toward its other end. A trigger marker "switch" draws a pressure plate; use activation "on-enter" to fire each time the player steps onto it.',
+        triggerActions: 'Trigger events include fire-trap { trap, shots } for 1-20 burst shots from a projectile trap, and '
+          + 'move-platform { platform, to }, where to is toggle, start or end. Toggle alternates its destination; start / end '
+          + 'send it to that end, reversing if it is moving away and doing nothing if it is already there or heading there. '
+          + 'A trigger marker "switch" draws a pressure plate; use activation "on-enter" to fire each time the player steps '
+          + 'onto it. For an upward rideable lift, use a switch at each landing, outside its path: to start at the bottom '
+          + 'and to end at the top. The deck starts the ride; trigger zones stay at their authored positions.',
         shooterFields: SHOOTER_FIELDS,
         axeFields: AXE_FIELDS,
         terrainMeshes: {
@@ -169,6 +177,7 @@ export function apiManual(auth: 'token' | 'loopback') {
           'play-sound': { type: 'play-sound', source: '/media/bell.wav or https URL', volume: `${SOUND_VOLUME.min}-${SOUND_VOLUME.max}` },
           'stop-timer': { type: 'stop-timer' },
           'launch-player': { type: 'launch-player', height: `${LAUNCH_FIELDS.height.min}-${LAUNCH_FIELDS.height.max} m`, strength: `${LAUNCH_FIELDS.strength.min}-${LAUNCH_FIELDS.strength.max}` },
+          'move-platform': { type: 'move-platform', platform: '<platform ID>', to: PLATFORM_DESTINATIONS.join(' | ') },
         },
         board: `Designers name areas by the Workshop's level board, like a chessboard: ${BOARD_CELL} m squares such as D7. Rows count up from y = 0 (row n spans y ${BOARD_CELL}(n-1) to ${BOARD_CELL}n m; row 0 lies just below 0). Columns are lettered A, B, ... Z, AA, ... rightward from column A, the ${BOARD_CELL} m band, on multiples of ${BOARD_CELL} m, that holds the leftmost terrain point.`,
         notes: 'Coordinates are metres, y up; angle is radians. Terrain is a mesh in a box: the mesh\'s bounds fill width and height, and depth centred on the obstacle line, where the 2D physics plays out; mirror reflects it, collision included, left to right before it turns; a circle collision needs equal width and height. A built-in shape or drawn outline is extruded in color, a 0xRRGGBB integer, which also draws an asset mesh in the shapes look. Terrain surface is required, one of ' + SURFACES.join(', ') + ' (the Workshop starts new terrain as rock), and takes that surface\'s friction and bounciness from the game settings. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',

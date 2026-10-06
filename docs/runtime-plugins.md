@@ -197,7 +197,11 @@ of its kind:
   `update(poses, time)` receives their drawn poses, `{ id, x, y }` (`PlatformPose`), each frame
   while the level has platforms. `travelX`/`travelY` are offsets in metres from the authored
   start to the other end; draw the runtime poses without changing those definitions. Do not
-  keep the borrowed pose array.
+  keep the borrowed pose array. The required `ride` boolean starts a resting platform when
+  the pot boards its top. The default look draws a darker metal deck plate on `ride`
+  platforms, moving it with the slab through the same pose updates; platforms with
+  `ride: false` have plain decks. A replacement `PlatformLook` receives `ride` in `set(objects)`
+  and can draw that plate its own way without changing the look contract.
 - `dispose()` runs when the game closes, once the view has let go of the look's passes: free its
   geometries and materials. `inspect()`, optional, reports to the Workshop's diagnostics, in
   `window.gettingOver.level().rendering.looks`.
@@ -210,7 +214,12 @@ edge below: `AXE.bladeWidth` across the obstacle line, toward the camera and awa
 below its pivot and turns about the x axis by `axeAngle(axe, time)` radians, positive away from
 the camera. `BONFIRE`, `SHOOTER` and `triggerBounds(trigger)` give the engine's sizes and a
 trigger's region. Platforms collide, so draw their slabs centred at z = 0. A switch plate is
-drawn on its trigger's floor and never collides. The view enables three.js local clipping, so
+drawn on its trigger's floor and never collides; a rideable platform's deck plate is scenery
+centred on the obstacle line, on its deck top, and stays within the slab's depth. The default
+platform look shares one box geometry across two dense instance meshes, slabs and ride plates,
+and writes matrices only for changed poses, authored objects or instance slots. Its travel
+bounds are cached on content edits, not rebuilt over every platform each frame. The view
+enables three.js local clipping, so
 a look can split itself at the obstacle line with clipping planes, as the engine's axes do;
 its pools are built as two half boxes instead. Import three.js from the `three` package, which
 is the engine's own copy. To add to one of the engine's looks rather than draw it anew,

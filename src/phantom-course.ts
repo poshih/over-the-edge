@@ -1,5 +1,5 @@
 // What shapes play on a level: its colliders and surfaces, enemies, traps, bonfires, pools and platforms, its triggers'
-// launches, trap bursts and platform toggles, its start, and the physics the game runs with. Phantom recordings belong
+// launches, trap bursts and platform moves, its start, and the physics the game runs with. Phantom recordings belong
 // to a course, the SHA-256 of this text. Decorations, labels, colours, depth, swapping a mesh for one that collides
 // alike, message text, control sensitivity or the cursor leave it alone, keeping recordings. See docs/phantoms.md.
 //
@@ -10,7 +10,7 @@ import { terrainCollision } from './level';
 import type { LevelDefinition, PlatformObject, ShooterObject } from './level';
 
 // Changes whenever what counts toward a course does, so every course changes with it.
-export const PHANTOM_COURSE_FORMAT = 4;
+export const PHANTOM_COURSE_FORMAT = 5;
 
 // The physics settings that move the player: every tuning field but the controls', and the hammer rig with the default
 // hammer's head. A library hammer's own head is a cosmetic's: recordings made with it join the course.
@@ -22,7 +22,7 @@ function shooterEntry(object: ShooterObject) {
 }
 
 function platformEntry(object: PlatformObject) {
-  return ['platform', object.x, object.y, object.travelX, object.travelY, object.width, object.height, object.speed, object.surface];
+  return ['platform', object.x, object.y, object.ride, object.travelX, object.travelY, object.width, object.height, object.speed, object.surface];
 }
 
 function targetEntry(entries: ReadonlyMap<string, string>, id: string): string {
@@ -65,7 +65,7 @@ export function phantomCourseText(level: LevelDefinition, settings: GameSettings
         const events = object.events.flatMap((event) => {
           if (event.type === 'launch-player') return [['launch-player', event.height, event.strength]];
           if (event.type === 'fire-trap') return [['fire-trap', targetEntry(shooters, event.trap), event.shots]];
-          if (event.type === 'toggle-platform') return [['toggle-platform', targetEntry(platforms, event.platform)]];
+          if (event.type === 'move-platform') return [['move-platform', targetEntry(platforms, event.platform), event.to]];
           return [];
         });
         if (events.length > 0) entry = ['trigger', object.region, object.x, object.y, object.activation, events];

@@ -35,7 +35,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | Section | Stored in | Contents |
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
-| `level` | `level.json` | Level JSON, schema 5, as exported from Workshop / Level |
+| `level` | `level.json` | Level JSON, schema 8, as exported from Workshop / Level |
 | `settings` | `project.json` | Game-settings profile, schema 12: physics (including the downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline) and cursor target (radius, dead zone, how much it follows the character and the optional return to the hammer) |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
@@ -116,7 +116,7 @@ files as base64 data URLs:
   "schemaVersion": 12,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 7, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 8, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }

@@ -5,15 +5,18 @@
 // pending edits are never silently dropped when the author moves on to save their level.
 import { TRIGGER_LIMITS } from '../level';
 import type { LevelObject } from '../level';
-import { DEFAULT_LAUNCH, FIRE_TRAP_FIELDS, LAUNCH_FIELDS, SOUND_VOLUME } from '../trigger-events';
-import type { TriggerAction } from '../trigger-events';
+import { DEFAULT_LAUNCH, FIRE_TRAP_FIELDS, LAUNCH_FIELDS, PLATFORM_DESTINATIONS, SOUND_VOLUME } from '../trigger-events';
+import type { PlatformDestination, TriggerAction } from '../trigger-events';
 import { connectionTargetId } from './connection-links';
 
-const EVENT_TYPES = ['message', 'play-video', 'play-sound', 'stop-timer', 'launch-player', 'fire-trap', 'toggle-platform'] as const;
+const EVENT_TYPES = ['message', 'play-video', 'play-sound', 'stop-timer', 'launch-player', 'fire-trap', 'move-platform'] as const;
 type EventType = TriggerAction['type'];
 const EVENT_LABELS: Record<EventType, string> = {
   message: 'Message', 'play-video': 'Play video', 'play-sound': 'Play sound', 'stop-timer': 'Stop timer', 'launch-player': 'Launch player',
-  'fire-trap': 'Fire trap', 'toggle-platform': 'Toggle platform',
+  'fire-trap': 'Fire trap', 'move-platform': 'Move platform',
+};
+const PLATFORM_LABELS: Readonly<Record<PlatformDestination, string>> = {
+  toggle: 'Toggle', start: 'To start', end: 'To end',
 };
 
 function defaultEvent(type: EventType): TriggerAction {
@@ -24,7 +27,7 @@ function defaultEvent(type: EventType): TriggerAction {
     case 'stop-timer': return { type };
     case 'launch-player': return { type, ...DEFAULT_LAUNCH };
     case 'fire-trap': return { type, trap: '', shots: 3 };
-    case 'toggle-platform': return { type, platform: '' };
+    case 'move-platform': return { type, platform: '', to: 'toggle' };
   }
 }
 
@@ -306,7 +309,7 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
       help.textContent = shooters.length === 0 ? 'Add a projectile trap before this event can be valid.' :
         'Starts a burst on the selected projectile trap.';
       item.append(trap, shots, help);
-    } else if (action.type === 'toggle-platform') {
+    } else if (action.type === 'move-platform') {
       const platform = document.createElement('label');
       platform.className = 'level-field';
       platform.textContent = 'Platform';
@@ -325,16 +328,32 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
         input.prepend(option);
       }
       input.value = action.platform;
-      input.addEventListener('change', () => {
-        entry.draft[index] = { type: 'toggle-platform', platform: input.value };
-        renderStatus();
-      }, listen);
       platform.append(input);
+      const destination = document.createElement('label');
+      destination.className = 'level-field';
+      destination.textContent = 'To';
+      const destinationInput = document.createElement('select');
+      destinationInput.append(...PLATFORM_DESTINATIONS.map((to) => {
+        const option = document.createElement('option');
+        option.value = to;
+        option.textContent = PLATFORM_LABELS[to];
+        return option;
+      }));
+      destinationInput.value = action.to;
+      destination.append(destinationInput);
+      const updateMovePlatform = (): void => {
+        const to = PLATFORM_DESTINATIONS.find((candidate) => candidate === destinationInput.value);
+        if (to === undefined) throw new Error('Unknown platform destination.');
+        entry.draft[index] = { type: 'move-platform', platform: input.value, to };
+        renderStatus();
+      };
+      input.addEventListener('change', updateMovePlatform, listen);
+      destinationInput.addEventListener('change', updateMovePlatform, listen);
       const help = document.createElement('p');
       help.className = 'level-help';
       help.textContent = platforms.length === 0 ? 'Add an elevator platform before this event can be valid.' :
-        'Sends that platform toward its other end; pressing again turns it back.';
-      item.append(platform, help);
+        'Toggle turns it back. To start / To end call it to that landing; nothing changes if it is already going or resting there.';
+      item.append(platform, destination, help);
     } else {
       const note = document.createElement('p');
       note.className = 'level-help';
@@ -369,7 +388,7 @@ export function createTriggerEventEditor(options: TriggerEventEditorOptions): Tr
     if (event.type === 'fire-trap') {
       const shooter = options.objects().find((object) => object.kind === 'shooter');
       entry.draft.push(shooter === undefined ? event : { ...event, trap: shooter.id });
-    } else if (event.type === 'toggle-platform') {
+    } else if (event.type === 'move-platform') {
       const platform = options.objects().find((object) => object.kind === 'platform');
       entry.draft.push(platform === undefined ? event : { ...event, platform: platform.id });
     } else entry.draft.push(event);

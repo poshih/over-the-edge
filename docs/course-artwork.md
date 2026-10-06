@@ -236,7 +236,7 @@ their content is served.
   "format": "over-the-edge-course",
   "schemaVersion": 2,
   "mode": "meshes",
-  "level": { "schemaVersion": 7, "labels": [], "objects": [] },
+  "level": { "schemaVersion": 8, "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "boulder.glb", "source": "data:model/gltf-binary;base64,..." }
   ],

@@ -16,7 +16,7 @@ import { partPoint, partVelocity } from './player-bodies';
 import { rigGeometry, sameRig } from './rig';
 import type { RigGeometry } from './rig';
 import { surfaceMaterials } from './surfaces';
-import type { LaunchSettings } from './trigger-events';
+import type { LaunchSettings, PlatformDestination } from './trigger-events';
 import { angleDifference } from './math';
 import { aimAt, limitAim, moveAim, returnAim, shiftAim } from './aim';
 import type { Aim } from './aim';
@@ -393,10 +393,10 @@ export class Simulation {
     this.hazards.burst(id, shots, this.elapsed);
   }
 
-  togglePlatform(id: string): void {
+  movePlatform(id: string, to: PlatformDestination): void {
     this.ensureLive();
-    if (this.world.isLocked()) throw new Error('Platform toggles must execute after the physics step.');
-    this.platforms.toggle(id);
+    if (this.world.isLocked()) throw new Error('Platform moves must execute after the physics step.');
+    this.platforms.move(id, to);
   }
 
   step(pointerDelta: Point): void {
@@ -453,6 +453,7 @@ export class Simulation {
       this.hurt(this.settings.physics.lavaDamage, 'lava', bath.id, root.x, root.y, 0, 0);
     }
     if (!this.dying && this.terminal() === null) {
+      this.platforms.board(this.rig.potFixture, this.manifold, SUPPORT_NORMAL);
       const foot = this.playerPosition();
       this.bonfires.update(foot);
       this.bestHeight = Math.max(this.bestHeight, foot.y);
@@ -600,6 +601,7 @@ export class Simulation {
     const geometry = sameRig(this.rig.geometry, this.settings.rig) && sameHammerHead(this.rig.geometry.head, this.settings.rig.head)
       ? this.rig.geometry : rigGeometry(this.settings.rig);
     this.rig = createPlayer(this.world, spawn, this.settings.physics, geometry, this.hammerHead ?? this.settings.rig.head);
+    this.platforms.resetRiders();
     this.supported = false;
     this.headTouching = false;
     this.impactSpeed = 0;

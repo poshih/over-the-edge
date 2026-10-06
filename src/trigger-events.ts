@@ -12,6 +12,8 @@ export const SOUND_VOLUME = { label: 'Sound volume', min: 0, max: 1, step: 0.05,
 export const FIRE_TRAP_FIELDS = {
   shots: { label: 'Shots', min: 1, max: 20, step: 1, unit: '' },
 } as const;
+export const PLATFORM_DESTINATIONS = ['toggle', 'start', 'end'] as const;
+export type PlatformDestination = (typeof PLATFORM_DESTINATIONS)[number];
 
 export type TriggerAction =
   // Shows a title and message in the project's message style: a toast, or a popup that pauses the game.
@@ -19,7 +21,7 @@ export type TriggerAction =
   | { readonly type: 'play-video'; readonly source: string }
   | ({ readonly type: 'launch-player' } & LaunchSettings)
   | { readonly type: 'fire-trap'; readonly trap: string; readonly shots: number }
-  | { readonly type: 'toggle-platform'; readonly platform: string }
+  | { readonly type: 'move-platform'; readonly platform: string; readonly to: PlatformDestination }
   | { readonly type: 'stop-timer' }
   // Plays a sound effect without pausing the game; the next event starts immediately.
   | { readonly type: 'play-sound'; readonly source: string; readonly volume: number };
