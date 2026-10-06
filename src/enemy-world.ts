@@ -27,7 +27,8 @@ interface EnemyRecord {
 
 interface EnemyCallbacks {
   readonly getPot: () => Body;
-  readonly getHeadFixture: () => Fixture;
+  // Null while the hammer cannot hurt enemies; its physical contacts still resolve.
+  readonly getHeadFixture: () => Fixture | null;
   readonly isTransientTerrain: (body: Body) => boolean;
   readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
   // A bump: the velocity it adds to the player, the enemy that dealt it and where they met, in world metres.

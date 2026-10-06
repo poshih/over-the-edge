@@ -3,7 +3,7 @@ import type { FieldSpec } from './project-fields';
 import { DEFAULT_MESSAGE_STYLE, MESSAGE_STYLES } from './trigger-events';
 import type { MessageStyle } from './trigger-events';
 
-// What the game shows over play: the readouts shared by the Workshop and releases, and how trigger messages appear.
+// Readouts, trigger messages and death presentation, shared by the Workshop and releases.
 export interface HudSettings {
   readonly height: {
     readonly visible: boolean; readonly label: string; readonly unit: string;
@@ -11,6 +11,7 @@ export interface HudSettings {
   };
   readonly timer: { readonly visible: boolean; readonly label: string };
   readonly messages: { readonly style: MessageStyle };
+  readonly death: { readonly text: string; readonly fadeIn: number; readonly hold: number };
 }
 
 const MESSAGE_STYLE_LABELS: Readonly<Record<MessageStyle, string>> = {
@@ -31,6 +32,10 @@ export const HUD_FIELDS: readonly FieldSpec[] = [
     description: 'How message events appear, in the Workshop and in releases.',
     options: MESSAGE_STYLES.map((value) => ({ value, label: MESSAGE_STYLE_LABELS[value] })),
   },
+  { kind: 'text', path: 'death.text', label: 'Death message', minLength: 1, maxLength: 64 },
+  { kind: 'number', path: 'death.fadeIn', label: 'Death message fade in', min: 0.1, max: 5, step: 0.1, unit: 's' },
+  { kind: 'number', path: 'death.hold', label: 'Death message hold', min: 0.5, max: 10, step: 0.1, unit: 's',
+    description: 'After fading in, the message stays this long before returning to play.' },
 ];
 
 export function validateHud(value: unknown): HudSettings {
@@ -41,6 +46,7 @@ export const DEFAULT_HUD: HudSettings = validateHud({
   height: { visible: true, label: 'CURRENT HEIGHT', unit: 'm', scale: 1, decimals: 1 },
   timer: { visible: true, label: 'ELAPSED' },
   messages: { style: DEFAULT_MESSAGE_STYLE },
+  death: { text: 'You are dead...', fadeIn: 1.5, hold: 2.5 },
 });
 
 export function formatHeight(hud: HudSettings, metres: number): string {

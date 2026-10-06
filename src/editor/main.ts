@@ -174,7 +174,7 @@ const project: ProjectSession = new ProjectSession({
       ui.setSceneTone(isDarkSky(look.theme));
       game.setEnemyArt(look.enemies);
       ui.setHud(look.hud);
-      game.setMessageStyle(look.hud.messages.style);
+      game.setHud(look.hud);
       audioDevice.setVolume(look.audio.volume);
       audio.setSettings(look.audio);
     },
@@ -415,7 +415,10 @@ function updateWorkshop(state: WorkshopState): void {
   const nextEditing = state.open && state.tab === 'level';
   if (nextEditing !== editing) {
     editing = nextEditing;
-    if (editing) game.simulation.restoreLevelObjects();
+    if (editing) {
+      if (game.dying) restart();
+      else game.simulation.restoreLevelObjects();
+    }
     game.setInputBlock({ reason: 'level-editor', blocked: editing });
     levelEditor.setMode(editing ? 'edit' : 'inactive');
   }

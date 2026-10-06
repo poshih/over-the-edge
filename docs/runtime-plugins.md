@@ -1,9 +1,9 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, hurt effects, object, enemy and phantom looks, scene layers,
-audio, event messages, gameplay observers, key bindings and additional input devices; character
-choice in releases and studio previews.
+camera following, backdrop, aim marks, hurt effects, death animation and screen, object,
+enemy and phantom looks, scene layers, audio, event messages, gameplay observers, key bindings
+and additional input devices; character choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
 so a game sees and hears its own presentation while it is authored. Its SDK is
 [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts). [Plugins](plugins.md) describes the
@@ -72,6 +72,7 @@ draws any readout its own way, and the others stay the engine's. Each is a facto
 | `elapsed` | The run's timer, in seconds |
 | `timerRunning` | Whether the timer still runs; a Stop timer event stops it |
 | `health` | The player's health, `{ current, max }` (`HealthReading`), or `null` when the authored level has no hurt sources; shots already in flight can still hurt after their shooter is removed |
+| `death` | `'health'` or `'fall'` during the death sequence, otherwise `null`; a fall can leave positive health |
 | `paused` | Whether the game is paused |
 | `pointerLocked` | Whether the mouse is captured for play |
 | `inputMode` | `mouse` or `touch` |
@@ -260,11 +261,15 @@ interface CameraAim { x: number; y: number; worldHeight: number }
 | `maxReach` | The rig's maximum reach in metres |
 | `width`, `height` | Canvas size in CSS pixels |
 | `dt` | The drawn frame's elapsed real seconds |
+| `death` | `'health'` or `'fall'` during the death sequence, otherwise `null` |
 
 `out` holds the current aim on entry. Write the next coordinates and a finite, positive
 `worldHeight` in place; allocate nothing in either method. `aim` runs each drawn frame, and
 `snap` on a resize, a recenter or a player placed anew. `DEFAULT_CAMERA_DIRECTOR` preserves the
 engine's full/compact framing, exponential follow and compact keep-the-rig-visible clamp.
+During death it holds the current framing, rather than following the corpse out of view;
+placement clears `death` and snaps to the new player. A replacement director receives that
+state in both methods and chooses its own death framing.
 The engine still owns the theme's perspective/FOV or orthographic projection, near/far, fog,
 matrices and the [pass sequence](#pass-rules-for-presentation-points).
 
@@ -430,8 +435,9 @@ interface HurtCause {
   lands at most once a second, as the character is then unharmed for a while, so lava burns once
   a second while the pot stays in it.
 - `clear` follows every placement of the player anew, a restart or a return to a bonfire: end what
-  follows the character. A death returns the player at once, so its fatal `hurt` comes just
-  before a `clear`. What shows where a blow landed, at the cause's `x` and `y`, can play on.
+  follows the character. The killing hit arrives at death entry; the return and `clear` follow
+  after the [death sequence](#death-sequence). What shows where a blow landed, at the cause's
+  `x` and `y`, can play on.
 - `update` runs on each drawn frame from a `hurt` or a `clear` until it returns `false`, and then
   not again until the next one, so an idle point costs nothing. It receives the borrowed
   [`SceneFrame`](#scene-layers): the drawn time, which a restart rewinds, and the character's
@@ -454,6 +460,7 @@ scratch, and allocate nothing on a frame. The engine detaches the root before `d
   flames die down and the last embers and smoke finish rising. Embers and smoke each live their
   own life from where they were born, so a later burn grows the flames again from where they are
   and starts new embers and smoke at the character, without anything appearing mid-flight.
+  A fatal lava burn keeps the corpse alight until placement clears it, without further damage.
 - **An axe:** where the blade struck, a cold steel flash with a glint, a ring rushing outward, a
   bright slash across the character bowed the way the blow knocks it, and a spray of sparks
   thrown that way, cooling from white through orange to red as they slow and fall.
@@ -518,6 +525,156 @@ To draw one source your own way and keep the others, wrap the point the same way
 source's hits out of what you forward to the base. Replace the point instead to draw every cause
 your own way. The same causes reach [gameplay observers](#gameplay-events) on `hurt` and `death`,
 for sounds or scores of a game's own.
+
+## Death sequence
+
+Health running out and falling out of the level both start the sequence. Death wins that
+physics step before triggers or recording observers run. The world keeps simulating:
+terrain, platforms, liquids, traps and enemies carry on, and dying costs run time unless a
+Stop timer event already stopped it. The player is inert: its hinge-relative aim is frozen
+and the motors hold that aim; it cannot take damage, hit an enemy with the hammer, light a
+bonfire or improve best height. Enemy bumps may still push it. No corpse impacts are staged.
+Running and queued trigger runs are cancelled, their signals close popups and videos, and
+pressed switches release; once-triggers keep their consumption and history.
+
+The project's HUD owns `death: { text, fadeIn, hold }`, not a runtime timing slot. The
+engine waits `fadeIn + hold` seconds before returning to the last bonfire, or requesting the
+ordinary Reset when none was reached. Defaults are **“You are dead...”**, a **1.5 s** fade
+and **2.5 s** hold. Each death takes a snapshot of those settings; edits affect the next
+death. The clock advances by `PHYSICS.dt` with each dying physics step and presentation
+interpolates it with the frame's alpha. Pause and a hidden tab hold it, with no catch-up.
+Reset and other control actions remain available; only movement is discarded.
+
+The [phantom recorders](phantoms.md) are interrupted at entry, before the terminal sample.
+Neither dying steps nor the teleport or placement pose is sampled; capture resumes on a
+subsequent live step. Incremental level edits apply without ending the sequence. Reset,
+level replacement, Workshop placement/play-from-here, entering Level editing and disposal
+cancel it, with no automatic `respawn` from cancellation. A rig rebuild is an ordinary
+restart. There is no wall-clock timeout or deferred completion callback to survive a
+cancellation.
+
+Two independent runtime slots replace the presentation without taking over its clock:
+[`DEATH_SCREEN`](#death-screen) and [`DEATH_ANIMATION`](#death-animation).
+Both consume reused, borrowed frames:
+
+```ts
+type DeathKind = 'health' | 'fall';
+type DeathInfo =
+  | { readonly kind: 'health'; readonly cause: Readonly<HurtCause> }
+  | { readonly kind: 'fall' };
+interface DeathFrame {
+  readonly elapsed: number;       // interpolated seconds since entry
+  readonly duration: number;      // the HUD's fadeIn + hold
+  readonly poseProgress: number;  // linear 0–1 over 0.65 s
+  readonly reducedMotion: boolean;
+}
+```
+
+`cause` is the killing hit, as for [hurt effects](#hurt-effects). Copy its fields to keep
+them, and never retain a frame. Reduced motion is captured at entry: the defaults show the
+static dead appearance and text immediately, but keep the same total wait.
+
+### Death screen
+
+`DEATH_SCREEN`, the slot `messages.death`, holds a `DeathScreenFactory`,
+`(mount: HTMLElement) => DeathScreen`:
+
+```ts
+interface DeathScreen {
+  show(info: DeathInfo, settings: HudSettings['death']): void;
+  update(frame: DeathFrame): void;
+  clear(): void;
+  dispose(): void;
+}
+```
+
+`mount` is the game view's interface layer, over its canvas and below the Workshop.
+Cover that layer with absolute positioning (`position: absolute; inset: 0; z-index: 1`),
+under modal presentations, not the browser viewport with a fixed overlay.
+
+- Create only your own nodes in `mount`, and remove only those nodes.
+- `show` runs once at entry, with the HUD's validated text and timing.
+- `update` runs on visible frames while dying. Animate with the engine's `elapsed`,
+  not a timer or another animation loop. Pausing cannot consume the wait.
+- `clear` runs at placement or cancellation: hide the screen and clear pending
+  announcements immediately. `dispose` releases it when the game closes or stops.
+- Keep it passive: no focus steal, focus trap, pointer interception or input blocking.
+  Reset and Pause must remain reachable.
+
+`DEFAULT_DEATH_SCREEN` centres the project's text over a restrained dark scrim. One paused
+Web Animation follows the engine's clock; it requests no frames of its own. A persistent
+polite, atomic live region announces once on a subsequent visible frame, and cancellation
+clears pending speech. Reduced motion reveals the text at once.
+
+### Death animation
+
+`DEATH_ANIMATION`, the slot `scene.death-animation`, holds a pure numeric
+`DeathAnimationWriter`, `(frame, out) => void`:
+
+```ts
+interface DeathAnimationInput extends DeathFrame {
+  readonly character: CharacterRiggingType;
+  readonly direction: -1 | 1; // tool side at entry; +1 when centred
+}
+interface DeathAnimationPose {
+  torsoLean: number;        // radian offset, −π/2 to π/2
+  headPitch: number;        // radian offset, −π/2 to π/2
+  spriteBrightness: number; // 0–1 colour multiplier, not opacity
+}
+```
+
+Write all three outputs on every call; the engine initialises them to invalid sentinels
+and checks each written pose. The input and output are reused; allocate nothing and keep
+no frame history in the writer. It sees no scene, physics world, material or renderer.
+It runs only while dying. Angles apply to the captured live torso/head pose before arms
+are solved; pot and tool keep their physics transforms and the arms keep `ARM_LAYER`.
+
+`DEFAULT_DEATH_ANIMATION` eases a 3D body's 20° lean toward the tool and a 35° head nod
+over 0.65 s. Built-in and imported avatars and Mesh parts use those offsets. 2D sprites
+instead dim to 45% brightness while holding their last directional, skeletal and flipbook
+pose: this is not an authored skeletal death clip. Runtime materials cache their original
+colours once and restore them on placement; saved art never changes. Imported rigs also
+receive [`deathWeight`](kinds-plugins.md#rig-strategies) in both phases, so a game's rig
+can adapt its arms independently. The standard rig retains its grips.
+
+For example, soften the nod while retaining the default screen, and report the death kind
+without replacing its drawing:
+
+```ts
+import {
+  DEFAULT_DEATH_ANIMATION, DEATH_ANIMATION, DEATH_SCREEN, defineRuntime, replace, wrap,
+} from '../../src/plugins/runtime-sdk';
+
+export default defineRuntime({
+  start(host) {
+    return [
+      replace(DEATH_ANIMATION, (frame, out) => {
+        DEFAULT_DEATH_ANIMATION(frame, out);
+        out.headPitch *= 0.5;
+      }),
+      wrap(DEATH_SCREEN, previous => mount => {
+        const screen = previous(mount);
+        return {
+          show(info, settings) {
+            screen.show(info, settings);
+            host.notice(info.kind === 'fall' ? 'Fell out of the level.' : 'Health ran out.');
+          },
+          update: frame => screen.update(frame),
+          clear: () => screen.clear(),
+          dispose: () => screen.dispose(),
+        };
+      }),
+    ];
+  },
+});
+```
+
+Both points require functions, and the screen's result requires all four methods.
+Every method and writer finishes synchronously: promise-like results are
+`PluginError('invalid-contribution')`. Missing, non-finite or out-of-range pose outputs
+are the same refusal, never clamped or replaced with defaults. Throws are `plugin-failed`
+with their cause; matching typed errors retain their code. All failures name the owner
+and point, including wrappers.
 
 ## Enemy looks
 
@@ -862,8 +1019,8 @@ interface GameObserver {
 | `type` | Additional fields and meaning |
 | --- | --- |
 | `hurt` | `health`, `max`: the simulation's remaining health and maximum after a nonlethal hurt in the step batch, independent of whether the HUD shows health; `cause`: what dealt the hit, a [`HurtCause`](#hurt-effects) with its `source` (`enemy`, `projectile`, `axe` or `lava`), the `id` of the level object that dealt it, where it struck (`x`, `y`) and the velocity it knocked the player with (`pushX`, `pushY`) |
-| `death` | Health ran out; `cause`: what dealt the killing hit, as for `hurt` |
-| `fall` | The player fell out of the level; takes precedence over death if both occur in the same step |
+| `death` | The health death sequence started; `cause`: what dealt the killing hit, as for `hurt` |
+| `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
 | `respawn` | `bonfire`: the checkpoint's ID, or `null` when the automatic reset path returns to the attempt's start |
 | `restart` | A new attempt: Reset, a rebuilt rig or a replacement level, not a checkpoint return |
 | `bonfire` | `id`: a newly reached checkpoint, including a previously lit bonfire other than the current checkpoint |
@@ -881,6 +1038,11 @@ with its bonfire ID; its timer and attempt continue. Messages and videos keep th
 [presentation contracts](#messages); they are not additional `GameEvent` variants. Cue previews
 do not notify observers.
 
+`death`/`fall` arrive at sequence entry, not placement. `restart`/`respawn` arrive only
+after its `fadeIn + hold` wait and placement. An explicit cancellation such as Reset emits
+the ordinary `restart`, never an automatic `respawn`. A simultaneous killing hit and fall
+still stages fatal hurt effects, but only the `fall` gameplay event and cue.
+
 **Schedule and ownership.** The Game stages notifications in reusable storage while its
 physics-step loop runs. After the loop, and before rendering, it flushes:
 
@@ -895,7 +1057,10 @@ Terrain changes stay synchronous and engine-only. No look, audio output, gamepla
 input device runs inside `Simulation.step` or a physics callback. Notifications from asynchronous
 trigger continuations or a reset between frames join the next flush, even while paused.
 Notifications raised by delivery callbacks join the following flush, not the batch being
-delivered. Pools grow only when a burst exceeds their previous high-water capacity.
+delivered. Hurt notices carry their placement: superseded notices cannot ignite a newly
+placed character, and its clear is applied before drawing even when a delivery callback
+resets again. Started world-anchored bursts can still finish. Pools grow only when a burst
+exceeds their previous high-water capacity.
 
 Events are **read-only borrowed objects, reused by the engine**. Read them only during
 `event`; never retain one or compare it with an event from an earlier call. Save scalar fields
@@ -1053,6 +1218,8 @@ The three independent slots are `MESSAGES.toasts` (`messages.toasts`), `MESSAGES
 (`messages.popup`) and `MESSAGES.video` (`messages.video`). The project's message style still
 chooses toasts or popups. The Workshop still skips trigger videos; releases and studio previews
 play them. All three points resolve once per session, even when that policy skips videos.
+The separate [`DEATH_SCREEN`](#death-screen) slot, `messages.death`, presents the engine's
+death sequence without modal ownership.
 
 ### Toasts
 
@@ -1074,8 +1241,9 @@ interface Toasts {
   The engine reports that as an event failure; any non-boolean result is `invalid-contribution`,
   naming the plugin. A toast never pauses play, takes input or holds up a trigger's next event.
 - `clear` starts a new run: drop waiting messages and dismiss the one showing.
-- `setHeld(true)` holds the toast while a popup or video owns the player's attention; `false`
-  resumes it. The engine owns this hold regardless of which modal presenter is chosen.
+- `setHeld(true)` holds the toast while a popup, video or death owns the player's attention;
+  `false` resumes it only after every hold releases. The engine owns this hold regardless
+  of which presenters are chosen.
 - `dispose` cancels animation, removes owned nodes and releases listeners when the Game closes.
   `inspect`, optional, supplies the `toasts` field of the Workshop's presentation diagnostics.
 
@@ -1137,9 +1305,10 @@ Defaults and replacements do work only while presenting; do not add an idle anim
 factory, the engine's own or an earlier plugin's, and returns the factory the game uses. The
 previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS`,
 `DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP`, `DEFAULT_AIM_MARKS`,
-`DEFAULT_HURT_EFFECTS` and `DEFAULT_CHARACTER_CHOICE` are the engine's own factories, the points' bases, for a plugin that replaces
-a point but draws the engine's part inside its own. Forward every contract method explicitly when wrapping an
-instance; its methods may live on a prototype, so spreading it does not copy them.
+`DEFAULT_HURT_EFFECTS`, `DEFAULT_DEATH_SCREEN` and `DEFAULT_CHARACTER_CHOICE` are the engine's
+own factories, the points' bases, for a plugin that replaces a point but draws the engine's
+part inside its own. Forward every contract method explicitly when wrapping an instance;
+its methods may live on a prototype, so spreading it does not copy them.
 Feature-gated defaults, such as audio and phantom drawing, are not SDK exports: extend them with `wrap`.
 
 The engine's health readout, flashing whenever the player is hurt:
@@ -1181,13 +1350,17 @@ see [order and conflicts](plugins.md#order-and-conflicts).
 - A `start` that throws fails with `plugin-failed`, naming the plugin, and the plugins that
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
-- Points reject non-function factories. Creating a readout, director, backdrop, marks, hurt
-  effects, look, layer, audio output, toast presenter, character choice, gameplay observer or input device
+- Points reject non-function factories or writers. Creating a readout, director, backdrop, marks,
+  hurt effects, death screen, look, layer, audio output, toast presenter, character choice,
+  gameplay observer or input device
   checks the returned object's required and optional methods and, where applicable, roots
   and passes. A factory, or a wrap, that throws fails with `plugin-failed`; a malformed return
   fails with `invalid-contribution`. Each names the plugin and point, including the contributor
   of an extra readout or other list item. A director that writes a non-finite aim or a
   non-positive height also fails explicitly.
+- A death screen's methods and a death-animation writer must finish synchronously.
+  Malformed poses and promise-like results fail with `invalid-contribution`; throws
+  are `plugin-failed`, with the owner and point. No invalid output is clamped or masked.
 - Key bindings must be a lowercase-key record of the three bindable actions. An observer's
   `event` and a device's `poll` must complete synchronously, without a promise-like return;
   a device must add finite movement. Violations fail with `invalid-contribution`, naming

@@ -34,6 +34,7 @@ import { LiquidWorld } from './liquid-world';
 import type { HealthReading } from './health-meter';
 import { PlatformWorld } from './platform-world';
 import type { PlatformPose } from './platform-world';
+import type { DeathKind } from './death-sequence';
 
 export interface PartPose extends Point {
   id: string;
@@ -112,6 +113,7 @@ export class Simulation {
   private readonly cause: { -readonly [K in keyof HurtCause]: HurtCause[K] } = { source: 'enemy', id: '', x: 0, y: 0, pushX: 0, pushY: 0 };
   // How many times the player has been placed: at every restart and every return to a bonfire.
   private placements = 0;
+  private dying = false;
   private disposed = false;
   private voidY: number | null;
   private supported = false;
@@ -141,7 +143,7 @@ export class Simulation {
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
-      getHeadFixture: () => this.rig.tool.head.fixture,
+      getHeadFixture: () => this.dying ? null : this.rig.tool.head.fixture,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       onBump: (delta, enemy, atX, atY) => {
@@ -204,7 +206,7 @@ export class Simulation {
       this.rig = { ...this.rig, geometry: rigGeometry(next.rig) };
       this.applyHead();
     }
-    if (next.cursor.maxTargetRadius !== previous.cursor.maxTargetRadius || next.cursor.deadZone !== previous.cursor.deadZone) {
+    if (!this.dying && (next.cursor.maxTargetRadius !== previous.cursor.maxTargetRadius || next.cursor.deadZone !== previous.cursor.deadZone)) {
       // A smaller radius pulls the target straight in; the cursor keeps to its dead zone.
       this.aim = limitAim(this.aim, next.cursor.maxTargetRadius, next.cursor.deadZone);
       this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
@@ -313,6 +315,19 @@ export class Simulation {
     return this.health <= 0;
   }
 
+  terminal(): DeathKind | null {
+    if (this.fellOutOfLevel()) return 'fall';
+    return this.dead() ? 'health' : null;
+  }
+
+  // The world carries on, but the player's hinge-relative aim and health stay where death left them.
+  beginDeath(): void {
+    this.ensureLive();
+    this.dying = true;
+    this.hurtTaken = false;
+    this.impactSpeed = 0;
+  }
+
   // The simulation's health, independent of HUD visibility. Reused and read-only: consume immediately, never retain it.
   readHealth(): HealthReading {
     this.ensureLive();
@@ -391,7 +406,7 @@ export class Simulation {
     }
     this.previous = this.current;
     let swinging = false;
-    if (pointerDelta.x !== 0 || pointerDelta.y !== 0) {
+    if (!this.dying && (pointerDelta.x !== 0 || pointerDelta.y !== 0)) {
       if (!Number.isFinite(this.aim.cursor.x + pointerDelta.x) || !Number.isFinite(this.aim.cursor.y + pointerDelta.y)) {
         throw new Error('Pointer target must remain finite.');
       }
@@ -400,7 +415,7 @@ export class Simulation {
       this.lastAimInput = this.elapsed;
       // Input that lowers the target swings the hammer down.
       swinging = this.aim.target.y < previousY;
-    } else if (this.returning()) {
+    } else if (!this.dying && this.returning()) {
       const { returnRate, returnOffsetX, returnOffsetY, maxTargetRadius } = this.settings.cursor;
       const origin = this.cursorOrigin(this.rig.root.getPosition());
       const tip = partPoint(this.rig.tool.head, this.headPoint);
@@ -412,7 +427,7 @@ export class Simulation {
     );
     this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
     const bath = this.liquids.push(this.rig, this.settings.physics);
-    const velocity = this.impactTracking ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
+    const velocity = this.impactTracking && !this.dying ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
     const approachX = velocity?.x ?? 0;
     const approachY = velocity?.y ?? 0;
     // Planck moves the body's own position vector, so keep where the root was.
@@ -421,9 +436,9 @@ export class Simulation {
     this.platforms.beforeStep();
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
     this.platforms.afterStep();
-    this.lagCharacter(rootX, rootY);
+    if (!this.dying) this.lagCharacter(rootX, rootY);
     if (!this.supported) this.detectSupport();
-    if (this.impactTracking) {
+    if (this.impactTracking && !this.dying) {
       const touching = this.headContactCount() > 0;
       if (touching && !this.headTouching) this.impactSpeed = Math.max(this.impactSpeed, Math.hypot(approachX, approachY));
       this.headTouching = touching;
@@ -437,9 +452,11 @@ export class Simulation {
       const root = this.rig.root.getPosition();
       this.hurt(this.settings.physics.lavaDamage, 'lava', bath.id, root.x, root.y, 0, 0);
     }
-    const foot = this.playerPosition();
-    this.bonfires.update(foot);
-    this.bestHeight = Math.max(this.bestHeight, foot.y);
+    if (!this.dying && this.terminal() === null) {
+      const foot = this.playerPosition();
+      this.bonfires.update(foot);
+      this.bestHeight = Math.max(this.bestHeight, foot.y);
+    }
     this.current = this.capture();
   }
 
@@ -588,6 +605,7 @@ export class Simulation {
     this.impactSpeed = 0;
     this.health = this.settings.physics.health;
     this.hurtTaken = false;
+    this.dying = false;
     this.placements++;
     this.aim = this.initialAim();
     this.lastAimInput = this.elapsed;
@@ -597,7 +615,7 @@ export class Simulation {
   }
 
   private vulnerable(): boolean {
-    return this.health > 0 && this.elapsed >= this.safeUntil;
+    return !this.dying && this.health > 0 && this.elapsed >= this.safeUntil;
   }
 
   // Takes `damage` from the player's health, dealt by the level object `id` striking at (x, y) and knocking the player

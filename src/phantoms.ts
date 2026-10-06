@@ -209,13 +209,16 @@ export function startPhantoms(options: {
       return;
     }
   };
-  const unobserve = game.observeSteps(() => {
-    const { simulation } = game;
-    simulation.rigPose(pose);
-    recorder?.step(simulation.placement, pose, simulation.rigGeometry.handleLength);
-    for (const ask of sources) ask();
-    untilStart--;
-    if (untilStart <= 0 && waiting.length > 0 && playback.playing < PHANTOM_TIMING.figures) startNext();
+  const unobserve = game.observeSteps({
+    step() {
+      const { simulation } = game;
+      simulation.rigPose(pose);
+      recorder?.step(simulation.placement, pose, simulation.rigGeometry.handleLength);
+      for (const ask of sources) ask();
+      untilStart--;
+      if (untilStart <= 0 && waiting.length > 0 && playback.playing < PHANTOM_TIMING.figures) startNext();
+    },
+    interrupt() { recorder?.interrupt(); },
   });
   return {
     dispose() {

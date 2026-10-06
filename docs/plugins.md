@@ -61,7 +61,7 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | Facet | Runs in | SDK | For | Virtual module |
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
-| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, hurt effects, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
+| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, hurt effects, death animation and screen, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
 | `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
@@ -218,13 +218,13 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | `reserved-plugin` | A plugin is named `engine` |
 | `invalid-facet` | A facet's default export has the wrong shape; a build refused a facet file its boundary forbids; a build was asked for a virtual module it does not serve |
 | `unknown-point` | A contribution names a point its environment does not have |
-| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a built-in or extra readout, look, camera director, backdrop, aim marks, hurt effects, scene layer, audio output, toasts, character choice view, notices, fatal display, gameplay observer or input device; a character choice view selected a non-integer index or an index outside its labels; input bindings are malformed or a device action is not bindable; an observer's `event` or a device's `poll` returned a promise-like value, or a device added non-finite movement; a message presenter returned a non-promise or invalid outcome; or a toast's show or hurt effects' update returned a non-boolean |
+| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a built-in or extra readout, look, camera director, backdrop, aim marks, hurt effects, death screen, scene layer, audio output, toasts, character choice view, notices, fatal display, gameplay observer or input device; a character choice view selected a non-integer index or an index outside its labels; input bindings are malformed or a device action is not bindable; an observer's `event`, a device's `poll`, a death-screen method or death-animation writer returned a promise-like value, a device added non-finite movement, or a death writer omitted an output or wrote a non-finite/out-of-range pose; a message presenter returned a non-promise or invalid outcome; or a toast's show or hurt effects' update returned a non-boolean |
 | `duplicate-contribution` | A plugin contributes to one point twice |
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
 | `foreign-namespace` | A keyed item is not named `<plugin>/<name>` under its own plugin |
 | `too-many` | A point holds more items than its limit, or a session more than 32 plugins |
-| `plugin-failed` | A plugin's own code threw: a `start`, a wrap, a factory, a release callback or a Workshop plugin; a gameplay observer's `event` or `dispose`; an input device's `poll`, `dispose` or `host.action`; the audio output's `handle`; the enemy look's `apply`, the bonfire look's `setLit`, or the hurt effects' `hurt` or `clear` |
+| `plugin-failed` | A plugin's own code threw: a `start`, a wrap, a factory, a release callback or a Workshop plugin; a gameplay observer's `event` or `dispose`; an input device's `poll`, `dispose` or `host.action`; the audio output's `handle`; the enemy look's `apply`, the bonfire look's `setLit`, the hurt effects' `hurt` or `clear`, a death-screen method or a death-animation writer |
 | `plugin-stopped` | A stopped Workshop plugin's host, or a closed release session, refused a call |
 
 A plugin may refuse with codes of its own, as a Workshop plugin's `validate` does for its data:
@@ -389,6 +389,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`scene.backdrop`](runtime-plugins.md#backdrop) | `BACKDROP` | `runtime` | Slot, `BackdropFactory` | `DEFAULT_BACKDROP` |
 | [`scene.aim-marks`](runtime-plugins.md#aim-marks) | `AIM_MARKS` | `runtime` | Slot, `AimMarksFactory` | `DEFAULT_AIM_MARKS` |
 | [`scene.hurt-effects`](runtime-plugins.md#hurt-effects) | `HURT_EFFECTS` | `runtime` | Slot, `HurtEffectsFactory` | `DEFAULT_HURT_EFFECTS` |
+| [`scene.death-animation`](runtime-plugins.md#death-animation) | `DEATH_ANIMATION` | `runtime` | Slot, `DeathAnimationWriter` | `DEFAULT_DEATH_ANIMATION` |
 | [`looks.enemies`](runtime-plugins.md#enemy-looks) | `LOOKS.enemies` | `runtime` | Slot, `EnemyLookFactory` | `DEFAULT_LOOKS.enemies` |
 | [`looks.phantoms`](runtime-plugins.md#phantom-looks) | `LOOKS.phantoms` | `runtime` | Slot, `PhantomLookFactory` | `DEFAULT_PHANTOM_LOOK` |
 | [`scene.layers`](runtime-plugins.md#scene-layers) | `SCENE_LAYERS` | `runtime` | List, 32 `SceneLayerFactory` | None |
@@ -396,6 +397,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`messages.toasts`](runtime-plugins.md#messages) | `MESSAGES.toasts` | `runtime` | Slot, `ToastsFactory` | `DEFAULT_MESSAGE_TOASTS` |
 | [`messages.popup`](runtime-plugins.md#messages) | `MESSAGES.popup` | `runtime` | Slot, `PopupPresenter` | `DEFAULT_MESSAGE_POPUP` |
 | [`messages.video`](runtime-plugins.md#messages) | `MESSAGES.video` | `runtime` | Slot, `VideoPresenter` | `DEFAULT_MESSAGE_VIDEO` |
+| [`messages.death`](runtime-plugins.md#death-screen) | `DEATH_SCREEN` | `runtime` | Slot, `DeathScreenFactory` | `DEFAULT_DEATH_SCREEN` |
 | [`game.events`](runtime-plugins.md#gameplay-events) | `EVENTS` | `runtime` | List, 32 `GameObserverFactory` | None |
 | [`input.bindings`](runtime-plugins.md#input) | `INPUT_BINDINGS` | `runtime` | Slot, frozen `InputBindings` | `DEFAULT_INPUT_BINDINGS`: r / p / Space / c |
 | [`input.devices`](runtime-plugins.md#input) | `INPUT_DEVICES` | `runtime` | List, 32 `InputDeviceFactory` | None; pointer input remains built in |

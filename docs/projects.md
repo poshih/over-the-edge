@@ -6,6 +6,9 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
+Project manifests and bundles use **schema 12**; their release content uses **schema 11**.
+Both require the HUD's death text and timing. Other versions are rejected, not converted.
+
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
 - `GAME_PROJECT=<project> npm run build:game` builds any project into a
   standalone, editor-free release.
@@ -40,7 +43,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
 | `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
 | `theme` | `project.json` | Sky, fog, exposure, camera, lights, sun disc, backdrop, aim marker, procedural character colours |
-| `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, in Workshop play-tests and releases; how trigger messages appear |
+| `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, in Workshop play-tests and releases; how trigger messages appear, and death text/fade/hold |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the course look, the GLB meshes terrain places and the GLBs replacing decoration models |
@@ -73,7 +76,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
@@ -91,7 +94,8 @@ The paths are fixed, so a manifest only says which files exist:
   "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club", "head": [{ "x": -0.1, "y": -0.2 }, "..."] }], "pot": [] },
   "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30 }, "...": "..." },
   "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
-           "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" } },
+           "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" },
+           "death": { "text": "You are dead...", "fadeIn": 1.5, "hold": 2.5 } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
   "enemies": { "bird": { "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null },
   "media": [{ "path": "/media/cavern-loop.wav" }],
@@ -109,7 +113,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 7, "labels": [], "objects": [] },
@@ -522,6 +526,15 @@ appear, in the Workshop and in releases: `toast` (the default) fades each messag
 and away as play goes on; `popup` pauses the game until the player continues. See
 [trigger events](../README.md#trigger-objects-and-events). The default readout is
 exactly the original one.
+
+`death.text` is single-line text of 1-64 characters, **“You are dead...”** by default.
+`death.fadeIn` is 0.1-5 seconds (default 1.5) and `death.hold` is 0.5-10 seconds
+(default 2.5), both with 0.1-second slider steps in **Project / HUD**. Health deaths
+and falls show the [death sequence](runtime-plugins.md#death-sequence) for their sum
+before placement. The world and run timer keep going; Pause and a hidden tab hold the
+clock. An active death keeps the values it started with. A runtime facet can replace
+the screen and character death animation independently; timing and wording remain
+project content.
 
 **Audio.** `volume` (master) and each clip's `volume` are 0-1. `music` loops while
 the game runs and pauses with it. Cues: `impact` (hammer strikes, louder when

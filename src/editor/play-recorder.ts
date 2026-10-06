@@ -21,7 +21,8 @@ function sessionId(): string {
  * clips up to the longest a recording may be, each starting with the previous one's last pose, so a run replays as
  * one. A restart, or a return to a bonfire, starts the next session. A clip also ends when the handle length changes,
  * the level or settings stop being that version or recording turns off; one shorter than a second, or in which the
- * player hardly moved, is dropped. Clips upload as they end, on the game's steps, so pauses record nothing.
+ * player hardly moved, is dropped. Death ends its alive-only clip and session before the terminal sample.
+ * Clips upload as they end, on the game's live steps, so pauses and the death sequence record nothing.
  */
 export class PlayRecorder {
   private readonly game: Game;
@@ -54,7 +55,7 @@ export class PlayRecorder {
     this.target = options.target;
     this.upload = options.upload;
     this.onFailure = options.onFailure;
-    this.unobserve = options.game.observeSteps(() => this.step());
+    this.unobserve = options.game.observeSteps({ step: () => this.step(), interrupt: () => this.interrupt() });
   }
 
   // Whether a clip is being captured.
@@ -74,6 +75,11 @@ export class PlayRecorder {
   dispose(): void {
     this.unobserve();
     this.end();
+  }
+
+  private interrupt(): void {
+    this.end();
+    this.session = null;
   }
 
   private step(): void {

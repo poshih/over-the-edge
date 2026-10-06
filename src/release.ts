@@ -240,7 +240,7 @@ export class Release {
       canvas: this.canvas, onFatal: (message) => this.fatalDisplay.show(message),
       eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
-      theme: manifest.theme, enemyArt: manifest.enemies, messageStyle: manifest.hud.messages.style,
+      theme: manifest.theme, enemyArt: manifest.enemies, hud: manifest.hud,
       onCue: receivesCues ? (cue) => audio.handle(cue) : undefined,
       onPauseChange: receivesCues ? (paused) => audio.setPaused(paused) : undefined,
       onAction: (action, options) => game.perform(action, options),

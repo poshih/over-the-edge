@@ -527,6 +527,14 @@ copy of that side's frame plan about the hand's grip after phase 1: its `offset`
 `forward` all turn, so the arms reach the turned wrist and phase 2 receives the turned plan. The
 plan phase 1 wrote is never rewritten.
 
+Both phase contexts include `deathWeight`: 0 while alive, increasing linearly to 1 over
+0.65 s during death, or 1 immediately for reduced motion. A strategy can use it to change
+its arms; the standard strategy keeps the hands on their grips. The runtime
+[`death-animation` point](runtime-plugins.md#death-animation) supplies the captured
+torso/head offsets before arms are solved, shared by built-in and imported avatars and
+Mesh parts. Its 2D default holds the last sprite pose and dims runtime materials, rather
+than inventing a skeletal death clip. Placement clears both the pose and the tint.
+
 The same registry is used by every check: importing or opening a project, the project server's
 writes, packaging a release and the running release, so a driver or motion is accepted or rejected
 identically everywhere. Node builds it once, when the dev server, build or project server starts,

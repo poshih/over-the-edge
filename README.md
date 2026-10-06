@@ -78,6 +78,8 @@ the release bundles two character profiles. The project's
 [HUD settings](docs/projects.md#section-reference) choose whether the height and timer
 show, health shows in levels where something can hurt the player, and a game's runtime
 plugin can replace any readout; see [HUD readouts](docs/runtime-plugins.md#hud-readouts).
+The HUD settings also author the death message and its fade/hold timing, shared by
+Workshop play-tests and releases.
 On-screen Play/Pause/Reset, peak height, branding, and help remain in the editor build,
 not the release.
 
@@ -102,7 +104,8 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
 - **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
-  aim marks, hurt effects, object, enemy and phantom looks, scene layers, audio, message presentation,
+  aim marks, hurt effects, death animation and screen, object, enemy and phantom looks,
+  scene layers, audio, message presentation,
   gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
   studio previews and releases; character choice in releases and studio previews;
 - **release**, notices, fatal errors and release-only services: a game whose content only some players may load signs
@@ -245,6 +248,8 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
+Project manifests and bundles use **schema 12**, and release content **schema 11**,
+including the required HUD death text and timing; other versions are rejected.
 
 ### Included full-length course
 
@@ -296,7 +301,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus death animation and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -860,17 +865,28 @@ enemies, traps or lava show no health.
 
 Choose **Workshop / Level / Bonfire**, then click/tap: its base rests on the terrain top
 under the pointer. A bonfire lights when the player's foot comes within **1.5 m** of its
-base, and the one reached last is where a death returns the player. A death, health
-running out or a fall out of the level, brings the player back at that bonfire, healed
-and unharmed for **2 s**, holding the hammer as at the level's start. The run goes on:
-its clock, best height, triggers, enemies and illusions stay as they were. Before any
+base, and the one reached last is where a death returns the player. Health running out
+or a fall out of the level starts a death animation: 3D characters slump and nod, and
+2D sprites hold their pose and dim. **“You are dead...”** slowly fades in over **1.5 s**
+and stays for **2.5 s** before the player returns. Author its text and timing in
+**Workshop / Project / HUD**. The world and run timer (unless stopped) keep going while the dead player
+has frozen aim, takes no damage, hits no enemies, lights no bonfires and gains no best
+height. Outstanding trigger runs cancel and pressure switches release. Pause and a
+hidden tab hold the sequence; movement is discarded, but Reset and other controls remain.
+
+After the wait the player returns at that bonfire, healed and unharmed for **2 s**,
+holding the hammer as at the level's start. The run goes on: its clock, best height,
+consumed once-triggers and level state carry on. Before any
 bonfire is reached, a death restarts the attempt exactly like Reset; Reset always
 restarts from the start and puts every bonfire out. Bonfires never collide; they stand on
 the obstacle line, behind the player.
 
 Health, lit bonfires and deaths are runtime state: saves and exports keep only the
 authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/projects.md)
-sound them, and a [phantom](docs/phantoms.md) session ends at a death as at a restart. A
+sound them; death/fall arrive at entry, respawn after placement. Both
+[phantom recorders](docs/phantoms.md) stop before the fatal sample: no corpse movement,
+teleport or placement pose becomes a phantom. Reset, replacement, Workshop placement and
+entering Level editing cancel the sequence; incremental edits apply while it continues. A
 game's runtime plugin can draw the [health readout](docs/runtime-plugins.md#hud-readouts) and
 [bonfires](docs/runtime-plugins.md#object-looks) its own way. Each hit says what dealt it, an
 enemy, a trap's projectile, an axe or lava, which level object did, where it struck and how hard
@@ -878,6 +894,8 @@ it knocked the player, so a game's [hurt effects](docs/runtime-plugins.md#hurt-e
 its own effect for each and its [gameplay observers](docs/runtime-plugins.md#gameplay-events) can
 tell them apart. The engine's sets the character alight while lava burns it, and shows a blade's
 or a projectile's blow where it lands.
+Two independent runtime points replace the [death screen and animation](docs/runtime-plugins.md#death-sequence).
+Fatal lava keeps the corpse alight until placement clears it.
 
 ### Traps
 

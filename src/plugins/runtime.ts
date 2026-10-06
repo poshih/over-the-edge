@@ -5,6 +5,8 @@ import { CAMERA } from '../camera-director';
 import { BACKDROP } from '../backdrop';
 import { AIM_MARKS } from '../aim-marks';
 import { HURT_EFFECTS } from '../hurt-effects';
+import { DEATH_ANIMATION } from '../death-animation';
+import { DEATH_SCREEN } from '../death-screen';
 import { SCENE_LAYERS } from '../scene-layer';
 import { AUDIO } from '../game-audio';
 import { MESSAGES } from '../event-presenter';
@@ -26,7 +28,7 @@ export function defineRuntime<T extends RuntimeFacet>(facet: T): T { return face
 
 export const RUNTIME = Object.freeze([
   ...Object.values(HUD), CHARACTER_CHOICE, ...Object.values(LOOKS),
-  CAMERA, BACKDROP, AIM_MARKS, HURT_EFFECTS, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES),
+  CAMERA, BACKDROP, AIM_MARKS, HURT_EFFECTS, DEATH_ANIMATION, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES), DEATH_SCREEN,
   EVENTS, INPUT_BINDINGS, INPUT_DEVICES,
 ]);
 

@@ -441,6 +441,7 @@ export class EventPresenter {
   private readonly lifecycle = new AbortController();
   private media: MediaHost;
   private active: ActivePresentation | null = null;
+  private deathHeld = false;
   private disposed = false;
 
   constructor(options: EventPresenterOptions) {
@@ -454,9 +455,9 @@ export class EventPresenter {
     this.popupOwner = plugins.owner(MESSAGES.popup);
     this.videoOwner = plugins.owner(MESSAGES.video);
     this.toasts = createToasts(toasts, options.mount, this.toastsOwner);
-    // Toasts hold while a popup or video has the player's attention.
+    // Independent holds: a closing modal cannot release a death's hold.
     this.onModalChange = (state) => {
-      this.toasts.setHeld(state.active);
+      this.holdToasts(state.active || this.deathHeld);
       options.onModalChange(state);
     };
     this.media = options.media ?? urlMediaHost((source) => source);
@@ -464,6 +465,18 @@ export class EventPresenter {
 
   setMedia(media: MediaHost): void {
     this.media = media;
+  }
+
+  setDeathHeld(held: boolean): void {
+    if (this.deathHeld === held) return;
+    this.deathHeld = held;
+    this.holdToasts(held || this.active !== null);
+  }
+
+  private holdToasts(held: boolean): void {
+    try { this.toasts.setHeld(held); } catch (error) {
+      throw presentationFailure(error, MESSAGES.toasts.id, this.toastsOwner);
+    }
   }
 
   /** True while a full-window video presentation is covering the game view. */

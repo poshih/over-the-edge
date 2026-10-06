@@ -9,10 +9,11 @@ import { listPoint, PluginError } from './plugins/kernel';
 export type GameEvent =
   // A hit took health and the player survived it: what dealt it, and the health left.
   | { readonly type: 'hurt'; readonly health: number; readonly max: number; readonly cause: Readonly<HurtCause> }
-  // Health ran out: what dealt the killing hit.
+  // Health death sequence entry: what dealt the killing hit.
   | { readonly type: 'death'; readonly cause: Readonly<HurtCause> }
+  // Fall sequence entry, taking precedence when health also runs out in that step.
   | { readonly type: 'fall' }
-  // An automatic return after death/fall; null when the reset path returns to the attempt's start.
+  // Placement after the death/fall wait; null when the reset path returns to the attempt's start.
   | { readonly type: 'respawn'; readonly bonfire: string | null }
   // A new attempt, including Reset, a rebuilt rig or a replacement level; not a checkpoint return.
   | { readonly type: 'restart' }

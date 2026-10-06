@@ -11,13 +11,14 @@ import { VISUAL_PART_IDS } from '../src/character';
 import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
 import { CURSOR_FIELDS, CURSOR_RETURN_FIELDS, RIG_FIELDS, TUNING_FIELDS } from '../src/game-settings';
-import { HUD_FIELDS } from '../src/hud';
+import { DEFAULT_HUD, HUD_FIELDS } from '../src/hud';
+import { CONTENT_SCHEMA_VERSION } from '../src/content';
 import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, PLATFORM_LIMITS, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
 import { BOARD_CELL } from '../src/level-board';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
 import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PLUGIN_DATA_LIMITS } from '../src/plugin-data';
-import { PROJECT_FILES, PROJECT_LIMITS } from '../src/project';
+import { PROJECT_FILES, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION } from '../src/project';
 import { SHARED_FORMATS, SHARED_KINDS, SHARED_NAME_LIMIT } from '../src/shared-copies';
 import type { SharedKind } from '../src/shared-copies';
 import { HAMMER_HEAD_LIMITS } from '../src/hammer-head';
@@ -95,6 +96,8 @@ export function apiManual(auth: 'token' | 'loopback') {
       kinds: Object.fromEntries(SHARED_KINDS.map((kind) => [kind, { maxBytes: SHARED_FORMATS[kind].maxBytes, value: SHARED_VALUES[kind] }])),
     },
     project: {
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      contentSchemaVersion: CONTENT_SCHEMA_VERSION,
       files: PROJECT_FILES,
       layout: 'project.json (manifest), level.json, characters/primary.json and characters/alternate.json (character profiles), art/<assetId>.glb, appearance/<part>.glb, media/<file>; beside them the level\'s history, which replacing the project keeps: level-versions/ and phantoms/<course>/.',
       limits: PROJECT_LIMITS,
@@ -104,7 +107,7 @@ export function apiManual(auth: 'token' | 'loopback') {
         + 'Every answer about revisions (section changes, GET revision, GET project, bundles) carries "level": { "version", "course" }, null while the stored level is invalid; GET level answers with X-Level-Version and X-Level-Course headers.',
       course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, bonfires, traps and liquid pools, the updrafts (triggers that launch the player) and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig; not the cursor. '
         + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level and settings\' course.',
-      phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records play on the version it plays, one session per run, in consecutive clips.',
+      phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records alive play on the version it plays, one session per run, in consecutive clips. Death ends the clip and session before the terminal step; dying movement, teleport and placement poses are never sampled.',
     },
     sections: {
       title: { value: 'string, 1-80 characters', description: 'Game title: browser tab and release name.' },
@@ -134,7 +137,7 @@ export function apiManual(auth: 'token' | 'loopback') {
           platform: { kind: 'platform', id: 'lift-1', x: 8, y: 4, travelX: 0, travelY: 6, width: 3, height: 0.4, depth: 2, speed: 1.5, surface: SURFACES.join(' | ') },
         },
         hazards: 'A bonfire (x, y: the centre of its base on the ground) lights when the player\'s foot comes within '
-          + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, brings the player back at the one reached last, the run going on, or restarts the run before any. `
+          + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, first animates the character and shows hud.death.text over hud.death.fadeIn + hud.death.hold seconds of physics time. The world and timer (unless stopped) carry on but the player's aim is frozen, it takes no damage, hits no enemies and lights no bonfires; Reset stays available, and Pause and a hidden tab hold the sequence. It then brings the player back at the one reached last, the run going on, or restarts the run before any. `
           + 'A shooter fires a projectile from its muzzle (x, y) along angle (radians, 0 = +x). Firing "timer" shoots at delay and every interval seconds of run time after; '
           + 'firing "trigger" shoots only bursts from trigger events, using delay after the trigger and interval between burst shots. '
           + `Shots require the player within ${SHOOTER.range} m; projectiles fly straight up to that far and stop on terrain, platforms or the hammer head. `
@@ -197,7 +200,11 @@ export function apiManual(auth: 'token' | 'loopback') {
         notes: 'IDs use lowercase letters, digits and inner hyphens. An avatar\'s boneMap maps the eight avatar joints to GLB joints; driver is { "id", "config" } naming the trusted rig strategy that interprets them ("standard" is the default); grips, arms and armForwardDistance follow the character profile format. A hammer\'s head is its own collision outline, in the settings\' rig.head format: it replaces the game\'s default head while that hammer is shown. A hammer uploaded without an entry starts with the game\'s default head.',
       },
       theme: { value: 'scene look', patch: true, fields: THEME_FIELDS },
-      hud: { value: 'game readout and trigger-message style', patch: true, fields: HUD_FIELDS },
+      hud: {
+        value: 'game readouts, trigger-message style and death text/timing', patch: true, fields: HUD_FIELDS,
+        deathDefault: DEFAULT_HUD.death,
+        description: 'death is { text, fadeIn, hold }; the engine waits fadeIn + hold seconds of dying physics steps before placement. An active sequence keeps its entry settings. Runtime points messages.death and scene.death-animation replace its presentation, not its clock.',
+      },
       audio: {
         value: '{ volume, music: { source, volume } | null, cues: { <cue>: { source, volume } | null } }',
         patch: true, volume: AUDIO_VOLUME,

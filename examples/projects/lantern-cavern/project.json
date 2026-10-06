@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -151,6 +151,11 @@
     },
     "messages": {
       "style": "toast"
+    },
+    "death": {
+      "text": "You are dead...",
+      "fadeIn": 1.5,
+      "hold": 2.5
     }
   },
   "audio": {

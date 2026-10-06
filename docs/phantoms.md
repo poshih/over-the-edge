@@ -18,9 +18,12 @@ Workshop records every run you play on a saved [level version](projects.md#level
 the open server project: its level together with its game settings. A pulsing red **REC**
 beside the game's controls shows when it is recording. Each run is a session of clips of up to
 10 seconds, each starting with the previous clip's last pose, so a run replays as one; a
-restart, Reset or death (a fall out of the level, or health running out) starts the next
-session. A clip also ends when the handle length
-changes, or the level or game settings stop being that saved version. Clips shorter than a
+restart or Reset starts the next session. Death (a fall out of the level, or health
+running out) closes the alive-only clip and session immediately, **before its terminal
+physics step is sampled**. The [death sequence](runtime-plugins.md#death-sequence), its
+teleport and the placement pose record nothing. A fresh session begins on the first
+subsequent live step, without copying the old session's last pose. A clip also ends when the
+handle length changes, or the level or game settings stop being that saved version. Clips shorter than a
 second, or in which the character moved less than 0.5 m and the hammer head less than 3 m, are
 dropped.
 
@@ -83,11 +86,15 @@ game in another browser or a private window: a player is never sent their own re
 **Recording.** Only a release with a backend records. After a random 5 to 30 seconds of play,
 the release records the next 10
 seconds, hands the recording to the backend, then waits another 30 to 90 seconds. A restart,
-or a death that returns the player to a bonfire, discards the recording in progress, and the
-next one starts 3 to 10 seconds later. A recording
+or any death, discards the recording in progress before the terminal sample, and the
+next one starts 3 to 10 seconds of live play later. Dying steps, the teleport and the
+placement pose are never sampled. A recording
 in which the character moved less than 0.5 m and the hammer head less than 3 m is not sent, and
 neither is one the format cannot hold, such as an endless fall past its ±4096 m range.
-Recording runs on the game's time, so pauses neither record nor count toward a wait.
+Recording runs on eligible live physics steps, so pauses and death neither record nor
+count toward a wait. Both recorders receive `Game.observeSteps({ step, interrupt })`:
+`step` only after a non-terminal, non-placement step, and `interrupt` at death entry.
+Placement checks remain the discontinuity guard for ordinary resets and rig changes.
 
 **Playback.** When play starts, and every 20 seconds while none are waiting, the release asks
 each source, its bundled packs and its backend, for up to 6 recordings near the player. It

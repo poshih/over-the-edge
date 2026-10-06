@@ -224,6 +224,14 @@ export class TriggerRuntime {
     this.previousTime = null;
   }
 
+  // Death ends outstanding runs and releases switches without rearming once-triggers or losing their history.
+  interrupt(): void {
+    this.ensureLive();
+    for (const record of this.records.values()) this.cancelRecord(record);
+    this.jump();
+    this.drain();
+  }
+
   reset(): void {
     this.ensureLive();
     for (const record of this.records.values()) {

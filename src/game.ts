@@ -13,9 +13,15 @@ import { clamp } from './math';
 import { Simulation } from './simulation';
 import { GameView } from './view';
 import { TriggerRuntime } from './triggers';
-import { DEFAULT_MESSAGE_STYLE, DEFAULT_VIDEO_PLAYBACK } from './trigger-events';
-import type { EventOutcome, MessageStyle, TriggerAction, VideoPlayback } from './trigger-events';
+import { DEFAULT_VIDEO_PLAYBACK } from './trigger-events';
+import type { EventOutcome, TriggerAction, VideoPlayback } from './trigger-events';
 import { EventPresenter } from './event-presenter';
+import { DEFAULT_HUD } from './hud';
+import type { HudSettings } from './hud';
+import { createDeathScreen } from './death-screen';
+import type { DeathScreen } from './death-screen';
+import { DEATH_POSE_SECONDS, DeathSequenceError } from './death-sequence';
+import type { DeathFrame, DeathInfo, DeathKind } from './death-sequence';
 import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
 import type { MediaHost } from './media-host';
@@ -44,6 +50,20 @@ import { Disposal } from './disposal';
 
 const IMPACT_INTERVAL = 0.07;
 
+export interface StepObserver {
+  step(): void;
+  interrupt(): void;
+}
+
+interface Dying {
+  readonly info: DeathInfo;
+  readonly duration: number;
+  readonly reducedMotion: boolean;
+  readonly placement: number;
+  elapsed: number;
+  previousElapsed: number;
+}
+
 function checkSynchronous(result: unknown, plugin: string, point: string, method: string): void {
   // A void callback may return an incidental value (for example Array.push's count). Only async work is invalid:
   // a promise would outlive the borrowed event or movement output, and the engine never awaits these callbacks.
@@ -60,6 +80,8 @@ export class Game {
   readonly input: PointerInput;
   readonly triggers: TriggerRuntime;
   private readonly presenter: EventPresenter;
+  private readonly deathScreen: DeathScreen;
+  private deathScreenDisposed = false;
   private readonly canvas: HTMLCanvasElement;
   private readonly onFatal: (message: string) => void;
   private readonly lifecycle = new AbortController();
@@ -76,6 +98,7 @@ export class Game {
   private readonly bonfirePlugin: string | null;
   private readonly switchPlugin: string | null;
   private readonly hurtPlugin: string | null;
+  private hurtPlacement: number;
   private readonly observers: Attributed<GameObserver>[] = [];
   private readonly devices: Attributed<InputDevice>[] = [];
   private readonly eventConsumers: boolean;
@@ -88,13 +111,17 @@ export class Game {
   private readonly previewCue: { type: 'cue'; cue: AudioCue; strength: number } = { type: 'cue', cue: 'impact', strength: 1 };
   private readonly pressedSwitches: string[] = [];
   private lastImpact = -Infinity;
-  private readonly stepObservers = new Set<() => void>();
+  private readonly stepObservers = new Set<StepObserver>();
   // Last phase of each enemy, so cues fire on hit and defeat transitions only.
   private readonly enemyPhases = new Map<string, EnemyPhase>();
   // The bonfire a death returns to, so its cue plays when another becomes it.
   private bonfire: string | null = null;
-  private readonly renderState: CharacterState & { dt: number } = { armIk: DEFAULT_ARM_IK, dt: 0 };
-  private messageStyle: MessageStyle;
+  private readonly renderState: CharacterState & { dt: number; death: DeathFrame | null } = { armIk: DEFAULT_ARM_IK, dt: 0, death: null };
+  private hud: HudSettings;
+  private death: Dying | null = null;
+  private readonly deathFrame: { -readonly [K in keyof DeathFrame]: DeathFrame[K] } = {
+    elapsed: 0, duration: 0, poseProgress: 0, reducedMotion: false,
+  };
   private readonly videos: VideoPlayback;
   private stopped = false;
   private disposed = false;
@@ -105,7 +132,7 @@ export class Game {
   private timerElapsed = 0;
   private timerRunning = true;
   private readonly hudFrame: { -readonly [K in keyof HudFrame]: HudFrame[K] } = {
-    height: 0, bestHeight: 0, elapsed: 0, timerRunning: true, health: null, paused: false,
+    height: 0, bestHeight: 0, elapsed: 0, timerRunning: true, health: null, death: null, paused: false,
     pointerLocked: false, inputMode: 'mouse',
   };
 
@@ -126,8 +153,7 @@ export class Game {
     enemyArt?: EnemyArtSettings;
     // Creates the decoration view, when the game draws decorations.
     decorations?: (() => DecorationView) | null;
-    // How message events appear; toasts by default.
-    messageStyle?: MessageStyle;
+    hud?: HudSettings;
     // Whether play-video events play or are skipped; they play by default. The Workshop skips them.
     videos?: VideoPlayback;
     // Streams authored video sources; by default sources are URLs.
@@ -151,7 +177,7 @@ export class Game {
     this.bonfirePlugin = options.plugins.owner(LOOKS.bonfire);
     this.switchPlugin = options.plugins.owner(LOOKS.switch);
     this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
-    this.messageStyle = options.messageStyle ?? DEFAULT_MESSAGE_STYLE;
+    this.hud = options.hud ?? DEFAULT_HUD;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     const listen = { signal: this.lifecycle.signal };
     window.addEventListener('error', (event) => this.stop(event.message), listen);
@@ -159,6 +185,7 @@ export class Game {
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     try {
       this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
+      this.hurtPlacement = this.simulation.placement;
       this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
         characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
         decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
@@ -176,6 +203,7 @@ export class Game {
           this.setInputBlock({ reason: 'event', blocked: active });
         },
       });
+      this.deathScreen = createDeathScreen(options.plugins, options.eventMount);
       this.triggers = new TriggerRuntime(options.level.objects.filter(isTriggerObject), {
         execute: (action, signal) => this.executeEvent(action, signal),
         onFailure: ({ triggerId, eventIndex, message }) => options.onNotice(`Trigger "${triggerId}", event ${eventIndex + 1}: ${message}`),
@@ -231,6 +259,7 @@ export class Game {
       document.addEventListener('visibilitychange', () => {
         this.accumulator = 0;
         this.previousTime = performance.now();
+        this.settleDeathClock();
         this.clearMovement();
       }, listen);
       // Seed the looks before the first frame. There are no boot gameplay events.
@@ -264,65 +293,77 @@ export class Game {
         const steps = Math.min(Math.floor(this.accumulator / PHYSICS.dt), PHYSICS.maxFrameSteps);
         if (steps > 0) {
           const perStep = this.stepMovement;
-          this.view.pointerDelta(this.input.takeMovement(), this.settings().physics.mouseSensitivity, this.input.mode, perStep);
-          if (hasDevices && this.inputBlocks.size === 0) {
-            perStep.x += this.deviceMovement.x;
-            perStep.y += this.deviceMovement.y;
+          if (this.death === null) {
+            this.view.pointerDelta(this.input.takeMovement(), this.settings().physics.mouseSensitivity, this.input.mode, perStep);
+            if (hasDevices && this.inputBlocks.size === 0) {
+              perStep.x += this.deviceMovement.x;
+              perStep.y += this.deviceMovement.y;
+            }
+            perStep.x /= steps;
+            perStep.y /= steps;
+          } else {
+            this.clearMovement();
+            perStep.x = perStep.y = 0;
           }
-          perStep.x /= steps;
-          perStep.y /= steps;
           let completed = 0;
-          let placed = false;
+          let interrupted = false;
           for (; completed < steps;) {
+            const placement = this.simulation.placement;
+            const dying = this.death;
             this.simulation.step(perStep);
             if (this.timerRunning) this.timerElapsed += PHYSICS.dt;
             completed++;
-            this.triggers.update(this.simulation.playerPosition(), this.simulation.time);
-            this.stageSwitches();
-            if (this.stopped) return;
-            for (const observer of this.stepObservers) observer();
-            const fell = this.simulation.fellOutOfLevel();
-            if (fell || this.simulation.dead()) {
-              placed = true;
-              if (fell) this.stageEvent('fall');
-              else {
-                const cause = this.simulation.hurtCause();
-                this.stageHurt(cause, true);
-                const event = this.stageEvent('death');
-                if (event !== null) stageCause(event.cause, cause);
+            if (dying !== null) {
+              dying.previousElapsed = dying.elapsed;
+              dying.elapsed += PHYSICS.dt;
+              if (dying.elapsed >= dying.duration) {
+                this.finishDeath(dying);
+                interrupted = true;
+                break;
               }
-              // A death returns the player to the bonfire reached last, the run going on; before any, it restarts the
-              // attempt exactly like Reset.
-              if (this.simulation.respawn()) this.respawned();
-              else {
-                const placement = this.simulation.placement;
-                this.onAction('reset');
-                if (this.simulation.placement !== placement) {
-                  const event = this.stageEvent('respawn');
-                  if (event !== null) event.bonfire = null;
-                }
+            } else {
+              const terminal = this.simulation.terminal();
+              if (terminal !== null) {
+                this.beginDeath(terminal);
+                interrupted = true;
+                break;
               }
-              break;
+              this.triggers.update(this.simulation.playerPosition(), this.simulation.time);
+              this.stageSwitches();
+              if (this.stopped) return;
+              // A trigger or an observer can reset synchronously. Never sample the placement it made.
+              for (const observer of this.stepObservers) {
+                if (this.simulation.placement !== placement || this.stopped) break;
+                observer.step();
+              }
+              if (this.stopped) return;
+              if (this.simulation.placement !== placement) {
+                interrupted = true;
+                break;
+              }
             }
             if (this.pauseReasons.size > 0) break;
           }
-          if (!placed && this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
-          const hurt = this.simulation.takeHurt();
-          if (hurt !== null) {
-            this.stageHurt(hurt, false);
-            const event = this.stageEvent('hurt');
-            if (event !== null) {
-              const health = this.simulation.readHealth();
-              event.health = health.current;
-              event.max = health.max;
-              stageCause(event.cause, hurt);
+          if (interrupted) this.accumulator = 0;
+          else if (this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
+          if (this.death === null && !interrupted) {
+            const hurt = this.simulation.takeHurt();
+            if (hurt !== null) {
+              this.stageHurt(hurt, false);
+              const event = this.stageEvent('hurt');
+              if (event !== null) {
+                const health = this.simulation.readHealth();
+                event.health = health.current;
+                event.max = health.max;
+                stageCause(event.cause, hurt);
+              }
             }
-          }
-          if (this.eventConsumers) {
-            const impact = this.simulation.takeImpact();
-            if (impact >= IMPACT_SPEED.minimum && this.allowImpact()) {
-              const event = this.stageEvent('impact');
-              if (event !== null) event.strength = impactStrength(impact);
+            if (this.eventConsumers) {
+              const impact = this.simulation.takeImpact();
+              if (impact >= IMPACT_SPEED.minimum && this.allowImpact()) {
+                const event = this.stageEvent('impact');
+                if (event !== null) event.strength = impactStrength(impact);
+              }
             }
           }
         }
@@ -334,8 +375,23 @@ export class Game {
       if (hasDevices) this.deviceMovement.x = this.deviceMovement.y = 0;
       this.flushNotifications();
       if (this.stopped) return;
+      const alpha = this.pauseReasons.size > 0 || !visible ? 1 : clamp(this.accumulator / PHYSICS.dt, 0, 1);
+      const dying = this.death;
+      this.renderState.death = null;
+      if (dying !== null) {
+        const frame = this.deathFrame;
+        frame.elapsed = dying.previousElapsed + (dying.elapsed - dying.previousElapsed) * alpha;
+        frame.duration = dying.duration;
+        frame.poseProgress = Math.min(1, frame.elapsed / DEATH_POSE_SECONDS);
+        frame.reducedMotion = dying.reducedMotion;
+        if (visible) this.deathScreen.update(frame);
+        if (this.death === dying) this.renderState.death = frame;
+      }
+      if (this.stopped) return;
       if (!this.presenter.coversGame) {
-        const frame = this.simulation.frame(this.pauseReasons.size > 0 ? 1 : clamp(this.accumulator / PHYSICS.dt, 0, 1));
+        this.prepareHurtPlacement();
+        if (this.stopped) return;
+        const frame = this.simulation.frame(alpha);
         this.renderState.dt = dt;
         this.view.render(frame, this.renderState);
       }
@@ -354,12 +410,15 @@ export class Game {
     frame.paused = this.pauseReasons.size > 0;
     frame.pointerLocked = this.input.locked;
     frame.inputMode = this.input.mode;
+    frame.death = this.death?.info.kind ?? null;
     return frame;
   }
 
   get halted(): boolean {
     return this.stopped;
   }
+
+  get dying(): boolean { return this.death !== null; }
 
   pauseState(): readonly string[] {
     return [...this.pauseReasons];
@@ -433,14 +492,15 @@ export class Game {
     this.sendAudio(this.previewCue);
   }
 
-  // Applies to future message events; toasts already showing or queued finish as toasts.
-  setMessageStyle(style: MessageStyle): void { this.messageStyle = style; }
+  // Applies to future messages and deaths; an active death keeps the text and duration it started with.
+  setHud(settings: HudSettings): void { this.hud = settings; }
 
   setPause(options: { reason: string; paused: boolean }): void {
     const wasPaused = this.pauseReasons.size > 0;
     if (options.paused) this.pauseReasons.add(options.reason);
     else this.pauseReasons.delete(options.reason);
     this.accumulator = 0;
+    this.settleDeathClock();
     this.clearMovement();
     const paused = this.pauseReasons.size > 0;
     if (this.started && !this.stopped && paused !== wasPaused) this.onPauseChange?.(paused);
@@ -453,9 +513,9 @@ export class Game {
     this.input.setInteraction({ enabled: this.inputBlocks.size === 0 });
   }
 
-  // Engine-only recording/diagnostics, after each step and before a death brings the player back.
+  // Engine-only recording/diagnostics. Only eligible live steps are sampled; death interrupts before its fatal sample.
   // Runtime plugins observe staged EVENTS instead. Returns this observer's removal.
-  observeSteps(observer: () => void): () => void {
+  observeSteps(observer: StepObserver): () => void {
     this.stepObservers.add(observer);
     return () => { this.stepObservers.delete(observer); };
   }
@@ -468,6 +528,7 @@ export class Game {
   // What follows the player back to a bonfire, the run going on: triggers forget the jump, and the character, input and
   // camera start afresh there.
   private respawned(): void {
+    this.cancelDeath();
     this.triggers.jump();
     this.stageSwitches();
     this.view.resetPresentation();
@@ -481,6 +542,7 @@ export class Game {
 
   // Everything a reset restarts besides the player and level objects.
   private restartRun(): void {
+    this.cancelDeath();
     this.triggers.reset();
     this.presenter.clearToasts();
     this.view.resetPresentation();
@@ -494,6 +556,7 @@ export class Game {
   }
 
   applyLevel(change: LevelChange): void {
+    if (change.kind === 'replace') this.cancelDeath();
     this.triggers.apply(change);
     this.stageSwitches();
     this.simulation.applyLevel(change);
@@ -535,6 +598,8 @@ export class Game {
     const disposal = new Disposal();
     disposal.run(() => cancelAnimationFrame(this.animationFrame));
     disposal.run(() => this.lifecycle.abort());
+    disposal.run(() => this.cancelDeath());
+    disposal.run(() => this.disposeDeathScreen());
     // Optional access also covers a constructor failure: dispose only the parts already made.
     disposal.run(() => this.triggers?.dispose());
     disposal.run(() => this.presenter?.dispose());
@@ -585,6 +650,8 @@ export class Game {
       // A failing display or cleanup cannot skip any remaining interaction teardown.
       // These parts are idempotent; dispose() later releases the rest of the Game exactly once.
       disposal.run(() => this.lifecycle.abort());
+      disposal.run(() => this.cancelDeath());
+      disposal.run(() => this.disposeDeathScreen());
       disposal.run(() => this.triggers?.dispose());
       disposal.run(() => this.presenter?.dispose());
       disposal.run(() => this.view?.disposeCharacters());
@@ -601,8 +668,68 @@ export class Game {
     this.timerRunning = true;
   }
 
+  private beginDeath(kind: DeathKind): void {
+    const info: DeathInfo = kind === 'fall' ? { kind } : { kind, cause: { ...this.simulation.hurtCause() } };
+    const settings = this.hud.death;
+    const dying: Dying = {
+      info, duration: settings.fadeIn + settings.hold, placement: this.simulation.placement,
+      elapsed: 0, previousElapsed: 0, reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    };
+    this.death = dying;
+    // Falling wins the cue, but the killing hit still reaches the hurt effects.
+    if (this.simulation.dead()) this.stageHurt(this.simulation.hurtCause(), true);
+    if (kind === 'fall') this.stageEvent('fall');
+    else {
+      const event = this.stageEvent('death');
+      if (event !== null && info.kind === 'health') stageCause(event.cause, info.cause);
+    }
+    this.simulation.beginDeath();
+    this.view.beginDeath(this.simulation.frame(1), kind);
+    this.clearMovement();
+    for (const observer of this.stepObservers) observer.interrupt();
+    if (this.death !== dying || this.stopped) return;
+    this.presenter.setDeathHeld(true);
+    this.triggers.interrupt();
+    this.stageSwitches();
+    if (this.death === dying && !this.stopped) this.deathScreen.show(info, settings);
+  }
+
+  private finishDeath(dying: Dying): void {
+    if (this.death !== dying || this.stopped || this.simulation.placement !== dying.placement) return;
+    if (this.simulation.respawn()) this.respawned();
+    else {
+      this.onAction('reset');
+      if (this.stopped) return;
+      if (this.simulation.placement === dying.placement) throw new DeathSequenceError();
+      const event = this.stageEvent('respawn');
+      if (event !== null) event.bonfire = null;
+    }
+  }
+
+  private cancelDeath(): void {
+    if (this.death === null) return;
+    this.death = null;
+    this.renderState.death = null;
+    const disposal = new Disposal();
+    disposal.run(() => this.view.cancelDeath());
+    disposal.run(() => this.deathScreen.clear());
+    disposal.run(() => this.presenter.setDeathHeld(false));
+    disposal.finish();
+  }
+
+  private disposeDeathScreen(): void {
+    if (this.deathScreenDisposed || this.deathScreen === undefined) return;
+    this.deathScreenDisposed = true;
+    this.deathScreen.dispose();
+  }
+
+  // Discard interpolation with the accumulator, so resuming cannot rewind the presentation by one step.
+  private settleDeathClock(): void {
+    if (this.death !== null) this.death.previousElapsed = this.death.elapsed;
+  }
+
   private executeEvent(action: TriggerAction, signal: AbortSignal): EventOutcome | Promise<EventOutcome> {
-    if (signal.aborted) return 'cancelled';
+    if (signal.aborted || this.death !== null || this.stopped) return 'cancelled';
     if (action.type === 'stop-timer') {
       this.timerRunning = false;
       this.stageEvent('finish');
@@ -630,7 +757,7 @@ export class Game {
       return 'completed';
     }
     // A toast never holds up the triggers: the next event, or the next trigger, starts at once.
-    if (action.type === 'message' && this.messageStyle === 'toast') {
+    if (action.type === 'message' && this.hud.messages.style === 'toast') {
       this.presenter.toast(action);
       return 'completed';
     }
@@ -660,7 +787,7 @@ export class Game {
       }
       if (this.stopped) break;
     }
-    if (this.simulation.placement !== placement || this.pauseReasons.size > 0 || this.inputBlocks.size > 0) this.clearMovement();
+    if (this.simulation.placement !== placement || this.pauseReasons.size > 0 || this.inputBlocks.size > 0 || this.death !== null) this.clearMovement();
   }
 
   private stageEvent<T extends GameEvent['type']>(type: T) {
@@ -669,11 +796,23 @@ export class Game {
 
   // The hurt effects always show, so their hits and clears are staged whoever else consumes events.
   private stageHurt(cause: Readonly<HurtCause>, fatal: boolean): void {
-    if (!this.stopped) this.pending.hurt(cause, fatal);
+    if (!this.stopped) this.pending.hurt(cause, fatal, this.simulation.placement);
   }
 
   private stageHurtClear(): void {
-    if (!this.stopped) this.pending.clearHurt();
+    if (!this.stopped) this.pending.clearHurt(this.simulation.placement);
+  }
+
+  // Delivery callbacks may place the player again. Clear the latest placement before drawing, not one frame later.
+  private prepareHurtPlacement(): void {
+    const placement = this.simulation.placement;
+    if (this.hurtPlacement === placement) return;
+    this.hurtPlacement = placement;
+    try { this.view.clearHurt(); } catch (error) {
+      if (error instanceof PluginError && error.plugin === this.hurtPlugin && error.point === HURT_EFFECTS.id) throw error;
+      throw new PluginError('plugin-failed', `Plugin "${this.hurtPlugin ?? 'engine'}" failed applying "${HURT_EFFECTS.id}" clear.`,
+        this.hurtPlugin, HURT_EFFECTS.id, { cause: error });
+    }
   }
 
   private stageSwitches(): void {
@@ -748,10 +887,14 @@ export class Game {
       for (let index = 0; index < batch.hurtCount; index++) {
         if (this.lifecycle.signal.aborted) return;
         const notice = batch.hurts[index]!;
+        if (notice.placement !== this.simulation.placement) continue;
+        this.prepareHurtPlacement();
+        if (this.lifecycle.signal.aborted) return;
+        if (notice.clear || notice.placement !== this.simulation.placement) continue;
         try {
-          if (notice.clear) this.view.clearHurt();
-          else this.view.hurt(notice.cause, notice.fatal);
+          this.view.hurt(notice.cause, notice.fatal);
         } catch (error) {
+          if (error instanceof PluginError && error.plugin === this.hurtPlugin && error.point === HURT_EFFECTS.id) throw error;
           throw new PluginError('plugin-failed', `Plugin "${this.hurtPlugin ?? 'engine'}" failed applying "${HURT_EFFECTS.id}".`,
             this.hurtPlugin, HURT_EFFECTS.id, { cause: error });
         }

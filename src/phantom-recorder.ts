@@ -14,7 +14,7 @@ export const PHANTOM_RECORDING = {
   // Play before the first recording starts, and between the end of one and the start of the next.
   firstDelay: { min: 5, max: 30 },
   delay: { min: 30, max: 90 },
-  // A restart discards the recording in progress; the next one starts sooner.
+  // Death or a restart discards the recording in progress; the next one starts sooner.
   retryDelay: { min: 3, max: 10 },
   // Metres any part of the rig may stray from what its keyframes reproduce.
   tolerance: 0.015,
@@ -179,8 +179,8 @@ export class PhantomCapture {
  * Chooses when to record: after a random stretch of play, it records the next 10 seconds and hands
  * the encoded recording to `onRecording`, then waits again. A restart, or a return to a bonfire,
  * discards the recording in progress; so does a recording in which the player hardly moved, and
- * one the format cannot hold, such as an endless fall past its coordinate range. Time is the
- * game's own, so pauses neither record nor count toward the wait.
+ * one the format cannot hold, such as an endless fall past its coordinate range. Only eligible live
+ * steps count, so pauses and the death sequence neither record nor count toward the wait.
  */
 export class PhantomRecorder {
   private readonly capture = new PhantomCapture();
@@ -201,13 +201,19 @@ export class PhantomRecorder {
     return this.remaining > 0;
   }
 
-  // After every physics step: the simulation's placement, which changes whenever the player is placed anew, and the rig.
+  // Death discards the unfinished clip before its terminal sample; a waiting recorder keeps its delay.
+  interrupt(): void {
+    if (!this.recording) return;
+    this.remaining = 0;
+    this.wait = this.delay(PHANTOM_RECORDING.retryDelay);
+  }
+
+  // After every eligible live physics step: the simulation's placement and the rig.
   step(placement: number, rig: Readonly<RigPose>, handleLength: number): void {
     const placed = placement !== this.placement;
     this.placement = placement;
     if (this.remaining > 0 && (placed || handleLength !== this.capture.handleLength)) {
-      this.remaining = 0;
-      this.wait = this.delay(PHANTOM_RECORDING.retryDelay);
+      this.interrupt();
     }
     if (this.remaining === 0) {
       this.wait--;

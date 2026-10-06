@@ -45,8 +45,8 @@ class EngineHurtEffects implements HurtEffects {
     this.root.add(this.fire.root, this.bursts.root);
   }
 
-  hurt(cause: Readonly<HurtCause>): void {
-    this.fire.hurt(cause);
+  hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
+    this.fire.hurt(cause, fatal);
     this.bursts.hurt(cause);
   }
 

@@ -255,15 +255,18 @@ export interface AvatarRigFrameContext {
   readonly forward: Vector3;
   readonly shaftLength: number;
   readonly dt: number;
+  // 0 alive; linear death-pose progress, or 1 immediately for reduced motion.
+  readonly deathWeight: number;
 }
 
-// Phase 2 inputs: the frame plan the caller wrote in phase 1 and the solved arms, in avatar space.
+// Phase 2 inputs: phase 1's plan and death weight, and the solved arms, in avatar space.
 export interface AvatarRigPoseContext {
   readonly body: Matrix4;
   readonly inverseBody: Matrix4;
   readonly plan: AvatarRigFramePlan;
   readonly arms: Readonly<Record<ArmSide, AvatarRigArmSolution>>;
   readonly dt: number;
+  readonly deathWeight: number;
 }
 
 export function createFramePlan(): AvatarRigFramePlan {

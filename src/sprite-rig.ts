@@ -73,6 +73,7 @@ interface ImageResource {
   readonly bitmap: ImageBitmap;
   readonly texture: THREE.Texture;
   readonly material: THREE.MeshBasicMaterial;
+  readonly colour: THREE.Color;
   readonly bytes: number;
   readonly pixels: number;
   disposed: boolean;
@@ -153,7 +154,7 @@ interface SkeletonRuntime {
   readonly boneIndex: ReadonlyMap<string, number>;
   readonly skeleton: THREE.Skeleton;
   evaluated: readonly RuntimeBoneWorld[];
-  originWorld: RuntimePoint;
+  readonly originWorld: { x: number; y: number };
 }
 
 interface BuildState extends CharacterPresentation {
@@ -176,6 +177,7 @@ const TILE_EPSILON = 1e-6;
 const EMPTY_POSE: SkeletonPreview['pose'] = Object.freeze([]);
 const EMPTY_BONES: readonly string[] = Object.freeze([]);
 const EMPTY_TARGETS = new Map<string, RuntimeTarget>();
+const EMPTY_REFRESH = Object.freeze({});
 const SKIN_SAMPLE_LIMIT = 4;
 const DIRECTION_STEP_DEGREES = 360 / FACING_DIRECTIONS.length;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
@@ -368,6 +370,8 @@ export class SpriteRig {
   private texturesCreated = 0;
   private texturesDisposed = 0;
   private currentDirection: FacingDirection = 'right';
+  private dying = false;
+  private deathBrightness = 1;
   private hasFrame = false;
   private lastFrame: { time: number; aim: RuntimePoint; targets: ReadonlyMap<string, RuntimeTarget> } = {
     time: 0,
@@ -664,6 +668,8 @@ export class SpriteRig {
 
   resetPresentation(): void {
     this.assertLive();
+    this.setDying(false);
+    this.setDeathBrightness(1);
     this.directionPose.reset();
     this.preview = null;
     this.directionalPreview = null;
@@ -674,6 +680,22 @@ export class SpriteRig {
       this.skeleton.previewPose = null;
       this.applyArmLengths(this.skeleton);
     }
+  }
+
+  setDying(dying: boolean): void {
+    this.assertLive();
+    this.dying = dying;
+  }
+
+  // Each material's original colour is captured once. Authored images and layer definitions never change.
+  setDeathBrightness(brightness: number): void {
+    this.assertLive();
+    if (!Number.isFinite(brightness) || brightness < 0 || brightness > 1) {
+      throw new SpriteError('Death brightness must be between 0 and 1.');
+    }
+    if (this.deathBrightness === brightness) return;
+    this.deathBrightness = brightness;
+    for (const resource of this.resources.values()) resource.material.color.copy(resource.colour).multiplyScalar(brightness);
   }
 
   presentationState() {
@@ -725,6 +747,10 @@ export class SpriteRig {
     const dt = frame.dt === undefined ? Math.max(0, frame.time - this.lastFrame.time) : frame.dt;
     if (!Number.isFinite(dt) || dt < 0) throw new SpriteError('Sprite frame duration must be finite and nonnegative.');
     const active = this.characterRiggingType === 'sprite-2d';
+    if (this.dying) {
+      if (active) this.refreshScene();
+      return;
+    }
     if (active) {
       this.directionPose.update(frame);
       if (this.directionalPreview !== null && this.previewDirectionPose !== null) {
@@ -990,7 +1016,7 @@ export class SpriteRig {
         map: texture, side: THREE.DoubleSide, alphaTest: ALPHA_CUTOFF, depthWrite: true, toneMapped: false,
       });
       this.texturesCreated++;
-      return { bitmap, texture, material, bytes, pixels: bitmap.width * bitmap.height, disposed: false, prepared: false };
+      return { bitmap, texture, material, colour: material.color.clone(), bytes, pixels: bitmap.width * bitmap.height, disposed: false, prepared: false };
     } catch (error) {
       texture?.dispose();
       bitmap.close();
@@ -1456,6 +1482,7 @@ export class SpriteRig {
         instance.resource.texture.needsUpdate = true;
       }
     }
+    for (const resource of this.resources.values()) resource.material.color.copy(resource.colour).multiplyScalar(this.deathBrightness);
     this.attachScene();
     this.refreshScene({ forceVisibility: true, notifyCoverage: false });
     for (const [name, covered] of this.coverage) {
@@ -1486,14 +1513,14 @@ export class SpriteRig {
     for (const [root, group] of this.skeletonMounts) root.add(group);
   }
 
-  private refreshScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = {}): void {
-    this.displayedPresentation = this.activePresentation();
+  private refreshScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = EMPTY_REFRESH): void {
+    if (!this.dying) this.displayedPresentation = this.activePresentation();
     const direction = this.displayedPresentation.direction;
     const changedDirection = direction !== this.currentDirection;
     if (changedDirection) this.currentDirection = direction;
     if (options.forceVisibility || changedDirection) this.applyDirection(direction, options.notifyCoverage !== false);
     if (this.characterRiggingType !== 'sprite-2d') return;
-    this.updateFlipbooks();
+    if (!this.dying) this.updateFlipbooks();
     const presentation = this.runtimePresentation();
     if (presentation !== null && (this.presentation !== null || this.rotatedLayers.length > 0)) {
       const { pivot } = presentation;
@@ -1503,7 +1530,7 @@ export class SpriteRig {
     }
     if (this.skeleton !== null) {
       this.updateSkeletonRoot(this.skeleton);
-      this.evaluateSkeleton(this.skeleton);
+      if (!this.dying) this.evaluateSkeleton(this.skeleton);
       this.updateBoneAttachments(this.skeleton);
       this.skeleton.group.updateWorldMatrix(true, true);
       for (const group of this.skeletonMounts.values()) group.updateWorldMatrix(true, true);
@@ -1638,7 +1665,8 @@ export class SpriteRig {
   private updateSkeletonRoot(runtime: SkeletonRuntime): void {
     const host = this.anchor(runtime.definition.anchor).node;
     host.getWorldPosition(this.tempWorld);
-    runtime.originWorld = { x: this.tempWorld.x, y: this.tempWorld.y };
+    runtime.originWorld.x = this.tempWorld.x;
+    runtime.originWorld.y = this.tempWorld.y;
     this.positionSkeletonMount(runtime.group, this.root, this.tempWorld);
     for (const [root, group] of this.skeletonMounts) this.positionSkeletonMount(group, root, this.tempWorld);
   }

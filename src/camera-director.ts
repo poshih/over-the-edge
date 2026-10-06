@@ -3,6 +3,7 @@ import type { Point } from './config';
 import { clamp } from './math';
 import { PluginError, slotPoint } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
+import type { DeathKind } from './death-sequence';
 // Plain data, also used by course scripts running in Node to place scenery for this framing.
 import VIEW_FRAME from './view-frame.json' with { type: 'json' };
 
@@ -16,6 +17,7 @@ export interface CameraView {
   readonly width: number;
   readonly height: number;
   readonly dt: number;
+  readonly death: DeathKind | null;
 }
 
 // The current aim on entry; a director writes the next one in place. The engine owns projection, depths, fog and
@@ -70,6 +72,7 @@ class FollowCamera implements CameraDirector {
   inspect() { return { compact: this.compact }; }
 
   private place(view: CameraView, out: CameraAim, snap: boolean): void {
+    if (view.death !== null) return;
     const { focus, reach, reachRadius, width, height } = view;
     const aspect = width / height;
     this.compact = width < FRAMING.compactWidth || height < FRAMING.compactHeight || aspect < 1;

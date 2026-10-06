@@ -4,6 +4,7 @@ import type { HealthReading } from './health-meter';
 import { formatHeight } from './hud';
 import type { HudSettings } from './hud';
 import type { InputMode } from './config';
+import type { DeathKind } from './death-sequence';
 import { listPoint, PluginError, slotPoint } from './plugins/kernel';
 
 // Shared play readouts: runtime facets replace or wrap the built-ins and add extras (docs/runtime-plugins.md).
@@ -22,6 +23,7 @@ export interface HudFrame {
   readonly timerRunning: boolean;
   // The player's health; null in levels where nothing can hurt the player, whose HUD hides the health readout.
   readonly health: HealthReading | null;
+  readonly death: DeathKind | null;
   readonly paused: boolean;
   readonly pointerLocked: boolean;
   readonly inputMode: InputMode;

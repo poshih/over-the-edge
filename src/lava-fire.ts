@@ -295,6 +295,7 @@ export class LavaFire implements HurtEffects {
   private births = 0;
   // A burn arrived since the last drawn frame.
   private igniting = false;
+  private fatalBurn = false;
   // The flames' strength before a burn's flare, 0-1: it grows while the fire burns and dies down after.
   private heat = 0;
   // In run time: until when the latest burn keeps the fire going, and when that burn flared.
@@ -335,8 +336,10 @@ export class LavaFire implements HurtEffects {
     this.root.visible = false;
   }
 
-  hurt(cause: Readonly<HurtCause>): void {
-    if (cause.source === 'lava') this.igniting = true;
+  hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
+    if (cause.source !== 'lava') return;
+    this.igniting = true;
+    if (fatal) this.fatalBurn = true;
   }
 
   clear(): void {
@@ -369,7 +372,7 @@ export class LavaFire implements HurtEffects {
       this.burnUntil = time + FIRE.burn;
       this.flaredAt = time;
     }
-    const burning = time <= this.burnUntil;
+    const burning = this.fatalBurn || time <= this.burnUntil;
     this.heat = burning ? Math.min(1, this.heat + dt / FIRE.kindle) : Math.max(0, this.heat - dt / FIRE.fade);
     const intensity = this.heat * (1 + FIRE.flare * Math.exp(-(time - this.flaredAt) / FIRE.flareFade));
     // The flames trail the character's motion, easing toward the lean it calls for.
@@ -413,6 +416,7 @@ export class LavaFire implements HurtEffects {
   // Puts the fire out at once: no flames, embers or smoke, and nothing owed.
   private reset(): void {
     this.heat = 0;
+    this.fatalBurn = false;
     this.burnUntil = this.flaredAt = -Infinity;
     this.emberParticles.reset();
     this.smokeParticles.reset();

@@ -45,6 +45,7 @@ export function stageCause(target: Readonly<HurtCause>, cause: Readonly<HurtCaus
 export interface HurtNotice {
   readonly clear: boolean;
   readonly fatal: boolean;
+  readonly placement: number;
   readonly cause: Readonly<HurtCause>;
 }
 
@@ -114,17 +115,19 @@ export class GameNotifications {
     }
   }
 
-  hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
+  hurt(cause: Readonly<HurtCause>, fatal: boolean, placement: number): void {
     const notice = this.hurtNotice();
     notice.clear = false;
     notice.fatal = fatal;
+    notice.placement = placement;
     stageCause(notice.cause, cause);
   }
 
-  clearHurt(): void {
+  clearHurt(placement: number): void {
     const notice = this.hurtNotice();
     notice.clear = true;
     notice.fatal = false;
+    notice.placement = placement;
   }
 
   clear(): void {
@@ -140,7 +143,7 @@ export class GameNotifications {
   private hurtNotice(): Mutable<HurtNotice> {
     let notice = this.hurts[this.hurtCount] as Mutable<HurtNotice> | undefined;
     if (notice === undefined) {
-      notice = { clear: false, fatal: false, cause: noCause() };
+      notice = { clear: false, fatal: false, placement: 0, cause: noCause() };
       this.hurts[this.hurtCount] = notice;
     }
     this.hurtCount++;

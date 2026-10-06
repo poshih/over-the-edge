@@ -84,9 +84,9 @@ export class WaistLean {
   }
 
   // Where the torso's origin, the player root at `x`, `y` when upright, sits once the upper body turns about the waist.
-  torsoOrigin(x: number, y: number, out: { x: number; y: number }): { x: number; y: number } {
-    out.x = x + this.pivotY * Math.sin(this.angle);
-    out.y = y + this.pivotY * (1 - Math.cos(this.angle));
+  torsoOrigin(x: number, y: number, out: { x: number; y: number }, angle = this.angle): { x: number; y: number } {
+    out.x = x + this.pivotY * Math.sin(angle);
+    out.y = y + this.pivotY * (1 - Math.cos(angle));
     return out;
   }
 }
