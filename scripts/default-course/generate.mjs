@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Builds the built-in course, the level every new game starts from: node scripts/default-course/generate.mjs
 // It models the course's rocks as GLB meshes, works out each one's collision as the engine does (src/mesh-collision.ts),
-// places them and writes src/default-course/: the GLBs, and course.json, which lists them and holds the level.
+// places them with one of each hazard and writes src/default-course/: the GLBs, and course.json, which lists them and
+// holds the level.
 //
 // A rock is its outline extruded: through the middle of its depth its walls are the outline itself, so the slice the
 // course collides with is that outline; toward the front and back the walls lean in and the faces bulge, roughened by
@@ -70,6 +71,22 @@ const LABELS = [
   { x: 10, y: 6.05, text: '03 / REACH BACK' },
   { x: 16.5, y: 11.3, text: '04 / THE TOP' },
   { x: -9.1, y: 0.45, text: 'THE VAULT' },
+  { x: 24.2, y: 2.1, text: 'OVER THE EDGE' },
+];
+// One of each hazard, none of which collides, on the climb's existing rocks:
+// - a bonfire on the first ledge, the only one roomy enough to come back to holding the hammer as at the start, which
+//   puts the head 1.55 m right of and 0.63 m above the bonfire's base;
+// - a projectile trap set into the left crag's face, firing over the start at the second ledge's height, where the
+//   cliff's next slope stops its projectiles;
+// - a shallow swamp in the corner of the fourth ledge, against its riser, the ledge's floor holding the player up;
+// - an axe swinging over the last step below the summit, its blade at the height of a player standing there;
+// - a lava lake filling the basin past the summit's far edge, between the cliff and the right crag.
+const HAZARDS = [
+  { kind: 'bonfire', id: 'ledge-bonfire', x: 3.75, y: 2.1 },
+  { kind: 'shooter', id: 'crag-shooter', x: -17.95, y: 4.2, angle: 0, interval: 3, delay: 1, speed: 10, damage: 1 },
+  { kind: 'pool', id: 'bog', liquid: 'swamp', x: 12.34, y: 9.25, width: 1.28, height: 0.5, depth: 1.2 },
+  { kind: 'axe', id: 'top-axe', x: 14, y: 13.9, length: 2.6, period: 4, offset: 0, damage: 1 },
+  { kind: 'pool', id: 'lava-lake', liquid: 'lava', x: 24.175, y: 0.6, width: 11.65, height: 1.2, depth: 2 },
 ];
 
 const tidy = (value, digits = 4) => Number(value.toFixed(digits)) + 0;
@@ -402,7 +419,7 @@ try {
     region: { type: 'box', width: tidy(SUMMIT.right - SUMMIT.left), height: TRIGGER_LIMITS.endingHeight },
     activation: 'once', marker: 'flag', events: ENDING_EVENTS,
   };
-  const level = validateLevel({ schemaVersion: LEVEL_SCHEMA_VERSION, labels: LABELS, objects: [...terrain, START, ending] });
+  const level = validateLevel({ schemaVersion: LEVEL_SCHEMA_VERSION, labels: LABELS, objects: [...terrain, START, ending, ...HAZARDS] });
   const meshes = ROCKS.map(({ id: name, file }) => {
     const { spec, bytes, id } = built.get(name);
     return { id, name: spec.name, file, bytes: bytes.byteLength };

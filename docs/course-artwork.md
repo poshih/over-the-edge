@@ -132,12 +132,20 @@ collides as its slice, the climb's ledges and its overhang, a **Boulder**, the v
 **Crag** closing each end of the course, mirrored on the right. `src/default-course/course.json`
 lists the GLBs with their asset IDs and holds the level, its collision included.
 
+The level also has one of each hazard, none of which collides, on those rocks: a
+[bonfire](../README.md#health-and-bonfires) on the first ledge, the one a fallen player comes
+back to; a [projectile trap](../README.md#traps) set into the left crag, firing over the start
+across the second ledge; a shallow swamp [pool](../README.md#liquid-pools) against the fourth
+ledge's riser; a swinging axe over the last step below the summit; and a lava lake filling the
+basin past the summit's far edge, **over the edge**. So it shows health, and a new game starts
+with an example of each to keep, move or delete.
+
 `node scripts/default-course/generate.mjs` makes all of it. It models each rock from an
 outline: through the middle of its depth the walls are the outline itself, so the slice is
 that outline; toward the front and back they chamfer in and the faces bulge, roughened by
 seeded noise. The GLBs have rough, non-metallic PBR materials coloured per vertex and no
 normals, so they are drawn flat-shaded. The script slices them with the engine's own slicer,
-places them and validates the level. About 6,800 triangles and 100 KB together, they load in
+places them with the hazards and validates the level. About 6,800 triangles and 100 KB together, they load in
 the Workshop when it draws them; new server projects copy them, and builds without
 `GAME_LEVEL` package them.
 

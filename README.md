@@ -703,8 +703,10 @@ opening, or a GLB mesh can bring a slice with holes.
 The built-in course is built from GLB meshes, as any course can be: its
 `ascent` is a **Cliff** mesh, not a stack of blocks, whose slice on the obstacle line is
 one static closed chain of 19 edges with the climb's ledges and overhang; its ground declares
-a box, and a boulder and a mirrored crag make the rest (see
-[the built-in course](docs/course-artwork.md#the-built-in-course)). Geometry is cached and
+a box, and a boulder and a mirrored crag make the rest. Its level also has one of each hazard:
+a bonfire on the first ledge, a projectile trap in the left crag firing across the second, a
+swamp against the fourth ledge's riser, an axe over the last step and a lava lake past the
+summit's far edge (see [the built-in course](docs/course-artwork.md#the-built-in-course)). Geometry is cached and
 shared, and static objects do not rebuild geometry or rewrite instance transforms each frame.
 Drawn outlines use the same rendering and collision path; they cost according to their
 edge/template count, not their on-screen size.
