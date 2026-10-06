@@ -1,6 +1,7 @@
 // A cursor that walks the course: floors, stairs and set pieces are added where the last element
 // ended, so the route stays continuous. `dir` is +1 travelling right and -1 travelling left.
 import { PIECE_PATHS } from './pieces.mjs';
+import { CourseLevelError, CourseQueryError } from './errors.mjs';
 
 const tidy = (value) => Number(value.toFixed(4)) + 0;
 
@@ -30,6 +31,8 @@ export class Trail {
 
   // To a set piece's far side, keeping the height.
   edge(record) {
+    if (record.bounds === null) throw new CourseQueryError('QUERY_CAPABILITY_UNSUPPORTED', { capability: 'piece.terrainBounds', detail: { pieceId: record.id } },
+      'A trail cannot move to the terrain edge of a piece with no terrain.');
     this.x = this.dir > 0 ? record.bounds.right : record.bounds.left;
     return this;
   }
@@ -142,7 +145,7 @@ export class Trail {
    */
   piece(id, options = {}) {
     const path = PIECE_PATHS[id];
-    if (path === undefined) throw new Error(`No travel path for set piece ${id}.`);
+    if (path === undefined) throw new CourseLevelError({ field: 'set piece travel path', value: id });
     const mirror = (path.mirror ?? false) !== (this.dir < 0);
     const flip = this.dir;
     const x = this.x - flip * path.entry[0] + this.dir * (options.gap ?? 0);

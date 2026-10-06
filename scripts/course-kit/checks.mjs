@@ -1,342 +1,373 @@
-// Checks for a generated course: level validation and budgets, overlaps between separately built
-// groups, and a conservative reach graph that must lead from the start to the ending.
-import { outline } from './course.mjs';
+// Policies over one prepared snapshot of the engine's authored collision.
+import { CourseLevelError, CourseQueryError, ReachModelError } from './errors.mjs';
+export { ReachModelError } from './errors.mjs';
 
+/** @typedef {import('./job.mjs').CourseSnapshot} CourseSnapshot */
+/** @typedef {import('../../src/collision-queries.ts').Bounds} Bounds */
+/** @typedef {import('../../src/level.ts').TerrainObject} TerrainObject */
+/** @typedef {Map<string, {group: string, zone: string}>} Groups */
 /**
- * What a connector may ask of the player under the engine's default physics: the shoulder rides 1.15 m
- * above the pot's base, and a lip within about 2.5 m of it can be pulled over (see
- * src/editor/set-pieces.ts). Connectors stay inside easier limits, so the difficulty of a course lives in
- * its set pieces. `maxStandSlope` is the steepest face, in degrees, the pot is assumed to rest on.
+ * @typedef {object} PieceRecord
+ * @property {string} id
+ * @property {string} stamp
+ * @property {string} group
+ * @property {'any' | 'down'} direction
+ * @property {Bounds | null} bounds
+ * @property {readonly import('../../src/level.ts').LevelObject[]} objects
  *
- * A project passes its own model when its physics differ. Above all, the pot's grip on terrain is
- * sqrt(terrainFriction * potFriction) and it slides on slopes steeper than atan(grip): a game with lower
- * terrain or pot friction stands on fewer slopes, so it lowers `maxStandSlope`, and a longer or shorter
- * rig changes `shoulder`, `pull` and `rise`.
+ * @typedef {object} ReachModel
+ * @property {number} shoulder
+ * @property {number} pull
+ * @property {number} rise
+ * @property {number} hop
+ * @property {number} drop
+ * @property {number} maxStandSlope
+ * @property {number} shoulderLipOffset
+ * @property {number} transitHeight
+ * @property {readonly number[]} clearanceHeights
+ * @property {readonly number[]} sideClearanceHeights
+ * @property {number} clearanceHalfWidth
+ * @property {number} standingInset
+ * @property {number} startFootOffset
+ * @property {number} fallDriftBase
+ * @property {number} fallDriftPerMetre
+ * @property {number} hopDrop
+ * @property {number} hopRise
+ * @property {number} moveRiseThreshold
+ * @property {number} fallMinimum
+ * @property {readonly number[]} fallProbeOffsets
+ * @property {number} fallColumnSpacing
+ * @property {number} fallInitialProbeHeight
+ * @property {number} fallProbeStartHeight
+ * @property {number} fallSurfaceOffset
+ * @property {number} anchorRadius
+ * @property {number} ventRiderMargin
+ * @property {number} ventRiderBelow
+ * @property {number} ventRiderAbove
+ * @property {number} ventTargetMargin
+ * @property {number} ventTargetAbove
+ * @property {number} endingBelow
+ * @property {number} goalRadius
+ *
+ * @typedef {ReachModel & {standNormal: number}} ReachRules
+ * @typedef {{id: number, x: number, y: number, object: TerrainObject, group: string, zone: string, illusion: boolean}} StandPoint
+ * @typedef {{from: {x: number, y: number}, to: {x: number, y: number}, why: string}} DesignedLink
  */
-export const ENGINE_DEFAULT_REACH = Object.freeze({ shoulder: 1.15, pull: 2.35, rise: 2.5, hop: 1.9, drop: 9, maxStandSlope: 40 });
+
+/** The old engine-default distances and body/rig probes, now completely caller-supplied. */
+export const ENGINE_DEFAULT_REACH = Object.freeze({
+  shoulder: 1.15, pull: 2.35, rise: 2.5, hop: 1.9, drop: 9, maxStandSlope: 40,
+  shoulderLipOffset: 0.3, transitHeight: 1.2,
+  clearanceHeights: Object.freeze([0.05, 0.45, 0.85]), sideClearanceHeights: Object.freeze([0.45, 0.85]),
+  clearanceHalfWidth: 0.35, standingInset: 0.1, startFootOffset: 0.65,
+  fallDriftBase: 2.2, fallDriftPerMetre: 0.25, hopDrop: 2.5, hopRise: 0.6,
+  moveRiseThreshold: 0.05, fallMinimum: 0.05,
+  fallProbeOffsets: Object.freeze([-2.4, -1.2, 1.2, 2.4]), fallColumnSpacing: 0.4,
+  fallInitialProbeHeight: 0.3, fallProbeStartHeight: 0, fallSurfaceOffset: 0.3,
+  anchorRadius: 1.6, ventRiderMargin: 1.6, ventRiderBelow: 1, ventRiderAbove: 0.2,
+  ventTargetMargin: 2.6, ventTargetAbove: 0.3, endingBelow: 0.1, goalRadius: 1.5,
+});
 const REACH_FIELDS = Object.keys(ENGINE_DEFAULT_REACH);
+const REACH_ARRAYS = ['clearanceHeights', 'sideClearanceHeights', 'fallProbeOffsets'];
 
-export class ReachModelError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'ReachModelError';
+// Seam/merge policy, not numerical tolerances. Compare to the inscribed-disk thickness of an overlap.
+export const POLICY_ALLOWANCES = Object.freeze({ overlap: 0.03, enemyStart: 0.02, keepOut: 0.05, reservationInset: 0.1, vent: 0.02 });
+export const CRAMPED = Object.freeze({ small: 1.5, clearance: 1.2 });
+const OVERLAP_REPORT_RADIUS_TOLERANCE = 0.0005;
+const TRUSTED_DESCENT_RISE = 0.05;
+const ENEMY_HALF_BOUNDS = Object.freeze({ bird: { x: 0.26, y: 0.26 }, ground: { x: 0.26, y: 0.7 } });
+
+/** @param {ReachModel} model @param {CourseSnapshot} snapshot @returns {ReachRules} */
+function reachRules(model, snapshot) {
+  if (model === null || typeof model !== 'object' || Array.isArray(model)) {
+    throw new ReachModelError('model', model, 'A complete reach model is required; pass ENGINE_DEFAULT_REACH or your own.');
   }
-}
-
-/** Validates a reach model and adds `standNormal`, the least upward share of a face's normal the pot stands on. */
-function reachRules(model) {
-  if (model === null || typeof model !== 'object') throw new ReachModelError('A reach model is required; pass ENGINE_DEFAULT_REACH or your own.');
   const unknown = Object.keys(model).filter((field) => !REACH_FIELDS.includes(field));
-  if (unknown.length > 0) throw new ReachModelError(`Unknown reach model fields: ${unknown.join(', ')}. Expected ${REACH_FIELDS.join(', ')}.`);
+  if (unknown.length > 0) throw new ReachModelError('fields', unknown, `Unknown reach model fields: ${unknown.join(', ')}.`);
   for (const field of REACH_FIELDS) {
     const value = model[field];
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      throw new ReachModelError(`Reach model field "${field}" must be a finite positive number of metres (degrees for maxStandSlope).`);
-    }
-  }
-  if (model.maxStandSlope >= 90) throw new ReachModelError('Reach model field "maxStandSlope" must be between 0 and 90 degrees.');
-  return { ...model, standNormal: Math.cos(model.maxStandSlope * Math.PI / 180) };
-}
-
-// Small colliders, about the pot's size or less (it is 1 m wide), must stay farther apart than the pot is
-// wide: a narrower slot between them traps the pot or the hammer head.
-export const CRAMPED = { small: 1.5, clearance: 1.2 };
-const SAMPLE = 0.3;
-const CELL = 3;
-
-function contains(polygon, point) {
-  for (let index = 0; index < polygon.length; index++) {
-    const a = polygon[index];
-    const b = polygon[(index + 1) % polygon.length];
-    if ((b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x) < -1e-9) return false;
-  }
-  return true;
-}
-
-/** Overlap depth of two convex outlines along their separating axes; zero when they only touch. */
-export function penetration(first, second) {
-  let depth = Infinity;
-  for (const polygon of [first, second]) {
-    for (let index = 0; index < polygon.length; index++) {
-      const a = polygon[index];
-      const b = polygon[(index + 1) % polygon.length];
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      if (length < 1e-9) continue;
-      const axis = { x: -(b.y - a.y) / length, y: (b.x - a.x) / length };
-      const project = (points) => points.map((point) => point.x * axis.x + point.y * axis.y);
-      const one = project(first);
-      const two = project(second);
-      const overlap = Math.min(Math.max(...one), Math.max(...two)) - Math.max(Math.min(...one), Math.min(...two));
-      if (overlap <= 0) return 0;
-      depth = Math.min(depth, overlap);
-    }
-  }
-  return depth;
-}
-
-function segmentDistance(point, a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
-  return Math.hypot(point.x - a.x - t * dx, point.y - a.y - t * dy);
-}
-
-/** The gap between two convex outlines; zero when they touch or overlap. */
-export function separation(first, second) {
-  if (penetration(first, second) > 0) return 0;
-  let gap = Infinity;
-  for (const [points, polygon] of [[first, second], [second, first]]) {
-    for (const point of points) {
-      for (let index = 0; index < polygon.length; index++) gap = Math.min(gap, segmentDistance(point, polygon[index], polygon[(index + 1) % polygon.length]));
-    }
-  }
-  return gap;
-}
-
-function boundsOf(points) {
-  return {
-    left: Math.min(...points.map((point) => point.x)), right: Math.max(...points.map((point) => point.x)),
-    bottom: Math.min(...points.map((point) => point.y)), top: Math.max(...points.map((point) => point.y)),
-  };
-}
-
-class Grid {
-  constructor() { this.cells = new Map(); }
-  key(x, y) { return `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`; }
-  insert(item, bounds) {
-    for (let x = Math.floor(bounds.left / CELL); x <= Math.floor(bounds.right / CELL); x++) {
-      for (let y = Math.floor(bounds.bottom / CELL); y <= Math.floor(bounds.top / CELL); y++) {
-        const key = `${x},${y}`;
-        if (!this.cells.has(key)) this.cells.set(key, []);
-        this.cells.get(key).push(item);
+    if (REACH_ARRAYS.includes(field)) {
+      if (!Array.isArray(value) || value.length === 0) throw new ReachModelError(field, value, `Reach model "${field}" needs a nonempty array.`);
+      snapshot.work.spend('geometry', value.length);
+      const offsets = field === 'fallProbeOffsets';
+      if (value.some((entry) => typeof entry !== 'number' || !Number.isFinite(entry) || (offsets ? entry === 0 : entry <= 0)) ||
+        new Set(value).size !== value.length || (!offsets && value.some((entry, at) => at > 0 && entry <= value[at - 1]))) {
+        throw new ReachModelError(field, value, `Reach model "${field}" needs finite ${offsets ? 'nonzero, distinct offsets' : 'positive, strictly increasing heights'}.`);
       }
+    } else if (typeof value !== 'number' || !Number.isFinite(value) || (field === 'fallProbeStartHeight' ? value < 0 : value <= 0)) {
+      throw new ReachModelError(field, value, `Reach model "${field}" must be finite and ${field === 'fallProbeStartHeight' ? 'nonnegative' : 'positive'}.`);
     }
   }
-  near(x, y, radius = 0) {
-    const found = new Set();
-    for (let cx = Math.floor((x - radius) / CELL); cx <= Math.floor((x + radius) / CELL); cx++) {
-      for (let cy = Math.floor((y - radius) / CELL); cy <= Math.floor((y + radius) / CELL); cy++) {
-        for (const item of this.cells.get(`${cx},${cy}`) ?? []) found.add(item);
-      }
-    }
-    return found;
-  }
-}
-
-export function solidIndex(level) {
-  const solids = level.objects.filter((object) => object.kind === 'terrain').map((object) => {
-    const polygon = outline(object);
-    return { object, polygon, bounds: boundsOf(polygon) };
+  if (model.maxStandSlope >= 90) throw new ReachModelError('maxStandSlope', model.maxStandSlope, 'maxStandSlope must be below 90 degrees.');
+  return Object.freeze({
+    ...model,
+    clearanceHeights: Object.freeze([...model.clearanceHeights]),
+    sideClearanceHeights: Object.freeze([...model.sideClearanceHeights]),
+    fallProbeOffsets: Object.freeze([...model.fallProbeOffsets]),
+    standNormal: Math.cos(model.maxStandSlope * Math.PI / 180),
   });
-  const grid = new Grid();
-  for (const solid of solids) grid.insert(solid, solid.bounds);
-  const inside = (point, ignore = null) => {
-    for (const solid of grid.near(point.x, point.y)) {
-      if (solid.object === ignore || solid.object.illusion) continue;
-      if (point.x < solid.bounds.left || point.x > solid.bounds.right || point.y < solid.bounds.bottom || point.y > solid.bounds.top) continue;
-      if (contains(solid.polygon, point)) return solid.object;
-    }
-    return null;
-  };
-  return { solids, grid, inside };
 }
 
-/** Terrain of different groups must not overlap; enemies must not start inside terrain. */
-export function overlaps(level, groups, supports = new Set()) {
-  const { solids, grid } = solidIndex(level);
+/** @param {Groups} groups @param {{id: string}} object */
+function membership(groups, object) {
+  const member = groups.get(object.id);
+  if (typeof member?.group !== 'string' || typeof member?.zone !== 'string') {
+    throw new CourseLevelError({ field: 'course group/zone membership', value: member }, object.id);
+  }
+  return member;
+}
+
+/** @param {Bounds} bounds @param {number} margin @returns {Bounds} */
+const expand = (bounds, margin) => ({
+  left: bounds.left - margin, right: bounds.right + margin, bottom: bounds.bottom - margin, top: bounds.top + margin,
+});
+/** @param {import('../../src/level.ts').TriggerObject} trigger @param {CourseSnapshot} snapshot @returns {Bounds} */
+function triggerBounds(trigger, snapshot) {
+  const box = snapshot.engine.level.triggerBounds(trigger);
+  return { left: box.minX, right: box.maxX, bottom: box.minY, top: box.maxY };
+}
+
+/** Terrain of separately built groups must not merge into a piece's parts; retain the authored illusion policy.
+ * @param {CourseSnapshot} snapshot @param {Groups} groups @param {Set<string>} [supports]
+ */
+export function overlaps(snapshot, groups, supports = new Set()) {
   const problems = [];
-  for (const solid of solids) {
-    for (const other of grid.near((solid.bounds.left + solid.bounds.right) / 2, (solid.bounds.bottom + solid.bounds.top) / 2,
-      Math.max(solid.bounds.right - solid.bounds.left, solid.bounds.top - solid.bounds.bottom) / 2 + CELL)) {
-      if (other.object.id <= solid.object.id) continue;
-      const a = groups.get(solid.object.id).group;
-      const b = groups.get(other.object.id).group;
-      // Only a set piece's own parts must stay clear; its ground may merge with anything but other pieces.
+  for (const record of snapshot.solids) {
+    for (const other of snapshot.candidates(record.bounds)) {
+      if (other.order <= record.order) continue;
+      const a = membership(groups, record.object).group, b = membership(groups, other.object).group;
       const part = (object, group) => group.startsWith('piece:') && !supports.has(object.id);
-      if (a === b || (!part(solid.object, a) && !part(other.object, b))) continue;
-      if (solid.bounds.right <= other.bounds.left || other.bounds.right <= solid.bounds.left ||
-        solid.bounds.top <= other.bounds.bottom || other.bounds.top <= solid.bounds.bottom) continue;
-      const depth = penetration(solid.polygon, other.polygon);
-      if (depth > 0.03) problems.push(`${solid.object.id} overlaps ${other.object.id} by ${depth.toFixed(2)} m`);
+      if (a === b || (!part(record.object, a) && !part(other.object, b))) continue;
+      if (!snapshot.queries.overlapExceeds(record.solid, other.solid, POLICY_ALLOWANCES.overlap)) continue;
+      const depth = snapshot.queries.overlapDepth(record.solid, other.solid, OVERLAP_REPORT_RADIUS_TOLERANCE);
+      problems.push(`${record.object.id} overlaps ${other.object.id} by ${depth.toFixed(2)} m`);
     }
   }
-  for (const enemy of level.objects.filter((object) => object.kind === 'enemy')) {
-    const half = enemy.species === 'bird' ? { x: 0.26, y: 0.26 } : { x: 0.26, y: 0.7 };
-    const box = [
-      { x: enemy.x - half.x, y: enemy.y - half.y }, { x: enemy.x + half.x, y: enemy.y - half.y },
-      { x: enemy.x + half.x, y: enemy.y + half.y }, { x: enemy.x - half.x, y: enemy.y + half.y },
-    ];
-    for (const solid of grid.near(enemy.x, enemy.y, 1)) {
-      if (penetration(box, solid.polygon) > 0.02) problems.push(`${enemy.id} starts inside ${solid.object.id}`);
+  for (const enemy of snapshot.level.objects.filter((object) => object.kind === 'enemy')) {
+    const half = enemy.species === 'bird' ? ENEMY_HALF_BOUNDS.bird : ENEMY_HALF_BOUNDS.ground;
+    const bounds = { left: enemy.x - half.x, right: enemy.x + half.x, bottom: enemy.y - half.y, top: enemy.y + half.y };
+    const box = snapshot.queries.rectangle(bounds);
+    for (const record of snapshot.candidates(bounds)) {
+      if (snapshot.queries.overlapExceeds(box, record.solid, POLICY_ALLOWANCES.enemyStart)) {
+        problems.push(`${enemy.id} starts inside ${record.object.id}`);
+      }
     }
   }
   return problems;
 }
 
 /**
- * No two small colliders may lie within the clearance of each other, touching included: dress a course with
- * decorations, never with terrain props. A set piece's own parts are designed and tested together, so only
- * they may sit close.
+ * Apply smallness and clearance to connected solid components, including islands in one mesh.
+ * Only actual parts of the same recorded set-piece placement are exempt; group names and supports are not proof.
+ * @param {CourseSnapshot} snapshot @param {Groups} groups @param {readonly PieceRecord[]} pieces
  */
-export function crampedColliders(level, groups) {
-  const { solids, grid } = solidIndex(level);
+export function crampedColliders(snapshot, groups, pieces) {
+  snapshot.work.spend('geometry', pieces.length);
+  const owners = new Map();
+  const terrainIds = new Set(snapshot.solids.map((record) => record.object.id));
+  for (const piece of pieces) {
+    snapshot.work.spend('geometry', piece.objects.length);
+    for (const object of piece.objects) {
+      if (object.kind !== 'terrain') continue;
+      if (!terrainIds.has(object.id) || membership(groups, object).group !== piece.group || owners.has(object.id)) {
+        throw new CourseLevelError({ field: 'unique set-piece part ownership', value: piece.group }, object.id);
+      }
+      owners.set(object.id, piece);
+    }
+  }
   const size = (bounds) => Math.max(bounds.right - bounds.left, bounds.top - bounds.bottom);
-  const small = new Set(solids.filter((solid) => size(solid.bounds) <= CRAMPED.small));
+  const small = new Set(snapshot.components.filter((record) => size(record.bounds) <= CRAMPED.small));
   const problems = [];
-  for (const solid of small) {
-    const center = { x: (solid.bounds.left + solid.bounds.right) / 2, y: (solid.bounds.bottom + solid.bounds.top) / 2 };
-    for (const other of grid.near(center.x, center.y, CRAMPED.small + CRAMPED.clearance + CELL)) {
-      if (!small.has(other) || other.object.id <= solid.object.id) continue;
-      const group = groups.get(solid.object.id).group;
-      if (group.startsWith('piece:') && group === groups.get(other.object.id).group) continue;
-      const gap = separation(solid.polygon, other.polygon);
-      if (gap < CRAMPED.clearance) problems.push(`${solid.object.id} and ${other.object.id} are small colliders ${gap.toFixed(2)} m apart`);
+  for (const record of small) {
+    for (const other of snapshot.componentCandidates(expand(record.bounds, CRAMPED.clearance))) {
+      if (other.order <= record.order || !small.has(other)) continue;
+      const owner = owners.get(record.object.id);
+      if (owner !== undefined && owner === owners.get(other.object.id)) continue;
+      const gap = snapshot.queries.separation(record.solid, other.solid);
+      if (gap <= CRAMPED.clearance) {
+        problems.push(`${record.object.id} component ${record.component + 1} and ${other.object.id} component ${other.component + 1} are small colliders ${gap.toFixed(2)} m apart`);
+      }
     }
   }
   return problems;
 }
 
-/** Nothing built outside a set piece may reach into its bounds, so its designed moves stay open. */
-export function keepOut(level, groups, pieces, allowed = new Set()) {
-  const { grid } = solidIndex(level);
+/** A piece's bounds deliberately reserve its movement space, including empty air.
+ * @param {CourseSnapshot} snapshot @param {Groups} groups @param {readonly PieceRecord[]} pieces @param {Set<string>} [allowed]
+ */
+export function keepOut(snapshot, groups, pieces, allowed = new Set()) {
+  snapshot.work.spend('geometry', pieces.length);
   const problems = [];
   for (const piece of pieces) {
-    const box = piece.bounds;
-    const inner = [
-      { x: box.left + 0.1, y: box.bottom + 0.1 }, { x: box.right - 0.1, y: box.bottom + 0.1 },
-      { x: box.right - 0.1, y: box.top - 0.1 }, { x: box.left + 0.1, y: box.top - 0.1 },
-    ];
-    const seen = new Set();
-    for (const solid of grid.near((box.left + box.right) / 2, (box.bottom + box.top) / 2, Math.max(box.right - box.left, box.top - box.bottom) / 2 + 3)) {
-      if (seen.has(solid) || groups.get(solid.object.id).group === piece.group || allowed.has(`${solid.object.id}|${piece.id}`)) continue;
-      seen.add(solid);
-      const depth = penetration(solid.polygon, inner);
-      if (depth > 0.05) problems.push(`${solid.object.id} reaches ${depth.toFixed(2)} m into ${piece.id}`);
+    if (piece.bounds === null) continue;
+    const box = piece.bounds, inset = POLICY_ALLOWANCES.reservationInset;
+    if (box.right - box.left <= inset * 2 || box.top - box.bottom <= inset * 2) {
+      throw new CourseLevelError({ field: 'set-piece reservation after inset', value: piece.id });
+    }
+    const inner = snapshot.queries.rectangle({ left: box.left + inset, right: box.right - inset, bottom: box.bottom + inset, top: box.top - inset });
+    for (const record of snapshot.candidates(inner.bounds)) {
+      if (membership(groups, record.object).group === piece.group || allowed.has(`${record.object.id}|${piece.id}`)) continue;
+      if (!snapshot.queries.overlapExceeds(record.solid, inner, POLICY_ALLOWANCES.keepOut)) continue;
+      const depth = snapshot.queries.overlapDepth(record.solid, inner, OVERLAP_REPORT_RADIUS_TOLERANCE);
+      problems.push(`${record.object.id} reaches ${depth.toFixed(2)} m into ${piece.id}`);
     }
   }
   return problems;
 }
 
-/** The course's own drafts rise through open air: nothing solid in a vent's column below its apex. */
-export function ventShafts(level, groups) {
-  const { solids } = solidIndex(level);
+/** A course's own drafts rise through open air above their region, up to the first launch event's apex.
+ * @param {CourseSnapshot} snapshot @param {Groups} groups
+ */
+export function ventShafts(snapshot, groups) {
   const problems = [];
-  for (const vent of level.objects.filter((object) => object.kind === 'trigger' && !groups.get(object.id).group.startsWith('piece:'))) {
+  for (const vent of snapshot.level.objects) {
+    if (vent.kind !== 'trigger' || membership(groups, vent).group.startsWith('piece:')) continue;
     const launch = vent.events.find((event) => event.type === 'launch-player');
     if (launch === undefined) continue;
-    const left = vent.x - vent.region.width / 2;
-    const right = vent.x + vent.region.width / 2;
-    const top = vent.y - vent.region.height / 2 + launch.height;
-    const floor = vent.y + vent.region.height / 2;
-    const shaft = [{ x: left, y: floor }, { x: right, y: floor }, { x: right, y: top }, { x: left, y: top }];
-    for (const solid of solids) {
-      if (solid.object.illusion || solid.bounds.right <= left || solid.bounds.left >= right || solid.bounds.top <= floor || solid.bounds.bottom >= top) continue;
-      const depth = penetration(solid.polygon, shaft);
-      if (depth > 0.02) problems.push(`${vent.id} rises into ${solid.object.id}`);
+    const bounds = triggerBounds(vent, snapshot), top = bounds.bottom + launch.height;
+    if (top <= bounds.top) continue;
+    const shaft = snapshot.queries.rectangle({ ...bounds, bottom: bounds.top, top });
+    for (const record of snapshot.candidates(shaft.bounds)) {
+      if (record.object.illusion) continue;
+      if (snapshot.queries.overlapExceeds(record.solid, shaft, POLICY_ALLOWANCES.vent)) problems.push(`${vent.id} rises into ${record.object.id}`);
     }
   }
   return problems;
 }
 
-/** Points where the pot can stand: upward faces no steeper than the reach model's `maxStandSlope` with room above them. */
-export function standPoints(level, groups, reach) {
-  return collectStandPoints(level, groups, reachRules(reach));
+/** @param {CourseSnapshot} snapshot @param {{x: number, y: number}} point @param {ReachRules} rules */
+function standingClearance(snapshot, point, rules) {
+  const clearColumn = (x, heights) => {
+    for (let i = 0; i < heights.length; i++) {
+      const probe = { x, y: point.y + heights[i] };
+      if (snapshot.inside(probe) !== null) return false;
+      if (i > 0 && snapshot.blocksSegment({ x, y: point.y + heights[i - 1] }, probe)) return false;
+    }
+    return true;
+  };
+  // Do not ignore the supporting object: another loop of that same cave may be its ceiling.
+  return clearColumn(point.x, rules.clearanceHeights) &&
+    clearColumn(point.x - rules.clearanceHalfWidth, rules.sideClearanceHeights) &&
+    clearColumn(point.x + rules.clearanceHalfWidth, rules.sideClearanceHeights);
 }
 
-function collectStandPoints(level, groups, rules) {
-  const index = solidIndex(level);
+/** Upward oriented edges and analytic circle arcs, sampled only for the conservative reach model.
+ * @param {CourseSnapshot} snapshot @param {Groups} groups @param {ReachModel} reach
+ */
+export function standPoints(snapshot, groups, reach) {
+  return collectStandPoints(snapshot, groups, reachRules(reach, snapshot));
+}
+
+/** @param {CourseSnapshot} snapshot @param {Groups} groups @param {ReachRules} rules */
+function collectStandPoints(snapshot, groups, rules) {
+  /** @type {StandPoint[]} */
   const points = [];
-  for (const { object, polygon } of index.solids) {
-    for (let edge = 0; edge < polygon.length; edge++) {
-      const a = polygon[edge];
-      const b = polygon[(edge + 1) % polygon.length];
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      if (length < 1e-6) continue;
-      const normal = { x: (b.y - a.y) / length, y: -(b.x - a.x) / length };
-      if (normal.y < rules.standNormal) continue;
-      const count = Math.max(1, Math.floor(length / SAMPLE));
-      const inset = Math.min(0.5, 0.1 / length);
+  const sampled = new Set();
+  for (const record of snapshot.solids) {
+    const object = record.object, member = membership(groups, object);
+    for (const surface of snapshot.queries.standingSurfaces(record.solid, rules.standNormal)) {
+      const count = Math.max(1, Math.floor(surface.length / snapshot.standingSampleSpacing));
+      snapshot.work.spend('samples', count + 1);
+      const inset = surface.length === 0 ? 0.5 : Math.min(0.5, rules.standingInset / surface.length);
       for (let step = 0; step <= count; step++) {
         const t = Math.min(1 - inset, Math.max(inset, step / count));
-        const point = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-        const probe = (dy) => ({ x: point.x, y: point.y + dy });
-        if (index.inside(probe(0.05), object) || index.inside(probe(0.45), object) || index.inside(probe(0.85), object)) continue;
-        // The pot is a metre wide: a slot narrower than its body cannot hold it.
-        if ([0.45, 0.85].some((dy) => index.inside({ x: point.x - 0.35, y: point.y + dy }, object) !== null ||
-          index.inside({ x: point.x + 0.35, y: point.y + dy }, object) !== null)) continue;
-        points.push({ ...point, object, group: groups.get(object.id).group, zone: groups.get(object.id).zone, illusion: object.illusion });
+        const angle = surface.type === 'arc' ? surface.from + (surface.to - surface.from) * t : 0;
+        const point = surface.type === 'edge'
+          ? { x: surface.a.x + (surface.b.x - surface.a.x) * t, y: surface.a.y + (surface.b.y - surface.a.y) * t }
+          : { x: surface.center.x + surface.radius * Math.cos(angle), y: surface.center.y + surface.radius * Math.sin(angle) };
+        const key = `${object.id}|${point.x}|${point.y}`;
+        if (sampled.has(key)) continue;
+        sampled.add(key);
+        if (!standingClearance(snapshot, point, rules)) continue;
+        points.push({ ...point, id: points.length, object, group: member.group, zone: member.zone, illusion: object.illusion });
       }
     }
   }
-  return { points, index };
+  return { points, index: snapshot.index };
 }
 
-function clearLine(index, from, to, ignore) {
-  for (const t of [0.2, 0.4, 0.6, 0.8]) {
-    const hit = index.inside({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t });
-    if (hit !== null && !ignore.has(hit)) return false;
-  }
-  return true;
-}
+/** @param {{x: number, y: number}} from @param {{x: number, y: number}} to @param {CourseSnapshot} snapshot */
+const clearLine = (from, to, snapshot) => !snapshot.blocksSegment(from, to);
 
 /**
- * Breadth-first search over stand points. Moves between separately built groups must fit the reach
- * model; inside a set piece every surface reaches every other (downward only for descents), as the
- * library designed it; updrafts lift the player to anything beside their column; `links` add designed
- * moves. While a course is being built, `goal` stands in for its missing ending.
+ * A conservative authoring model, not a physics/playability proof. The complete model is mandatory.
+ * Trusted piece membership remains explicit policy: hubs for any-direction pieces, an ordered chain for descents.
+ * @param {CourseSnapshot} snapshot @param {Groups} groups @param {readonly PieceRecord[]} pieces
+ * @param {readonly DesignedLink[]} links @param {ReachModel} reach @param {{x: number, y: number} | null} [goal]
  */
-export function reachGraph(level, groups, pieces, links, reach, goal = null) {
-  const rules = reachRules(reach);
-  const { points, index } = collectStandPoints(level, groups, rules);
-  const grid = new Grid();
-  points.forEach((point, id) => { point.id = id; grid.insert(point, { left: point.x, right: point.x, bottom: point.y, top: point.y }); });
-  const neighbours = points.map(() => new Set());
-  const connect = (a, b) => { if (a !== b) neighbours[a.id].add(b.id); };
+export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) {
+  const rules = reachRules(reach, snapshot);
+  const maximumDrift = rules.fallDriftBase + rules.fallDriftPerMetre * rules.drop;
+  if (!Number.isFinite(maximumDrift)) throw new ReachModelError('fallDriftPerMetre/drop', maximumDrift, 'The modeled fall drift must stay finite.');
+  const { points } = collectStandPoints(snapshot, groups, rules);
+  const pointIndex = snapshot.createIndex(points,
+    (point) => ({ left: point.x, right: point.x, bottom: point.y, top: point.y }));
+  /** @type {Set<number>[]} */
+  const neighbours = [];
+  const node = () => { snapshot.work.spend('graphNodes'); neighbours.push(new Set()); return neighbours.length - 1; };
+  for (let i = 0; i < points.length; i++) node();
+  const connect = (from, to) => {
+    if (from === to || neighbours[from].has(to)) return;
+    snapshot.work.spend('graphEdges');
+    neighbours[from].add(to);
+  };
+  const candidates = (bounds) => pointIndex.query(bounds);
   const solid = (point) => !point.illusion;
   for (const a of points) {
     if (!solid(a)) continue;
-    const shoulder = { x: a.x, y: a.y + rules.shoulder };
-    for (const b of grid.near(a.x, a.y, Math.max(rules.pull + 0.5, 3))) {
+    const shoulder = { x: a.x, y: a.y + rules.shoulder }, horizontal = Math.max(rules.pull, rules.hop);
+    for (const b of candidates({ left: a.x - horizontal, right: a.x + horizontal, bottom: a.y - rules.hopDrop, top: a.y + Math.max(rules.rise, rules.hopRise) })) {
+      snapshot.work.spend('reachCandidates');
       if (a === b || !solid(b)) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      // Climbing pulls the pot over a lip; hops and drops carry it over anything below knee height.
-      const ignore = new Set([a.object, b.object]);
-      if (dy > 0.05 && a.object !== b.object) {
+      const dx = b.x - a.x, dy = b.y - a.y;
+      if (dy > rules.moveRiseThreshold && a.object !== b.object) {
         if (dy <= rules.rise && Math.hypot(dx, b.y - shoulder.y) <= rules.pull &&
-          clearLine(index, shoulder, { x: b.x, y: b.y + 0.3 }, ignore)) connect(a, b);
-      } else if (dy >= -2.5 && dy <= 0.6 && Math.abs(dx) <= rules.hop) {
-        if (clearLine(index, { x: a.x, y: a.y + 1.2 }, { x: b.x, y: b.y + 1.2 }, ignore)) connect(a, b);
-      }
+          clearLine(shoulder, { x: b.x, y: b.y + rules.shoulderLipOffset }, snapshot)) connect(a.id, b.id);
+      } else if (dy >= -rules.hopDrop && dy <= rules.hopRise && Math.abs(dx) <= rules.hop &&
+        clearLine({ x: a.x, y: a.y + rules.transitHeight }, { x: b.x, y: b.y + rules.transitHeight }, snapshot)) connect(a.id, b.id);
     }
-    // Dropping off an edge onto something below, drifting a little further the longer the fall.
-    for (const b of grid.near(a.x, a.y - rules.drop / 2, rules.drop / 2 + 3)) {
+    for (const b of candidates({ left: a.x - maximumDrift, right: a.x + maximumDrift, bottom: a.y - rules.drop, top: a.y - rules.fallMinimum })) {
+      snapshot.work.spend('reachCandidates');
       const fall = a.y - b.y;
-      if (b === a || !solid(b) || fall < 0.05 || fall > rules.drop || Math.abs(b.x - a.x) > 2.2 + 0.25 * fall) continue;
-      if (clearLine(index, { x: a.x, y: a.y + 1.2 }, { x: b.x, y: b.y + 1.2 }, new Set([a.object, b.object]))) connect(a, b);
+      if (b === a || !solid(b) || fall < rules.fallMinimum || fall > rules.drop ||
+        Math.abs(b.x - a.x) > rules.fallDriftBase + rules.fallDriftPerMetre * fall) continue;
+      if (clearLine({ x: a.x, y: a.y + rules.transitHeight }, { x: b.x, y: b.y + rules.transitHeight }, snapshot)) connect(a.id, b.id);
     }
   }
-  // Falling: off either side of a point the player lands on the first surface below.
   const columns = new Map();
-  const bin = (x) => Math.round(x / 0.4);
+  const bin = (x) => {
+    const column = Math.round(x / rules.fallColumnSpacing);
+    if (!Number.isFinite(column)) throw new ReachModelError('fallColumnSpacing', rules.fallColumnSpacing, 'The modeled fall column must stay finite.');
+    return column;
+  };
   for (const point of points) {
     if (!solid(point)) continue;
     if (!columns.has(bin(point.x))) columns.set(bin(point.x), []);
     columns.get(bin(point.x)).push(point);
   }
-  for (const list of columns.values()) list.sort((first, second) => second.y - first.y);
+  for (const list of columns.values()) list.sort((a, b) => {
+    snapshot.work.spend('reachCandidates');
+    return b.y - a.y || a.id - b.id;
+  });
   for (const a of points) {
     if (!solid(a)) continue;
-    for (const offset of [-2.4, -1.2, 1.2, 2.4]) {
+    for (const offset of rules.fallProbeOffsets) {
+      snapshot.work.spend('reachCandidates');
       const x = a.x + offset;
-      if (index.inside({ x, y: a.y + 0.3 }) !== null) continue;
-      const below = (columns.get(bin(x)) ?? []).find((point) => point.y < a.y - 0.3);
-      if (below === undefined) continue;
-      let open = true;
-      for (let y = a.y; y > below.y + 0.3; y -= 0.6) {
-        if (index.inside({ x: below.x, y }) !== null) { open = false; break; }
+      if (snapshot.inside({ x, y: a.y + rules.fallInitialProbeHeight }) !== null) continue;
+      const list = columns.get(bin(x)) ?? [];
+      let low = 0, high = list.length;
+      while (low < high) {
+        snapshot.work.spend('reachCandidates');
+        const middle = Math.floor((low + high) / 2);
+        if (list[middle].y < a.y - rules.fallSurfaceOffset) high = middle;
+        else low = middle + 1;
       }
-      if (open) connect(a, below);
+      const below = list[low];
+      if (below === undefined) continue;
+      if (clearLine({ x: below.x, y: a.y + rules.fallProbeStartHeight }, { x: below.x, y: below.y + rules.fallSurfaceOffset }, snapshot)) {
+        connect(a.id, below.id);
+      }
     }
   }
   const byGroup = new Map();
@@ -344,77 +375,97 @@ export function reachGraph(level, groups, pieces, links, reach, goal = null) {
     if (!byGroup.has(point.group)) byGroup.set(point.group, []);
     byGroup.get(point.group).push(point);
   }
+  snapshot.work.spend('reachCandidates', pieces.length);
   for (const piece of pieces) {
     const members = byGroup.get(piece.group) ?? [];
-    for (const a of members) {
-      for (const b of members) if (piece.direction !== 'down' || b.y < a.y + 0.05) connect(a, b);
-    }
+    snapshot.work.spend('reachCandidates', members.length);
+    if (piece.direction === 'down') {
+      const ordered = [...members].sort((a, b) => {
+        snapshot.work.spend('reachCandidates');
+        return b.y - a.y || a.id - b.id;
+      });
+      for (let i = 1; i < ordered.length; i++) {
+        const upper = ordered[i - 1], lower = ordered[i];
+        connect(upper.id, lower.id);
+        if (upper.y < lower.y + TRUSTED_DESCENT_RISE) connect(lower.id, upper.id);
+      }
+    } else if (piece.direction === 'any') {
+      if (members.length === 0) continue;
+      const hub = node();
+      for (const point of members) { connect(point.id, hub); connect(hub, point.id); }
+    } else throw new CourseLevelError({ field: 'set-piece traversal direction', value: piece.direction });
   }
-  for (const vent of level.objects.filter((object) => object.kind === 'trigger' && object.events.some((event) => event.type === 'launch-player'))) {
-    const lift = Math.max(...vent.events.filter((event) => event.type === 'launch-player').map((event) => event.height));
-    const bottom = vent.y - vent.region.height / 2;
-    const riders = points.filter((point) => Math.abs(point.x - vent.x) <= vent.region.width / 2 + 1.6 &&
-      point.y >= bottom - 1 && point.y <= vent.y + vent.region.height / 2 + 0.2);
-    const targets = points.filter((point) => solid(point) && Math.abs(point.x - vent.x) <= vent.region.width / 2 + 2.6 &&
-      point.y > bottom && point.y <= bottom + lift + 0.3);
-    for (const a of riders) for (const b of targets) connect(a, b);
+  for (const vent of snapshot.level.objects) {
+    if (vent.kind !== 'trigger') continue;
+    const launches = vent.events.filter((event) => event.type === 'launch-player');
+    if (launches.length === 0) continue;
+    const lift = Math.max(...launches.map((event) => event.height)), bounds = triggerBounds(vent, snapshot);
+    const riders = candidates({
+      left: bounds.left - rules.ventRiderMargin, right: bounds.right + rules.ventRiderMargin,
+      bottom: bounds.bottom - rules.ventRiderBelow, top: bounds.top + rules.ventRiderAbove,
+    });
+    const targetCandidates = candidates({
+      left: bounds.left - rules.ventTargetMargin, right: bounds.right + rules.ventTargetMargin,
+      bottom: bounds.bottom, top: bounds.bottom + lift + rules.ventTargetAbove,
+    });
+    snapshot.work.spend('reachCandidates', riders.length + targetCandidates.length);
+    const targets = targetCandidates.filter((point) => solid(point) && point.y > bounds.bottom);
+    if (riders.length === 0 || targets.length === 0) continue;
+    const hub = node();
+    for (const point of riders) connect(point.id, hub);
+    for (const point of targets) connect(hub, point.id);
   }
   const nearest = (target) => {
     let best = null;
-    for (const point of grid.near(target.x, target.y, 1.6)) {
+    for (const point of candidates({ left: target.x - rules.anchorRadius, right: target.x + rules.anchorRadius,
+      bottom: target.y - rules.anchorRadius, top: target.y + rules.anchorRadius })) {
+      snapshot.work.spend('reachCandidates');
       const distance = Math.hypot(point.x - target.x, point.y - target.y);
-      if (distance <= 1.6 && (best === null || distance < best.distance)) best = { point, distance };
+      if (distance <= rules.anchorRadius && (best === null || distance < best.distance ||
+        (distance === best.distance && point.id < best.point.id))) best = { point, distance };
     }
-    if (best === null) throw new Error(`No stand point near (${target.x}, ${target.y}).`);
+    if (best === null) throw new CourseQueryError('QUERY_NO_STAND_POINT', { x: target.x, y: target.y, radius: rules.anchorRadius },
+      `No stand point within ${rules.anchorRadius} m of (${target.x}, ${target.y}).`);
     return best.point;
   };
-  for (const link of links) connect(nearest(link.from), nearest(link.to));
+  snapshot.work.spend('reachCandidates', links.length);
+  for (const link of links) connect(nearest(link.from).id, nearest(link.to).id);
 
-  const start = level.objects.find((object) => object.kind === 'start');
-  const ending = level.objects.find((object) => object.kind === 'trigger' && object.events.some((event) => event.type === 'stop-timer'));
-  const origin = nearest({ x: start.x, y: start.y - 0.65 });
-  const seen = new Uint8Array(points.length);
-  const queue = [origin.id];
-  seen[origin.id] = 1;
-  while (queue.length > 0) {
-    const current = queue.shift();
-    for (const next of neighbours[current]) {
-      if (!seen[next]) {
-        seen[next] = 1;
-        queue.push(next);
-      }
+  const start = snapshot.level.objects.find((object) => object.kind === 'start');
+  const ending = snapshot.level.objects.find((object) => object.kind === 'trigger' && object.events.some((event) => event.type === 'stop-timer'));
+  const origin = nearest({ x: start.x, y: start.y - rules.startFootOffset });
+  const seenNodes = new Uint8Array(neighbours.length), queue = [origin.id];
+  seenNodes[origin.id] = 1;
+  for (let head = 0; head < queue.length; head++) {
+    for (const next of neighbours[queue[head]]) {
+      if (!seenNodes[next]) { seenNodes[next] = 1; queue.push(next); }
     }
   }
-  // While a course is being built, the end of its route stands in for the ending.
   const inEnding = ending !== undefined
-    ? (point) => Math.abs(point.x - ending.x) <= ending.region.width / 2 &&
-      point.y >= ending.y - ending.region.height / 2 - 0.1 && point.y <= ending.y + ending.region.height / 2
-    : (point) => goal !== null && Math.hypot(point.x - goal.x, point.y - goal.y) <= 1.5;
-  // Points from which the ending can still be reached; anything the player can reach but not leave is a trap.
-  const incoming = points.map(() => []);
+    ? (point) => snapshot.engine.level.triggerContains(ending, point) ||
+      snapshot.engine.level.triggerContains(ending, { x: point.x, y: point.y + rules.endingBelow })
+    : (point) => goal !== null && Math.hypot(point.x - goal.x, point.y - goal.y) <= rules.goalRadius;
+  const incoming = neighbours.map(() => []);
   neighbours.forEach((targets, from) => { for (const to of targets) incoming[to].push(from); });
-  const finish = new Uint8Array(points.length);
-  const back = points.filter(inEnding).map((point) => point.id);
-  for (const id of back) finish[id] = 1;
-  while (back.length > 0) {
-    for (const previous of incoming[back.pop()]) {
-      if (!finish[previous]) {
-        finish[previous] = 1;
-        back.push(previous);
-      }
+  const finishNodes = new Uint8Array(neighbours.length), back = points.filter(inEnding).map((point) => point.id);
+  for (const id of back) finishNodes[id] = 1;
+  for (let head = 0; head < back.length; head++) {
+    for (const previous of incoming[back[head]]) {
+      if (!finishNodes[previous]) { finishNodes[previous] = 1; back.push(previous); }
     }
   }
+  const seen = seenNodes.slice(0, points.length), finish = finishNodes.slice(0, points.length);
   const traps = new Map();
   for (const point of points) {
     if (!seen[point.id] || finish[point.id] || !solid(point)) continue;
-    const key = point.group;
-    if (!traps.has(key)) traps.set(key, { group: key, count: 0, x: point.x, y: point.y });
-    traps.get(key).count++;
+    if (!traps.has(point.group)) traps.set(point.group, { group: point.group, count: 0, x: point.x, y: point.y });
+    traps.get(point.group).count++;
   }
   const reached = points.filter((point) => seen[point.id]);
   const unreachedPieces = pieces.filter((piece) => (byGroup.get(piece.group) ?? []).length > 0 &&
     !(byGroup.get(piece.group) ?? []).some((point) => seen[point.id])).map((piece) => `${piece.id} (${piece.stamp})`);
   return {
+    model: 'conservative-authoring-model', playabilityProof: false, snapshot,
     points, seen, reached: reached.length, total: points.length,
     ending: points.some((point) => seen[point.id] && inEnding(point)),
     highest: reached.reduce((best, point) => point.y > best.y ? point : best, origin),
@@ -422,19 +473,17 @@ export function reachGraph(level, groups, pieces, links, reach, goal = null) {
   };
 }
 
-export function budget(level) {
-  const count = (kind) => level.objects.filter((object) => object.kind === kind).length;
-  const terrain = level.objects.filter((object) => object.kind === 'terrain');
+/** @param {CourseSnapshot} snapshot */
+export function budget(snapshot) {
+  const level = snapshot.level, count = (kind) => level.objects.filter((object) => object.kind === kind).length;
   return {
-    terrain: count('terrain'), illusions: terrain.filter((object) => object.illusion).length,
+    terrain: snapshot.solids.length, illusions: snapshot.solids.filter((record) => record.object.illusion).length,
     triggers: count('trigger'), updrafts: level.objects.filter((object) => object.kind === 'trigger' &&
       object.events.some((event) => event.type === 'launch-player')).length,
     enemies: count('enemy'), birds: level.objects.filter((object) => object.kind === 'enemy' && object.species === 'bird').length,
-    decorations: count('decoration'),
-    labels: level.labels.length,
-    meshes: [...new Set(terrain.map(({ mesh }) => mesh.type === 'shape' ? mesh.shape : mesh.type))].sort(),
-    top: Math.max(...terrain.map((object) => Math.max(...outline(object).map((point) => point.y)))),
-    left: Math.min(...terrain.map((object) => Math.min(...outline(object).map((point) => point.x)))),
-    right: Math.max(...terrain.map((object) => Math.max(...outline(object).map((point) => point.x)))),
+    decorations: count('decoration'), labels: level.labels.length,
+    meshes: [...new Set(snapshot.solids.map(({ object }) => object.mesh.type === 'shape' ? object.mesh.shape : object.mesh.type))].sort(),
+    bounds: snapshot.bounds, top: snapshot.bounds?.top ?? null, left: snapshot.bounds?.left ?? null, right: snapshot.bounds?.right ?? null,
+    work: snapshot.work.usage,
   };
 }

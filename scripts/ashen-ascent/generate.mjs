@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { CourseBuilder } from '../course-kit/course.mjs';
+import { loadCourseEngine } from '../course-kit/engine.mjs';
+import { createCourseJob } from '../course-kit/job.mjs';
+import { CourseError } from '../course-kit/errors.mjs';
 import { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, ventShafts } from '../course-kit/checks.mjs';
 import { courseMap, renderCrops } from '../course-kit/map.mjs';
 import { buildCourse } from './zones.mjs';
@@ -21,27 +24,22 @@ const flags = new Set(process.argv.slice(2));
 const server = await createServer({ configFile: false, root, logLevel: 'silent', server: { middlewareMode: true }, appType: 'custom' });
 try {
   const library = await server.ssrLoadModule('/src/editor/set-pieces.ts');
-  const { LEVEL_SCHEMA_VERSION, validateLevel, validateLevelObject } = await server.ssrLoadModule('/src/level.ts');
+  const engine = await loadCourseEngine(server);
+  const job = createCourseJob(engine);
   const project = await server.ssrLoadModule('/src/project.ts');
-  const builder = new CourseBuilder(library);
+  const builder = new CourseBuilder(library, job);
   const trail = buildCourse(builder);
-  for (const object of builder.objects) {
-    try {
-      validateLevelObject(object);
-    } catch (error) {
-      throw new Error(`${object.id}: ${error.message} ${JSON.stringify(object)}`);
-    }
-  }
-  const level = validateLevel(builder.level(LEVEL_SCHEMA_VERSION));
+  const snapshot = job.prepare(builder.level(engine.level.LEVEL_SCHEMA_VERSION));
+  const level = snapshot.level;
   const problems = [];
   const used = new Set(builder.pieces.map((piece) => piece.id));
   const missing = library.SET_PIECES.filter((piece) => !used.has(piece.id)).map((piece) => piece.id);
   const repeated = builder.pieces.map((piece) => piece.id).filter((id, index, all) => all.indexOf(id) !== index);
   if (missing.length > 0) problems.push(`Set pieces not placed: ${missing.join(', ')}`);
   if (repeated.length > 0) problems.push(`Set pieces placed twice: ${repeated.join(', ')}`);
-  problems.push(...overlaps(level, builder.groups, builder.supports), ...keepOut(level, builder.groups, builder.pieces, builder.allowed),
-    ...ventShafts(level, builder.groups), ...crampedColliders(level, builder.groups));
-  const reach = reachGraph(level, builder.groups, builder.pieces, builder.links, ENGINE_DEFAULT_REACH, { x: trail.x, y: trail.y });
+  problems.push(...overlaps(snapshot, builder.groups, builder.supports), ...keepOut(snapshot, builder.groups, builder.pieces, builder.allowed),
+    ...ventShafts(snapshot, builder.groups), ...crampedColliders(snapshot, builder.groups, builder.pieces));
+  const reach = reachGraph(snapshot, builder.groups, builder.pieces, builder.links, ENGINE_DEFAULT_REACH, { x: trail.x, y: trail.y });
   if (!reach.ending) {
     problems.push(`The ending is not reachable; the highest reached point is (${reach.highest.x.toFixed(1)}, ${reach.highest.y.toFixed(1)}) in ${reach.highest.group}.`);
   }
@@ -50,13 +48,13 @@ try {
     problems.push(`Traps (reachable, but the ending is not reachable from them): ${reach.traps.map((trap) =>
       `${trap.group} x${trap.count} near (${trap.x.toFixed(1)}, ${trap.y.toFixed(1)})`).join('; ')}`);
   }
-  const totals = budget(level);
+  const totals = budget(snapshot);
   console.log(JSON.stringify({ budget: totals, pieces: builder.pieces.length, reach: { reached: reach.reached, total: reach.total, ending: reach.ending } }));
   const zones = builder.zones.map((zone) => ({ name: zone.name, from: zone.from }));
   if (flags.has('--preview')) {
     const directory = join(root, 'artifacts/ashen-ascent');
     await mkdir(directory, { recursive: true });
-    const map = courseMap(level, { zones, scale: 8, reach, sky: MAP_SKY });
+    const map = courseMap(snapshot, { zones, scale: 8, reach, sky: MAP_SKY });
     await writeFile(join(directory, 'reach.svg'), map.svg);
     const crops = builder.zones.map((zone) => ({ name: zone.code, left: zone.view?.left ?? map.left, right: zone.view?.right ?? map.right,
       bottom: zone.from - 4, top: zone.to + 8 }));
@@ -77,7 +75,7 @@ try {
     [`${example}/project.json`, `${JSON.stringify(manifest, null, 2)}\n`],
     [`${example}/level.json`, `${JSON.stringify(level)}\n`],
     ...Object.entries(media).map(([name, bytes]) => [`${example}/media/${name}`, bytes]),
-    ['docs/ashen-ascent-map.svg', `${courseMap(level, { zones, scale: 6, sky: MAP_SKY }).svg}\n`],
+    ['docs/ashen-ascent-map.svg', `${courseMap(snapshot, { zones, scale: 6, sky: MAP_SKY }).svg}\n`],
   ]);
   const strays = (await readdir(join(root, example, 'media')).catch(() => []))
     .map((name) => `${example}/media/${name}`).filter((path) => !outputs.has(path));
@@ -87,6 +85,9 @@ try {
     for (const path of strays) await rm(join(root, path));
     for (const [path, data] of outputs) await writeFile(join(root, path), data);
   }
+} catch (error) {
+  if (error instanceof CourseError) console.error(`${error.code}: ${error.message}\nRepair: ${error.repair}`);
+  throw error;
 } finally {
   await server.close();
 }

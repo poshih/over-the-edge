@@ -2,6 +2,8 @@
 // foreground. Distant scenery is placed by where it should appear on screen while the camera looks at a
 // point of the climb: it barely drifts from there, while scenery near the course moves almost with it.
 import VIEW_FRAME from '../../src/view-frame.json' with { type: 'json' };
+import { SceneryCameraError } from './errors.mjs';
+export { SceneryCameraError } from './errors.mjs';
 
 // The rock shelf model's proportions, and its slab top as a share of its height; boulders stand above it.
 const SHELF_SIZE = { width: 24, height: 5.01 };
@@ -11,13 +13,6 @@ const SHELF_STEP = 0.92;
 // Every third model of a row is a little shorter than the one before it.
 const ROW_SHRINK = 0.12;
 
-export class SceneryCameraError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'SceneryCameraError';
-  }
-}
-
 /**
  * Scenery helpers for a theme's camera (`theme.camera`), which must be the perspective camera; its vertical
  * `fieldOfView` is in degrees. The camera frames the engine's course view height, so its distance from the
@@ -25,10 +20,12 @@ export class SceneryCameraError extends Error {
  */
 export function sceneryHelpers({ perspective, fieldOfView }) {
   if (perspective !== true) {
-    throw new SceneryCameraError('Depth-placed scenery needs the theme\'s perspective camera; an orthographic camera does not shrink distant decorations.');
+    throw new SceneryCameraError('perspective', perspective,
+      'Depth-placed scenery needs the theme\'s perspective camera; an orthographic camera does not shrink distant decorations.');
   }
   if (typeof fieldOfView !== 'number' || !(fieldOfView > 0 && fieldOfView < 180)) {
-    throw new SceneryCameraError('Scenery needs the theme\'s perspective camera fieldOfView, in degrees between 0 and 180.');
+    throw new SceneryCameraError('fieldOfView', fieldOfView,
+      'Scenery needs the theme\'s perspective camera fieldOfView, in degrees between 0 and 180.');
   }
   // The perspective camera's distance from the course plane.
   const distance = VIEW_FRAME.viewHeight / 2 / Math.tan(fieldOfView * Math.PI / 360);

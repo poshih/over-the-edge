@@ -1,6 +1,23 @@
 // The level builder of a generated course (see docs/course-kit.md). Set pieces come from the Workshop's
 // library through placeSetPiece, so a course uses the library's own prefabs; everything else is
 // ordinary terrain, triggers, enemies and labels, grouped so the checks can tell them apart.
+import { CourseLevelError, CourseQueryError } from './errors.mjs';
+
+/** @typedef {import('../../src/level.ts').TerrainMesh} TerrainMesh */
+/** @typedef {import('./job.mjs').CourseJob} CourseJob */
+/**
+ * @typedef {object} TerrainOptions
+ * @property {number} [angle]
+ * @property {number} [depth]
+ * @property {boolean} [mirror]
+ * @property {string} [tone]
+ * @property {number} [color]
+ * @property {boolean} [illusion]
+ * @property {import('../../src/surfaces.ts').Surface} [surface]
+ * @property {string} [group]
+ * @property {string} [allowIn]
+ * @property {boolean} [support]
+ */
 
 // A small deterministic generator, so a seed always builds the same course.
 export function random(seed) {
@@ -14,11 +31,22 @@ export function random(seed) {
   };
 }
 
-const tidy = (value, digits = 4) => Number(value.toFixed(digits)) + 0;
+const tidy = (value, digits = 4) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new CourseLevelError({ field: 'coordinate or dimension', value });
+  return Number(value.toFixed(digits)) + 0;
+};
 
 export class CourseBuilder {
-  constructor(library) {
+  /** @param {Pick<typeof import('../../src/editor/set-pieces.ts'), 'setPieceById' | 'placeSetPiece'>} library @param {CourseJob} job */
+  constructor(library, job) {
+    if (typeof library?.setPieceById !== 'function' || typeof library?.placeSetPiece !== 'function' ||
+      typeof job?.validateObject !== 'function' || typeof job?.worldBounds !== 'function' ||
+      typeof job?.engine?.level?.shapeMesh !== 'function') {
+      throw new CourseQueryError('QUERY_CAPABILITY_UNSUPPORTED', { capability: 'CourseBuilder(library, job)' },
+        'CourseBuilder needs the engine set-piece library and a course job.');
+    }
     this.library = library;
+    this.job = job;
     this.objects = [];
     this.labels = [];
     // Every object's group: a placed piece, or a named connector group of a zone.
@@ -50,7 +78,8 @@ export class CourseBuilder {
   }
 
   add(object, group) {
-    if (this.groups.has(object.id)) throw new Error(`Duplicate object ID ${object.id}.`);
+    if (this.groups.has(object.id)) throw new CourseLevelError({ field: 'duplicate object ID', value: object.id }, object.id);
+    this.job.validateObject(object);
     this.objects.push(object);
     this.groups.set(object.id, { group, zone: this.zone.code });
     return object;
@@ -59,15 +88,24 @@ export class CourseBuilder {
   color(tone, explicit) {
     if (explicit !== undefined) return explicit;
     const color = this.zone.palette[tone];
-    if (color === undefined) throw new Error(`Zone ${this.zone.code} has no "${tone}" colour.`);
+    if (color === undefined) throw new CourseLevelError({ field: `zone ${this.zone.code} palette tone`, value: tone });
     return color;
   }
 
-  // Terrain of a built-in mesh in the zone's palette: `tone` names one of its colours; `mirror` reflects it left to right.
-  terrain(name, type, x, y, width, height, options = {}) {
+  /**
+   * Terrain brings its engine collision explicitly, including a GLB's compound slice.
+   * @param {string} name @param {TerrainMesh} mesh
+   * @param {number} x @param {number} y @param {number} width @param {number} height
+   * @param {TerrainOptions} [options]
+   */
+  terrain(name, mesh, x, y, width, height, options = {}) {
+    const angle = options.angle ?? 0;
+    if (typeof angle !== 'number' || !Number.isFinite(angle) || angle < -Math.PI || angle > Math.PI) {
+      throw new CourseLevelError({ field: 'terrain angle in [-π, π]', value: angle });
+    }
     const object = {
-      kind: 'terrain', id: this.id(name), mesh: { type: 'shape', shape: type }, x: tidy(x), y: tidy(y),
-      width: tidy(width), height: tidy(height), angle: Math.max(-Math.PI, Math.min(Math.PI, tidy(options.angle ?? 0, 6))),
+      kind: 'terrain', id: this.id(name), mesh, x: tidy(x), y: tidy(y),
+      width: tidy(width), height: tidy(height), angle: Math.max(-Math.PI, Math.min(Math.PI, tidy(angle, 6))),
       depth: options.depth ?? 1.5, mirror: options.mirror ?? false,
       color: this.color(options.tone ?? 'rock', options.color),
       illusion: options.illusion ?? false,
@@ -79,25 +117,25 @@ export class CourseBuilder {
   }
 
   block(name, left, bottom, width, height, options) {
-    return this.terrain(name, 'box', left + width / 2, bottom + height / 2, width, height, options);
+    return this.terrain(name, this.job.engine.level.shapeMesh('box'), left + width / 2, bottom + height / 2, width, height, options);
   }
 
   // A right triangle whose vertical side is on the right (rising to the right), or on the left when mirrored.
   ramp(name, left, bottom, width, height, options = {}) {
-    return this.terrain(name, 'ramp', left + width / 2, bottom + height / 2, width, height, options);
+    return this.terrain(name, this.job.engine.level.shapeMesh('ramp'), left + width / 2, bottom + height / 2, width, height, options);
   }
 
   peak(name, left, bottom, width, height, options) {
-    return this.terrain(name, 'triangle', left + width / 2, bottom + height / 2, width, height, options);
+    return this.terrain(name, this.job.engine.level.shapeMesh('triangle'), left + width / 2, bottom + height / 2, width, height, options);
   }
 
   // A triangle hanging point-down from `top`, such as an icicle or a stalactite.
   fang(name, centerX, top, width, height, options = {}) {
-    return this.terrain(name, 'triangle', centerX, top - height / 2, width, height, { ...options, angle: Math.PI });
+    return this.terrain(name, this.job.engine.level.shapeMesh('triangle'), centerX, top - height / 2, width, height, { ...options, angle: Math.PI });
   }
 
   hex(name, centerX, bottom, width, height, options) {
-    return this.terrain(name, 'hexagon', centerX, bottom + height / 2, width, height, options);
+    return this.terrain(name, this.job.engine.level.shapeMesh('hexagon'), centerX, bottom + height / 2, width, height, options);
   }
 
   // A rotated board whose underside runs from (x1, y1) to (x2, y2); its thickness extends upward.
@@ -106,7 +144,7 @@ export class CourseBuilder {
     const flip = x2 < x1 || (x2 === x1 && y2 < y1) ? -1 : 1;
     const ux = (x2 - x1) / length * flip;
     const uy = (y2 - y1) / length * flip;
-    return this.terrain(name, 'box', (x1 + x2) / 2 - uy * thickness / 2, (y1 + y2) / 2 + ux * thickness / 2, length, thickness,
+    return this.terrain(name, this.job.engine.level.shapeMesh('box'), (x1 + x2) / 2 - uy * thickness / 2, (y1 + y2) / 2 + ux * thickness / 2, length, thickness,
       { ...options, angle: Math.atan2(uy, ux) });
   }
 
@@ -157,7 +195,7 @@ export class CourseBuilder {
   }
 
   label(x, y, text) {
-    if (text.length > 34) throw new Error(`Label "${text}" is longer than a label sprite shows.`);
+    if (text.length > 34) throw new CourseLevelError({ field: 'label text (at most 34 characters)', value: text });
     this.labels.push({ x: tidy(x), y: tidy(y), text });
   }
 
@@ -205,7 +243,7 @@ export class CourseBuilder {
     for (const label of placement.labels) this.labels.push(options.retuneLabel ? options.retuneLabel(label) : label);
     const record = {
       id, zone: this.zone.code, stamp, group, anchor: { x, y }, mirror: options.mirror ?? false, objects: placed,
-      bounds: worldBounds(placed.filter((object) => object.kind === 'terrain')), direction: options.direction ?? 'any',
+      bounds: this.job.worldBounds(placed.filter((object) => object.kind === 'terrain')), direction: options.direction ?? 'any',
     };
     this.pieces.push(record);
     return record;
@@ -215,53 +253,4 @@ export class CourseBuilder {
   level(schemaVersion) {
     return { schemaVersion, labels: this.labels, objects: this.objects };
   }
-}
-
-// Unit outlines, as src/level.ts defines them.
-export const UNIT = {
-  box: [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]],
-  ramp: [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5]],
-  triangle: [[-0.5, -0.5], [0.5, -0.5], [0, 0.5]],
-  hexagon: [[0.5, 0], [0.25, 0.5], [-0.25, 0.5], [-0.5, 0], [-0.25, -0.5], [0.25, -0.5]],
-  circle: Array.from({ length: 32 }, (_, index) => [Math.cos(index * Math.PI / 16) / 2, Math.sin(index * Math.PI / 16) / 2]),
-};
-
-export class CourseShapeError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'CourseShapeError';
-  }
-}
-
-// The outline in its unit box a terrain object collides as: its built-in shape, the shape its mesh declares or its drawn
-// outline, counterclockwise also when mirrored. A mesh's slice may have several loops, which the checks do not measure.
-function unitOutline(object) {
-  const { mesh } = object;
-  const kind = mesh.type === 'shape' ? mesh.shape : mesh.type === 'asset' && mesh.collision.type !== 'slice' ? mesh.collision.type : null;
-  const unit = kind !== null ? UNIT[kind] : mesh.type === 'outline' ? mesh.vertices.map((vertex) => [vertex.x, vertex.y]) : undefined;
-  if (unit === undefined) throw new CourseShapeError(`${object.id} collides as a mesh's slice, which the course checks do not measure.`);
-  return object.mirror ? unit.map(([x, y]) => [-x, y]).reverse() : unit;
-}
-
-/**
- * An object's collision outline in world space. The checks assume convex outlines, as every built-in shape is:
- * they measure a concave outline's overlaps by its convex hull and may misjudge points in its notches, so give a
- * concave outline a clear space of its own.
- */
-export function outline(object) {
-  const cosine = Math.cos(object.angle);
-  const sine = Math.sin(object.angle);
-  return unitOutline(object).map(([unitX, unitY]) => {
-    const x = unitX * object.width;
-    const y = unitY * object.height;
-    return { x: object.x + x * cosine - y * sine, y: object.y + x * sine + y * cosine };
-  });
-}
-
-export function worldBounds(objects) {
-  const points = objects.flatMap(outline);
-  return {
-    left: Math.min(...points.map((point) => point.x)), right: Math.max(...points.map((point) => point.x)),
-    bottom: Math.min(...points.map((point) => point.y)), top: Math.max(...points.map((point) => point.y)),
-  };
 }
