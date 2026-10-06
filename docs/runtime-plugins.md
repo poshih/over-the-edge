@@ -366,7 +366,7 @@ export default defineRuntime({
 interface AimMarks {
   readonly root: Object3D;
   setTheme(theme: GameTheme): void;
-  update(tip: Readonly<Point>, cursor: Readonly<Point>): void;
+  update(tip: Readonly<Point>, cursor: Readonly<Point>, death: DeathKind | null): void;
   dispose(): void;
 }
 ```
@@ -375,10 +375,13 @@ The root draws in **marks**, over the characters and their arms, under the tool.
 **All its materials must ignore depth (`depthTest: false`), leaving the arms/tool depth
 alone**, as the [pass rules](#pass-rules-for-presentation-points) require. This point changes
 drawing only, never aiming or input. `DEFAULT_AIM_MARKS` is the original ring and centre dot
-and dashed line from the hammer tip to the cursor, recoloured from `theme.aim`. It reuses both
-position and line-distance attributes. `update` receives borrowed, read-only points each drawn
-frame, including a character presentation preview's movement. Reuse geometry, materials and
-scratch; allocate nothing per frame. The engine detaches the root before `dispose`.
+and dashed line from the hammer tip to the cursor, recoloured from `theme.aim`. It hides all
+three while dying and shows them again on the next live update, reusing both position and
+line-distance attributes. `update` receives borrowed, read-only points each drawn frame,
+including a character presentation preview's movement, and the [death kind](#death-sequence):
+`'health'`, `'fall'` or `null` while alive. A replacement chooses its own death presentation
+through that input. Reuse geometry, materials and scratch; allocate nothing per frame.
+The engine detaches the root before `dispose`.
 
 For a dot without the line:
 
@@ -393,7 +396,10 @@ const dot: AimMarksFactory = theme => {
   return {
     root: mesh,
     setTheme(theme) { mesh.material.color.set(theme.aim.cursor); },
-    update(_tip, cursor) { mesh.position.set(cursor.x, cursor.y, 1); },
+    update(_tip, cursor, death) {
+      mesh.visible = death === null;
+      if (death === null) mesh.position.set(cursor.x, cursor.y, 1);
+    },
     dispose() { mesh.geometry.dispose(); mesh.material.dispose(); },
   };
 };
@@ -545,6 +551,14 @@ death. The clock advances by `PHYSICS.dt` with each dying physics step and prese
 interpolates it with the frame's alpha. Pause and a hidden tab hold it, with no catch-up.
 Reset and other control actions remain available; only movement is discarded.
 
+`Game` hosts must handle `onAction('reset')` by placing the player synchronously through
+`Game` before returning, for example with `game.perform('reset')`. A death's return
+without a bonfire relies on that placement. If Reset returns without a new placement, or
+placement changes without cancelling the active death, return fails with a typed
+[`DeathSequenceError`](plugins.md#errors) rather than silently leaving the sequence active.
+`Game.dying` reports whether a sequence is active; `Game.deathKind` is `'health'`, `'fall'`
+or `null`.
+
 The [phantom recorders](phantoms.md) are interrupted at entry, before the terminal sample.
 Neither dying steps nor the teleport or placement pose is sampled; capture resumes on a
 subsequent live step. Incremental level edits apply without ending the sequence. Reset,
@@ -630,10 +644,12 @@ It runs only while dying. Angles apply to the captured live torso/head pose befo
 are solved; pot and tool keep their physics transforms and the arms keep `ARM_LAYER`.
 
 `DEFAULT_DEATH_ANIMATION` eases a 3D body's 20° lean toward the tool and a 35° head nod
-over 0.65 s. Built-in and imported avatars and Mesh parts use those offsets. 2D sprites
-instead dim to 45% brightness while holding their last directional, skeletal and flipbook
-pose: this is not an authored skeletal death clip. Runtime materials cache their original
-colours once and restore them on placement; saved art never changes. Imported rigs also
+over 0.65 s. Built-in and imported avatars and Mesh parts use those offsets. A 2D rig armed
+for death evaluates one live directional, skeletal and flipbook pose with its attachments
+on its next drawn update, then holds it while dimming to 45% brightness. A profile selected
+while dying is armed the same way; this is not an authored skeletal death clip.
+Runtime materials cache their original colours once and restore them on placement; saved
+art never changes. Imported rigs also
 receive [`deathWeight`](kinds-plugins.md#rig-strategies) in both phases, so a game's rig
 can adapt its arms independently. The standard rig retains its grips.
 

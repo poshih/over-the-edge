@@ -1243,7 +1243,7 @@ export class GameView {
     this.spriteFrame.time = frame.time;
     this.spriteFrame.dt = options.dt;
     this.slots[this.activeSlot]!.rig.update(this.spriteFrame);
-    this.aimMarks.update(tip, frame.cursor);
+    this.aimMarks.update(tip, frame.cursor, this.cameraView.death);
     this.terrain.update(frame.time);
     this.decorations?.update();
     this.looks.update(frame.time, frame.projectiles, frame.enemies, frame.platforms);

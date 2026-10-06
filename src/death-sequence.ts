@@ -18,20 +18,17 @@ export interface DeathFrame {
 
 export const DEATH_POSE_SECONDS = 0.65;
 
+export type DeathSequenceErrorCode = 'placement-failed' | 'placement-changed';
+
 export class DeathSequenceError extends Error {
-  readonly code = 'placement-failed';
+  readonly code: DeathSequenceErrorCode;
 
-  constructor() {
-    super('The death sequence requested Reset, but the player was not placed anew.');
+  constructor(code: DeathSequenceErrorCode) {
+    super(code === 'placement-failed'
+      ? 'The death sequence requested Reset, but the player was not placed anew.'
+      : 'The player was placed anew without cancelling the active death sequence.');
     this.name = 'DeathSequenceError';
-  }
-}
-
-export function checkDeathCallback(result: unknown, plugin: string | null, point: string, method: string): void {
-  if (result !== null && (typeof result === 'object' || typeof result === 'function') &&
-    typeof Reflect.get(result, 'then') === 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": "${point}" ${method} must finish synchronously, not return a promise.`, plugin, point);
+    this.code = code;
   }
 }
 

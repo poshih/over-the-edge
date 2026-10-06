@@ -111,17 +111,6 @@ function writeArmPose(side: ArmSide, targets: ArmTargets, previous: ArmPose | nu
   return out;
 }
 
-export function solveArmPose(
-  side: ArmSide,
-  targets: ArmTargets,
-  options: { previous: ArmPose | null; dt: number; lengths?: Pick<ArmChain, 'upper' | 'forearm'> },
-): ArmPose {
-  return writeArmPose(side, targets, options.previous, options.dt, options.lengths ?? ARM_LENGTH, {
-    side, shoulder: targets.shoulder, hand: targets.hand, hint: targets.hint, shaftAxis: targets.shaftAxis,
-    elbow: new Vector3(), normal: new Vector3(), axis: new Vector3(), bendDirection: new Vector3(),
-  });
-}
-
 // One arm's pooled output and history. Phantom looks keep one per arm per figure, so neither targets nor the
 // solver's intermediate vectors, quaternions or result allocate per frame. The same math also serves the player.
 export class ArmPoseSolver {

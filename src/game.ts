@@ -44,7 +44,7 @@ import type { HurtCause } from './hazards';
 import { HURT_EFFECTS } from './hurt-effects';
 import { AUDIO } from './game-audio';
 import { LOOKS } from './object-looks';
-import { PluginError } from './plugins/kernel';
+import { checkSynchronous, PluginError } from './plugins/kernel';
 import type { Attributed } from './plugins/kernel';
 import { Disposal } from './disposal';
 
@@ -62,16 +62,6 @@ interface Dying {
   readonly placement: number;
   elapsed: number;
   previousElapsed: number;
-}
-
-function checkSynchronous(result: unknown, plugin: string, point: string, method: string): void {
-  // A void callback may return an incidental value (for example Array.push's count). Only async work is invalid:
-  // a promise would outlive the borrowed event or movement output, and the engine never awaits these callbacks.
-  if (result !== null && (typeof result === 'object' || typeof result === 'function') &&
-    typeof Reflect.get(result, 'then') === 'function') {
-    throw new PluginError('invalid-contribution', `Plugin "${plugin}": "${point}" ${method} must finish synchronously, not return a promise.`,
-      plugin, point);
-  }
 }
 
 export class Game {
@@ -163,6 +153,7 @@ export class Game {
     onCue?: (cue: GameCue) => void;
     // The initial pause state at start(), then changes only, so audio needs no per-frame polling.
     onPauseChange?: (paused: boolean) => void;
+    // 'reset' must place the player synchronously through Game; death's return without a bonfire relies on it.
     onAction: (action: UiAction, options?: UiActionOptions) => void;
     onNotice: (message: string) => void;
     onShortcut?: (event: KeyboardEvent) => void;
@@ -410,7 +401,7 @@ export class Game {
     frame.paused = this.pauseReasons.size > 0;
     frame.pointerLocked = this.input.locked;
     frame.inputMode = this.input.mode;
-    frame.death = this.death?.info.kind ?? null;
+    frame.death = this.deathKind;
     return frame;
   }
 
@@ -419,6 +410,8 @@ export class Game {
   }
 
   get dying(): boolean { return this.death !== null; }
+
+  get deathKind(): DeathKind | null { return this.death?.info.kind ?? null; }
 
   pauseState(): readonly string[] {
     return [...this.pauseReasons];
@@ -695,12 +688,13 @@ export class Game {
   }
 
   private finishDeath(dying: Dying): void {
-    if (this.death !== dying || this.stopped || this.simulation.placement !== dying.placement) return;
+    if (this.death !== dying || this.stopped) return;
+    if (this.simulation.placement !== dying.placement) throw new DeathSequenceError('placement-changed');
     if (this.simulation.respawn()) this.respawned();
     else {
       this.onAction('reset');
       if (this.stopped) return;
-      if (this.simulation.placement === dying.placement) throw new DeathSequenceError();
+      if (this.simulation.placement === dying.placement) throw new DeathSequenceError('placement-failed');
       const event = this.stageEvent('respawn');
       if (event !== null) event.bonfire = null;
     }

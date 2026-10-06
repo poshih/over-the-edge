@@ -28,6 +28,16 @@ export class PluginError extends Error {
   }
 }
 
+export function checkSynchronous(result: unknown, plugin: string | null, point: string, method: string): void {
+  // A void callback may return an incidental value (for example Array.push's count). Only async work is invalid:
+  // a promise would outlive borrowed input or output, and the engine never awaits these callbacks.
+  if (result !== null && (typeof result === 'object' || typeof result === 'function') &&
+    typeof Reflect.get(result, 'then') === 'function') {
+    throw new PluginError('invalid-contribution',
+      `Plugin "${plugin ?? 'engine'}": "${point}" ${method} must finish synchronously, not return a promise.`, plugin, point);
+  }
+}
+
 // Rebuild a typed refusal crossing a module-runner boundary. Never match error messages.
 export function pluginRefusal(error: unknown, plugin: string): PluginError | null {
   if (typeof error !== 'object' || error === null || Reflect.get(error, 'kind') !== 'plugin-error') return null;

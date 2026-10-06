@@ -233,6 +233,16 @@ hyphens, starting with a letter; any other code throws a `TypeError`. Branch on 
 the message. `pluginRefusal(error, plugin)` rebuilds a `PluginError` that crossed Vite's module
 runner as another copy of the class, by its `kind` tag, or returns `null`.
 
+Death-return placement failures are engine invariants, not plugin refusals. The runtime SDK
+exports `DeathSequenceError`; branch on its `code`:
+
+| Code | Cause |
+| --- | --- |
+| `placement-failed` | `Game`'s `onAction('reset')` returned without placing the player synchronously |
+| `placement-changed` | Placement changed without cancelling the active death sequence |
+
+See the [death sequence's host contract](runtime-plugins.md#death-sequence).
+
 ## Lifecycle and hot reload
 
 | Facet | Starts | When it changes | Stops |
@@ -387,7 +397,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`looks.swamp`](runtime-plugins.md#object-looks) | `LOOKS.swamp` | `runtime` | Slot, `() => ObjectLook<PoolObject>` | `DEFAULT_LOOKS.swamp` |
 | [`camera.director`](runtime-plugins.md#camera-director) | `CAMERA` | `runtime` | Slot, `CameraDirectorFactory` | `DEFAULT_CAMERA_DIRECTOR` |
 | [`scene.backdrop`](runtime-plugins.md#backdrop) | `BACKDROP` | `runtime` | Slot, `BackdropFactory` | `DEFAULT_BACKDROP` |
-| [`scene.aim-marks`](runtime-plugins.md#aim-marks) | `AIM_MARKS` | `runtime` | Slot, `AimMarksFactory` | `DEFAULT_AIM_MARKS` |
+| [`scene.aim-marks`](runtime-plugins.md#aim-marks) | `AIM_MARKS` | `runtime` | Slot, `AimMarksFactory` | `DEFAULT_AIM_MARKS`; hidden while dying |
 | [`scene.hurt-effects`](runtime-plugins.md#hurt-effects) | `HURT_EFFECTS` | `runtime` | Slot, `HurtEffectsFactory` | `DEFAULT_HURT_EFFECTS` |
 | [`scene.death-animation`](runtime-plugins.md#death-animation) | `DEATH_ANIMATION` | `runtime` | Slot, `DeathAnimationWriter` | `DEFAULT_DEATH_ANIMATION` |
 | [`looks.enemies`](runtime-plugins.md#enemy-looks) | `LOOKS.enemies` | `runtime` | Slot, `EnemyLookFactory` | `DEFAULT_LOOKS.enemies` |

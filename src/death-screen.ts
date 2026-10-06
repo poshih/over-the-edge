@@ -1,8 +1,8 @@
 import './death-screen.css';
-import { checkDeathCallback, deathPluginFailure } from './death-sequence';
+import { deathPluginFailure } from './death-sequence';
 import type { DeathFrame, DeathInfo } from './death-sequence';
 import type { HudSettings } from './hud';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { checkSynchronous, PluginError, slotPoint } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 
 export interface DeathScreen {
@@ -114,22 +114,22 @@ export function createDeathScreen(plugins: RuntimePlugins, mount: HTMLElement): 
   }
   return {
     show(info, settings) {
-      try { checkDeathCallback(screen.show(info, settings), plugin, DEATH_SCREEN.id, 'show'); } catch (error) {
+      try { checkSynchronous(screen.show(info, settings), plugin, DEATH_SCREEN.id, 'show'); } catch (error) {
         throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'show');
       }
     },
     update(frame) {
-      try { checkDeathCallback(screen.update(frame), plugin, DEATH_SCREEN.id, 'update'); } catch (error) {
+      try { checkSynchronous(screen.update(frame), plugin, DEATH_SCREEN.id, 'update'); } catch (error) {
         throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'update');
       }
     },
     clear() {
-      try { checkDeathCallback(screen.clear(), plugin, DEATH_SCREEN.id, 'clear'); } catch (error) {
+      try { checkSynchronous(screen.clear(), plugin, DEATH_SCREEN.id, 'clear'); } catch (error) {
         throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'clear');
       }
     },
     dispose() {
-      try { checkDeathCallback(screen.dispose(), plugin, DEATH_SCREEN.id, 'dispose'); } catch (error) {
+      try { checkSynchronous(screen.dispose(), plugin, DEATH_SCREEN.id, 'dispose'); } catch (error) {
         throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'dispose');
       }
     },

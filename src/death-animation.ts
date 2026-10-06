@@ -1,6 +1,6 @@
 import type { DeathFrame } from './death-sequence';
-import { checkDeathCallback, deathPluginFailure } from './death-sequence';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { deathPluginFailure } from './death-sequence';
+import { checkSynchronous, PluginError, slotPoint } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { CharacterRiggingType } from './sprite-data';
 
@@ -41,7 +41,7 @@ export function createDeathAnimation(plugins: RuntimePlugins): DeathAnimationWri
   return (frame, out) => {
     out.torsoLean = out.headPitch = out.spriteBrightness = NaN;
     try {
-      checkDeathCallback(writer(frame, out), plugin, DEATH_ANIMATION.id, 'write');
+      checkSynchronous(writer(frame, out), plugin, DEATH_ANIMATION.id, 'write');
       if (!Number.isFinite(out.torsoLean) || Math.abs(out.torsoLean) > Math.PI / 2 ||
         !Number.isFinite(out.headPitch) || Math.abs(out.headPitch) > Math.PI / 2 ||
         !Number.isFinite(out.spriteBrightness) || out.spriteBrightness < 0 || out.spriteBrightness > 1) {

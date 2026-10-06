@@ -183,7 +183,9 @@ allocates nothing per frame on its behalf.
   ends. `game.project(point)` and `game.unproject(client)` convert as the Level tab does.
 - **Game control.** `game.pause(paused)` under the plugin's own reason, `game.restart()`,
   `game.placePlayer(position)` as the Level tab places the player, and `game.state()`, what
-  `window.gettingOver.snapshot()` reports.
+  `window.gettingOver.snapshot()` reports. That state includes `paused`, `pauseReasons`,
+  `stopped`, `timer: { elapsed, running }`, `dying` (an active death sequence) and
+  `death` (`'health'`, `'fall'` or `null` while alive), built on request rather than per frame.
 - **Avatar facts.** `game.avatar()` is the loaded imported avatar, or `null`: the model facts its
   motion kinds get (`AvatarMotionModel`), each motion's claimed joints, and
   `jointWorld(index, out)`, a skin joint's current world frame.

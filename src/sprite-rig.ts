@@ -371,6 +371,7 @@ export class SpriteRig {
   private texturesDisposed = 0;
   private currentDirection: FacingDirection = 'right';
   private dying = false;
+  private deathPosePending = false;
   private deathBrightness = 1;
   private hasFrame = false;
   private lastFrame: { time: number; aim: RuntimePoint; targets: ReadonlyMap<string, RuntimeTarget> } = {
@@ -685,6 +686,8 @@ export class SpriteRig {
   setDying(dying: boolean): void {
     this.assertLive();
     this.dying = dying;
+    // Capture the next live frame before holding, including a rig selected during death.
+    this.deathPosePending = dying;
   }
 
   // Each material's original colour is captured once. Authored images and layer definitions never change.
@@ -747,7 +750,7 @@ export class SpriteRig {
     const dt = frame.dt === undefined ? Math.max(0, frame.time - this.lastFrame.time) : frame.dt;
     if (!Number.isFinite(dt) || dt < 0) throw new SpriteError('Sprite frame duration must be finite and nonnegative.');
     const active = this.characterRiggingType === 'sprite-2d';
-    if (this.dying) {
+    if (this.dying && !this.deathPosePending) {
       if (active) this.refreshScene();
       return;
     }
@@ -772,7 +775,8 @@ export class SpriteRig {
       aim: { x: frame.aim.x, y: frame.aim.y },
       targets: new Map([...frame.targets].map(([name, target]) => [name, { ...target }])),
     };
-    if (active) this.refreshScene();
+    if (active) this.refreshScene(EMPTY_REFRESH, true);
+    this.deathPosePending = false;
   }
 
   upsert(layer: SpriteLayer): void {
@@ -1513,14 +1517,15 @@ export class SpriteRig {
     for (const [root, group] of this.skeletonMounts) root.add(group);
   }
 
-  private refreshScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = EMPTY_REFRESH): void {
-    if (!this.dying) this.displayedPresentation = this.activePresentation();
+  private refreshScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = EMPTY_REFRESH,
+    evaluatePose = !this.dying): void {
+    if (evaluatePose) this.displayedPresentation = this.activePresentation();
     const direction = this.displayedPresentation.direction;
     const changedDirection = direction !== this.currentDirection;
     if (changedDirection) this.currentDirection = direction;
     if (options.forceVisibility || changedDirection) this.applyDirection(direction, options.notifyCoverage !== false);
     if (this.characterRiggingType !== 'sprite-2d') return;
-    if (!this.dying) this.updateFlipbooks();
+    if (evaluatePose) this.updateFlipbooks();
     const presentation = this.runtimePresentation();
     if (presentation !== null && (this.presentation !== null || this.rotatedLayers.length > 0)) {
       const { pivot } = presentation;
@@ -1530,7 +1535,7 @@ export class SpriteRig {
     }
     if (this.skeleton !== null) {
       this.updateSkeletonRoot(this.skeleton);
-      if (!this.dying) this.evaluateSkeleton(this.skeleton);
+      if (evaluatePose) this.evaluateSkeleton(this.skeleton);
       this.updateBoneAttachments(this.skeleton);
       this.skeleton.group.updateWorldMatrix(true, true);
       for (const group of this.skeletonMounts.values()) group.updateWorldMatrix(true, true);

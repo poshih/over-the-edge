@@ -1424,6 +1424,8 @@ The editor entry exposes the read-only `window.gettingOver.snapshot()` and
 `window.gettingOver.project({ x, y })` diagnostics for observing actual physics,
 motor effort, camera state, and world-to-screen coordinates. `snapshot().rig` is
 the rig's geometry: handle length, extension range, reach and segment length.
+`snapshot().dying` reports an active death sequence, and `snapshot().death` is
+`'health'`, `'fall'` or `null` while alive.
 They do not expose commands that bypass the game's input or motor mechanism.
 `window.gettingOver.appearance()` reports imported parts, saved/draft alignment,
 loading errors, current rendering anchors and world transforms, and the arm IK

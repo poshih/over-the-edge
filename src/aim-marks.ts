@@ -1,6 +1,7 @@
 import { BufferAttribute, BufferGeometry, CircleGeometry, Group, Line, LineDashedMaterial, Mesh, MeshBasicMaterial, RingGeometry } from 'three';
 import type { Object3D } from 'three';
 import type { Point } from './config';
+import type { DeathKind } from './death-sequence';
 import { PluginError, slotPoint } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { GameTheme } from './theme';
@@ -10,7 +11,7 @@ export interface AimMarks {
   // (depthTest: false), leaving the depth shared by arms and tool alone.
   readonly root: Object3D;
   setTheme(theme: GameTheme): void;
-  update(tip: Readonly<Point>, cursor: Readonly<Point>): void;
+  update(tip: Readonly<Point>, cursor: Readonly<Point>, death: DeathKind | null): void;
   dispose(): void;
 }
 
@@ -53,7 +54,9 @@ class RingAimMarks implements AimMarks {
     this.targetMaterial.color.set(theme.aim.line);
   }
 
-  update(tip: Readonly<Point>, cursor: Readonly<Point>): void {
+  update(tip: Readonly<Point>, cursor: Readonly<Point>, death: DeathKind | null): void {
+    this.root.visible = death === null;
+    if (death !== null) return;
     this.cursor.position.set(cursor.x, cursor.y, 1);
     this.positions.setXYZ(0, tip.x, tip.y, 0.8);
     this.positions.setXYZ(1, cursor.x, cursor.y, 0.8);
@@ -89,7 +92,7 @@ export function createAimMarks(plugins: RuntimePlugins, theme: GameTheme): AimMa
     typeof Reflect.get(marks as object, 'setTheme') !== 'function' || typeof Reflect.get(marks as object, 'update') !== 'function' ||
     typeof Reflect.get(marks as object, 'dispose') !== 'function') {
     throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": aim marks must return a three.js root, setTheme(theme), update(tip, cursor) and dispose().`, plugin, AIM_MARKS.id);
+      `Plugin "${plugin ?? 'engine'}": aim marks must return a three.js root, setTheme(theme), update(tip, cursor, death) and dispose().`, plugin, AIM_MARKS.id);
   }
   return marks as AimMarks;
 }

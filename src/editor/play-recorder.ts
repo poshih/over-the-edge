@@ -22,7 +22,8 @@ function sessionId(): string {
  * one. A restart, or a return to a bonfire, starts the next session. A clip also ends when the handle length changes,
  * the level or settings stop being that version or recording turns off; one shorter than a second, or in which the
  * player hardly moved, is dropped. Death ends its alive-only clip and session before the terminal sample.
- * Clips upload as they end, on the game's live steps, so pauses and the death sequence record nothing.
+ * Clips upload as they end, including from the interruption at death entry. Only live steps are sampled, so pauses
+ * and the death sequence record nothing.
  */
 export class PlayRecorder {
   private readonly game: Game;
