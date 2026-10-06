@@ -255,18 +255,19 @@ export interface AvatarRigFrameContext {
   readonly forward: Vector3;
   readonly shaftLength: number;
   readonly dt: number;
-  // 0 alive; linear death-pose progress, or 1 immediately for reduced motion.
-  readonly deathWeight: number;
+  readonly poseSource: 'live' | 'captured-death';
+  readonly attachment: 'gripped';
 }
 
-// Phase 2 inputs: phase 1's plan and death weight, and the solved arms, in avatar space.
+// Released poses bypass phase 1. Their plan has zero offsets and forearm-aligned hand directions.
 export interface AvatarRigPoseContext {
   readonly body: Matrix4;
   readonly inverseBody: Matrix4;
   readonly plan: AvatarRigFramePlan;
   readonly arms: Readonly<Record<ArmSide, AvatarRigArmSolution>>;
   readonly dt: number;
-  readonly deathWeight: number;
+  readonly poseSource: 'live' | 'physical-death' | 'captured-death';
+  readonly attachment: 'gripped' | 'released';
 }
 
 export function createFramePlan(): AvatarRigFramePlan {

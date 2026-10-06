@@ -2,7 +2,7 @@ import { Vec2 } from 'planck';
 import type { Body, Fixture, World } from 'planck';
 import type { Point } from './config';
 
-export type PartKind = 'root' | 'pot' | 'shoulder' | 'slider' | 'handle' | 'head';
+export type PartKind = 'root' | 'pot' | 'shoulder' | 'slider' | 'handle' | 'head' | 'torso' | 'character-head' | 'upper-arm' | 'forearm';
 
 // Artwork follows a point on a body, not necessarily that body's origin. Several rigid parts can
 // share one body; physical ownership, momentum and destruction must use PlayerBody instead.
@@ -35,10 +35,11 @@ export function playerBody(world: World, options: {
   readonly position: Readonly<Point>;
   readonly angle: number;
   readonly fixedRotation: boolean;
+  readonly allowSleep?: boolean;
 }): PlayerBody {
   return { id: options.id, body: world.createDynamicBody({
     position: new Vec2(options.position.x, options.position.y), angle: options.angle,
-    bullet: true, allowSleep: false, fixedRotation: options.fixedRotation,
+    bullet: true, allowSleep: options.allowSleep ?? false, fixedRotation: options.fixedRotation,
   }) };
 }
 

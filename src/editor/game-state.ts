@@ -19,7 +19,7 @@ export function workshopGameState(game: Game, context: {
     })),
     paused: reasons.length > 0, pauseReasons: reasons,
     pointerLocked: game.input.locked, inputMode: game.input.mode,
-    camera: game.view.cameraState(), cursorScreen: game.view.project(state.cursor),
+    camera: game.view.cameraState(), cursorScreen: game.view.project(state.aim.cursor),
     step: PHYSICS.dt, stopped: game.halted, timer: game.timerState(), dying: game.dying, death: game.deathKind,
   };
 }

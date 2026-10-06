@@ -6,6 +6,7 @@ import { isPoolObject, polygonArea } from './level';
 import type { LevelChange, PoolObject } from './level';
 import { LIQUID_SETTINGS } from './liquids';
 import type { PlayerRig } from './player';
+import type { PlayerBody } from './player-bodies';
 
 interface Pool {
   readonly object: PoolObject;
@@ -95,10 +96,24 @@ export class LiquidWorld {
   push(rig: PlayerRig, tuning: Readonly<Tuning>): PoolObject | null {
     this.ensureLive();
     if (this.pools.size === 0) return null;
+    if (rig.phase === 'dying-ragdoll') {
+      const bath = this.pushSubject(rig.characterBodies, rig.potFixture, rig.characterMass, tuning);
+      this.pushSubject(rig.tool.bodies, null, rig.toolMass, tuning);
+      return bath;
+    }
+    let mass = 0;
+    for (const { body } of rig.bodies) mass += body.getMass();
+    return this.pushSubject(rig.bodies, rig.potFixture, mass, tuning);
+  }
+
+  // A detached tool has its own indexed region and drag reference mass; only the corpse's pot
+  // supplies buoyancy. Never span the empty distance between the two subjects with one query.
+  private pushSubject(bodies: readonly PlayerBody[], potFixture: Fixture | null, mass: number,
+    tuning: Readonly<Tuning>): PoolObject | null {
     const { lowerBound, upperBound } = this.query;
     lowerBound.x = lowerBound.y = Infinity;
     upperBound.x = upperBound.y = -Infinity;
-    for (const { body } of rig.bodies) {
+    for (const { body } of bodies) {
       for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) {
         const bounds = fixture.getAABB(0);
         lowerBound.x = Math.min(lowerBound.x, bounds.lowerBound.x);
@@ -111,8 +126,6 @@ export class LiquidWorld {
     this.nearby.length = 0;
     this.index.query(this.query, this.collect);
     if (this.nearby.length === 0) return null;
-    let mass = 0;
-    for (const { body } of rig.bodies) mass += body.getMass();
     let bath: PoolObject | null = null;
     for (const pool of this.nearby) {
       const { liquid } = pool.object;
@@ -121,10 +134,10 @@ export class LiquidWorld {
       // the hammer alike.
       const lift = tuning[settings.buoyancy] / 100 * mass * PHYSICS.gravity / POT_AREA;
       const thickness = tuning[settings.drag] * mass / POT_AREA;
-      for (const { body } of rig.bodies) {
+      for (const { body } of bodies) {
         for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) {
           if (!this.submerge(fixture, pool)) continue;
-          const pot = fixture === rig.potFixture;
+          const pot = fixture === potFixture;
           this.press(body, pot ? lift : 0, thickness);
           if (pot && bath?.liquid !== 'lava') bath = pool.object;
         }

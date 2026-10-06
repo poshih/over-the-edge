@@ -1,9 +1,9 @@
 import type { Tuning } from '../config';
 import {
-  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS, TUNING_FIELDS,
+  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEATH_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS, TUNING_FIELDS,
   validateGameSettings, withRig,
 } from '../game-settings';
-import type { CursorSettings, GameSettings } from '../game-settings';
+import type { CursorSettings, DeathSettings, GameSettings } from '../game-settings';
 import { minReachLimit, rigGeometry } from '../rig';
 import type { RigSettings } from '../rig';
 import { element, setPressed, setText } from '../dom';
@@ -146,6 +146,8 @@ export function createUI(options: UiOptions): GameUi {
   const controls = new Map<keyof Tuning, RangeControl>();
   const rigControls = new Map<keyof RigSettings, RangeControl>();
   const cursorControls = new Map<Exclude<keyof CursorSettings, 'returnToHammer'>, RangeControl>();
+  const deathControls = new Map<Exclude<keyof DeathSettings, 'mode'>, RangeControl>();
+  const deathMode = document.createElement('select');
   const returnToggle = document.createElement('input');
   const practiceButtons = new Map<PracticeId, HTMLButtonElement>();
   const tuningGroups = element<HTMLElement>(root, '.tuning-groups');
@@ -177,6 +179,14 @@ export function createUI(options: UiOptions): GameUi {
       control.setValue(settings.cursor[field.key]);
     }
     returnToggle.checked = settings.cursor.returnToHammer;
+    deathMode.value = settings.death.mode;
+    for (const field of DEATH_FIELDS) {
+      const control = deathControls.get(field.key);
+      if (!control) throw new Error(`Missing death control: ${field.key}`);
+      const inactive = settings.death.mode === 'hold';
+      control.setValue(settings.death[field.key], { disabled: inactive });
+      control.row.classList.toggle('is-inactive', inactive);
+    }
     for (const field of CURSOR_RETURN_FIELDS) {
       const control = cursorControls.get(field.key);
       if (!control) throw new Error(`Missing cursor control: ${field.key}`);
@@ -312,6 +322,30 @@ export function createUI(options: UiOptions): GameUi {
   const savedSettings = createSection({
     id: 'physics-saved', title: 'Saved game settings', hint: 'Named profiles and JSON files',
   });
+  const deathGroup = tuningSection({
+    id: 'physics-death', title: 'Death', hint: 'Physical collapse or a held pose',
+  }, 'Death');
+  const deathLabel = document.createElement('label');
+  deathLabel.htmlFor = deathMode.id = 'death-mode';
+  deathLabel.textContent = 'Death mode';
+  for (const [value, text] of [['ragdoll', 'Ragdoll — collapse and drop the hammer'], ['hold', 'Hold — keep the last aim']] as const) {
+    const option = document.createElement('option');
+    option.value = value; option.textContent = text; deathMode.append(option);
+  }
+  deathMode.addEventListener('change', () => editSettings({
+    ...settings, death: { ...settings.death, mode: deathMode.value as DeathSettings['mode'] },
+  }), listen);
+  const deathHelp = document.createElement('p');
+  deathHelp.className = 'rig-settings-help';
+  deathHelp.textContent = 'Ragdoll releases the hands and hammer and simulates a passive corpse. Hold keeps the motors and grips at the last aim. Changes apply to the next death; the HUD controls its text and wait.';
+  deathGroup.append(deathLabel, deathMode, deathHelp);
+  for (const field of DEATH_FIELDS) {
+    const control = createRangeControl(field, {
+      id: `death-${field.key}`, name: field.key, signal: events.signal,
+      onInput: value => editSettings({ ...settings, death: { ...settings.death, [field.key]: value } }),
+    });
+    deathControls.set(field.key, control); deathGroup.append(control.row);
+  }
   const savedSettingsMount = document.createElement('section');
   savedSettingsMount.className = 'game-settings-history';
   savedSettingsMount.setAttribute('aria-label', 'Saved game settings');
@@ -368,10 +402,12 @@ export function createUI(options: UiOptions): GameUi {
     if (panel.hidden || selectedTab !== 'physics') return;
     const state = options.readStatus();
     setText(contacts, `${state.contacts} ${state.contacts === 1 ? 'contact' : 'contacts'}`);
-    setText(hinge, `${Math.round(state.hingeLoad * 100)}%`);
-    setText(slider, `${Math.round(state.sliderLoad * 100)}%`);
-    if (hingeMeter.value !== state.hingeLoad) hingeMeter.value = state.hingeLoad;
-    if (sliderMeter.value !== state.sliderLoad) sliderMeter.value = state.sliderLoad;
+    setText(hinge, state.hingeLoad === null ? 'Released' : `${Math.round(state.hingeLoad * 100)}%`);
+    setText(slider, state.sliderLoad === null ? 'Released' : `${Math.round(state.sliderLoad * 100)}%`);
+    hingeMeter.hidden = state.hingeLoad === null;
+    sliderMeter.hidden = state.sliderLoad === null;
+    if (state.hingeLoad !== null && hingeMeter.value !== state.hingeLoad) hingeMeter.value = state.hingeLoad;
+    if (state.sliderLoad !== null && sliderMeter.value !== state.sliderLoad) sliderMeter.value = state.sliderLoad;
   }
   function update(frame: HudFrame, state: HudState): void {
     hud.update(frame, state.capturing);

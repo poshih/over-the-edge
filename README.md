@@ -104,7 +104,7 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
 - **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
-  aim marks, hurt effects, death animation and screen, object, enemy and phantom looks,
+  aim marks, hurt effects, death pose and screen, object, enemy and phantom looks,
   scene layers, audio, message presentation,
   gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
   studio previews and releases; character choice in releases and studio previews;
@@ -309,7 +309,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus death animation and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -405,15 +405,15 @@ Dynamic root, rotation locked
           +-- compliant: carriage + three spring-welded segments + head
 ```
 
-A rigid player has three dynamic bodies and two joints; a compliant player has
+A live rigid player has three dynamic bodies and two joints; a compliant player has
 seven bodies and six joints. The polar drive solves its lateral constraint and
 both bounded motor rows together against the actual driven body's mass, without
 light guide bodies in the force path. The rigid tool has no welds to converge.
 Component mass, centre of mass and inertia are preserved: the hinge component's
 translation mass belongs to the root, and its rotor inertia belongs to the tool.
-Arms are visual two-bone IK, never collision bodies or actuators. The pot and
+Live arms are visual two-bone IK, never collision bodies or actuators. The pot and
 hammer head collide with terrain and nearby living enemies; the shaft fixtures
-supply geometry and mass distribution but never generate contacts. Normal locomotion does not teleport bodies,
+supply geometry and mass distribution but generate no live contacts. Normal locomotion does not teleport bodies,
 apply assistance forces, or turn off the head's collisions. Authored updrafts
 and enemy contact knockback apply explicit, mass-aware impulses once per physical
 body without changing the rig or disabling collisions. Terrain collides only from
@@ -421,6 +421,11 @@ the outside: a colliding fixture whose own centroid ends up inside a terrain
 outline, for example after an edit or a restored illusion, passes out of it instead
 of being trapped or shoved. A non-colliding shaft inside rock never suppresses a
 head contact just because they share a body. See [ground-hold stability](docs/ground-hold-stability.md).
+
+Default death replaces the root with six passive ragdoll bodies and drops the drive joint,
+leaving eight bodies and six joints for a rigid tool, or twelve bodies and ten joints for
+a compliant one. The shaft then collides. One placement owns the corpse and tool and
+destroys them together on reset or respawn; see [health and bonfires](#health-and-bonfires).
 
 The simulation runs at a fixed **240 Hz**, with continuous collision handling,
 64 velocity iterations and 20 position iterations. Time steps and solver
@@ -601,7 +606,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 12**, with `physics`, `rig` and `cursor` sections; files and saves
+**schema version 13**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
 in any other version are rejected, not converted. Unreadable saves are marked and
 retained, while other valid snapshots remain available.
 
@@ -609,7 +614,7 @@ Profiles contain gameplay configuration, not saved body trajectories, levels,
 or character artwork. Height and peak readouts describe the current attempt.
 
 Saved profiles preserve their stored hammer friction. **Defaults** restores
-all built-in physics, rig and cursor settings without changing saved profiles.
+all built-in physics, rig, cursor and death settings without changing saved profiles.
 
 The practice positions make the important behaviors easy to revisit: resting
 on a ledge, smooth ground pushes, launches, and vaulting a low block. The
@@ -874,13 +879,27 @@ enemies, traps or lava show no health.
 Choose **Workshop / Level / Bonfire**, then click/tap: its base rests on the terrain top
 under the pointer. A bonfire lights when the player's foot comes within **1.5 m** of its
 base, and the one reached last is where a death returns the player. Health running out
-or a fall out of the level starts a death animation: 3D characters slump and nod, and
-2D sprites hold their pose and dim. **“You are dead...”** slowly fades in over **1.5 s**
+or a fall out of the level starts a physical death: the character collapses as a passive
+ragdoll, lets go of the hammer and drops it. The jar and hammer keep their motion; the corpse
+and released hammer collide with the course, platforms and active enemies, never each other.
+2D sprites freeze their facing and flipbook frame but follow the physical body, head and hands,
+and dim. **“You are dead...”** slowly fades in over **1.5 s**
 and stays for **2.5 s** before the player returns. Author its text and timing in
 **Workshop / Project / HUD**. The world and run timer (unless stopped) keep going while the dead player
-has frozen aim, takes no damage, hits no enemies, lights no bonfires and gains no best
+has no input, takes no damage, deals no hammer hits or scripted bumps, lights no bonfires and gains no best
 height. Outstanding trigger runs cancel and pressure switches release. Pause and a
 hidden tab hold the sequence; movement is discarded, but Reset and other controls remain.
+
+**Physics / Death** selects `ragdoll` (the default) or `hold`, which keeps the last aim,
+motors and grips, with the former 20° slump and 35° nod. Ragdoll angular damping is
+**0–10 /s**, default **2**, and friction **0.05–2**, default **0.45**; the jar and hammer
+head keep their own materials. A death snapshots its construction settings. Runtime
+character selections and accepted model/head changes while dying wait for placement;
+Workshop character-authoring edits refuse with a transient notice and leave the draft
+unchanged. Player-body tuning stays live in `hold`, but takes effect at placement in
+`ragdoll`, without retuning the corpse. The corpse's pot remains buoyant; limbs and the
+separately queried dropped hammer take liquid drag only. A hammer that strays far from
+the corpse can miss sleeping enemies, whose colliders are inactive there.
 
 After the wait the player returns at that bonfire, healed and unharmed for **2 s**,
 holding the hammer as at the level's start. The run goes on: its clock, best height,
@@ -902,8 +921,8 @@ it knocked the player, so a game's [hurt effects](docs/runtime-plugins.md#hurt-e
 its own effect for each and its [gameplay observers](docs/runtime-plugins.md#gameplay-events) can
 tell them apart. The engine's sets the character alight while lava burns it, and shows a blade's
 or a projectile's blow where it lands.
-Two independent runtime points replace the [death screen and animation](docs/runtime-plugins.md#death-sequence).
-Fatal lava keeps the corpse alight until placement clears it.
+Two independent runtime points replace the [death screen and pose](docs/runtime-plugins.md#death-sequence).
+Fatal lava follows the presented corpse's torso and keeps it alight until placement clears it.
 
 ### Traps
 
@@ -1382,7 +1401,7 @@ toward it as before.
 In **Workshop / Appearance / Body-relative elbow hints**, adjust each arm's
 **X**, **Y**, and **Z** hint coordinates independently. These are preferred elbow
 positions in torso-local metres: positive X goes right, positive Y goes up,
-and positive Z goes toward the camera. The torso origin follows the player root,
+and positive Z goes toward the camera. While alive the torso origin follows the player root,
 not the shoulder. Defaults prefer elbows below and outside the shoulders, with
 separate front/back preferences.
 

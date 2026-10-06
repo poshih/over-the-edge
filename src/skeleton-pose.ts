@@ -34,6 +34,12 @@ export interface SkeletonRotation {
   readonly pivot: RigPoint | 'bone-origin';
   readonly angle: number;
 }
+export interface HeldSkeletonFrame {
+  readonly targets: ReadonlyMap<string, RigTarget>;
+  readonly rootAngle: number;
+  readonly released: boolean;
+}
+type MutableBoneWorld = { -readonly [K in keyof BoneWorld]: BoneWorld[K] };
 
 const DEG_TO_RAD = Math.PI / 180;
 const EIGHTH_TURN = Math.PI / 4;
@@ -418,6 +424,12 @@ export class SkeletonPose {
   private readonly hairSolver: HairSolver;
   private rotationRoots: readonly number[] = [];
   private rotationTopology: readonly number[] = [];
+  private readonly heldX: Float64Array;
+  private readonly heldY: Float64Array;
+  private readonly heldAngle: Float64Array;
+  private readonly heldOutput: MutableBoneWorld[];
+  private heldRootAngle = 0;
+  private heldHeads: readonly { readonly bone: number; readonly x: number; readonly y: number; readonly angle: number; readonly anchor: RigTarget }[] = [];
 
   constructor(definition: SkeletonDefinition) {
     this.definition = definition;
@@ -438,6 +450,10 @@ export class SkeletonPose {
     this.worldY = new Float64Array(definition.bones.length);
     this.worldAngle = new Float64Array(definition.bones.length);
     this.lengthScale = new Float64Array(definition.bones.length).fill(1);
+    this.heldX = new Float64Array(definition.bones.length);
+    this.heldY = new Float64Array(definition.bones.length);
+    this.heldAngle = new Float64Array(definition.bones.length);
+    this.heldOutput = definition.bones.map(bone => ({ id: bone.id, x: 0, y: 0, angle: 0, length: bone.length, scale: 1 }));
 
     for (const pose of definition.poses) this.directionPose.set(pose.direction, compilePose(pose.pose, definition.bones.length, this.indexById));
     for (const clip of definition.clips) this.clips.set(clip.id, compileClip(clip, definition.bones.length, this.indexById));
@@ -491,6 +507,60 @@ export class SkeletonPose {
     copy.rotationTopology = this.rotationTopology;
     copy.hairSolver.copyFrom(this.hairSolver);
     return copy;
+  }
+
+  // Direction, animation and hair base pose stop at entry. Existing anatomical ownership comes
+  // from artwork's head anchor, not guessed bone names or a second sprite schema.
+  hold(rootAngle: number, targets: ReadonlyMap<string, RigTarget>, headBones: readonly string[]): void {
+    this.heldX.set(this.localX); this.heldY.set(this.localY); this.heldAngle.set(this.localAngle);
+    this.heldRootAngle = rootAngle;
+    const target = targets.get('character-head');
+    if (target === undefined) throw new SkeletonError('The held skeleton needs its character-head anchor.');
+    this.heldHeads = headBones.map(id => {
+      const bone = this.requireBone(id, 'Held head bone');
+      return { bone, x: this.worldX[bone], y: this.worldY[bone], angle: this.worldAngle[bone], anchor: { ...target } };
+    });
+  }
+
+  evaluateHeld(frame: HeldSkeletonFrame): readonly BoneWorld[] {
+    this.localX.set(this.heldX); this.localY.set(this.heldY); this.localAngle.set(this.heldAngle);
+    const turn = frame.rootAngle - this.heldRootAngle, cos = Math.cos(turn), sin = Math.sin(turn);
+    for (const bone of this.topology) {
+      if (this.parentIndex[bone] >= 0) continue;
+      const x = this.localX[bone], y = this.localY[bone];
+      this.localX[bone] = cos * x - sin * y; this.localY[bone] = sin * x + cos * y;
+      this.localAngle[bone] += turn;
+    }
+    reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle,
+      this.worldX, this.worldY, this.worldAngle, this.lengthScale);
+    const head = frame.targets.get('character-head');
+    if (head === undefined) throw new SkeletonError('The physical skeleton needs its character-head anchor.');
+    for (const held of this.heldHeads) {
+      const rotation = head.angle - held.anchor.angle;
+      const dx = held.x - held.anchor.x, dy = held.y - held.anchor.y;
+      const x = head.x + Math.cos(rotation) * dx - Math.sin(rotation) * dy;
+      const y = head.y + Math.sin(rotation) * dx + Math.cos(rotation) * dy;
+      const angle = held.angle + rotation, bone = held.bone, parent = this.parentIndex[bone];
+      if (parent < 0) {
+        this.localX[bone] = x; this.localY[bone] = y; this.localAngle[bone] = angle;
+      } else {
+        const px = x - this.worldX[parent], py = y - this.worldY[parent], pa = this.worldAngle[parent];
+        this.localX[bone] = rotateX(px, py, -pa) / this.lengthScale[parent];
+        this.localY[bone] = rotateY(px, py, -pa); this.localAngle[bone] = angle - pa;
+      }
+      reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle,
+        this.worldX, this.worldY, this.worldAngle, this.lengthScale);
+    }
+    if (frame.released) this.solveIk(frame.targets, true);
+    for (let index = 0; index < this.heldOutput.length; index++) {
+      const out = this.heldOutput[index]!;
+      out.x = this.worldX[index]; out.y = this.worldY[index]; out.angle = this.worldAngle[index];
+      out.scale = this.lengthScale[index]; out.length = this.definition.bones[index]!.length * out.scale;
+      if (!Number.isFinite(out.x) || !Number.isFinite(out.y) || !Number.isFinite(out.angle)) {
+        throw new SkeletonError(`Physical pose produced a non-finite transform for bone "${out.id}".`);
+      }
+    }
+    return this.heldOutput;
   }
 
   evaluate(options: {
@@ -627,16 +697,16 @@ export class SkeletonPose {
     }
   }
 
-  private solveIk(targets: ReadonlyMap<string, RigTarget>): void {
+  private solveIk(targets: ReadonlyMap<string, RigTarget>, released = false): void {
     for (const chain of this.ik) {
       const target = targets.get(chain.target);
       if (!target) throw new SkeletonError(`Missing IK target "${chain.target}".`);
 
       const shoulderX = this.worldX[chain.upper];
       const shoulderY = this.worldY[chain.upper];
-      const desiredWrist = transformPoint({ x: chain.offsetX, y: chain.offsetY }, target, target.angle);
-      const reachX = desiredWrist.x - shoulderX;
-      const reachY = desiredWrist.y - shoulderY;
+      const offsetX = released ? 0 : chain.offsetX, offsetY = released ? 0 : chain.offsetY;
+      const reachX = target.x + Math.cos(target.angle) * offsetX - Math.sin(target.angle) * offsetY - shoulderX;
+      const reachY = target.y + Math.sin(target.angle) * offsetX + Math.cos(target.angle) * offsetY - shoulderY;
       const reach = Math.hypot(reachX, reachY);
 
       const upperLength = this.definition.bones[chain.upper].length * this.lengthScale[chain.upper];

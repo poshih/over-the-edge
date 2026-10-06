@@ -527,13 +527,39 @@ copy of that side's frame plan about the hand's grip after phase 1: its `offset`
 `forward` all turn, so the arms reach the turned wrist and phase 2 receives the turned plan. The
 plan phase 1 wrote is never rewritten.
 
-Both phase contexts include `deathWeight`: 0 while alive, increasing linearly to 1 over
-0.65 s during death, or 1 immediately for reduced motion. A strategy can use it to change
-its arms; the standard strategy keeps the hands on their grips. The runtime
-[`death-animation` point](runtime-plugins.md#death-animation) supplies the captured
-torso/head offsets before arms are solved, shared by built-in and imported avatars and
-Mesh parts. Its 2D default holds the last sprite pose and dims runtime materials, rather
-than inventing a skeletal death clip. Placement clears both the pose and the tint.
+`AvatarRigPoseContext` includes `poseSource: 'live' | 'physical-death' | 'captured-death'`
+and `attachment: 'gripped' | 'released'`. Physical death bypasses `writeFramePlan`,
+grip placement and wrist offsets. Its explicit shoulder/elbow/wrist solutions and hand
+directions follow the corpse, not the dropped shaft. The standard strategy composes those
+solutions as supplied. In live play and `hold` mode both phases still run, with
+`AvatarRigFrameContext.poseSource` being `'live'` or `'captured-death'` and its attachment
+`'gripped'`.
+
+The runtime [`death-pose` point](runtime-plugins.md#death-pose) presents one shared physical
+pose for Mesh parts, the built-in skinned avatar, imported avatars and 2D sprites. The
+engine builds six passive bodies from the resolved terminal pose, with shared figure
+dimensions: torso, head, two upper arms and two forearms/hands. 3D arm segments project
+onto the course plane; projections shorter than 0.04 m are normalised at entry. Collider
+visuals are centred on the obstacle line, and 3D arms retain `ARM_LAYER`, sharing depth with
+the released hammer.
+
+Sprite profiles stay at schema 19. Existing torso/head anchors and grip-target IK chains
+carry the physical pose; no ragdoll data is authored. Facing, flipbook frames, animation
+and hair base pose freeze at entry, but the skeleton continues evaluating physical hand
+targets with pooled buffers. Artwork bound to a dedicated head subtree follows that
+anchor independently; weighted artwork spanning body and head follows its existing
+ownership, rather than guessed bone names. 2D materials dim to 45%, restored at placement.
+`hold` mode keeps the captured sprite pose, and the former 3D slump/nod and grips.
+`dying-rigid` continues ordinary player tuning in place. Player-body tuning edits during
+`dying-ragdoll` take effect at the next placement, never by retuning the corpse; rig
+geometry edits and switches between rigid and compliant handles still restart the run.
+Runtime character selections, model and hammer-head changes accepted during death wait
+for placement. Synchronous character authoring instead refuses while the rig is dying
+with [`SpriteEditError`](sprites.md#game-agnostic-contract), before changing its state.
+The Workshop reports a transient notice and keeps its draft; pointer-driven previews
+quietly decline, while clearing a preview preserves the captured death presentation.
+In-flight profile/model loads continue waiting for placement. Physics never rebuilds
+the corpse to follow an asset edit.
 
 The same registry is used by every check: importing or opening a project, the project server's
 writes, packaging a release and the running release, so a driver or motion is accepted or rejected

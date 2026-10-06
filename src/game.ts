@@ -47,6 +47,7 @@ import { LOOKS } from './object-looks';
 import { checkSynchronous, PluginError } from './plugins/kernel';
 import type { Attributed } from './plugins/kernel';
 import { Disposal } from './disposal';
+import { createDeathSeed } from './player-pose';
 
 const IMPACT_INTERVAL = 0.07;
 
@@ -109,6 +110,7 @@ export class Game {
   private readonly renderState: CharacterState & { dt: number; death: DeathFrame | null } = { armIk: DEFAULT_ARM_IK, dt: 0, death: null };
   private hud: HudSettings;
   private death: Dying | null = null;
+  private readonly deathSeed = createDeathSeed();
   private readonly deathFrame: { -readonly [K in keyof DeathFrame]: DeathFrame[K] } = {
     elapsed: 0, duration: 0, poseProgress: 0, reducedMotion: false,
   };
@@ -676,7 +678,8 @@ export class Game {
       const event = this.stageEvent('death');
       if (event !== null && info.kind === 'health') stageCause(event.cause, info.cause);
     }
-    this.simulation.beginDeath();
+    this.view.writeDeathSeed(this.simulation.frame(1), this.deathSeed, this.renderState.armIk);
+    this.simulation.beginDeath(this.deathSeed);
     this.view.beginDeath(this.simulation.frame(1), kind);
     this.clearMovement();
     for (const observer of this.stepObservers) observer.interrupt();

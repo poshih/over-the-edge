@@ -43,6 +43,13 @@ export interface ArmPose {
   shaftAxis: Vector3;
 }
 
+export function createArmPose(side: ArmSide): ArmPose {
+  return {
+    side, shoulder: new Vector3(), hand: new Vector3(), hint: new Vector3(), shaftAxis: new Vector3(),
+    elbow: new Vector3(), normal: new Vector3(), axis: new Vector3(), bendDirection: new Vector3(),
+  };
+}
+
 function initialBend(axis: Vector3, side: ArmSide, out: Vector3): Vector3 {
   if (Math.abs(axis.x) + DIRECTION_EPSILON < Math.abs(axis.z)) out.set(1, 0, 0);
   else out.set(0, 0, 1);
@@ -118,10 +125,7 @@ export class ArmPoseSolver {
   private ready = false;
 
   constructor(side: ArmSide) {
-    this.pose = {
-      side, shoulder: new Vector3(), hand: new Vector3(), hint: new Vector3(), shaftAxis: new Vector3(),
-      elbow: new Vector3(), normal: new Vector3(), axis: new Vector3(), bendDirection: new Vector3(),
-    };
+    this.pose = createArmPose(side);
   }
 
   reset(): void { this.ready = false; }

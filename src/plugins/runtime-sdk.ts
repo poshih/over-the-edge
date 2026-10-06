@@ -26,15 +26,20 @@ export { AIM_MARKS, DEFAULT_AIM_MARKS } from '../aim-marks';
 export type { AimMarks, AimMarksFactory } from '../aim-marks';
 export { DEFAULT_HURT_EFFECTS, HURT_EFFECTS } from '../hurt-effects';
 export type { HurtEffects, HurtEffectsFactory } from '../hurt-effects';
-export { DEFAULT_DEATH_ANIMATION, DEATH_ANIMATION } from '../death-animation';
-export type { DeathAnimationInput, DeathAnimationPose, DeathAnimationWriter } from '../death-animation';
+export { DEFAULT_DEATH_POSE, DEATH_POSE } from '../death-pose';
+export type {
+  DeathAppearance, DeathArmPose, DeathLayout, DeathPose, DeathPoseInput, DeathPoseWriter,
+  ReadonlyDeathAppearance, ReadonlyDeathArmPose, ReadonlyDeathLayout, ReadonlyDeathPose, Rotation3, Transform2,
+} from '../death-pose';
 export { DEFAULT_DEATH_SCREEN, DEATH_SCREEN } from '../death-screen';
 export type { DeathScreen, DeathScreenFactory } from '../death-screen';
 export { DeathSequenceError } from '../death-sequence';
 export type { DeathFrame, DeathInfo, DeathKind, DeathSequenceErrorCode } from '../death-sequence';
+export { PlayerDeathError } from '../player-ragdoll';
+export type { PlayerDeathErrorCode } from '../player-ragdoll';
 export type { CharacterRiggingType } from '../sprite-data';
 export { SCENE_LAYERS, SCENE_LAYER_LIMITS } from '../scene-layer';
-export type { SceneFrame, SceneLayer, SceneLayerFactory } from '../scene-layer';
+export type { SceneDeathPlayerFrame, SceneFrame, SceneLayer, SceneLayerFactory, ScenePlayerFrame } from '../scene-layer';
 export { OBSTACLE_LINE } from '../obstacle-line';
 export { ARM_LAYER } from '../arm-layer';
 export type { Point } from '../config';
@@ -46,6 +51,7 @@ export type { PhantomPose, PhantomTool } from '../phantom-format';
 export type { HammerHead } from '../hammer-head';
 export type { RigGeometry } from '../rig';
 export type { PartPose } from '../simulation';
+export type { DeathPlayerFrame, LivePlayerFrame, PlayerFrameState } from '../player-pose';
 export type { PlatformPose } from '../platform-world';
 export type { ProjectilePose } from '../hazard-world';
 export { AXE, axeAngle, BONFIRE, HURT_SOURCES, SHOOTER } from '../hazards';

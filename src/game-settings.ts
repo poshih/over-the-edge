@@ -23,11 +23,18 @@ export interface CursorSettings {
   readonly returnOffsetY: number;
 }
 
+export interface DeathSettings {
+  readonly mode: 'ragdoll' | 'hold';
+  readonly angularDamping: number;
+  readonly friction: number;
+}
+
 export interface GameSettings {
-  readonly schemaVersion: 12;
+  readonly schemaVersion: 13;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
+  readonly death: Readonly<DeathSettings>;
 }
 
 export const GAME_SETTINGS_LIMITS = { fileBytes: 64 * 1024 } as const;
@@ -38,8 +45,11 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   followCharacter: 100,
   returnToHammer: false, returnDelay: 0.15, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
 });
+export const DEFAULT_DEATH_SETTINGS: Readonly<DeathSettings> = Object.freeze({
+  mode: 'ragdoll', angularDamping: 2, friction: 0.45,
+});
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 12, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS,
+  schemaVersion: 13, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS, death: DEFAULT_DEATH_SETTINGS,
 });
 
 interface NumericSetting {
@@ -60,6 +70,12 @@ interface TuningField extends NumericSetting {
 
 type RigField = NumericSetting & { key: RigLength };
 type CursorField = NumericSetting & { key: Exclude<keyof CursorSettings, 'returnToHammer'> };
+type DeathField = NumericSetting & { key: Exclude<keyof DeathSettings, 'mode'> };
+
+export const DEATH_FIELDS: readonly DeathField[] = [
+  { key: 'angularDamping', label: 'Corpse angular damping', min: 0, max: 10, step: 0.1, unit: '/s', description: 'Passive rotational drag on the six ragdoll bodies. A death keeps the settings it entered with.' },
+  { key: 'friction', label: 'Corpse friction', min: 0.05, max: 2, step: 0.05, unit: '', description: 'Contact friction on the ragdoll and released hammer shaft. The jar and hammer head keep their own materials. Applies at the next death.' },
+];
 
 export const RIG_FIELDS: readonly RigField[] = [
   { key: 'handleLength', label: 'Handle length', ...RIG_LIMITS.handleLength, step: 0.05, unit: 'm', description: 'From the butt to the centre of the head. Fully retracted, the head stops at the minimum reach from the shoulder hinge, so with none the butt travels this far behind it. Changing it rebuilds the player and restarts the run.' },
@@ -89,7 +105,7 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'hammerMass', label: 'Hammer head mass', group: 'Mass & recoil', min: 0.5, max: 4, step: 0.1, unit: 'kg', description: 'Lower head mass reduces swing recoil; higher mass increases momentum and motor load.' },
   { key: 'playerMass', label: 'Player mass', group: 'Mass & recoil', min: 6, max: 24, step: 0.5, unit: 'kg', description: 'Character mass shared by the root and pot, excluding hinge and tool components. A heavier player recoils less but is harder to lift.' },
   { key: 'angularSpeed', label: 'Rotation speed cap', group: 'Mass & recoil', min: 2, max: 18, step: 0.5, unit: 'rad/s', description: 'Lower this limit to soften fast swing kicks. It caps the hinge velocity target.' },
-  { key: 'shaftMass', label: 'Shaft mass (total)', group: 'Mass & recoil', min: 0.15, max: 3, step: 0.01, unit: 'kg', description: 'Total mass of the non-colliding shaft, evenly distributed along its length. Lower values reduce recoil.' },
+  { key: 'shaftMass', label: 'Shaft mass (total)', group: 'Mass & recoil', min: 0.15, max: 3, step: 0.01, unit: 'kg', description: 'Total shaft mass, evenly distributed along its length. It does not collide during live play; ragdoll death releases it and enables its contacts. Lower values reduce recoil.' },
   { key: 'hingeCarrierMass', label: 'Hinge carrier mass', group: 'Mass & recoil', min: 0.1, max: 2, step: 0.05, unit: 'kg', description: 'Hinge component mass carried at the shoulder, with matching rotor inertia on the driven tool. Its rotational inertia scales with its mass.' },
   { key: 'sliderCarriageMass', label: 'Slider carriage mass', group: 'Mass & recoil', min: 0.1, max: 2, step: 0.05, unit: 'kg', description: 'Carriage mass at the handle butt, part of the single tool body when rigid. Lower values reduce extension recoil.' },
   { key: 'hingeTorque', label: 'Hinge strength', group: 'Motors', min: 80, max: 1000, step: 10, unit: 'N m', description: 'Maximum rotational effort. This is not the requested motor speed.' },
@@ -102,7 +118,7 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'extensionGain', label: 'Extension response', group: 'Response', min: 2, max: 35, step: 0.5, unit: '/s', description: 'Error along the handle becomes requested slider speed.' },
   { key: 'extensionDamping', label: 'Extension damping', group: 'Response', min: 0, max: 0.8, step: 0.02, unit: '', description: 'Measured slider speed opposes the extension command.' },
   { key: 'bodyDamping', label: 'Body damping', group: 'Materials', min: 0, max: 1, step: 0.02, unit: '/s', description: 'Passive linear and angular drag on moving bodies.' },
-  { key: 'gripFriction', label: 'Hammer friction', group: 'Materials', min: 0.2, max: 10, step: 0.05, unit: '', description: 'Contact friction on the hammer head, not an artificial grip. The shaft does not collide.' },
+  { key: 'gripFriction', label: 'Hammer friction', group: 'Materials', min: 0.2, max: 10, step: 0.05, unit: '', description: 'Contact friction on the hammer head, not an artificial grip. The shaft does not collide during live play; a released shaft takes the Death group\'s friction.' },
   { key: 'potFriction', label: 'Jar friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction on the pot, the jar: how well it rests on slopes and how much it scrapes as it slides. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
   { key: 'rockFriction', label: 'Rock friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Rock surface, the default. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
   { key: 'woodFriction', label: 'Wood friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Wood surface. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
@@ -186,8 +202,8 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 }
 
 export function validateGameSettings(value: unknown): GameSettings {
-  settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor'], 'Game settings profile');
-  if (value.schemaVersion !== 12) throw new GameSettingsError('Game settings require schema version 12.');
+  settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor', 'death'], 'Game settings profile');
+  if (value.schemaVersion !== 13) throw new GameSettingsError('Game settings require schema version 13.');
   const rig = validateRig(value.rig);
   const numbers = [...CURSOR_FIELDS, ...CURSOR_RETURN_FIELDS];
   settingsFields(value.cursor, ['returnToHammer', ...numbers.map((field) => field.key)], 'Cursor settings');
@@ -198,5 +214,9 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  return Object.freeze({ schemaVersion: 12, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor) });
+  settingsFields(value.death, ['mode', ...DEATH_FIELDS.map((field) => field.key)], 'Death settings');
+  if (value.death.mode !== 'ragdoll' && value.death.mode !== 'hold') throw new GameSettingsError('Death mode must be ragdoll or hold.');
+  const death: { -readonly [K in keyof DeathSettings]: DeathSettings[K] } = { ...DEFAULT_DEATH_SETTINGS, mode: value.death.mode };
+  for (const field of DEATH_FIELDS) death[field.key] = settingNumber(value.death[field.key], field);
+  return Object.freeze({ schemaVersion: 13, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor), death: Object.freeze(death) });
 }

@@ -43,12 +43,14 @@ built-in `standard` among them. An avatar selects a plugin's strategy by its nam
 "driver": { "id": "my-game/my-rig", "config": null }
 ```
 
-Both `AvatarRigFrameContext` and `AvatarRigPoseContext` carry `deathWeight`: **0** during
-live play and **0–1** over the death pose's 0.65 s, or **1** immediately for reduced motion.
-Use it to adapt the hands and arms without taking over the engine's clock. The standard
-strategy keeps its grips. The runtime point
-[`DEATH_ANIMATION`](runtime-plugins.md#death-animation) owns the shared torso/head offsets
-and 2D dimming, applied before arm solving; rig strategies remain pure numeric and arm-only.
+`AvatarRigPoseContext` carries `poseSource` (`'live'`, `'physical-death'` or
+`'captured-death'`) and `attachment` (`'gripped'` or `'released'`). Physical death supplies
+explicit shoulder, elbow and wrist positions and forearm-aligned hand directions; the host
+skips `writeFramePlan`, grip placement and wrist offsets. The standard strategy composes
+those joints without reattaching the hands. Live play and the `hold` death mode still run
+both phases; `AvatarRigFrameContext` then carries `'live'` or `'captured-death'` and
+`'gripped'`. The runtime [`DEATH_POSE`](runtime-plugins.md#death-pose) writes the presented
+body, head and arm pose, plus sprite dimming; rig strategies remain pure numeric and arm-only.
 Placement clears death before the next live rig frame.
 
 ## Motion kinds

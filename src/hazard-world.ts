@@ -13,7 +13,7 @@ export interface ProjectilePose extends Readonly<Point> {
 }
 
 export interface HazardHooks {
-  // The hammer head, which blocks projectiles.
+  // The hammer head blocks projectiles even when released; this is obstruction, not vulnerability.
   readonly shield: () => Fixture;
   readonly isTerrain: (body: Body) => boolean;
   // Terrain stops projectiles only from outside, so a muzzle set into a wall shoots out of it.

@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 12,
+    "schemaVersion": 13,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -99,6 +99,11 @@
       "returnRate": 8,
       "returnOffsetX": 0,
       "returnOffsetY": 0
+    },
+    "death": {
+      "mode": "ragdoll",
+      "angularDamping": 2,
+      "friction": 0.45
     }
   },
   "characters": {

@@ -36,7 +36,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 8, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 12: physics (including the downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline) and cursor target (radius, dead zone, how much it follows the character and the optional return to the hammer) |
+| `settings` | `project.json` | Game-settings profile, schema 13: physics (including the downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death mode/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -81,12 +81,13 @@ The paths are fixed, so a manifest only says which files exist:
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 12, "physics": { "...": "..." },
+    "schemaVersion": 13, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
     "cursor": {
       "maxTargetRadius": 2.65, "deadZone": 0.1, "followCharacter": 100,
       "returnToHammer": false, "returnDelay": 0.15, "returnRate": 8, "returnOffsetX": 0, "returnOffsetY": 0
-    }
+    },
+    "death": { "mode": "ragdoll", "angularDamping": 2, "friction": 0.45 }
   },
   "characters": { "primary": null, "alternate": null },
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
@@ -501,6 +502,18 @@ An open Workshop page shows each change within two seconds.
 
 ## Section reference
 
+**Game settings.** The nested settings schema is **13** (the outer project schema remains
+12). `death.mode` is `ragdoll` by default, or `hold` to retain the old motors, aim and
+grips. `death.angularDamping` is 0–10 /s, step 0.1, default 2; `death.friction` is
+0.05–2, step 0.05, default 0.45. The corpse and released shaft use that friction;
+the pot and hammer head keep their own materials. These fields appear in **Physics / Death**,
+are saved/exported with the physics, rig and cursor, and count toward the phantom course.
+Construction settings apply to the next death. Runtime character selections and accepted
+model/head changes wait for placement, never a rebuilt corpse; synchronous Workshop
+character edits refuse with a transient notice and keep the draft unchanged.
+Player-body tuning stays live in `hold`, but takes effect at placement in `ragdoll`.
+The separate HUD fields below own death text and wait.
+
 **Theme.** Colours are lowercase `#rrggbb`. `fog.near` and `fog.far` are depths in
 metres behind the course (`near` up to 1,000 and `far` up to 2,000, past the deepest
 decoration; `far` must exceed `near`; a negative `near`, down to -20, hazes the course
@@ -533,7 +546,7 @@ exactly the original one.
 and falls show the [death sequence](runtime-plugins.md#death-sequence) for their sum
 before placement. The world and run timer keep going; Pause and a hidden tab hold the
 clock. An active death keeps the values it started with. A runtime facet can replace
-the screen and character death animation independently; timing and wording remain
+the screen and character death pose independently; timing and wording remain
 project content.
 
 **Audio.** `volume` (master) and each clip's `volume` are 0-1. `music` loops while

@@ -8,7 +8,7 @@ and previews in the running game. A plugin's **workshop facet** holds them, name
 
 ```json
 {
-  "apiVersion": 1,
+  "apiVersion": 2,
   "plugins": [
     { "id": "my-game", "workshop": "./workshop.ts" }
   ]
@@ -186,6 +186,10 @@ allocates nothing per frame on its behalf.
   `window.gettingOver.snapshot()` reports. That state includes `paused`, `pauseReasons`,
   `stopped`, `timer: { elapsed, running }`, `dying` (an active death sequence) and
   `death` (`'health'`, `'fall'` or `null` while alive), built on request rather than per frame.
+  `player: { phase, centre }` works with a live root or a corpse. `aim.state` is
+  `'driven'` with origin/offsets, or `'captured'` with the released rig's frozen world
+  cursor and target; `drive.state` is `'driven'` with motor readings, or `'released'`
+  without them. Released `hingeLoad` and `sliderLoad` are `null`, never stale motor values.
 - **Avatar facts.** `game.avatar()` is the loaded imported avatar, or `null`: the model facts its
   motion kinds get (`AvatarMotionModel`), each motion's claimed joints, and
   `jointWorld(index, out)`, a skin joint's current world frame.

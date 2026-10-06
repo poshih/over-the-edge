@@ -21,6 +21,20 @@ export interface PlayerTool {
   readonly setHead: (head: HammerHead, tuning: Readonly<Tuning>) => void;
 }
 
+// Release changes contacts, never the tool's bodies, mass properties, motion or internal welds.
+export function releasePlayerTool(tool: PlayerTool, friction: number): void {
+  for (const part of tool.parts) {
+    if (part.kind !== 'handle' || part.fixture === undefined) continue;
+    part.fixture.setFilterMaskBits(PHYSICS.terrainCategory | PHYSICS.enemyCategory);
+    part.fixture.setFriction(friction);
+    part.fixture.setRestitution(0);
+  }
+  for (const { body } of tool.bodies) {
+    body.setSleepingAllowed(true);
+    body.setAwake(true);
+  }
+}
+
 type ToolConstruction = Omit<PlayerTool, 'acceptsTuning'>;
 
 interface ToolInput {

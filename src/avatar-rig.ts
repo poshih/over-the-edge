@@ -88,8 +88,8 @@ function callStrategy<T>(callback: () => T): T {
  * arms followed from the context and writes the pose. That is the plan phase 1 wrote, or, when the
  * profile rotates a hand, the engine's copy of it turned about that hand's grip; the written plan is
  * never rewritten. A strategy holds no frame state between calls. Pure numeric: a strategy never
- * sees a scene, material or renderer object. Both phases receive deathWeight, 0 alive and 0–1 while
- * dying; the standard rig keeps its grips as the runtime death animation slumps the body and head.
+ * sees a scene, material or renderer object. Released hands bypass phase 1 and arrive in phase 2
+ * as physical joints with forearm-aligned directions and no wrist offsets.
  */
 export interface AvatarFramePlanner {
   writeFramePlan(context: AvatarRigFrameContext, out: AvatarRigFramePlan): void;

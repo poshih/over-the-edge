@@ -10,7 +10,7 @@ import {
   isPlatformObject,
 } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
-import { changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, tunePlayer } from './player';
+import { beginPlayerDeath, changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, holdPlayer, launchPlayer, playerAnchor, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { partPoint, partVelocity } from './player-bodies';
 import { rigGeometry, sameRig } from './rig';
@@ -35,6 +35,9 @@ import type { HealthReading } from './health-meter';
 import { PlatformWorld } from './platform-world';
 import type { PlatformPose } from './platform-world';
 import type { DeathKind } from './death-sequence';
+import { PlayerDeathError, validateDeathSeed, writeRagdollPose } from './player-ragdoll';
+import { copyDeathPose, createDeathPose, interpolateDeathPose, interpolateTransform } from './player-pose';
+import type { DeathPose, DeathSeed, MutablePlayerFrameState, PlayerFrameState } from './player-pose';
 
 export interface PartPose extends Point {
   id: string;
@@ -46,7 +49,9 @@ export interface PartPose extends Point {
 
 export interface PhysicsFrame {
   time: number;
+  placement: number;
   parts: PartPose[];
+  player: PlayerFrameState;
   cursor: Point;
   enemies: readonly EnemyPose[];
   projectiles: readonly ProjectilePose[];
@@ -69,7 +74,7 @@ export interface RigPose {
   buttY: number;
 }
 
-type PlayerFrame = Omit<PhysicsFrame, 'enemies' | 'projectiles' | 'platforms' | 'cursor' | 'rig'> & { cursorOffset: Point };
+interface PlayerFrame { time: number; parts: PartPose[]; player: MutablePlayerFrameState; cursorOffset: Point }
 
 const IDLE_COMMAND: MotorCommand = {
   angularError: 0, extensionError: 0, angularSpeed: 0, linearSpeed: 0, hingeBoost: 1, sliderBoost: 1,
@@ -98,6 +103,9 @@ export class Simulation {
   private lastAimInput = 0;
   private previous: PlayerFrame;
   private current: PlayerFrame;
+  private interpolated: PlayerFrame;
+  private readonly deathCursor: Point = { x: 0, y: 0 };
+  private readonly deathTarget: Point = { x: 0, y: 0 };
   private command = { ...IDLE_COMMAND };
   private elapsed = 0;
   private bestHeight = 0;
@@ -113,7 +121,6 @@ export class Simulation {
   private readonly cause: { -readonly [K in keyof HurtCause]: HurtCause[K] } = { source: 'enemy', id: '', x: 0, y: 0, pushX: 0, pushY: 0 };
   // How many times the player has been placed: at every restart and every return to a bonfire.
   private placements = 0;
-  private dying = false;
   private disposed = false;
   private voidY: number | null;
   private supported = false;
@@ -141,9 +148,11 @@ export class Simulation {
       surfaceMaterials(this.settings.physics));
     this.platforms = new PlatformWorld(this.world, level.objects.filter(isPlatformObject), surfaceMaterials(this.settings.physics));
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
+    this.preparePlayerFixtures();
     this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
       getPot: () => this.rig.pot,
       getHeadFixture: () => this.dying ? null : this.rig.tool.head.fixture,
+      canBump: () => !this.dying,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       onBump: (delta, enemy, atX, atY) => {
@@ -164,8 +173,11 @@ export class Simulation {
     this.bonfires = new Bonfires(level.objects.filter(isBonfireObject));
     this.liquids = new LiquidWorld(level.objects.filter(isPoolObject));
     this.aim = this.initialAim();
-    this.current = this.capture();
-    this.previous = this.current;
+    this.current = this.createPlayerFrame();
+    this.previous = this.createPlayerFrame();
+    this.interpolated = this.createPlayerFrame();
+    this.capture(this.current);
+    this.capture(this.previous);
   }
 
   gameSettings(): GameSettings { return this.settings; }
@@ -177,7 +189,7 @@ export class Simulation {
   setHammerHead(head: HammerHead | null): void {
     this.ensureLive();
     this.hammerHead = head;
-    this.applyHead();
+    if (!this.dying) this.applyHead();
   }
 
   // A rig is never rebuilt in place, except its head: other new rig settings rebuild the player and restart the run.
@@ -202,7 +214,7 @@ export class Simulation {
       this.reset(this.spawn);
       return 'restarted';
     }
-    if (!sameHammerHead(next.rig.head, previous.rig.head)) {
+    if (!this.dying && !sameHammerHead(next.rig.head, previous.rig.head)) {
       this.rig = { ...this.rig, geometry: rigGeometry(next.rig) };
       this.applyHead();
     }
@@ -212,7 +224,7 @@ export class Simulation {
       this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
       this.current = { ...this.current, cursorOffset: { ...this.aim.cursor } };
     }
-    if (tuned) {
+    if (tuned && this.rig.phase !== 'dying-ragdoll') {
       tunePlayer(this.rig, next.physics);
       for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
         contact.resetFriction();
@@ -288,13 +300,13 @@ export class Simulation {
   get placement(): number { return this.placements; }
 
   playerPosition(): Readonly<Point> {
-    const root = this.rig.root.getPosition();
+    const root = playerAnchor(this.rig).getPosition();
     return { x: root.x, y: root.y + RIG.potBottom };
   }
 
   // Writes the rig's current pose into `out`, allocating nothing, so it can be read every step.
   rigPose(out: RigPose): RigPose {
-    const root = this.rig.root.getPosition();
+    const root = playerAnchor(this.rig).getPosition();
     const tip = partPoint(this.rig.tool.head, this.headPoint);
     const butt = partPoint(this.rig.tool.butt, this.buttPoint);
     out.x = root.x;
@@ -308,7 +320,7 @@ export class Simulation {
   }
 
   fellOutOfLevel(): boolean {
-    return this.supported && this.voidY !== null && this.rig.root.getPosition().y + RIG.potBottom < this.voidY;
+    return this.supported && this.voidY !== null && playerAnchor(this.rig).getPosition().y + RIG.potBottom < this.voidY;
   }
 
   dead(): boolean {
@@ -320,12 +332,26 @@ export class Simulation {
     return this.dead() ? 'health' : null;
   }
 
-  // The world carries on, but the player's hinge-relative aim and health stay where death left them.
-  beginDeath(): void {
+  // The view resolves the terminal pose once; physics owns the resulting one-way phase transition.
+  beginDeath(seed: DeathSeed): void {
     this.ensureLive();
-    this.dying = true;
+    if (this.world.isLocked()) throw new PlayerDeathError('locked-world', 'Death must begin between physics steps.');
+    if (this.rig.phase !== 'alive') throw new PlayerDeathError('repeated-entry', 'This placement is already dying.');
+    validateDeathSeed(seed, this.placements, this.elapsed);
+    const origin = this.cursorOrigin(this.rig.root.getPosition());
+    this.deathCursor.x = origin.x + this.aim.cursor.x;
+    this.deathCursor.y = origin.y + this.aim.cursor.y;
+    this.deathTarget.x = origin.x + this.aim.target.x;
+    this.deathTarget.y = origin.y + this.aim.target.y;
+    this.rig = beginPlayerDeath(this.world, this.rig, seed, this.settings.physics, this.settings.death);
+    this.preparePlayerFixtures();
     this.hurtTaken = false;
     this.impactSpeed = 0;
+    this.current = this.createPlayerFrame();
+    this.previous = this.createPlayerFrame();
+    this.interpolated = this.createPlayerFrame();
+    this.capture(this.current);
+    this.capture(this.previous);
   }
 
   // The simulation's health, independent of HUD visibility. Reused and read-only: consume immediately, never retain it.
@@ -404,7 +430,9 @@ export class Simulation {
     if (!Number.isFinite(pointerDelta.x) || !Number.isFinite(pointerDelta.y)) {
       throw new Error('Pointer movement must be finite.');
     }
+    const buffer = this.previous;
     this.previous = this.current;
+    this.current = buffer;
     let swinging = false;
     if (!this.dying && (pointerDelta.x !== 0 || pointerDelta.y !== 0)) {
       if (!Number.isFinite(this.aim.cursor.x + pointerDelta.x) || !Number.isFinite(this.aim.cursor.y + pointerDelta.y)) {
@@ -417,27 +445,33 @@ export class Simulation {
       swinging = this.aim.target.y < previousY;
     } else if (!this.dying && this.returning()) {
       const { returnRate, returnOffsetX, returnOffsetY, maxTargetRadius } = this.settings.cursor;
-      const origin = this.cursorOrigin(this.rig.root.getPosition());
+      const origin = this.cursorOrigin(playerAnchor(this.rig).getPosition());
       const tip = partPoint(this.rig.tool.head, this.headPoint);
       this.aim = returnAim(this.aim, { x: tip.x + returnOffsetX - origin.x, y: tip.y + returnOffsetY - origin.y },
         1 - Math.exp(-returnRate * PHYSICS.dt), maxTargetRadius);
     }
-    this.command = drivePlayer(
-      this.rig, this.worldPoint(this.cursorOrigin(this.rig.root.getPosition()), this.aim.target), this.settings.physics, { swinging },
-    );
-    this.enemies.beforeStep(this.rig.root.getPosition(), this.elapsed);
+    const rig = this.rig;
+    if (rig.phase === 'alive') {
+      this.command = drivePlayer(rig, this.worldPoint(this.cursorOrigin(rig.root.getPosition()), this.aim.target),
+        this.settings.physics, { swinging });
+    } else if (rig.phase === 'dying-rigid') {
+      this.command = holdPlayer(rig, this.worldPoint(this.cursorOrigin(rig.root.getPosition()), this.aim.target), this.settings.physics);
+    }
+    // Activation stays centred on the corpse. Sleeping enemies far from it have no collider for
+    // a released hammer that strays beyond this region; death never adds a second AI region.
+    this.enemies.beforeStep(playerAnchor(rig).getPosition(), this.elapsed);
     const bath = this.liquids.push(this.rig, this.settings.physics);
     const velocity = this.impactTracking && !this.dying ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
     const approachX = velocity?.x ?? 0;
     const approachY = velocity?.y ?? 0;
     // Planck moves the body's own position vector, so keep where the root was.
-    const root = this.rig.root.getPosition();
+    const root = playerAnchor(this.rig).getPosition();
     const rootX = root.x, rootY = root.y;
     this.platforms.beforeStep();
     this.world.step(PHYSICS.dt, PHYSICS.velocityIterations, PHYSICS.positionIterations);
     this.platforms.afterStep();
     if (!this.dying) this.lagCharacter(rootX, rootY);
-    if (!this.supported) this.detectSupport();
+    if (!this.dying && !this.supported) this.detectSupport();
     if (this.impactTracking && !this.dying) {
       const touching = this.headContactCount() > 0;
       if (touching && !this.headTouching) this.impactSpeed = Math.max(this.impactSpeed, Math.hypot(approachX, approachY));
@@ -446,10 +480,10 @@ export class Simulation {
     this.elapsed += PHYSICS.dt;
     this.terrain.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
-    this.hazards.afterStep(this.elapsed, this.rig.root.getPosition());
+    this.hazards.afterStep(this.elapsed, playerAnchor(this.rig).getPosition());
     // Lava burns the character while the pot is in it; each burn, like any hit, leaves it unharmed for a second.
     if (bath?.liquid === 'lava') {
-      const root = this.rig.root.getPosition();
+      const root = playerAnchor(this.rig).getPosition();
       this.hurt(this.settings.physics.lavaDamage, 'lava', bath.id, root.x, root.y, 0, 0);
     }
     if (!this.dying && this.terminal() === null) {
@@ -458,25 +492,30 @@ export class Simulation {
       this.bonfires.update(foot);
       this.bestHeight = Math.max(this.bestHeight, foot.y);
     }
-    this.current = this.capture();
+    this.capture(this.current);
   }
 
   frame(alpha: number): PhysicsFrame {
-    const parts = this.current.parts.map((part, index) => {
-      const previous = this.previous.parts[index];
-      return {
-        ...part,
-        x: previous.x + (part.x - previous.x) * alpha,
-        y: previous.y + (part.y - previous.y) * alpha,
-        angle: previous.angle + angleDifference(part.angle, previous.angle) * alpha,
-      };
-    });
-    const root = parts.find((part) => part.kind === 'root');
-    if (!root) throw new Error('The physics frame is missing its character center.');
+    const shown = this.interpolated, parts = shown.parts;
+    for (let index = 0; index < this.current.parts.length; index++) {
+      const part = this.current.parts[index]!, previous = this.previous.parts[index]!, out = parts[index]!;
+      out.x = previous.x + (part.x - previous.x) * alpha;
+      out.y = previous.y + (part.y - previous.y) * alpha;
+      out.angle = previous.angle + angleDifference(part.angle, previous.angle) * alpha;
+      out.vertices = part.vertices; out.collides = part.collides;
+    }
+    const current = this.current.player, previous = this.previous.player, player = shown.player;
+    interpolateTransform(player.centre, previous.centre, current.centre, alpha);
+    if (player.phase === 'alive' && previous.phase === 'alive' && current.phase === 'alive') {
+      player.shoulder.x = previous.shoulder.x + (current.shoulder.x - previous.shoulder.x) * alpha;
+      player.shoulder.y = previous.shoulder.y + (current.shoulder.y - previous.shoulder.y) * alpha;
+    } else if (player.phase !== 'alive' && previous.phase !== 'alive' && current.phase !== 'alive') {
+      interpolateDeathPose(player.pose, previous.pose, current.pose, alpha);
+    } else throw new PlayerDeathError('phase-mismatch', 'Player interpolation crossed a placement or death phase.');
     return {
       time: this.previous.time + (this.current.time - this.previous.time) * alpha,
-      parts,
-      cursor: this.worldPoint(this.cursorOrigin(root), {
+      placement: this.placements, parts, player,
+      cursor: this.rig.phase === 'dying-ragdoll' ? this.deathCursor : this.worldPoint(this.cursorOrigin(player.centre), {
         x: this.previous.cursorOffset.x + (this.current.cursorOffset.x - this.previous.cursorOffset.x) * alpha,
         y: this.previous.cursorOffset.y + (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha,
       }),
@@ -490,28 +529,31 @@ export class Simulation {
   // HUD-only data: no allocations, contact walk, motor queries or plugin callbacks.
   writeHudFrame(out: { height: number; bestHeight: number; health: HealthReading | null }): void {
     const health = this.readHealth();
-    out.height = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
+    out.height = Math.max(0, playerAnchor(this.rig).getPosition().y + RIG.potBottom);
     out.bestHeight = this.bestHeight;
     out.health = this.hurts ? health : null;
   }
 
   status() {
     this.ensureLive();
-    const root = this.rig.root.getPosition();
+    const root = playerAnchor(this.rig).getPosition();
     let contacts = 0;
     for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
       if (contact.isTouching() && contact.isEnabled()) contacts++;
     }
-    const hingeTorque = this.rig.drive.getMotorTorque(1 / PHYSICS.dt);
-    const sliderForce = this.rig.drive.getMotorForce(1 / PHYSICS.dt);
+    const released = this.rig.phase === 'dying-ragdoll';
+    const hingeTorque = this.rig.phase === 'dying-ragdoll' ? null : this.rig.drive.getMotorTorque(1 / PHYSICS.dt);
+    const sliderForce = this.rig.phase === 'dying-ragdoll' ? null : this.rig.drive.getMotorForce(1 / PHYSICS.dt);
     // Loads are shares of the strength each motor had in the last step, downswing boost included.
     return {
       time: this.elapsed,
       height: Math.max(0, root.y + RIG.potBottom),
       bestHeight: this.bestHeight,
       contacts,
-      hingeLoad: Math.abs(hingeTorque) / (this.settings.physics.hingeTorque * this.command.hingeBoost),
-      sliderLoad: Math.abs(sliderForce) / (this.settings.physics.sliderForce * this.command.sliderBoost),
+      phase: this.rig.phase,
+      motors: released ? 'released' as const : 'driven' as const,
+      hingeLoad: hingeTorque === null ? null : Math.abs(hingeTorque) / (this.settings.physics.hingeTorque * this.command.hingeBoost),
+      sliderLoad: sliderForce === null ? null : Math.abs(sliderForce) / (this.settings.physics.sliderForce * this.command.sliderBoost),
       // Null in levels where nothing can hurt the player.
       health: this.hurts ? { current: this.health, max: this.settings.physics.health } : null,
     };
@@ -519,25 +561,27 @@ export class Simulation {
 
   snapshot() {
     const status = this.status();
-    const root = this.rig.root.getPosition();
+    const anchor = playerAnchor(this.rig), root = anchor.getPosition();
     const origin = this.cursorOrigin(root);
     return {
       ...status,
-      root: { x: root.x, y: root.y, angle: this.rig.root.getAngle() },
+      player: { phase: this.rig.phase, centre: { x: root.x, y: root.y, angle: anchor.getAngle() } },
       tip: { ...partPoint(this.rig.tool.head, this.headPoint) },
-      cursor: this.worldPoint(origin, this.aim.cursor),
-      cursorOrigin: origin,
-      cursorOffset: { ...this.aim.cursor },
-      target: this.worldPoint(origin, this.aim.target),
-      targetOffset: { ...this.aim.target },
-      rootVelocity: { ...this.rig.root.getLinearVelocity() },
+      aim: this.rig.phase === 'dying-ragdoll' ? {
+        state: 'captured' as const, cursor: { ...this.deathCursor }, target: { ...this.deathTarget },
+      } : {
+        state: 'driven' as const, cursor: this.worldPoint(origin, this.aim.cursor), origin,
+        cursorOffset: { ...this.aim.cursor }, target: this.worldPoint(origin, this.aim.target), targetOffset: { ...this.aim.target },
+      },
+      playerVelocity: { ...anchor.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
-      extension: this.rig.drive.getTranslation(),
       headContacts: this.headContactCount(),
       rig: this.rig.geometry,
-      hingeTorque: this.rig.drive.getMotorTorque(1 / PHYSICS.dt),
-      sliderForce: this.rig.drive.getMotorForce(1 / PHYSICS.dt),
-      command: { ...this.command },
+      drive: this.rig.phase === 'dying-ragdoll' ? { state: 'released' as const } : {
+        state: 'driven' as const, extension: this.rig.drive.getTranslation(),
+        hingeTorque: this.rig.drive.getMotorTorque(1 / PHYSICS.dt), sliderForce: this.rig.drive.getMotorForce(1 / PHYSICS.dt),
+        command: { ...this.command },
+      },
       tuning: { ...this.settings.physics },
       bodyProperties: Object.fromEntries(this.rig.bodies.map(({ id, body }) =>
         [id, { mass: body.getMass(), inertia: body.getInertia() }] as const)),
@@ -568,23 +612,54 @@ export class Simulation {
     this.disposed = true;
   }
 
-  private capture(): PlayerFrame {
-    return {
-      time: this.elapsed,
-      parts: this.rig.parts.map((part) => {
-        const position = partPoint(part, this.pointScratch);
-        const angle = part.body.getAngle();
-        const velocity = partVelocity(part, this.velocityScratch);
-        if (![position.x, position.y, angle, velocity.x, velocity.y, part.body.getAngularVelocity()].every(Number.isFinite)) {
-          throw new Error(`Non-finite physics state on ${part.id}. Simulation stopped.`);
-        }
-        return {
-          id: part.id, kind: part.kind, x: position.x, y: position.y, angle, vertices: part.vertices,
-          collides: part.fixture !== undefined && part.fixture.getFilterMaskBits() !== 0,
-        };
-      }),
-      cursorOffset: { ...this.aim.cursor },
-    };
+  private createPlayerFrame(): PlayerFrame {
+    const rig = this.rig, centre = { x: 0, y: 0, angle: 0 };
+    const player: MutablePlayerFrameState = rig.phase === 'alive'
+      ? { phase: 'alive', centre, shoulder: { x: 0, y: 0 } }
+      : { phase: rig.phase, centre, pose: createDeathPose(), layout: rig.seed.layout, headFacing: rig.seed.headFacing, direction: rig.seed.direction };
+    return { time: this.elapsed, player, cursorOffset: { x: 0, y: 0 }, parts: rig.parts.map(part => ({
+      id: part.id, kind: part.kind, x: 0, y: 0, angle: 0, vertices: part.vertices, collides: false,
+    })) };
+  }
+
+  private capture(out: PlayerFrame): void {
+    out.time = this.elapsed;
+    out.cursorOffset.x = this.aim.cursor.x; out.cursorOffset.y = this.aim.cursor.y;
+    const anchor = playerAnchor(this.rig), centre = anchor.getPosition();
+    out.player.centre.x = centre.x; out.player.centre.y = centre.y; out.player.centre.angle = anchor.getAngle();
+    if (this.rig.phase === 'alive' && out.player.phase === 'alive') {
+      out.player.shoulder.x = centre.x + RIG.shoulder.x; out.player.shoulder.y = centre.y + RIG.shoulder.y;
+    } else if (this.rig.phase === 'dying-ragdoll' && out.player.phase !== 'alive') {
+      writeRagdollPose(this.rig.ragdoll, out.player.pose);
+    } else if (this.rig.phase === 'dying-rigid' && out.player.phase !== 'alive') {
+      const seed = this.rig.seed, pose = out.player.pose;
+      copyDeathPose(pose, seed.pose);
+      this.translatePose(pose, centre.x - seed.centre.x, centre.y - seed.centre.y);
+    } else throw new PlayerDeathError('phase-mismatch', 'A player snapshot has the wrong phase.');
+    for (let index = 0; index < this.rig.parts.length; index++) {
+      const part = this.rig.parts[index]!, target = out.parts[index]!;
+      const position = partPoint(part, this.pointScratch);
+      const angle = part.body.getAngle();
+      const velocity = partVelocity(part, this.velocityScratch);
+      if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(angle) ||
+        !Number.isFinite(velocity.x) || !Number.isFinite(velocity.y) || !Number.isFinite(part.body.getAngularVelocity())) {
+        throw new Error(`Non-finite physics state on ${part.id}. Simulation stopped.`);
+      }
+      target.x = position.x; target.y = position.y; target.angle = angle; target.vertices = part.vertices;
+      target.collides = part.fixture !== undefined && part.fixture.getFilterMaskBits() !== 0;
+    }
+  }
+
+  private translatePose(pose: DeathPose, x: number, y: number): void {
+    pose.torso.x += x; pose.torso.y += y; pose.head.x += x; pose.head.y += y;
+    pose.arms.left.shoulder.x += x; pose.arms.left.shoulder.y += y;
+    pose.arms.left.elbow.x += x; pose.arms.left.elbow.y += y; pose.arms.left.hand.x += x; pose.arms.left.hand.y += y;
+    pose.arms.right.shoulder.x += x; pose.arms.right.shoulder.y += y;
+    pose.arms.right.elbow.x += x; pose.arms.right.elbow.y += y; pose.arms.right.hand.x += x; pose.arms.right.hand.y += y;
+  }
+
+  private preparePlayerFixtures(): void {
+    for (const part of this.rig.parts) if (part.fixture !== undefined) this.terrain.prepareFixture(part.fixture);
   }
 
   // A new run from the run's spawn.
@@ -592,7 +667,7 @@ export class Simulation {
     this.elapsed = 0;
     this.safeUntil = 0;
     this.placePlayer(this.spawn);
-    this.bestHeight = Math.max(0, this.rig.root.getPosition().y + RIG.potBottom);
+    this.bestHeight = Math.max(0, playerAnchor(this.rig).getPosition().y + RIG.potBottom);
   }
 
   // A new player at `spawn`, at full health.
@@ -601,19 +676,22 @@ export class Simulation {
     const geometry = sameRig(this.rig.geometry, this.settings.rig) && sameHammerHead(this.rig.geometry.head, this.settings.rig.head)
       ? this.rig.geometry : rigGeometry(this.settings.rig);
     this.rig = createPlayer(this.world, spawn, this.settings.physics, geometry, this.hammerHead ?? this.settings.rig.head);
+    this.preparePlayerFixtures();
     this.platforms.resetRiders();
     this.supported = false;
     this.headTouching = false;
     this.impactSpeed = 0;
     this.health = this.settings.physics.health;
     this.hurtTaken = false;
-    this.dying = false;
     this.placements++;
     this.aim = this.initialAim();
     this.lastAimInput = this.elapsed;
     this.command = { ...IDLE_COMMAND };
-    this.current = this.capture();
-    this.previous = this.current;
+    this.current = this.createPlayerFrame();
+    this.previous = this.createPlayerFrame();
+    this.interpolated = this.createPlayerFrame();
+    this.capture(this.current);
+    this.capture(this.previous);
   }
 
   private vulnerable(): boolean {
@@ -666,6 +744,7 @@ export class Simulation {
     const head = this.hammerHead ?? this.settings.rig.head;
     if (sameHammerHead(this.rig.tool.head.vertices, head)) return;
     this.rig.tool.setHead(head, this.settings.physics);
+    this.terrain.prepareFixture(this.rig.tool.head.fixture);
     // The frames captured since the last step show it too, so a paused game draws the new head.
     const outline = (frame: PlayerFrame): PlayerFrame =>
       ({ ...frame, parts: frame.parts.map((part) => part.kind === 'head' ? { ...part, vertices: head } : part) });
@@ -689,7 +768,7 @@ export class Simulation {
   private lagCharacter(fromX: number, fromY: number): void {
     const { followCharacter, maxTargetRadius } = this.settings.cursor;
     if (followCharacter >= 100) return;
-    const root = this.rig.root.getPosition();
+    const root = playerAnchor(this.rig).getPosition();
     const lag = 1 - followCharacter / 100;
     const dx = (fromX - root.x) * lag, dy = (fromY - root.y) * lag;
     if (dx !== 0 || dy !== 0) this.aim = shiftAim(this.aim, dx, dy, maxTargetRadius);
@@ -704,7 +783,7 @@ export class Simulation {
 
   // An attempt starts aiming at the hammer head, with the cursor on the target.
   private initialAim(): Aim {
-    const origin = this.cursorOrigin(this.rig.root.getPosition());
+    const origin = this.cursorOrigin(playerAnchor(this.rig).getPosition());
     const tip = partPoint(this.rig.tool.head, this.headPoint);
     return aimAt({ x: tip.x - origin.x, y: tip.y - origin.y }, this.settings.cursor.maxTargetRadius);
   }
@@ -721,4 +800,6 @@ export class Simulation {
   private ensureLive(): void {
     if (this.disposed) throw new Error('Cannot use a disposed physics simulation.');
   }
+
+  private get dying(): boolean { return this.rig.phase !== 'alive'; }
 }

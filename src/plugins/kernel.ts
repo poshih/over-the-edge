@@ -3,7 +3,7 @@
 import { isNamespacedId, isPluginId, namespaceOf } from './ids.ts';
 export { isNamespacedId, isPluginId, namespaceOf } from './ids.ts';
 
-export const PLUGIN_API_VERSION = 1;
+export const PLUGIN_API_VERSION = 2;
 export const PLUGIN_LIMITS = Object.freeze({ plugins: 32 });
 export const PLUGIN_ERROR_CODES = Object.freeze([
   'invalid-manifest', 'api-version', 'invalid-plugin', 'duplicate-plugin', 'reserved-plugin', 'invalid-facet',

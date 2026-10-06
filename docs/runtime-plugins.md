@@ -1,7 +1,7 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, hurt effects, death animation and screen, object,
+camera following, backdrop, aim marks, hurt effects, death pose and screen, object,
 enemy and phantom looks, scene layers, audio, event messages, gameplay observers, key bindings
 and additional input devices; character choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
@@ -456,7 +456,9 @@ interface HurtCause {
 - `update` runs on each drawn frame from a `hurt` or a `clear` until it returns `false`, and then
   not again until the next one, so an idle point costs nothing. It receives the borrowed
   [`SceneFrame`](#scene-layers): the drawn time, which a restart rewinds, and the character's
-  `parts`, whose `root` is the character's centre. Return `true` while anything still shows;
+  physical `parts` and typed `player` phase. Use `player.centre` in either phase, or
+  `player.presented.torso` while dying to follow the corpse as drawn. There is no `root`
+  part during a ragdoll death. Return `true` while anything still shows;
   anything else than a boolean is an error.
 
 `hurt` and `clear` arrive with the [gameplay events](#gameplay-events), after the frame's physics
@@ -546,11 +548,49 @@ for sounds or scores of a game's own.
 Health running out and falling out of the level both start the sequence. Death wins that
 physics step before triggers or recording observers run. The world keeps simulating:
 terrain, platforms, liquids, traps and enemies carry on, and dying costs run time unless a
-Stop timer event already stopped it. The player is inert: its hinge-relative aim is frozen
-and the motors hold that aim; it cannot take damage, hit an enemy with the hammer, light a
-bonfire or improve best height. Enemy bumps may still push it. No corpse impacts are staged.
+Stop timer event already stopped it. In the default `ragdoll` mode the player becomes
+six passive physical bodies, releases its hands and drops the hammer. The drive joint
+and live root are removed between steps; no dying step drives that rig. The jar and
+tool retain their transforms and velocities, and the old root's mass is redistributed
+across the torso, head, two upper arms and two forearms/hands. In `hold` mode the original
+fixed-rotation root, motors, last hinge-relative aim and grips stay unchanged.
+Neither mode can take damage, deal a hammer hit or scripted enemy bump, light a
+bonfire or improve best height. Ordinary physical contacts still push bodies; no corpse
+impacts are staged.
 Running and queued trigger runs are cancelled, their signals close popups and videos, and
 pressed switches release; once-triggers keep their consumption and history.
+
+The game settings (schema **13**) own `death: { mode, angularDamping, friction }`.
+Workshop / Physics / Death exposes the same fields:
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `mode` | `'ragdoll'` or `'hold'` | `'ragdoll'` |
+| `angularDamping` | 0–10 /s, step 0.1 | 2 |
+| `friction` | 0.05–2, step 0.05 | 0.45 |
+
+Ragdoll fixtures and the released shaft use corpse friction; the pot and head retain their
+own materials. Corpse parts do not self-collide, and the tool collides with terrain,
+platforms and active enemies, never the corpse. The detached head still blocks projectile
+rays, without new damage or impulses. Corpse and tool query liquids separately with their
+own masses; only the pot supplies buoyancy, while limbs and tool take drag. Enemy activity
+remains centred on the corpse: a stray hammer can pass through sleeping enemies far away.
+Construction settings are captured at entry. Player-body tuning stays live in `hold`;
+in `ragdoll` it takes effect at the next placement, not by retuning the corpse.
+Runtime character selections and accepted model/head changes wait for placement;
+synchronous character-authoring edits are refused with a transient Workshop notice,
+leaving its draft unchanged. In-flight profile/model loads keep waiting for placement.
+No corpse is rebuilt mid-death.
+
+The engine's `PlacementHold` accepts only prepared applications that cannot fail for
+caller input: validate and prepare everything refusable before deferring. It detaches
+the batch before applying, so re-entry cannot replay it or resolve waiters early.
+A thrown application is an engine invariant violation: cancel the remaining work and
+reject placement waiters. `AppearanceRig` checks alignment and fitting at call time,
+against the last accepted model for that same slot (including a pending replacement).
+Thus an `align()` after an accepted, deferred `setModel()` is valid; after `reset()` it
+refuses until another model is accepted. Application installs the prepared fit without
+revalidating caller input.
 
 The project's HUD owns `death: { text, fadeIn, hold }`, not a runtime timing slot. The
 engine waits `fadeIn + hold` seconds before returning to the last bonfire, or requesting the
@@ -577,7 +617,7 @@ restart. There is no wall-clock timeout or deferred completion callback to survi
 cancellation.
 
 Two independent runtime slots replace the presentation without taking over its clock:
-[`DEATH_SCREEN`](#death-screen) and [`DEATH_ANIMATION`](#death-animation).
+[`DEATH_SCREEN`](#death-screen) and [`DEATH_POSE`](#death-pose).
 Both consume reused, borrowed frames:
 
 ```ts
@@ -629,53 +669,88 @@ Web Animation follows the engine's clock; it requests no frames of its own. A pe
 polite, atomic live region announces once on a subsequent visible frame, and cancellation
 clears pending speech. Reduced motion reveals the text at once.
 
-### Death animation
+### Death pose
 
-`DEATH_ANIMATION`, the slot `scene.death-animation`, holds a pure numeric
-`DeathAnimationWriter`, `(frame, out) => void`:
+`DEATH_POSE`, the slot `scene.death-pose`, holds a pure numeric
+`DeathPoseWriter`, `(frame, out) => void`:
 
 ```ts
-interface DeathAnimationInput extends DeathFrame {
-  readonly character: CharacterRiggingType;
-  readonly direction: -1 | 1; // tool side at entry; +1 when centred
+interface Transform2 { x: number; y: number; angle: number }
+interface Rotation3 { x: number; y: number; z: number; w: number }
+interface DeathArmPose {
+  shoulder: Point;
+  elbow: Point;
+  hand: Transform2;
 }
-interface DeathAnimationPose {
-  torsoLean: number;        // radian offset, −π/2 to π/2
-  headPitch: number;        // radian offset, −π/2 to π/2
+interface DeathPose {
+  torso: Transform2;
+  head: Transform2;
+  arms: Record<'left' | 'right', DeathArmPose>;
+}
+interface DeathPoseInput extends DeathFrame {
+  readonly character: CharacterRiggingType;
+  readonly body: 'ragdoll' | 'rigid';
+  readonly attachment: 'released' | 'gripped';
+  readonly physical: ReadonlyDeathPose; // deeply readonly DeathPose
+  readonly headFacing: Readonly<Rotation3>;
+  readonly layout: ReadonlyDeathLayout; // torso-local waist and neck
+  readonly direction: -1 | 1; // tool side at entry; +1 when centred
+  readonly grippedArms: Readonly<Record<'left' | 'right', ReadonlyDeathArmPose>> | null;
+}
+interface DeathAppearance extends DeathPose {
+  headFacing: Rotation3;
   spriteBrightness: number; // 0–1 colour multiplier, not opacity
 }
 ```
 
-Write all three outputs on every call; the engine initialises them to invalid sentinels
-and checks each written pose. The input and output are reused; allocate nothing and keep
-no frame history in the writer. It sees no scene, physics world, material or renderer.
-It runs only while dying. Angles apply to the captured live torso/head pose before arms
-are solved; pot and tool keep their physics transforms and the arms keep `ARM_LAYER`.
+Coordinates are world metres in the course plane, angles counterclockwise radians.
+`torso` is the artwork's torso frame and `head` the physical head centre; facial
+yaw/pitch remain in `headFacing`. Ragdoll input is the interpolated physical pose.
+Rigid input is the captured terminal pose carried with its live root. `grippedArms`
+is the hold mode's numeric grip-driven baseline, evaluated with the default slump,
+or `null` for released hands. A held pose writer that changes the torso can write
+its own matching arms too.
 
-`DEFAULT_DEATH_ANIMATION` eases a 3D body's 20° lean toward the tool and a 35° head nod
-over 0.65 s. Built-in and imported avatars and Mesh parts use those offsets. A 2D rig armed
-for death evaluates one live directional, skeletal and flipbook pose with its attachments
-on its next drawn update, then holds it while dimming to 45% brightness. A profile selected
-while dying is armed the same way; this is not an authored skeletal death clip.
-Runtime materials cache their original colours once and restore them on placement; saved
-art never changes. Imported rigs also
-receive [`deathWeight`](kinds-plugins.md#rig-strategies) in both phases, so a game's rig
-can adapt its arms independently. The standard rig retains its grips.
+Write every point, angle, quaternion component and brightness each call. The engine
+initialises them to invalid sentinels, then requires complete finite transforms, a unit
+facial quaternion (squared norm within 0.0001 of 1) and brightness within 0–1.
+Input, output and pose buffers are reused and borrowed. Allocate nothing, keep no frame
+history and never mutate the input. The writer sees no scene, body, material or renderer
+and runs only while dying. It changes presentation, not collision; an authored nonphysical
+collapse should select `hold`.
 
-For example, soften the nod while retaining the default screen, and report the death kind
-without replacing its drawing:
+`DEFAULT_DEATH_POSE` copies the physical ragdoll directly. `hold` keeps the former 20°
+torso lean and 35° head nod, eased by smoothstep over 0.65 s, and retains grip-driven arms.
+Both dim 2D runtime materials to 45%; saved art never changes. Reduced motion completes
+the slump/dimming immediately, but never stops physical integration or changes the wait.
+Released hands use their forearm directions, with no grip placement or wrist offsets.
+Mesh parts, built-in and imported skinned avatars and 2D anchors consume the shared pose.
+Sprites freeze facing, flipbook and animation/hair base poses but continue evaluating
+physical hand targets each frame with pooled skeleton and target buffers.
+Collider visuals remain on `OBSTACLE_LINE`; 3D arms keep `ARM_LAYER` and share depth with
+the dropped tool. Placement clears the tint and pose.
+
+The seed is evaluated once against the terminal frame at alpha 1, without rendering,
+moving the camera or staging effects. The same complete state, settings and seed give
+the same fixed-step integration; a seed is not promised identical across render cadences.
+Locked-world entry, stale placement/time, repeated entry, invalid seeds, construction
+failures and inconsistent snapshot/interpolation phases raise
+[`PlayerDeathError`](plugins.md#errors), not a fallback or an incomplete corpse.
+
+For example, retain the default physical pose but choose a dimmer sprite, and report
+the death kind without replacing the screen's drawing:
 
 ```ts
 import {
-  DEFAULT_DEATH_ANIMATION, DEATH_ANIMATION, DEATH_SCREEN, defineRuntime, replace, wrap,
+  DEFAULT_DEATH_POSE, DEATH_POSE, DEATH_SCREEN, defineRuntime, replace, wrap,
 } from '../../src/plugins/runtime-sdk';
 
 export default defineRuntime({
   start(host) {
     return [
-      replace(DEATH_ANIMATION, (frame, out) => {
-        DEFAULT_DEATH_ANIMATION(frame, out);
-        out.headPitch *= 0.5;
+      replace(DEATH_POSE, (frame, out) => {
+        DEFAULT_DEATH_POSE(frame, out);
+        out.spriteBrightness *= 0.8;
       }),
       wrap(DEATH_SCREEN, previous => mount => {
         const screen = previous(mount);
@@ -833,6 +908,7 @@ interface SceneLayer {
 interface SceneFrame {
   readonly time: number;
   readonly parts: readonly Readonly<PartPose>[];
+  readonly player: ScenePlayerFrame;
   readonly cursor: Readonly<Point>;
   readonly enemies: readonly EnemyPose[];
   readonly rig: RigGeometry;
@@ -846,6 +922,14 @@ Only layers with `update` receive a per-frame callback; static layers are still 
 a temporary character presentation preview. `time` is simulation seconds and rewinds on a
 restart; all member references are borrowed. Read during the call, never keep the frame as a
 previous snapshot, allocate nothing and update changed objects only.
+
+`player.phase` is `'alive'`, `'dying-rigid'` or `'dying-ragdoll'`. All expose `centre`;
+live frames expose `shoulder`, and death frames expose the interpolated physical `pose`,
+captured `layout` and `headFacing`, and the death writer's `presented` appearance, including
+its facial quaternion and sprite brightness. Use these
+typed phases rather than searching for a `root` part: ragdolls have no live root.
+`parts` still describe physics and collision, not authored death-pose changes. Hurt effects
+use this same frame; fatal lava follows `player.presented.torso` until placement.
 
 Layers obey the [obstacle-line and pass rules](#pass-rules-for-presentation-points): collider
 visuals stay on the obstacle line in actors, and all marks materials ignore depth. Layers
@@ -1383,7 +1467,7 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   fails with `invalid-contribution`. Each names the plugin and point, including the contributor
   of an extra readout or other list item. A director that writes a non-finite aim or a
   non-positive height also fails explicitly.
-- A death screen's methods and a death-animation writer must finish synchronously.
+- A death screen's methods and a death-pose writer must finish synchronously.
   Malformed poses and promise-like results fail with `invalid-contribution`; throws
   are `plugin-failed`, with the owner and point. No invalid output is clamped or masked.
 - Key bindings must be a lowercase-key record of the three bindable actions. An observer's
@@ -1411,7 +1495,7 @@ and projectiles as glowing orbs. Its manifest, `examples/plugins/plugins.json`:
 
 ```json
 {
-  "apiVersion": 1,
+  "apiVersion": 2,
   "plugins": [
     { "id": "example", "runtime": "./runtime.ts" }
   ]

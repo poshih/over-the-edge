@@ -31,6 +31,7 @@ const FIRE = {
   smoke: 10, smokeRate: 5.5, smokeLife: [1.4, 2], smokeRise: [1.2, 2], smokeSize: [0.9, 1.3],
   // How much the flames lean, per metre a second the character moves, and at most.
   lean: 0.1, maxLean: 0.45,
+  anchorHeight: 0.45,
   // Each layer's depth in front of the obstacle line, so in perspective it lies over the character.
   depth: { glow: 0.4, smoke: 0.5, flames: 0.55, embers: 0.6 },
 } as const;
@@ -291,6 +292,7 @@ export class LavaFire implements HurtEffects {
   private readonly smokeParticles = new Particles(FIRE.smoke, { life: FIRE.smokeLife, rise: FIRE.smokeRise, size: FIRE.smokeSize });
   private readonly matrix = new Matrix4();
   private readonly hidden = new Matrix4().makeScale(0, 0, 0);
+  private readonly origin = { x: 0, y: 0 };
   // Every particle born so far, which seeds what the next one is born with.
   private births = 0;
   // A burn arrived since the last drawn frame.
@@ -354,16 +356,17 @@ export class LavaFire implements HurtEffects {
       this.lastTime = time;
       return false;
     }
-    let root: SceneFrame['parts'][number] | undefined;
-    for (let index = 0; index < frame.parts.length; index++) {
-      if (frame.parts[index]!.kind === 'root') root = frame.parts[index];
+    const root = this.origin, player = frame.player;
+    if (player.phase === 'alive') {
+      root.x = player.centre.x; root.y = player.centre.y;
+    } else {
+      const torso = player.presented.torso;
+      // The centre of the upright fire follows the turned torso, while the flames still rise
+      // in world space. A horizontal corpse must not leave its fire over an upright root.
+      root.x = torso.x - Math.sin(torso.angle) * FIRE.anchorHeight;
+      root.y = torso.y + (Math.cos(torso.angle) - 1) * FIRE.anchorHeight;
     }
-    // Without a character, or with its run time rewound, the fire is out.
-    if (root === undefined || time < this.lastTime) this.reset();
-    if (root === undefined) {
-      this.igniting = false;
-      return false;
-    }
+    if (time < this.lastTime) this.reset();
     // Time passes for the fire only while it shows: a fire just lit starts here.
     const dt = this.showing ? time - this.lastTime : 0;
     if (!this.showing) this.lean = 0;
@@ -396,7 +399,7 @@ export class LavaFire implements HurtEffects {
     this.placeFlames(root, time, intensity);
     const embers = this.placeEmbers(time);
     const smoke = this.placeSmoke(time);
-    this.glow.position.set(root.x, root.y + 0.45, FIRE.depth.glow);
+    this.glow.position.set(root.x, root.y + FIRE.anchorHeight, FIRE.depth.glow);
     this.flames.visible = this.glow.visible = this.heat > 0;
     this.showing = burning || this.heat > 0 || embers + smoke > 0;
     this.root.visible = this.showing;

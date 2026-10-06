@@ -29,6 +29,7 @@ interface EnemyCallbacks {
   readonly getPot: () => Body;
   // Null while the hammer cannot hurt enemies; its physical contacts still resolve.
   readonly getHeadFixture: () => Fixture | null;
+  readonly canBump: () => boolean;
   readonly isTransientTerrain: (body: Body) => boolean;
   readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
   // A bump: the velocity it adds to the player, the enemy that dealt it and where they met, in world metres.
@@ -442,7 +443,7 @@ export class EnemyWorld {
   }
 
   private resolveBump(): void {
-    if (this.bumps.size === 0 || this.time < this.nextBumpAt) return;
+    if (!this.callbacks.canBump() || this.bumps.size === 0 || this.time < this.nextBumpAt) return;
     const player = this.callbacks.getPot().getWorldCenter();
     let nearest: EnemyRecord | null = null;
     let distance = Infinity;

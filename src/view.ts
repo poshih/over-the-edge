@@ -7,9 +7,9 @@ import {
   Vector3, WebGLRenderer,
 } from 'three';
 import type { Material, Object3D } from 'three';
-import { ARM_SIDES, HEAD_GEOMETRY, SHAFT_ARTWORK_LENGTH, SPRITE_TARGET_IDS } from './character';
+import { ARM_SIDES, DEFAULT_ARM_IK, HEAD_GEOMETRY, SHAFT_ARTWORK_LENGTH, SPRITE_TARGET_IDS } from './character';
 import type { ArmIkSettings, ArmSide, CharacterState, VisualBinding, VisualPartId } from './character';
-import { ArmPoseSolver, DEFAULT_ARM_CHAINS } from './arm-ik';
+import { ARM_GEOMETRY, ArmPoseSolver, createArmPose, DEFAULT_ARM_CHAINS } from './arm-ik';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';
 import { ARM_LAYER } from './arm-layer';
 import { OBSTACLE_LINE } from './obstacle-line';
@@ -61,11 +61,14 @@ import type { AimMarks } from './aim-marks';
 import type { HurtCause } from './hazards';
 import { createHurtEffects, HURT_EFFECTS } from './hurt-effects';
 import type { HurtEffects } from './hurt-effects';
-import { createDeathAnimation } from './death-animation';
-import type { DeathAnimationInput, DeathAnimationPose, DeathAnimationWriter } from './death-animation';
+import { createDeathAppearance, createDeathPoseWriter, DEFAULT_DEATH_POSE } from './death-pose';
+import type { DeathAppearance, DeathPoseInput, DeathPoseWriter } from './death-pose';
+import { copyRotation, createDeathPose } from './player-pose';
+import type { DeathPose, DeathSeed, MutableLivePlayerFrame, PlayerFrameState } from './player-pose';
+import { PlacementHold } from './placement-hold';
 import type { DeathFrame, DeathKind } from './death-sequence';
 import { createSceneLayers } from './scene-layer';
-import type { SceneFrame, SceneLayer } from './scene-layer';
+import type { SceneDeathPlayerFrame, SceneFrame, SceneLayer, ScenePlayerFrame } from './scene-layer';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import type { DecorationView } from './decoration-view';
@@ -269,7 +272,6 @@ function withArmLengths(chains: ArmChains, arms: CharacterArms | null): ArmChain
 
 // Toward the camera: the grip frame's Z in world space.
 const WORLD_FORWARD = Object.freeze(new Vector3(0, 0, 1));
-const HEAD_PITCH_AXIS = Object.freeze(new Vector3(1, 0, 0));
 
 // A hand's grip rotation as a quaternion in its grip frame, or null for none, so unrotated hands do no
 // per-frame work. Three.js's 'ZYX' order composes Rz · Ry · Rx: X first, then Y, then Z, about fixed axes.
@@ -343,15 +345,32 @@ export class GameView {
   private readonly aimMarks: AimMarks;
   private readonly hurtEffects: HurtEffects;
   private readonly hurtPlugin: string | null;
-  private readonly deathAnimation: DeathAnimationWriter;
-  private readonly deathInput: { -readonly [K in keyof DeathAnimationInput]: DeathAnimationInput[K] } = {
+  private readonly deathWriter: DeathPoseWriter;
+  private readonly deathInput: { -readonly [K in keyof DeathPoseInput]: DeathPoseInput[K] } = {
     elapsed: 0, duration: 0, poseProgress: 0, reducedMotion: false, character: DEFAULT_CHARACTER_RIGGING_TYPE, direction: 1,
+    body: 'rigid', attachment: 'gripped', physical: createDeathPose(), headFacing: { x: 0, y: 0, z: 0, w: 1 },
+    layout: { waist: { x: 0, y: 0.32 }, neck: { x: 0, y: PLAYER_FIGURE.neck.y } }, grippedArms: null,
   };
-  private readonly deathPose: DeathAnimationPose = { torsoLean: 0, headPitch: 0, spriteBrightness: 1 };
-  private deathLean = 0;
-  private readonly deathHead = new Quaternion();
+  private readonly deathPose: DeathAppearance = createDeathAppearance();
+  private readonly sceneDeathPlayer: { -readonly [K in keyof SceneDeathPlayerFrame]: SceneDeathPlayerFrame[K] } = {
+    phase: 'dying-rigid', centre: { x: 0, y: 0, angle: 0 }, pose: createDeathPose(), presented: this.deathPose,
+    layout: { waist: { x: 0, y: 0 }, neck: { x: 0, y: 0 } }, headFacing: { x: 0, y: 0, z: 0, w: 1 }, direction: 1,
+  };
+  private readonly heldDefault: DeathAppearance = createDeathAppearance();
+  private readonly grippedPose: DeathPose = createDeathPose();
+  private readonly physicalArms = { left: createArmPose('left'), right: createArmPose('right') };
+  private readonly placementHold = new PlacementHold();
+  private readonly deferVisualChange = (apply: () => void, cancel?: () => void): boolean => this.placementHold.defer(apply, cancel);
   private readonly headRotation = new Quaternion();
-  private readonly headPitch = new Quaternion();
+  private readonly headDelta = new Matrix4();
+  private readonly headWorld = new Matrix4();
+  private readonly headCentre = new Vector3();
+  private readonly headCentreLocal = new Vector3();
+  private readonly headRoll = new Quaternion();
+  private readonly zAxis = new Vector3(0, 0, 1);
+  private readonly capturedArmIk = { ...DEFAULT_ARM_IK };
+  private capturedHeadAngle = 0;
+  private capturedTorsoAngle = 0;
   // Whether the hurt effects update on drawn frames: from a hurt or a clear until they say nothing shows.
   private hurtShowing = false;
   // Course labels.
@@ -372,6 +391,7 @@ export class GameView {
   private readonly waistLean = new WaistLean(Math.max(...RIG.potVertices.map((point) => point.y)));
   private maxWaistLean = DEFAULT_WAIST_LEAN;
   private readonly torsoOrigin = { x: 0, y: 0 };
+  private readonly spriteNeck = { x: 0, y: 0 };
   private readonly headPivot = new Vector3(...HEAD_GEOMETRY.neck);
   private readonly headOffset = new Vector3();
   private avatar: AvatarView | null = null;
@@ -403,6 +423,9 @@ export class GameView {
   private previewParts: PartPose[] = [];
   private readonly previewCursor = { x: 0, y: 0 };
   private previewFrame: PhysicsFrame | null = null;
+  private readonly previewPlayer: MutableLivePlayerFrame = {
+    phase: 'alive', centre: { x: 0, y: 0, angle: 0 }, shoulder: { x: 0, y: 0 },
+  };
   private avatarFacts: { readonly avatar: PreparedAvatar; readonly motions: PreparedAvatarMotions; readonly facts: ImportedAvatarFacts } | null = null;
   private renders = 0;
   private readonly customShaft = new Group();
@@ -463,10 +486,11 @@ export class GameView {
   private readonly armTargets = { shoulder: new Vector3(), hand: new Vector3(), hint: new Vector3(), shaftAxis: new Vector3() };
   private readonly frameContext: { -readonly [K in keyof AvatarRigFrameContext]: AvatarRigFrameContext[K] } = {
     body: this.torso.matrixWorld, inverseBody: this.inverseBody, tool: this.avatarTool,
-    shaftAxis: this.avatarShaft, forward: this.avatarForward, shaftLength: 0, dt: 0, deathWeight: 0,
+    shaftAxis: this.avatarShaft, forward: this.avatarForward, shaftLength: 0, dt: 0, poseSource: 'live', attachment: 'gripped',
   };
   private readonly poseContext: { -readonly [K in keyof AvatarRigPoseContext]: AvatarRigPoseContext[K] } = {
-    body: this.torso.matrixWorld, inverseBody: this.inverseBody, plan: this.turnedPlan, arms: this.solutions, dt: 0, deathWeight: 0,
+    body: this.torso.matrixWorld, inverseBody: this.inverseBody, plan: this.turnedPlan, arms: this.solutions, dt: 0,
+    poseSource: 'live', attachment: 'gripped',
   };
   private readonly spriteTargets = new Map<string, MutableRigTarget>(
     ['left-grip', 'right-grip', 'hammer-base', 'hammer-shaft', 'hammer-head', 'aim']
@@ -508,7 +532,7 @@ export class GameView {
     try {
       this.director = createCameraDirector(options.plugins);
       this.cameraPlugin = options.plugins.owner(CAMERA);
-      this.deathAnimation = createDeathAnimation(options.plugins);
+      this.deathWriter = createDeathPoseWriter(options.plugins);
       this.looks = new LevelLooks(options.plugins, level.objects, options.enemyArt === undefined ? DEFAULT_ENEMY_ART : options.enemyArt);
       created.push(this.looks);
       this.enemies = this.looks.enemies;
@@ -525,14 +549,15 @@ export class GameView {
       throw error;
     }
     this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
-    const root = this.part(initial, 'root');
+    const root = initial.player.centre;
     const head = this.part(initial, 'head');
     this.cameraView.focus.x = root.x;
     this.cameraView.focus.y = root.y;
     this.cameraView.reach.x = head.x;
     this.cameraView.reach.y = head.y;
     this.rig = initial.rig;
-    this.sceneFrame = { time: initial.time, parts: initial.parts, cursor: initial.cursor, enemies: initial.enemies, rig: initial.rig };
+    this.sceneFrame = { time: initial.time, parts: initial.parts, player: this.scenePlayer(initial.player),
+      cursor: initial.cursor, enemies: initial.enemies, rig: initial.rig };
     // Keep unmounted runtime layers owned too, if subsequent renderer/player construction fails.
     for (const layer of layers) this.layers.add(layer);
     try {
@@ -662,6 +687,7 @@ export class GameView {
   selectCharacter(index: number): void {
     const slot = this.slots[index];
     if (!Number.isInteger(index) || slot === undefined) throw new Error(`Unknown character profile ${index}.`);
+    if (this.placementHold.defer(() => this.selectCharacter(index))) return;
     if (index === this.activeSlot) return;
     this.activeSlot = index;
     for (const other of this.slots) {
@@ -788,6 +814,7 @@ export class GameView {
   // the characters' own models, loading any not loaded yet. Resolves once the part is visible; a
   // failure leaves the part as it was.
   async setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void> {
+    await this.placementHold.wait(signal);
     if (part === null) {
       // Snapshot the committed slots and the library view before awaiting. Every character model is
       // loaded and every avatar rig pure-prepared from these snapshots; nothing in the scene or the
@@ -813,6 +840,7 @@ export class GameView {
           }
         }
         signal.throwIfAborted();
+        await this.placementHold.wait(signal);
         // Immediately before any live mutation, refuse a slot, a presentation or the library view that
         // moved while the loads ran. The model and its compiled rig are bound together in `prepared`, so
         // the commit below never pairs a preparation with reread mutable state. On refusal the library
@@ -1077,6 +1105,9 @@ export class GameView {
     // The prepared rig the frame plan and pose phases use, or null for the built-in zero-offset avatar.
     const previousAvatar = this.activeAvatar;
     this.activeAvatar = avatarMode ? partAvatar ?? slot?.avatar ?? null : null;
+    const headBind = this.activeAvatar?.binds.joints.head;
+    if (headBind === undefined) this.headPivot.fromArray(HEAD_GEOMETRY.neck);
+    else this.headPivot.setFromMatrixPosition(headBind);
     // A newly activated avatar solves arms from its own bind, never the pose the previous avatar left.
     if (this.activeAvatar !== previousAvatar) this.resetPoseHistory();
     if (this.avatar !== null) this.attach(this.avatar.root, this.actors, this.avatarRenderer === this.avatar);
@@ -1114,7 +1145,7 @@ export class GameView {
     this.gripRotations = rotation === null ? { left: null, right: null }
       : { left: gripQuaternion(rotation.left), right: gripQuaternion(rotation.right) };
     if (slot !== undefined && this.cameraView.death !== null) {
-      slot.rig.setDying(true);
+      slot.rig.setDying(true, this.deathInput.body === 'ragdoll');
       slot.rig.setDeathBrightness(this.spriteArms ? this.deathPose.spriteBrightness : 1);
     }
   }
@@ -1130,32 +1161,65 @@ export class GameView {
     this.syncRig(physics);
     this.syncHead(this.part(physics, 'head').vertices);
     // The camera follows the simulation; the character draws where a presentation preview moves it.
-    const focus = this.part(physics, 'root');
+    const focus = physics.player.centre;
     const reach = this.part(physics, 'head');
     this.cameraView.focus.x = focus.x;
     this.cameraView.focus.y = focus.y;
     this.cameraView.reach.x = reach.x;
     this.cameraView.reach.y = reach.y;
     const frame = this.presentedFrame(physics);
-    const root = this.part(frame, 'root');
     const tip = this.part(frame, 'head');
-    const death = options.death;
-    if (death !== null) {
-      const input = this.deathInput;
-      input.elapsed = death.elapsed;
-      input.duration = death.duration;
-      input.poseProgress = death.poseProgress;
-      input.reducedMotion = death.reducedMotion;
-      input.character = this.slots[this.activeSlot]!.presentation.characterRiggingType;
-      this.deathAnimation(input, this.deathPose);
-      this.slots[this.activeSlot]!.rig.setDeathBrightness(this.spriteArms ? this.deathPose.spriteBrightness : 1);
-    }
     this.updateCamera(options.dt, false);
     this.backdrop.follow(this.cameraAim);
+    this.posePlayer(frame, options, frame === physics ? 0 : this.previewOffset.turn);
+    this.aimMarks.update(tip, frame.cursor, this.cameraView.death);
+    this.terrain.update(frame.time);
+    this.decorations?.update();
+    this.looks.update(frame.time, frame.projectiles, frame.enemies, frame.platforms);
+    if (this.updatingLayers.size > 0 || this.hurtShowing) {
+      const shown = this.sceneFrame;
+      shown.time = physics.time;
+      shown.parts = physics.parts;
+      shown.player = this.scenePlayer(physics.player);
+      shown.cursor = physics.cursor;
+      shown.enemies = physics.enemies;
+      shown.rig = physics.rig;
+      for (const layer of this.updatingLayers) layer.update!(shown);
+      if (this.hurtShowing) this.hurtShowing = this.updateHurt(shown);
+    }
+    this.renderer.info.reset();
+    this.renderer.clear();
+    if (this.backdrop.root.visible) this.renderer.render(this.backdropScene, this.camera);
+    this.renderer.render(this.course, this.camera);
+    this.renderer.clearDepth();
+    this.renderer.render(this.actors, this.camera);
+    if (this.drawsFront()) {
+      this.renderer.clearDepth();
+      this.renderer.render(this.front, this.camera);
+    }
+    this.renderer.clearDepth();
+    if (this.armsOverBody) {
+      this.camera.layers.set(ARM_LAYER);
+      this.actors.matrixWorldAutoUpdate = false;
+      try { this.renderer.render(this.actors, this.camera); } finally {
+        this.actors.matrixWorldAutoUpdate = true;
+        this.camera.layers.set(DEFAULT_LAYER);
+      }
+    }
+    this.renderer.render(this.marks, this.camera);
+    this.renderer.render(this.foreground, this.camera);
+  }
+
+  // The same terminal-frame evaluation seeds death and draws live play. It does not render,
+  // move the camera or stage effects; released poses never visit live grip placement or IK.
+  private posePlayer(frame: PhysicsFrame, options: CharacterState & { dt: number; death: DeathFrame | null }, turn = 0): void {
+    const player = frame.player, root = player.centre, tip = this.part(frame, 'head');
+    const released = player.phase === 'dying-ragdoll';
+    const depth = released ? OBSTACLE_LINE : this.toolDepth;
     for (const part of frame.parts) {
       const mesh = this.playerMeshes.get(part.id);
       if (!mesh) continue;
-      mesh.position.set(part.x, part.y, part.kind === 'pot' ? PLAYER_DEPTH.pot : this.toolDepth);
+      mesh.position.set(part.x, part.y, part.kind === 'pot' ? PLAYER_DEPTH.pot : depth);
       mesh.rotation.z = part.angle;
       if (part.kind === 'pot') {
         // The jar's frame: origin at the physical pot's bottom-centre, at the pot's own depth. The pot model and
@@ -1172,58 +1236,86 @@ export class GameView {
     shaftCenter.x = (shaftBase.x + tip.x) / 2;
     shaftCenter.y = (shaftBase.y + tip.y) / 2;
     const shaftAngle = shaftLength <= PHYSICS.aimEpsilon ? shaftBase.angle : Math.atan2(tip.y - shaftBase.y, tip.x - shaftBase.x);
-    // The upper body leans toward the hammer, turning about the waist; everything drawn on the torso and the arms'
-    // shoulders turn with it. A presentation preview's turn turns the leaning body about the root with the pot and tool,
-    // so the lean is the unturned one.
-    const turn = frame === physics ? 0 : this.previewOffset.turn;
     const turnCos = Math.cos(turn), turnSin = Math.sin(turn);
-    if (death === null) this.waistLean.update(shaftAngle - turn, this.maxWaistLean, frame.time);
-    const lean = death === null || this.spriteArms ? this.waistLean.angle : this.deathLean + this.deathPose.torsoLean;
-    const origin = this.waistLean.torsoOrigin(root.x, root.y, this.torsoOrigin, lean);
-    if (turn !== 0) {
-      const dx = origin.x - root.x, dy = origin.y - root.y;
-      origin.x = root.x + dx * turnCos - dy * turnSin;
-      origin.y = root.y + dx * turnSin + dy * turnCos;
-    }
-    this.torso.position.set(origin.x, origin.y, PLAYER_DEPTH.torso);
-    this.torso.rotation.z = lean + turn;
-    this.torso.updateWorldMatrix(true, false);
-    const aimOrigin = this.part(frame, 'shoulder');
     const aim = this.aim;
-    aim.x = frame.cursor.x - aimOrigin.x;
-    aim.y = frame.cursor.y - aimOrigin.y;
-    // The head turns within the leaning torso, so it aims in the torso's frame to keep looking at the cursor.
-    const cos = Math.cos(lean + turn), sin = Math.sin(lean + turn);
-    if (death === null) {
+    const headAnchor = this.bindings.get('character-head')!.anchor;
+    headAnchor.matrixAutoUpdate = false;
+    this.customShaft.position.set(shaftCenter.x, shaftCenter.y, depth);
+    this.customShaft.rotation.z = shaftAngle;
+    this.customShaft.scale.x = shaftLength / SHAFT_ARTWORK_LENGTH;
+    this.toolFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, depth);
+    let armPoses: ArmPose[];
+    if (player.phase === 'alive') {
+      headAnchor.matrix.identity();
+      headAnchor.matrixWorldNeedsUpdate = true;
+      this.waistLean.update(shaftAngle - turn, this.maxWaistLean, frame.time);
+      const lean = this.waistLean.angle;
+      const origin = this.waistLean.torsoOrigin(root.x, root.y, this.torsoOrigin, lean);
+      if (turn !== 0) {
+        const dx = origin.x - root.x, dy = origin.y - root.y;
+        origin.x = root.x + dx * turnCos - dy * turnSin;
+        origin.y = root.y + dx * turnSin + dy * turnCos;
+      }
+      this.torso.position.set(origin.x, origin.y, PLAYER_DEPTH.torso);
+      this.torso.rotation.z = lean + turn;
+      this.torso.updateWorldMatrix(true, false);
+      aim.x = frame.cursor.x - player.shoulder.x;
+      aim.y = frame.cursor.y - player.shoulder.y;
+      const cos = Math.cos(lean + turn), sin = Math.sin(lean + turn);
       this.localAim.x = aim.x * cos + aim.y * sin;
       this.localAim.y = aim.y * cos - aim.x * sin;
       this.headAim.update(this.localAim, frame.time);
       this.headRotation.copy(this.headAim.rotation);
+      this.headOffset.copy(this.headPivot).applyQuaternion(this.headRotation).negate().add(this.headPivot);
+      this.meshHead.matrix.makeRotationFromQuaternion(this.headRotation).setPosition(this.headOffset);
+      this.meshHead.matrixWorldNeedsUpdate = true;
+      armPoses = this.updateArms(this.torso.matrixWorld, this.toolFrame, shaftLength, options, shaftAngle);
     } else {
-      this.headRotation.copy(this.deathHead);
-      if (!this.spriteArms) this.headRotation.multiply(this.headPitch.setFromAxisAngle(HEAD_PITCH_AXIS, this.deathPose.headPitch));
+      const death = options.death;
+      if (death === null) throw new Error('A physical death frame needs the active death sequence.');
+      const input = this.deathInput;
+      input.elapsed = death.elapsed; input.duration = death.duration;
+      input.poseProgress = death.poseProgress; input.reducedMotion = death.reducedMotion;
+      input.character = this.slots[this.activeSlot]!.presentation.characterRiggingType;
+      input.body = released ? 'ragdoll' : 'rigid'; input.attachment = released ? 'released' : 'gripped';
+      input.physical = player.pose; input.headFacing = player.headFacing; input.layout = player.layout;
+      input.direction = player.direction; input.grippedArms = null;
+      // Hold retains the existing grip-driven 3D solutions, including depth and rig wrist tracks.
+      // The pure writer gets their numeric baseline, so its default changes no held-hand behaviour.
+      if (!released) {
+        DEFAULT_DEATH_POSE(input, this.heldDefault);
+        this.placeTorso(this.heldDefault, PLAYER_DEPTH.torso);
+        const live = this.updateArms(this.torso.matrixWorld, this.toolFrame, shaftLength, options, shaftAngle, false);
+        this.writeArmPoints(live, this.grippedPose);
+        input.grippedArms = this.grippedPose.arms;
+      }
+      this.deathWriter(input, this.deathPose);
+      this.slots[this.activeSlot]!.rig.setDeathBrightness(this.spriteArms ? this.deathPose.spriteBrightness : 1);
+      this.placeTorso(this.deathPose, released ? OBSTACLE_LINE : PLAYER_DEPTH.torso);
+      this.placeDeathHead(this.deathPose, released);
+      if (released || this.spriteArms) {
+        headAnchor.matrix.copy(this.headDelta);
+        this.meshHead.matrix.identity();
+      } else {
+        headAnchor.matrix.identity();
+        this.meshHead.matrix.copy(this.headDelta);
+      }
+      headAnchor.matrixWorldNeedsUpdate = this.meshHead.matrixWorldNeedsUpdate = true;
+      aim.x = this.spriteAim.x; aim.y = this.spriteAim.y;
+      armPoses = this.updateDeathArms(this.deathPose, released, options.dt);
     }
-    this.headOffset.copy(this.headPivot).applyQuaternion(this.headRotation).negate().add(this.headPivot);
-    this.meshHead.matrix.makeRotationFromQuaternion(this.headRotation).setPosition(this.headOffset);
-    this.meshHead.matrixWorldNeedsUpdate = true;
-    this.customShaft.position.set(shaftCenter.x, shaftCenter.y, this.toolDepth);
-    this.customShaft.rotation.z = shaftAngle;
-    this.customShaft.scale.x = shaftLength / SHAFT_ARTWORK_LENGTH;
-    // Unscaled physical coordinates keep grip offsets independent of artwork and tiling.
-    this.toolFrame.makeRotationZ(shaftAngle).setPosition(shaftBase.x, shaftBase.y, this.toolDepth);
-    const armPoses = this.updateArms(this.torso.matrixWorld, this.toolFrame, shaftLength, options, shaftAngle);
-    // A prepared imported rig reads its avatar-space pose, written by updateArms; the built-in and
-    // sprite avatars take the world-space poses directly.
     if (this.avatarRenderer instanceof SkinnedAvatarView) {
-      this.avatarRenderer.apply(this.torso.matrixWorld, this.potFrame, this.headRotation, this.activeAvatar!.pose, frame.time);
+      this.avatarRenderer.apply(this.torso.matrixWorld, this.potFrame, this.headRotation, this.activeAvatar!.pose, frame.time,
+        player.phase === 'alive' ? null : this.headDelta);
     } else if (this.avatarRenderer !== null) {
-      this.avatarRenderer.update(this.torso.matrixWorld, armPoses, this.headRotation, this.turnGloves());
+      this.avatarRenderer.update(this.torso.matrixWorld, armPoses, this.headRotation,
+        released ? this.gloveTurns : this.turnGloves(), player.phase === 'alive' ? null : this.headDelta);
     }
     // The one-model hammer follows the physical tool frame; its handle is fitted to the rig, not per frame.
     this.propModels.hammer?.update(this.toolFrame);
     for (const pose of armPoses) {
-      // Sprite grip attachments follow the shaft contact, not an anatomical rig's offset wrist.
-      this.spriteContact.set(this.gripDistances[pose.side], 0, 0).applyMatrix4(this.toolFrame);
+      if (released) this.spriteContact.copy(pose.hand);
+      else this.spriteContact.set(this.gripDistances[pose.side], 0, 0).applyMatrix4(this.toolFrame);
       const target = this.spriteTargets.get(ARM_SLOTS[pose.side].target)!;
       target.x = this.spriteContact.x;
       target.y = this.spriteContact.y;
@@ -1243,52 +1335,78 @@ export class GameView {
     this.spriteFrame.time = frame.time;
     this.spriteFrame.dt = options.dt;
     this.slots[this.activeSlot]!.rig.update(this.spriteFrame);
-    this.aimMarks.update(tip, frame.cursor, this.cameraView.death);
-    this.terrain.update(frame.time);
-    this.decorations?.update();
-    this.looks.update(frame.time, frame.projectiles, frame.enemies, frame.platforms);
-    if (this.updatingLayers.size > 0 || this.hurtShowing) {
-      const shown = this.sceneFrame;
-      shown.time = physics.time;
-      shown.parts = physics.parts;
-      shown.cursor = physics.cursor;
-      shown.enemies = physics.enemies;
-      shown.rig = physics.rig;
-      for (const layer of this.updatingLayers) layer.update!(shown);
-      if (this.hurtShowing) this.hurtShowing = this.updateHurt(shown);
-    }
-    this.renderer.info.reset();
-    this.renderer.clear();
-    if (this.backdrop.root.visible) this.renderer.render(this.backdropScene, this.camera);
-    this.renderer.render(this.course, this.camera);
-    // The course's colliders reach toward the camera, so the actors draw over them with depth of their own.
-    this.renderer.clearDepth();
-    this.renderer.render(this.actors, this.camera);
-    // Decorations on or in front of the line, axes swung toward the camera and the liquid in front of whatever is in a
-    // pool draw over the actors, never hidden by a phantom's translucent depth. The front holds nothing else, so a
-    // course without them skips the pass and its depth clear.
-    if (this.drawsFront()) {
-      this.renderer.clearDepth();
-      this.renderer.render(this.front, this.camera);
-    }
-    // The hands hold the tool: a 3D character's arms and the tool share one depth, isolated from all other character
-    // artwork (the body, jar and head the arms would clip into, transparent GLBs and skinned sprites) and from the
-    // decorations.
-    this.renderer.clearDepth();
-    if (this.armsOverBody) {
-      // The actors' matrices are already current.
-      this.camera.layers.set(ARM_LAYER);
-      this.actors.matrixWorldAutoUpdate = false;
-      try {
-        this.renderer.render(this.actors, this.camera);
-      } finally {
-        this.actors.matrixWorldAutoUpdate = true;
-        this.camera.layers.set(DEFAULT_LAYER);
+  }
+
+  writeDeathSeed(frame: PhysicsFrame, out: DeathSeed, armIk: Readonly<ArmIkSettings>): void {
+    if (frame.player.phase !== 'alive') throw new Error('A death seed must be evaluated from a live terminal frame.');
+    this.syncRig(frame); this.syncHead(this.part(frame, 'head').vertices);
+    this.presentationPreview = null;
+    Object.assign(this.capturedArmIk, armIk);
+    this.posePlayer(frame, { armIk, dt: 0, death: null });
+    out.placement = frame.placement; out.time = frame.time;
+    out.centre.x = frame.player.centre.x; out.centre.y = frame.player.centre.y; out.centre.angle = frame.player.centre.angle;
+    out.pose.torso.x = this.torso.position.x; out.pose.torso.y = this.torso.position.y; out.pose.torso.angle = this.torso.rotation.z;
+    out.layout.waist.x = 0; out.layout.waist.y = Math.max(...RIG.potVertices.map(point => point.y));
+    out.layout.neck.x = this.headPivot.x; out.layout.neck.y = this.headPivot.y;
+    this.headCentreLocal.copy(this.headPivot);
+    this.headCentreLocal.y += PLAYER_FIGURE.helmet.y - PLAYER_FIGURE.neck.y;
+    this.headCentre.copy(this.headCentreLocal).applyMatrix4(this.meshHead.matrix).applyMatrix4(this.torso.matrixWorld);
+    out.pose.head.x = this.headCentre.x; out.pose.head.y = this.headCentre.y; out.pose.head.angle = this.torso.rotation.z;
+    copyRotation(out.headFacing, this.headRotation);
+    this.writeArmPoints(this.posedArms, out.pose);
+    if (this.spriteArms) {
+      const rig = this.slots[this.activeSlot]!.rig;
+      for (const side of ARM_SIDES) rig.writeDeathArm(side, out.pose.arms[side]);
+      if (rig.writeDeathHead(out.pose.head, this.spriteNeck)) {
+        this.inverseBody.copy(this.torso.matrixWorld).invert();
+        this.headCentre.set(out.pose.head.x, out.pose.head.y, PLAYER_DEPTH.torso);
+        this.headCentreLocal.copy(this.headCentre).applyMatrix4(this.inverseBody);
+        this.gripShoulder.set(this.spriteNeck.x, this.spriteNeck.y, PLAYER_DEPTH.torso).applyMatrix4(this.inverseBody);
+        out.layout.neck.x = this.gripShoulder.x; out.layout.neck.y = this.gripShoulder.y;
+        out.headFacing.x = out.headFacing.y = out.headFacing.z = 0; out.headFacing.w = 1;
       }
     }
-    // The marks ignore depth and write none, so they show over the arms and the tool still tests against the arms.
-    this.renderer.render(this.marks, this.camera);
-    this.renderer.render(this.foreground, this.camera);
+    this.capturedHeadAngle = out.pose.head.angle; this.capturedTorsoAngle = out.pose.torso.angle;
+    out.direction = this.part(frame, 'head').x < frame.player.centre.x ? -1 : 1;
+  }
+
+  private writeArmPoints(poses: readonly ArmPose[], out: DeathPose): void {
+    for (const pose of poses) {
+      const arm = out.arms[pose.side];
+      arm.shoulder.x = pose.shoulder.x; arm.shoulder.y = pose.shoulder.y;
+      arm.elbow.x = pose.elbow.x; arm.elbow.y = pose.elbow.y;
+      arm.hand.x = pose.hand.x; arm.hand.y = pose.hand.y;
+      arm.hand.angle = Math.atan2(pose.shaftAxis.y, pose.shaftAxis.x);
+    }
+  }
+
+  private placeTorso(pose: DeathPose, depth: number): void {
+    this.torso.position.set(pose.torso.x, pose.torso.y, depth);
+    this.torso.rotation.z = pose.torso.angle;
+    this.torso.updateWorldMatrix(true, false);
+  }
+
+  private placeDeathHead(pose: DeathAppearance, released: boolean): void {
+    this.headRotation.set(pose.headFacing.x, pose.headFacing.y, pose.headFacing.z, pose.headFacing.w);
+    const angle = this.spriteArms ? pose.head.angle - this.capturedHeadAngle + this.capturedTorsoAngle : pose.head.angle;
+    this.headRoll.setFromAxisAngle(this.zAxis, angle).multiply(this.headRotation);
+    const from = this.deathInput.headFacing, to = pose.headFacing;
+    const nodDepth = 2 * (PLAYER_FIGURE.helmet.y - PLAYER_FIGURE.neck.y) *
+      (to.x * to.w + to.y * to.z - from.x * from.w - from.y * from.z);
+    this.headWorld.makeRotationFromQuaternion(this.headRoll).setPosition(pose.head.x, pose.head.y,
+      released ? OBSTACLE_LINE : this.headCentre.z + nodDepth);
+    this.inverseBody.copy(this.torso.matrixWorld).invert();
+    this.headDelta.multiplyMatrices(this.inverseBody, this.headWorld);
+    this.headWorld.makeTranslation(-this.headCentreLocal.x, -this.headCentreLocal.y, -this.headCentreLocal.z);
+    this.headDelta.multiply(this.headWorld);
+  }
+
+  private scenePlayer(player: PlayerFrameState): ScenePlayerFrame {
+    if (player.phase === 'alive') return player;
+    const shown = this.sceneDeathPlayer;
+    shown.phase = player.phase; shown.centre = player.centre; shown.pose = player.pose;
+    shown.layout = player.layout; shown.headFacing = player.headFacing; shown.direction = player.direction;
+    return shown;
   }
 
   // A hit took health, the killing one when `fatal`: the hurt effects take it, then update on drawn frames until done.
@@ -1300,16 +1418,16 @@ export class GameView {
   beginDeath(frame: PhysicsFrame, kind: DeathKind): void {
     this.cameraView.death = kind;
     this.presentationPreview = null;
-    this.deathLean = this.waistLean.angle;
-    this.deathHead.copy(this.headAim.rotation);
-    this.deathInput.direction = this.part(frame, 'head').x < this.part(frame, 'root').x ? -1 : 1;
-    this.slots[this.activeSlot]!.rig.setDying(true);
+    if (frame.player.phase === 'alive') throw new Error('Death presentation needs the simulation death phase.');
+    this.deathInput.direction = frame.player.direction;
+    this.deathInput.body = frame.player.phase === 'dying-ragdoll' ? 'ragdoll' : 'rigid';
+    this.placementHold.begin();
+    this.slots[this.activeSlot]!.rig.setDying(true, frame.player.phase === 'dying-ragdoll');
   }
 
   cancelDeath(): void {
     this.cameraView.death = null;
     this.deathInput.poseProgress = 0;
-    this.deathPose.torsoLean = this.deathPose.headPitch = 0;
     this.deathPose.spriteBrightness = 1;
     for (const slot of this.slots) {
       slot.rig.setDying(false);
@@ -1334,7 +1452,7 @@ export class GameView {
 
   recenter(frame: PhysicsFrame): void {
     this.syncRig(frame);
-    const root = this.part(frame, 'root');
+    const root = frame.player.centre;
     const tip = this.part(frame, 'head');
     this.syncHead(tip.vertices);
     this.cameraView.focus.x = root.x;
@@ -1351,6 +1469,7 @@ export class GameView {
     this.waistLean.reset();
     this.gripHold.reset();
     for (const slot of this.slots) slot.rig.resetPresentation();
+    this.placementHold.place();
     if (this.avatarRenderer instanceof SkinnedAvatarView) this.avatarRenderer.interrupt();
     this.resetPoseHistory();
   }
@@ -1512,6 +1631,7 @@ export class GameView {
 
   dispose(): void {
     const disposal = new Disposal();
+    disposal.run(() => this.placementHold.dispose());
     disposal.run(() => this.observer?.disconnect());
     disposal.run(() => this.disposeCharacters());
     const avatar = this.avatar;
@@ -1700,6 +1820,7 @@ export class GameView {
         new Vector3(SHAFT_ARTWORK_LENGTH / 2, RIG.handleHalfWidth, RIG.handleHalfWidth),
       ),
       visibility: this.visibility('hammer-shaft', shaftSegments),
+      deferChange: this.deferVisualChange,
     });
     this.foreground.add(this.customShaft);
     const head = new Group();
@@ -1726,6 +1847,7 @@ export class GameView {
     this.bindings.set(slot, {
       anchor, modelAnchor, defaults, bounds: new Box3().setFromObject(model, true),
       visibility: this.visibility(slot, defaults),
+      deferChange: this.deferVisualChange,
     });
     if (ARM_PARTS.has(slot)) onArmLayer(model);
     return anchor;
@@ -1767,8 +1889,8 @@ export class GameView {
 
   // Every character type takes its hands from the same grip placement on the physical tool frame.
   private updateArms(body: Matrix4, tool: Matrix4, shaftLength: number,
-    options: { armIk: Readonly<ArmIkSettings>; dt: number; death: DeathFrame | null }, shaftAngle: number): ArmPose[] {
-    const settings = options.armIk;
+    options: { armIk: Readonly<ArmIkSettings>; dt: number; death: DeathFrame | null }, shaftAngle: number, compose = true): ArmPose[] {
+    const settings = options.death === null ? options.armIk : this.capturedArmIk;
     const chains = this.armChains;
     const cos = Math.cos(shaftAngle);
     const sin = Math.sin(shaftAngle);
@@ -1778,8 +1900,8 @@ export class GameView {
     const prepared = this.activeAvatar;
     // Phase 1: the prepared rig writes each side's wrist target track before grips are placed; the arms
     // then follow that plan as the grip rotations turn it.
-    const deathWeight = options.death === null ? 0 : options.death.reducedMotion ? 1 : options.death.poseProgress;
-    const plan = prepared === null ? null : this.frameAvatarRig(prepared, body, tool, cos, sin, shaftLength, options.dt, deathWeight);
+    const poseSource = options.death === null ? 'live' : 'captured-death';
+    const plan = prepared === null ? null : this.frameAvatarRig(prepared, body, tool, cos, sin, shaftLength, options.dt, poseSource);
     // Every arm reaches from the body's shoulders with the lengths it is drawn at, measured in the course plane as
     // the camera sees it. A 2D arm chain that targets a hand's grip has its authored lengths unless the profile has
     // its own.
@@ -1834,8 +1956,9 @@ export class GameView {
       context.body = body;
       context.plan = plan;
       context.dt = options.dt;
-      context.deathWeight = deathWeight;
-      prepared.rig.writePose(context, prepared.pose);
+      context.poseSource = poseSource;
+      context.attachment = 'gripped';
+      if (compose) prepared.rig.writePose(context, prepared.pose);
     }
     return poses;
   }
@@ -1843,7 +1966,7 @@ export class GameView {
   // Phase 1 inputs for a prepared rig: the tool frame and the standard hand directions, in avatar space.
   // Returns the plan the arms follow: the rig's own, or the view's copy turned about each rotated hand's grip.
   private frameAvatarRig(prepared: PreparedAvatar, body: Matrix4, tool: Matrix4, cos: number, sin: number,
-    shaftLength: number, dt: number, deathWeight: number): AvatarRigFramePlan {
+    shaftLength: number, dt: number, poseSource: 'live' | 'captured-death'): AvatarRigFramePlan {
     this.inverseBody.copy(body).invert();
     this.avatarTool.copy(this.inverseBody).multiply(tool);
     this.avatarButt.setFromMatrixPosition(this.avatarTool);
@@ -1853,7 +1976,7 @@ export class GameView {
     context.body = body;
     context.shaftLength = shaftLength;
     context.dt = dt;
-    context.deathWeight = deathWeight;
+    context.poseSource = poseSource;
     prepared.rig.writeFramePlan(context, prepared.plan);
     if (this.gripRotations.left === null && this.gripRotations.right === null) return prepared.plan;
     for (const side of ARM_SIDES) {
@@ -1871,6 +1994,54 @@ export class GameView {
       turned.forward.applyQuaternion(turn);
     }
     return this.turnedPlan;
+  }
+
+  private updateDeathArms(presented: DeathPose, released: boolean, dt: number): ArmPose[] {
+    const body = this.torso.matrixWorld, prepared = this.activeAvatar;
+    this.inverseBody.copy(body).invert();
+    const poses = this.posedArms;
+    for (let index = 0; index < ARM_SIDES.length; index++) {
+      const side = ARM_SIDES[index]!, source = presented.arms[side], pose = this.physicalArms[side];
+      const previousNormalZ = poses[index]!.normal.z;
+      const held = released ? null : poses[index]!;
+      pose.shoulder.set(source.shoulder.x, source.shoulder.y, held === null ? OBSTACLE_LINE : held.shoulder.z);
+      pose.elbow.set(source.elbow.x, source.elbow.y, held === null ? OBSTACLE_LINE : held.elbow.z);
+      pose.hand.set(source.hand.x, source.hand.y, held === null ? OBSTACLE_LINE : held.hand.z);
+      if (held === null) pose.normal.set(0, 0, Math.abs(previousNormalZ) > 1e-8
+        ? Math.sign(previousNormalZ) : ARM_GEOMETRY[side].normalSign);
+      else pose.normal.copy(held.normal);
+      pose.shaftAxis.set(Math.cos(source.hand.angle), Math.sin(source.hand.angle), 0);
+      pose.axis.subVectors(pose.hand, pose.shoulder).normalize();
+      pose.bendDirection.subVectors(pose.elbow, pose.shoulder).normalize();
+      pose.hint.copy(pose.elbow);
+      const arm = this.arms.get(side)!;
+      placeLimb(arm.upper, pose.shoulder, pose.elbow, pose.normal);
+      placeLimb(arm.lower, pose.elbow, pose.hand, pose.normal);
+      arm.elbow.position.copy(pose.elbow); arm.hand.position.copy(pose.hand);
+      arm.hand.rotation.set(0, 0, source.hand.angle);
+      if (!released && this.gripRotations[side] !== null) arm.hand.quaternion.multiply(this.gripRotations[side]!);
+      if (prepared !== null) {
+        this.captureAvatarSolution(side, pose);
+        if (released) {
+          const track = this.turnedPlan[side];
+          track.offset.set(0, 0, 0);
+          track.shaft.copy(pose.shaftAxis).transformDirection(this.inverseBody);
+          track.forward.set(0, 0, 1).transformDirection(this.inverseBody);
+        }
+      }
+    }
+    poses.length = 0;
+    poses.push(this.physicalArms.left, this.physicalArms.right);
+    if (released) this.gloveTurns.left = this.gloveTurns.right = null;
+    if (prepared !== null) {
+      const context = this.poseContext;
+      context.body = body; context.dt = dt;
+      if (released) context.plan = this.turnedPlan;
+      context.poseSource = released ? 'physical-death' : 'captured-death';
+      context.attachment = released ? 'released' : 'gripped';
+      prepared.rig.writePose(context, prepared.pose);
+    }
+    return poses;
   }
 
   // Each rotated glove's turn about its grip in world space, where the grip frame follows the tool's shaft
@@ -1922,7 +2093,7 @@ export class GameView {
   // turn about the root, then moved by its offset. The preview ends past its duration, on a rewind or on bad values.
   private presentedFrame(frame: PhysicsFrame): PhysicsFrame {
     const running = this.presentationPreview;
-    if (running === null) return frame;
+    if (running === null || frame.player.phase !== 'alive') return frame;
     if (running.start === null) running.start = frame.time;
     const elapsed = frame.time - running.start;
     const offset = this.previewOffset;
@@ -1936,11 +2107,7 @@ export class GameView {
       if (this.presentationPreview === running) this.presentationPreview = null;
       return frame;
     }
-    let root: PartPose | null = null;
-    for (let index = 0; index < frame.parts.length && root === null; index += 1) {
-      if (frame.parts[index]!.id === 'root') root = frame.parts[index]!;
-    }
-    if (root === null) throw new Error('Missing rendered physics part: root');
+    const root = frame.player.centre;
     const cos = Math.cos(offset.turn), sin = Math.sin(offset.turn);
     const pivotX = root.x, pivotY = root.y;
     if (this.previewParts.length !== frame.parts.length) {
@@ -1962,10 +2129,17 @@ export class GameView {
     this.previewCursor.x = pivotX + cursorX * cos - cursorY * sin + offset.x;
     this.previewCursor.y = pivotY + cursorX * sin + cursorY * cos + offset.y;
     const shown = this.previewFrame ??= {
-      time: frame.time, parts: this.previewParts, cursor: this.previewCursor, enemies: frame.enemies,
+      time: frame.time, placement: frame.placement, player: this.previewPlayer,
+      parts: this.previewParts, cursor: this.previewCursor, enemies: frame.enemies,
       projectiles: frame.projectiles, platforms: frame.platforms, rig: frame.rig,
     };
     shown.time = frame.time;
+    shown.placement = frame.placement;
+    this.previewPlayer.centre.x = pivotX + offset.x; this.previewPlayer.centre.y = pivotY + offset.y;
+    this.previewPlayer.centre.angle = root.angle + offset.turn;
+    const sx = frame.player.shoulder.x - pivotX, sy = frame.player.shoulder.y - pivotY;
+    this.previewPlayer.shoulder.x = pivotX + sx * cos - sy * sin + offset.x;
+    this.previewPlayer.shoulder.y = pivotY + sx * sin + sy * cos + offset.y;
     shown.parts = this.previewParts;
     shown.enemies = frame.enemies;
     shown.projectiles = frame.projectiles;

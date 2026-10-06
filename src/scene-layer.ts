@@ -5,6 +5,13 @@ import { listPoint, PluginError } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { RigGeometry } from './rig';
 import type { PartPose } from './simulation';
+import type { DeathPlayerFrame, LivePlayerFrame } from './player-pose';
+import type { ReadonlyDeathAppearance } from './death-pose';
+
+export interface SceneDeathPlayerFrame extends DeathPlayerFrame {
+  readonly presented: ReadonlyDeathAppearance;
+}
+export type ScenePlayerFrame = LivePlayerFrame | SceneDeathPlayerFrame;
 
 // A read-only view of the simulation at the drawn time, not a character's temporary presentation preview.
 // This object is reused and its members are borrowed: read during update(), never keep a previous-frame snapshot
@@ -13,6 +20,7 @@ export interface SceneFrame {
   // Simulation seconds; a restart rewinds them to 0.
   readonly time: number;
   readonly parts: readonly Readonly<PartPose>[];
+  readonly player: ScenePlayerFrame;
   readonly cursor: Readonly<Point>;
   readonly enemies: readonly EnemyPose[];
   readonly rig: RigGeometry;

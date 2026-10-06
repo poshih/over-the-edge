@@ -164,6 +164,14 @@ export class TerrainWorld {
     for (const [id, body] of this.bodies) applyMaterial(body, materials[this.object(id).surface]);
   }
 
+  // Prepare newly created player fixtures between steps, not on their first contact.
+  prepareFixture(fixture: Fixture): void {
+    this.ensureMutable();
+    if (this.fixtureCentroids.has(fixture)) return;
+    fixture.getShape().computeMass(this.probeMass, 1);
+    this.fixtureCentroids.set(fixture, new Vec2(this.probeMass.center.x, this.probeMass.center.y));
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.ensureMutable();

@@ -15,7 +15,7 @@ inputs, the game's own trusted code, never project data.
 
 ```json
 {
-  "apiVersion": 1,
+  "apiVersion": 2,
   "plugins": [
     { "id": "my-game", "kinds": "./kinds.ts", "runtime": "./runtime.ts", "release": "./release.ts", "workshop": "./workshop.ts" }
   ]
@@ -37,7 +37,7 @@ GAME_PLUGINS=games/my-game/plugins.json GAME_PROJECT=projects/my-game npm run bu
 
 | Field | Rule |
 | --- | --- |
-| `apiVersion` | `1` (`PLUGIN_API_VERSION`) |
+| `apiVersion` | `2` (`PLUGIN_API_VERSION`) |
 | `plugins` | 1-32 plugins (`PLUGIN_LIMITS.plugins`), in composition order: see [order and conflicts](#order-and-conflicts) |
 | `id` | 1-64 lowercase letters, digits and hyphens, starting with a letter. IDs are unique, and `engine` is reserved |
 | `kinds`, `runtime`, `release`, `workshop` | The plugin's facets, at least one: each a path relative to the manifest, naming a `.ts`, `.mts`, `.js` or `.mjs` file inside the repository |
@@ -52,6 +52,10 @@ GAME_PLUGINS=games/my-game/plugins.json GAME_PROJECT=projects/my-game npm run bu
 - Without `GAME_PLUGINS` a game has no plugins: the engine's defaults everywhere, the built-in
   kinds alone and no library models packaged.
 
+Breaking public contract changes bump `PLUGIN_API_VERSION`; manifests must name the current
+version, without legacy readers or aliases. Version 2 uses the numeric death-pose point and
+phase/attachment rig contexts.
+
 A plugin's identity comes from the manifest alone, and facet modules never repeat it. Each host
 tells its facet the ID, as `host.plugin`. The ID names the plugin in errors, keys its Workshop
 data in the project and is the namespace of the items it adds, so renaming a plugin changes them.
@@ -61,7 +65,7 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | Facet | Runs in | SDK | For | Virtual module |
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
-| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, hurt effects, death animation and screen, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
+| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, hurt effects, death pose and screen, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
 | `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
@@ -79,7 +83,7 @@ A manifest, `games/my-game/plugins.json`, with one plugin, `my-game`, and a runt
 
 ```json
 {
-  "apiVersion": 1,
+  "apiVersion": 2,
   "plugins": [
     { "id": "my-game", "runtime": "./runtime.ts" }
   ]
@@ -212,19 +216,19 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | Code | Cause |
 | --- | --- |
 | `invalid-manifest` | The manifest is not a JSON file inside the repository, holds something other than `apiVersion` and `plugins`, lists no plugin or more than 32, or names a file twice |
-| `api-version` | `apiVersion` is not 1 |
+| `api-version` | `apiVersion` is not 2 |
 | `invalid-plugin` | A plugin is not an object, or has an invalid ID, an unknown field, no facet, or a facet that is not a relative path to a module file inside the repository |
 | `duplicate-plugin` | Two plugins share an ID |
 | `reserved-plugin` | A plugin is named `engine` |
 | `invalid-facet` | A facet's default export has the wrong shape; a build refused a facet file its boundary forbids; a build was asked for a virtual module it does not serve |
 | `unknown-point` | A contribution names a point its environment does not have |
-| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a built-in or extra readout, look, camera director, backdrop, aim marks, hurt effects, death screen, scene layer, audio output, toasts, character choice view, notices, fatal display, gameplay observer or input device; a character choice view selected a non-integer index or an index outside its labels; input bindings are malformed or a device action is not bindable; an observer's `event`, a device's `poll`, a death-screen method or death-animation writer returned a promise-like value, a device added non-finite movement, or a death writer omitted an output or wrote a non-finite/out-of-range pose; a message presenter returned a non-promise or invalid outcome; or a toast's show or hurt effects' update returned a non-boolean |
+| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a built-in or extra readout, look, camera director, backdrop, aim marks, hurt effects, death screen, scene layer, audio output, toasts, character choice view, notices, fatal display, gameplay observer or input device; a character choice view selected a non-integer index or an index outside its labels; input bindings are malformed or a device action is not bindable; an observer's `event`, a device's `poll`, a death-screen method or death-pose writer returned a promise-like value, a device added non-finite movement, or a death writer omitted an output or wrote a non-finite transform, non-unit quaternion or out-of-range brightness; a message presenter returned a non-promise or invalid outcome; or a toast's show or hurt effects' update returned a non-boolean |
 | `duplicate-contribution` | A plugin contributes to one point twice |
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
 | `foreign-namespace` | A keyed item is not named `<plugin>/<name>` under its own plugin |
 | `too-many` | A point holds more items than its limit, or a session more than 32 plugins |
-| `plugin-failed` | A plugin's own code threw: a `start`, a wrap, a factory, a release callback or a Workshop plugin; a gameplay observer's `event` or `dispose`; an input device's `poll`, `dispose` or `host.action`; the audio output's `handle`; the enemy look's `apply`, the bonfire look's `setLit`, the hurt effects' `hurt` or `clear`, a death-screen method or a death-animation writer |
+| `plugin-failed` | A plugin's own code threw: a `start`, a wrap, a factory, a release callback or a Workshop plugin; a gameplay observer's `event` or `dispose`; an input device's `poll`, `dispose` or `host.action`; the audio output's `handle`; the enemy look's `apply`, the bonfire look's `setLit`, the hurt effects' `hurt` or `clear`, a death-screen method or a death-pose writer |
 | `plugin-stopped` | A stopped Workshop plugin's host, or a closed release session, refused a call |
 
 A plugin may refuse with codes of its own, as a Workshop plugin's `validate` does for its data:
@@ -242,6 +246,21 @@ exports `DeathSequenceError`; branch on its `code`:
 | `placement-changed` | Placement changed without cancelling the active death sequence |
 
 See the [death sequence's host contract](runtime-plugins.md#death-sequence).
+
+Physical entry and frame validation additionally use the typed `PlayerDeathError`
+(`src/player-ragdoll.ts`); branch on its `code`:
+
+| Code | Cause |
+| --- | --- |
+| `locked-world` | Death entry inside a physics step |
+| `stale-seed` | The seed belongs to another placement or physics time |
+| `repeated-entry` | The placement is already dying |
+| `invalid-seed` | The terminal pose or character layout is invalid |
+| `construction-failed` | The corpse cannot be constructed or the live root removed |
+| `phase-mismatch` | A player snapshot or interpolation has inconsistent live/death phases |
+
+These stop the transition or frame rather than substituting a pose, teleporting the
+character or retaining a partial corpse.
 
 ## Lifecycle and hot reload
 
@@ -399,7 +418,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`scene.backdrop`](runtime-plugins.md#backdrop) | `BACKDROP` | `runtime` | Slot, `BackdropFactory` | `DEFAULT_BACKDROP` |
 | [`scene.aim-marks`](runtime-plugins.md#aim-marks) | `AIM_MARKS` | `runtime` | Slot, `AimMarksFactory` | `DEFAULT_AIM_MARKS`; hidden while dying |
 | [`scene.hurt-effects`](runtime-plugins.md#hurt-effects) | `HURT_EFFECTS` | `runtime` | Slot, `HurtEffectsFactory` | `DEFAULT_HURT_EFFECTS` |
-| [`scene.death-animation`](runtime-plugins.md#death-animation) | `DEATH_ANIMATION` | `runtime` | Slot, `DeathAnimationWriter` | `DEFAULT_DEATH_ANIMATION` |
+| [`scene.death-pose`](runtime-plugins.md#death-pose) | `DEATH_POSE` | `runtime` | Slot, `DeathPoseWriter` | `DEFAULT_DEATH_POSE` |
 | [`looks.enemies`](runtime-plugins.md#enemy-looks) | `LOOKS.enemies` | `runtime` | Slot, `EnemyLookFactory` | `DEFAULT_LOOKS.enemies` |
 | [`looks.phantoms`](runtime-plugins.md#phantom-looks) | `LOOKS.phantoms` | `runtime` | Slot, `PhantomLookFactory` | `DEFAULT_PHANTOM_LOOK` |
 | [`scene.layers`](runtime-plugins.md#scene-layers) | `SCENE_LAYERS` | `runtime` | List, 32 `SceneLayerFactory` | None |

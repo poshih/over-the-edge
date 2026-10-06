@@ -35,7 +35,7 @@ export interface UiOptions {
   mount: HTMLElement;
   plugins: RuntimePlugins;
   // Physics diagnostics only, requested while its tab is visible, never as part of the HUD frame.
-  readStatus: () => { readonly contacts: number; readonly hingeLoad: number; readonly sliderLoad: number };
+  readStatus: () => { readonly contacts: number; readonly hingeLoad: number | null; readonly sliderLoad: number | null };
   initialSettings: Readonly<GameSettings>;
   initialInputMode: InputMode;
   onAction: (action: EditorAction, options?: UiActionOptions) => void;

@@ -184,14 +184,16 @@ export class SkinnedAvatarView {
   // Applies the prepared rig's avatar-space pose, which the engine wrote this frame from the plan
   // and the arm solutions, then runs the motions for the frame at `time` (simulation seconds). `body` places
   // avatar space, leaning with the upper body; `pot` places the jar, its origin at the jar's bottom-centre.
-  apply(body: Matrix4, pot: Matrix4, headRotation: Quaternion, pose: AvatarRigPose, time: number): void {
+  apply(body: Matrix4, pot: Matrix4, headRotation: Quaternion, pose: AvatarRigPose, time: number, headDelta: Matrix4 | null = null): void {
     this.root.matrix.copy(body);
     this.root.matrixWorldNeedsUpdate = true;
 
     const head = this.joints.head;
-    this.frame.makeRotationFromQuaternion(headRotation);
-    this.rotated.copy(this.headPivot).applyMatrix4(this.frame);
-    this.frame.setPosition(this.headPivot.x - this.rotated.x, this.headPivot.y - this.rotated.y, this.headPivot.z - this.rotated.z);
+    if (headDelta === null) {
+      this.frame.makeRotationFromQuaternion(headRotation);
+      this.rotated.copy(this.headPivot).applyMatrix4(this.frame);
+      this.frame.setPosition(this.headPivot.x - this.rotated.x, this.headPivot.y - this.rotated.y, this.headPivot.z - this.rotated.z);
+    } else this.frame.copy(headDelta);
     head.current.multiplyMatrices(this.frame, head.bind);
 
     for (const side of ARM_SIDES) {

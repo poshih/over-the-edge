@@ -101,10 +101,11 @@ export class AvatarView {
 
   // `turns` rotates each glove about its grip in world space, or is null for a glove that keeps the tool's frame.
   update(body: Matrix4, poses: readonly ArmPose[], headRotation: Quaternion,
-    turns: Readonly<Record<ArmSide, Quaternion | null>>): void {
+    turns: Readonly<Record<ArmSide, Quaternion | null>>, headDelta: Matrix4 | null = null): void {
     this.root.matrix.copy(body);
     this.root.matrixWorldNeedsUpdate = true;
-    this.head.matrix.makeRotationFromQuaternion(headRotation).setPosition(0, AVATAR_BIND.headY, 0);
+    if (headDelta === null) this.head.matrix.makeRotationFromQuaternion(headRotation).setPosition(0, AVATAR_BIND.headY, 0);
+    else this.head.matrix.makeTranslation(0, AVATAR_BIND.headY, 0).premultiply(headDelta);
     this.head.matrixWorldNeedsUpdate = true;
     this.inverseBody.copy(body).invert();
     for (let index = 0; index < poses.length; index++) {

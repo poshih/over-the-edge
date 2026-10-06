@@ -488,6 +488,19 @@ scene; unbound layers already follow those foreground anchors directly.
 The secondary mounts share the same evaluated skeleton and world origin,
 so changing render pass does not change pose, skin weights or authored offsets.
 
+While a rig is dying, its read-only `editsHeld` query is `true`. Synchronous
+authoring calls (`setCharacterRiggingType`, `setArmForwardDistance`, `setWaistLean`,
+`setGrips`, `setArms`, `setAvatarMotion`, `configureSkeleton`, `configurePresentation`,
+`upsert`, `remove` and setting either preview) refuse before any state change with
+`SpriteEditError` from `src/sprite-rig.ts`. It extends `SpriteError` and has the
+distinguishable code `'dying'`; branch on the type and code, not the message.
+`setPreview(null)` and `setDirectionalPreview(null)` remain allowed and leave
+the captured death pose, facing and flipbook frame intact. The Workshop checks
+`editsHeld` up front, reports authoring refusals as transient notices without
+changing its draft or persistent error, and quietly declines pointer previews.
+Async `replace()` operations still await placement with their abort signal;
+neither preview clearing nor the death screen's clear releases that wait.
+
 The portable JSON shape is:
 
 ```json

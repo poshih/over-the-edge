@@ -1,4 +1,5 @@
 import type { SpriteRig } from '../sprite-rig';
+import { SpriteEditError } from '../sprite-rig';
 import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
@@ -849,7 +850,7 @@ export class SpriteEditorState {
       this.leavePreview();
       return;
     }
-    if (!this.canEdit()) return;
+    if (this.rig.editsHeld || !this.canEdit()) return;
     try {
       const skeleton = this.draft.skeleton;
       if (skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
@@ -901,7 +902,7 @@ export class SpriteEditorState {
       }
       return true;
     }
-    if (!this.canEdit()) return false;
+    if (this.rig.editsHeld || !this.canEdit()) return false;
     try {
       if (![value.aim.x, value.aim.y].every(Number.isFinite) || value.aim.x === 0 && value.aim.y === 0) {
         throw new DirectionalError('Preview aim must be a finite, nonzero vector.');
@@ -1249,6 +1250,11 @@ export class SpriteEditorState {
   // Why the draft cannot change now, reported, or null when it can.
   private editable(): SpriteError | null {
     if (this.disposed) return new SpriteError('The character editor is closed.');
+    if (this.rig.editsHeld) {
+      const refusal = new SpriteEditError();
+      this.notice(refusal.message, 'error');
+      return refusal;
+    }
     if (this.restoring || this.busy) {
       const refusal = new SpriteError('Wait for the current sprite operation to finish before editing.');
       this.notice(refusal.message, 'error');
