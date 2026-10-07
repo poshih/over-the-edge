@@ -151,8 +151,10 @@ hair's geometry to a chain of joints in the GLB and list the chain in `avatar.ha
   A chain keeps its joints its own `radius` clear of every collider; pinned roots and segment lengths win where both
   cannot hold.
 - The simulation freezes while time stands still, catches up at most 15 steps, and
-  restarts from the rigid pose on a rewind, a restart or a new avatar. Hair never
-  drives IK, gameplay or physics.
+  restarts from the rigid pose on an explicit placement (restart, checkpoint return or level replacement),
+  a new avatar or a gap longer than those 15 steps. Pauses and tab hiding settle interpolation;
+  only explicit placements rewind presentation time, and placements also restart hair, with elapsed
+  time clamped at zero. Hair never drives IK, gameplay or physics.
 - `{ "chains": [], "colliders": [] }` keeps every unmapped joint rigid, at no cost.
   At most 16 chains, 64 joints over all chains and 32 colliders.
 - Chains are checked against the model wherever the bone map is: `unknown-joint`,
@@ -193,8 +195,10 @@ each by its ID, `<plugin>/<name>`, with configuration only that kind interprets:
   (`AvatarMotionFrame`):
   - **the clock**: `reset`, start from rest with no steps, or `steps` fixed 1/60 s steps to
     advance. It resets and steps exactly as hair does: frozen while time stands still, at most 15
-    catch-up steps, and a reset on a rewind, a restart, a new avatar or motion, or after the avatar
-    was not drawn for longer than those 15 steps. No game code measures time;
+    catch-up steps, and a reset on an explicit placement, a new avatar or motion, or after the avatar
+    was not drawn for longer than those 15 steps. Pauses and tab hiding settle interpolation; only
+    explicit placements rewind presentation time, and placements also restart hair and motions,
+    with elapsed time clamped at zero. No game code measures time;
   - **placement**: `body`, where avatar space sits in the world, including the waist lean, and
     `pot`, the jar's frame, its origin at the jar's bottom-centre;
   - **the skeleton**: the mapped joints' frames at bind and now, in avatar space;
@@ -568,7 +572,7 @@ The profile and selected library avatar resolve the fitted or default shoulder/n
 layout, waist lean, arm lengths and authored grips once on a presentation change.
 When the profile supplies no arm lengths, a sprite grip chain supplies its natural
 lengths; otherwise its type's default or fitted chains do. The project's arm-IK hints
-provide the XY poles. `GameView.onCharacterFigure` pushes changes to
+provide the XY poles. `CharacterView`'s `onCharacterFigure` callback pushes changes to
 `Simulation.setCharacterFigure`. Construction takes `(settings, level, figure, moments)`:
 a headless host supplies a `MomentWriter` and `DEFAULT_CHARACTER_FIGURE` or another
 validated figure. `CharacterFigureError` has code `'invalid-figure'`;
@@ -739,11 +743,23 @@ game.selectCharacter(1);
 game.characterSelection(); // { active: 1, count: 2, types: ['sprite-2d', 'avatar-3d'] }
 ```
 
-`GameView` accepts the same `characterModels` option, `createAlternateCharacter()`
+`CharacterView`, exposed as `game.view.character`, is the character host and receives
+the same `characterModels` loader. Its `createAlternateCharacter()`
 returns the second profile's `SpriteRig`, and `selectCharacter(index)` switches
 profiles. `SpriteRig` stays independent of Three.js model loading: its
 `characterAssets.prepare(document, signal)` option loads and validates a
 document's models before the rig commits it. Without a host, documents with models are rejected.
+
+### Presenter architecture
+
+`GameView` owns the scene passes, camera and effects; `CharacterView` owns character
+selection, the resolved figure, previews and death presentation. `CharacterProfiles`
+keeps profile models, library overrides and their prepare-then-commit transactions.
+The mesh-parts, built-in avatar, imported-avatar and sprite `CharacterPresenter`s share
+`FigureRig`'s scene, lean and head aim, plus `GripArms`' grip placement and IK. An imported
+presenter's frame plan runs before grips and its pose phase after IK; only the active
+sprite presenter feeds `SpriteRig.update`, using pooled targets and pose buffers.
+Games customize through profile content and the rig, motion and runtime plugin points.
 
 ## Performance
 

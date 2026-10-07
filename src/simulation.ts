@@ -63,6 +63,11 @@ export interface PhysicsFrame {
   rig: RigGeometry;
 }
 
+export function physicsPart(frame: PhysicsFrame, id: string): PartPose {
+  for (const part of frame.parts) if (part.id === id) return part;
+  throw new Error(`Missing rendered physics part: ${id}`);
+}
+
 // Settings apply to the running player, except a new rig, which rebuilds it and restarts the run.
 export type SettingsEffect = 'applied' | 'restarted';
 

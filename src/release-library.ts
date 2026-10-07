@@ -7,7 +7,7 @@ import type { ContentAccess } from './content-session';
 import type { CharacterModelLoader, LoadedCharacterModel } from './character-model-types';
 import { EMPTY_SELECTION, isPartRole, libraryAvatarSettings, PART_ROLES } from './model-library';
 import type { LibraryAvatarSettings, ModelSelection, ModelSelectionRequest, PartRole } from './model-library';
-import type { PartModel } from './view';
+import type { PartModel } from './character-view';
 
 // What shows each part's model: the game, which also gives its physics a library hammer's head.
 export interface PartModelHost {

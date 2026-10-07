@@ -208,7 +208,10 @@ allocates nothing per frame on its behalf.
   `out.turn` radians about the player's root. The avatar's motions see it through `body` and
   `pot` exactly as they see real movement, so a drop, a bounce or a shake swings hair and
   [secondary motion](characters.md#secondary-motion). The camera and overlays keep the
-  simulation's frame. A preview ends early on a rewind, a restart or another preview, and
+  simulation's frame. A preview ends early on a placement, a restart or another preview.
+  Pauses and tab hiding settle interpolation; only explicit placements rewind presentation
+  time, and placements also restart lean, head aim, hair and motions, with elapsed time
+  clamped at zero.
   `game.preview(null)` ends the plugin's own. `offset` finishes synchronously; a promise-like
   result is `invalid-contribution`, attributed to the preview's plugin and `offset` action.
 

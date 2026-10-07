@@ -29,7 +29,7 @@ import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { HammerHead } from './hammer-head';
 import type { PartRole } from './model-library';
-import type { PartModel } from './view';
+import type { PartModel } from './character-view';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { HudFrame } from './hud-readouts';
@@ -361,22 +361,22 @@ export class Game {
 
   async loadSprites(document: SpriteDocument): Promise<void> {
     if (this.stopped) throw new Error('Cannot load sprites into a stopped game.');
-    await this.view.sprites.replace(document, { signal: this.lifecycle.signal });
+    await this.view.character.sprites.replace(document, { signal: this.lifecycle.signal });
   }
 
   // Loads a second character profile for players to switch to; it stays loaded while hidden.
   async loadAlternateSprites(document: SpriteDocument): Promise<void> {
     if (this.stopped) throw new Error('Cannot load sprites into a stopped game.');
-    await this.view.createAlternateCharacter().replace(document, { signal: this.lifecycle.signal });
+    await this.view.character.createAlternateCharacter().replace(document, { signal: this.lifecycle.signal });
   }
 
   selectCharacter(index: number): void {
     if (this.stopped) return;
-    this.view.selectCharacter(index);
+    this.view.character.selectCharacter(index);
   }
 
   characterSelection() {
-    return this.view.characterSelection();
+    return this.view.character.characterSelection();
   }
 
   settings(): GameSettings { return this.simulation.gameSettings(); }
@@ -391,7 +391,7 @@ export class Game {
   // collides. The head changes mid-run without restarting it.
   async setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void> {
     if (this.stopped) return;
-    await this.view.setPartModel(role, part, AbortSignal.any([signal, this.lifecycle.signal]));
+    await this.view.character.setPartModel(role, part, AbortSignal.any([signal, this.lifecycle.signal]));
     if (role === 'hammer' && !this.stopped) this.simulation.setHammerHead(part?.head ?? null);
   }
 
@@ -401,12 +401,12 @@ export class Game {
   }
 
   partModels(): Record<PartRole, string | null> {
-    return this.view.partModels();
+    return this.view.character.partModels();
   }
 
   setCharacter(state: CharacterState): void {
     if (this.stopped) return;
-    this.view.setArmIk(state.armIk);
+    this.view.character.setArmIk(state.armIk);
   }
 
   setTheme(theme: GameTheme): void { this.view.setTheme(theme); }
@@ -453,7 +453,7 @@ export class Game {
     this.cancelDeath();
     this.triggers.jump();
     this.stageSwitches();
-    this.view.resetPresentation();
+    this.view.character.resetPresentation();
     this.accumulator = 0;
     this.clearMovement();
     this.view.recenter(this.simulation.frame(1));
@@ -464,7 +464,7 @@ export class Game {
     this.cancelDeath();
     this.triggers.reset();
     this.presenter.clearToasts();
-    this.view.resetPresentation();
+    this.view.character.resetPresentation();
     this.resetClock();
     this.accumulator = 0;
     this.clearMovement();
@@ -480,7 +480,7 @@ export class Game {
     this.view.applyLevel(change);
     if (change.kind === 'replace') {
       this.presenter.clearToasts();
-      this.view.resetPresentation();
+      this.view.character.resetPresentation();
       this.resetClock();
       this.accumulator = 0;
       this.clearMovement();
@@ -560,7 +560,7 @@ export class Game {
       disposal.run(() => this.disposeDeathScreen());
       disposal.run(() => this.triggers?.dispose());
       disposal.run(() => this.presenter?.dispose());
-      disposal.run(() => this.view?.disposeCharacters());
+      disposal.run(() => this.view?.character.disposeCharacters());
       disposal.run(() => this.input?.setInteraction({ enabled: false }));
       disposal.run(() => {
         if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -583,7 +583,7 @@ export class Game {
     };
     this.death = dying;
     this.simulation.beginDeath();
-    this.view.beginDeath(this.simulation.frame(1), kind);
+    this.view.character.beginDeath(this.simulation.frame(1), kind);
     this.clearMovement();
     for (const observer of this.stepObservers) observer.interrupt();
     if (this.death !== dying || this.stopped) return;
@@ -609,7 +609,7 @@ export class Game {
     this.death = null;
     this.renderState.death = null;
     const disposal = new Disposal();
-    disposal.run(() => this.view.cancelDeath());
+    disposal.run(() => this.view.character.cancelDeath());
     disposal.run(() => call0(this.deathScreen, 'clear'));
     disposal.run(() => this.presenter.setDeathHeld(false));
     disposal.finish();

@@ -3,7 +3,7 @@ import type { LoadedCharacterModel } from '../character-model-types';
 import type { HammerHead } from '../hammer-head';
 import { PART_ROLES } from '../model-library';
 import type { PartRole } from '../model-library';
-import type { PartModel } from '../view';
+import type { PartModel } from '../character-view';
 import type { LibraryModel } from './project-session';
 
 // The game: it shows part models, a library hammer's with its head in the physics.

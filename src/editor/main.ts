@@ -243,19 +243,19 @@ const ui: GameUi = boot(() => createUI({
 });
 runtimeNotice = (message, kind = 'info') => ui.notice(message, kind);
 for (const { message, kind } of startupNotices.splice(0)) ui.notice(message, kind);
-const rig = new AppearanceRig(game.view.visuals);
+const rig = new AppearanceRig(game.view.character.visuals);
 const appearance = new Appearance(rig, ui.notice, { browserStore: !opensProject });
 const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice, projectSave: project, serverCopies });
 const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
 }));
 const spriteEditor = createSpriteEditor({
-  mount: ui.spriteMount, characterMount: ui.characterMount, rig: game.view.sprites, onNotice: ui.notice,
-  describeModel: (source, usage) => game.view.characterModelReport(source, usage),
+  mount: ui.spriteMount, characterMount: ui.characterMount, rig: game.view.character.sprites, onNotice: ui.notice,
+  describeModel: (source, usage) => game.view.character.characterModelReport(source, usage),
   viewport: { canvas, project: (point) => game.view.project(point) },
   targetIds: SPRITE_TARGET_IDS,
   hammerRig: game.simulation.rigGeometry,
-  naturalArms: () => game.view.naturalArmLengths(),
+  naturalArms: () => game.view.character.naturalArmLengths(),
   serverModels,
   // The Character tab's handle length edits the same game setting as Physics.
   onHandleLength: (handleLength) => {
@@ -269,17 +269,17 @@ const spriteEditor = createSpriteEditor({
   motion: {
     kinds: avatarRigs.motionIds, controls: () => workshopPlugins.motionControls(),
     subscribe: (listener) => workshopPlugins.subscribe(() => listener()),
-    preview: (kind) => game.view.previewMotion(kind),
+    preview: (kind) => game.view.character.previewMotion(kind),
   },
   anchors: VISUAL_PARTS.map(({ id, label }) => {
-    const binding = game.view.visuals.get(id);
+    const binding = game.view.character.visuals.get(id);
     if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);
     const size = binding.bounds.getSize(new Vector3());
     const center = binding.bounds.getCenter(new Vector3());
     return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
   }),
 });
-const collisionOverlay = new CollisionOverlay(() => game.view.armPoses());
+const collisionOverlay = new CollisionOverlay(() => game.view.character.armPoses());
 game.view.addLayer(collisionOverlay);
 // The course draws as the project's look says, as its releases draw it: placed GLBs, loaded from the project as the level
 // uses them, or every terrain object as its collision.
@@ -469,9 +469,9 @@ const diagnostics = Object.freeze({
   project: (point: Point) => game.view.project(point),
   settings: () => game.settings(),
   appearance: () => appearance.snapshot(),
-  sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.sprites.inspect() }),
+  sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.character.sprites.inspect() }),
   events: () => game.eventState(),
-  gameProject: () => ({ ...project.snapshot(), playback: audio.inspect() ?? null, parts: game.view.partModels() }),
+  gameProject: () => ({ ...project.snapshot(), playback: audio.inspect() ?? null, parts: game.view.character.partModels() }),
   plugins: () => plugins.inspect(),
   level: () => ({
     definition: level.definition(),

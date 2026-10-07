@@ -293,14 +293,17 @@ displayed rotation, or other smoothing state.
 | Later zero-length or numerically negligible aim | Keep the last aim, direction, and target; existing smoothing may finish |
 | Paused simulation | Live selection and smoothing freeze with simulation time |
 | Same direction again | Preserve smoothing progress |
-| Clock rewind / gameplay reset | Reinitialize live directional state; gameplay reset also exits previews |
+| Gameplay placement / reset / level replacement | Reinitialize live directional state and exit previews |
+| Pause / tab hiding / resume | Settle interpolation; presentation time does not rewind and facing, head tilt and hair keep their state |
 | Document replacement | Initialize fresh state using the latest live aim |
 | Authored presentation edit | Reinitialize directional settings without reloading artwork |
 | Directional preview | Use an independent aim, clock, direction, and copy of the braid state |
 | Preview exit / leaving Sprites / Play | Discard preview state and show the independently maintained live state |
 
-The existing hair solver's bounded catch-up and backward-scrub reset rules
-still apply. The preview clock can advance while physics is paused. Live
+The hair solver's bounded catch-up and explicit placement resets also apply.
+Pauses and tab hiding settle interpolation; only explicit placements rewind presentation
+time, and placements also restart facing, head tilt and hair, with elapsed time clamped
+at zero. The preview clock can advance while physics is paused. Live
 directional and hair state are maintained separately, so preview rotations
 and particle motion are not copied back into gameplay.
 
@@ -330,7 +333,7 @@ shows that frame. No crossfade is applied.
 | First frame / reset / document replacement | Select directly from the current aim; an initial zero-length aim uses 0 degrees |
 | Later zero-length or negligible aim | Keep the last frame |
 | Paused simulation | Selection freezes with simulation time, like facing |
-| Clock rewind or any other facing reinitialization | Select directly again |
+| Explicit facing reinitialization | Select directly again |
 | Changing frames, start angle or hysteresis | Select directly using the new settings |
 | Other layer edits | Keep the frame and its hysteresis memory unless facing is reinitialized |
 | Directional preview | Independent frame memory that follows the preview aim |
@@ -439,8 +442,10 @@ Place circles and roots so the strand can escape: pinned roots and bone lengths
 take precedence when overlapping colliders make a collision-free pose impossible.
 
 The runtime advances bounded fixed substeps, freezes on the same simulation
-time, and resets on backward scrubbing or a restart. Hair never adds forces,
-bodies, or collision fixtures to the game.
+time, and resets at an explicit gameplay placement or after a long gap. Pauses and tab hiding
+settle interpolation; only explicit placements rewind presentation time, and placements
+also restart hair, with elapsed time clamped at zero. Hair never adds
+forces, bodies, or collision fixtures to the game.
 
 ## Game-agnostic contract
 
@@ -475,7 +480,20 @@ rig.remove(layerId);
 rig.dispose();
 ```
 
-Anchors are injected by the host game. `GameView` supplies this game's thirteen
+`update()` targets must name the rig's `targetIds`; an unknown live or death target
+throws `SpriteError`. An explicit `dt` must be finite and nonnegative; negative
+values throw rather than being clamped. Without `dt`, elapsed simulation time is
+clamped at zero for the preview clock.
+
+When a host stops feeding a rig, it calls `forgetLiveFrame()`. This discards the
+last live frame, resets presentation history and ends pose and directional previews.
+Until the next `update()`, commits evaluate an unconstrained pose with hair interrupted;
+that update seeds fresh targets and motion. Pose previews are also unconstrained without
+a live frame, then use their authored constraints once a frame arrives.
+The active profile's sprite mounts stay attached for every
+rigging type; `SpriteRig` hides its own artwork for non-sprite types.
+
+Anchors are injected by the host game. `CharacterView` (`game.view.character`) supplies this game's thirteen
 body/tool anchors, their stable fitting bounds, and visibility ownership.
 Arms use local Y along the segment; the full hammer shaft uses local X.
 Head coordinates are torso-local, so its fitting center is above the origin.

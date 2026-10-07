@@ -10,7 +10,7 @@ import type { GameSettings } from '../game-settings';
 import type { PluginData } from '../plugin-data';
 import { isPluginId } from '../plugin-data';
 import { isProjectDataError } from '../project';
-import type { PresentationPreview } from '../view';
+import type { PresentationPreview } from '../character-view';
 import { SCENE_LAYER_CONTRACT } from '../scene-layer';
 import type { SceneLayer } from '../scene-layer';
 import type { Appearance } from './appearance';
@@ -576,7 +576,7 @@ export class WorkshopPluginHost {
         control.placePlayer({ x: position.x, y: position.y });
       },
       state: () => control.state(),
-      avatar: () => game.view.importedAvatar(),
+      avatar: () => game.view.character.importedAvatar(),
       preview: (preview: 'sway' | 'jolt' | WorkshopPreview | null) => {
         live();
         this.startPreview(plugin, preview);
@@ -585,7 +585,7 @@ export class WorkshopPluginHost {
   }
 
   private startPreview(plugin: RunningPlugin, value: 'sway' | 'jolt' | WorkshopPreview | null): void {
-    const view = this.options.game.view;
+    const view = this.options.game.view.character;
     if (value === null) {
       this.endPreview(plugin);
       return;
@@ -632,7 +632,7 @@ export class WorkshopPluginHost {
     const running = this.preview;
     if (running === null || running.plugin !== plugin) return;
     this.preview = null;
-    this.options.game.view.endPresentationPreview(running.preview);
+    this.options.game.view.character.endPresentationPreview(running.preview);
   }
 
   // Canvas pointer events for plugins, unless the mouse is captured for play. A plugin that captures a `down` takes the

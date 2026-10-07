@@ -37,7 +37,8 @@ export class WaistLean {
   }
 
   // `shaftAngle` is the shaft's direction from its butt to its head (radians, counterclockwise from +X); `maxLean` is
-  // the profile's waistLean in degrees; `time` is simulation seconds, and a rewind restarts at the target.
+  // the profile's waistLean in degrees; `time` is simulation seconds. Pauses and tab hiding settle interpolation; only
+  // explicit placements rewind presentation time, and placements also restart lean, with elapsed time clamped at zero.
   update(shaftAngle: number, maxLean: number, time: number): void {
     if (!Number.isFinite(shaftAngle) || !Number.isFinite(maxLean) || !Number.isFinite(time)) {
       throw new Error('The waist lean needs a finite shaft angle, lean and time.');
@@ -46,13 +47,13 @@ export class WaistLean {
     const target = waistLeanTarget(shaftAngle, maxLean);
     const previous = this.previousTime;
     this.previousTime = time;
-    if (previous === null || time < previous) this.eased = target;
-    else this.eased += (target - this.eased) * -Math.expm1(-(time - previous) / RESPONSE_TIME);
+    if (previous === null) this.eased = target;
+    else this.eased += (target - this.eased) * -Math.expm1(-Math.max(0, time - previous) / RESPONSE_TIME);
     this.angle = this.eased + this.previewAngle(time);
   }
 
   // Rocks or kicks the upper body from the next frame on, over the lean, timed by simulation time like the motion it
-  // shows; a rewind ends it. The preview and filter are presentation only.
+  // shows. Placement ends it explicitly; the preview and filter are presentation only.
   preview(kind: LeanPreview): void {
     this.previewing = kind;
     this.previewStart = null;
@@ -73,9 +74,9 @@ export class WaistLean {
   private previewAngle(time: number): number {
     if (this.previewing === null) return 0;
     if (this.previewStart === null) this.previewStart = time;
-    const elapsed = time - this.previewStart;
+    const elapsed = Math.max(0, time - this.previewStart);
     const duration = this.previewing === 'sway' ? SWAY.duration : JOLT.duration;
-    if (elapsed < 0 || elapsed >= duration) {
+    if (elapsed >= duration) {
       this.previewing = null;
       return 0;
     }

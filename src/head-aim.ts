@@ -19,9 +19,9 @@ export class HeadAim {
     if (!Number.isFinite(aim.x) || !Number.isFinite(aim.y) || !Number.isFinite(time)) {
       throw new Error('Head aim and time must be finite.');
     }
-    const reset = this.previousTime === null || time < this.previousTime;
-    if (!reset && time === this.previousTime) return;
-    const elapsed = reset ? 0 : time - this.previousTime!;
+    const reset = this.previousTime === null;
+    const elapsed = reset ? 0 : Math.max(0, time - this.previousTime!);
+    if (!reset && elapsed === 0) return;
     const length = Math.hypot(aim.x, aim.y);
     if (length > HEAD_AIM.aimEpsilon) {
       const x = aim.x / length, y = aim.y / length;

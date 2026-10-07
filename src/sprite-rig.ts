@@ -33,11 +33,11 @@ import type { AvatarMotionEntry } from './avatar-motion-data';
 import { DirectionalError, sameDirectionalPresentation, validateDirectionalPresentation } from './directional-data';
 import type { DirectionalPresentation } from './directional-data';
 import { DirectionalPose } from './directional-pose';
-import type { DirectionalFrame } from './directional-pose';
+import type { DirectionalFrame, MutableDirectionalFrame } from './directional-pose';
 import { FACING_DIRECTIONS, SkeletonError, validateSkeleton, validateSkeletonPreview } from './skeleton-data';
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview } from './skeleton-data';
 import { SkeletonPose, restPose } from './skeleton-pose';
-import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as RuntimeBoneWorld, SkeletonRotation } from './skeleton-pose';
+import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as RuntimeBoneWorld, MutableBoneWorld, SkeletonRotation } from './skeleton-pose';
 import { compileSpriteHeadTracking } from './sprite-head-aim';
 import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-aim';
 import { selectFlipbookFrame } from './sprite-flipbook';
@@ -150,13 +150,26 @@ interface SkeletonRuntime {
   readonly definition: SkeletonDefinition;
   pose: SkeletonPose;
   previewPose: SkeletonPose | null;
+  previewFresh: boolean;
   readonly group: THREE.Group;
   readonly bones: readonly THREE.Bone[];
   readonly boneIndex: ReadonlyMap<string, number>;
   readonly skeleton: THREE.Skeleton;
   evaluated: readonly RuntimeBoneWorld[];
   readonly originWorld: { x: number; y: number };
+  readonly liveInput: SkeletonInput;
+  readonly previewInput: SkeletonInput;
+  readonly liveOutput: readonly MutableBoneWorld[];
+  readonly previewOutput: readonly MutableBoneWorld[];
+  readonly liveRotation: MutableSkeletonRotation;
+  readonly previewRotation: MutableSkeletonRotation;
+  readonly livePivot: { x: number; y: number };
+  readonly previewPivot: { x: number; y: number };
 }
+
+type SkeletonInput = Parameters<SkeletonPose['evaluate']>[0];
+type MutableSkeletonRotation = { -readonly [K in keyof SkeletonRotation]: SkeletonRotation[K] };
+interface PooledFrameTarget { x: number; y: number; angle: number; used: boolean }
 
 interface BuildState extends CharacterPresentation {
   readonly resources: Map<string, ImageResource>;
@@ -354,8 +367,14 @@ export class SpriteRig {
   private images = new Map<string, ImageResource>();
   private resources = new Map<string, ImageResource>();
   private layers = new Map<string, LayerInstance>();
+  private layerEntries: readonly LayerInstance[] = [];
+  private boneLayers: readonly BoneLayerInstance[] = [];
+  private tiledLayers: readonly TiledLayerInstance[] = [];
   private attachments = new Map<string, Attachment>();
+  private attachmentEntries: readonly Attachment[] = [];
   private skeletonMounts = new Map<THREE.Object3D, THREE.Group>();
+  private skeletonMountEntries: readonly { readonly root: THREE.Object3D; readonly group: THREE.Group }[] = [];
+  private materialResources: readonly ImageResource[] = [];
   private skeleton: SkeletonRuntime | null = null;
   private preview: SkeletonPreview | null = null;
   private presentation: DirectionalPresentation | null = null;
@@ -365,7 +384,10 @@ export class SpriteRig {
   private previewTime = 0;
   private rotatedLayers: readonly LegacyLayerInstance[] = [];
   private flipbooks: readonly FlipbookLayerInstance[] = [];
-  private displayedPresentation: Readonly<DirectionalFrame> = this.directionPose.snapshot();
+  private readonly liveDirectionFrame: MutableDirectionalFrame = { direction: 'right', aimAngle: 0, targetRotation: 0, displayedRotation: 0 };
+  private readonly previewDirectionFrame: MutableDirectionalFrame = { direction: 'right', aimAngle: 0, targetRotation: 0, displayedRotation: 0 };
+  private readonly displayedPresentation: MutableDirectionalFrame = { direction: 'right', aimAngle: 0, targetRotation: 0, displayedRotation: 0 };
+  private readonly previewDirectionInput = { time: 0, aim: { x: 0, y: 0 } as RuntimePoint };
   private replacement: Replacement | null = null;
   private disposed = false;
   private pendingDecodes = 0;
@@ -385,10 +407,43 @@ export class SpriteRig {
   };
   private deathBrightness = 1;
   private hasFrame = false;
-  private lastFrame: { time: number; aim: RuntimePoint; targets: ReadonlyMap<string, RuntimeTarget> } = {
+  private readonly liveTargets = new Map<string, RuntimeTarget>();
+  private readonly frameTargetPool = new Map<string, PooledFrameTarget>();
+  private readonly frameTargetEntries: { readonly name: string; readonly target: PooledFrameTarget }[] = [];
+  private readonly targetPool = new Map<string, { x: number; y: number; angle: number }>();
+  private readonly translatedTargets = new Map<string, RuntimeTarget>();
+  private readonly anchorTargetEntries: {
+    readonly name: string; readonly node: THREE.Object3D; readonly target: { x: number; y: number; angle: number };
+    readonly death: { x: number; y: number; angle: number };
+    readonly setCovered: SpriteAnchor['setCovered'];
+  }[] = [];
+  private readonly deathTargetEntries: {
+    readonly source: PooledFrameTarget; readonly target: { x: number; y: number; angle: number };
+  }[] = [];
+  private readonly nonAnchorTargets: string[] = [];
+  private targetOrigin: RuntimePoint = { x: 0, y: 0 };
+  private readonly copyLiveTarget = (target: RuntimeTarget, name: string): void => {
+    const out = this.frameTargetPool.get(name);
+    if (out === undefined) throw new SpriteError(`Unknown sprite target "${name}".`);
+    out.x = target.x; out.y = target.y; out.angle = target.angle; out.used = true;
+    if (!this.liveTargets.has(name)) this.liveTargets.set(name, out);
+  };
+  private readonly copyDeathTarget = (target: RuntimeTarget, name: string): void => {
+    const out = this.deathFrameTargets.get(name);
+    if (out === undefined) throw new SpriteError(`Unknown death target "${name}".`);
+    out.x = target.x; out.y = target.y; out.angle = target.angle; out.used = true;
+  };
+  private readonly translateTarget = (target: RuntimeTarget, name: string): void => {
+    if ('used' in target && !target.used) return;
+    const out = this.targetPool.get(name);
+    if (out === undefined) throw new SpriteError(`Unknown sprite target "${name}".`);
+    out.x = target.x - this.targetOrigin.x; out.y = target.y - this.targetOrigin.y; out.angle = target.angle;
+    if (!this.translatedTargets.has(name)) this.translatedTargets.set(name, out);
+  };
+  private readonly lastFrame = {
     time: 0,
     aim: { x: 1, y: 0 },
-    targets: new Map<string, RuntimeTarget>(),
+    targets: this.liveTargets as ReadonlyMap<string, RuntimeTarget>,
   };
 
   private readonly tempMatrixA = new THREE.Matrix4();
@@ -423,7 +478,23 @@ export class SpriteRig {
     for (const name of this.anchors.keys()) this.deathTargets.set(name, { x: 0, y: 0, angle: 0 });
     for (const name of this.targetIds) {
       if (!this.deathTargets.has(name)) this.deathTargets.set(name, { x: 0, y: 0, angle: 0 });
-      this.deathFrameTargets.set(name, { x: 0, y: 0, angle: 0, used: false });
+      const source = { x: 0, y: 0, angle: 0, used: false };
+      this.deathFrameTargets.set(name, source);
+      this.deathTargetEntries.push({ source, target: this.deathTargets.get(name)! });
+      const target = { x: 0, y: 0, angle: 0, used: false };
+      this.frameTargetPool.set(name, target);
+      this.frameTargetEntries.push({ name, target });
+      this.targetPool.set(name, { x: 0, y: 0, angle: 0 });
+      if (!this.anchors.has(name)) this.nonAnchorTargets.push(name);
+    }
+    for (const [name, anchor] of this.anchors) {
+      let target = this.targetPool.get(name);
+      if (target === undefined) {
+        target = { x: 0, y: 0, angle: 0 };
+        this.targetPool.set(name, target);
+      }
+      this.translatedTargets.set(name, target);
+      this.anchorTargetEntries.push({ name, node: anchor.node, target, death: this.deathTargets.get(name)!, setCovered: anchor.setCovered });
     }
     this.prepareCharacterPresentation = options.prepareCharacterPresentation;
     this.onNaturalArmsChange = options.onNaturalArmsChange;
@@ -639,6 +710,7 @@ export class SpriteRig {
       this.preview = preview;
       this.directionalPreview = null;
       this.previewDirectionPose = null;
+      this.preparePreviewPose();
       this.refreshCommittedScene({ forceVisibility: true });
     } catch (error) {
       throw this.spriteFailure(error);
@@ -687,6 +759,7 @@ export class SpriteRig {
       this.preview = null;
       this.directionalPreview = { aim: point(preview.aim) };
     }
+    this.preparePreviewPose();
     this.refreshCommittedScene({ forceVisibility: true });
   }
 
@@ -694,6 +767,20 @@ export class SpriteRig {
     this.assertLive();
     this.resetBasePresentation();
     if (this.dying) this.refreshCommittedScene({ forceVisibility: true });
+  }
+
+  // A presenter that stops feeding this rig invalidates its live frame. Commits then evaluate an unconstrained
+  // pose, with hair interrupted; the next update seeds fresh targets and motion instead of stale host coordinates.
+  forgetLiveFrame(): void {
+    this.assertLive();
+    this.hasFrame = false;
+    this.lastFrame.time = 0;
+    this.lastFrame.aim.x = 1; this.lastFrame.aim.y = 0;
+    this.liveTargets.clear();
+    for (const entry of this.frameTargetEntries) entry.target.used = false;
+    for (const name of this.nonAnchorTargets) this.translatedTargets.delete(name);
+    this.evaluatedBasePose = null;
+    this.resetBasePresentation();
   }
 
   private resetBasePresentation(): void {
@@ -707,6 +794,7 @@ export class SpriteRig {
       this.skeleton.pose = new SkeletonPose(this.skeleton.definition);
       this.skeleton.pose.configureRotation(this.runtimePresentation()?.bones ?? EMPTY_BONES);
       this.skeleton.previewPose = null;
+      this.skeleton.previewFresh = false;
       this.applyArmLengths(this.skeleton);
     }
     if (this.dying && this.hasFrame) this.directionPose.update(this.lastFrame);
@@ -767,7 +855,7 @@ export class SpriteRig {
     const continuing = runtime === null || (this.deathSkeletonPose !== null && pose === this.deathSkeletonPose &&
       this.preview === this.deathPreview && this.directionalPreview === this.deathDirectionalPreview);
     if (continuing) {
-      this.displayedPresentation = this.activePresentation();
+      this.activePresentation();
       this.updateFlipbooks();
     } else {
       // A new skeleton or preview must evaluate its base once before hold reads its numeric world arrays.
@@ -786,7 +874,7 @@ export class SpriteRig {
     }
     if (this.deathBrightness === brightness) return;
     this.deathBrightness = brightness;
-    for (const resource of this.resources.values()) resource.material.color.copy(resource.colour).multiplyScalar(brightness);
+    for (const resource of this.materialResources) resource.material.color.copy(resource.colour).multiplyScalar(brightness);
   }
 
   presentationState() {
@@ -841,35 +929,27 @@ export class SpriteRig {
     if (this.dying) {
       // The directional choice and flipbook frame are captured, but physical targets still move.
       this.lastFrame.time = frame.time;
-      for (const [name, target] of frame.targets) {
-        const out = this.deathFrameTargets.get(name);
-        if (out === undefined) throw new SpriteError(`Unknown death target "${name}".`);
-        out.x = target.x; out.y = target.y; out.angle = target.angle; out.used = true;
-      }
+      frame.targets.forEach(this.copyDeathTarget);
       if (active) this.refreshScene(EMPTY_REFRESH, false, true);
       return;
     }
     if (active) {
-      this.directionPose.update(frame);
+      this.directionPose.update(frame, this.liveDirectionFrame);
       if (this.directionalPreview !== null && this.previewDirectionPose !== null) {
-        if (frame.time < this.lastFrame.time) {
-          this.previewTime = frame.time;
-          this.previewDirectionPose.reset();
-          if (this.skeleton !== null) this.skeleton.previewPose = null;
-        } else {
-          this.previewTime += dt;
-        }
-        this.previewDirectionPose.update({ time: this.previewTime, aim: this.directionalPreview.aim });
+        this.previewTime += dt;
+        this.previewDirectionInput.time = this.previewTime;
+        this.previewDirectionInput.aim = this.directionalPreview.aim;
+        this.previewDirectionPose.update(this.previewDirectionInput, this.previewDirectionFrame);
       }
     } else if (!Number.isFinite(frame.time) || !Number.isFinite(frame.aim.x) || !Number.isFinite(frame.aim.y)) {
       throw new SpriteError('Sprite frame time and aim must be finite.');
     }
     this.hasFrame = true;
-    this.lastFrame = {
-      time: frame.time,
-      aim: { x: frame.aim.x, y: frame.aim.y },
-      targets: new Map([...frame.targets].map(([name, target]) => [name, { ...target }])),
-    };
+    this.lastFrame.time = frame.time;
+    this.lastFrame.aim.x = frame.aim.x; this.lastFrame.aim.y = frame.aim.y;
+    for (const entry of this.frameTargetEntries) entry.target.used = false;
+    frame.targets.forEach(this.copyLiveTarget);
+    for (const { name, target } of this.frameTargetEntries) if (!target.used) this.liveTargets.delete(name);
     if (active) this.refreshScene(EMPTY_REFRESH, true);
   }
 
@@ -1040,6 +1120,10 @@ export class SpriteRig {
     this.detachScene();
     this.disposeLayers(this.layers.values());
     this.layers.clear();
+    this.layerEntries = this.boneLayers = this.tiledLayers = [];
+    this.attachmentEntries = [];
+    this.skeletonMountEntries = [];
+    this.materialResources = [];
     this.rotatedLayers = [];
     this.flipbooks = [];
     this.directionalPreview = null;
@@ -1229,16 +1313,26 @@ export class SpriteRig {
       const boneIndex = new Map(definition.bones.map((bone, index) => [bone.id, index]));
       const inverses = rest.map((bone) => this.composeBoneMatrix(bone).invert());
       const skeleton = new THREE.Skeleton([...bones], inverses);
+      const originWorld = { x: 0, y: 0 };
+      const input = (): SkeletonInput => ({
+        time: 0, origin: originWorld, direction: 'right', targets: EMPTY_TARGETS,
+        clip: null, pose: EMPTY_POSE, constraints: 'disabled', rotation: null,
+      });
       const runtime: SkeletonRuntime = {
         definition,
         pose,
         previewPose: null,
+        previewFresh: false,
         group,
         bones,
         boneIndex,
         skeleton,
         evaluated: rest,
-        originWorld: { x: 0, y: 0 },
+        originWorld,
+        liveInput: input(), previewInput: input(),
+        liveOutput: rest.map(bone => ({ ...bone })), previewOutput: rest.map(bone => ({ ...bone })),
+        liveRotation: { pivot: 'bone-origin', angle: 0 }, previewRotation: { pivot: 'bone-origin', angle: 0 },
+        livePivot: { x: 0, y: 0 }, previewPivot: { x: 0, y: 0 },
       };
       this.applyBoneMatrices(runtime, rest);
       skeleton.update();
@@ -1541,6 +1635,12 @@ export class SpriteRig {
     this.layers = next.layers;
     this.attachments = next.attachments;
     this.skeletonMounts = next.skeletonMounts;
+    this.layerEntries = [...next.layers.values()];
+    this.boneLayers = this.layerEntries.filter((instance): instance is BoneLayerInstance => instance.kind === 'bone');
+    this.tiledLayers = this.layerEntries.filter((instance): instance is TiledLayerInstance => instance.kind !== 'skin' && instance.tile !== null);
+    this.attachmentEntries = [...next.attachments.values()];
+    this.skeletonMountEntries = [...next.skeletonMounts].map(([root, group]) => ({ root, group }));
+    this.materialResources = [...next.resources.values()];
     this.skeleton = next.skeleton;
     this.presentation = next.presentation;
     this.headTrackingPlan = next.headTracking;
@@ -1587,6 +1687,7 @@ export class SpriteRig {
     }
     for (const resource of this.resources.values()) resource.material.color.copy(resource.colour).multiplyScalar(this.deathBrightness);
     this.attachScene();
+    this.preparePreviewPose();
     this.refreshCommittedScene({ forceVisibility: true, notifyCoverage: false });
     for (const [name, covered] of this.coverage) {
       if (previousCoverage.get(name) !== covered) this.anchor(name).setCovered({ covered });
@@ -1619,7 +1720,7 @@ export class SpriteRig {
 
   private refreshScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = EMPTY_REFRESH,
     evaluatePose = !this.dying, physicalDeath = false): void {
-    if (evaluatePose) this.displayedPresentation = this.activePresentation();
+    if (evaluatePose) this.activePresentation();
     const direction = this.displayedPresentation.direction;
     const changedDirection = direction !== this.currentDirection;
     if (changedDirection) this.currentDirection = direction;
@@ -1639,34 +1740,37 @@ export class SpriteRig {
       else if (physicalDeath) this.evaluatePhysicalSkeleton(this.skeleton);
       this.updateBoneAttachments(this.skeleton);
       this.skeleton.group.updateWorldMatrix(true, true);
-      for (const group of this.skeletonMounts.values()) group.updateWorldMatrix(true, true);
+      for (const { group } of this.skeletonMountEntries) group.updateWorldMatrix(true, true);
     }
     if (!this.dying) this.rotateLayers();
-    for (const attachment of this.attachments.values()) {
+    for (const attachment of this.attachmentEntries) {
       // Manual local matrices must follow moving anchors before UV density is measured.
       if (attachment.legacyCount > 0) attachment.group.updateWorldMatrix(true, true, true);
     }
-    for (const instance of this.layers.values()) {
-      if (instance.kind === 'skin' || instance.tile === null || !instance.visible) continue;
+    for (const instance of this.tiledLayers) {
+      if (!instance.visible) continue;
       instance.mesh.updateWorldMatrix(true, false);
       this.updateTileUv(instance);
     }
   }
 
   private activePresentation(): Readonly<DirectionalFrame> {
+    const out = this.displayedPresentation;
     if (this.preview !== null) {
       const index = directionIndex(this.preview.direction);
-      return {
-        direction: this.preview.direction,
-        aimAngle: this.presentation === null ? index * DIRECTION_STEP_DEGREES : this.presentation.directions[index].neutralAngle,
-        targetRotation: 0, displayedRotation: 0,
-      };
+      out.direction = this.preview.direction;
+      out.aimAngle = this.presentation === null ? index * DIRECTION_STEP_DEGREES : this.presentation.directions[index].neutralAngle;
+      out.targetRotation = out.displayedRotation = 0;
+      return out;
     }
+    let source: Readonly<DirectionalFrame>;
     if (this.directionalPreview !== null) {
       if (this.previewDirectionPose === null) throw new SpriteError('Directional preview is missing its presentation state.');
-      return this.previewDirectionPose.snapshot();
-    }
-    return this.directionPose.snapshot();
+      source = this.previewDirectionPose.snapshot();
+    } else source = this.directionPose.snapshot();
+    out.direction = source.direction; out.aimAngle = source.aimAngle;
+    out.targetRotation = source.targetRotation; out.displayedRotation = source.displayedRotation;
+    return out;
   }
 
   private runtimePresentation(): DirectionalPresentation | null {
@@ -1754,17 +1858,17 @@ export class SpriteRig {
 
   private applyDirection(direction: FacingDirection, notifyCoverage: boolean): void {
     const index = directionIndex(direction);
-    for (const instance of this.layers.values()) {
+    for (const instance of this.layerEntries) {
       const visible = this.characterRiggingType === 'sprite-2d' && (instance.directionMask & (1 << index)) !== 0;
       if (visible === instance.visible) continue;
       instance.visible = visible;
       instance.mesh.visible = visible;
     }
-    for (const [name, anchor] of this.anchors) {
+    for (const { name, setCovered } of this.anchorTargetEntries) {
       const covered = this.characterRiggingType === 'sprite-2d';
       if (this.coverage.get(name) === covered) continue;
       this.coverage.set(name, covered);
-      if (notifyCoverage) anchor.setCovered({ covered });
+      if (notifyCoverage) setCovered({ covered });
     }
   }
 
@@ -1774,7 +1878,7 @@ export class SpriteRig {
     runtime.originWorld.x = this.tempWorld.x;
     runtime.originWorld.y = this.tempWorld.y;
     this.positionSkeletonMount(runtime.group, this.root, this.tempWorld);
-    for (const [root, group] of this.skeletonMounts) this.positionSkeletonMount(group, root, this.tempWorld);
+    for (const { root, group } of this.skeletonMountEntries) this.positionSkeletonMount(group, root, this.tempWorld);
   }
 
   private positionSkeletonMount(group: THREE.Group, root: THREE.Object3D, origin: THREE.Vector3): void {
@@ -1787,48 +1891,56 @@ export class SpriteRig {
     group.matrixWorldNeedsUpdate = true;
   }
 
-  private skeletonRotation(runtime: SkeletonRuntime, frame: Readonly<DirectionalFrame>): SkeletonRotation | null {
+  private skeletonRotation(runtime: SkeletonRuntime, frame: Readonly<DirectionalFrame>, preview: boolean): SkeletonRotation | null {
     const presentation = this.runtimePresentation();
     if (presentation === null || !presentation.rotation || presentation.bones.length === 0) return null;
-    return {
-      pivot: this.presentation === null ? 'bone-origin' : {
-        x: this.presentationPivot.x - runtime.originWorld.x, y: this.presentationPivot.y - runtime.originWorld.y,
-      },
-      angle: THREE.MathUtils.degToRad(frame.displayedRotation),
-    };
+    const rotation = preview ? runtime.previewRotation : runtime.liveRotation;
+    const pivot = preview ? runtime.previewPivot : runtime.livePivot;
+    pivot.x = this.presentationPivot.x - runtime.originWorld.x; pivot.y = this.presentationPivot.y - runtime.originWorld.y;
+    rotation.pivot = this.presentation === null ? 'bone-origin' : pivot;
+    rotation.angle = THREE.MathUtils.degToRad(frame.displayedRotation);
+    return rotation;
+  }
+
+  private preparePreviewPose(): void {
+    const runtime = this.skeleton;
+    if (runtime === null || runtime.previewPose !== null || this.preview === null && this.directionalPreview === null) return;
+    runtime.previewPose = new SkeletonPose(runtime.definition);
+    runtime.previewFresh = true;
   }
 
   private evaluateSkeleton(runtime: SkeletonRuntime): void {
     try {
       const live = this.directionPose.snapshot();
       const constraints: 'enabled' | 'disabled' = this.hasFrame ? 'enabled' : 'disabled';
-      const input = {
-        time: this.lastFrame.time,
-        origin: runtime.originWorld,
-        direction: live.direction,
-        targets: this.hasFrame ? this.rigTargets(runtime.originWorld) : EMPTY_TARGETS,
-        clip: this.hasFrame ? runtime.definition.animation : null,
-        pose: EMPTY_POSE,
-        constraints,
-        rotation: this.skeletonRotation(runtime, live),
-      };
+      const input = runtime.liveInput;
+      input.time = this.lastFrame.time;
+      input.direction = live.direction;
+      input.targets = this.hasFrame ? this.rigTargets(runtime.originWorld) : EMPTY_TARGETS;
+      input.clip = this.hasFrame ? runtime.definition.animation : null;
+      input.pose = EMPTY_POSE;
+      input.constraints = constraints;
+      input.rotation = this.skeletonRotation(runtime, live, false);
       // Keep the live braid running independently while an editor preview owns the displayed pose.
       let evaluatedPose = runtime.pose;
-      let bones = evaluatedPose.evaluate(input);
+      let bones = evaluatedPose.evaluate(input, runtime.liveOutput);
       if (this.preview !== null || this.directionalPreview !== null) {
-        if (runtime.previewPose === null) {
-          runtime.previewPose = runtime.pose.fork();
-        }
+        if (runtime.previewPose === null) throw new SpriteError('A sprite preview has no prepared pose.');
         evaluatedPose = runtime.previewPose;
-        bones = evaluatedPose.evaluate({
-          ...input,
-          time: this.preview === null ? this.previewTime : this.preview.time,
-          direction: this.displayedPresentation.direction,
-          clip: this.preview === null ? input.clip : this.preview.clip,
-          pose: this.preview === null ? EMPTY_POSE : this.preview.pose,
-          constraints: this.preview === null ? constraints : this.preview.constraints,
-          rotation: this.skeletonRotation(runtime, this.displayedPresentation),
-        });
+        if (runtime.previewFresh) {
+          evaluatedPose.copyMotionFrom(runtime.pose);
+          runtime.previewFresh = false;
+        }
+        const preview = runtime.previewInput;
+        preview.time = this.preview === null ? this.previewTime : this.preview.time;
+        preview.direction = this.displayedPresentation.direction;
+        preview.targets = input.targets;
+        preview.clip = this.preview === null ? input.clip : this.preview.clip;
+        preview.pose = this.preview === null ? EMPTY_POSE : this.preview.pose;
+        // Without a live frame, neither live nor preview poses have IK targets.
+        preview.constraints = this.hasFrame && this.preview !== null ? this.preview.constraints : constraints;
+        preview.rotation = this.skeletonRotation(runtime, this.displayedPresentation, true);
+        bones = evaluatedPose.evaluate(preview, runtime.previewOutput);
       }
       this.evaluatedBasePose = evaluatedPose;
       runtime.evaluated = bones;
@@ -1840,8 +1952,7 @@ export class SpriteRig {
   }
 
   private updateBoneAttachments(runtime: SkeletonRuntime): void {
-    for (const instance of this.layers.values()) {
-      if (instance.kind !== 'bone') continue;
+    for (const instance of this.boneLayers) {
       const index = runtime.boneIndex.get(instance.boneId);
       if (index === undefined) throw new SpriteError(`Sprite "${instance.data.name}" references a missing bone.`);
       const bone = runtime.bones[index]!.matrixWorld;
@@ -1859,35 +1970,31 @@ export class SpriteRig {
   }
 
   private rigTargets(origin: RuntimePoint): ReadonlyMap<string, RuntimeTarget> {
-    const targets = new Map<string, RuntimeTarget>();
-    for (const [name, anchor] of this.anchors) {
-      anchor.node.getWorldPosition(this.tempWorld);
-      targets.set(name, {
-        x: this.tempWorld.x - origin.x,
-        y: this.tempWorld.y - origin.y,
-        angle: this.worldAngle(anchor.node),
-      });
+    for (const { node, target } of this.anchorTargetEntries) {
+      node.getWorldPosition(this.tempWorld);
+      target.x = this.tempWorld.x - origin.x;
+      target.y = this.tempWorld.y - origin.y;
+      target.angle = this.worldAngle(node);
     }
+    this.targetOrigin = origin;
     const frameTargets = this.dying ? this.deathFrameTargets : this.lastFrame.targets;
-    for (const [name, target] of frameTargets) {
-      if ('used' in target && !target.used) continue;
-      targets.set(name, { x: target.x - origin.x, y: target.y - origin.y, angle: target.angle });
+    frameTargets.forEach(this.translateTarget);
+    for (const name of this.nonAnchorTargets) {
+      const target = frameTargets.get(name);
+      if (target === undefined || 'used' in target && !target.used) this.translatedTargets.delete(name);
     }
-    return targets;
+    return this.translatedTargets;
   }
 
-  // Reused anchor/target records: physical death never enters the allocating live target-copy path.
+  // The held pose has its own pooled target records, so live and captured targets never alias.
   private writeDeathTargets(origin: RuntimePoint): ReadonlyMap<string, RuntimeTarget> {
-    for (const [name, anchor] of this.anchors) {
-      anchor.node.getWorldPosition(this.tempWorld);
-      const out = this.deathTargets.get(name)!;
+    for (const { node, death: out } of this.anchorTargetEntries) {
+      node.getWorldPosition(this.tempWorld);
       out.x = this.tempWorld.x - origin.x; out.y = this.tempWorld.y - origin.y;
-      out.angle = this.worldAngle(anchor.node);
+      out.angle = this.worldAngle(node);
     }
-    for (const [name, target] of this.deathFrameTargets) {
+    for (const { source: target, target: out } of this.deathTargetEntries) {
       if (!target.used) continue;
-      const out = this.deathTargets.get(name);
-      if (out === undefined) throw new SpriteError(`Unknown physical target "${name}".`);
       out.x = target.x - origin.x; out.y = target.y - origin.y; out.angle = target.angle;
     }
     return this.deathTargets;

@@ -11,6 +11,7 @@ export interface DirectionalFrame {
   readonly targetRotation: number;
   readonly displayedRotation: number;
 }
+export type MutableDirectionalFrame = { -readonly [K in keyof DirectionalFrame]: DirectionalFrame[K] };
 
 const RAD_TO_DEG = 180 / Math.PI;
 const AIM_EPSILON = 1e-6;
@@ -64,28 +65,28 @@ export class DirectionalPose {
     this.presentation = presentation === null ? null : validateDirectionalPresentation(presentation);
   }
 
-  // Counts direct initializations: the first update, the first update after reset(), and clock rewinds.
+  // Counts direct initializations: the first update and the first update after an explicit reset().
   get epoch(): number {
     return this.initializations;
   }
 
-  update(input: { readonly time: number; readonly aim: { readonly x: number; readonly y: number } }): Readonly<DirectionalFrame> {
+  // A host may supply a pooled output; without one, the returned frame is an immutable snapshot.
+  update(input: { readonly time: number; readonly aim: { readonly x: number; readonly y: number } },
+    out?: MutableDirectionalFrame): Readonly<DirectionalFrame> {
     requireFinite(input.time, 'Directional time');
     requireFinite(input.aim.x, 'Directional aim X');
     requireFinite(input.aim.y, 'Directional aim Y');
-    const elapsed = this.previousTime === null ? 0 : input.time - this.previousTime;
+    const elapsed = this.previousTime === null ? 0 : Math.max(0, input.time - this.previousTime);
     if (this.presentation !== null && this.previousTime !== null && elapsed === 0) return this.frame;
-    const initialize = this.previousTime === null || elapsed < 0;
+    const initialize = this.previousTime === null;
     if (initialize) this.initializations += 1;
     const zeroAim = Math.hypot(input.aim.x, input.aim.y) <= AIM_EPSILON;
     const radians = zeroAim ? 0 : Math.atan2(input.aim.y, input.aim.x);
     const aimAngle = zeroAim ? (initialize ? 0 : this.frame.aimAngle) : normalizeDegrees(radians * RAD_TO_DEG);
     const presentation = this.presentation;
     if (presentation === null) {
-      return this.store({
-        direction: zeroAim && !initialize ? this.frame.direction : facingDirection(radians),
-        aimAngle, targetRotation: 0, displayedRotation: 0,
-      }, input.time);
+      return this.store(zeroAim && !initialize ? this.frame.direction : facingDirection(radians),
+        aimAngle, 0, 0, input.time, out);
     }
 
     const previousIndex = FACING_DIRECTIONS.indexOf(this.frame.direction);
@@ -106,7 +107,7 @@ export class DirectionalPose {
           rule.minimumRotation, rule.maximumRotation);
       displayedRotation = dampRotation(current, targetRotation, rule, elapsed);
     }
-    return this.store({ direction: rule.direction, aimAngle, targetRotation, displayedRotation }, input.time);
+    return this.store(rule.direction, aimAngle, targetRotation, displayedRotation, input.time, out);
   }
 
   snapshot(): Readonly<DirectionalFrame> {
@@ -118,8 +119,14 @@ export class DirectionalPose {
     this.previousTime = null;
   }
 
-  private store(frame: DirectionalFrame, time: number): Readonly<DirectionalFrame> {
-    this.frame = Object.freeze(frame);
+  private store(direction: FacingDirection, aimAngle: number, targetRotation: number, displayedRotation: number,
+    time: number, out: MutableDirectionalFrame | undefined): Readonly<DirectionalFrame> {
+    const frame = out ?? { direction, aimAngle, targetRotation, displayedRotation };
+    frame.direction = direction;
+    frame.aimAngle = aimAngle;
+    frame.targetRotation = targetRotation;
+    frame.displayedRotation = displayedRotation;
+    this.frame = out === undefined ? Object.freeze(frame) : frame;
     this.previousTime = time;
     return this.frame;
   }

@@ -253,7 +253,7 @@ export class Release {
     // A part the backend selected shows its library model: its profile model is never fetched.
     const replaced = library.replaced(selection);
     session.prefetch(bootSources(manifest, replaced));
-    game.view.reserveParts(replaced);
+    game.view.character.reserveParts(replaced);
     const parts = library.load(selection);
     game.setCharacter({ armIk: manifest.armIk });
     game.setInputBlock({ reason: 'loading', blocked: true });
@@ -263,7 +263,7 @@ export class Release {
       game.loadSprites(primary),
       ...(alternate === null ? [] : [game.loadAlternateSprites(alternate)]),
       ...(this.code.loadCourseArt === null ? [] : [this.code.loadCourseArt(game, manifest.art, content, signal)]),
-      ...(this.code.loadAppearance === null ? [] : [this.code.loadAppearance(game.view.visuals,
+      ...(this.code.loadAppearance === null ? [] : [this.code.loadAppearance(game.view.character.visuals,
         manifest.appearance, { signal, content })]),
       parts,
     ]);

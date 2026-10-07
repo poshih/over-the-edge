@@ -38,7 +38,7 @@ export interface HeldSkeletonFrame {
   readonly targets: ReadonlyMap<string, RigTarget>;
   readonly rootAngle: number;
 }
-type MutableBoneWorld = { -readonly [K in keyof BoneWorld]: BoneWorld[K] };
+export type MutableBoneWorld = { -readonly [K in keyof BoneWorld]: BoneWorld[K] };
 
 const DEG_TO_RAD = Math.PI / 180;
 const EIGHTH_TURN = Math.PI / 4;
@@ -102,8 +102,8 @@ function requireFinite(value: number, label: string): number {
 }
 
 function requirePoint(point: RigPoint, label: string): void {
-  requireFinite(point.x, `${label} X`);
-  requireFinite(point.y, `${label} Y`);
+  if (!Number.isFinite(point.x)) requireFinite(point.x, `${label} X`);
+  if (!Number.isFinite(point.y)) requireFinite(point.y, `${label} Y`);
 }
 
 function requireTarget(target: RigTarget, label: string): void {
@@ -427,6 +427,12 @@ export class SkeletonPose {
   private readonly heldY: Float64Array;
   private readonly heldAngle: Float64Array;
   private readonly heldOutput: MutableBoneWorld[];
+  private readonly poseSeen: Uint8Array;
+  private readonly validateTarget = (target: RigTarget, id: string): void => {
+    if (!Number.isFinite(target.x) || !Number.isFinite(target.y) || !Number.isFinite(target.angle)) {
+      requireTarget(target, `IK target "${id}"`);
+    }
+  };
   private heldRootAngle = 0;
   private heldHeads: readonly { readonly bone: number; readonly x: number; readonly y: number; readonly angle: number; readonly anchor: RigTarget }[] = [];
 
@@ -453,6 +459,7 @@ export class SkeletonPose {
     this.heldY = new Float64Array(definition.bones.length);
     this.heldAngle = new Float64Array(definition.bones.length);
     this.heldOutput = definition.bones.map(bone => ({ id: bone.id, x: 0, y: 0, angle: 0, length: bone.length, scale: 1 }));
+    this.poseSeen = new Uint8Array(definition.bones.length);
 
     for (const pose of definition.poses) this.directionPose.set(pose.direction, compilePose(pose.pose, definition.bones.length, this.indexById));
     for (const clip of definition.clips) this.clips.set(clip.id, compileClip(clip, definition.bones.length, this.indexById));
@@ -499,13 +506,13 @@ export class SkeletonPose {
     }
   }
 
-  fork(): SkeletonPose {
-    const copy = new SkeletonPose(this.definition);
-    copy.lengthScale.set(this.lengthScale);
-    copy.rotationRoots = this.rotationRoots;
-    copy.rotationTopology = this.rotationTopology;
-    copy.hairSolver.copyFrom(this.hairSolver);
-    return copy;
+  // Seeds a preallocated preview after the live frame.
+  copyMotionFrom(source: SkeletonPose): void {
+    if (source.definition !== this.definition) throw new SkeletonError('Motion can only be copied between poses of the same skeleton.');
+    this.lengthScale.set(source.lengthScale);
+    this.rotationRoots = source.rotationRoots;
+    this.rotationTopology = source.rotationTopology;
+    this.hairSolver.copyFrom(source.hairSolver);
   }
 
   // Direction, animation and hair base pose stop at entry. Existing anatomical ownership comes
@@ -576,7 +583,10 @@ export class SkeletonPose {
     pose: readonly BonePose[];
     constraints: 'enabled' | 'disabled';
     rotation?: SkeletonRotation | null;
-  }): readonly BoneWorld[] {
+  }, out?: readonly MutableBoneWorld[]): readonly BoneWorld[] {
+    if (out !== undefined && out.length !== this.definition.bones.length) {
+      throw new SkeletonError('The pose output must have one record per bone.');
+    }
     const time = requireFinite(options.time, 'Pose time');
     requirePoint(options.origin, 'Pose origin');
     if (!FACING_DIRECTION_SET.has(options.direction)) throw new SkeletonError('Choose one of the eight facing directions.');
@@ -610,12 +620,19 @@ export class SkeletonPose {
 
     if (options.constraints === 'disabled') {
       this.hairSolver.interrupt();
-      return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle, this.lengthScale);
+    } else if (this.hair.length > 0) this.solveHair(time, options.origin);
+
+    if (out === undefined) return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle, this.lengthScale);
+    for (let index = 0; index < out.length; index++) {
+      const bone = this.definition.bones[index]!, target = out[index]!;
+      const x = this.worldX[index], y = this.worldY[index], angle = this.worldAngle[index], scale = this.lengthScale[index];
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(angle)) {
+        throw new SkeletonError(`Pose evaluation produced an invalid transform for bone "${bone.id}".`);
+      }
+      target.id = bone.id; target.x = x; target.y = y; target.angle = angle;
+      target.length = bone.length * scale; target.scale = scale;
     }
-
-    if (this.hair.length > 0) this.solveHair(time, options.origin);
-
-    return snapshotPose(this.definition, this.worldX, this.worldY, this.worldAngle, this.lengthScale);
+    return out;
   }
 
   private applyRotation(rotation: SkeletonRotation): void {
@@ -679,15 +696,17 @@ export class SkeletonPose {
   }
 
   private validateRuntimePose(pose: readonly BonePose[], constraints: 'enabled' | 'disabled'): void {
-    const seen = new Set<string>();
+    if (pose.length === 0) return;
+    const seen = this.poseSeen;
+    seen.fill(0);
     for (const entry of pose) {
-      if (seen.has(entry.bone)) throw new SkeletonError(`Pose contains duplicate bone "${entry.bone}".`);
-      seen.add(entry.bone);
       const index = this.indexById.get(entry.bone);
       if (index === undefined) throw new SkeletonError(`Pose references missing bone "${entry.bone}".`);
-      requireFinite(entry.x, `Pose X for "${entry.bone}"`);
-      requireFinite(entry.y, `Pose Y for "${entry.bone}"`);
-      requireFinite(entry.rotation, `Pose rotation for "${entry.bone}"`);
+      if (seen[index] !== 0) throw new SkeletonError(`Pose contains duplicate bone "${entry.bone}".`);
+      seen[index] = 1;
+      if (!Number.isFinite(entry.x)) requireFinite(entry.x, `Pose X for "${entry.bone}"`);
+      if (!Number.isFinite(entry.y)) requireFinite(entry.y, `Pose Y for "${entry.bone}"`);
+      if (!Number.isFinite(entry.rotation)) requireFinite(entry.rotation, `Pose rotation for "${entry.bone}"`);
       if (constraints === 'enabled' && this.fixedJoints[index] !== 0 &&
         (Math.abs(entry.x) > JOINT_TOLERANCE || Math.abs(entry.y) > JOINT_TOLERANCE)) {
         throw new SkeletonError(`Tip-attached bone "${entry.bone}" can rotate, but cannot translate in a constrained pose.`);
@@ -696,9 +715,7 @@ export class SkeletonPose {
   }
 
   private validateTargets(targets: ReadonlyMap<string, RigTarget>): void {
-    for (const [id, target] of targets) {
-      requireTarget(target, `IK target "${id}"`);
-    }
+    targets.forEach(this.validateTarget);
   }
 
   private solveIk(targets: ReadonlyMap<string, RigTarget>, released = false): void {
@@ -749,13 +766,14 @@ export class SkeletonPose {
     this.populateHairTargets(origin);
     this.populateColliderWorld(origin);
     this.hairSolver.solve(time);
-    for (const [index, chain] of this.hair.entries()) this.applyHairPose(chain, this.hairSolver.chains[index], origin);
+    for (let index = 0; index < this.hair.length; index++) this.applyHairPose(this.hair[index], this.hairSolver.chains[index], origin);
     reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle, this.worldX, this.worldY, this.worldAngle,
       this.lengthScale);
   }
 
   private populateHairTargets(origin: RigPoint): void {
-    for (const [chainIndex, chain] of this.hair.entries()) {
+    for (let chainIndex = 0; chainIndex < this.hair.length; chainIndex++) {
+      const chain = this.hair[chainIndex];
       const state = this.hairSolver.chains[chainIndex];
       for (let index = 0; index < chain.bones.length; index += 1) {
         const bone = chain.bones[index];
@@ -763,25 +781,18 @@ export class SkeletonPose {
         state.targetY[index] = this.worldY[bone] + origin.y;
       }
       const last = chain.bones[chain.bones.length - 1];
-      const tip = transformPoint(
-        { x: this.definition.bones[last].length * this.lengthScale[last], y: 0 },
-        { x: this.worldX[last] + origin.x, y: this.worldY[last] + origin.y },
-        this.worldAngle[last],
-      );
-      state.targetX[chain.bones.length] = tip.x;
-      state.targetY[chain.bones.length] = tip.y;
+      const length = this.definition.bones[last].length * this.lengthScale[last], angle = this.worldAngle[last];
+      state.targetX[chain.bones.length] = length * Math.cos(angle) + this.worldX[last] + origin.x;
+      state.targetY[chain.bones.length] = length * Math.sin(angle) + this.worldY[last] + origin.y;
     }
   }
 
   private populateColliderWorld(origin: RigPoint): void {
-    for (const [index, collider] of this.colliders.entries()) {
-      const position = transformPoint(
-        { x: collider.x * this.lengthScale[collider.bone], y: collider.y },
-        { x: this.worldX[collider.bone] + origin.x, y: this.worldY[collider.bone] + origin.y },
-        this.worldAngle[collider.bone],
-      );
-      this.hairSolver.colliderX[index] = position.x;
-      this.hairSolver.colliderY[index] = position.y;
+    for (let index = 0; index < this.colliders.length; index++) {
+      const collider = this.colliders[index], angle = this.worldAngle[collider.bone];
+      const x = collider.x * this.lengthScale[collider.bone], y = collider.y, cos = Math.cos(angle), sin = Math.sin(angle);
+      this.hairSolver.colliderX[index] = x * cos - y * sin + this.worldX[collider.bone] + origin.x;
+      this.hairSolver.colliderY[index] = x * sin + y * cos + this.worldY[collider.bone] + origin.y;
     }
   }
 

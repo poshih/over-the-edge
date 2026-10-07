@@ -337,6 +337,7 @@ export interface WorkshopGame {
   avatar(): WorkshopAvatar | null;
   // Runs the engine's Sway or Jolt, as Character's buttons do, or a preview of the plugin's own, whose offsets are kept
   // within WORKSHOP_PREVIEW_LIMITS.distance of the player; null ends the plugin's own preview. A preview ends early on a
-  // rewind, a restart or another preview.
+  // placement, a restart or another preview. Pauses and tab hiding settle interpolation; only explicit placements rewind
+  // presentation time, and placements also restart lean, head aim, hair and motions, with elapsed time clamped at zero.
   preview(preview: 'sway' | 'jolt' | WorkshopPreview | null): void;
 }

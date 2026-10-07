@@ -6,8 +6,10 @@
 // Each frame the caller writes every chain's targets (and lengths, where they change) and every collider's centre,
 // advances the solver and reads the particles back. solve(time) runs the solver on its own MotionClock: simulation
 // freezes while time stands still, catches up at most MOTION_MAX_STEPS fixed steps, and restarts from the targets on a
-// rewind, after a long gap or after interrupt(). An imported avatar's hair instead takes the steps of the clock its
-// view shares with the avatar's other motions, through advance(). DOM-free and allocation-free per frame.
+// placement interrupt() or after a long gap. An imported avatar's hair instead takes the steps of the clock its
+// view shares with the avatar's other motions, through advance(). Pauses and tab hiding settle interpolation; only
+// explicit placements rewind presentation time, and placements also restart hair, with elapsed time clamped at zero.
+// DOM-free and allocation-free per frame.
 import { MotionClock, MOTION_STEP_SECONDS } from './motion-clock.ts';
 
 // Parameter ranges, shared by every hair format's validation.
@@ -78,6 +80,7 @@ export class HairSolver {
   private readonly solvedColliderY: Float64Array;
   // The clock solve() runs on.
   private readonly clock = new MotionClock();
+  private readonly tipCandidate = { x: 0, y: 0, penetration: 0, distance: 0 };
 
   constructor(chains: readonly { readonly parameters: HairParameters; readonly segments: number }[], colliderRadii: readonly number[]) {
     this.chains = Object.freeze(chains.map(chain => new HairChainState(chain.parameters, chain.segments)));
@@ -103,7 +106,8 @@ export class HairSolver {
     this.colliderY.set(source.colliderY);
     this.solvedColliderX.set(source.solvedColliderX);
     this.solvedColliderY.set(source.solvedColliderY);
-    for (const [index, chain] of this.chains.entries()) {
+    for (let index = 0; index < this.chains.length; index++) {
+      const chain = this.chains[index];
       const from = source.chains[index];
       if (from.lengths.length !== chain.lengths.length) throw new RangeError('Hair state can only be copied between equal chains.');
       chain.lengths.set(from.lengths);
@@ -124,7 +128,11 @@ export class HairSolver {
   // Restarts from the targets, or takes `steps` fixed steps; with none, the chains only follow moved targets and
   // colliders. A chain that never ran restarts either way.
   advance(reset: boolean, steps: number): void {
-    if (reset || this.chains.some(chain => !chain.initialized)) {
+    let fresh = reset;
+    if (!fresh) for (const chain of this.chains) {
+      if (!chain.initialized) { fresh = true; break; }
+    }
+    if (fresh) {
       for (const chain of this.chains) {
         this.resetChain(chain);
         this.constrain(chain, 'kinematic');
@@ -260,17 +268,10 @@ export class HairSolver {
     const distance = Math.hypot(dx, dy), length = chain.lengths[index];
     const desiredX = x + length * (distance > SEGMENT_EPSILON ? dx / distance : this.fallbackX(chain, index));
     const desiredY = y + length * (distance > SEGMENT_EPSILON ? dy / distance : this.fallbackY(chain, index));
-    let bestX = desiredX, bestY = desiredY;
-    let bestPenetration = this.collisionPenetration(chain, bestX, bestY), bestDistance = 0;
-    if (bestPenetration > DISTANCE_EPSILON) {
-      const consider = (candidateX: number, candidateY: number): void => {
-        const penetration = this.collisionPenetration(chain, candidateX, candidateY);
-        const separation = (candidateX - desiredX) ** 2 + (candidateY - desiredY) ** 2;
-        if (penetration < bestPenetration - DISTANCE_EPSILON ||
-          Math.abs(penetration - bestPenetration) <= DISTANCE_EPSILON && separation < bestDistance) {
-          bestX = candidateX; bestY = candidateY; bestPenetration = penetration; bestDistance = separation;
-        }
-      };
+    const best = this.tipCandidate;
+    best.x = desiredX; best.y = desiredY;
+    best.penetration = this.collisionPenetration(chain, desiredX, desiredY); best.distance = 0;
+    if (best.penetration > DISTANCE_EPSILON) {
       for (let collider = 0; collider < this.colliderX.length; collider += 1) {
         const toX = this.colliderX[collider] - x, toY = this.colliderY[collider] - y;
         const centerDistance = Math.hypot(toX, toY);
@@ -280,16 +281,24 @@ export class HairSolver {
         const along = (length ** 2 + centerDistance ** 2 - radius ** 2) / (2 * centerDistance);
         if (Math.abs(along) <= length) {
           const across = Math.sqrt(Math.max(0, length ** 2 - along ** 2));
-          consider(x + axisX * along - axisY * across, y + axisY * along + axisX * across);
-          consider(x + axisX * along + axisY * across, y + axisY * along - axisX * across);
+          this.considerTip(chain, x + axisX * along - axisY * across, y + axisY * along + axisX * across, desiredX, desiredY);
+          this.considerTip(chain, x + axisX * along + axisY * across, y + axisY * along - axisX * across, desiredX, desiredY);
         }
-        consider(x - axisX * length, y - axisY * length);
+        this.considerTip(chain, x - axisX * length, y - axisY * length, desiredX, desiredY);
       }
     }
-    chain.currentX[index + 1] = bestX;
-    chain.currentY[index + 1] = bestY;
+    chain.currentX[index + 1] = best.x;
+    chain.currentY[index + 1] = best.y;
   }
 
+  private considerTip(chain: HairChainState, candidateX: number, candidateY: number, desiredX: number, desiredY: number): void {
+    const best = this.tipCandidate, penetration = this.collisionPenetration(chain, candidateX, candidateY);
+    const separation = (candidateX - desiredX) ** 2 + (candidateY - desiredY) ** 2;
+    if (penetration < best.penetration - DISTANCE_EPSILON ||
+      Math.abs(penetration - best.penetration) <= DISTANCE_EPSILON && separation < best.distance) {
+      best.x = candidateX; best.y = candidateY; best.penetration = penetration; best.distance = separation;
+    }
+  }
   private enforceCollisions(chain: HairChainState, particle: number): void {
     for (let index = 0; index < this.colliderX.length; index += 1) {
       const minimum = this.colliderRadius[index] + chain.parameters.radius;

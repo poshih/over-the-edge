@@ -85,8 +85,9 @@ export interface AvatarMotionSkeleton {
  * between frames.
  */
 export interface AvatarMotionFrame {
-  // Start from rest, taking no steps: the avatar is new, time rewound (a restart rewinds), or it was not simulated
-  // for longer than the catch-up limit.
+  // Start from rest, taking no steps: the avatar is new, the player was explicitly placed, or it was not simulated
+  // for longer than the catch-up limit. Pauses and tab hiding settle interpolation; only explicit placements rewind
+  // presentation time, and placements also restart hair and motions, with elapsed time clamped at zero.
   readonly reset: boolean;
   // Fixed steps to advance: 0 when reset or while time stands still, at most AVATAR_MOTION_MAX_STEPS.
   readonly steps: number;
