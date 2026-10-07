@@ -56,7 +56,7 @@ export function invalidResult(target: Pick<Attributed<unknown>, 'plugin' | 'poin
     target.plugin, target.point);
 }
 
-export function checkSynchronous(result: unknown, target: Pick<Attributed<unknown>, 'plugin' | 'point'>, action: string): void {
+function checkSynchronous(result: unknown, target: Pick<Attributed<unknown>, 'plugin' | 'point'>, action: string): void {
   // A void callback may return an incidental value (for example Array.push's count). Only async work is invalid:
   // a promise would outlive borrowed input or output, and the engine never awaits these callbacks.
   let asynchronous = false;

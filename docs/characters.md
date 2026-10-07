@@ -14,8 +14,8 @@ every model. The hands hold the handle where the profile's [grips](../README.md#
 put them, and its [arm lengths](../README.md#arm-lengths), when set, size the arms.
 The [character figure](#the-character-figure-and-death)—arm lengths, shoulders,
 neck, grips and lean—shapes only the corpse, which never steers the continuing run.
-`Game` ignores character settings, selections and part/head changes after stopping
-or disposal; sprite loads refuse a stopped game and in-flight loads are cancelled.
+`Game` ignores character settings, selections, part/head changes and sprite loads after stopping
+or disposal; a new sprite load resolves without changing anything, and in-flight loads are cancelled.
 
 ## Skinned avatar
 

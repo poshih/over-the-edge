@@ -199,6 +199,11 @@ Each plugin's callbacks receive its own `ReleaseApi`:
 | `halted` | Whether the game has stopped on an error |
 | `modelLibrary` | The [library models](#library-models) the player can swap to |
 
+Pause requests always update the plugin's reason. Only a transition between running and paused
+settles interpolation, clears movement and changes audio; redundant requests do not interrupt play.
+After the game stops or is disposed, input-block requests are ignored. Pause reasons can still
+change, but cannot resume a stopped game.
+
 A store panel of the game's own, which pauses the game while it is open:
 
 ```ts

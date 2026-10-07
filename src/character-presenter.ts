@@ -17,7 +17,7 @@ import type { Transform2 } from './player-pose';
 import { UPPER_BODY_3D } from './sprite-data';
 import type { CharacterPresentation } from './sprite-data';
 
-export type PresenterKind = 'mesh-parts' | 'built-in-avatar' | 'imported-avatar' | 'sprite';
+type PresenterKind = 'mesh-parts' | 'built-in-avatar' | 'imported-avatar' | 'sprite';
 
 // Replaced on a presentation change; no frame rewrites its proportions or grip rotations.
 export interface CharacterStance {

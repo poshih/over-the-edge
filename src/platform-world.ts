@@ -7,7 +7,7 @@ import { sameSurfaceMaterials } from './surfaces';
 import type { SurfaceMaterial, SurfaceMaterials } from './surfaces';
 import type { PlatformDestination } from './trigger-events';
 
-export const PLATFORM_RIDE = { awaySeconds: 0.3 } as const;
+const PLATFORM_RIDE = { awaySeconds: 0.3 } as const;
 const RIDE_AWAY_STEPS = Math.ceil(PLATFORM_RIDE.awaySeconds / PHYSICS.dt);
 
 export interface PlatformPose {

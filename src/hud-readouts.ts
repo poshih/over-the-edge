@@ -75,7 +75,17 @@ export const DEFAULT_HUD_READOUTS: Readonly<Record<HudReadoutName, HudReadoutFac
     unit.className = 'play-readout-unit';
     unit.textContent = settings.height.unit;
     value.append(number, unit);
-    return { update: (frame) => setText(number, formatHeight(settings, frame.height)) };
+    const precision = 10 ** settings.height.decimals;
+    let displayed = NaN;
+    return { update: (frame) => {
+      const product = frame.height * settings.height.scale * precision;
+      const next = Math.round(product);
+      // Near rounding ties, defer to toFixed instead of caching a rounded multiplication.
+      const nearTie = Math.abs(product - Math.floor(product) - 0.5) <= 1e-6;
+      if (next === displayed && !nearTie) return;
+      displayed = nearTie ? NaN : next;
+      setText(number, formatHeight(settings, frame.height));
+    } };
   },
   health: (mount) => {
     const meter = createHealthMeter();
@@ -84,8 +94,12 @@ export const DEFAULT_HUD_READOUTS: Readonly<Record<HudReadoutName, HudReadoutFac
   },
   timer: (mount, settings) => {
     const { value, label } = labelled(mount, 'timer', settings.timer.label);
+    let displayed: number | undefined;
     return { update: (frame) => {
       setText(label, frame.timerRunning ? settings.timer.label : 'TIME STOPPED');
+      const next = Math.floor(Math.max(0, frame.elapsed));
+      if (Object.is(next, displayed)) return;
+      displayed = next;
       setText(value, formatElapsedTime(frame.elapsed));
     } };
   },

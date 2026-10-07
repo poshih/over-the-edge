@@ -88,6 +88,7 @@ export class Game {
   private readonly deviceMovement: Point = { x: 0, y: 0 };
   private readonly pressedSwitches: string[] = [];
   private readonly stepObservers = new Set<StepObserver>();
+  private stepPlacement = 0;
   private readonly renderState: { dt: number; death: DeathFrame | null } = { dt: 0, death: null };
   private hud: HudSettings;
   private death: Dying | null = null;
@@ -221,6 +222,7 @@ export class Game {
   }
 
   start(onFrame: (state: HudFrame) => void): void {
+    if (this.stopped) return;
     if (this.started) throw new Error('The game loop is already running.');
     this.started = true;
     this.audio?.setPaused(this.pauseReasons.size > 0);
@@ -277,10 +279,11 @@ export class Game {
               this.stageSwitches();
               if (this.stopped) return;
               // A trigger or an observer can reset synchronously. Never sample the placement it made.
-              for (const observer of this.stepObservers) {
-                if (this.simulation.placement !== placement || this.stopped) break;
-                observer.step();
-              }
+              const previousPlacement = this.stepPlacement;
+              this.stepPlacement = placement;
+              // forEach preserves live Set delivery without allocating an iterator.
+              try { this.stepObservers.forEach(this.deliverStep); }
+              finally { this.stepPlacement = previousPlacement; }
               if (this.stopped) return;
               if (this.simulation.placement !== placement) {
                 interrupted = true;
@@ -360,13 +363,13 @@ export class Game {
   }
 
   async loadSprites(document: SpriteDocument): Promise<void> {
-    if (this.stopped) throw new Error('Cannot load sprites into a stopped game.');
+    if (this.stopped) return;
     await this.view.character.sprites.replace(document, { signal: this.lifecycle.signal });
   }
 
   // Loads a second character profile for players to switch to; it stays loaded while hidden.
   async loadAlternateSprites(document: SpriteDocument): Promise<void> {
-    if (this.stopped) throw new Error('Cannot load sprites into a stopped game.');
+    if (this.stopped) return;
     await this.view.character.createAlternateCharacter().replace(document, { signal: this.lifecycle.signal });
   }
 
@@ -383,6 +386,7 @@ export class Game {
 
   // New rig settings rebuild the player, so they restart the run like Reset.
   setSettings(settings: Readonly<GameSettings>): void {
+    if (this.stopped) return;
     if (this.simulation.setSettings(settings) === 'restarted') this.restartRun();
   }
 
@@ -409,26 +413,28 @@ export class Game {
     this.view.character.setArmIk(state.armIk);
   }
 
-  setTheme(theme: GameTheme): void { this.view.setTheme(theme); }
+  setTheme(theme: GameTheme): void { if (!this.stopped) this.view.setTheme(theme); }
 
-  setEnemyArt(art: EnemyArtSettings): void { this.view.setEnemyArt(art); }
+  setEnemyArt(art: EnemyArtSettings): void { if (!this.stopped) this.view.setEnemyArt(art); }
 
-  setMedia(media: MediaHost): void { this.presenter.setMedia(media); }
+  setMedia(media: MediaHost): void { if (!this.stopped) this.presenter.setMedia(media); }
 
   // Applies to future messages and deaths; an active death keeps the text and duration it started with.
-  setHud(settings: HudSettings): void { this.hud = settings; }
+  setHud(settings: HudSettings): void { if (!this.stopped) this.hud = settings; }
 
   setPause(options: { reason: string; paused: boolean }): void {
     const wasPaused = this.pauseReasons.size > 0;
     if (options.paused) this.pauseReasons.add(options.reason);
     else this.pauseReasons.delete(options.reason);
+    const paused = this.pauseReasons.size > 0;
+    if (paused === wasPaused) return;
     this.settleInterpolation();
     this.clearMovement();
-    const paused = this.pauseReasons.size > 0;
-    if (this.started && !this.stopped && paused !== wasPaused) this.audio?.setPaused(paused);
+    if (this.started && !this.stopped) this.audio?.setPaused(paused);
   }
 
   setInputBlock(options: { reason: string; blocked: boolean }): void {
+    if (this.stopped) return;
     if (options.blocked) this.inputBlocks.add(options.reason);
     else this.inputBlocks.delete(options.reason);
     if (this.inputBlocks.size > 0) this.clearMovement();
@@ -438,11 +444,20 @@ export class Game {
   // Engine-only recording/diagnostics. Only eligible live steps are sampled; death interrupts before its fatal sample.
   // Runtime plugins observe gameplay moments instead. Returns this observer's removal.
   observeSteps(observer: StepObserver): () => void {
+    if (this.stopped) return () => {};
     this.stepObservers.add(observer);
     return () => { this.stepObservers.delete(observer); };
   }
 
+  private readonly deliverStep = (observer: StepObserver): void => {
+    if (this.stopped || this.simulation.placement !== this.stepPlacement) return;
+    observer.step();
+  };
+
+  private readonly deliverInterrupt = (observer: StepObserver): void => { observer.interrupt(); };
+
   reset(spawn?: Readonly<PlayerSpawn>): void {
+    if (this.stopped) return;
     this.simulation.reset(spawn);
     this.restartRun();
   }
@@ -473,6 +488,7 @@ export class Game {
   }
 
   applyLevel(change: LevelChange): void {
+    if (this.stopped) return;
     if (change.kind === 'replace') this.cancelDeath();
     this.triggers.apply(change);
     this.stageSwitches();
@@ -489,6 +505,7 @@ export class Game {
   }
 
   perform(action: UiAction, options: UiActionOptions = {}): void {
+    if (this.stopped) return;
     switch (action) {
       case 'play':
         this.setPause({ reason: 'user', paused: false });
@@ -585,7 +602,7 @@ export class Game {
     this.simulation.beginDeath();
     this.view.character.beginDeath(this.simulation.frame(1), kind);
     this.clearMovement();
-    for (const observer of this.stepObservers) observer.interrupt();
+    this.stepObservers.forEach(this.deliverInterrupt);
     if (this.death !== dying || this.stopped) return;
     this.presenter.setDeathHeld(true);
     this.triggers.interrupt();

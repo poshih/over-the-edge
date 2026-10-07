@@ -52,7 +52,7 @@ export function momentCue(moment: Moment): AudioCue | null {
   }
 }
 
-export const AUDIO_CONTRACT = instanceContract({
+const AUDIO_CONTRACT = instanceContract({
   returns: 'moment(moment), preview(cue), setPaused(paused), setSettings(settings), setMedia(media), dispose() and, when given, inspect()',
   methods: ['moment', 'preview', 'setPaused', 'setSettings', 'setMedia', 'dispose'],
   optional: ['inspect'],

@@ -72,7 +72,7 @@ export function impactStrength(speed: number): number {
   return Math.min(1, Math.max(0, (speed - IMPACTS.minimumSpeed) / (IMPACTS.fullSpeed - IMPACTS.minimumSpeed)));
 }
 
-export function isMomentType(value: unknown): value is MomentType {
+function isMomentType(value: unknown): value is MomentType {
   return typeof value === 'string' && MOMENT_TYPES.includes(value as MomentType);
 }
 
@@ -100,7 +100,7 @@ export function momentRoutes<T>(consumers: readonly T[], filter: (consumer: T) =
 
 // Engine-internal: the SDK exposes only the read-only moments.
 type MomentSlots = { [T in MomentType]: { -readonly [K in keyof MomentOf<T>]: MomentOf<T>[K] } };
-export type MomentSlot<T extends MomentType> = MomentSlots[T];
+type MomentSlot<T extends MomentType> = MomentSlots[T];
 type MutableCause = { -readonly [K in keyof HurtCause]: HurtCause[K] };
 
 function noCause(): MutableCause {
@@ -137,7 +137,7 @@ export interface MomentWriter {
   append<T extends MomentType>(type: T, placement: number, time: number): MomentSlot<T>;
 }
 
-export interface MomentBatch { readonly moments: readonly Moment[]; readonly count: number }
+interface MomentBatch { readonly moments: readonly Moment[]; readonly count: number }
 
 class MomentBuffer implements MomentBatch {
   readonly moments: Moment[] = [];

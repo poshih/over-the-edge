@@ -131,7 +131,7 @@ export interface CorpseReading {
   readonly headMargin: number;
 }
 
-export function solvePlanarArm(shoulder: Readonly<Point>, target: Readonly<Point>, upper: number, forearm: number,
+function solvePlanarArm(shoulder: Readonly<Point>, target: Readonly<Point>, upper: number, forearm: number,
   pole: Readonly<Point>, down: Readonly<Point>, out: DeathArmPose): void {
   const dx = target.x - shoulder.x, dy = target.y - shoulder.y, distance = Math.hypot(dx, dy);
   const nx = distance < 1e-9 ? down.x : dx / distance;

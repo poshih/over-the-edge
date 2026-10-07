@@ -42,7 +42,7 @@ export const DEFAULT_EFFECTS: Readonly<{ readonly strikes: MomentEffectFactory; 
   lava: () => new LavaFire(),
 });
 
-export const EFFECT_CONTRACT = instanceContract({
+const EFFECT_CONTRACT = instanceContract({
   returns: 'a three.js root, a course, actors or marks pass, a valid optional moments filter, moment(moment), update(frame) and dispose()',
   methods: ['moment', 'update', 'dispose'],
   root: true,

@@ -33,7 +33,7 @@ import type { CharacterPresentation, SpriteDocument } from './sprite-data';
 import { SPRITE_ARM_SLOTS, SpritePresenter } from './sprite-presenter';
 import { DEFAULT_WAIST_LEAN } from './waist-lean';
 
-export const MAX_CHARACTER_PROFILES = 2;
+const MAX_CHARACTER_PROFILES = 2;
 export const HAMMER_PARTS: ReadonlySet<VisualPartId> = new Set(['hammer-shaft', 'hammer-head']);
 export const PROP_PARTS: ReadonlySet<VisualPartId> = new Set(['pot', 'hammer-shaft', 'hammer-head']);
 export const DEFAULT_PRESENTATION: CharacterPresentation = Object.freeze({
@@ -73,7 +73,7 @@ type OwnedPreparedAvatar = PreparedAvatar & { readonly lease: CharacterModelLeas
 
 // One loaded character profile. Its sprite rig, models and views are built once and kept while
 // another profile is shown, so switching profiles only changes what is attached and visible.
-export interface CharacterSlot {
+interface CharacterSlot {
   readonly index: number;
   readonly rig: SpriteRig;
   readonly presenter: SpritePresenter;
