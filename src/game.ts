@@ -42,6 +42,7 @@ import type { GameEvent, GameObserver } from './game-events';
 import { GameNotifications, stageCause } from './game-notifications';
 import type { HurtCause } from './hazards';
 import { HURT_EFFECTS } from './hurt-effects';
+import { BLOCK_EFFECTS } from './block-effects';
 import { AUDIO } from './game-audio';
 import { LOOKS } from './object-looks';
 import { checkSynchronous, PluginError } from './plugins/kernel';
@@ -89,6 +90,7 @@ export class Game {
   private readonly bonfirePlugin: string | null;
   private readonly switchPlugin: string | null;
   private readonly hurtPlugin: string | null;
+  private readonly blockPlugin: string | null;
   private hurtPlacement: number;
   private readonly observers: Attributed<GameObserver>[] = [];
   private readonly devices: Attributed<InputDevice>[] = [];
@@ -170,6 +172,7 @@ export class Game {
     this.bonfirePlugin = options.plugins.owner(LOOKS.bonfire);
     this.switchPlugin = options.plugins.owner(LOOKS.switch);
     this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
+    this.blockPlugin = options.plugins.owner(BLOCK_EFFECTS);
     this.hud = options.hud ?? DEFAULT_HUD;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     const listen = { signal: this.lifecycle.signal };
@@ -339,6 +342,11 @@ export class Game {
           }
           if (interrupted) this.accumulator = 0;
           else if (this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
+          // The held or released hammer blocks even during death; never gate its effects on vulnerability.
+          const blocks = this.simulation.takeBlocks();
+          for (let index = 0; index < blocks.count; index++) {
+            if (!this.stopped) this.pending.block(blocks.hits[index]!, this.simulation.placement);
+          }
           if (this.death === null && !interrupted) {
             const hurt = this.simulation.takeHurt();
             if (hurt !== null) {
@@ -894,6 +902,18 @@ export class Game {
           if (error instanceof PluginError && error.plugin === this.hurtPlugin && error.point === HURT_EFFECTS.id) throw error;
           throw new PluginError('plugin-failed', `Plugin "${this.hurtPlugin ?? 'engine'}" failed applying "${HURT_EFFECTS.id}".`,
             this.hurtPlugin, HURT_EFFECTS.id, { cause: error });
+        }
+      }
+      for (let index = 0; index < batch.blockCount; index++) {
+        if (this.lifecycle.signal.aborted) return;
+        const notice = batch.blocks[index]!;
+        if (notice.placement !== this.simulation.placement) continue;
+        try {
+          this.view.block(notice.hit);
+        } catch (error) {
+          if (error instanceof PluginError && error.plugin === this.blockPlugin && error.point === BLOCK_EFFECTS.id) throw error;
+          throw new PluginError('plugin-failed', `Plugin "${this.blockPlugin ?? 'engine'}" failed applying "${BLOCK_EFFECTS.id}".`,
+            this.blockPlugin, BLOCK_EFFECTS.id, { cause: error });
         }
       }
       // b. Audio: the same source order as the gameplay notifications, with impacts already limited.

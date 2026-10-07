@@ -1,7 +1,7 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, hurt effects, death pose and screen, object,
+camera following, backdrop, aim marks, hurt and block effects, death pose and screen, object,
 enemy and phantom looks, scene layers, audio, event messages, gameplay observers, key bindings
 and additional input devices; character choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
@@ -542,6 +542,117 @@ To draw one source your own way and keep the others, wrap the point the same way
 source's hits out of what you forward to the base. Replace the point instead to draw every cause
 your own way. The same causes reach [gameplay observers](#gameplay-events) on `hurt` and `death`,
 for sounds or scores of a game's own.
+
+## Block effects
+
+`BLOCK_EFFECTS`, the slot `scene.block-effects`, holds a `BlockEffectsFactory`,
+`() => BlockEffects`: what shows where a projectile strikes the hammer head, independently
+of the character's [hurt effects](#hurt-effects).
+
+```ts
+interface BlockEffects {
+  readonly root: Object3D;
+  block(hit: Readonly<ProjectileBlock>): void;
+  update(frame: SceneFrame): boolean;
+  dispose(): void;
+}
+
+interface ProjectileBlock {
+  readonly trap: string;        // the ID of the trap that fired the projectile
+  readonly x: number;           // where the bolt struck the head, in world metres
+  readonly y: number;
+  readonly directionX: number;  // the projectile's unit flight direction
+  readonly directionY: number;
+  readonly normalX: number;     // the head's outward unit surface normal there
+  readonly normalY: number;
+}
+```
+
+- `block` receives each projectile stopped by the hammer head, whether held or released.
+  It runs after the frame's physics steps and before drawing, once per block, including
+  during death and while the character is unharmed. A projectile that hurt the character
+  first is not also a block. Terrain and platform stops do not call this point.
+  `hit` is borrowed: copy the scalar fields you keep. Pending blocks from a superseded
+  player placement, restart or replacement level are dropped before delivery.
+- `update` runs on each drawn frame from a `block` until it returns `false`, then not again
+  until the next block, so an idle point costs nothing. It receives the borrowed
+  [`SceneFrame`](#scene-layers), reused by the engine; return `true` while anything still
+  shows. Anything else than a boolean is an error.
+- There is no `clear`: blocks stay where they struck, not on the character or hammer,
+  and can finish when the player returns to a bonfire. A restart rewinds `frame.time`;
+  end the bursts when time moves backward.
+
+The root draws in **marks**, over the characters and their arms, **under the tool**, held
+or released. **All its materials must use `depthTest: false`**; `depthWrite: false` leaves
+the depth shared by arms and tool alone, as the [pass rules](#pass-rules-for-presentation-points)
+require. Reuse geometry, materials and scratch; allocate nothing on a block or drawn frame.
+The engine detaches the root before `dispose`. This is presentation only: it changes
+neither health nor the hammer's motion, and adds no gameplay event or audio cue.
+
+`DEFAULT_BLOCK_EFFECTS` shows a projectile-sized **cold white-steel flash**, a glint and
+a small ring, six centimetres off the contact point along the outward normal, on the
+obstacle line. Sparks glance off the head along the reflected flight
+`r = d - 2 * (d · n) * n`, fanned toward the outward normal, cooling to dim blue-grey as
+they slow and fall. The burning bolt breaks into glowing chips that drop from the strike.
+It reads differently from the hot orange flash and back-spray of a character hit.
+
+The default shares the instanced burst implementation and shader sources with the hurt
+effects, but owns a separate root and four-burst pool. The oldest is replaced when full,
+so a three-shot burst shows each block. It needs no textures, reuses its geometry,
+materials and scratch, allocates nothing per block or frame, and hides its root while idle.
+A rewound drawn time ends the old bursts before newly delivered blocks start.
+
+To keep the engine's effect and add one of your own, wrap the point and forward every
+method. This adds a short blue ring at the strike:
+
+```ts
+import { Group, Mesh, MeshBasicMaterial, RingGeometry } from 'three';
+import { BLOCK_EFFECTS, defineRuntime, wrap } from '../../src/plugins/runtime-sdk';
+import type { BlockEffectsFactory } from '../../src/plugins/runtime-sdk';
+
+const withRing = (previous: BlockEffectsFactory): BlockEffectsFactory => () => {
+  const base = previous();
+  const ring = new Mesh(new RingGeometry(0.12, 0.16, 32),
+    new MeshBasicMaterial({ color: 0xa8d9ff, transparent: true, depthTest: false, depthWrite: false }));
+  ring.visible = false;
+  const root = new Group().add(base.root, ring);
+  let start: number | null = null;
+  let pending = false;
+  let lastTime = 0;
+  return {
+    root,
+    block(hit) {
+      base.block(hit);
+      // Copy what is kept: the hit is borrowed.
+      ring.position.set(hit.x + hit.normalX * 0.06, hit.y + hit.normalY * 0.06, 0);
+      pending = true;
+    },
+    update(frame) {
+      const showing = base.update(frame);
+      if (frame.time < lastTime) { start = null; pending = false; }
+      lastTime = frame.time;
+      if (pending) { pending = false; start = frame.time; }
+      if (start === null) { ring.visible = false; return showing; }
+      const age = frame.time - start;
+      ring.scale.setScalar(1 + age * 4);
+      ring.material.opacity = Math.max(0, 1 - age / 0.25);
+      ring.visible = age >= 0 && age < 0.25;
+      if (!ring.visible) start = null;
+      return showing || ring.visible;
+    },
+    dispose() {
+      base.dispose();
+      ring.geometry.dispose();
+      ring.material.dispose();
+    },
+  };
+};
+
+export default defineRuntime({ start: () => [wrap(BLOCK_EFFECTS, withRing)] });
+```
+
+Replace the point instead to draw every block your own way. Replacing it does not
+change the character's hurt effects or how projectiles are stopped.
 
 ## Death sequence
 
@@ -1156,8 +1267,8 @@ still stages fatal hurt effects, but only the `fall` gameplay event and cue.
 physics-step loop runs. After the loop, and before rendering, it flushes:
 
 1. Enemy look changes in order, the bonfire look's latest lit set at most once, then hits and
-   placements for the [hurt effects](#hurt-effects) in order, whether or not anything else
-   consumes events.
+   placements for the [hurt effects](#hurt-effects) in order, followed by
+   [projectile blocks](#block-effects), whether or not anything else consumes events.
 2. Audio, mapping those gameplay events to the existing cues and authored sounds in source order.
    `restart` and `respawn` have no cues.
 3. Gameplay observers: each event in source order, with observers called in manifest order.
@@ -1166,10 +1277,10 @@ Terrain changes stay synchronous and engine-only. No look, audio output, gamepla
 input device runs inside `Simulation.step` or a physics callback. Notifications from asynchronous
 trigger continuations or a reset between frames join the next flush, even while paused.
 Notifications raised by delivery callbacks join the following flush, not the batch being
-delivered. Hurt notices carry their placement: superseded notices cannot ignite a newly
-placed character, and its clear is applied before drawing even when a delivery callback
-resets again. Started world-anchored bursts can still finish. Pools grow only when a burst
-exceeds their previous high-water capacity.
+delivered. Hurt and block notices carry their placement: superseded notices cannot ignite
+a newly placed character or show an old block, and its hurt clear is applied before drawing
+even when a delivery callback resets again. Started world-anchored bursts can still finish.
+Pools grow only when a burst exceeds their previous high-water capacity.
 
 Events are **read-only borrowed objects, reused by the engine**. Read them only during
 `event`; never retain one or compare it with an event from an earlier call. Save scalar fields
@@ -1414,7 +1525,7 @@ Defaults and replacements do work only while presenting; do not add an idle anim
 factory, the engine's own or an earlier plugin's, and returns the factory the game uses. The
 previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS`,
 `DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP`, `DEFAULT_AIM_MARKS`,
-`DEFAULT_HURT_EFFECTS`, `DEFAULT_DEATH_SCREEN` and `DEFAULT_CHARACTER_CHOICE` are the engine's
+`DEFAULT_HURT_EFFECTS`, `DEFAULT_BLOCK_EFFECTS`, `DEFAULT_DEATH_SCREEN` and `DEFAULT_CHARACTER_CHOICE` are the engine's
 own factories, the points' bases, for a plugin that replaces a point but draws the engine's
 part inside its own. Forward every contract method explicitly when wrapping an instance;
 its methods may live on a prototype, so spreading it does not copy them.
@@ -1460,7 +1571,7 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
 - Points reject non-function factories or writers. Creating a readout, director, backdrop, marks,
-  hurt effects, death screen, look, layer, audio output, toast presenter, character choice,
+  hurt or block effects, death screen, look, layer, audio output, toast presenter, character choice,
   gameplay observer or input device
   checks the returned object's required and optional methods and, where applicable, roots
   and passes. A factory, or a wrap, that throws fails with `plugin-failed`; a malformed return
@@ -1476,7 +1587,7 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   the plugin and point; a thrown callback is `plugin-failed` with its cause.
 - Audio and toasts require their lifecycle methods, and an optional `inspect` must be a
   function. Popup/video results must be promises of a valid `EventOutcome`, and a toast's
-  `show` must return a boolean, as hurt effects' `update` must; malformed results fail with
+  `show` must return a boolean, as hurt and block effects' `update` must; malformed results fail with
   `invalid-contribution`, naming the plugin and point.
 - At facet startup, contribution validation, point resolution or consumer creation, a refusal
   stops the environment that encounters it with a fatal error naming the plugin. The engine

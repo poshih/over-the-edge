@@ -2,16 +2,17 @@ import {
   AdditiveBlending, DoubleSide, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, PlaneGeometry,
   ShaderMaterial,
 } from 'three';
-import type { HurtCause } from './hazards';
-import type { HurtEffects } from './hurt-effects';
+import type { HurtCause, ProjectileBlock } from './hazards';
+import { OBSTACLE_LINE } from './obstacle-line';
 import type { SceneFrame } from './scene-layer';
 
 // Where a blade or a projectile strikes the character, a burst shows the blow: a flash with a glint, a ring rushing
 // outward and sparks thrown the way the hit knocks the character, cooling as they fly and falling. A blade also leaves
 // a bright slash across the character, and a burning bolt breaks into glowing chips. Bursts stay where the blow landed,
-// so one still plays out where the character fell when it comes back at a bonfire.
+// so one still plays out where the character fell when it comes back at a bonfire. A projectile blocked by the hammer
+// instead flashes steel-white and throws sparks along its reflected flight, with the bolt's chips dropping from it.
 const BURST = {
-  // Bursts showing at once; a hit lands at most once a second, so a few is plenty.
+  // Bursts showing at once, replacing the oldest so several shots at the hammer show together.
   count: 4,
   // How long each part lasts, in seconds; the slash draws in `slashDraw`, then fades.
   flash: 0.14, ring: 0.32, slashDraw: 0.06, slash: 0.28,
@@ -23,14 +24,18 @@ const BURST = {
   life: 0.8,
   // In front of the obstacle line, so in perspective it lies over the character.
   depth: 0.7,
+  // A block starts just off the struck face, in metres along its outward normal.
+  blockOffset: 0.06,
 } as const;
 
-// How each kind of blow looks: a cold steel flash and slash for a blade, a hot one for a burning bolt. Colours in linear
-// light, sizes in metres, and how widely sparks spread about their direction, in radians.
+// How each impact looks: cold steel for a blade or a block, hot for a bolt hitting the character. Colours in linear
+// light, sizes in metres, and the spark fan's spread in radians.
 const LOOK = {
   axe: { flash: [0.75, 0.86, 1], ring: [0.45, 0.6, 0.9], flashSize: 1.5, ringSize: 1.7, spread: 0.85 },
   projectile: { flash: [1, 0.72, 0.38], ring: [0.9, 0.5, 0.2], flashSize: 1.1, ringSize: 1.2, spread: 1.1 },
+  block: { flash: [0.82, 0.92, 1], ring: [0.6, 0.78, 1], flashSize: 1.1, ringSize: 1.2, spread: 0.65 },
 } as const;
+type BurstKind = keyof typeof LOOK;
 const SLASH = [0.85, 0.94, 1] as const;
 
 // Quads lit by a colour each, from an instance attribute.
@@ -174,8 +179,8 @@ function setTint(tint: InstancedBufferAttribute, index: number, color: readonly 
   values[index * 3 + 2] = color[2]! * brightness;
 }
 
-/** The engine's blow effects: a burst where a blade or a projectile strikes the character. Other hits show none. */
-export class HitBursts implements HurtEffects {
+/** Shared instanced impact bursts; each presentation point owns its own pool and root. */
+export class HitBursts {
   readonly root = new Group();
   private readonly flashes = tintedQuads(FLASH_FRAGMENT, BURST.count, 12);
   private readonly rings = tintedQuads(RING_FRAGMENT, BURST.count, 11);
@@ -186,14 +191,15 @@ export class HitBursts implements HurtEffects {
   private readonly slashState: InstancedBufferAttribute;
   private readonly matrix = new Matrix4();
   // Each burst: when it started in run time, -1 while its slot is free; where the blow landed; the unit direction it
-  // knocked the character; whether a blade dealt it; and which side the character was knocked to (-1 or 1).
+  // travels; which kind of impact it was; and which side the character was knocked to (-1 or 1).
   private readonly born = new Float64Array(BURST.count).fill(-1);
   private readonly x = new Float32Array(BURST.count);
   private readonly y = new Float32Array(BURST.count);
   private readonly dirX = new Float32Array(BURST.count);
   private readonly dirY = new Float32Array(BURST.count);
-  private readonly blade = new Uint8Array(BURST.count);
+  private readonly kind = Array<BurstKind>(BURST.count).fill('projectile');
   private readonly side = new Float32Array(BURST.count);
+  private readonly order = new Float64Array(BURST.count);
   // Each spark's and chip's starting velocity, life and size, and each chip's starting angle and spin.
   private readonly sparkVX = new Float32Array(BURST.count * BURST.sparks);
   private readonly sparkVY = new Float32Array(BURST.count * BURST.sparks);
@@ -205,13 +211,17 @@ export class HitBursts implements HurtEffects {
   private readonly chipSize = new Float32Array(BURST.count * BURST.chips);
   private readonly chipAngle = new Float32Array(BURST.count * BURST.chips);
   private readonly chipSpin = new Float32Array(BURST.count * BURST.chips);
-  // Blows that arrived since the last drawn frame, which starts them: where, which way and whether by a blade.
+  // The latest impacts since the last drawn frame, which starts them: where, which way, which kind and, for a block,
+  // the outward normal its sparks spread toward.
   private readonly pendingX = new Float32Array(BURST.count);
   private readonly pendingY = new Float32Array(BURST.count);
-  private readonly pendingPushX = new Float32Array(BURST.count);
-  private readonly pendingPushY = new Float32Array(BURST.count);
-  private readonly pendingBlade = new Uint8Array(BURST.count);
+  private readonly pendingDirX = new Float32Array(BURST.count);
+  private readonly pendingDirY = new Float32Array(BURST.count);
+  private readonly pendingKind = Array<BurstKind>(BURST.count).fill('projectile');
+  private readonly pendingNormalX = new Float32Array(BURST.count);
+  private readonly pendingNormalY = new Float32Array(BURST.count);
   private pending = 0;
+  private pendingHead = 0;
   private active = 0;
   // Every burst started so far, which seeds the next one's sparks and chips.
   private started = 0;
@@ -232,28 +242,44 @@ export class HitBursts implements HurtEffects {
 
   hurt(cause: Readonly<HurtCause>): void {
     if ((cause.source !== 'axe' && cause.source !== 'projectile') || this.pending === BURST.count) return;
-    const index = this.pending++;
-    this.pendingX[index] = cause.x;
-    this.pendingY[index] = cause.y;
-    this.pendingPushX[index] = cause.pushX;
-    this.pendingPushY[index] = cause.pushY;
-    this.pendingBlade[index] = cause.source === 'axe' ? 1 : 0;
+    this.queue(cause.source, cause.x, cause.y, cause.pushX, cause.pushY, 0, 0);
+  }
+
+  block(hit: Readonly<ProjectileBlock>): void {
+    const dot = hit.directionX * hit.normalX + hit.directionY * hit.normalY;
+    const reflectedX = hit.directionX - 2 * dot * hit.normalX;
+    const reflectedY = hit.directionY - 2 * dot * hit.normalY;
+    this.queue('block', hit.x + hit.normalX * BURST.blockOffset, hit.y + hit.normalY * BURST.blockOffset,
+      reflectedX, reflectedY, hit.normalX, hit.normalY);
+  }
+
+  private queue(kind: BurstKind, x: number, y: number, directionX: number, directionY: number, normalX: number, normalY: number): void {
+    const index = (this.pendingHead + this.pending) % BURST.count;
+    if (this.pending < BURST.count) this.pending++;
+    else this.pendingHead = (this.pendingHead + 1) % BURST.count;
+    this.pendingX[index] = x;
+    this.pendingY[index] = y;
+    this.pendingDirX[index] = directionX;
+    this.pendingDirY[index] = directionY;
+    this.pendingKind[index] = kind;
+    this.pendingNormalX[index] = normalX;
+    this.pendingNormalY[index] = normalY;
   }
 
   // Bursts stay where the blow landed, so placing the player anew leaves them to play out.
   clear(): void {}
 
-  update(frame: SceneFrame): boolean {
+  update(frame: SceneFrame, rewind: 'discard-pending' | 'keep-pending' = 'discard-pending'): boolean {
     const time = frame.time;
     if (this.pending === 0 && this.active === 0) {
       this.lastTime = time;
       return false;
     }
-    // A rewound run time, at a restart, ends every burst.
-    if (time < this.lastTime) this.reset();
+    // A rewound run time ends the old bursts; blocks delivered for this frame can still start afterward.
+    if (time < this.lastTime) this.reset(rewind === 'discard-pending');
     this.lastTime = time;
-    for (let index = 0; index < this.pending; index++) this.start(index, time);
-    this.pending = 0;
+    for (let index = 0; index < this.pending; index++) this.start((this.pendingHead + index) % BURST.count, time);
+    this.pending = this.pendingHead = 0;
     for (let burst = 0; burst < BURST.count; burst++) {
       if (this.born[burst]! < 0) continue;
       const age = time - this.born[burst]!;
@@ -278,9 +304,9 @@ export class HitBursts implements HurtEffects {
     }
   }
 
-  private reset(): void {
+  private reset(discardPending: boolean): void {
     for (let burst = 0; burst < BURST.count; burst++) if (this.born[burst]! >= 0) this.end(burst);
-    this.pending = 0;
+    if (discardPending) this.pending = this.pendingHead = 0;
   }
 
   // Starts the pending blow in `index`, in a free slot or, with none, the oldest burst's.
@@ -291,31 +317,48 @@ export class HitBursts implements HurtEffects {
         burst = slot;
         break;
       }
-      if (this.born[slot]! < this.born[burst]!) burst = slot;
+      if (this.born[slot]! < this.born[burst]! ||
+        (this.born[slot] === this.born[burst] && this.order[slot]! < this.order[burst]!)) burst = slot;
     }
-    if (this.born[burst]! < 0) this.active++;
-    const blade = this.pendingBlade[index] === 1;
-    const pushX = this.pendingPushX[index]!, pushY = this.pendingPushY[index]!;
+    if (this.born[burst]! >= 0) this.end(burst);
+    this.active++;
+    const kind = this.pendingKind[index]!;
+    const blade = kind === 'axe', blocked = kind === 'block';
+    const pushX = this.pendingDirX[index]!, pushY = this.pendingDirY[index]!;
     const push = Math.hypot(pushX, pushY);
     this.born[burst] = time;
     this.x[burst] = this.pendingX[index]!;
     this.y[burst] = this.pendingY[index]!;
     this.dirX[burst] = push > 0 ? pushX / push : 0;
     this.dirY[burst] = push > 0 ? pushY / push : 1;
-    this.blade[burst] = blade ? 1 : 0;
+    this.kind[burst] = kind;
     this.side[burst] = pushX < 0 ? -1 : 1;
-    const seed = this.started++ * 131;
-    const look = blade ? LOOK.axe : LOOK.projectile;
+    this.order[burst] = this.started++;
+    const seed = this.order[burst]! * 131;
+    const look = LOOK[kind];
     const toward = Math.atan2(this.dirY[burst]!, this.dirX[burst]!);
+    const normalX = this.pendingNormalX[index]!, normalY = this.pendingNormalY[index]!;
+    const normalAngle = Math.atan2(normalY, normalX);
     for (let spark = 0; spark < BURST.sparks; spark++) {
       const at = burst * BURST.sparks + spark;
-      // A blade throws its sparks the way it knocks the character; a bolt sprays most of them back from where it
-      // struck, the rest on along its flight.
-      const back = !blade && spark % 9 < 5;
-      const angle = (back ? toward + Math.PI : toward) + (seeded(seed + spark, 1) - 0.5) * 2 * (back ? look.spread : look.spread * 0.5);
       const speed = between(BURST.sparkSpeed, seeded(seed + spark, 2));
-      this.sparkVX[at] = Math.cos(angle) * speed;
-      this.sparkVY[at] = Math.sin(angle) * speed;
+      if (blocked) {
+        // Fan the reflected flight toward the outward normal; both directions stay off the struck face.
+        const angle = normalAngle + (seeded(seed + spark, 1) - 0.5) * 2 * look.spread;
+        const fan = 0.6 * seeded(seed + spark, 11);
+        const dx = this.dirX[burst]! * (1 - fan) + Math.cos(angle) * fan;
+        const dy = this.dirY[burst]! * (1 - fan) + Math.sin(angle) * fan;
+        const length = Math.hypot(dx, dy);
+        this.sparkVX[at] = dx / length * speed;
+        this.sparkVY[at] = dy / length * speed;
+      } else {
+        // A blade throws its sparks the way it knocks the character; a bolt sprays most of them back from where it
+        // struck, the rest on along its flight.
+        const back = !blade && spark % 9 < 5;
+        const angle = (back ? toward + Math.PI : toward) + (seeded(seed + spark, 1) - 0.5) * 2 * (back ? look.spread : look.spread * 0.5);
+        this.sparkVX[at] = Math.cos(angle) * speed;
+        this.sparkVY[at] = Math.sin(angle) * speed;
+      }
       this.sparkLife[at] = between(BURST.sparkLife, seeded(seed + spark, 3));
       this.sparkSize[at] = 0.7 + 0.6 * seeded(seed + spark, 4);
     }
@@ -323,8 +366,8 @@ export class HitBursts implements HurtEffects {
       const at = burst * BURST.chips + chip;
       const angle = toward + (seeded(seed + chip, 5) - 0.5) * 1.8;
       const speed = between(BURST.chipSpeed, seeded(seed + chip, 6));
-      this.chipVX[at] = Math.cos(angle) * speed;
-      this.chipVY[at] = Math.sin(angle) * speed + 1.5;
+      this.chipVX[at] = Math.cos(angle) * speed * (blocked ? 0.45 : 1);
+      this.chipVY[at] = blocked ? -speed * (0.25 + 0.5 * seeded(seed + chip, 5)) : Math.sin(angle) * speed + 1.5;
       this.chipLife[at] = between(BURST.chipLife, seeded(seed + chip, 7));
       this.chipSize[at] = between(BURST.chipSize, seeded(seed + chip, 8));
       this.chipAngle[at] = seeded(seed + chip, 9) * Math.PI * 2;
@@ -345,12 +388,14 @@ export class HitBursts implements HurtEffects {
   // Draws the burst in slot `burst`, `age` seconds after it started.
   private place(burst: number, age: number): void {
     const x = this.x[burst]!, y = this.y[burst]!;
-    const blade = this.blade[burst] === 1;
-    const look = blade ? LOOK.axe : LOOK.projectile;
+    const kind = this.kind[burst]!;
+    const blade = kind === 'axe';
+    const look = LOOK[kind];
+    const depth = kind === 'block' ? OBSTACLE_LINE : BURST.depth;
     const flash = age / BURST.flash;
     if (flash < 1) {
       const size = look.flashSize * (0.55 + 0.45 * Math.sqrt(flash));
-      this.flashes.mesh.setMatrixAt(burst, this.matrix.makeScale(size, size, 1).setPosition(x, y, BURST.depth));
+      this.flashes.mesh.setMatrixAt(burst, this.matrix.makeScale(size, size, 1).setPosition(x, y, depth));
       setTint(this.flashes.tint, burst, look.flash, (1 - flash) ** 2 * 1.4);
     } else {
       this.flashes.mesh.setMatrixAt(burst, HIDDEN);
@@ -358,7 +403,7 @@ export class HitBursts implements HurtEffects {
     const ring = age / BURST.ring;
     if (ring < 1) {
       const size = look.ringSize * (0.25 + 0.75 * (1 - (1 - ring) ** 3));
-      this.rings.mesh.setMatrixAt(burst, this.matrix.makeScale(size, size, 1).setPosition(x, y, BURST.depth));
+      this.rings.mesh.setMatrixAt(burst, this.matrix.makeScale(size, size, 1).setPosition(x, y, depth));
       setTint(this.rings.tint, burst, look.ring, (1 - ring) ** 1.5 * 0.9);
     } else {
       this.rings.mesh.setMatrixAt(burst, HIDDEN);
@@ -373,7 +418,7 @@ export class HitBursts implements HurtEffects {
       this.slashes.setMatrixAt(burst, this.matrix.set(
         cos * side, -sin, 0, x,
         sin * side, cos, 0, y + 0.1,
-        0, 0, 1, BURST.depth,
+        0, 0, 1, depth,
         0, 0, 0, 1,
       ));
       setTint(this.slashTint, burst, SLASH, 1);
@@ -383,15 +428,16 @@ export class HitBursts implements HurtEffects {
     } else {
       this.slashes.setMatrixAt(burst, HIDDEN);
     }
-    this.placeSparks(burst, age, x, y);
-    if (!blade) this.placeChips(burst, age, x, y);
+    this.placeSparks(burst, age, x, y, depth);
+    if (!blade) this.placeChips(burst, age, x, y, depth);
   }
 
-  // Sparks fly from where the blow landed, slowing and falling, each a streak along its flight that cools from white
-  // through orange to red as it dies.
-  private placeSparks(burst: number, age: number, x: number, y: number): void {
+  // Sparks fly from the strike, slowing and falling, each a streak along its flight. Character hits cool from white
+  // through orange to red; steel blocks cool to dim blue-grey.
+  private placeSparks(burst: number, age: number, x: number, y: number, depth: number): void {
     const drag = BURST.sparkDrag, fall = BURST.sparkGravity / drag;
     const slowed = 1 - Math.exp(-drag * age);
+    const blocked = this.kind[burst] === 'block';
     for (let spark = 0; spark < BURST.sparks; spark++) {
       const at = burst * BURST.sparks + spark;
       const life = this.sparkLife[at]!;
@@ -411,20 +457,26 @@ export class HitBursts implements HurtEffects {
       this.sparks.mesh.setMatrixAt(at, this.matrix.set(
         cos * length, -sin * width, 0, sx - cos * length / 2,
         sin * length, cos * width, 0, sy - sin * length / 2,
-        0, 0, 1, BURST.depth,
+        0, 0, 1, depth,
         0, 0, 0, 1,
       ));
       const left = 1 - age / life;
       const glow = left ** 1.2 * 1.8;
       const values = this.sparks.tint.array as Float32Array;
-      values[at * 3] = glow;
-      values[at * 3 + 1] = glow * (0.25 + 0.6 * left);
-      values[at * 3 + 2] = glow * (0.05 + 0.5 * left * left);
+      if (blocked) {
+        values[at * 3] = glow * (0.32 + 0.6 * left);
+        values[at * 3 + 1] = glow * (0.45 + 0.52 * left);
+        values[at * 3 + 2] = glow * (0.6 + 0.4 * left);
+      } else {
+        values[at * 3] = glow;
+        values[at * 3 + 1] = glow * (0.25 + 0.6 * left);
+        values[at * 3 + 2] = glow * (0.05 + 0.5 * left * left);
+      }
     }
   }
 
   // A burning bolt's chips tumble away from where it struck, falling and dimming.
-  private placeChips(burst: number, age: number, x: number, y: number): void {
+  private placeChips(burst: number, age: number, x: number, y: number, depth: number): void {
     const drag = BURST.chipDrag, fall = BURST.chipGravity / drag;
     const slowed = 1 - Math.exp(-drag * age);
     for (let chip = 0; chip < BURST.chips; chip++) {
@@ -443,7 +495,7 @@ export class HitBursts implements HurtEffects {
       this.chips.mesh.setMatrixAt(at, this.matrix.set(
         cos * 1.6, -sin, 0, cx,
         sin * 1.6, cos, 0, cy,
-        0, 0, 1, BURST.depth,
+        0, 0, 1, depth,
         0, 0, 0, 1,
       ));
       const glow = left * 1.6;

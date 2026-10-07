@@ -3,7 +3,7 @@ import type { AABBValue, Body, Fixture, World } from 'planck';
 import { PHYSICS } from './config';
 import type { Point } from './config';
 import { AXE, axeAngle, axeBlade, axeReach, HURT_BOX, SHOOTER } from './hazards';
-import type { Bounds } from './hazards';
+import type { Bounds, ProjectileBlock } from './hazards';
 import { isTrapObject } from './level';
 import type { AxeObject, LevelChange, ShooterObject, TrapObject } from './level';
 
@@ -22,6 +22,8 @@ export interface HazardHooks {
   readonly vulnerable: () => boolean;
   // A hit: its damage, the velocity it adds to the player, the trap that dealt it and where it struck, in world metres.
   readonly hurt: (damage: number, push: Readonly<Point>, source: 'projectile' | 'axe', trap: string, atX: number, atY: number) => void;
+  // A projectile stopped by the hammer head, held or released. Borrowed: copy what is kept.
+  readonly block: (hit: Readonly<ProjectileBlock>) => void;
 }
 
 interface Shooter {
@@ -102,6 +104,10 @@ export class HazardWorld {
   private readonly rayFrom = new Vec2();
   private readonly rayTo = new Vec2();
   private rayStop = 1;
+  private rayShield = false;
+  private readonly rayBlock: { -readonly [K in keyof ProjectileBlock]: ProjectileBlock[K] } = {
+    trap: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0,
+  };
   private disposed = false;
 
   constructor(world: World, objects: readonly TrapObject[], hooks: HazardHooks) {
@@ -230,6 +236,7 @@ export class HazardWorld {
       this.rayFrom.set(shot.x, shot.y);
       this.rayTo.set(toX, toY);
       this.rayStop = 1;
+      this.rayShield = false;
       if (distance > 0) this.world.rayCast(this.rayFrom, this.rayTo, this.stopRay);
       if (vulnerable && this.enters(shot.x, shot.y, toX - shot.x, toY - shot.y)) {
         // Only the first hit of a step hurts: the player then cannot be hurt for a while.
@@ -243,6 +250,12 @@ export class HazardWorld {
         continue;
       }
       if (this.rayStop < 1 || shot.travelled + distance >= SHOOTER.range) {
+        if (this.rayStop < 1 && this.rayShield) {
+          this.rayBlock.trap = shot.trap;
+          this.rayBlock.directionX = shot.directionX;
+          this.rayBlock.directionY = shot.directionY;
+          this.hooks.block(this.rayBlock);
+        }
         this.discard(index);
         continue;
       }
@@ -324,12 +337,20 @@ export class HazardWorld {
   };
 
   // The nearest terrain or hammer head along the ray; everything else lets projectiles through.
-  private readonly stopRay = (fixture: Fixture, _point: Vec2, _normal: Vec2, fraction: number): number => {
-    if (fixture !== this.hooks.shield()) {
+  private readonly stopRay = (fixture: Fixture, point: Vec2, normal: Vec2, fraction: number): number => {
+    const shield = fixture === this.hooks.shield();
+    if (!shield) {
       const body = fixture.getBody();
       if (!this.hooks.isTerrain(body) || this.hooks.insideTerrain(body, this.rayFrom)) return -1;
     }
+    if (fraction > this.rayStop) return this.rayStop;
     this.rayStop = fraction;
+    this.rayShield = shield;
+    // Planck may reuse the callback vectors; keep only their scalar fields.
+    this.rayBlock.x = point.x;
+    this.rayBlock.y = point.y;
+    this.rayBlock.normalX = normal.x;
+    this.rayBlock.normalY = normal.y;
     return fraction;
   };
 

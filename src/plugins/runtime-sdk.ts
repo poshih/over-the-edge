@@ -26,6 +26,8 @@ export { AIM_MARKS, DEFAULT_AIM_MARKS } from '../aim-marks';
 export type { AimMarks, AimMarksFactory } from '../aim-marks';
 export { DEFAULT_HURT_EFFECTS, HURT_EFFECTS } from '../hurt-effects';
 export type { HurtEffects, HurtEffectsFactory } from '../hurt-effects';
+export { BLOCK_EFFECTS, DEFAULT_BLOCK_EFFECTS } from '../block-effects';
+export type { BlockEffects, BlockEffectsFactory } from '../block-effects';
 export { DEFAULT_DEATH_POSE, DEATH_POSE } from '../death-pose';
 export type {
   DeathAppearance, DeathArmPose, DeathLayout, DeathPose, DeathPoseInput, DeathPoseWriter,
@@ -55,7 +57,7 @@ export type { DeathPlayerFrame, LivePlayerFrame, PlayerFrameState } from '../pla
 export type { PlatformPose } from '../platform-world';
 export type { ProjectilePose } from '../hazard-world';
 export { AXE, axeAngle, BONFIRE, HURT_SOURCES, SHOOTER } from '../hazards';
-export type { HurtCause, HurtSource } from '../hazards';
+export type { HurtCause, HurtSource, ProjectileBlock } from '../hazards';
 export { triggerBounds } from '../level';
 export type { AxeObject, BonfireObject, LevelObject, PlatformObject, PoolObject, ShooterObject, TriggerObject } from '../level';
 export { AUDIO, SILENT_AUDIO_OUTPUT } from '../game-audio';

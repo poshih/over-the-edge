@@ -1,6 +1,6 @@
 import type { EnemyEvent } from './enemy-types';
 import type { GameEvent } from './game-events';
-import type { HurtCause, HurtSource } from './hazards';
+import type { HurtCause, HurtSource, ProjectileBlock } from './hazards';
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type EventType = GameEvent['type'];
@@ -49,6 +49,11 @@ export interface HurtNotice {
   readonly cause: Readonly<HurtCause>;
 }
 
+export interface BlockNotice {
+  readonly placement: number;
+  readonly hit: Readonly<ProjectileBlock>;
+}
+
 /**
  * One reusable batch. Pools and ordered storage retain their high-water capacity, growing only on larger bursts.
  * Enemy poses and lit sets are immutable snapshots supplied by the simulation; only their envelopes are pooled here.
@@ -62,6 +67,8 @@ export class GameNotifications {
   switches: readonly string[] | null = null;
   readonly hurts: HurtNotice[] = [];
   hurtCount = 0;
+  readonly blocks: BlockNotice[] = [];
+  blockCount = 0;
   private readonly pools: { [T in EventType]: EventOf<T>[] } = {
     hurt: [], death: [], fall: [], respawn: [], restart: [], bonfire: [],
     'enemy-hit': [], 'enemy-defeat': [], impact: [], launch: [], finish: [], sound: [],
@@ -78,7 +85,8 @@ export class GameNotifications {
   private removeCount = 0;
 
   get pending(): boolean {
-    return this.eventCount > 0 || this.enemyCount > 0 || this.lit !== null || this.switches !== null || this.hurtCount > 0;
+    return this.eventCount > 0 || this.enemyCount > 0 || this.lit !== null || this.switches !== null ||
+      this.hurtCount > 0 || this.blockCount > 0;
   }
 
   event<T extends EventType>(type: T): EventOf<T> {
@@ -130,12 +138,31 @@ export class GameNotifications {
     notice.placement = placement;
   }
 
+  block(hit: Readonly<ProjectileBlock>, placement: number): void {
+    let notice = this.blocks[this.blockCount] as Mutable<BlockNotice> | undefined;
+    if (notice === undefined) {
+      notice = { placement, hit: { trap: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0 } };
+      this.blocks[this.blockCount] = notice;
+    }
+    notice.placement = placement;
+    const staged: Mutable<ProjectileBlock> = notice.hit;
+    staged.trap = hit.trap;
+    staged.x = hit.x;
+    staged.y = hit.y;
+    staged.directionX = hit.directionX;
+    staged.directionY = hit.directionY;
+    staged.normalX = hit.normalX;
+    staged.normalY = hit.normalY;
+    this.blockCount++;
+  }
+
   clear(): void {
     this.eventCount = 0;
     this.enemyCount = 0;
     this.lit = null;
     this.switches = null;
     this.hurtCount = 0;
+    this.blockCount = 0;
     this.resetCount = this.upsertCount = this.removeCount = 0;
     for (const type of EVENT_TYPES) this.used[type] = 0;
   }

@@ -29,7 +29,7 @@ import type { ProjectilePose } from './hazard-world';
 import { Bonfires } from './bonfires';
 import type { BonfireState } from './bonfires';
 import { bonfireSpawn, HEALTH } from './hazards';
-import type { HurtCause, HurtSource } from './hazards';
+import type { HurtCause, HurtSource, ProjectileBlock } from './hazards';
 import { LiquidWorld } from './liquid-world';
 import type { HealthReading } from './health-meter';
 import { PlatformWorld } from './platform-world';
@@ -119,6 +119,9 @@ export class Simulation {
   private hurtTaken = false;
   // What dealt the latest hit that took health: reused, and read at once by whoever is given it.
   private readonly cause: { -readonly [K in keyof HurtCause]: HurtCause[K] } = { source: 'enemy', id: '', x: 0, y: 0, pushX: 0, pushY: 0 };
+  // Blocks since the last take; storage keeps its high-water capacity.
+  private readonly blocks = { hits: [] as { -readonly [K in keyof ProjectileBlock]: ProjectileBlock[K] }[], count: 0 };
+  private blockCount = 0;
   // How many times the player has been placed: at every restart and every return to a bonfire.
   private placements = 0;
   private disposed = false;
@@ -169,6 +172,7 @@ export class Simulation {
         this.hurt(damage, source, trap, atX, atY, push.x, push.y);
         changePlayerVelocity(this.rig, push);
       },
+      block: (hit) => this.block(hit),
     });
     this.bonfires = new Bonfires(level.objects.filter(isBonfireObject));
     this.liquids = new LiquidWorld(level.objects.filter(isPoolObject));
@@ -281,6 +285,7 @@ export class Simulation {
     this.platforms.reset();
     this.enemies.reset(this.elapsed);
     this.hazards.reset(this.elapsed);
+    this.blockCount = this.blocks.count = 0;
     this.bonfires.reset();
   }
 
@@ -368,6 +373,15 @@ export class Simulation {
     const taken = this.hurtTaken;
     this.hurtTaken = false;
     return taken ? this.cause : null;
+  }
+
+  // Projectile blocks since the previous take, also during death. The batch, its array and hits are borrowed:
+  // consume the first `count` hits immediately, never retain them. Only a larger batch grows the pool.
+  takeBlocks(): { readonly hits: readonly ProjectileBlock[]; readonly count: number } {
+    this.ensureLive();
+    this.blocks.count = this.blockCount;
+    this.blockCount = 0;
+    return this.blocks;
   }
 
   // What dealt the latest hit that took health; after a death, the killing one. Reused and read-only: consume it
@@ -683,6 +697,7 @@ export class Simulation {
     this.impactSpeed = 0;
     this.health = this.settings.physics.health;
     this.hurtTaken = false;
+    this.blockCount = this.blocks.count = 0;
     this.placements++;
     this.aim = this.initialAim();
     this.lastAimInput = this.elapsed;
@@ -696,6 +711,22 @@ export class Simulation {
 
   private vulnerable(): boolean {
     return !this.dying && this.health > 0 && this.elapsed >= this.safeUntil;
+  }
+
+  private block(hit: Readonly<ProjectileBlock>): void {
+    let staged = this.blocks.hits[this.blockCount];
+    if (staged === undefined) {
+      staged = { trap: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0 };
+      this.blocks.hits[this.blockCount] = staged;
+    }
+    staged.trap = hit.trap;
+    staged.x = hit.x;
+    staged.y = hit.y;
+    staged.directionX = hit.directionX;
+    staged.directionY = hit.directionY;
+    staged.normalX = hit.normalX;
+    staged.normalY = hit.normalY;
+    this.blockCount++;
   }
 
   // Takes `damage` from the player's health, dealt by the level object `id` striking at (x, y) and knocking the player

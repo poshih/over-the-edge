@@ -22,6 +22,23 @@ export interface HurtCause {
   readonly pushY: number;
 }
 
+export interface ProjectileBlock {
+  // The ID of the trap that fired the projectile.
+  readonly trap: string;
+  // Where the bolt struck the hammer head, in world metres.
+  readonly x: number;
+  // Where the bolt struck the hammer head, in world metres.
+  readonly y: number;
+  // The projectile's unit flight direction, x component.
+  readonly directionX: number;
+  // The projectile's unit flight direction, y component.
+  readonly directionY: number;
+  // The head's outward unit surface normal at the strike, x component.
+  readonly normalX: number;
+  // The head's outward unit surface normal at the strike, y component.
+  readonly normalY: number;
+}
+
 export const HEALTH = {
   // A hit leaves the player unharmed this long, so one blow counts once.
   hurtSeconds: 1,

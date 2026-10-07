@@ -104,7 +104,7 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
 - **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
-  aim marks, hurt effects, death pose and screen, object, enemy and phantom looks,
+  aim marks, hurt and block effects, death pose and screen, object, enemy and phantom looks,
   scene layers, audio, message presentation,
   gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
   studio previews and releases; character choice in releases and studio previews;
@@ -936,10 +936,13 @@ A **projectile trap** fires from its muzzle, its position, along its rotation: a
 Set **Fires** to **Only when triggered** for a trap that never shoots on its own: a trigger can
 start a burst, where First shot is the delay after the trigger and Shot interval is the time
 between burst shots. Projectiles fly straight for up to 40 m. Terrain and elevator platforms
-stop them, and so does the hammer head, which makes the hammer a
-shield. Terrain stops them only from outside, so a muzzle set into a wall's face shoots
-out of it. A hit costs the trap's **Damage** and knocks the player along the shot, and
-where it strikes the burning bolt bursts in a hot flash, sparks and glowing chips.
+stop them, and so does the hammer head, which makes the hammer a shield. When the head
+stops one, held or released, the bolt breaks against it in a steel flash with sparks
+glancing off and glowing chips dropping: a game's
+[block effects](docs/runtime-plugins.md#block-effects) can draw that strike its own way.
+Terrain stops them only from outside, so a muzzle set into a wall's face shoots out of it.
+A hit on the character costs the trap's **Damage** and knocks the player along the shot,
+and where it strikes the burning bolt bursts in a hot flash, sparks and glowing chips.
 
 A **swinging axe** hangs its blade **Length** below its pivot, its position, and swings in
 and out of the view, toward the camera and away, up to 63° either side, once every
