@@ -346,6 +346,12 @@ export class Game {
     return this.stopped;
   }
 
+  // Engine-only boot measurement; reading the input gates never changes them.
+  acceptsInput(): boolean {
+    return this.started && !this.stopped && this.pauseReasons.size === 0 && this.inputBlocks.size === 0
+      && document.visibilityState === 'visible' && this.death === null && !this.presenter.coversGame;
+  }
+
   get dying(): boolean { return this.death !== null; }
 
   get deathKind(): DeathKind | null { return this.death?.info.kind ?? null; }

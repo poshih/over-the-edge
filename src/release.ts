@@ -30,6 +30,8 @@ import type { PhantomBuild, Phantoms } from './phantoms';
 import { readSelection, ReleaseModelLibrary } from './release-library';
 import { EMPTY_SELECTION } from './model-library';
 import type { ModelSelection } from './model-library';
+import type { HudFrame } from './hud-readouts';
+import { ReleaseMeasurements } from './release-measurements';
 
 // Code the shell includes only when its content needs it, chosen at build time.
 export interface ReleaseCode {
@@ -82,6 +84,7 @@ export class Release {
   private fatalDisplay: Attributed<FatalDisplay>;
   private readonly code: ReleaseCode;
   private readonly lifecycle = new AbortController();
+  private readonly measurements = new ReleaseMeasurements();
   private readonly ui: ReturnType<typeof createPlayUI>;
   private plugins: ReleasePlugins | null = null;
   private loading: Attempt | null = null;
@@ -98,6 +101,7 @@ export class Release {
   }
 
   async run(): Promise<void> {
+    this.measurements.start();
     try {
       const contentUrl = new URL(this.code.pins.contentUrl, document.baseURI).href;
       this.plugins = await ReleasePlugins.start(this.code.releasePlugins, {
@@ -131,6 +135,8 @@ export class Release {
         } catch (error) {
           // A game that stopped itself has shown why; the loads it cancelled say nothing new.
           const halted = this.loading?.game?.halted === true;
+          this.measurements.mark(this.lifecycle.signal.aborted ? 'aborted' : 'failed',
+            this.loading?.session ?? null);
           this.discardAttempt();
           if (this.lifecycle.signal.aborted || halted && isAbort(error)) return;
           if (!(error instanceof ContentError)) throw error;
@@ -140,6 +146,8 @@ export class Release {
       }
       this.play(this.loaded);
     } catch (error) {
+      this.measurements.mark(this.lifecycle.signal.aborted ? 'aborted' : 'failed',
+        this.loading?.session ?? this.loaded?.session ?? null);
       const disposal = new Disposal();
       disposal.run(() => this.discardAttempt());
       disposal.run(() => this.discardLoaded());
@@ -153,6 +161,8 @@ export class Release {
   dispose(): void {
     const disposal = new Disposal();
     disposal.run(() => this.lifecycle.abort(new DOMException('The release closed.', 'AbortError')));
+    disposal.run(() => this.measurements.mark('aborted', this.loading?.session ?? this.loaded?.session ?? null));
+    disposal.run(() => this.measurements.close());
     disposal.run(() => this.discardAttempt());
     disposal.run(() => this.discardLoaded());
     disposal.run(() => this.ui.dispose());
@@ -199,6 +209,7 @@ export class Release {
   }
 
   private async load(access: ContentAccess): Promise<Loaded> {
+    this.measurements.beginAttempt();
     const lifecycle = new AbortController();
     const signal = AbortSignal.any([this.lifecycle.signal, lifecycle.signal]);
     const plugins = RuntimePlugins.start(this.code.runtimePlugins, {
@@ -214,6 +225,7 @@ export class Release {
       (selection): { selection: ModelSelection; error: Error | null } => ({ selection, error: null }),
       (error: unknown) => ({ selection: EMPTY_SELECTION, error: error instanceof Error ? error : new Error(String(error)) }));
     const manifest = await session.manifest(signal);
+    this.measurements.mark('manifest-ready', session);
     const { selection, error: selectionError } = await selectionRead;
     signal.throwIfAborted();
     const content: ContentLoader = (source, request) => session.bytes(source, request);
@@ -271,6 +283,7 @@ export class Release {
     const failures = await library.show(await parts);
     for (const failure of selectionError === null ? failures : [selectionError, ...failures]) this.modelFailed(failure);
     session.forgetDownloads();
+    this.measurements.mark('boot-content-loaded', session);
     this.loading = null;
     return { session, manifest, game, audio, audioDevice, library, plugins, lifecycle };
   }
@@ -299,6 +312,7 @@ export class Release {
     if (game.halted) return;
     game.selectCharacter(this.ui.enableCharacters());
     game.setInputBlock({ reason: 'loading', blocked: false });
+    this.measurements.mark('loading-unblocked', loaded.session);
     this.plugins!.notify(READY, (plugin): ReleaseApi => {
       const api: ReleaseApi = Object.freeze({
         setPause: (paused: boolean) => game.setPause({ reason: `release:${plugin}`, paused }),
@@ -317,6 +331,14 @@ export class Release {
         packs: manifest.phantoms, content: (source, request) => loaded.session.bytes(source, request),
       });
     }
-    game.start((state) => this.ui.update(state));
+    let onFrame: (state: HudFrame) => void = (state) => {
+      if (game.acceptsInput()) {
+        this.measurements.mark('input-enabled', loaded.session);
+        // Once measured, frames go straight to the HUD with no more input probes.
+        onFrame = (state) => this.ui.update(state);
+      }
+      this.ui.update(state);
+    };
+    game.start((state) => onFrame(state));
   }
 }

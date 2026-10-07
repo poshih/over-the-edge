@@ -68,6 +68,13 @@ export interface ContentProgress {
   readonly total: number;
 }
 
+export interface ContentStatistics {
+  readonly payloadBytesRead: number;
+  readonly verifiedBytes: number;
+  readonly requests: number;
+  readonly retries: number;
+}
+
 interface HeldGrant {
   readonly grant: ContentGrant;
   // Whether the grant arrived with time to spare. One that did not (a short lifetime, or a clock
@@ -164,6 +171,10 @@ export class ContentSession {
   private active = 0;
   private loaded = 0;
   private total = 0;
+  private payloadBytesRead = 0;
+  private verifiedBytes = 0;
+  private requests = 0;
+  private retries = 0;
 
   constructor(options: { access: ContentAccess; pins: ContentPins; onProgress?: (progress: ContentProgress) => void }) {
     this.access = options.access;
@@ -231,6 +242,13 @@ export class ContentSession {
   // Drops downloads kept for boot; grants stay for later requests.
   forgetDownloads(): void {
     this.cached.clear();
+  }
+
+  statistics(): ContentStatistics {
+    return {
+      payloadBytesRead: this.payloadBytesRead, verifiedBytes: this.verifiedBytes,
+      requests: this.requests, retries: this.retries,
+    };
   }
 
   dispose(): void {
@@ -345,6 +363,7 @@ export class ContentSession {
       for (let attempt = 0; ; attempt++) {
         const watchdog = new Watchdog(signal);
         try {
+          if (attempt > 0) this.retries++;
           const response = await this.request(held.grant, path, watchdog);
           if ((response.status === 401 || response.status === 403) && attempt === 0) {
             await response.body?.cancel().catch(() => undefined);
@@ -358,6 +377,7 @@ export class ContentSession {
           if (await sha256Hex(bytes) !== pathHash(path)) {
             throw new ContentError('integrity', `Content ${path} does not match its SHA-256; it changed after the build.`, { path });
           }
+          this.verifiedBytes += bytes.byteLength;
           return bytes;
         } finally {
           watchdog.stop();
@@ -370,6 +390,7 @@ export class ContentSession {
 
   private async request(grant: ContentGrant, path: string, watchdog: Watchdog): Promise<Response> {
     try {
+      this.requests++;
       return await fetch(grant.urls.get(path)!, { credentials: grant.credentials, signal: watchdog.signal });
     } catch {
       if (watchdog.caller.aborted) throw aborted(watchdog.caller);
@@ -396,6 +417,7 @@ export class ContentSession {
           throw new ContentError('unavailable', `Content ${path} could not be downloaded completely.`, { path });
         }
         if (chunk.done) break;
+        this.payloadBytesRead += chunk.value.byteLength;
         watchdog.arm();
         if (offset + chunk.value.byteLength > expected) {
           reader.cancel().catch(() => undefined);
