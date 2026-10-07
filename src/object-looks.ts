@@ -13,7 +13,7 @@ import type { AxeObject, BonfireObject, LevelObject, PlatformObject, PoolObject,
 import type { PhantomPose, PhantomTool } from './phantom-format';
 import { PoolView } from './pool-view';
 import { PlatformView } from './platform-view';
-import type { PlatformPose } from './platform-world';
+import type { PlatformFrame, PlatformPose } from './platform-world';
 import { ProjectileView, ShooterView } from './shooter-view';
 import { SwitchView } from './switch-view';
 import { UpdraftView } from './updraft-view';
@@ -55,10 +55,10 @@ export interface SwitchLook extends ObjectLook<TriggerObject> {
 
 export interface PlatformLook {
   readonly passes: LookPasses;
-  // Authored platforms at load and only when they change; never change the objects themselves.
+  // Authored platforms at load and only when they change; never mutate them. Retain existing IDs' drawn positions.
   set(objects: readonly PlatformObject[]): void;
-  // Borrowed drawn poses, reused each frame while the level has platforms.
-  update(poses: readonly PlatformPose[], time: number): void;
+  // Only changed drawn poses, not membership. The array and poses are borrowed until the next frame.
+  update(changes: readonly PlatformPose[], time: number): void;
   dispose(): void;
   inspect?(): unknown;
 }
@@ -67,6 +67,7 @@ export interface ProjectileLook {
   readonly passes: LookPasses;
   // Called every frame while the level has shooters or projectiles fly, plus one final empty update when both end.
   // Each projectile has its tip at its position and flies along its angle.
+  // The array and poses are borrowed until the next frame; copy any values kept.
   update(projectiles: readonly ProjectilePose[], time: number): void;
   dispose(): void;
   inspect?(): unknown;
@@ -352,9 +353,13 @@ export class LevelLooks {
     this.switch.setPressed(ids);
   }
 
-  update(time: number, projectiles: readonly ProjectilePose[], enemies: readonly EnemyPose[], platforms: readonly PlatformPose[]): void {
+  update(time: number, projectiles: readonly ProjectilePose[], enemies: readonly EnemyPose[], platforms: PlatformFrame): void {
     for (const { look } of this.active) look.update(time);
-    if (this.hasPlatforms) this.platform.update(platforms, time);
+    if (this.hasPlatforms) {
+      const revision = platforms.revision;
+      this.platform.update(platforms.changes, time);
+      platforms.acknowledge(revision);
+    }
     if (this.hasEnemies) this.enemies.update(enemies, time);
     if (this.hasShooters || projectiles.length > 0) {
       this.projectile.update(projectiles, time);

@@ -33,7 +33,7 @@ import type { HurtCause, HurtSource, ProjectileBlock } from './hazards';
 import { LiquidWorld } from './liquid-world';
 import type { HealthReading } from './health-meter';
 import { PlatformWorld } from './platform-world';
-import type { PlatformPose } from './platform-world';
+import type { PlatformFrame } from './platform-world';
 import type { DeathKind } from './death-sequence';
 import { PlayerDeathError, validateDeathSeed, writeRagdollPose } from './player-ragdoll';
 import { copyDeathPose, createDeathPose, interpolateDeathPose, interpolateTransform } from './player-pose';
@@ -55,7 +55,7 @@ export interface PhysicsFrame {
   cursor: Point;
   enemies: readonly EnemyPose[];
   projectiles: readonly ProjectilePose[];
-  platforms: readonly PlatformPose[];
+  platforms: PlatformFrame;
   // The geometry of the rig these parts belong to; replaced only when the rig settings change.
   rig: RigGeometry;
 }

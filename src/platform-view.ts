@@ -115,10 +115,10 @@ export class PlatformView {
     this.updateBounds();
   }
 
-  update(poses: readonly PlatformPose[]): void {
+  update(changes: readonly PlatformPose[]): void {
     this.ensureLive();
-    for (let index = 0; index < poses.length; index++) {
-      const pose = poses[index]!;
+    for (let index = 0; index < changes.length; index++) {
+      const pose = changes[index]!;
       const drawn = this.drawn.get(pose.id);
       if (drawn === undefined) throw new Error(`Unknown platform pose: ${pose.id}.`);
       if (drawn.x !== pose.x || drawn.y !== pose.y) this.write(drawn, pose.x, pose.y);

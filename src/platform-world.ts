@@ -16,6 +16,13 @@ export interface PlatformPose {
   readonly y: number;
 }
 
+export interface PlatformFrame {
+  readonly changes: readonly PlatformPose[];
+  readonly revision: number;
+  // Only the drawing consumer acknowledges a sample; diagnostics and camera samples leave changes pending.
+  acknowledge(revision: number): void;
+}
+
 interface PlatformRecord {
   object: PlatformObject;
   readonly body: Body;
@@ -29,10 +36,65 @@ interface PlatformRecord {
   currentX: number;
   currentY: number;
   readonly pose: { id: string; x: number; y: number };
+  drawnX: number;
+  drawnY: number;
+  movingSlot: number;
+  arrivedSlot: number;
+  riderSlot: number;
+  drawSlot: number;
   readonly velocity: Vec2;
 }
 
-const NO_PLATFORMS: readonly PlatformPose[] = Object.freeze([]);
+type ActiveSlot = 'movingSlot' | 'arrivedSlot' | 'riderSlot' | 'drawSlot';
+
+// Packed sets reserve their storage on content changes, not when a step activates a platform.
+class ActivePlatforms {
+  private readonly entries: (PlatformRecord | undefined)[] = [];
+  private readonly slot: ActiveSlot;
+  count = 0;
+
+  constructor(slot: ActiveSlot) {
+    this.slot = slot;
+  }
+
+  reserve(capacity: number): void {
+    if (this.entries.length < capacity) this.entries.length = capacity;
+  }
+
+  at(index: number): PlatformRecord {
+    return this.entries[index]!;
+  }
+
+  has(record: PlatformRecord): boolean {
+    return record[this.slot] >= 0;
+  }
+
+  add(record: PlatformRecord): void {
+    if (this.has(record)) return;
+    record[this.slot] = this.count;
+    this.entries[this.count++] = record;
+  }
+
+  delete(record: PlatformRecord): void {
+    const slot = record[this.slot];
+    if (slot < 0) return;
+    const last = this.entries[--this.count]!;
+    if (slot < this.count) {
+      this.entries[slot] = last;
+      last[this.slot] = slot;
+    }
+    this.entries[this.count] = undefined;
+    record[this.slot] = -1;
+  }
+
+  clear(): void {
+    for (let index = 0; index < this.count; index++) {
+      this.entries[index]![this.slot] = -1;
+      this.entries[index] = undefined;
+    }
+    this.count = 0;
+  }
+}
 
 function applyMaterial(body: Body, material: SurfaceMaterial): void {
   for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) {
@@ -54,10 +116,19 @@ export class PlatformWorld {
   private readonly world: World;
   private readonly records = new Map<string, PlatformRecord>();
   private readonly bodies = new Map<Body, PlatformRecord>();
-  private readonly moving = new Set<PlatformRecord>();
-  private readonly arrived = new Set<PlatformRecord>();
-  private readonly ridePlatforms: PlatformRecord[] = [];
-  private readonly poses: { id: string; x: number; y: number }[] = [];
+  private readonly moving = new ActivePlatforms('movingSlot');
+  private readonly arrived = new ActivePlatforms('arrivedSlot');
+  private readonly riders = new ActivePlatforms('riderSlot');
+  private readonly drawing = new ActivePlatforms('drawSlot');
+  private readonly changeScratch: PlatformPose[] = [];
+  // Allocated on content changes, so changing the delta length never reallocates a frame array.
+  private readonly changeBuffers: PlatformPose[][] = [[]];
+  private readonly drawnFrame = {
+    changes: this.changeBuffers[0]!,
+    revision: 0,
+    acknowledge: (revision: number): void => this.acknowledgeFrame(revision),
+  };
+  private rideCount = 0;
   private readonly position = new Vec2();
   private materials: SurfaceMaterials;
   private step = 0;
@@ -98,10 +169,12 @@ export class PlatformWorld {
 
   resetRiders(): void {
     this.ensureMutable();
-    for (let index = 0; index < this.ridePlatforms.length; index++) {
-      const record = this.ridePlatforms[index]!;
+    this.riders.clear();
+    for (const record of this.records.values()) {
+      if (!record.object.ride) continue;
       record.supportedAt = -1;
       record.awaySteps = RIDE_AWAY_STEPS;
+      if (this.moving.has(record) || record.arrivedAt === this.step) this.riders.add(record);
     }
   }
 
@@ -122,12 +195,15 @@ export class PlatformWorld {
     if (this.arrived.has(record) && record.arrivedAt !== this.step) this.settlePose(record);
     this.arrived.delete(record);
     this.moving.add(record);
+    this.drawing.add(record);
+    if (record.object.ride) this.riders.add(record);
   }
 
   beforeStep(): void {
     this.ensureLive();
     this.step++;
-    for (const record of this.moving) {
+    for (let index = 0; index < this.moving.count; index++) {
+      const record = this.moving.at(index);
       record.previousX = record.currentX;
       record.previousY = record.currentY;
       const dx = targetX(record) - record.currentX;
@@ -142,7 +218,8 @@ export class PlatformWorld {
 
   afterStep(): void {
     this.ensureLive();
-    for (const record of this.moving) {
+    for (let index = 0; index < this.moving.count;) {
+      const record = this.moving.at(index);
       if (record.arriving) {
         this.stop(record, targetX(record), targetY(record));
         record.arrivedAt = this.step;
@@ -151,13 +228,14 @@ export class PlatformWorld {
         const position = record.body.getPosition();
         record.currentX = position.x;
         record.currentY = position.y;
+        index++;
       }
     }
   }
 
   board(pot: Fixture, manifold: WorldManifold, minimumTopNormal: number): void {
     this.ensureMutable();
-    if (this.ridePlatforms.length === 0) return;
+    if (this.rideCount === 0) return;
     const body = pot.getBody();
     for (let edge = body.getContactList(); edge; edge = edge.next) {
       if (edge.other === null) continue;
@@ -168,10 +246,13 @@ export class PlatformWorld {
       const support = contact.getWorldManifold(manifold);
       if (!support || support.pointCount === 0) continue;
       const up = contact.getFixtureA().getBody() === body ? -support.normal.y : support.normal.y;
-      if (up >= minimumTopNormal) record.supportedAt = this.step;
+      if (up >= minimumTopNormal) {
+        record.supportedAt = this.step;
+        this.riders.add(record);
+      }
     }
-    for (let index = 0; index < this.ridePlatforms.length; index++) {
-      const record = this.ridePlatforms[index]!;
+    for (let index = 0; index < this.riders.count;) {
+      const record = this.riders.at(index);
       if (this.moving.has(record) || record.arrivedAt === this.step) {
         // Travel cannot rearm boarding: a descending deck can briefly lose the pot's support contact.
         record.awaySteps = 0;
@@ -182,22 +263,34 @@ export class PlatformWorld {
       } else if (record.awaySteps < RIDE_AWAY_STEPS) {
         record.awaySteps++;
       }
+      if (record.awaySteps >= RIDE_AWAY_STEPS) this.riders.delete(record);
+      else index++;
     }
   }
 
-  frame(alpha: number): readonly PlatformPose[] {
+  frame(alpha: number): PlatformFrame {
     this.ensureLive();
-    if (this.poses.length === 0) return NO_PLATFORMS;
-    for (const record of this.moving) this.interpolate(record, alpha);
-    // Preserve the final moving step's interpolation, then settle its pose without stepping resting platforms.
-    for (const record of this.arrived) {
-      if (record.arrivedAt === this.step) this.interpolate(record, alpha);
-      else {
-        this.settlePose(record);
+    let count = 0;
+    for (let index = 0; index < this.drawing.count;) {
+      const record = this.drawing.at(index);
+      if (this.moving.has(record) || (this.arrived.has(record) && record.arrivedAt === this.step)) {
+        this.interpolate(record, alpha);
+      } else {
+        // Preserve the final moving step's interpolation until a later step has settled it.
         this.arrived.delete(record);
+        record.previousX = record.pose.x = record.currentX;
+        record.previousY = record.pose.y = record.currentY;
       }
+      const changed = record.pose.x !== record.drawnX || record.pose.y !== record.drawnY;
+      if (changed) this.changeScratch[count++] = record.pose;
+      if (!changed && !this.moving.has(record) && !this.arrived.has(record)) this.drawing.delete(record);
+      else index++;
     }
-    return this.poses;
+    const changes = this.changeBuffers[count]!;
+    for (let index = 0; index < count; index++) changes[index] = this.changeScratch[index]!;
+    this.drawnFrame.changes = changes;
+    this.drawnFrame.revision++;
+    return this.drawnFrame;
   }
 
   isPlatform(body: Body): boolean {
@@ -228,7 +321,9 @@ export class PlatformWorld {
     if (this.disposed) return;
     this.ensureMutable();
     for (const id of this.records.keys()) this.remove(id);
-    this.poses.length = 0;
+    this.drawnFrame.changes = this.changeBuffers[0]!;
+    this.changeScratch.length = 0;
+    this.changeBuffers.length = 1;
     this.disposed = true;
   }
 
@@ -240,12 +335,20 @@ export class PlatformWorld {
       object, body, toEnd: false, arriving: false, arrivedAt: -1,
       supportedAt: -1, awaySteps: RIDE_AWAY_STEPS,
       previousX: object.x, previousY: object.y, currentX: object.x, currentY: object.y,
-      pose: { id: object.id, x: object.x, y: object.y }, velocity: new Vec2(),
+      pose: { id: object.id, x: object.x, y: object.y }, drawnX: object.x, drawnY: object.y,
+      movingSlot: -1, arrivedSlot: -1, riderSlot: -1, drawSlot: -1, velocity: new Vec2(),
     };
     this.records.set(object.id, record);
     this.bodies.set(body, record);
-    if (object.ride) this.ridePlatforms.push(record);
-    this.poses.push(record.pose);
+    this.moving.reserve(this.records.size);
+    this.arrived.reserve(this.records.size);
+    this.riders.reserve(this.records.size);
+    this.drawing.reserve(this.records.size);
+    if (this.changeScratch.length < this.records.size) {
+      this.changeScratch.push(record.pose);
+      this.changeBuffers.push(new Array<PlatformPose>(this.records.size));
+    }
+    if (object.ride) this.rideCount++;
   }
 
   private upsert(object: PlatformObject, reset: boolean): void {
@@ -275,6 +378,7 @@ export class PlatformWorld {
     }
     if (reset) record.toEnd = false;
     if (reset || !this.moving.has(record)) this.place(record, targetX(record), targetY(record));
+    this.syncRider(record);
   }
 
   private createFixture(body: Body, object: PlatformObject): void {
@@ -288,11 +392,17 @@ export class PlatformWorld {
   }
 
   private setRide(record: PlatformRecord, ride: boolean): void {
-    if (ride) this.ridePlatforms.push(record);
+    if (ride) this.rideCount++;
     else {
-      const index = this.ridePlatforms.indexOf(record);
-      if (index >= 0) this.ridePlatforms.splice(index, 1);
+      this.rideCount--;
+      this.riders.delete(record);
     }
+  }
+
+  private syncRider(record: PlatformRecord): void {
+    if (record.object.ride && (this.moving.has(record) || record.arrivedAt === this.step ||
+      record.supportedAt === this.step || record.awaySteps < RIDE_AWAY_STEPS)) this.riders.add(record);
+    else this.riders.delete(record);
   }
 
   private stop(record: PlatformRecord, x: number, y: number): void {
@@ -309,11 +419,13 @@ export class PlatformWorld {
     this.stop(record, x, y);
     this.settlePose(record);
     this.arrived.delete(record);
+    if (x === record.drawnX && y === record.drawnY) this.drawing.delete(record);
   }
 
   private settlePose(record: PlatformRecord): void {
-    record.previousX = record.pose.x = record.currentX;
-    record.previousY = record.pose.y = record.currentY;
+    record.previousX = record.currentX;
+    record.previousY = record.currentY;
+    this.drawing.add(record);
   }
 
   private interpolate(record: PlatformRecord, alpha: number): void {
@@ -321,18 +433,35 @@ export class PlatformWorld {
     record.pose.y = record.previousY + (record.currentY - record.previousY) * alpha;
   }
 
+  private acknowledgeFrame(revision: number): void {
+    this.ensureLive();
+    // A reentrant sample invalidates the older acknowledgement, not its pending changes.
+    if (revision !== this.drawnFrame.revision) return;
+    const { changes } = this.drawnFrame;
+    for (let index = 0; index < changes.length; index++) {
+      const pose = changes[index]!;
+      const record = this.records.get(pose.id);
+      if (record === undefined || record.pose !== pose) continue;
+      record.drawnX = pose.x;
+      record.drawnY = pose.y;
+      if (!this.moving.has(record) && !this.arrived.has(record)) {
+        if (record.currentX === record.drawnX && record.currentY === record.drawnY) this.drawing.delete(record);
+        else this.drawing.add(record);
+      }
+    }
+  }
+
   private remove(id: string): void {
     const record = this.records.get(id);
     if (record === undefined) return;
-    const index = this.poses.indexOf(record.pose);
-    if (index < 0) throw new Error('Platform poses and bodies are inconsistent.');
     if (!this.world.destroyBody(record.body)) throw new Error(`Could not remove platform body: ${id}.`);
     this.records.delete(id);
     this.bodies.delete(record.body);
     this.moving.delete(record);
     this.arrived.delete(record);
-    this.setRide(record, false);
-    this.poses.splice(index, 1);
+    this.riders.delete(record);
+    this.drawing.delete(record);
+    if (record.object.ride) this.rideCount--;
   }
 
   private ensureMutable(): void {

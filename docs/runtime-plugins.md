@@ -187,17 +187,27 @@ of its kind:
 - The projectile look's `update(projectiles, time)` also receives the projectiles in flight,
   each `{ x, y, angle }` (`ProjectilePose`) with its tip at its position. It runs while the level
   has projectile traps or shots fly, then once more with none, so the look can clear its last
-  shots.
+  shots. The array and its mutable pose slots are pooled, bounded by `SHOOTER.projectiles`,
+  and borrowed read-only until the next frame sample. Never retain or mutate either; copy
+  scalar values into your own state if you need history. Do not use array or pose identity
+  to detect changes, and a slot does not identify a particular shot.
 - `setLit(ids)`, the bonfire look's alone, receives the bonfires the player has reached this
   run, which burn, whenever they change. Changes during physics are staged: after the step loop,
   it runs at most once per notification flush, with the latest lit set.
 - `setPressed(ids)`, the switch look's alone, receives the switch triggers the player's foot is
   inside. Reset, restart and respawn release switches through the same staged looks phase.
 - The platform look's `set(objects)` receives the authored platforms, and its
-  `update(poses, time)` receives their drawn poses, `{ id, x, y }` (`PlatformPose`), each frame
-  while the level has platforms. `travelX`/`travelY` are offsets in metres from the authored
-  start to the other end; draw the runtime poses without changing those definitions. Do not
-  keep the borrowed pose array. The required `ride` boolean starts a resting platform when
+  `update(changes, time)` receives **only changed drawn poses**, `{ id, x, y }`
+  (`PlatformPose`), each frame while the level has platforms. This is a position delta,
+  not a membership list: an empty update leaves every platform where it was. In `set`,
+  place new IDs at their authored `x`/`y`, retain existing IDs' drawn positions, and remove
+  missing IDs. `travelX`/`travelY` are offsets in metres from the authored start to the other
+  end; draw the runtime poses without changing those definitions. The delta array and its
+  mutable pose slots are borrowed read-only until the next frame sample: do not retain or
+  mutate them, and copy coordinates you keep into your own drawing records. Changes stay
+  pending until the look has drawn them; sampling a frame for the camera, death presentation
+  or Workshop diagnostics does not consume them. Reset and level replacement send changed
+  positions through the same path. The required `ride` boolean starts a resting platform when
   the pot boards its top. The default look draws a darker metal deck plate on `ride`
   platforms, moving it with the slab through the same pose updates; platforms with
   `ride: false` have plain decks. A replacement `PlatformLook` receives `ride` in `set(objects)`
@@ -205,6 +215,12 @@ of its kind:
 - `dispose()` runs when the game closes, once the view has let go of the look's passes: free its
   geometries and materials. `inspect()`, optional, reports to the Workshop's diagnostics, in
   `window.gettingOver.level().rendering.looks`.
+
+At the simulation/view boundary, `PhysicsFrame.platforms` is a reused `PlatformFrame`,
+with `changes`, `revision` and `acknowledge(revision)`. `LevelLooks` owns acknowledgement,
+after a successful platform-look update; non-rendering frame samples never acknowledge.
+An acknowledgement from an older sample cannot consume a newer sample's pending changes.
+The platform look itself receives only the delta array, not the acknowledgement function.
 
 A look only draws: collision, hits and buoyancy stay the engine's, from the objects' own
 fields, so draw what the play does. Objects stand on the obstacle line, z = 0, where they are
@@ -217,8 +233,9 @@ trigger's region. Platforms collide, so draw their slabs centred at z = 0. A swi
 drawn on its trigger's floor and never collides; a rideable platform's deck plate is scenery
 centred on the obstacle line, on its deck top, and stays within the slab's depth. The default
 platform look shares one box geometry across two dense instance meshes, slabs and ride plates,
-and writes matrices only for changed poses, authored objects or instance slots. Its travel
-bounds are cached on content edits, not rebuilt over every platform each frame. The view
+and visits only the pose deltas, writing matrices only for changed poses, authored objects or
+instance slots. Its travel bounds are cached on content edits, not rebuilt over every
+platform each frame. The view
 enables three.js local clipping, so
 a look can split itself at the obstacle line with clipping planes, as the engine's axes do;
 its pools are built as two half boxes instead. Import three.js from the `three` package, which

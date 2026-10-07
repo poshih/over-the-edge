@@ -65,6 +65,7 @@ export interface TriggerRuntimeCallbacks {
 
 interface TriggerRecord {
   readonly object: TriggerObject;
+  readonly bounds: ReturnType<typeof triggerBounds>;
   readonly order: number;
   readonly proxyId: number;
   inside: boolean;
@@ -93,6 +94,11 @@ type RuntimeEffect =
   | { kind: 'failure'; details: TriggerFailureDetails }
   | { kind: 'fault'; error: unknown };
 
+interface SegmentSpan {
+  start: number;
+  end: number;
+}
+
 function pointToSegmentDistanceSquared(p: Readonly<Point>, a: Readonly<Point>, b: Readonly<Point>): number {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
@@ -104,32 +110,39 @@ function pointToSegmentDistanceSquared(p: Readonly<Point>, a: Readonly<Point>, b
   return (p.x - cx) ** 2 + (p.y - cy) ** 2;
 }
 
+function clipSegment(p: number, q: number, span: SegmentSpan): boolean {
+  if (p === 0) return q >= 0;
+  const r = q / p;
+  if (p < 0) {
+    if (r > span.end) return false;
+    if (r > span.start) span.start = r;
+  } else {
+    if (r < span.start) return false;
+    if (r < span.end) span.end = r;
+  }
+  return true;
+}
+
 // Liang-Barsky clip of segment a->b against an axis-aligned box; degenerates to a point test when a === b.
-function segmentIntersectsBox(bounds: { minX: number; maxX: number; minY: number; maxY: number },
-  a: Readonly<Point>, b: Readonly<Point>): boolean {
-  let t0 = 0;
-  let t1 = 1;
+function segmentIntersectsBox(bounds: ReturnType<typeof triggerBounds>, a: Readonly<Point>, b: Readonly<Point>,
+  span: SegmentSpan): boolean {
+  span.start = 0;
+  span.end = 1;
   const dx = b.x - a.x;
   const dy = b.y - a.y;
-  const clip = (p: number, q: number): boolean => {
-    if (p === 0) return q >= 0;
-    const r = q / p;
-    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
-    return true;
-  };
-  return clip(-dx, a.x - bounds.minX) && clip(dx, bounds.maxX - a.x) &&
-    clip(-dy, a.y - bounds.minY) && clip(dy, bounds.maxY - a.y) && t0 <= t1;
+  return clipSegment(-dx, a.x - bounds.minX, span) && clipSegment(dx, bounds.maxX - a.x, span) &&
+    clipSegment(-dy, a.y - bounds.minY, span) && clipSegment(dy, bounds.maxY - a.y, span) && span.start <= span.end;
 }
 
-function segmentIntersectsTrigger(trigger: TriggerObject, a: Readonly<Point>, b: Readonly<Point>): boolean {
+function segmentIntersectsTrigger(record: TriggerRecord, a: Readonly<Point>, b: Readonly<Point>, span: SegmentSpan): boolean {
+  const trigger = record.object;
   if (trigger.region.type === 'circle') {
-    return pointToSegmentDistanceSquared({ x: trigger.x, y: trigger.y }, a, b) <= trigger.region.radius ** 2;
+    return pointToSegmentDistanceSquared(trigger, a, b) <= trigger.region.radius ** 2;
   }
-  return segmentIntersectsBox(triggerBounds(trigger), a, b);
+  return segmentIntersectsBox(record.bounds, a, b, span);
 }
 
-function triggerAabb(object: TriggerObject): AABBValue {
-  const bounds = triggerBounds(object);
+function triggerAabb(bounds: ReturnType<typeof triggerBounds>): AABBValue {
   return { lowerBound: { x: bounds.minX, y: bounds.minY }, upperBound: { x: bounds.maxX, y: bounds.maxY } };
 }
 
@@ -141,8 +154,19 @@ export class TriggerRuntime {
   private readonly queue: ActiveRun[] = [];
   private readonly effects: RuntimeEffect[] = [];
   private activeRun: ActiveRun | null = null;
-  private previousPosition: Point | null = null;
+  private readonly previousPosition: Point = { x: 0, y: 0 };
+  private readonly from: Point = { x: 0, y: 0 };
+  private hasPreviousPosition = false;
   private previousTime: number | null = null;
+  private readonly query: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
+  private readonly segmentSpan: SegmentSpan = { start: 0, end: 1 };
+  private readonly candidates: (TriggerRecord | undefined)[] = [];
+  private candidateCount = 0;
+  private readonly collectCandidate = (nodeId: number): boolean => {
+    const record = this.records.get(this.index.getUserData(nodeId));
+    if (record) this.candidates[this.candidateCount++] = record;
+    return true;
+  };
   private time = 0;
   private orderCounter = 0;
   private draining = false;
@@ -162,29 +186,34 @@ export class TriggerRuntime {
     if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(time)) {
       throw new Error('Trigger position and time must be finite numbers.');
     }
-    const previousPosition = this.previousPosition;
+    const previousX = this.previousPosition.x;
+    const previousY = this.previousPosition.y;
+    const hadPreviousPosition = this.hasPreviousPosition;
     const previousTime = this.previousTime;
     this.time = time;
-    this.previousPosition = { x: position.x, y: position.y };
+    this.previousPosition.x = position.x;
+    this.previousPosition.y = position.y;
+    this.hasPreviousPosition = true;
     this.previousTime = time;
-    if (previousPosition && position.x === previousPosition.x && position.y === previousPosition.y) {
+    this.candidateCount = 0;
+    if (hadPreviousPosition && position.x === previousX && position.y === previousY) {
       return;
     }
-    const sweepEligible = previousPosition !== null && previousTime !== null && time >= previousTime;
-    const from = sweepEligible ? previousPosition : position;
+    const sweepEligible = hadPreviousPosition && previousTime !== null && time >= previousTime;
+    const from = this.from;
+    from.x = sweepEligible ? previousX : position.x;
+    from.y = sweepEligible ? previousY : position.y;
     const pad = TRIGGER_LIMITS.exitMargin;
-    const query: AABBValue = {
-      lowerBound: { x: Math.min(from.x, position.x) - pad, y: Math.min(from.y, position.y) - pad },
-      upperBound: { x: Math.max(from.x, position.x) + pad, y: Math.max(from.y, position.y) + pad },
-    };
-    const candidates: TriggerRecord[] = [];
-    this.index.query(query, (nodeId) => {
-      const record = this.records.get(this.index.getUserData(nodeId));
-      if (record) candidates.push(record);
-      return true;
-    });
-    candidates.sort((a, b) => a.order - b.order);
-    for (const record of candidates) this.evaluate(record, from, position, sweepEligible);
+    const { lowerBound, upperBound } = this.query;
+    lowerBound.x = Math.min(from.x, position.x) - pad;
+    lowerBound.y = Math.min(from.y, position.y) - pad;
+    upperBound.x = Math.max(from.x, position.x) + pad;
+    upperBound.y = Math.max(from.y, position.y) + pad;
+    this.index.query(this.query, this.collectCandidate);
+    this.sortCandidates();
+    for (let index = 0; index < this.candidateCount; index++) {
+      this.evaluate(this.candidates[index]!, from, position, sweepEligible);
+    }
     this.drain();
   }
 
@@ -207,7 +236,7 @@ export class TriggerRuntime {
       }
     }
     this.switchesDirty = true;
-    this.previousPosition = null;
+    this.hasPreviousPosition = false;
     this.previousTime = null;
     this.drain();
   }
@@ -220,7 +249,7 @@ export class TriggerRuntime {
       if (record.object.marker === 'switch' && record.inside) this.switchesDirty = true;
       record.inside = false;
     }
-    this.previousPosition = null;
+    this.hasPreviousPosition = false;
     this.previousTime = null;
   }
 
@@ -244,7 +273,7 @@ export class TriggerRuntime {
       record.run = null;
     }
     this.switchesDirty = true;
-    this.previousPosition = null;
+    this.hasPreviousPosition = false;
     this.previousTime = null;
     this.time = 0;
     this.drain();
@@ -287,9 +316,34 @@ export class TriggerRuntime {
     if (this.disposed) return;
     this.disposed = true;
     for (const id of this.records.keys()) this.removeTrigger(id);
-    this.previousPosition = null;
+    this.hasPreviousPosition = false;
     this.previousTime = null;
+    this.candidates.length = 0;
+    this.candidateCount = 0;
     this.drain();
+  }
+
+  // Sort only the populated slots, in place, without a sort work array or a per-step comparator.
+  private sortCandidates(): void {
+    const count = this.candidateCount;
+    for (let root = Math.floor(count / 2) - 1; root >= 0; root--) this.siftCandidates(root, count);
+    for (let end = count - 1; end > 0; end--) {
+      const first = this.candidates[0]!;
+      this.candidates[0] = this.candidates[end];
+      this.candidates[end] = first;
+      this.siftCandidates(0, end);
+    }
+  }
+
+  private siftCandidates(root: number, count: number): void {
+    const record = this.candidates[root]!;
+    for (let child = root * 2 + 1; child < count; child = root * 2 + 1) {
+      if (child + 1 < count && this.candidates[child + 1]!.order > this.candidates[child]!.order) child++;
+      if (record.order >= this.candidates[child]!.order) break;
+      this.candidates[root] = this.candidates[child];
+      root = child;
+    }
+    this.candidates[root] = record;
   }
 
   private evaluate(record: TriggerRecord, from: Readonly<Point>, to: Readonly<Point>,
@@ -297,7 +351,7 @@ export class TriggerRuntime {
     const trigger = record.object;
     const wasInside = record.inside;
     const nowInside = triggerContains(trigger, to, wasInside ? TRIGGER_LIMITS.exitMargin : 0);
-    const swept = !nowInside && !wasInside && sweepEligible && segmentIntersectsTrigger(trigger, from, to);
+    const swept = !nowInside && !wasInside && sweepEligible && segmentIntersectsTrigger(record, from, to, this.segmentSpan);
     record.inside = nowInside;
     if (trigger.marker === 'switch' && nowInside !== wasInside) this.switchesDirty = true;
     if ((nowInside && !wasInside) || swept) this.fire(record);
@@ -336,7 +390,7 @@ export class TriggerRuntime {
         }
       }
     } finally {
-      this.effects.splice(0, delivered);
+      if (delivered > 0) this.effects.splice(0, delivered);
       this.draining = false;
       if (this.disposed) this.listeners.clear();
     }
@@ -491,13 +545,15 @@ export class TriggerRuntime {
   }
 
   private createRecord(object: TriggerObject, previous?: TriggerRecord): void {
+    const bounds = triggerBounds(object);
     const record: TriggerRecord = {
-      object, order: previous ? previous.order : this.orderCounter++,
-      proxyId: this.index.createProxy(triggerAabb(object), object.id),
+      object, bounds, order: previous ? previous.order : this.orderCounter++,
+      proxyId: this.index.createProxy(triggerAabb(bounds), object.id),
       inside: false, consumed: false, generation: previous ? previous.generation + 1 : 0,
       activationCount: 0, lastActivatedAt: null, run: null,
     };
     this.records.set(object.id, record);
+    if (this.candidates.length < this.records.size) this.candidates.length = this.records.size;
   }
 
   private removeTrigger(id: string): void {
@@ -506,6 +562,8 @@ export class TriggerRuntime {
     this.cancelRecord(record);
     this.index.destroyProxy(record.proxyId);
     this.records.delete(id);
+    this.candidates.fill(undefined);
+    this.candidateCount = 0;
     if (record.object.marker === 'switch') this.switchesDirty = true;
   }
 

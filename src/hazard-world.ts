@@ -58,9 +58,6 @@ interface Projectile {
   travelled: number;
 }
 
-// The frame of a level with nothing in flight, shared so idle frames allocate nothing.
-const NO_PROJECTILES: readonly ProjectilePose[] = Object.freeze([]);
-
 // The first shot of `shooter` at or after `time`.
 function shotFrom(shooter: ShooterObject, time: number): number {
   if (time <= shooter.delay) return shooter.delay;
@@ -96,6 +93,9 @@ export class HazardWorld {
   // Shooters by their next shot, earliest first.
   private schedule: Shooter[] = [];
   private readonly projectiles: Projectile[] = [];
+  private readonly posePool: { -readonly [K in keyof ProjectilePose]: ProjectilePose[K] }[] = [];
+  // One array per populated length keeps its backing storage even after empty frames.
+  private readonly framePosePool: ProjectilePose[][] = [[]];
   private readonly box: Bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private readonly blade: Bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private readonly query: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
@@ -169,10 +169,20 @@ export class HazardWorld {
   }
 
   frame(alpha: number): readonly ProjectilePose[] {
-    if (this.projectiles.length === 0) return NO_PROJECTILES;
-    return this.projectiles.map((shot) => ({
-      x: shot.fromX + (shot.x - shot.fromX) * alpha, y: shot.fromY + (shot.y - shot.fromY) * alpha, angle: shot.angle,
-    }));
+    const count = this.projectiles.length;
+    while (this.posePool.length < count) {
+      this.posePool.push({ x: 0, y: 0, angle: 0 });
+      this.framePosePool.push(this.posePool.slice());
+    }
+    const poses = this.framePosePool[count]!;
+    for (let index = 0; index < count; index++) {
+      const shot = this.projectiles[index]!;
+      const pose = this.posePool[index]!;
+      pose.x = shot.fromX + (shot.x - shot.fromX) * alpha;
+      pose.y = shot.fromY + (shot.y - shot.fromY) * alpha;
+      pose.angle = shot.angle;
+    }
+    return poses;
   }
 
   inspect() {

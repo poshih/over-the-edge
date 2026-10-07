@@ -1189,16 +1189,26 @@ geometry batches rather than the number of placed objects.
 Decorations batch by model in chunks that grow with depth, so a representative
 1,000-decoration level draws in about 60 calls and idle frames upload nothing.
 Trigger proximity uses a spatial index rather than scanning the level every
-physics tick. Flag markers share instanced geometry, and their buffers update
-only when marker positions change. Runtime event state is separate from authored
+physics tick, reusing its position, query, clipping and candidate storage rather
+than allocating per-step scratch objects. Flag markers share instanced geometry,
+and their buffers update only when marker positions change. Runtime event state is separate from authored
 objects and remains available in editor diagnostics.
 Traps cost what is active, not what is placed: shooters wait in a schedule ordered by
 their next shot, each projectile in flight casts one ray a physics step, and a spatial
 index of where blades reach finds only the axes near the player. Axes swing in their
 vertex shader, so frames write nothing for them; projectile instances are written only
-for those in flight, and bonfires find the player through a spatial index too. Liquid
+for those in flight. Their borrowed pose array and pose slots are pooled up to the
+high-water count, at most 256 shots, rather than rebuilt each frame. Length-indexed
+arrays retain their backing storage through count changes and empty frames.
+Bonfires find the player through a spatial index too. Liquid
 pools do as well: a step clips only the player's parts in the pools it is near, and the
 liquid moves in its shaders, so frames write nothing for pools.
+Platforms keep packed active sets: a boarding step visits the pot's contacts and
+only ride platforms supported, travelling, arriving or counting their time away.
+Drawing visits only moving, arriving or pending changed poses, and the platform
+look receives only position deltas, not every platform in the level. Camera and
+diagnostic frame samples leave undrawn changes pending. Resets and content edits
+use the same incremental drawing path; buffers and poses are reused.
 [Phantoms](docs/phantoms.md) cost only while they play: at most three, each drawing 12
 meshes that share one geometry set, about 0.05 ms a frame on the full Ashen Ascent course.
 Recording checks only the stretch since its last keyframe, a few microseconds per physics step.
