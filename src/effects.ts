@@ -7,8 +7,9 @@ import type { Moment, MomentType } from './moments';
 import { call0, call1, createInstance, instanceContract, invalidResult, listPoint, slotPoint } from './plugins/kernel';
 import type { CheckedInstance } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
+import type { SceneFrame } from './scene-frame';
 import { SCENE_PASSES } from './scene-layer';
-import type { SceneFrame, ScenePass } from './scene-layer';
+import type { ScenePass } from './scene-layer';
 
 export interface MomentEffect {
   readonly root: Object3D;
@@ -17,7 +18,7 @@ export interface MomentEffect {
   readonly moments?: readonly MomentType[];
   // In journal order, current placement only. Borrow the moment and nested cause only for this call.
   moment(moment: Moment): void;
-  // Each drawn frame after a moment, until false. Borrow the frame and allocate nothing.
+  // Each drawn frame after a moment, until false. As drawn, including previews; borrow the frame and allocate nothing.
   update(frame: SceneFrame): boolean;
   // After the root is detached.
   dispose(): void;

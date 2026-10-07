@@ -24,11 +24,11 @@ import type { Backdrop } from './backdrop';
 import { createAimMarks } from './aim-marks';
 import type { AimMarks } from './aim-marks';
 import { SceneEffects } from './effects';
-import { createDeathPose } from './player-pose';
-import type { PlayerFrameState } from './player-pose';
 import type { DeathFrame, DeathKind } from './death-sequence';
+import { createSceneFrame } from './scene-frame';
+import type { MutableSceneFrame } from './scene-frame';
 import { createSceneLayers, SCENE_LAYER_CONTRACT } from './scene-layer';
-import type { SceneDeathPlayerFrame, SceneFrame, SceneLayer, ScenePlayerFrame } from './scene-layer';
+import type { SceneLayer } from './scene-layer';
 import { disposeResources } from './scene-resources';
 import { physicsPart } from './simulation';
 import type { PhysicsFrame } from './simulation';
@@ -98,14 +98,14 @@ export class GameView {
   private readonly backdrop: Attributed<Backdrop>;
   private readonly aimMarks: Attributed<AimMarks>;
   readonly effects: SceneEffects;
-  private readonly sceneDeathPlayer: { -readonly [K in keyof SceneDeathPlayerFrame]: SceneDeathPlayerFrame[K] };
   // Course labels.
   private readonly labels = new Group();
   // Null in a release whose level has no decorations; its shell then carries none of their code.
   readonly decorations: DecorationView | null;
   private readonly layers = new Map<SceneLayer, CheckedInstance<SceneLayer>>();
-  private readonly updatingLayers = new Set<Attributed<SceneLayer>>();
-  private readonly sceneFrame: { -readonly [K in keyof SceneFrame]: SceneFrame[K] };
+  private updatingLayers: readonly Attributed<SceneLayer>[] = [];
+  private readonly sceneFrame: MutableSceneFrame;
+  private drawnPhysics: PhysicsFrame;
   private renders = 0;
   private rig: RigGeometry;
   private headOutline: HammerHead = DEFAULT_HAMMER_HEAD;
@@ -185,11 +185,8 @@ export class GameView {
     this.cameraView.reach.x = head.x;
     this.cameraView.reach.y = head.y;
     this.rig = initial.rig;
-    this.sceneDeathPlayer = {
-      phase: 'dying', centre: { x: 0, y: 0, angle: 0 }, pose: createDeathPose(), presented: this.character.appearance,
-    };
-    this.sceneFrame = { time: initial.time, parts: initial.parts, player: this.scenePlayer(initial.player),
-      cursor: initial.cursor, enemies: initial.enemies, rig: initial.rig };
+    this.drawnPhysics = initial;
+    this.sceneFrame = createSceneFrame(head.vertices);
     // Keep unmounted runtime layers owned too, if subsequent renderer/player construction fails.
     for (const layer of layers) this.layers.set(layer.value, layer);
     try {
@@ -288,7 +285,9 @@ export class GameView {
   addLayer(layer: SceneLayer, source: Pick<Attributed<unknown>, 'plugin' | 'point'> = ENGINE): void {
     const target = this.layers.get(layer) ?? checkInstance<SceneLayer>(SCENE_LAYER_CONTRACT, layer, source);
     this.layers.set(layer, target);
-    if (layer.update !== undefined) this.updatingLayers.add(target);
+    if (layer.update !== undefined && !this.updatingLayers.includes(target)) {
+      this.updatingLayers = [...this.updatingLayers, target];
+    }
     const pass = target.captured.pass === 'course' ? this.course : target.captured.pass === 'actors' ? this.actors : this.marks;
     pass.add(layer.root);
   }
@@ -298,15 +297,21 @@ export class GameView {
     const target = this.layers.get(layer);
     if (target === undefined) return;
     this.layers.delete(layer);
-    this.updatingLayers.delete(target);
+    if (this.updatingLayers.includes(target)) {
+      this.updatingLayers = this.updatingLayers.filter(registered => registered !== target);
+    }
     layer.root.removeFromParent();
     if (layer.dispose !== undefined) call0(target, 'dispose');
   }
 
-  // The current rig's read-only geometry, for a layer's initial state before its first drawn frame.
+  // Internal rig settings for phantom playback, including before its first drawn frame.
   get rigGeometry(): RigGeometry { return this.rig; }
 
+  // Internal collision diagnostics: the physics frame last passed to render(), borrowed, not a snapshot.
+  drawnPhysicsFrame(): PhysicsFrame { return this.drawnPhysics; }
+
   render(physics: PhysicsFrame, options: { dt: number; death: DeathFrame | null }): void {
+    this.drawnPhysics = physics;
     this.renders++;
     this.syncRig(physics);
     this.syncHead(physicsPart(physics, 'head').vertices);
@@ -323,15 +328,18 @@ export class GameView {
     this.terrain.update(frame.time);
     this.decorations?.update();
     this.looks.update(frame.time, frame.projectiles, frame.enemies, frame.platforms);
-    if (this.updatingLayers.size > 0 || this.effects.active) {
+    const layers = this.updatingLayers;
+    if (layers.length > 0 || this.effects.active) {
       const shown = this.sceneFrame;
-      shown.time = physics.time;
-      shown.parts = physics.parts;
-      shown.player = this.scenePlayer(physics.player);
-      shown.cursor = physics.cursor;
-      shown.enemies = physics.enemies;
-      shown.rig = physics.rig;
-      for (const layer of this.updatingLayers) call1(layer, 'update', shown);
+      shown.time = frame.time;
+      shown.cursor.x = frame.cursor.x; shown.cursor.y = frame.cursor.y;
+      shown.enemies = frame.enemies;
+      this.character.writeScene(shown);
+      for (let index = 0; index < layers.length; index++) {
+        const layer = layers[index]!;
+        // An earlier update may have removed and disposed a layer still in this frame's captured list.
+        if (this.layers.get(layer.value) === layer) call1(layer, 'update', shown);
+      }
       this.effects.update(shown);
     }
     this.renderer.info.reset();
@@ -357,13 +365,6 @@ export class GameView {
     }
     this.renderer.render(this.marks, this.camera);
     this.renderer.render(this.foreground, this.camera);
-  }
-
-  private scenePlayer(player: PlayerFrameState): ScenePlayerFrame {
-    if (player.phase === 'alive') return player;
-    const shown = this.sceneDeathPlayer;
-    shown.phase = player.phase; shown.centre = player.centre; shown.pose = player.pose;
-    return shown;
   }
 
   recenter(frame: PhysicsFrame): void {
@@ -494,10 +495,18 @@ export class GameView {
     };
   }
 
-  cameraState() {
+  // On-request camera readings without invoking a plugin's diagnostics.
+  cameraReadings() {
     return {
       x: this.camera.position.x, y: this.camera.position.y, width: this.width, height: this.height,
-      worldHeight: this.worldHeight, director: this.director.value.inspect === undefined ? null : call0(this.director, 'inspect') ?? null,
+      worldHeight: this.worldHeight,
+    };
+  }
+
+  cameraState() {
+    return {
+      ...this.cameraReadings(),
+      director: this.director.value.inspect === undefined ? null : call0(this.director, 'inspect') ?? null,
     };
   }
 
@@ -521,7 +530,7 @@ export class GameView {
       if (layer.value.dispose !== undefined) disposal.run(() => call0(layer, 'dispose'));
     }
     this.layers.clear();
-    this.updatingLayers.clear();
+    this.updatingLayers = [];
     disposal.run(() => disposeResources(this.backdropScene, this.course, this.actors, this.front, this.marks, this.foreground));
     disposal.run(() => this.renderer?.dispose());
     disposal.finish();

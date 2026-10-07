@@ -315,6 +315,13 @@ only what it needs.
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
+Runtime scene layers, moment effects and Workshop overlays receive a pooled, read-only
+[`SceneFrame`](docs/runtime-plugins.md#scene-layers): character, hammer, cursor and enemies
+as drawn, including Workshop presentation previews, without physics internals. Read it only
+during `update`; reuse geometry/materials and allocate nothing per frame. Workshop
+`game.state()` instead returns explicit typed gameplay/control readings through
+[`WorkshopGameState`](docs/workshop-plugins.md#the-running-game), built on request.
+
 Plugins are build inputs, the game's own trusted code, never project data, so nothing sent to a
 project server can add code to a game. Each facet runs where its code belongs: kinds wherever
 the game runs and is validated, runtime wherever it plays, release in the releases built with it,
@@ -1552,6 +1559,10 @@ The editor entry exposes the read-only `window.gettingOver.snapshot()` and
 `window.gettingOver.project({ x, y })` diagnostics for observing actual physics,
 motor effort, camera state, and world-to-screen coordinates. `snapshot().rig` is
 the rig's geometry: handle length, extension range, reach and segment length.
+These are internal editor diagnostics, not a plugin contract. Workshop plugins use
+the SDK's explicit plain-data [`WorkshopGameState`](docs/workshop-plugins.md#the-running-game)
+through `game.state()`, without collider parts, rig geometry, motor commands or subsystem
+inspection.
 `snapshot().dying` reports an active death sequence, and `snapshot().death` is
 `'health'`, `'fall'` or `null` while alive.
 They do not expose commands that bypass the game's input or motor mechanism.

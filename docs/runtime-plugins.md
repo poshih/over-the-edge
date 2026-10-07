@@ -484,8 +484,9 @@ interface MomentEffect {
   A reset inside one effect's `moment` can leave later effects receiving that superseded
   moment; the pre-draw placement catch-up follows before anything is drawn.
 - After a moment, `update` runs each drawn frame until it returns `false`; only active effects
-  update, after scene layers. It receives the borrowed [`SceneFrame`](#scene-layers), unaffected
-  by Workshop character previews. Return a boolean, `true` while anything still shows.
+  update, after scene layers. It receives the pooled, borrowed [`SceneFrame`](#scene-layers):
+  character, hammer, cursor and enemies **as drawn**, including Workshop character previews,
+  without physics internals. Return a boolean, `true` while anything still shows.
   Reuse geometry, materials and scratch; allocate nothing in either method.
 - End/reset at `placed`, **not when time moves backward**. A new run rewinds the clock;
   pauses and tab visibility changes settle interpolation at the current step, so resuming
@@ -515,8 +516,8 @@ Lava burns kindle turbulent tongues of flame, deep red to white-hot, bending awa
 and flaring at each burn, with embers, smoke and a flickering glow. Each burn keeps the fire
 going a little over a second; when burns stop, the flames die down and the last particles finish
 rising from where they were born. A fatal lava burn keeps the corpse alight until **any**
-`placed` puts it out. Live fire follows `player.centre`; dying fire follows
-`player.presented.torso`. Replacing lava does not change strikes, and replacing strikes does
+`placed` puts it out. Live fire follows `character.centre`; dying fire follows
+`character.torso`. Replacing lava does not change strikes, and replacing strikes does
 not change lava.
 
 To add a ring to the default strikes, wrap the factory and forward every method, keeping its
@@ -944,8 +945,10 @@ values:
 | `fresh` | A new recording or discontinuous seek: reset the slot's drawing history |
 | `dt` | Playback seconds for drawing history, 0 when fresh; a pause also has 0 but is not fresh |
 
-`head` is the current rig settings' `HammerHead` (`SceneFrame.rig.head`), as in the engine's
+`head` is the current rig settings' `HammerHead`, as in the engine's
 original phantoms: not the recorded player's or a selected library hammer's own outline.
+It is independent of `SceneFrame.hammer.outline`, which describes the drawn hammer's actual
+collider, including a library hammer's own.
 Playback calls `draw` **only while at least one slot shows** and controls the root's visibility, hiding it when the
 last slot ends without a final empty draw. It may also draw when `play` or `hold` changes a
 slot between game frames; other slots then get `dt = 0`, never a second advance.
@@ -991,13 +994,27 @@ interface SceneLayer {
   update?(frame: SceneFrame): void;
   dispose?(): void;
 }
+interface ScenePoint { readonly x: number; readonly y: number }
+interface ScenePose extends ScenePoint { readonly angle: number }
+interface SceneCharacter {
+  readonly phase: 'alive' | 'dying';
+  readonly centre: ScenePose;
+  readonly torso: ScenePose;
+  readonly head: ScenePose;
+  readonly hands: Readonly<Record<'left' | 'right', ScenePose>>;
+}
+interface SceneHammer {
+  readonly held: boolean;
+  readonly butt: ScenePose;
+  readonly head: ScenePose;
+  readonly outline: HammerHead;
+}
 interface SceneFrame {
   readonly time: number;
-  readonly parts: readonly Readonly<PartPose>[];
-  readonly player: ScenePlayerFrame;
-  readonly cursor: Readonly<Point>;
+  readonly character: SceneCharacter;
+  readonly hammer: SceneHammer;
+  readonly cursor: ScenePoint;
   readonly enemies: readonly EnemyPose[];
-  readonly rig: RigGeometry;
 }
 ```
 
@@ -1006,18 +1023,30 @@ The returned root, pass and methods stay the same for the layer's lifetime.
 Only layers with `update` receive a per-frame callback; static layers are still drawn.
 Factories, `update` and optional `dispose` finish synchronously: a promise-like result is
 `invalid-contribution`. This also applies to the Workshop's overlay `update` and `dispose`.
-`SceneFrame` is one reused, read-only view of the simulation at the drawn time, unaffected by
-a temporary character presentation preview. `time` is simulation seconds and rewinds on a
-restart; all member references are borrowed. In particular, `enemies` and its poses are pooled
-until the next frame, also in Workshop previews. Read during the call, never keep the frame as a
-previous snapshot, allocate nothing and update changed objects only.
+`SceneFrame` is one pooled, read-only view of **what is drawn**, including temporary Workshop
+character presentation previews; releases have no such previews. It exposes no physics parts,
+rig geometry or physical-player frames. Positions are world metres on the course plane,
+angles radians counterclockwise. `time` is the drawn frame's simulation seconds and rewinds
+on a restart; `cursor` is the drawn cursor and `enemies` are the drawn enemy poses.
 
-`player.phase` is `'alive'` or `'dying'`. Both expose `centre`; live frames expose
-`shoulder`, and death frames expose the interpolated physical `pose` and the death
-writer's `presented` appearance, including its facial quaternion and sprite brightness. Use these
-typed phases rather than searching for a `root` part: ragdolls have no live root.
-`parts` still describe physics and collision, not authored death-pose changes. Effects
-use this same frame; fatal lava follows `player.presented.torso` until placement.
+`character.phase` is `'alive'` or `'dying'`. `centre` is the drawn player centre: the live jar
+root or the corpse jar, with its angle. `torso` is the drawn torso frame. While alive, `head`
+is the shown head centre and roll, using the same capture rule as death entry; `hands` are
+the left/right grip points on the drawn tool frame, with its shaft angle, not an imported
+avatar's offset wrist targets. While dying, `head` and `hands` come from the death writer's
+appearance. Effects use this same frame; fatal lava follows `character.torso` until placement.
+
+`hammer.held` is true exactly while alive. `butt` and `head` are the drawn slider and head
+part poses. `outline` is the colliding head's borrowed head-local `HammerHead`: +X along the
+handle away from the butt, +Y across it, including a selected library hammer's own outline.
+Unlike this active collider, phantom looks keep using the current rig settings' head.
+
+The Game owns one record and writes its nested character, hammer and cursor poses in place,
+without allocation, only when an updating layer or an active effect needs it. All member
+references are borrowed; in particular, the enemies array and its poses are pooled until the
+next frame. Read during the call, never retain the frame or its members as a previous-frame
+snapshot. Copy individual values into your own preallocated history when needed, allocate
+nothing in `update` and update changed objects only.
 
 Layers obey the [obstacle-line and pass rules](#pass-rules-for-presentation-points): collider
 visuals stay on the obstacle line in actors, and all marks materials ignore depth. Layers

@@ -31,8 +31,6 @@ import type { MediaEntry } from '../media';
 import type { LibraryAvatarSettings, ModelLibrary, PartRole } from '../model-library';
 import type { PluginData } from '../plugin-data';
 import type { ProjectArt } from '../project';
-import type { RigGeometry } from '../rig';
-import type { PartPose } from '../simulation';
 import type { CharacterRiggingType, SpriteDocument } from '../sprite-data';
 import type { GameTheme } from '../theme';
 import type { WorkshopGameState } from './game-state';
@@ -51,12 +49,13 @@ export { PLUGIN_DATA_LIMITS } from '../plugin-data';
 export type { PluginData } from '../plugin-data';
 export type { JsonValue } from '../bounded-json';
 export type { WorkshopGameState } from './game-state';
-export type { SceneFrame, SceneLayer } from '../scene-layer';
+export type { SceneLayer } from '../scene-layer';
+export type { SceneCharacter, SceneFrame, SceneHammer, ScenePoint, ScenePose } from '../scene-frame';
 export type {
   AppearancePart, ArmIkSettings, ArtMode, AudioSettings, AvatarMotionEntry, AvatarMotionModel, CharacterArms, CharacterRiggingType,
   DirectionalPresentation, EnemyArtSettings, EnemyPose, GameSettings, GameTheme, Grips, HammerHead, HudSettings,
-  LevelDefinition, LevelLabel, LevelObject, LibraryAvatarSettings, MediaEntry, ModelLibrary, PartPose, PartRole, Point, ProjectArt,
-  RigGeometry, SpriteDocument, VisualAlignment, VisualPartId,
+  LevelDefinition, LevelLabel, LevelObject, LibraryAvatarSettings, MediaEntry, ModelLibrary, PartRole, Point, ProjectArt,
+  SpriteDocument, VisualAlignment, VisualPartId,
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -331,7 +330,7 @@ export interface WorkshopGame {
   restart(): void;
   // Moves the player to `position`, the pot's centre, in the start's pose, and starts attempts there, as the Level tab does.
   placePlayer(position: Point): void;
-  // What `window.gettingOver.snapshot()` reports.
+  // Explicit plain-data control and gameplay readings, built on request; no engine diagnostics.
   state(): WorkshopGameState;
   // The loaded imported avatar, or null while the character shows none.
   avatar(): WorkshopAvatar | null;

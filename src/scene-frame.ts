@@ -1,0 +1,65 @@
+import type { EnemyPose } from './enemy-types';
+import type { HammerHead } from './hammer-head';
+
+// World metres on the course plane; angles are radians counterclockwise.
+export interface ScenePoint { readonly x: number; readonly y: number }
+export interface ScenePose extends ScenePoint { readonly angle: number }
+
+export interface SceneCharacter {
+  readonly phase: 'alive' | 'dying';
+  // The drawn player centre: the live jar root, or the corpse jar.
+  readonly centre: ScenePose;
+  readonly torso: ScenePose;
+  readonly head: ScenePose;
+  // Live grip points on the drawn tool frame, or the death appearance's hands.
+  readonly hands: Readonly<Record<'left' | 'right', ScenePose>>;
+}
+
+export interface SceneHammer {
+  readonly held: boolean;
+  readonly butt: ScenePose;
+  readonly head: ScenePose;
+  // The drawn head's colliding outline, head-local and borrowed, including a library hammer's own.
+  readonly outline: HammerHead;
+}
+
+// One pooled, read-only view of what is drawn, including Workshop presentation previews.
+// Read during update(): the record, nested poses, outline and enemies are borrowed, not previous-frame snapshots.
+export interface SceneFrame {
+  // Drawn simulation seconds; a restart rewinds them to 0.
+  readonly time: number;
+  readonly character: SceneCharacter;
+  readonly hammer: SceneHammer;
+  readonly cursor: ScenePoint;
+  readonly enemies: readonly EnemyPose[];
+}
+
+// Internal writer mirrors; SDKs expose only the read-only contract.
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+interface MutableSceneCharacter extends Mutable<SceneCharacter> {
+  centre: Mutable<ScenePose>;
+  torso: Mutable<ScenePose>;
+  head: Mutable<ScenePose>;
+  hands: Record<'left' | 'right', Mutable<ScenePose>>;
+}
+interface MutableSceneHammer extends Mutable<SceneHammer> {
+  butt: Mutable<ScenePose>;
+  head: Mutable<ScenePose>;
+}
+export interface MutableSceneFrame extends Mutable<SceneFrame> {
+  character: MutableSceneCharacter;
+  hammer: MutableSceneHammer;
+  cursor: Mutable<ScenePoint>;
+}
+
+function pose(): Mutable<ScenePose> { return { x: 0, y: 0, angle: 0 }; }
+
+export function createSceneFrame(outline: HammerHead): MutableSceneFrame {
+  return {
+    time: 0,
+    character: { phase: 'alive', centre: pose(), torso: pose(), head: pose(), hands: { left: pose(), right: pose() } },
+    hammer: { held: true, butt: pose(), head: pose(), outline },
+    cursor: { x: 0, y: 0 },
+    enemies: [],
+  };
+}

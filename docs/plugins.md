@@ -53,14 +53,34 @@ GAME_PLUGINS=games/my-game/plugins.json GAME_PROJECT=projects/my-game npm run bu
   kinds alone and no library models packaged.
 
 Breaking public contract changes bump `PLUGIN_API_VERSION`; manifests must name the current
-version, without legacy readers or aliases. Version 2 enforces synchronous plugin
-contracts, gives platform looks only changed-pose deltas, and introduces the stamped
-gameplay-moment journal,
-`effects.strikes` / `effects.lava` / `effects.extras`, filtered `game.observers`, and the
-audio contract's `moment` / `preview` methods. Its numeric death-pose input
-contains the captured live pose, interpolated physical corpse and entry facial
-quaternion. Rig frame contexts are live-only; pose contexts carry gripped or
-released attachment, without presentation-source flags.
+version, without legacy readers or aliases. Version 2 breaks version-1 contracts:
+
+- Renames `game.events` to filtered `game.observers`: `EVENTS` → `OBSERVERS`,
+  `GameEvent` → `Moment`, and `GameObserver.event()` → `moment()`, through the stamped
+  gameplay-moment journal.
+- Removes `scene.hurt-effects` for `effects.strikes` / `effects.lava` / `effects.extras`;
+  `HURT_EFFECTS` / `DEFAULT_HURT_EFFECTS` → `EFFECTS` / `DEFAULT_EFFECTS`, and
+  `HurtEffects` / `HurtEffectsFactory` → `MomentEffect` / `MomentEffectFactory`.
+- Renames `scene.death-animation` to `scene.death-pose`:
+  `DEATH_ANIMATION` / `DEFAULT_DEATH_ANIMATION` → `DEATH_POSE` / `DEFAULT_DEATH_POSE`;
+  `DeathAnimationInput` / `DeathAnimationPose` / `DeathAnimationWriter` →
+  `DeathPoseInput` / `DeathAppearance` / `DeathPoseWriter`. Input drops `direction` and carries
+  captured live pose, interpolated physical corpse and entry `headFacing`; the writer fills
+  full `DeathAppearance` (`torso`, `head`, `arms`, `headFacing`, `spriteBrightness`), not
+  `torsoLean` / `headPitch` offsets.
+- `DeathFrame.duration` now uses the game settings' `death.wait`; `HudSettings['death'].hold`
+  is removed, affecting `DeathScreen.show(info, settings)` and Workshop `hud()` edits.
+- Enforces synchronous runtime contracts; platform looks receive only changed-pose deltas.
+  Projectile/enemy look arrays and poses are now pooled and borrowed. `SceneFrame` replaces
+  `parts` / `rig` with as-drawn `character` / `hammer`, without physics internals.
+  Runtime and Workshop SDKs drop `PartPose` / `RigGeometry`; Workshop `game.state()` is an
+  explicit typed plain-data contract.
+- Removes `GameCue` and `GameAudio.handle(cue)`; audio now uses `moment()` / `preview()`,
+  and `AUDIO_CUES` / `AudioCue` gains `block`.
+- `AvatarRigFrameContext` and `AvatarRigPoseContext` drop `deathWeight`: frame context is
+  live-only; pose context has `attachment: 'gripped' | 'released'`. `AvatarMotionFrame.reset`
+  no longer fires because time steps backward; Workshop presentation previews now end early
+  on placement rather than rewind.
 
 A plugin's identity comes from the manifest alone, and facet modules never repeat it. Each host
 tells its facet the ID, as `host.plugin`. The ID names the plugin in errors, keys its Workshop

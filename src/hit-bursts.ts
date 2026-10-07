@@ -5,7 +5,7 @@ import {
 import type { MomentEffect } from './effects';
 import type { Moment } from './moments';
 import { OBSTACLE_LINE } from './obstacle-line';
-import type { SceneFrame } from './scene-layer';
+import type { SceneFrame } from './scene-frame';
 
 // Where a blade or a projectile strikes the character, a burst shows the blow: a flash with a glint, a ring rushing
 // outward and sparks thrown the way the hit knocks the character, cooling as they fly and falling. A blade also leaves

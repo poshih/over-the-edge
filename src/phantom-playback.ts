@@ -9,7 +9,8 @@ import { DEFAULT_PHANTOM_LOOK } from './phantom-view';
 import type { RuntimePlugins } from './plugins/runtime';
 import { call0, call2 } from './plugins/kernel';
 import type { Attributed } from './plugins/kernel';
-import type { SceneFrame, SceneLayer } from './scene-layer';
+import type { SceneFrame } from './scene-frame';
+import type { SceneLayer } from './scene-layer';
 import type { GameView } from './view';
 
 export const PHANTOM_TIMING = {
@@ -24,7 +25,7 @@ export const PHANTOM_TIMING = {
 // layer until its Game closes or the consumer removes it. GameView and the catalogue never import playback.
 export function createPhantomPlayback(view: GameView, plugins: RuntimePlugins, figures: number): PhantomPlayback {
   const factory = plugins.slot(LOOKS.phantoms, DEFAULT_PHANTOM_LOOK);
-  const playback = new PhantomPlayback(factory, { figures, head: view.rigGeometry.head });
+  const playback = new PhantomPlayback(factory, { figures, head: () => view.rigGeometry.head });
   view.addLayer(playback, factory);
   return playback;
 }
@@ -62,14 +63,16 @@ export class PhantomPlayback implements SceneLayer {
   // A dedicated slot for the replay viewer, never advanced by game time.
   private readonly held: Figure = figure();
   private readonly frames: readonly PhantomFigureFrame[];
+  private readonly readHead: () => HammerHead;
   private head: HammerHead;
   private time: number | null = null;
   private count = 0;
 
-  constructor(factory: Attributed<PhantomLookFactory>, options: { readonly figures: number; readonly head: HammerHead }) {
+  constructor(factory: Attributed<PhantomLookFactory>, options: { readonly figures: number; readonly head: () => HammerHead }) {
     this.figures = Array.from({ length: options.figures }, figure);
     this.frames = [...this.figures.map(figure => figure.frame), this.held.frame];
-    this.head = options.head;
+    this.readHead = options.head;
+    this.head = this.readHead();
     this.look = createPhantomLook(factory, this.frames.length);
     this.root = this.look.value.root;
     this.root.visible = false;
@@ -95,7 +98,7 @@ export class PhantomPlayback implements SceneLayer {
 
   // Playback follows the game's time, including pauses. Nothing is sampled or drawn when no figure shows.
   update(frame: SceneFrame): void {
-    this.head = frame.rig.head;
+    this.head = this.readHead();
     const previous = this.time;
     this.time = frame.time;
     if (this.count === 0 && !this.held.frame.visible) return;

@@ -645,14 +645,14 @@ export class Simulation {
     };
   }
 
-  snapshot() {
-    const status = this.status();
+  // Plain player readings on request, without resampling the borrowed draw frame or inspecting level subsystems.
+  playerReadings() {
+    this.ensureLive();
     const anchor = playerAnchor(this.rig), root = anchor.getPosition();
     const origin = this.cursorOrigin(root, { x: 0, y: 0 });
     return {
-      ...status,
       player: { phase: this.rig.phase, centre: { x: root.x, y: root.y, angle: anchor.getAngle() } },
-      tip: { ...partPoint(this.rig.tool.head, this.headPoint) },
+      tip: partPoint(this.rig.tool.head, { x: 0, y: 0 }),
       aim: this.rig.phase === 'dying' ? {
         state: 'captured' as const, cursor: { ...this.deathCursor }, target: { ...this.deathTarget },
       } : {
@@ -662,12 +662,25 @@ export class Simulation {
       playerVelocity: { ...anchor.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
       headContacts: this.headContactCount(),
-      rig: this.rig.geometry,
       drive: this.rig.phase === 'dying' ? { state: 'released' as const } : {
         state: 'driven' as const, extension: this.rig.drive.getTranslation(),
         hingeTorque: this.rig.drive.getMotorTorque(1 / PHYSICS.dt), sliderForce: this.rig.drive.getMotorForce(1 / PHYSICS.dt),
-        command: { ...this.command },
       },
+    };
+  }
+
+  snapshot() {
+    const status = this.status(), readings = this.playerReadings();
+    return {
+      ...status,
+      player: readings.player,
+      tip: readings.tip,
+      aim: readings.aim,
+      playerVelocity: readings.playerVelocity,
+      potAngle: readings.potAngle,
+      headContacts: readings.headContacts,
+      rig: this.rig.geometry,
+      drive: readings.drive.state === 'released' ? readings.drive : { ...readings.drive, command: { ...this.command } },
       tuning: { ...this.settings.physics },
       bodyProperties: Object.fromEntries(this.rig.bodies.map(({ id, body }) =>
         [id, { mass: body.getMass(), inertia: body.getInertia() }] as const)),

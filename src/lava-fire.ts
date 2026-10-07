@@ -4,7 +4,7 @@ import {
 } from 'three';
 import type { MomentEffect } from './effects';
 import type { Moment } from './moments';
-import type { SceneFrame } from './scene-layer';
+import type { SceneFrame } from './scene-frame';
 
 // A fire that takes the character while lava burns it: tongues of flame shaded from a turbulence field, licking up the
 // character, bending away from its motion and flaring at each burn, with embers rising from it, smoke above it and a
@@ -357,11 +357,11 @@ export class LavaFire implements MomentEffect {
       this.lastTime = time;
       return false;
     }
-    const root = this.origin, player = frame.player;
-    if (player.phase === 'alive') {
-      root.x = player.centre.x; root.y = player.centre.y;
+    const root = this.origin, character = frame.character;
+    if (character.phase === 'alive') {
+      root.x = character.centre.x; root.y = character.centre.y;
     } else {
-      const torso = player.presented.torso;
+      const torso = character.torso;
       // The centre of the upright fire follows the turned torso, while the flames still rise
       // in world space. A horizontal corpse must not leave its fire over an upright root.
       root.x = torso.x - Math.sin(torso.angle) * FIRE.anchorHeight;

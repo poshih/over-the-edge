@@ -1,32 +1,8 @@
 import type { Object3D } from 'three';
-import type { Point } from './config';
-import type { EnemyPose } from './enemy-types';
 import { call0, createInstance, instanceContract, listPoint } from './plugins/kernel';
 import type { CheckedInstance } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
-import type { RigGeometry } from './rig';
-import type { PartPose } from './simulation';
-import type { DeathPlayerFrame, LivePlayerFrame } from './player-pose';
-import type { ReadonlyDeathAppearance } from './death-pose';
-
-export interface SceneDeathPlayerFrame extends DeathPlayerFrame {
-  readonly presented: ReadonlyDeathAppearance;
-}
-export type ScenePlayerFrame = LivePlayerFrame | SceneDeathPlayerFrame;
-
-// A read-only view of the simulation at the drawn time, not a character's temporary presentation preview.
-// This object is reused and its members are borrowed: read during update(), never keep a previous-frame snapshot
-// by retaining their references.
-export interface SceneFrame {
-  // Simulation seconds; a restart rewinds them to 0.
-  readonly time: number;
-  readonly parts: readonly Readonly<PartPose>[];
-  readonly player: ScenePlayerFrame;
-  readonly cursor: Readonly<Point>;
-  // The array and its poses are pooled, borrowed until the next frame; copy individual values kept.
-  readonly enemies: readonly EnemyPose[];
-  readonly rig: RigGeometry;
-}
+import type { SceneFrame } from './scene-frame';
 
 export const SCENE_PASSES = Object.freeze(['course', 'actors', 'marks'] as const);
 export type ScenePass = (typeof SCENE_PASSES)[number];

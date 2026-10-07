@@ -178,7 +178,11 @@ allocates nothing per frame on its behalf.
   visuals stay centred on the obstacle line, z = 0, in actors; a marks overlay's materials
   ignore depth (`depthTest: false`), leaving the arms/tool depth alone. Only overlays with
   `update(frame: SceneFrame)` run each drawn frame. That frame is reused and read-only (time,
-  parts, cursor, enemies and rig), so never retain it as a snapshot and allocate nothing.
+  character, hammer, cursor and enemies **as drawn**, including presentation previews),
+  without physics internals. Its record and nested poses are pooled; the head outline and
+  pooled enemy poses are borrowed. Never retain them as a snapshot and allocate nothing.
+  `SceneCharacter`, `SceneHammer`, `ScenePose` and `ScenePoint` are also exported by the
+  Workshop SDK.
   `update` and optional `dispose` finish synchronously; a promise-like result is
   `invalid-contribution` and stops only the contributing plugin.
   Static overlays have no frame callback. The host checks the root, pass and methods when
@@ -190,14 +194,35 @@ allocates nothing per frame on its behalf.
   none of the drag, and game input stays blocked under the plugin's reason only until the drag
   ends. `game.project(point)` and `game.unproject(client)` convert as the Level tab does.
 - **Game control.** `game.pause(paused)` under the plugin's own reason, `game.restart()`,
-  `game.placePlayer(position)` as the Level tab places the player, and `game.state()`, what
-  `window.gettingOver.snapshot()` reports. That state includes `paused`, `pauseReasons`,
+  `game.placePlayer(position)` as the Level tab places the player, and
+  `game.state(): WorkshopGameState`, an explicit read-only contract of plain data exported
+  by the Workshop SDK. That state includes `paused`, `pauseReasons`,
   `stopped`, `timer: { elapsed, running }`, `dying` (an active death sequence) and
   `death` (`'health'`, `'fall'` or `null` while alive), built on request rather than per frame.
-  `player: { phase: 'alive' | 'dying', centre }` works with a live root or a corpse. `aim.state` is
-  `'driven'` with origin/offsets, or `'captured'` with the released rig's frozen world
-  cursor and target; `drive.state` is `'driven'` with motor readings, or `'released'`
-  without them. Released `hingeLoad` and `sliderLoad` are `null`, never stale motor values.
+  `player: { phase: 'alive' | 'dying', centre: { x, y, angle } }` works with a live root or
+  a corpse. `aim.state` is `'driven'` with `cursor`, `origin`, `cursorOffset`, `target` and
+  `targetOffset`, or `'captured'` with the released rig's frozen world `cursor` and `target`.
+  `drive.state` is `'driven'` with `extension`, `hingeTorque` and `sliderForce`, or
+  `'released'` without them. Released `hingeLoad` and `sliderLoad` are `null`, never stale
+  motor values. Its other readings are:
+
+  | Fields | Meaning |
+  | --- | --- |
+  | `time`, `height`, `bestHeight`, `contacts` | Simulation seconds, current/best height in metres and touching/enabled contact count |
+  | `phase`, `motors` | `'alive'` / `'dying'` and `'driven'` / `'released'` |
+  | `hingeLoad`, `sliderLoad`, `health` | Motor strength shares or `null`; `{ current, max }` health or `null` where nothing can hurt the player |
+  | `tip`, `playerVelocity`, `potAngle`, `headContacts` | Hammer tip `{ x, y }`, player velocity `{ x, y }` in metres/second, jar angle and head contact count |
+  | `practice`, `placedPlayer` | Selected practice ID or `null`; a placed `{ position: { x, y }, angle, reach }` or `null` |
+  | `debug`, `pointerLocked`, `inputMode` | Collision diagnostics visibility, pointer capture and `'mouse'` / `'touch'` |
+  | `camera` | `{ x, y, width, height, worldHeight }`: world focus, canvas size in CSS pixels and world height |
+  | `cursorScreen`, `step` | Cursor `{ x, y }` in client CSS pixels and the fixed simulation step in seconds |
+
+  World positions and offsets are metres; angles are radians counterclockwise. These are
+  gameplay readings, not Workshop presentation-preview poses. The contract excludes rig
+  geometry, collider parts, internal body properties and body/joint counts, tuning, motor
+  commands, subsystem inspection and camera-director inspection.
+  `window.gettingOver.snapshot()` remains the editor's fuller internal diagnostics,
+  **not a plugin contract**.
 - **Avatar facts.** `game.avatar()` is the loaded imported avatar, or `null`: the model facts its
   motion kinds get (`AvatarMotionModel`), each motion's claimed joints, and
   `jointWorld(index, out)`, a skin joint's current world frame.
@@ -207,8 +232,10 @@ allocates nothing per frame on its behalf.
   tool together) by `out.x` and `out.y` metres in the view's plane, at most 20 m, and turns it by
   `out.turn` radians about the player's root. The avatar's motions see it through `body` and
   `pot` exactly as they see real movement, so a drop, a bounce or a shake swings hair and
-  [secondary motion](characters.md#secondary-motion). The camera and overlays keep the
-  simulation's frame. A preview ends early on a placement, a restart or another preview.
+  [secondary motion](characters.md#secondary-motion). The camera and internal collision
+  diagnostics keep the simulation's frame; scene layers, Workshop overlays and effects
+  receive the as-drawn `SceneFrame`, including the preview's movement. A preview ends early
+  on a placement, a restart or another preview.
   Pauses and tab hiding settle interpolation; only explicit placements rewind presentation
   time, and placements also restart lean, head aim, hair and motions, with elapsed time
   clamped at zero.

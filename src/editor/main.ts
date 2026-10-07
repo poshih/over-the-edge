@@ -41,7 +41,7 @@ import { PlayRecorder } from './play-recorder';
 import { ServerCopies } from './server-copies';
 import { publishedLevel } from './server-levels';
 import { createDecorationView } from '../decoration-library';
-import { workshopGameState } from './game-state';
+import { gameDiagnostics, workshopGameState } from './game-state';
 import { WorkshopPluginHost, workshopPlugins } from './workshop-plugin-host';
 import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
@@ -279,7 +279,7 @@ const spriteEditor = createSpriteEditor({
     return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
   }),
 });
-const collisionOverlay = new CollisionOverlay(() => game.view.character.armPoses());
+const collisionOverlay = new CollisionOverlay(() => game.view.character.armPoses(), () => game.view.drawnPhysicsFrame());
 game.view.addLayer(collisionOverlay);
 // The course draws as the project's look says, as its releases draw it: placed GLBs, loaded from the project as the level
 // uses them, or every terrain object as its collision.
@@ -455,7 +455,8 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
   game.perform(action, options);
 }
 
-const gameState = () => workshopGameState(game, { practice: practice(), placedPlayer: typeof origin === 'string' ? null : origin, debug });
+const gameContext = () => ({ practice: practice(), placedPlayer: typeof origin === 'string' ? null : origin, debug });
+const gameState = () => workshopGameState(game, gameContext());
 
 plugins = new WorkshopPluginHost({
   registry: workshopPlugins, ui, game, canvas, project, level, character: spriteEditor, appearance,
@@ -465,7 +466,7 @@ plugins = new WorkshopPluginHost({
 });
 
 const diagnostics = Object.freeze({
-  snapshot: gameState,
+  snapshot: () => gameDiagnostics(game, gameContext()),
   project: (point: Point) => game.view.project(point),
   settings: () => game.settings(),
   appearance: () => appearance.snapshot(),

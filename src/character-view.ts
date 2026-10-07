@@ -1,6 +1,6 @@
 import { Group } from 'three';
 import type { Matrix4, Texture } from 'three';
-import { DEFAULT_ARM_IK } from './character';
+import { ARM_SIDES, DEFAULT_ARM_IK } from './character';
 import type { ArmIkSettings, ArmSide, VisualBinding, VisualPartId } from './character';
 import type { ArmPose } from './arm-ik';
 import type { CharacterArms, ArmLengths } from './character-arms';
@@ -26,10 +26,12 @@ import type { HammerHead } from './hammer-head';
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 import { OBSTACLE_LINE } from './obstacle-line';
 import { DEFAULT_ARM_CHAINS } from './player-figure-data';
-import { copyDeathPose, createDeathPose } from './player-pose';
+import { copyDeathPose, copyTransform, createDeathPose } from './player-pose';
 import type { DeathPose, MutableLivePlayerFrame } from './player-pose';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
+import type { MutableSceneFrame } from './scene-frame';
+import { physicsPart } from './simulation';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { DEFAULT_CHARACTER_RIGGING_TYPE } from './sprite-data';
 import type { CharacterRiggingType } from './sprite-data';
@@ -39,7 +41,8 @@ import type { LeanPreview } from './waist-lean';
 
 // A preview that moves the character's whole presentation for a while: its body, pot and tool together, by `offset` in
 // the view's plane and turned about the player's root, over `duration` seconds of simulation time. Presentation only:
-// the camera, physics and overlays keep the simulation's frame. It ends early on a placement, a restart or another preview.
+// the camera, physics and internal collision diagnostics keep the simulation's frame; scene layers and effects read
+// what is drawn. It ends early on a placement, a restart or another preview.
 export interface PresentationPreview {
   readonly duration: number;
   // Writes the offset `elapsed` seconds in: metres, and radians counterclockwise. Non-finite values end the preview.
@@ -70,7 +73,7 @@ export class CharacterView {
   readonly actors = new Group();
   readonly foreground = new Group();
   readonly sprites: SpriteRig;
-  readonly appearance: DeathAppearance = createDeathAppearance();
+  private readonly appearance: DeathAppearance = createDeathAppearance();
   private readonly figure: FigureRig;
   private readonly arms: GripArms;
   private readonly profiles: CharacterProfiles;
@@ -97,6 +100,7 @@ export class CharacterView {
   private readonly deathFrame: Mutable<DeathPresented>;
   private readonly presentedCursor = { x: 0, y: 0 };
   private lastPresented: PresentedFrame | null = null;
+  private shownPhysics: PhysicsFrame | null = null;
   // The running presentation preview, from the simulation time of its first frame, and the frame it draws: the
   // simulation's with the player's parts and cursor moved. Reused, so a preview allocates nothing per frame.
   private presentationPreview: { readonly preview: PresentationPreview; start: number | null } | null = null;
@@ -285,7 +289,36 @@ export class CharacterView {
     }
     // The one-model hammer follows the physical tool frame; its handle is fitted to the rig, not per frame.
     this.profiles.propModels.hammer?.update(figure.toolFrame);
+    this.shownPhysics = frame;
     return frame;
+  }
+
+  // After pose(), and only when a scene layer or effect needs the read model. All targets and scratch are reused.
+  writeScene(out: MutableSceneFrame): void {
+    const frame = this.shownPhysics;
+    if (frame === null) throw new Error('A scene frame needs a posed character.');
+    const character = out.character, hammer = out.hammer, figure = this.figure, torso = figure.torso;
+    character.phase = frame.player.phase;
+    copyTransform(character.centre, frame.player.centre);
+    character.torso.x = torso.position.x; character.torso.y = torso.position.y; character.torso.angle = torso.rotation.z;
+    hammer.held = character.phase === 'alive';
+    copyTransform(hammer.butt, figure.shaft.base);
+    copyTransform(hammer.head, figure.shaft.tip);
+    hammer.outline = physicsPart(frame, 'head').vertices;
+    if (character.phase === 'alive') {
+      figure.writeShownHead(character.head, this.currentStance);
+      const tool = figure.toolFrame.elements;
+      for (let index = 0; index < ARM_SIDES.length; index++) {
+        const side = ARM_SIDES[index]!, hand = character.hands[side], grip = this.arms.distances[side];
+        hand.x = tool[0]! * grip + tool[12]!;
+        hand.y = tool[1]! * grip + tool[13]!;
+        hand.angle = figure.shaft.angle;
+      }
+    } else {
+      copyTransform(character.head, this.appearance.head);
+      copyTransform(character.hands.left, this.appearance.arms.left.hand);
+      copyTransform(character.hands.right, this.appearance.arms.right.hand);
+    }
   }
 
   beginDeath(frame: PhysicsFrame, kind: DeathKind): void {

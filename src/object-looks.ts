@@ -104,7 +104,7 @@ export interface PhantomLook {
   // Characters draw in actors, never hidden by the course. Playback owns this root's visibility.
   readonly root: Object3D;
   // Every slot, including hidden ones, while at least one shows. Head is the current rig settings' outline,
-  // as in SceneFrame.rig.head, not the recorded player's or a library hammer's own.
+  // not the recorded player's or a library hammer's own.
   draw(figures: readonly PhantomFigureFrame[], head: HammerHead): void;
   dispose(): void;
 }

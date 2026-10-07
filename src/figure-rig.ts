@@ -21,7 +21,7 @@ import { HeadAim } from './head-aim';
 import { OBSTACLE_LINE } from './obstacle-line';
 import { createHammerHeadGeometry, createPotGeometry, placeLimb, PLAYER_FIGURE } from './player-figure';
 import { copyRotation } from './player-pose';
-import type { DeathPose, LivePlayerFrame, Rotation3 } from './player-pose';
+import type { DeathPose, LivePlayerFrame, Rotation3, Transform2 } from './player-pose';
 import type { RigGeometry } from './rig';
 import { disposeResources } from './scene-resources';
 import { physicsPart } from './simulation';
@@ -300,12 +300,16 @@ export class FigureRig {
     if (rotation !== null) arm.hand.quaternion.multiply(rotation);
   }
 
-  writeShownPose(out: DeathPose, facing: Rotation3, stance: Readonly<CharacterStance>): void {
-    out.torso.x = this.torso.position.x; out.torso.y = this.torso.position.y; out.torso.angle = this.torso.rotation.z;
+  writeShownHead(out: Transform2, stance: Readonly<CharacterStance>): void {
     this.headCentre.copy(this.headCentreLocal);
     if (stance.upperBody3d) this.headCentre.applyMatrix4(this.meshHead.matrix);
     this.headCentre.applyMatrix4(this.torso.matrixWorld);
-    out.head.x = this.headCentre.x; out.head.y = this.headCentre.y; out.head.angle = this.torso.rotation.z;
+    out.x = this.headCentre.x; out.y = this.headCentre.y; out.angle = this.torso.rotation.z;
+  }
+
+  writeShownPose(out: DeathPose, facing: Rotation3, stance: Readonly<CharacterStance>): void {
+    out.torso.x = this.torso.position.x; out.torso.y = this.torso.position.y; out.torso.angle = this.torso.rotation.z;
+    this.writeShownHead(out.head, stance);
     copyRotation(facing, this.headRotation);
     for (const pose of this.posedArms) {
       const arm = out.arms[pose.side];

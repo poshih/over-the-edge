@@ -6,7 +6,8 @@ import { objectLoops } from '../level';
 import type { TerrainEvent } from '../level';
 import { transformPoint } from '../math';
 import { OBSTACLE_LINE } from '../obstacle-line';
-import type { SceneFrame, SceneLayer } from '../scene-layer';
+import type { SceneLayer } from '../scene-layer';
+import type { PhysicsFrame } from '../simulation';
 
 const MARKER_RADIUS = 0.07;
 const GUIDE_RADIUS = 0.09;
@@ -25,10 +26,12 @@ export class CollisionOverlay implements SceneLayer {
   private readonly positions = new Float32Array(DYNAMIC_EDGES * 6);
   private readonly outlines = new Map<string, readonly (readonly Point[])[]>();
   private readonly armPoses: () => readonly ArmPose[];
+  private readonly drawnPhysics: () => PhysicsFrame;
   private dirty = true;
 
-  constructor(armPoses: () => readonly ArmPose[]) {
+  constructor(armPoses: () => readonly ArmPose[], drawnPhysics: () => PhysicsFrame) {
     this.armPoses = armPoses;
+    this.drawnPhysics = drawnPhysics;
     this.root.visible = false;
     this.moving.geometry.setAttribute('position', new BufferAttribute(this.positions, 3));
     for (const lines of [this.fixed, this.moving]) { lines.frustumCulled = false; lines.renderOrder = 30; }
@@ -58,7 +61,7 @@ export class CollisionOverlay implements SceneLayer {
     this.dirty = true;
   }
 
-  update(frame: SceneFrame): void {
+  update(): void {
     if (!this.root.visible) return;
     if (this.dirty) {
       const positions: number[] = [];
@@ -83,7 +86,7 @@ export class CollisionOverlay implements SceneLayer {
     };
     const line = (a: Point, b: Point): void => segment(a.x, a.y, OBSTACLE_LINE, b.x, b.y, OBSTACLE_LINE);
     const guide = (a: Vector3, b: Vector3): void => segment(a.x, a.y, a.z, b.x, b.y, b.z);
-    for (const part of frame.parts) {
+    for (const part of this.drawnPhysics().parts) {
       if (part.collides) {
         for (let index = 0; index < part.vertices.length; index++) {
           line(transformPoint(part.vertices[index], part, part.angle),
