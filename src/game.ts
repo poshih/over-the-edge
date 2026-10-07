@@ -1,4 +1,3 @@
-import { DEFAULT_ARM_IK } from './character';
 import type { DecorationView } from './decoration-view';
 import type { CharacterState } from './character';
 import { PHYSICS } from './config';
@@ -43,7 +42,7 @@ import type { AudioOutput } from './game-audio';
 import { call0, call1, call2, createInstance, invalidResult, pluginFailure } from './plugins/kernel';
 import type { Attributed, CheckedInstance } from './plugins/kernel';
 import { Disposal } from './disposal';
-import { createDeathSeed } from './player-pose';
+import { DEFAULT_CHARACTER_FIGURE } from './character-figure';
 
 export interface StepObserver {
   step(): void;
@@ -88,10 +87,9 @@ export class Game {
   private readonly deviceMovement: Point = { x: 0, y: 0 };
   private readonly pressedSwitches: string[] = [];
   private readonly stepObservers = new Set<StepObserver>();
-  private readonly renderState: CharacterState & { dt: number; death: DeathFrame | null } = { armIk: DEFAULT_ARM_IK, dt: 0, death: null };
+  private readonly renderState: { dt: number; death: DeathFrame | null } = { dt: 0, death: null };
   private hud: HudSettings;
   private death: Dying | null = null;
-  private readonly deathSeed = createDeathSeed();
   private readonly deathFrame: { -readonly [K in keyof DeathFrame]: DeathFrame[K] } = {
     elapsed: 0, duration: 0, poseProgress: 0, reducedMotion: false,
   };
@@ -149,10 +147,12 @@ export class Game {
     window.addEventListener('unhandledrejection', (event) =>
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     try {
-      this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level, this.journal);
+      this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level,
+        DEFAULT_CHARACTER_FIGURE, this.journal);
       this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
         characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
         decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
+        onCharacterFigure: (figure) => this.simulation.setCharacterFigure(figure),
       });
       this.input = new PointerInput(options.canvas, {
         bindings: options.plugins.slot(INPUT_BINDINGS, DEFAULT_INPUT_BINDINGS).value,
@@ -371,6 +371,7 @@ export class Game {
   }
 
   selectCharacter(index: number): void {
+    if (this.stopped) return;
     this.view.selectCharacter(index);
   }
 
@@ -389,7 +390,8 @@ export class Game {
   // into the physics, and the characters' own hammer the settings' default head, so the hammer shown is the one that
   // collides. The head changes mid-run without restarting it.
   async setPartModel(role: PartRole, part: PartModel | null, signal: AbortSignal): Promise<void> {
-    await this.view.setPartModel(role, part, signal);
+    if (this.stopped) return;
+    await this.view.setPartModel(role, part, AbortSignal.any([signal, this.lifecycle.signal]));
     if (role === 'hammer' && !this.stopped) this.simulation.setHammerHead(part?.head ?? null);
   }
 
@@ -403,7 +405,8 @@ export class Game {
   }
 
   setCharacter(state: CharacterState): void {
-    this.renderState.armIk = { ...state.armIk };
+    if (this.stopped) return;
+    this.view.setArmIk(state.armIk);
   }
 
   setTheme(theme: GameTheme): void { this.view.setTheme(theme); }
@@ -580,8 +583,7 @@ export class Game {
       elapsed: 0, previousElapsed: 0, reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     };
     this.death = dying;
-    this.view.writeDeathSeed(this.simulation.frame(1), this.deathSeed, this.renderState.armIk);
-    this.simulation.beginDeath(this.deathSeed);
+    this.simulation.beginDeath();
     this.view.beginDeath(this.simulation.frame(1), kind);
     this.clearMovement();
     for (const observer of this.stepObservers) observer.interrupt();

@@ -37,7 +37,6 @@ export interface SkeletonRotation {
 export interface HeldSkeletonFrame {
   readonly targets: ReadonlyMap<string, RigTarget>;
   readonly rootAngle: number;
-  readonly released: boolean;
 }
 type MutableBoneWorld = { -readonly [K in keyof BoneWorld]: BoneWorld[K] };
 
@@ -511,7 +510,8 @@ export class SkeletonPose {
 
   // Direction, animation and hair base pose stop at entry. Existing anatomical ownership comes
   // from artwork's head anchor, not guessed bone names or a second sprite schema.
-  hold(rootAngle: number, targets: ReadonlyMap<string, RigTarget>, headBones: readonly string[]): void {
+  hold(rootAngle: number, targets: ReadonlyMap<string, RigTarget>, headBones: readonly string[], preserveBase = false): void {
+    if (preserveBase) this.restoreHeldPose(rootAngle, targets);
     this.heldX.set(this.localX); this.heldY.set(this.localY); this.heldAngle.set(this.localAngle);
     this.heldRootAngle = rootAngle;
     const target = targets.get('character-head');
@@ -523,8 +523,22 @@ export class SkeletonPose {
   }
 
   evaluateHeld(frame: HeldSkeletonFrame): readonly BoneWorld[] {
+    this.restoreHeldPose(frame.rootAngle, frame.targets);
+    this.solveIk(frame.targets, true);
+    for (let index = 0; index < this.heldOutput.length; index++) {
+      const out = this.heldOutput[index]!;
+      out.x = this.worldX[index]; out.y = this.worldY[index]; out.angle = this.worldAngle[index];
+      out.scale = this.lengthScale[index]; out.length = this.definition.bones[index]!.length * out.scale;
+      if (!Number.isFinite(out.x) || !Number.isFinite(out.y) || !Number.isFinite(out.angle)) {
+        throw new SkeletonError(`Physical pose produced a non-finite transform for bone "${out.id}".`);
+      }
+    }
+    return this.heldOutput;
+  }
+
+  private restoreHeldPose(rootAngle: number, targets: ReadonlyMap<string, RigTarget>): void {
     this.localX.set(this.heldX); this.localY.set(this.heldY); this.localAngle.set(this.heldAngle);
-    const turn = frame.rootAngle - this.heldRootAngle, cos = Math.cos(turn), sin = Math.sin(turn);
+    const turn = rootAngle - this.heldRootAngle, cos = Math.cos(turn), sin = Math.sin(turn);
     for (const bone of this.topology) {
       if (this.parentIndex[bone] >= 0) continue;
       const x = this.localX[bone], y = this.localY[bone];
@@ -533,7 +547,7 @@ export class SkeletonPose {
     }
     reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle,
       this.worldX, this.worldY, this.worldAngle, this.lengthScale);
-    const head = frame.targets.get('character-head');
+    const head = targets.get('character-head');
     if (head === undefined) throw new SkeletonError('The physical skeleton needs its character-head anchor.');
     for (const held of this.heldHeads) {
       const rotation = head.angle - held.anchor.angle;
@@ -551,16 +565,6 @@ export class SkeletonPose {
       reflowPose(this.topology, this.parentIndex, this.localX, this.localY, this.localAngle,
         this.worldX, this.worldY, this.worldAngle, this.lengthScale);
     }
-    if (frame.released) this.solveIk(frame.targets, true);
-    for (let index = 0; index < this.heldOutput.length; index++) {
-      const out = this.heldOutput[index]!;
-      out.x = this.worldX[index]; out.y = this.worldY[index]; out.angle = this.worldAngle[index];
-      out.scale = this.lengthScale[index]; out.length = this.definition.bones[index]!.length * out.scale;
-      if (!Number.isFinite(out.x) || !Number.isFinite(out.y) || !Number.isFinite(out.angle)) {
-        throw new SkeletonError(`Physical pose produced a non-finite transform for bone "${out.id}".`);
-      }
-    }
-    return this.heldOutput;
   }
 
   evaluate(options: {

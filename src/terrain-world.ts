@@ -30,7 +30,7 @@ function applyMaterial(body: Body, material: SurfaceMaterial): void {
 
 export class TerrainWorld {
   private readonly world: World;
-  private readonly getPot: () => Body;
+  private readonly getPot: () => Body | null;
   private readonly objects = new Map<string, TerrainObject>();
   private readonly bodies = new Map<string, Body>();
   private readonly ids = new Map<Body, string>();
@@ -48,7 +48,7 @@ export class TerrainWorld {
   private materials: SurfaceMaterials;
   private disposed = false;
 
-  constructor(world: World, objects: readonly TerrainObject[], getPot: () => Body, materials: SurfaceMaterials) {
+  constructor(world: World, objects: readonly TerrainObject[], getPot: () => Body | null, materials: SurfaceMaterials) {
     this.world = world;
     this.getPot = getPot;
     this.materials = materials;
@@ -212,7 +212,7 @@ export class TerrainWorld {
     const a = contact.getFixtureA().getBody();
     const b = contact.getFixtureB().getBody();
     const pot = this.getPot();
-    if (a !== pot && b !== pot) return;
+    if (pot === null || a !== pot && b !== pot) return;
     const terrain = a === pot ? b : a;
     const id = this.ids.get(terrain);
     if (id === undefined || !this.object(id).illusion || this.fading.has(id) || this.candidates.has(id)) return;

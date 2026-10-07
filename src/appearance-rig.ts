@@ -15,11 +15,8 @@ interface VisualBinding {
   bounds: Box3;
   visibility: VisualVisibility;
   model: LoadedVisual | null;
-  // Last accepted model/reset, including changes waiting for placement.
-  requestedModel: LoadedVisual | null;
   replacement: Group | null;
   orientation: Group | null;
-  readonly deferChange: RuntimeBinding['deferChange'];
 }
 
 interface VisualFit {
@@ -31,14 +28,13 @@ interface VisualFit {
 
 export class AppearanceRig {
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
-  private readonly pendingModels = new Set<LoadedVisual>();
   private disposed = false;
 
   constructor(slots: ReadonlyMap<VisualPartId, RuntimeBinding>) {
-    for (const [slot, { modelAnchor, defaults, bounds, visibility, deferChange }] of slots) {
+    for (const [slot, { modelAnchor, defaults, bounds, visibility }] of slots) {
       if (bounds.isEmpty()) throw new Error(`The visual slot ${slot} has no fitting bounds.`);
       this.bindings.set(slot, { anchor: modelAnchor, defaults, bounds: bounds.clone(), visibility,
-        model: null, requestedModel: null, replacement: null, orientation: null, deferChange });
+        model: null, replacement: null, orientation: null });
     }
   }
 
@@ -49,50 +45,33 @@ export class AppearanceRig {
   setModel(slot: VisualPartId, model: LoadedVisual, alignment: Readonly<VisualAlignment>): void {
     const binding = this.binding(slot);
     const fit = this.prepareFit(slot, binding, model, alignment);
-    const cancel = (): void => {
-      if (binding.requestedModel === model) binding.requestedModel = binding.model;
-      if (this.pendingModels.delete(model)) model.dispose();
-    };
-    const apply = (): void => {
-      if (this.disposed) return;
-      this.clear(binding);
-      const centered = new Group();
-      centered.position.copy(fit.centering);
-      centered.add(model.scene);
-      const orientation = new Group();
-      orientation.add(centered);
-      const replacement = new Group();
-      replacement.add(orientation);
-      binding.anchor.add(replacement);
-      binding.model = model;
-      binding.replacement = replacement;
-      binding.orientation = orientation;
-      this.applyFit(slot, binding, model, fit);
-      binding.visibility.setReplacement(replacement);
-      this.pendingModels.delete(model);
-    };
-    const deferred = binding.deferChange?.(apply, cancel) ?? false;
-    binding.requestedModel = model;
-    if (deferred) this.pendingModels.add(model);
-    else apply();
+    this.clear(binding);
+    const centered = new Group();
+    centered.position.copy(fit.centering);
+    centered.add(model.scene);
+    const orientation = new Group();
+    orientation.add(centered);
+    const replacement = new Group();
+    replacement.add(orientation);
+    binding.anchor.add(replacement);
+    binding.model = model;
+    binding.replacement = replacement;
+    binding.orientation = orientation;
+    this.applyFit(slot, binding, model, fit);
+    binding.visibility.setReplacement(replacement);
   }
 
   align(slot: VisualPartId, alignment: Readonly<VisualAlignment>): void {
     const binding = this.binding(slot);
-    const model = binding.requestedModel;
+    const model = binding.model;
     if (model === null) throw new AppearanceError(`Cannot align ${slot} without a custom model.`);
     const fit = this.prepareFit(slot, binding, model, alignment);
-    const apply = (): void => { if (!this.disposed) this.applyFit(slot, binding, model, fit); };
-    if (!binding.deferChange?.(apply)) apply();
+    this.applyFit(slot, binding, model, fit);
   }
 
   reset(slot: VisualPartId): void {
     const binding = this.binding(slot);
-    const apply = (): void => { if (!this.disposed) this.clear(binding); };
-    const cancel = (): void => { binding.requestedModel = binding.model; };
-    const deferred = binding.deferChange?.(apply, cancel) ?? false;
-    binding.requestedModel = null;
-    if (!deferred) apply();
+    this.clear(binding);
   }
 
   private prepareFit(slot: VisualPartId, binding: VisualBinding, model: LoadedVisual,
@@ -152,8 +131,6 @@ export class AppearanceRig {
     if (this.disposed) return;
     this.disposed = true;
     const disposal = new Disposal();
-    for (const model of this.pendingModels) disposal.run(() => model.dispose());
-    this.pendingModels.clear();
     for (const binding of this.bindings.values()) disposal.run(() => this.clear(binding));
     this.bindings.clear();
     disposal.finish();

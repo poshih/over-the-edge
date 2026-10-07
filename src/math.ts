@@ -4,16 +4,23 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function clampLength(point: Readonly<Point>, maximum: number): Point {
+export function clampLength(point: Readonly<Point>, maximum: number, out: Point = { x: 0, y: 0 }): Point {
   // Normalize before measuring so finite, very large input cannot overflow.
   const scale = Math.max(Math.abs(point.x), Math.abs(point.y), maximum);
-  if (scale === 0) return { x: 0, y: 0 };
+  if (scale === 0) {
+    out.x = out.y = 0;
+    return out;
+  }
   const x = point.x / scale;
   const y = point.y / scale;
   const length = Math.hypot(x, y);
-  if (length <= maximum / scale) return { x: point.x, y: point.y };
+  if (length <= maximum / scale) {
+    out.x = point.x; out.y = point.y;
+    return out;
+  }
   const radius = maximum / length;
-  return { x: x * radius, y: y * radius };
+  out.x = x * radius; out.y = y * radius;
+  return out;
 }
 
 export function angleDifference(target: number, current: number): number {

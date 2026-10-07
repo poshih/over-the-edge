@@ -96,7 +96,7 @@ export class LiquidWorld {
   push(rig: PlayerRig, tuning: Readonly<Tuning>): PoolObject | null {
     this.ensureLive();
     if (this.pools.size === 0) return null;
-    if (rig.phase === 'dying-ragdoll') {
+    if (rig.phase === 'dying') {
       const bath = this.pushSubject(rig.characterBodies, rig.potFixture, rig.characterMass, tuning);
       this.pushSubject(rig.tool.bodies, null, rig.toolMass, tuning);
       return bath;

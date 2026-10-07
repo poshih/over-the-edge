@@ -1,6 +1,6 @@
 import { Bone, Group, Matrix4, MeshStandardMaterial, Skeleton, SkinnedMesh, Vector3 } from 'three';
 import type { Quaternion } from 'three';
-import { ARM_GEOMETRY, ARM_LENGTH } from './arm-ik';
+import { ARM_GEOMETRY, ARM_LENGTH } from './player-figure-data';
 import type { ArmPose } from './arm-ik';
 import { AVATAR_BIND, AVATAR_JOINTS, createAvatarGeometry } from './avatar-geometry';
 import { ARM_LAYER } from './arm-layer';

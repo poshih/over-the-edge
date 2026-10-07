@@ -219,7 +219,8 @@ GAME_SPRITES=skins/paper.json GAME_ALTERNATE_SPRITES=skins/hero.json npm run bui
 Players choose **2D** or **3D** in the release's corner control, including
 mid-level; the choice persists in the browser. Both profiles and their GLBs are
 validated at build time and load once. Switching changes only the presentation,
-including each profile's grips and arm lengths; physics and the level continue unchanged. Without `GAME_ALTERNATE_SPRITES`,
+including each profile's grips and arm lengths; live physics and the level continue unchanged,
+and its figure is stored for the next death. Without `GAME_ALTERNATE_SPRITES`,
 the release has no such control. See [imported 3D characters](docs/characters.md).
 
 `src/editor/` owns all authoring UI, persistence, imports, and debugging tools.
@@ -423,9 +424,12 @@ outline, for example after an edit or a restored illusion, passes out of it inst
 of being trapped or shoved. A non-colliding shaft inside rock never suppresses a
 head contact just because they share a body. See [ground-hold stability](docs/ground-hold-stability.md).
 
-Default death replaces the root with six passive ragdoll bodies and drops the drive joint,
+Death replaces the root with six passive ragdoll bodies and drops the drive joint,
 leaving eight bodies and six joints for a rigid tool, or twelve bodies and ten joints for
-a compliant one. The shaft then collides. One placement owns the corpse and tool and
+a compliant one. Simulation constructs it from its live rig and a validated
+[character figure](docs/characters.md#the-character-figure-and-death), never from the view.
+Corpse and tool fixtures then collide only with terrain and platforms, not enemies
+or each other. One placement owns the corpse and tool and
 destroys them together on reset or respawn; see [health and bonfires](#health-and-bonfires).
 
 The simulation runs at a fixed **240 Hz**, with continuous collision handling,
@@ -613,7 +617,7 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 14**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
+**schema version 15**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
 in any other version are rejected, not converted. Browser snapshots use storage format
 **7**; earlier storage keys are not read. Unreadable current-format saves are marked and
 retained, while other valid snapshots remain available.
@@ -905,7 +909,10 @@ under the pointer. A bonfire lights when the player's foot comes within **1.5 m*
 base, and the one reached last is where a death returns the player. Health running out
 or a fall out of the level starts a physical death: the character collapses as a passive
 ragdoll, lets go of the hammer and drops it. The jar and hammer keep their motion; the corpse
-and released hammer collide with the course, platforms and active enemies, never each other.
+and released hammer collide only with the course and platforms, never enemies or each other.
+Enemies, bird dives and trap range checks use the frozen entry point, and the dying jar
+cannot trigger illusions. The released head still blocks projectile rays. The figure
+and corpse never steer persistent world state after a bonfire return.
 2D sprites freeze their facing and flipbook frame but follow the physical body, head and hands,
 and dim. The player returns after **Respawn wait** in **Physics / Death**
 (`death.wait`, **0.5–15 s**, step **0.1**, default **4 s**), snapshotted at entry.
@@ -917,16 +924,20 @@ has no input, takes no damage, deals no hammer hits or scripted bumps, lights no
 height. Outstanding trigger runs cancel and pressure switches release. Pause and a
 hidden tab hold the sequence; movement is discarded, but Reset and other controls remain.
 
-**Physics / Death** selects `ragdoll` (the default) or `hold`, which keeps the last aim,
-motors and grips, with the former 20° slump and 35° nod. Ragdoll angular damping is
+**Physics / Death** owns the wait and corpse materials. Ragdoll angular damping is
 **0–10 /s**, default **2**, and friction **0.05–2**, default **0.45**; the jar and hammer
 head keep their own materials. A death snapshots its wait and construction settings. Runtime
-character selections and accepted model/head changes while dying wait for placement;
-Workshop character-authoring edits refuse with a transient notice and leave the draft
-unchanged. Player-body tuning stays live in `hold`, but takes effect at placement in
-`ragdoll`, without retuning the corpse. The corpse's pot remains buoyant; limbs and the
-separately queried dropped hammer take liquid drag only. A hammer that strays far from
-the corpse can miss sleeping enemies, whose colliders are inactive there.
+character selections, Workshop edits, previews, appearance changes and completed
+profile/model loads apply immediately while dying. The corpse keeps its entry figure;
+a changed figure is stored for the next death. A library hammer chosen mid-death
+draws at once while its released collider keeps its entry outline until placement.
+Player-body tuning takes effect at placement, without retuning the corpse.
+The default [`DEATH_POSE`](docs/runtime-plugins.md#death-pose) writer smoothsteps from
+the last drawn live pose to the physical corpse over 0.65 s. With no live frame drawn
+in this placement it captures the physical entry pose; reduced motion uses the
+physical pose immediately. Sprites re-hold their base after each committed edit.
+The corpse's pot remains buoyant; limbs and the separately queried dropped hammer
+take liquid drag only.
 
 After the wait the player returns at that bonfire, healed and protected for the configured
 respawn invulnerability (**2 s** by default),
@@ -1350,7 +1361,8 @@ bone-bound cutouts, weighted sprite meshes, eight-way artwork and poses,
 keyframed animation, hand IK, a tiled fixed-length shaft, and cosmetic spring-bone
 hair with body circles. Save/export includes the complete rig; `GAME_SPRITES`
 bundles it without the editor. Supply directional artwork yourself. Rigging
-changes the character's appearance, not its physics or hammer reach.
+changes the character's appearance, not live physics or hammer reach. Its arm-chain
+lengths also resolve the next corpse's numeric figure.
 
 **Directional Presentation** adds shared angle-sector boundaries, per-direction
 hysteresis, and smoothly limited head rotation around an authored neck pivot.
@@ -1435,7 +1447,8 @@ character profile, with `slideAt` a fraction (0-1), `slideRange` the butt-end an
 `{ "from", "to" }` fractions (0-1) and `rotation` each hand's `{ "x", "y", "z" }` in degrees
 (`{ "left": {...}, "right": {...} }`), so each character keeps its own; Mesh parts, both avatars and
 the 2D `left-grip` and `right-grip` targets share the grip positions, and the 2D targets ignore
-`rotation`. Grips are presentation: physics, input and the hammer models never read them.
+`rotation`. Live physics, input and hammer models never read them. Corpse entry uses
+the authored left/right distances, never the presentation's slide offset.
 
 ### Arm lengths
 
@@ -1445,7 +1458,8 @@ bones, and the 2D arm chains that target `left-grip` and `right-grip`, whose bon
 their length with their arm artwork, while joint caps and hands keep their size. They are saved as `arms` in the
 character profile. **Use natural arm lengths** clears them (`"arms": null`), and each type keeps
 its own: 0.82 m and 0.82 m for the built-in arms, an imported avatar's bind pose, and a 2D
-skeleton's authored bones. Arm lengths are visual only: physics and reach are unchanged. Sliding
+skeleton's authored bones. Live physics and reach are unchanged; these lengths also
+size the next corpse through the character figure. Sliding
 hands measure their slide point against them, and an arm too short for its grip straightens
 toward it as before.
 

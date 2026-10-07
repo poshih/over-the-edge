@@ -28,8 +28,8 @@ export { DEFAULT_EFFECTS, EFFECT_LIMITS, EFFECTS } from '../effects';
 export type { MomentEffect, MomentEffectFactory } from '../effects';
 export { DEFAULT_DEATH_POSE, DEATH_POSE } from '../death-pose';
 export type {
-  DeathAppearance, DeathArmPose, DeathLayout, DeathPose, DeathPoseInput, DeathPoseWriter,
-  ReadonlyDeathAppearance, ReadonlyDeathArmPose, ReadonlyDeathLayout, ReadonlyDeathPose, Rotation3, Transform2,
+  DeathAppearance, DeathArmPose, DeathPose, DeathPoseInput, DeathPoseWriter,
+  ReadonlyDeathAppearance, ReadonlyDeathArmPose, ReadonlyDeathPose, Rotation3, Transform2,
 } from '../death-pose';
 export { DEFAULT_DEATH_SCREEN, DEATH_SCREEN } from '../death-screen';
 export type { DeathScreen, DeathScreenFactory } from '../death-screen';

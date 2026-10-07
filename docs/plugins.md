@@ -53,11 +53,14 @@ GAME_PLUGINS=games/my-game/plugins.json GAME_PROJECT=projects/my-game npm run bu
   kinds alone and no library models packaged.
 
 Breaking public contract changes bump `PLUGIN_API_VERSION`; manifests must name the current
-version, without legacy readers or aliases. Version 2 uses the numeric death-pose point and
-phase/attachment rig contexts, enforces synchronous plugin contracts, and gives platform
-looks only changed poses. It also introduces the stamped gameplay-moment journal,
+version, without legacy readers or aliases. Version 2 enforces synchronous plugin
+contracts, gives platform looks only changed-pose deltas, and introduces the stamped
+gameplay-moment journal,
 `effects.strikes` / `effects.lava` / `effects.extras`, filtered `game.observers`, and the
-audio contract's `moment` / `preview` methods.
+audio contract's `moment` / `preview` methods. Its numeric death-pose input
+contains the captured live pose, interpolated physical corpse and entry facial
+quaternion. Rig frame contexts are live-only; pose contexts carry gripped or
+released attachment, without presentation-source flags.
 
 A plugin's identity comes from the manifest alone, and facet modules never repeat it. Each host
 tells its facet the ID, as `host.plugin`. The ID names the plugin in errors, keys its Workshop
@@ -256,14 +259,17 @@ Physical entry and frame validation additionally use the typed `PlayerDeathError
 | Code | Cause |
 | --- | --- |
 | `locked-world` | Death entry inside a physics step |
-| `stale-seed` | The seed belongs to another placement or physics time |
 | `repeated-entry` | The placement is already dying |
-| `invalid-seed` | The terminal pose or character layout is invalid |
 | `construction-failed` | The corpse cannot be constructed or the live root removed |
 | `phase-mismatch` | A player snapshot or interpolation has inconsistent live/death phases |
 
 These stop the transition or frame rather than substituting a pose, teleporting the
 character or retaining a partial corpse.
+
+`CharacterFigureError` (`src/character-figure.ts`) has code `'invalid-figure'`.
+Simulation construction and figure updates validate immutable numeric proportions:
+finite coordinates, positive finite arm lengths, bounded waist lean and grips.
+A figure refusal never changes an existing corpse.
 
 ## Lifecycle and hot reload
 

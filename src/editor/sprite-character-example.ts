@@ -1,4 +1,4 @@
-import { ARM_GEOMETRY } from '../arm-ik';
+import { ARM_GEOMETRY } from '../player-figure-data';
 import { DEFAULT_ARM_FORWARD_DISTANCE, PLAYER_DEPTH } from '../character-depth';
 import { DEFAULT_WAIST_LEAN } from '../waist-lean';
 import { ARM_SIDES, SHAFT_ARTWORK_LENGTH } from '../character';

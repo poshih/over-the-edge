@@ -26,37 +26,14 @@ export interface ReadonlyDeathPose {
   readonly arms: Readonly<Record<ArmSide, ReadonlyDeathArmPose>>;
 }
 
-// The resolved waist and neck, in the torso's local frame. Body construction and presentation
-// share the captured layout; asset changes take effect only at the next placement.
-export interface DeathLayout {
-  waist: Point;
-  neck: Point;
-}
-export interface ReadonlyDeathLayout {
-  readonly waist: Readonly<Point>;
-  readonly neck: Readonly<Point>;
-}
-export interface DeathSeed {
-  placement: number;
-  time: number;
-  centre: Transform2;
-  layout: DeathLayout;
-  pose: DeathPose;
-  headFacing: Rotation3;
-  direction: -1 | 1;
-}
-
 interface PlayerCentre { readonly centre: Readonly<Transform2> }
 export interface LivePlayerFrame extends PlayerCentre {
   readonly phase: 'alive';
   readonly shoulder: Readonly<Point>;
 }
 export interface DeathPlayerFrame extends PlayerCentre {
-  readonly phase: 'dying-ragdoll' | 'dying-rigid';
+  readonly phase: 'dying';
   readonly pose: ReadonlyDeathPose;
-  readonly layout: ReadonlyDeathLayout;
-  readonly headFacing: Readonly<Rotation3>;
-  readonly direction: -1 | 1;
 }
 export type PlayerFrameState = LivePlayerFrame | DeathPlayerFrame;
 export interface MutableLivePlayerFrame extends LivePlayerFrame { centre: Transform2; shoulder: Point }
@@ -87,13 +64,6 @@ export function createDeathPose(): DeathPose {
   const arm = (): DeathArmPose => ({ shoulder: { x: 0, y: 0 }, elbow: { x: 0, y: 0 }, hand: { x: 0, y: 0, angle: 0 } });
   return { torso: { x: 0, y: 0, angle: 0 }, head: { x: 0, y: 0, angle: 0 }, arms: { left: arm(), right: arm() } };
 }
-export function createDeathSeed(): DeathSeed {
-  return {
-    placement: 0, time: 0, centre: { x: 0, y: 0, angle: 0 },
-    layout: { waist: { x: 0, y: 0 }, neck: { x: 0, y: 0 } },
-    pose: createDeathPose(), headFacing: { x: 0, y: 0, z: 0, w: 1 }, direction: 1,
-  };
-}
 export function copyPoint(out: Point, from: Readonly<Point>): void { out.x = from.x; out.y = from.y; }
 export function copyTransform(out: Transform2, from: Readonly<Transform2>): void {
   copyPoint(out, from); out.angle = from.angle;
@@ -109,14 +79,6 @@ export function copyDeathPose(out: DeathPose, from: ReadonlyDeathPose): void {
   copyPoint(out.arms.right.shoulder, from.arms.right.shoulder);
   copyPoint(out.arms.right.elbow, from.arms.right.elbow);
   copyTransform(out.arms.right.hand, from.arms.right.hand);
-}
-export function copyDeathSeed(from: DeathSeed): DeathSeed {
-  const out = createDeathSeed();
-  out.placement = from.placement; out.time = from.time; out.direction = from.direction;
-  copyTransform(out.centre, from.centre);
-  copyPoint(out.layout.waist, from.layout.waist); copyPoint(out.layout.neck, from.layout.neck);
-  copyRotation(out.headFacing, from.headFacing); copyDeathPose(out.pose, from.pose);
-  return out;
 }
 function interpolatePoint(out: Point, from: Readonly<Point>, to: Readonly<Point>, alpha: number): void {
   out.x = from.x + (to.x - from.x) * alpha; out.y = from.y + (to.y - from.y) * alpha;

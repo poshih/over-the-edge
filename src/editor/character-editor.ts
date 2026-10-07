@@ -154,7 +154,8 @@ export function createCharacterEditor(options: {
           <button type="button" class="button character-waist-lean-reset">Reset waist lean</button>
           <p class="appearance-format">Leans the upper body toward the hammer, turning at the waist on the jar's rim:
             the most when the shaft is level, not at all when it points straight up or down. The shoulders, arms and
-            head turn with it, and the head keeps looking at the cursor. Visual only; 0° keeps the body upright.</p>
+            head turn with it, and the head keeps looking at the cursor. Live physics stays unchanged; the target lean
+            also positions the next corpse. 0° keeps the body upright.</p>
           <p class="appearance-format character-arm-forward-inactive" hidden>Both apply to Mesh parts and Avatar.
             The saved values are retained in 2D mode, which keeps its authored sprite depths and stays upright.</p>
         </fieldset>
@@ -169,8 +170,8 @@ export function createCharacterEditor(options: {
           <p class="appearance-format">Sets the arms of every character type: the built-in and mesh-part arms,
             an imported avatar's bones and the 2D arm chains that target the grips, whose arm artwork stretches
             along each bone while joint caps and hands keep their size. Without them each type keeps its own arm
-            lengths. Visual only: physics and reach are unchanged, and sliding hands measure their slide point
-            against these lengths. Save the character profile to keep them.</p>
+            lengths. Live physics and reach are unchanged; these lengths also size the next corpse.
+            Sliding hands measure their slide point against them. Save the character profile to keep them.</p>
         </fieldset>
       `)}
 
@@ -195,8 +196,9 @@ export function createCharacterEditor(options: {
             at 0% the handle slides through them all the time, and at 100% only when an arm would otherwise be
             stretched straight. The butt-end and head-end limits keep sliding hands on a stretch of the handle,
             from the butt (0%) to as near the head as a hand may come (100%); at them the hands hold on and the
-            arms reach farther, stretching if a limit is out of their reach. Avatars, mesh parts and 2D grip targets use the same grips. Physics is
-            unchanged. Save the character profile to keep them.</p>
+            arms reach farther, stretching if a limit is out of their reach. Avatars, mesh parts and 2D grip targets use the same grips.
+            Live physics is unchanged. Arm lengths, shoulders, neck, grips and lean shape only the corpse,
+            which never steers the continuing run. Save the character profile to keep them.</p>
           <fieldset class="tuning-group character-grip-rotation">
             <legend>Hand rotation</legend>
             <div class="character-grip-rotation-controls"></div>

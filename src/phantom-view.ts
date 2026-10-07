@@ -3,7 +3,8 @@
 import { CylinderGeometry, Group, Mesh, MeshLambertMaterial, SphereGeometry, Vector3 } from 'three';
 import type { BufferGeometry } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ArmPoseSolver, DEFAULT_ARM_CHAINS } from './arm-ik';
+import { ArmPoseSolver } from './arm-ik';
+import { DEFAULT_ARM_CHAINS } from './player-figure-data';
 import { ARM_SIDES, DEFAULT_ARM_IK } from './character';
 import type { ArmSide } from './character';
 import { DEFAULT_ARM_FORWARD_DISTANCE, getToolDepth, PLAYER_DEPTH } from './character-depth';

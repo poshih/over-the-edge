@@ -4,8 +4,8 @@
 // run the one implementation. The per-frame frame builders use scalar arithmetic and write their
 // output matrix directly, so they allocate nothing and share no state between calls.
 import { Matrix4, Vector3 } from 'three';
-import { ARM_GEOMETRY } from './arm-ik';
-import type { ArmChain, ArmChains } from './arm-ik';
+import { ARM_GEOMETRY } from './player-figure-data';
+import type { ArmChain, ArmChains } from './player-figure-data';
 import { AVATAR_BIND } from './avatar-geometry';
 import { ARM_SIDES } from './character';
 import type { ArmSide } from './character';
@@ -255,8 +255,6 @@ export interface AvatarRigFrameContext {
   readonly forward: Vector3;
   readonly shaftLength: number;
   readonly dt: number;
-  readonly poseSource: 'live' | 'captured-death';
-  readonly attachment: 'gripped';
 }
 
 // Released poses bypass phase 1. Their plan has zero offsets and forearm-aligned hand directions.
@@ -266,7 +264,6 @@ export interface AvatarRigPoseContext {
   readonly plan: AvatarRigFramePlan;
   readonly arms: Readonly<Record<ArmSide, AvatarRigArmSolution>>;
   readonly dt: number;
-  readonly poseSource: 'live' | 'physical-death' | 'captured-death';
   readonly attachment: 'gripped' | 'released';
 }
 

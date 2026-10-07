@@ -30,7 +30,7 @@ import { characterAssets } from './character-profile';
 import type { CharacterAssets } from './character-profile';
 import { sameAvatarMotion, validateAvatarMotion } from './avatar-motion-data';
 import type { AvatarMotionEntry } from './avatar-motion-data';
-import { DirectionalError, validateDirectionalPresentation } from './directional-data';
+import { DirectionalError, sameDirectionalPresentation, validateDirectionalPresentation } from './directional-data';
 import type { DirectionalPresentation } from './directional-data';
 import { DirectionalPose } from './directional-pose';
 import type { DirectionalFrame } from './directional-pose';
@@ -43,18 +43,7 @@ import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-a
 import { selectFlipbookFrame } from './sprite-flipbook';
 import { isContentRef } from './content-ref';
 import type { ContentLoader } from './content-ref';
-import { PlacementHold } from './placement-hold';
-import type { DeathArmPose, Transform2 } from './player-pose';
 import type { HeldSkeletonFrame } from './skeleton-pose';
-
-export class SpriteEditError extends SpriteError {
-  readonly code = 'dying';
-
-  constructor() {
-    super('Wait until the player is placed again before editing the dying character.');
-    this.name = 'SpriteEditError';
-  }
-}
 
 // How a host names one arm: the IK target its hand follows, and the anchors depicting its two segments.
 export interface SpriteArmSlots {
@@ -354,6 +343,7 @@ export class SpriteRig {
   private arms: CharacterArms | null = null;
   // How this host names each arm, so the character's arm lengths reach its 2D arm chains.
   private readonly armSlots: Readonly<Record<ArmSide, SpriteArmSlots>> | null;
+  private readonly onNaturalArmsChange: (() => void) | undefined;
   // Stretched arm bones and the anchor whose artwork depicts each; other art on them keeps its size.
   private segmentAnchors: ReadonlyMap<string, string> = new Map();
   // Each hand's authored 2D arm chain lengths, kept current with the skeleton.
@@ -383,13 +373,15 @@ export class SpriteRig {
   private texturesDisposed = 0;
   private currentDirection: FacingDirection = 'right';
   private dying = false;
-  private physicalDeath = false;
-  private readonly placementHold = new PlacementHold();
   private deathHeadBones: readonly string[] = EMPTY_BONES;
   private deathSkeletonPose: SkeletonPose | null = null;
+  private evaluatedBasePose: SkeletonPose | null = null;
+  private deathPreview: SkeletonPreview | null = null;
+  private deathDirectionalPreview: { readonly aim: RuntimePoint } | null = null;
   private readonly deathTargets = new Map<string, { x: number; y: number; angle: number }>();
+  private readonly deathFrameTargets = new Map<string, { x: number; y: number; angle: number; used: boolean }>();
   private readonly heldFrame: { -readonly [K in keyof HeldSkeletonFrame]: HeldSkeletonFrame[K] } = {
-    targets: this.deathTargets, rootAngle: 0, released: false,
+    targets: this.deathTargets, rootAngle: 0,
   };
   private deathBrightness = 1;
   private hasFrame = false;
@@ -422,14 +414,19 @@ export class SpriteRig {
     // Loads a release's packaged images (content: sources); hosts without one reject them.
     loadContent?: ContentLoader;
     armSlots?: Readonly<Record<ArmSide, SpriteArmSlots>>;
+    onNaturalArmsChange?: () => void;
   }) {
     this.anchors = new Map(anchors);
     for (const name of this.anchors.keys()) this.coverage.set(name, false);
     this.root = options.root;
     this.targetIds = new Set(options.targetIds);
     for (const name of this.anchors.keys()) this.deathTargets.set(name, { x: 0, y: 0, angle: 0 });
-    for (const name of this.targetIds) if (!this.deathTargets.has(name)) this.deathTargets.set(name, { x: 0, y: 0, angle: 0 });
+    for (const name of this.targetIds) {
+      if (!this.deathTargets.has(name)) this.deathTargets.set(name, { x: 0, y: 0, angle: 0 });
+      this.deathFrameTargets.set(name, { x: 0, y: 0, angle: 0, used: false });
+    }
     this.prepareCharacterPresentation = options.prepareCharacterPresentation;
+    this.onNaturalArmsChange = options.onNaturalArmsChange;
     this.armSlots = options.armSlots === undefined ? null : Object.freeze({
       left: Object.freeze({ ...options.armSlots.left }), right: Object.freeze({ ...options.armSlots.right }),
     });
@@ -454,10 +451,7 @@ export class SpriteRig {
     this.headTrackingPlan = compileSpriteHeadTracking(this.headTracking, [], null, null);
   }
 
-  get editsHeld(): boolean { return this.dying; }
-
   async replace(document: SpriteDocument, options: { signal: AbortSignal } = { signal: new AbortController().signal }): Promise<void> {
-    await this.placementHold.wait(options.signal);
     this.assertMutable();
     if (options.signal.aborted) throw cancellation(options.signal);
     document = validateSpriteMetadata(document);
@@ -520,7 +514,6 @@ export class SpriteRig {
         images.set(image.id, resource);
       }
       checkSignal(signal);
-      await this.placementHold.wait(signal);
       const next = this.buildState(document.layers, document.skeleton, images, resources,
         { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
           armForwardDistance: document.armForwardDistance, waistLean: document.waistLean, grips: document.grips, arms: document.arms,
@@ -552,6 +545,7 @@ export class SpriteRig {
     const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), armForwardDistance: distance });
     this.armForwardDistance = distance;
     commit?.();
+    if (this.dying) this.refreshCommittedScene();
   }
 
   setWaistLean(value: number): void {
@@ -561,6 +555,7 @@ export class SpriteRig {
     const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), waistLean: lean });
     this.waistLean = lean;
     commit?.();
+    if (this.dying) this.refreshCommittedScene();
   }
 
   setGrips(value: Grips): void {
@@ -570,6 +565,7 @@ export class SpriteRig {
     const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), grips });
     this.grips = grips;
     commit?.();
+    if (this.dying) this.refreshCommittedScene();
   }
 
   // Stretches the 2D arm chains and informs the host, which sizes its 3D arms; nothing reloads.
@@ -581,6 +577,7 @@ export class SpriteRig {
     this.arms = arms;
     this.applyArmLengths(this.skeleton);
     commit?.();
+    if (this.dying) this.refreshCommittedScene();
   }
 
   // Each hand's authored 2D arm chain lengths, or null for a hand without one; nothing is allocated.
@@ -600,6 +597,7 @@ export class SpriteRig {
     const commit = this.prepareCharacterPresentation?.({ ...this.currentCharacterPresentation(), avatar: next });
     this.assets = characterAssets({ ...this.assets, avatar: next });
     commit?.();
+    if (this.dying) this.refreshCommittedScene();
   }
 
   configureSkeleton(
@@ -641,7 +639,7 @@ export class SpriteRig {
       this.preview = preview;
       this.directionalPreview = null;
       this.previewDirectionPose = null;
-      this.refreshScene({ forceVisibility: true });
+      this.refreshCommittedScene({ forceVisibility: true });
     } catch (error) {
       throw this.spriteFailure(error);
     }
@@ -689,14 +687,18 @@ export class SpriteRig {
       this.preview = null;
       this.directionalPreview = { aim: point(preview.aim) };
     }
-    this.refreshScene({ forceVisibility: true });
+    this.refreshCommittedScene({ forceVisibility: true });
   }
 
   resetPresentation(): void {
     this.assertLive();
-    this.setDying(false);
-    this.setDeathBrightness(1);
-    this.placementHold.place();
+    this.resetBasePresentation();
+    if (this.dying) this.refreshCommittedScene({ forceVisibility: true });
+  }
+
+  private resetBasePresentation(): void {
+    this.deathSkeletonPose = null;
+    if (!this.dying) this.setDeathBrightness(1);
     this.directionPose.reset();
     this.preview = null;
     this.directionalPreview = null;
@@ -707,27 +709,73 @@ export class SpriteRig {
       this.skeleton.previewPose = null;
       this.applyArmLengths(this.skeleton);
     }
+    if (this.dying && this.hasFrame) this.directionPose.update(this.lastFrame);
   }
 
-  setDying(dying: boolean, physical = false): void {
+  setDying(dying: boolean): void {
     this.assertLive();
+    if (this.dying === dying) return;
     this.dying = dying;
-    this.physicalDeath = dying && physical;
     if (!dying) {
       this.deathSkeletonPose = null;
+      this.deathPreview = null;
+      this.deathDirectionalPreview = null;
       return;
     }
-    this.placementHold.begin();
+    for (const target of this.deathFrameTargets.values()) target.used = false;
+    for (const [name, target] of this.lastFrame.targets) {
+      const out = this.deathFrameTargets.get(name);
+      if (out === undefined) throw new SpriteError(`Unknown death target "${name}".`);
+      out.x = target.x; out.y = target.y; out.angle = target.angle; out.used = true;
+    }
     const runtime = this.skeleton;
+    const pose = this.selectedBasePose();
+    if (!this.hasFrame || runtime !== null && pose !== this.evaluatedBasePose) {
+      this.refreshScene({ forceVisibility: true }, true);
+    }
+    this.holdDeathPose(false);
+  }
+
+  private holdDeathPose(preserveBase: boolean): void {
+    const runtime = this.skeleton;
+    this.deathPreview = this.preview;
+    this.deathDirectionalPreview = this.directionalPreview;
+    this.deathSkeletonPose = null;
     if (runtime !== null) {
       this.updateSkeletonRoot(runtime);
       const targets = this.writeDeathTargets(runtime.originWorld);
       const anchor = this.anchor(runtime.definition.anchor).node;
-      const pose = this.deathSkeletonPose ??
-        (this.preview !== null || this.directionalPreview !== null ? runtime.previewPose ?? runtime.pose : runtime.pose);
+      const pose = this.selectedBasePose()!;
       this.deathSkeletonPose = pose;
-      pose.hold(this.worldAngle(anchor), targets, this.deathHeadBones);
+      pose.hold(this.worldAngle(anchor), targets, this.deathHeadBones, preserveBase);
     }
+  }
+
+  private selectedBasePose(): SkeletonPose | null {
+    const runtime = this.skeleton;
+    if (runtime === null) return null;
+    return this.preview !== null || this.directionalPreview !== null ? runtime.previewPose ?? runtime.pose : runtime.pose;
+  }
+
+  private refreshCommittedScene(options: { forceVisibility?: boolean; notifyCoverage?: boolean } = EMPTY_REFRESH): void {
+    if (!this.dying) {
+      this.refreshScene(options);
+      return;
+    }
+    const runtime = this.skeleton;
+    const pose = this.selectedBasePose();
+    const continuing = runtime === null || (this.deathSkeletonPose !== null && pose === this.deathSkeletonPose &&
+      this.preview === this.deathPreview && this.directionalPreview === this.deathDirectionalPreview);
+    if (continuing) {
+      this.displayedPresentation = this.activePresentation();
+      this.updateFlipbooks();
+    } else {
+      // A new skeleton or preview must evaluate its base once before hold reads its numeric world arrays.
+      this.refreshScene(options, true);
+    }
+    this.holdDeathPose(continuing);
+    this.refreshScene(options, false, true);
+    this.rotateLayers();
   }
 
   // Each material's original colour is captured once. Authored images and layer definitions never change.
@@ -793,11 +841,10 @@ export class SpriteRig {
     if (this.dying) {
       // The directional choice and flipbook frame are captured, but physical targets still move.
       this.lastFrame.time = frame.time;
-      const targets = this.lastFrame.targets as Map<string, { x: number; y: number; angle: number }>;
       for (const [name, target] of frame.targets) {
-        const out = targets.get(name);
-        if (out === undefined) throw new SpriteError(`Death target "${name}" was not captured at entry.`);
-        out.x = target.x; out.y = target.y; out.angle = target.angle;
+        const out = this.deathFrameTargets.get(name);
+        if (out === undefined) throw new SpriteError(`Unknown death target "${name}".`);
+        out.x = target.x; out.y = target.y; out.angle = target.angle; out.used = true;
       }
       if (active) this.refreshScene(EMPTY_REFRESH, false, true);
       return;
@@ -982,7 +1029,6 @@ export class SpriteRig {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.placementHold.dispose();
     const commitPresentation = this.prepareCharacterPresentation?.({
       characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
       waistLean: DEFAULT_WAIST_LEAN, grips: DEFAULT_GRIPS, arms: null,
@@ -999,6 +1045,7 @@ export class SpriteRig {
     this.directionalPreview = null;
     this.previewDirectionPose = null;
     this.deathSkeletonPose = null;
+    this.evaluatedBasePose = null;
     this.disposeSkeleton(this.skeleton);
     this.skeleton = null;
     for (const resource of this.resources.values()) this.releaseResource(resource);
@@ -1019,7 +1066,6 @@ export class SpriteRig {
 
   private assertMutable(): void {
     this.assertLive();
-    if (this.dying) throw new SpriteEditError();
     if (this.replacement !== null || this.pendingDecodes > 0) {
       throw new SpriteError('A sprite replacement or cancelled PNG decode is still in progress.');
     }
@@ -1481,7 +1527,7 @@ export class SpriteRig {
     const changedType = next.characterRiggingType !== this.characterRiggingType;
     const nextAssets = characterAssets(next);
     const presentation = next.presentation ?? next.headTracking.presentation;
-    const resetDirection = changedType || next.mode === 'replace' || presentation !== this.runtimePresentation();
+    const resetDirection = changedType || next.mode === 'replace' || !sameDirectionalPresentation(presentation, this.runtimePresentation());
     const previousCoverage = new Map(this.coverage);
     const retained = new Set(next.layers.values());
     for (const instance of this.rotatedLayers) {
@@ -1506,14 +1552,15 @@ export class SpriteRig {
     this.grips = next.grips;
     this.arms = next.arms;
     this.assets = nextAssets;
-    this.applyArmLengths(this.skeleton);
-    if (changedType && next.mode === 'edit') this.resetPresentation();
+    const changedNaturalArms = this.applyArmLengths(this.skeleton, false);
+    if (changedType && next.mode === 'edit') this.resetBasePresentation();
     this.preview = options.preview;
     if (changedType || next.mode === 'replace' || this.preview !== null) {
       this.directionalPreview = null;
       this.previewDirectionPose = null;
     }
     if (resetDirection) {
+      this.deathSkeletonPose = null;
       this.directionPose = new DirectionalPose(presentation);
       if (this.hasFrame) this.directionPose.update(this.lastFrame);
       if (this.directionalPreview !== null) {
@@ -1540,11 +1587,12 @@ export class SpriteRig {
     }
     for (const resource of this.resources.values()) resource.material.color.copy(resource.colour).multiplyScalar(this.deathBrightness);
     this.attachScene();
-    this.refreshScene({ forceVisibility: true, notifyCoverage: false });
+    this.refreshCommittedScene({ forceVisibility: true, notifyCoverage: false });
     for (const [name, covered] of this.coverage) {
       if (previousCoverage.get(name) !== covered) this.anchor(name).setCovered({ covered });
     }
     next.commitPresentation?.();
+    if (changedNaturalArms) this.onNaturalArmsChange?.();
     for (const layer of oldLayers.values()) if (!retained.has(layer)) this.disposeLayer(layer);
     if (oldSkeleton !== this.skeleton) this.disposeSkeleton(oldSkeleton);
     for (const [source, resource] of oldResources) {
@@ -1765,12 +1813,14 @@ export class SpriteRig {
         rotation: this.skeletonRotation(runtime, live),
       };
       // Keep the live braid running independently while an editor preview owns the displayed pose.
-      let bones = runtime.pose.evaluate(input);
+      let evaluatedPose = runtime.pose;
+      let bones = evaluatedPose.evaluate(input);
       if (this.preview !== null || this.directionalPreview !== null) {
         if (runtime.previewPose === null) {
           runtime.previewPose = runtime.pose.fork();
         }
-        bones = runtime.previewPose.evaluate({
+        evaluatedPose = runtime.previewPose;
+        bones = evaluatedPose.evaluate({
           ...input,
           time: this.preview === null ? this.previewTime : this.preview.time,
           direction: this.displayedPresentation.direction,
@@ -1780,6 +1830,7 @@ export class SpriteRig {
           rotation: this.skeletonRotation(runtime, this.displayedPresentation),
         });
       }
+      this.evaluatedBasePose = evaluatedPose;
       runtime.evaluated = bones;
       this.applyBoneMatrices(runtime, bones);
       runtime.skeleton.update();
@@ -1817,7 +1868,9 @@ export class SpriteRig {
         angle: this.worldAngle(anchor.node),
       });
     }
-    for (const [name, target] of this.lastFrame.targets) {
+    const frameTargets = this.dying ? this.deathFrameTargets : this.lastFrame.targets;
+    for (const [name, target] of frameTargets) {
+      if ('used' in target && !target.used) continue;
       targets.set(name, { x: target.x - origin.x, y: target.y - origin.y, angle: target.angle });
     }
     return targets;
@@ -1831,7 +1884,8 @@ export class SpriteRig {
       out.x = this.tempWorld.x - origin.x; out.y = this.tempWorld.y - origin.y;
       out.angle = this.worldAngle(anchor.node);
     }
-    for (const [name, target] of this.lastFrame.targets) {
+    for (const [name, target] of this.deathFrameTargets) {
+      if (!target.used) continue;
       const out = this.deathTargets.get(name);
       if (out === undefined) throw new SpriteError(`Unknown physical target "${name}".`);
       out.x = target.x - origin.x; out.y = target.y - origin.y; out.angle = target.angle;
@@ -1844,67 +1898,9 @@ export class SpriteRig {
     if (pose === null) throw new SpriteError('A dying skeleton has no captured pose.');
     this.heldFrame.targets = this.writeDeathTargets(runtime.originWorld);
     this.heldFrame.rootAngle = this.worldAngle(this.anchor(runtime.definition.anchor).node);
-    this.heldFrame.released = this.physicalDeath;
     runtime.evaluated = pose.evaluateHeld(this.heldFrame);
     this.applyBoneMatrices(runtime, runtime.evaluated);
     runtime.skeleton.update();
-  }
-
-  // A sprite's existing grip chain is the anatomical source of its projected death seed.
-  writeDeathArm(side: ArmSide, out: DeathArmPose): boolean {
-    const runtime = this.skeleton;
-    if (this.characterRiggingType !== 'sprite-2d' || runtime === null) return false;
-    const chain = runtime.definition.ik.find(ik => ik.target === this.armSlots?.[side].target);
-    if (chain === undefined) return false;
-    const upper = runtime.evaluated[runtime.boneIndex.get(chain.upper)!]!;
-    const lower = runtime.evaluated[runtime.boneIndex.get(chain.lower)!]!;
-    const hand = runtime.evaluated[runtime.boneIndex.get(chain.hand)!]!;
-    out.shoulder.x = upper.x + runtime.originWorld.x; out.shoulder.y = upper.y + runtime.originWorld.y;
-    out.elbow.x = lower.x + runtime.originWorld.x; out.elbow.y = lower.y + runtime.originWorld.y;
-    out.hand.x = hand.x + runtime.originWorld.x; out.hand.y = hand.y + runtime.originWorld.y;
-    out.hand.angle = lower.angle;
-    return true;
-  }
-
-  // Resolve a sprite's head from its existing visible artwork and semantic head owner, not the
-  // hidden 3D helmet. This once-per-entry read also keeps a captured directional tilt in the seed.
-  writeDeathHead(out: Transform2, neck: { x: number; y: number }): boolean {
-    if (this.characterRiggingType !== 'sprite-2d' || this.headTracking === null) return false;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    let first: LayerInstance | null = null;
-    for (const instance of this.layers.values()) {
-      if (!instance.visible || instance.data.anchor !== this.headTracking.anchor) continue;
-      first ??= instance;
-      instance.mesh.updateWorldMatrix(true, false);
-      const positions = instance.mesh.geometry.getAttribute('position');
-      for (let index = 0; index < positions.count; index++) {
-        this.tempWorld.fromBufferAttribute(positions, index);
-        if (instance.kind === 'skin') instance.mesh.applyBoneTransform(index, this.tempWorld);
-        this.tempWorld.applyMatrix4(instance.mesh.matrixWorld);
-        minX = Math.min(minX, this.tempWorld.x); maxX = Math.max(maxX, this.tempWorld.x);
-        minY = Math.min(minY, this.tempWorld.y); maxY = Math.max(maxY, this.tempWorld.y);
-      }
-    }
-    if (first === null) return false;
-    out.x = (minX + maxX) / 2; out.y = (minY + maxY) / 2;
-    const runtime = this.skeleton, owner = this.deathHeadBones[0];
-    if (runtime !== null && owner !== undefined) {
-      const index = runtime.boneIndex.get(owner)!;
-      const posed = runtime.evaluated[index]!, rest = restPose(runtime.definition)[index]!;
-      out.angle = posed.angle - rest.angle + this.worldAngle(this.anchor(runtime.definition.anchor).node);
-      neck.x = posed.x + runtime.originWorld.x; neck.y = posed.y + runtime.originWorld.y;
-    } else {
-      out.angle = this.worldAngle(first.mesh) - THREE.MathUtils.degToRad(first.data.rotation);
-      if (first.kind === 'bone' && runtime !== null) {
-        const index = runtime.boneIndex.get(first.boneId)!;
-        out.angle -= restPose(runtime.definition)[index]!.angle;
-      }
-      const pivot = this.headTracking.pivot, anchor = this.anchor(pivot.anchor).node;
-      anchor.updateWorldMatrix(true, false);
-      this.tempWorld.set(pivot.x, pivot.y, 0).applyMatrix4(anchor.matrixWorld);
-      neck.x = this.tempWorld.x; neck.y = this.tempWorld.y;
-    }
-    return true;
   }
 
   private worldAngle(node: THREE.Object3D): number {
@@ -1924,7 +1920,7 @@ export class SpriteRig {
     }
   }
 
-  private applyArmLengths(runtime: SkeletonRuntime | null): void {
+  private applyArmLengths(runtime: SkeletonRuntime | null, notify = true): boolean {
     const lengths = new Map<string, number>();
     const segments = new Map<string, string>();
     if (runtime !== null && this.arms !== null && this.armSlots !== null) {
@@ -1949,7 +1945,13 @@ export class SpriteRig {
       const length = (id: string) => definition.bones.find(bone => bone.id === id)!.length;
       return Object.freeze({ upper: length(ik.upper), forearm: length(ik.lower) });
     };
-    this.naturalArms = Object.freeze({ left: chain('left'), right: chain('right') });
+    const left = chain('left'), right = chain('right'), previous = this.naturalArms;
+    const same = (a: ArmLengths | null, b: ArmLengths | null): boolean =>
+      a === null || b === null ? a === b : a.upper === b.upper && a.forearm === b.forearm;
+    if (same(previous.left, left) && same(previous.right, right)) return false;
+    this.naturalArms = Object.freeze({ left, right });
+    if (notify) this.onNaturalArmsChange?.();
+    return true;
   }
 
   private updateTileUv(instance: TiledLayerInstance): void {

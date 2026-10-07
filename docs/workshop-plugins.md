@@ -194,7 +194,7 @@ allocates nothing per frame on its behalf.
   `window.gettingOver.snapshot()` reports. That state includes `paused`, `pauseReasons`,
   `stopped`, `timer: { elapsed, running }`, `dying` (an active death sequence) and
   `death` (`'health'`, `'fall'` or `null` while alive), built on request rather than per frame.
-  `player: { phase, centre }` works with a live root or a corpse. `aim.state` is
+  `player: { phase: 'alive' | 'dying', centre }` works with a live root or a corpse. `aim.state` is
   `'driven'` with origin/offsets, or `'captured'` with the released rig's frozen world
   cursor and target; `drive.state` is `'driven'` with motor readings, or `'released'`
   without them. Released `hingeLoad` and `sliderLoad` are `null`, never stale motor values.

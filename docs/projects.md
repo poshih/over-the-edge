@@ -37,7 +37,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 8, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 14: physics (including health, invulnerability, hurt box, knockback, enemy rules, downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death wait/mode/materials |
+| `settings` | `project.json` | Game-settings profile, schema 15: physics (including health, invulnerability, hurt box, knockback, enemy rules, downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death wait/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -82,13 +82,13 @@ The paths are fixed, so a manifest only says which files exist:
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 14, "physics": { "...": "..." },
+    "schemaVersion": 15, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
     "cursor": {
       "maxTargetRadius": 2.65, "deadZone": 0.1, "followCharacter": 100,
       "returnToHammer": false, "returnDelay": 0.15, "returnRate": 8, "returnOffsetX": 0, "returnOffsetY": 0
     },
-    "death": { "mode": "ragdoll", "wait": 4, "angularDamping": 2, "friction": 0.45 }
+    "death": { "wait": 4, "angularDamping": 2, "friction": 0.45 }
   },
   "characters": { "primary": null, "alternate": null },
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
@@ -503,23 +503,28 @@ An open Workshop page shows each change within two seconds.
 
 ## Section reference
 
-**Game settings.** The nested settings schema is **14**, exported in code as
+**Game settings.** The nested settings schema is **15**, exported in code as
 `GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **14**, release content
 **13**, and browser game-settings snapshots **7**. All settings are required and
 unknown fields or other versions are rejected, with no legacy reader or conversion.
 `death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
 returning at a bonfire, or restarting when none was reached. A death captures this
 wait at entry, independently of its HUD fade.
-`death.mode` is `ragdoll` by default, or `hold` to retain the live motors, aim and
-grips. `death.angularDamping` is 0–10 /s, step 0.1, default 2; `death.friction` is
+Death always releases the hands and hammer and builds a passive corpse from physics
+and the [character figure](characters.md#the-character-figure-and-death).
+`death.angularDamping` is 0–10 /s, step 0.1, default 2; `death.friction` is
 0.05–2, step 0.05, default 0.45. The corpse and released shaft use that friction;
 the pot and hammer head keep their own materials. These fields appear in **Physics / Death**,
 are saved/exported with the physics, rig and cursor. Death settings and timing do not
 count toward the phantom course because recordings never include dying.
-Wait and construction settings apply to the next death. Runtime character selections and accepted
-model/head changes wait for placement, never a rebuilt corpse; synchronous Workshop
-character edits refuse with a transient notice and keep the draft unchanged.
-Player-body tuning stays live in `hold`, but takes effect at placement in `ragdoll`.
+Wait and construction settings apply to the next death. Corpse and tool collide
+only with terrain and platforms; enemies and traps use the frozen entry point, and
+the dying jar cannot trigger illusions. The released head still blocks projectile rays.
+Character selections, Workshop edits, appearance changes and completed profile/model
+loads apply immediately, without rebuilding the corpse. A new figure is stored for
+the next death. A library hammer chosen while dying draws immediately, while its
+released collider keeps its entry outline until placement.
+Player-body tuning takes effect at placement, never by retuning the corpse.
 The separate HUD fields below own only death text and visual fade.
 
 Alive-play rules belong to `physics`, with the same fields in Workshop / Physics and

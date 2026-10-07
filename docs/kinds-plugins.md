@@ -43,13 +43,14 @@ built-in `standard` among them. An avatar selects a plugin's strategy by its nam
 "driver": { "id": "my-game/my-rig", "config": null }
 ```
 
-`AvatarRigPoseContext` carries `poseSource` (`'live'`, `'physical-death'` or
-`'captured-death'`) and `attachment` (`'gripped'` or `'released'`). Physical death supplies
+`AvatarRigFrameContext` is live-only: body and inverse body, tool, shaft axis,
+forward direction, shaft length and frame duration. `AvatarRigPoseContext` carries
+`attachment` (`'gripped'` or `'released'`). Death supplies
 explicit shoulder, elbow and wrist positions and forearm-aligned hand directions; the host
 skips `writeFramePlan`, grip placement and wrist offsets. The standard strategy composes
-those joints without reattaching the hands. Live play and the `hold` death mode still run
-both phases; `AvatarRigFrameContext` then carries `'live'` or `'captured-death'` and
-`'gripped'`. The runtime [`DEATH_POSE`](runtime-plugins.md#death-pose) writes the presented
+those joints without reattaching the hands. Live play runs both phases with gripped
+attachment; death runs only the pose phase with released attachment. Neither context
+has a presentation-source flag. The runtime [`DEATH_POSE`](runtime-plugins.md#death-pose) writes the presented
 body, head and arm pose, plus sprite dimming; rig strategies remain pure numeric and arm-only.
 Placement clears death before the next live rig frame.
 

@@ -148,8 +148,7 @@ export function createUI(options: UiOptions): GameUi {
   const controls = new Map<keyof Tuning, RangeControl>();
   const rigControls = new Map<keyof RigSettings, RangeControl>();
   const cursorControls = new Map<Exclude<keyof CursorSettings, 'returnToHammer'>, RangeControl>();
-  const deathControls = new Map<Exclude<keyof DeathSettings, 'mode'>, RangeControl>();
-  const deathMode = document.createElement('select');
+  const deathControls = new Map<keyof DeathSettings, RangeControl>();
   const returnToggle = document.createElement('input');
   const practiceButtons = new Map<PracticeId, HTMLButtonElement>();
   const tuningGroups = element<HTMLElement>(root, '.tuning-groups');
@@ -181,13 +180,10 @@ export function createUI(options: UiOptions): GameUi {
       control.setValue(settings.cursor[field.key]);
     }
     returnToggle.checked = settings.cursor.returnToHammer;
-    deathMode.value = settings.death.mode;
     for (const field of DEATH_FIELDS) {
       const control = deathControls.get(field.key);
       if (!control) throw new Error(`Missing death control: ${field.key}`);
-      const inactive = settings.death.mode === 'hold' && field.key !== 'wait';
-      control.setValue(settings.death[field.key], { disabled: inactive });
-      control.row.classList.toggle('is-inactive', inactive);
+      control.setValue(settings.death[field.key]);
     }
     for (const field of CURSOR_RETURN_FIELDS) {
       const control = cursorControls.get(field.key);
@@ -325,22 +321,15 @@ export function createUI(options: UiOptions): GameUi {
     id: 'physics-saved', title: 'Saved game settings', hint: 'Named profiles and JSON files',
   });
   const deathGroup = tuningSection({
-    id: 'physics-death', title: 'Death', hint: 'Respawn wait, physical collapse or a held pose',
+    id: 'physics-death', title: 'Death', hint: 'Respawn wait and passive corpse',
   }, 'Death');
-  const deathLabel = document.createElement('label');
-  deathLabel.htmlFor = deathMode.id = 'death-mode';
-  deathLabel.textContent = 'Death mode';
-  for (const [value, text] of [['ragdoll', 'Ragdoll — collapse and drop the hammer'], ['hold', 'Hold — keep the last aim']] as const) {
-    const option = document.createElement('option');
-    option.value = value; option.textContent = text; deathMode.append(option);
-  }
-  deathMode.addEventListener('change', () => editSettings({
-    ...settings, death: { ...settings.death, mode: deathMode.value as DeathSettings['mode'] },
-  }), listen);
   const deathHelp = document.createElement('p');
   deathHelp.className = 'rig-settings-help';
-  deathHelp.textContent = 'Ragdoll releases the hands and hammer and simulates a passive corpse. Hold keeps the motors and grips at the last aim. Changes apply to the next death; Respawn wait controls placement, while the HUD controls only text and fade.';
-  deathGroup.append(deathLabel, deathMode, deathHelp);
+  deathHelp.textContent = 'Death releases the hands and hammer and simulates a passive corpse from the character\'s figure. ' +
+    'The corpse and tool collide only with terrain, not enemies or each other, and cannot trigger illusions. ' +
+    'Character edits show immediately without changing the existing corpse. These settings apply to the next death; ' +
+    'Respawn wait controls placement, while the HUD controls only text and fade.';
+  deathGroup.append(deathHelp);
   for (const field of DEATH_FIELDS) {
     const control = createRangeControl(field, {
       id: `death-${field.key}`, name: field.key, signal: events.signal,

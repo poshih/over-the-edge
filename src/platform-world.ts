@@ -268,6 +268,12 @@ export class PlatformWorld {
     }
   }
 
+  // Borrow the last reading without sampling or consuming pending changes.
+  get frameReading(): PlatformFrame {
+    this.ensureLive();
+    return this.drawnFrame;
+  }
+
   frame(alpha: number): PlatformFrame {
     this.ensureLive();
     let count = 0;

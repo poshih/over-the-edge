@@ -1,11 +1,15 @@
 // A character leans its upper body toward the hammer, turning at the waist. A profile's `waistLean` is the most it
-// leans, in degrees; 0 keeps it upright. Presentation only: physics, grips and aim never see it. No imports, so the
-// profile format loads anywhere.
+// leans, in degrees; 0 keeps it upright. Live presentation eases toward the target; physics uses that same target
+// once at corpse entry, never the view's filter or preview. No imports, so the profile format loads anywhere.
 export const DEFAULT_WAIST_LEAN = 0;
 export const WAIST_LEAN_LIMITS = { min: 0, max: 45, step: 1 } as const;
 
 const RESPONSE_TIME = 0.15;
 const RADIANS_PER_DEGREE = Math.PI / 180;
+
+export function waistLeanTarget(shaftAngle: number, maxLean: number): number {
+  return -maxLean * RADIANS_PER_DEGREE * Math.cos(shaftAngle);
+}
 
 // A Workshop preview that moves the upper body so secondary motion can be judged without playing: a sway rocks it
 // about the waist a few times, a jolt kicks it once.
@@ -39,7 +43,7 @@ export class WaistLean {
       throw new Error('The waist lean needs a finite shaft angle, lean and time.');
     }
     // Leaning toward +X, the side a level shaft points to when its angle is 0, turns the upper body clockwise.
-    const target = -maxLean * RADIANS_PER_DEGREE * Math.cos(shaftAngle);
+    const target = waistLeanTarget(shaftAngle, maxLean);
     const previous = this.previousTime;
     this.previousTime = time;
     if (previous === null || time < previous) this.eased = target;
@@ -48,7 +52,7 @@ export class WaistLean {
   }
 
   // Rocks or kicks the upper body from the next frame on, over the lean, timed by simulation time like the motion it
-  // shows; a rewind ends it. Presentation only, like the lean.
+  // shows; a rewind ends it. The preview and filter are presentation only.
   preview(kind: LeanPreview): void {
     this.previewing = kind;
     this.previewStart = null;

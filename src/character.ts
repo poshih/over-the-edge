@@ -38,6 +38,4 @@ export interface VisualBinding {
   readonly defaults: readonly Object3D[];
   readonly bounds: Readonly<Box3>;
   readonly visibility: VisualVisibility;
-  // Asset owners retain pending models until placement, or release them if the view closes.
-  readonly deferChange?: (apply: () => void, cancel?: () => void) => boolean;
 }

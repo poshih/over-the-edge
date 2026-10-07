@@ -1,28 +1,12 @@
 import { MathUtils, Quaternion, Vector3 } from 'three';
 import type { ArmSide } from './character';
 import { clamp } from './math';
+import { ARM_GEOMETRY } from './player-figure-data';
+import type { ArmChain } from './player-figure-data';
 
-export const ARM_LENGTH = { upper: 0.82, forearm: 0.82 } as const;
 const DIRECTION_EPSILON = 1e-8;
 const POLE_SINGULARITY_SINE = 0.15;
 const MAX_BEND_SPEED = 8;
-export const ARM_GEOMETRY = {
-  left: { shoulder: [-0.17, 0.74, -0.09], normalSign: -1 },
-  right: { shoulder: [0.17, 0.74, 0.09], normalSign: 1 },
-} as const;
-
-// A two-bone arm: torso-local shoulder and bind-pose segment lengths.
-export interface ArmChain {
-  readonly shoulder: readonly [number, number, number];
-  readonly upper: number;
-  readonly forearm: number;
-}
-export type ArmChains = Readonly<Record<ArmSide, ArmChain>>;
-
-export const DEFAULT_ARM_CHAINS: ArmChains = Object.freeze({
-  left: Object.freeze({ shoulder: ARM_GEOMETRY.left.shoulder, upper: ARM_LENGTH.upper, forearm: ARM_LENGTH.forearm }),
-  right: Object.freeze({ shoulder: ARM_GEOMETRY.right.shoulder, upper: ARM_LENGTH.upper, forearm: ARM_LENGTH.forearm }),
-});
 
 interface ArmTargets {
   shoulder: Vector3;

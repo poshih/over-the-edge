@@ -24,6 +24,27 @@ export interface DirectionalPresentation {
   readonly bones: readonly string[];
 }
 
+function sameEntries<T>(left: readonly T[], right: readonly T[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index++) if (left[index] !== right[index]) return false;
+  return true;
+}
+
+export function sameDirectionalPresentation(left: DirectionalPresentation | null, right: DirectionalPresentation | null): boolean {
+  if (left === right) return true;
+  if (left === null || right === null || left.hysteresis !== right.hysteresis || left.rotation !== right.rotation ||
+    left.pivot.anchor !== right.pivot.anchor || left.pivot.x !== right.pivot.x || left.pivot.y !== right.pivot.y ||
+    !sameEntries(left.boundaries, right.boundaries) || !sameEntries(left.layers, right.layers) || !sameEntries(left.bones, right.bones) ||
+    left.directions.length !== right.directions.length) return false;
+  for (let index = 0; index < left.directions.length; index++) {
+    const a = left.directions[index]!, b = right.directions[index]!;
+    if (a.direction !== b.direction || a.clockwiseHold !== b.clockwiseHold || a.counterclockwiseHold !== b.counterclockwiseHold ||
+      a.neutralAngle !== b.neutralAngle || a.minimumRotation !== b.minimumRotation || a.maximumRotation !== b.maximumRotation ||
+      a.responseTime !== b.responseTime) return false;
+  }
+  return true;
+}
+
 const FULL_TURN = 360;
 const HALF_TURN = FULL_TURN / 2;
 const DEFAULT_SECTOR = FULL_TURN / FACING_DIRECTIONS.length;

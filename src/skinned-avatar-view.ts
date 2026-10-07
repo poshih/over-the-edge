@@ -1,6 +1,6 @@
 import { Group, Matrix4, Mesh, SkinnedMesh, Vector3 } from 'three';
 import type { Material, Object3D, Quaternion } from 'three';
-import type { ArmChain, ArmChains } from './arm-ik';
+import type { ArmChain, ArmChains } from './player-figure-data';
 import type { AvatarRigBinds, AvatarRigPose } from './avatar-rig';
 import { ARM_SIDES } from './character';
 import { AVATAR_JOINT_IDS, AVATAR_JOINT_PARENTS } from './character-profile';

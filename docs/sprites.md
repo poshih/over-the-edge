@@ -44,7 +44,8 @@ toward the hammer, 0-45° in 1° steps; 0 (the default) keeps it upright.
   shaft is level, not at all when it points straight up or down. It eases there in about 0.15 s.
 - The torso, the shoulders and the arms' reach turn with it. The head turns within the leaning torso and keeps looking
   at the cursor, and the body below the waist stays inside the jar.
-- It is presentation only: hammer length, aim, contacts and physics are unchanged.
+- Live hammer length, aim, contacts and physics are unchanged. Corpse entry uses the
+  same target lean through the character figure, never the presentation's eased value.
 - It is part of the character profile (`waistLean`). A library avatar shown in the profile's place keeps the profile's
   lean.
 - 2D sprite skeletons stay upright and keep the saved value for the next 3D selection.
@@ -128,8 +129,10 @@ the last successful explicit Save becomes the next startup layout.
 
 ## 2D skeletal rigging
 
-The Sprites tab can author one skeleton per layout, without changing gameplay
-physics. Use cutout images for rigid pieces, weighted grids for bending artwork,
+The Sprites tab can author one skeleton per layout, without changing live gameplay
+physics. Its character figure—arm lengths, shoulders, neck, grips and lean—shapes
+only the corpse, which never steers the continuing run.
+Use cutout images for rigid pieces, weighted grids for bending artwork,
 or both in the same document. A skeleton can be saved before adding artwork.
 
 ### Head aim
@@ -478,7 +481,10 @@ Arms use local Y along the segment; the full hammer shaft uses local X.
 Head coordinates are torso-local, so its fitting center is above the origin.
 Shaft replacements and arm IK use the same physical slider-to-head frame,
 independently of the chosen artwork.
-Visuals do not create bodies or change colliders, masses, reach, or simulation.
+Artwork does not create bodies or change live colliders, masses or reach. The
+profile's arm lengths and grips do resolve the numeric
+[character figure](characters.md#the-character-figure-and-death) for the next corpse;
+physics never reads artwork bounds or sprite poses to construct it.
 Coverage callbacks only update the host's underlay visibility; they must not
 re-enter the rig. Replacements snapshot validated metadata before awaiting
 image loading, so later caller edits cannot change an in-flight import.
@@ -488,18 +494,22 @@ scene; unbound layers already follow those foreground anchors directly.
 The secondary mounts share the same evaluated skeleton and world origin,
 so changing render pass does not change pose, skin weights or authored offsets.
 
-While a rig is dying, its read-only `editsHeld` query is `true`. Synchronous
-authoring calls (`setCharacterRiggingType`, `setArmForwardDistance`, `setWaistLean`,
-`setGrips`, `setArms`, `setAvatarMotion`, `configureSkeleton`, `configurePresentation`,
-`upsert`, `remove` and setting either preview) refuse before any state change with
-`SpriteEditError` from `src/sprite-rig.ts`. It extends `SpriteError` and has the
-distinguishable code `'dying'`; branch on the type and code, not the message.
-`setPreview(null)` and `setDirectionalPreview(null)` remain allowed and leave
-the captured death pose, facing and flipbook frame intact. The Workshop checks
-`editsHeld` up front, reports authoring refusals as transient notices without
-changing its draft or persistent error, and quietly declines pointer previews.
-Async `replace()` operations still await placement with their abort signal;
-neither preview clearing nor the death screen's clear releases that wait.
+`setDying(true)` holds facing, flipbook frames, animation and hair base pose while
+the corpse's head and released hand targets continue moving. `setDying(false)`
+ends that hold. Authoring calls, setting or clearing either preview, profile
+replacement and the reset made by a character selection remain available while
+dying and apply immediately. Every commit re-holds the new state; a new skeleton or
+preview evaluates its base once before capture, and held IK always solves released
+targets without wrist-chain offsets. Compatible changes preserve the held base
+rather than capturing an already-collapsed IK solution. Existing loading and
+validation refusals still apply; death itself is not an editing refusal.
+
+Hosts may pass `onNaturalArmsChange()` with `armSlots`. It fires when an arm chain's
+natural lengths change, after the committed presentation, so the active character
+can resolve its figure once. Inactive profiles do no frame work. A presentation
+change stores the figure for the next death, never rebuilds the current corpse.
+Async `replace()` commits as soon as loading and validation succeed, respecting
+its abort signal without waiting for placement.
 
 The portable JSON shape is:
 

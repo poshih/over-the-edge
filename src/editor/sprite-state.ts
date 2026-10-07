@@ -1,5 +1,4 @@
 import type { SpriteRig } from '../sprite-rig';
-import { SpriteEditError } from '../sprite-rig';
 import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
@@ -11,7 +10,7 @@ import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
 import { DEFAULT_WAIST_LEAN } from '../waist-lean';
 import { sameArms } from '../character-arms';
 import { DEFAULT_GRIPS, sameGrips } from '../grips';
-import { DirectionalError, validateDirectionalPresentation } from '../directional-data';
+import { DirectionalError, sameDirectionalPresentation, validateDirectionalPresentation } from '../directional-data';
 import type { DirectionalPresentation } from '../directional-data';
 import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
 import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin } from '../skeleton-data';
@@ -174,16 +173,12 @@ function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
   if (!sameCharacterAssets(left, right)) return false;
   if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
   return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
-    samePresentation(left.presentation, right.presentation) &&
+    sameDirectionalPresentation(left.presentation, right.presentation) &&
     left.layers.every((layer, index) => sameLayer(layer, right.layers[index])) &&
     (left.images === right.images || left.images.every((image, index) => {
       const other = right.images[index];
       return image === other || image.id === other.id && image.name === other.name && image.source === other.source;
     }));
-}
-
-function samePresentation(left: DirectionalPresentation | null, right: DirectionalPresentation | null): boolean {
-  return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
 
 const PROP_MODEL_IDS: Readonly<Record<PropModelRole, string>> = { hammer: HAMMER_MODEL_ID, pot: POT_MODEL_ID };
@@ -850,7 +845,7 @@ export class SpriteEditorState {
       this.leavePreview();
       return;
     }
-    if (this.rig.editsHeld || !this.canEdit()) return;
+    if (!this.canEdit()) return;
     try {
       const skeleton = this.draft.skeleton;
       if (skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
@@ -873,7 +868,7 @@ export class SpriteEditorState {
       const presentation = value === null ? null : validateDirectionalPresentation(value);
       const document = Object.freeze({ ...this.draft, presentation });
       this.validateDraft(document);
-      if (samePresentation(this.draft.presentation, presentation)) {
+      if (sameDirectionalPresentation(this.draft.presentation, presentation)) {
         if (this.error !== null) {
           this.error = null;
           this.changed();
@@ -902,7 +897,7 @@ export class SpriteEditorState {
       }
       return true;
     }
-    if (this.rig.editsHeld || !this.canEdit()) return false;
+    if (!this.canEdit()) return false;
     try {
       if (![value.aim.x, value.aim.y].every(Number.isFinite) || value.aim.x === 0 && value.aim.y === 0) {
         throw new DirectionalError('Preview aim must be a finite, nonzero vector.');
@@ -1250,11 +1245,6 @@ export class SpriteEditorState {
   // Why the draft cannot change now, reported, or null when it can.
   private editable(): SpriteError | null {
     if (this.disposed) return new SpriteError('The character editor is closed.');
-    if (this.rig.editsHeld) {
-      const refusal = new SpriteEditError();
-      this.notice(refusal.message, 'error');
-      return refusal;
-    }
     if (this.restoring || this.busy) {
       const refusal = new SpriteError('Wait for the current sprite operation to finish before editing.');
       this.notice(refusal.message, 'error');

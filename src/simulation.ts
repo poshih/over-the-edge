@@ -10,7 +10,7 @@ import {
   isPlatformObject,
 } from './level';
 import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
-import { beginPlayerDeath, changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, holdPlayer, launchPlayer, playerAnchor, tunePlayer } from './player';
+import { beginPlayerDeath, changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, playerAnchor, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { partPoint, partVelocity } from './player-bodies';
 import { rigGeometry, sameRig } from './rig';
@@ -34,9 +34,11 @@ import type { HealthReading } from './health-meter';
 import { PlatformWorld } from './platform-world';
 import type { PlatformFrame } from './platform-world';
 import type { DeathKind } from './death-sequence';
-import { PlayerDeathError, validateDeathSeed, writeRagdollPose } from './player-ragdoll';
-import { copyDeathPose, createDeathPose, interpolateDeathPose, interpolateTransform } from './player-pose';
-import type { DeathPose, DeathSeed, MutablePlayerFrameState, PlayerFrameState } from './player-pose';
+import { PlayerDeathError, writeRagdollPose } from './player-ragdoll';
+import { createDeathPose, interpolateDeathPose, interpolateTransform } from './player-pose';
+import type { MutablePlayerFrameState, PlayerFrameState } from './player-pose';
+import { validateCharacterFigure } from './character-figure';
+import type { CharacterFigure } from './character-figure';
 import { copyCause, impactStrength, IMPACTS } from './moments';
 import type { MomentWriter, TerminalMoment } from './moments';
 
@@ -97,6 +99,7 @@ export class Simulation {
   private readonly moments: MomentWriter;
   private level: LevelDefinition;
   private settings: GameSettings;
+  private figure: CharacterFigure;
   // Where the current run started; a rebuilt rig restarts from here.
   private spawn: Readonly<PlayerSpawn>;
   // Hinge-relative: the cursor input moves, and the target the hammer drives toward.
@@ -106,9 +109,11 @@ export class Simulation {
   private previous: PlayerFrame;
   private current: PlayerFrame;
   private interpolated: PlayerFrame;
+  private readonly shownFrame: PhysicsFrame;
   private readonly deathCursor: Point = { x: 0, y: 0 };
   private readonly deathTarget: Point = { x: 0, y: 0 };
-  private command = { ...IDLE_COMMAND };
+  private readonly deathAnchor: Point = { x: 0, y: 0 };
+  private readonly command: MotorCommand = { ...IDLE_COMMAND };
   private elapsed = 0;
   private bestHeight = 0;
   // Damage points left, and until when in run time a hit cannot hurt.
@@ -129,6 +134,8 @@ export class Simulation {
   private readonly buttPoint = new Vec2();
   private readonly pointScratch = new Vec2();
   private readonly velocityScratch = new Vec2();
+  private readonly originScratch: Point = { x: 0, y: 0 };
+  private readonly targetScratch: Point = { x: 0, y: 0 };
   private impactTracking = false;
   private headTouching = false;
   private lastImpactAt = -Infinity;
@@ -136,8 +143,9 @@ export class Simulation {
   // The hammer's own head when it is a library hammer, which overrides the settings' default head; null for the default.
   private hammerHead: HammerHead | null = null;
 
-  constructor(settings: Readonly<GameSettings>, level: LevelDefinition, moments: MomentWriter) {
+  constructor(settings: Readonly<GameSettings>, level: LevelDefinition, figure: Readonly<CharacterFigure>, moments: MomentWriter) {
     this.settings = validateGameSettings(settings);
+    this.figure = validateCharacterFigure(figure);
     this.moments = moments;
     this.level = level;
     this.spawn = levelSpawn(level);
@@ -146,7 +154,7 @@ export class Simulation {
     this.hurts = levelHurts(level);
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
-    this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.rig.pot,
+    this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.dying ? null : this.rig.pot,
       surfaceMaterials(this.settings.physics));
     this.platforms = new PlatformWorld(this.world, level.objects.filter(isPlatformObject), surfaceMaterials(this.settings.physics));
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
@@ -194,11 +202,22 @@ export class Simulation {
     this.interpolated = this.createPlayerFrame();
     this.capture(this.current);
     this.capture(this.previous);
+    this.shownFrame = {
+      time: this.elapsed, placement: this.placements, parts: this.interpolated.parts, player: this.interpolated.player,
+      cursor: { x: 0, y: 0 }, enemies: [], projectiles: [],
+      platforms: this.platforms.frameReading, rig: this.rig.geometry,
+    };
   }
 
   gameSettings(): GameSettings { return this.settings; }
 
   get rigGeometry(): RigGeometry { return this.rig.geometry; }
+
+  // Stores the figure for the next death only; an existing corpse keeps the proportions it was built with.
+  setCharacterFigure(figure: Readonly<CharacterFigure>): void {
+    this.ensureLive();
+    this.figure = validateCharacterFigure(figure);
+  }
 
   // The hammer's own head outline, or null for the settings' default head. The head changes in place, mid-run, so a
   // hammer swap never restarts the run.
@@ -238,7 +257,7 @@ export class Simulation {
         this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
         this.current = { ...this.current, cursorOffset: { ...this.aim.cursor } };
       }
-      if (tuned && this.rig.phase !== 'dying-ragdoll') tunePlayer(this.rig, next.physics);
+      if (tuned && this.rig.phase === 'alive') tunePlayer(this.rig, next.physics);
     }
     if (tuned) {
       // Reset cached mixed materials once, after every fixture update or rig rebuild.
@@ -348,18 +367,19 @@ export class Simulation {
     return this.dead() ? 'health' : null;
   }
 
-  // The view resolves the terminal pose once; physics owns the resulting one-way phase transition.
-  beginDeath(seed: DeathSeed): void {
+  // Physics constructs the corpse from its own rig state and the current character figure, once between steps.
+  beginDeath(): void {
     this.ensureLive();
     if (this.world.isLocked()) throw new PlayerDeathError('locked-world', 'Death must begin between physics steps.');
     if (this.rig.phase !== 'alive') throw new PlayerDeathError('repeated-entry', 'This placement is already dying.');
-    validateDeathSeed(seed, this.placements, this.elapsed);
-    const origin = this.cursorOrigin(this.rig.root.getPosition());
+    const origin = this.cursorOrigin(this.rig.root.getPosition(), this.originScratch);
     this.deathCursor.x = origin.x + this.aim.cursor.x;
     this.deathCursor.y = origin.y + this.aim.cursor.y;
     this.deathTarget.x = origin.x + this.aim.target.x;
     this.deathTarget.y = origin.y + this.aim.target.y;
-    this.rig = beginPlayerDeath(this.world, this.rig, seed, this.settings.physics, this.settings.death);
+    const root = this.rig.root.getPosition();
+    this.deathAnchor.x = root.x; this.deathAnchor.y = root.y;
+    this.rig = beginPlayerDeath(this.world, this.rig, this.figure, this.settings.physics, this.settings.death);
     this.preparePlayerFixtures();
     this.current = this.createPlayerFrame();
     this.previous = this.createPlayerFrame();
@@ -439,21 +459,20 @@ export class Simulation {
       swinging = this.aim.target.y < previousY;
     } else if (!this.dying && this.returning()) {
       const { returnRate, returnOffsetX, returnOffsetY, maxTargetRadius } = this.settings.cursor;
-      const origin = this.cursorOrigin(playerAnchor(this.rig).getPosition());
+      const origin = this.cursorOrigin(playerAnchor(this.rig).getPosition(), this.originScratch);
       const tip = partPoint(this.rig.tool.head, this.headPoint);
-      this.aim = returnAim(this.aim, { x: tip.x + returnOffsetX - origin.x, y: tip.y + returnOffsetY - origin.y },
+      const target = this.targetScratch;
+      target.x = tip.x + returnOffsetX - origin.x; target.y = tip.y + returnOffsetY - origin.y;
+      this.aim = returnAim(this.aim, target,
         1 - Math.exp(-returnRate * PHYSICS.dt), maxTargetRadius);
     }
     const rig = this.rig;
     if (rig.phase === 'alive') {
-      this.command = drivePlayer(rig, this.worldPoint(this.cursorOrigin(rig.root.getPosition()), this.aim.target),
-        this.settings.physics, { swinging });
-    } else if (rig.phase === 'dying-rigid') {
-      this.command = holdPlayer(rig, this.worldPoint(this.cursorOrigin(rig.root.getPosition()), this.aim.target), this.settings.physics);
+      const origin = this.cursorOrigin(rig.root.getPosition(), this.originScratch);
+      const target = this.worldPoint(origin, this.aim.target, this.targetScratch);
+      drivePlayer(rig, target, this.settings.physics, swinging, this.command);
     }
-    // Activation stays centred on the corpse. Sleeping enemies far from it have no collider for
-    // a released hammer that strays beyond this region; death never adds a second AI region.
-    this.enemies.beforeStep(playerAnchor(rig).getPosition(), this.elapsed);
+    this.enemies.beforeStep(this.worldAnchor(), this.elapsed);
     const bath = this.liquids.push(this.rig, this.settings.physics);
     const velocity = this.impactTracking && !this.dying ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
     const approachX = velocity?.x ?? 0;
@@ -499,7 +518,7 @@ export class Simulation {
     }
     this.terrain.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
-    this.hazards.afterStep(this.elapsed, playerAnchor(this.rig).getPosition());
+    this.hazards.afterStep(this.elapsed, this.worldAnchor());
     // Lava burns the character while the pot is in it; each burn, like any hit, leaves it unharmed for a second.
     if (bath?.liquid === 'lava') {
       const root = playerAnchor(this.rig).getPosition();
@@ -528,6 +547,7 @@ export class Simulation {
     return moment;
   }
 
+  // The frame and every mutable member are borrowed until the next call. Consume immediately, never retain them.
   frame(alpha: number): PhysicsFrame {
     const shown = this.interpolated, parts = shown.parts;
     for (let index = 0; index < this.current.parts.length; index++) {
@@ -545,18 +565,20 @@ export class Simulation {
     } else if (player.phase !== 'alive' && previous.phase !== 'alive' && current.phase !== 'alive') {
       interpolateDeathPose(player.pose, previous.pose, current.pose, alpha);
     } else throw new PlayerDeathError('phase-mismatch', 'Player interpolation crossed a placement or death phase.');
-    return {
-      time: this.previous.time + (this.current.time - this.previous.time) * alpha,
-      placement: this.placements, parts, player,
-      cursor: this.rig.phase === 'dying-ragdoll' ? this.deathCursor : this.worldPoint(this.cursorOrigin(player.centre), {
-        x: this.previous.cursorOffset.x + (this.current.cursorOffset.x - this.previous.cursorOffset.x) * alpha,
-        y: this.previous.cursorOffset.y + (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha,
-      }),
-      enemies: this.enemies.frame(alpha),
-      projectiles: this.hazards.frame(alpha),
-      platforms: this.platforms.frame(alpha),
-      rig: this.rig.geometry,
-    };
+    const frame = this.shownFrame, cursor = frame.cursor;
+    frame.time = this.previous.time + (this.current.time - this.previous.time) * alpha;
+    frame.placement = this.placements; frame.parts = parts; frame.player = player;
+    if (this.dying) {
+      cursor.x = this.deathCursor.x; cursor.y = this.deathCursor.y;
+    } else {
+      cursor.x = player.centre.x + RIG.shoulder.x + (this.previous.cursorOffset.x +
+        (this.current.cursorOffset.x - this.previous.cursorOffset.x) * alpha);
+      cursor.y = player.centre.y + RIG.shoulder.y + (this.previous.cursorOffset.y +
+        (this.current.cursorOffset.y - this.previous.cursorOffset.y) * alpha);
+    }
+    frame.enemies = this.enemies.frame(alpha); frame.projectiles = this.hazards.frame(alpha);
+    frame.platforms = this.platforms.frame(alpha); frame.rig = this.rig.geometry;
+    return frame;
   }
 
   // HUD-only data: no allocations, contact walk, motor queries or plugin callbacks.
@@ -574,9 +596,9 @@ export class Simulation {
     for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
       if (contact.isTouching() && contact.isEnabled()) contacts++;
     }
-    const released = this.rig.phase === 'dying-ragdoll';
-    const hingeTorque = this.rig.phase === 'dying-ragdoll' ? null : this.rig.drive.getMotorTorque(1 / PHYSICS.dt);
-    const sliderForce = this.rig.phase === 'dying-ragdoll' ? null : this.rig.drive.getMotorForce(1 / PHYSICS.dt);
+    const released = this.rig.phase === 'dying';
+    const hingeTorque = this.rig.phase === 'dying' ? null : this.rig.drive.getMotorTorque(1 / PHYSICS.dt);
+    const sliderForce = this.rig.phase === 'dying' ? null : this.rig.drive.getMotorForce(1 / PHYSICS.dt);
     // Loads are shares of the strength each motor had in the last step, downswing boost included.
     return {
       time: this.elapsed,
@@ -595,22 +617,22 @@ export class Simulation {
   snapshot() {
     const status = this.status();
     const anchor = playerAnchor(this.rig), root = anchor.getPosition();
-    const origin = this.cursorOrigin(root);
+    const origin = this.cursorOrigin(root, { x: 0, y: 0 });
     return {
       ...status,
       player: { phase: this.rig.phase, centre: { x: root.x, y: root.y, angle: anchor.getAngle() } },
       tip: { ...partPoint(this.rig.tool.head, this.headPoint) },
-      aim: this.rig.phase === 'dying-ragdoll' ? {
+      aim: this.rig.phase === 'dying' ? {
         state: 'captured' as const, cursor: { ...this.deathCursor }, target: { ...this.deathTarget },
       } : {
-        state: 'driven' as const, cursor: this.worldPoint(origin, this.aim.cursor), origin,
-        cursorOffset: { ...this.aim.cursor }, target: this.worldPoint(origin, this.aim.target), targetOffset: { ...this.aim.target },
+        state: 'driven' as const, cursor: this.worldPoint(origin, this.aim.cursor, { x: 0, y: 0 }), origin,
+        cursorOffset: { ...this.aim.cursor }, target: this.worldPoint(origin, this.aim.target, { x: 0, y: 0 }), targetOffset: { ...this.aim.target },
       },
       playerVelocity: { ...anchor.getLinearVelocity() },
       potAngle: this.rig.pot.getAngle(),
       headContacts: this.headContactCount(),
       rig: this.rig.geometry,
-      drive: this.rig.phase === 'dying-ragdoll' ? { state: 'released' as const } : {
+      drive: this.rig.phase === 'dying' ? { state: 'released' as const } : {
         state: 'driven' as const, extension: this.rig.drive.getTranslation(),
         hingeTorque: this.rig.drive.getMotorTorque(1 / PHYSICS.dt), sliderForce: this.rig.drive.getMotorForce(1 / PHYSICS.dt),
         command: { ...this.command },
@@ -649,7 +671,7 @@ export class Simulation {
     const rig = this.rig, centre = { x: 0, y: 0, angle: 0 };
     const player: MutablePlayerFrameState = rig.phase === 'alive'
       ? { phase: 'alive', centre, shoulder: { x: 0, y: 0 } }
-      : { phase: rig.phase, centre, pose: createDeathPose(), layout: rig.seed.layout, headFacing: rig.seed.headFacing, direction: rig.seed.direction };
+      : { phase: 'dying', centre, pose: createDeathPose() };
     return { time: this.elapsed, player, cursorOffset: { x: 0, y: 0 }, parts: rig.parts.map(part => ({
       id: part.id, kind: part.kind, x: 0, y: 0, angle: 0, vertices: part.vertices, collides: false,
     })) };
@@ -662,12 +684,8 @@ export class Simulation {
     out.player.centre.x = centre.x; out.player.centre.y = centre.y; out.player.centre.angle = anchor.getAngle();
     if (this.rig.phase === 'alive' && out.player.phase === 'alive') {
       out.player.shoulder.x = centre.x + RIG.shoulder.x; out.player.shoulder.y = centre.y + RIG.shoulder.y;
-    } else if (this.rig.phase === 'dying-ragdoll' && out.player.phase !== 'alive') {
+    } else if (this.rig.phase === 'dying' && out.player.phase === 'dying') {
       writeRagdollPose(this.rig.ragdoll, out.player.pose);
-    } else if (this.rig.phase === 'dying-rigid' && out.player.phase !== 'alive') {
-      const seed = this.rig.seed, pose = out.player.pose;
-      copyDeathPose(pose, seed.pose);
-      this.translatePose(pose, centre.x - seed.centre.x, centre.y - seed.centre.y);
     } else throw new PlayerDeathError('phase-mismatch', 'A player snapshot has the wrong phase.');
     for (let index = 0; index < this.rig.parts.length; index++) {
       const part = this.rig.parts[index]!, target = out.parts[index]!;
@@ -681,14 +699,6 @@ export class Simulation {
       target.x = position.x; target.y = position.y; target.angle = angle; target.vertices = part.vertices;
       target.collides = part.fixture !== undefined && part.fixture.getFilterMaskBits() !== 0;
     }
-  }
-
-  private translatePose(pose: DeathPose, x: number, y: number): void {
-    pose.torso.x += x; pose.torso.y += y; pose.head.x += x; pose.head.y += y;
-    pose.arms.left.shoulder.x += x; pose.arms.left.shoulder.y += y;
-    pose.arms.left.elbow.x += x; pose.arms.left.elbow.y += y; pose.arms.left.hand.x += x; pose.arms.left.hand.y += y;
-    pose.arms.right.shoulder.x += x; pose.arms.right.shoulder.y += y;
-    pose.arms.right.elbow.x += x; pose.arms.right.elbow.y += y; pose.arms.right.hand.x += x; pose.arms.right.hand.y += y;
   }
 
   private preparePlayerFixtures(): void {
@@ -719,7 +729,7 @@ export class Simulation {
     this.placements++;
     this.aim = this.initialAim();
     this.lastAimInput = this.elapsed;
-    this.command = { ...IDLE_COMMAND };
+    Object.assign(this.command, IDLE_COMMAND);
     this.current = this.createPlayerFrame();
     this.previous = this.createPlayerFrame();
     this.interpolated = this.createPlayerFrame();
@@ -832,18 +842,24 @@ export class Simulation {
 
   // An attempt starts aiming at the hammer head, with the cursor on the target.
   private initialAim(): Aim {
-    const origin = this.cursorOrigin(playerAnchor(this.rig).getPosition());
+    const origin = this.cursorOrigin(playerAnchor(this.rig).getPosition(), this.originScratch);
     const tip = partPoint(this.rig.tool.head, this.headPoint);
     return aimAt({ x: tip.x - origin.x, y: tip.y - origin.y }, this.settings.cursor.maxTargetRadius);
   }
 
   // Aim is hinge-relative like the hammer's reach; the root never rotates, so the hinge is a fixed offset.
-  private cursorOrigin(root: Readonly<Point>): Point {
-    return { x: root.x + RIG.shoulder.x, y: root.y + RIG.shoulder.y };
+  private cursorOrigin(root: Readonly<Point>, out: Point): Point {
+    out.x = root.x + RIG.shoulder.x; out.y = root.y + RIG.shoulder.y;
+    return out;
   }
 
-  private worldPoint(origin: Readonly<Point>, offset: Readonly<Point>): Point {
-    return { x: origin.x + offset.x, y: origin.y + offset.y };
+  private worldPoint(origin: Readonly<Point>, offset: Readonly<Point>, out: Point): Point {
+    out.x = origin.x + offset.x; out.y = origin.y + offset.y;
+    return out;
+  }
+
+  private worldAnchor(): Readonly<Point> {
+    return this.dying ? this.deathAnchor : playerAnchor(this.rig).getPosition();
   }
 
   private ensureLive(): void {

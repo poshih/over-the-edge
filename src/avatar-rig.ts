@@ -84,12 +84,13 @@ function callStrategy<T>(callback: () => T): T {
 
 /**
  * A prepared rig for one avatar. The engine owns the frame-plan and pose scratch and passes it in:
- * phase 1 writes the frame plan before grips are placed and arms solved, phase 2 reads the plan the
+ * the live-only phase 1 writes the frame plan before grips are placed and arms solved, phase 2 reads the plan the
  * arms followed from the context and writes the pose. That is the plan phase 1 wrote, or, when the
  * profile rotates a hand, the engine's copy of it turned about that hand's grip; the written plan is
  * never rewritten. A strategy holds no frame state between calls. Pure numeric: a strategy never
  * sees a scene, material or renderer object. Released hands bypass phase 1 and arrive in phase 2
- * as physical joints with forearm-aligned directions and no wrist offsets.
+ * as presented corpse joints with forearm-aligned directions and no wrist offsets. Only phase 2 has an attachment,
+ * either gripped or released; neither context carries presentation-source flags.
  */
 export interface AvatarFramePlanner {
   writeFramePlan(context: AvatarRigFrameContext, out: AvatarRigFramePlan): void;

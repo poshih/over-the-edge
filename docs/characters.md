@@ -8,10 +8,14 @@ only data: GLBs, a bone map and a profile. Everything below is authored in
 Revert, JSON export/import and `GAME_SPRITES` carry it.
 
 A typical 3D character is three models: a skinned body, the pot and the hammer.
-Physics never depends on these models. Colliders, masses, hammer length, reach,
+Live physics never depends on these models. Live colliders, masses, hammer length, reach,
 contacts, saves and level state are identical in every character type and with
 every model. The hands hold the handle where the profile's [grips](../README.md#hand-grips)
 put them, and its [arm lengths](../README.md#arm-lengths), when set, size the arms.
+The [character figure](#the-character-figure-and-death)—arm lengths, shoulders,
+neck, grips and lean—shapes only the corpse, which never steers the continuing run.
+`Game` ignores character settings, selections and part/head changes after stopping
+or disposal; sprite loads refuse a stopped game and in-flight loads are cancelled.
 
 ## Skinned avatar
 
@@ -527,19 +531,54 @@ copy of that side's frame plan about the hand's grip after phase 1: its `offset`
 `forward` all turn, so the arms reach the turned wrist and phase 2 receives the turned plan. The
 plan phase 1 wrote is never rewritten.
 
-`AvatarRigPoseContext` includes `poseSource: 'live' | 'physical-death' | 'captured-death'`
-and `attachment: 'gripped' | 'released'`. Physical death bypasses `writeFramePlan`,
+`AvatarRigFrameContext` is live-only: body and inverse body, tool, shaft axis,
+forward direction, shaft length and frame duration. `AvatarRigPoseContext` includes
+`attachment: 'gripped' | 'released'`. Death bypasses `writeFramePlan`,
 grip placement and wrist offsets. Its explicit shoulder/elbow/wrist solutions and hand
 directions follow the corpse, not the dropped shaft. The standard strategy composes those
-solutions as supplied. In live play and `hold` mode both phases still run, with
-`AvatarRigFrameContext.poseSource` being `'live'` or `'captured-death'` and its attachment
-`'gripped'`.
+solutions as supplied. Live play runs both phases with gripped attachment; death
+runs only the pose phase with released attachment. Neither context carries a
+presentation-source flag.
+
+### The character figure and death
 
 The runtime [`death-pose` point](runtime-plugins.md#death-pose) presents one shared physical
 pose for Mesh parts, the built-in skinned avatar, imported avatars and 2D sprites. The
-engine builds six passive bodies from the resolved terminal pose, with shared figure
-dimensions: torso, head, two upper arms and two forearms/hands. 3D arm segments project
-onto the course plane; projections shorter than 0.04 m are normalised at entry. Collider
+simulation builds six passive bodies from its own live rig and a validated
+`CharacterFigure` (`src/character-figure.ts`), never from the view: torso, head, two
+upper arms and two forearms/hands. Shared torso/head collider dimensions, mass
+shares and joint limits stay engine defaults. The figure is immutable numeric data:
+
+```ts
+interface FigureArm {
+  readonly shoulder: Readonly<Point>; // torso-local course-plane metres
+  readonly upper: number;            // positive finite metres
+  readonly forearm: number;
+  readonly pole: Readonly<Point>;    // torso-local elbow bend preference
+}
+interface CharacterFigure {
+  readonly waistLean: number;        // degrees; 0 for 2D
+  readonly neck: Readonly<Point>;     // torso-local neck pivot
+  readonly arms: Readonly<Record<'left' | 'right', FigureArm>>;
+  readonly grips: Readonly<Record<'left' | 'right', number>>; // metres from the butt
+}
+```
+
+The profile and selected library avatar resolve the fitted or default shoulder/neck
+layout, waist lean, arm lengths and authored grips once on a presentation change.
+When the profile supplies no arm lengths, a sprite grip chain supplies its natural
+lengths; otherwise its type's default or fitted chains do. The project's arm-IK hints
+provide the XY poles. `GameView.onCharacterFigure` pushes changes to
+`Simulation.setCharacterFigure`. Construction takes `(settings, level, figure, moments)`:
+a headless host supplies a `MomentWriter` and `DEFAULT_CHARACTER_FIGURE` or another
+validated figure. `CharacterFigureError` has code `'invalid-figure'`;
+coordinates must be finite, lengths positive and finite, lean within 0–45° and grips
+within `GRIP_LIMITS`. There is no minimum projected arm length.
+
+At entry, physics uses the physical tool line's target waist lean (not the view's
+eased lean), authored grips (not the live slide offset) and planar two-bone IK,
+bending each elbow toward its pole. Each segment retains the figure's exact length;
+only a capsule polygon's half-span is at least 0.02 m to keep it well formed. Collider
 visuals are centred on the obstacle line, and 3D arms retain `ARM_LAYER`, sharing depth with
 the released hammer.
 
@@ -548,18 +587,25 @@ carry the physical pose; no ragdoll data is authored. Facing, flipbook frames, a
 and hair base pose freeze at entry, but the skeleton continues evaluating physical hand
 targets with pooled buffers. Artwork bound to a dedicated head subtree follows that
 anchor independently; weighted artwork spanning body and head follows its existing
-ownership, rather than guessed bone names. 2D materials dim to 45%, restored at placement.
-`hold` mode keeps the captured sprite pose, and the former 3D slump/nod and grips.
-`dying-rigid` continues ordinary player tuning in place. Player-body tuning edits during
-`dying-ragdoll` take effect at the next placement, never by retuning the corpse; rig
+ownership, rather than guessed bone names. The default death writer smoothsteps from
+the last drawn live pose into the interpolated corpse and dims 2D materials to 45%,
+restored at placement. With no live frame drawn in this placement, capture uses the
+physical entry pose; reduced motion skips the blend. Sprites ignore facial yaw/pitch
+and keep their head on the obstacle line.
+
+All corpse and tool fixtures collide only with terrain and platforms, never enemies
+or each other. Enemies and traps read the frozen entry point, and the dying jar cannot
+trigger illusions; the released head still blocks projectile rays. The figure and
+corpse do not shape persistent world state after a bonfire return.
+Player-body tuning edits while dying take effect at the next placement, never by retuning the corpse; rig
 geometry edits and switches between rigid and compliant handles still restart the run.
-Runtime character selections, model and hammer-head changes accepted during death wait
-for placement. Synchronous character authoring instead refuses while the rig is dying
-with [`SpriteEditError`](sprites.md#game-agnostic-contract), before changing its state.
-The Workshop reports a transient notice and keeps its draft; pointer-driven previews
-quietly decline, while clearing a preview preserves the captured death presentation.
-In-flight profile/model loads continue waiting for placement. Physics never rebuilds
-the corpse to follow an asset edit.
+Character selections, Workshop edits, previews, appearance changes and completed
+profile/model loads apply at once while dying. Sprites re-hold the base pose from the
+new state, evaluating a new skeleton or preview once first; held IK always uses
+released targets. Physics stores a changed figure for the next death without rebuilding
+the current corpse. A library hammer chosen mid-death draws immediately, while the
+released collider keeps its entry outline until placement. A rig's wrist-chain offset
+still drops away at entry; the presentation-only blend cannot change that physical rule.
 
 The same registry is used by every check: importing or opening a project, the project server's
 writes, packaging a release and the running release, so a driver or motion is accepted or rejected
@@ -602,8 +648,9 @@ labels follow each profile's type, numbered if they match. The choice is stored
 in `localStorage` under `over-the-edge:play:character` and restored on the next
 visit; a stale or unavailable value falls back to the first profile. Both profiles
 load completely before play. Switching, including mid-level, only swaps what is
-attached and visible: nothing reloads, and physics, the timer and the level
-continue. An inactive profile is detached from the scene and does no per-frame
+attached and visible: nothing reloads, and live physics, the timer and the level
+continue. Its figure is stored for the next death; swapping during death retargets
+the existing corpse immediately. An inactive profile is detached from the scene and does no per-frame
 work. A release with only `GAME_SPRITES` behaves exactly as before and shows no
 control.
 

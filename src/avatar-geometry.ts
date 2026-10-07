@@ -1,5 +1,5 @@
 import { BufferGeometry, Color, Float32BufferAttribute, MathUtils, Uint16BufferAttribute } from 'three';
-import { ARM_GEOMETRY, ARM_LENGTH } from './arm-ik';
+import { ARM_GEOMETRY, ARM_LENGTH } from './player-figure-data';
 import { ARM_SIDES, HEAD_GEOMETRY } from './character';
 import type { ArmSide } from './character';
 

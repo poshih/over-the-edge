@@ -4,7 +4,7 @@ import { HammerHeadError, validateHammerHead } from './hammer-head';
 import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, MIN_SLIDER_TRAVEL, minReachLimit, RIG_LIMITS, rigGeometry } from './rig';
 import type { RigLength, RigSettings } from './rig';
 
-export const GAME_SETTINGS_SCHEMA_VERSION = 14;
+export const GAME_SETTINGS_SCHEMA_VERSION = 15;
 
 export interface CursorSettings {
   // The farthest from the shoulder hinge the hammer aims; at most the rig's reach.
@@ -26,7 +26,6 @@ export interface CursorSettings {
 }
 
 export interface DeathSettings {
-  readonly mode: 'ragdoll' | 'hold';
   readonly wait: number;
   readonly angularDamping: number;
   readonly friction: number;
@@ -49,7 +48,7 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   returnToHammer: false, returnDelay: 0.15, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
 });
 export const DEFAULT_DEATH_SETTINGS: Readonly<DeathSettings> = Object.freeze({
-  mode: 'ragdoll', wait: 4, angularDamping: 2, friction: 0.45,
+  wait: 4, angularDamping: 2, friction: 0.45,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
   schemaVersion: GAME_SETTINGS_SCHEMA_VERSION, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS, death: DEFAULT_DEATH_SETTINGS,
@@ -73,7 +72,7 @@ interface TuningField extends NumericSetting {
 
 type RigField = NumericSetting & { key: RigLength };
 type CursorField = NumericSetting & { key: Exclude<keyof CursorSettings, 'returnToHammer'> };
-type DeathField = NumericSetting & { key: Exclude<keyof DeathSettings, 'mode'> };
+type DeathField = NumericSetting & { key: keyof DeathSettings };
 
 export const DEATH_FIELDS: readonly DeathField[] = [
   { key: 'wait', label: 'Respawn wait', min: 0.5, max: 15, step: 0.1, unit: 's', description: 'Time from death to returning at the last bonfire, or restarting when none was reached. A death keeps the wait it entered with; the HUD fade does not change it.' },
@@ -240,9 +239,8 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (cursor.maxTargetRadius > reach) {
     throw new GameSettingsError(`Maximum target radius must not exceed the hammer's ${Number(reach.toFixed(3))} m reach.`);
   }
-  settingsFields(value.death, ['mode', ...DEATH_FIELDS.map((field) => field.key)], 'Death settings');
-  if (value.death.mode !== 'ragdoll' && value.death.mode !== 'hold') throw new GameSettingsError('Death mode must be ragdoll or hold.');
-  const death: { -readonly [K in keyof DeathSettings]: DeathSettings[K] } = { ...DEFAULT_DEATH_SETTINGS, mode: value.death.mode };
+  settingsFields(value.death, DEATH_FIELDS.map((field) => field.key), 'Death settings');
+  const death: { -readonly [K in keyof DeathSettings]: DeathSettings[K] } = { ...DEFAULT_DEATH_SETTINGS };
   for (const field of DEATH_FIELDS) death[field.key] = settingNumber(value.death[field.key], field);
   return Object.freeze({ schemaVersion: GAME_SETTINGS_SCHEMA_VERSION, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor), death: Object.freeze(death) });
 }

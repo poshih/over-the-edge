@@ -2,7 +2,7 @@ import { DEFAULT_HAMMER_HEAD, hammerHeadBack } from './hammer-head.ts';
 import type { HammerHead } from './hammer-head.ts';
 import { RIG_LIMITS } from './rig.ts';
 
-// Where a character's hands hold the handle. Grips are presentation: physics never reads them.
+// Where a character's hands hold the handle. Corpse entry uses the authored distances, never the live slide offset.
 export const GRIP_PLACEMENTS = ['fixed', 'sliding'] as const;
 export type GripPlacement = (typeof GRIP_PLACEMENTS)[number];
 

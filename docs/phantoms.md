@@ -228,6 +228,12 @@ and phantom looks receive the game's current default head rather than the record
 All death settings, including `death.wait`, and death timing, HUD text/fade and
 `DEATH_POSE` presentation are excluded: recordings never include dying. These settings
 shape only the death sequence, not the alive play a phantom records.
+The character figure and corpse are excluded too: physics builds the corpse from
+its own rig state and the profile's numeric proportions, never the renderer's
+filters or artwork. Corpse and tool fixtures cannot contact enemies, enemy/trap
+anchors are frozen at entry, and the dying jar cannot trigger illusions. The
+figure and corpse therefore do not steer persistent level state in a continuing
+run. The released head can still block transient projectile rays.
 
 Decorations, labels, colours, depth, which mesh draws a collision, trigger events other than
 launches, trap bursts and platform moves, control sensitivity and the cursor settings are
