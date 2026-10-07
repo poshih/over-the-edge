@@ -14,7 +14,8 @@
     "pack:course": "node --experimental-strip-types scripts/pack-course.ts",
     "generate:showcase": "node --experimental-strip-types scripts/showcase/generate.ts",
     "generate:default-course": "node --experimental-strip-types scripts/default-course/generate.ts",
-    "generate:ashen-ascent": "node --experimental-strip-types scripts/ashen-ascent/generate.ts"
+    "generate:ashen-ascent": "node --experimental-strip-types scripts/ashen-ascent/generate.ts",
+    "generate:streaming": "node --experimental-strip-types scripts/level-streaming/generate.ts"
   },
   "engines": {
     "node": ">=22.12.0"

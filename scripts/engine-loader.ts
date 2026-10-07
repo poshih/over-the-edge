@@ -5,16 +5,17 @@ export interface EngineModules {
   '/src/level.ts': Pick<typeof import('../src/level.ts'),
     'geometryKey' | 'terrainCollision' | 'objectLoops' | 'objectPointLocation' | 'loopsPointLocation' |
     'shapeMesh' | 'validateLevel' | 'validateLevelObject' | 'triggerBounds' | 'triggerContains' |
-    'isSimplePolygon' | 'LevelError' | 'LEVEL_LIMITS' | 'LEVEL_SCHEMA_VERSION' | 'TRIGGER_LIMITS'>;
+    'isSimplePolygon' | 'LevelError' | 'LEVEL_LIMITS' | 'LEVEL_SCHEMA_VERSION' | 'TRIGGER_LIMITS' | 'DECORATION_LIMITS'>;
   '/src/collision-queries.ts': Pick<typeof import('../src/collision-queries.ts'),
     'compileCollision' | 'placeCollision' | 'rectangleSolid' | 'pointLocation' | 'intersection' |
     'overlapExceeds' | 'overlapDepth' | 'separation' | 'standingSurfaces' | 'segmentInteriorIntervals' |
     'unionBounds' | 'BoundsIndex' | 'CollisionQueryError'>;
   '/src/mesh-collision.ts': Pick<typeof import('../src/mesh-collision.ts'), 'meshTerrain'>;
-  '/src/art-types.ts': Pick<typeof import('../src/art-types.ts'), 'ArtError'>;
+  '/src/art-types.ts': Pick<typeof import('../src/art-types.ts'), 'ArtError' | 'ART_LIMITS' | 'artRecord'>;
+  '/src/course-art-model.ts': Pick<typeof import('../src/course-art-model.ts'), 'validateCourseModel'>;
   '/src/editor/set-pieces.ts': Pick<typeof import('../src/editor/set-pieces.ts'), 'SET_PIECES' | 'setPieceById' | 'placeSetPiece'>;
   '/src/project.ts': Pick<typeof import('../src/project.ts'),
-    'validateProjectManifest' | 'defaultProjectManifest' | 'checkProjectReferences' | 'loadProjectContent'>;
+    'validateProjectManifest' | 'defaultProjectManifest' | 'checkProjectReferences' | 'loadProjectContent' | 'PROJECT_LIMITS'>;
   '/src/trigger-events.ts': Pick<typeof import('../src/trigger-events.ts'), 'ENDING_EVENTS'>;
   '/src/surfaces.ts': Pick<typeof import('../src/surfaces.ts'), 'DEFAULT_SURFACE'>;
 }
@@ -36,7 +37,7 @@ const EXPORTS = {
     geometryKey: 'function', terrainCollision: 'function', objectLoops: 'function', objectPointLocation: 'function',
     loopsPointLocation: 'function', shapeMesh: 'function', validateLevel: 'function', validateLevelObject: 'function',
     triggerBounds: 'function', triggerContains: 'function', isSimplePolygon: 'function', LevelError: 'function',
-    LEVEL_LIMITS: 'object', LEVEL_SCHEMA_VERSION: 'number', TRIGGER_LIMITS: 'object',
+    LEVEL_LIMITS: 'object', LEVEL_SCHEMA_VERSION: 'number', TRIGGER_LIMITS: 'object', DECORATION_LIMITS: 'object',
   },
   '/src/collision-queries.ts': {
     compileCollision: 'function', placeCollision: 'function', rectangleSolid: 'function', pointLocation: 'function',
@@ -45,10 +46,12 @@ const EXPORTS = {
     BoundsIndex: 'function', CollisionQueryError: 'function',
   },
   '/src/mesh-collision.ts': { meshTerrain: 'function' },
-  '/src/art-types.ts': { ArtError: 'function' },
+  '/src/art-types.ts': { ArtError: 'function', ART_LIMITS: 'object', artRecord: 'function' },
+  '/src/course-art-model.ts': { validateCourseModel: 'function' },
   '/src/editor/set-pieces.ts': { SET_PIECES: 'array', setPieceById: 'function', placeSetPiece: 'function' },
   '/src/project.ts': {
     validateProjectManifest: 'function', defaultProjectManifest: 'function', checkProjectReferences: 'function', loadProjectContent: 'function',
+    PROJECT_LIMITS: 'object',
   },
   '/src/trigger-events.ts': { ENDING_EVENTS: 'array' },
   '/src/surfaces.ts': { DEFAULT_SURFACE: 'string' },
