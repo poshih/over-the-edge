@@ -37,6 +37,11 @@ export default defineRuntime({
 - The engine resolves each point once per session and keeps direct references to its factories
   and presenters; it never resolves a point on a frame or a cue.
 
+`start`, wrapping functions, factories and every runtime instance method are synchronous.
+Returning a promise-like value, including from a `void` method or optional `inspect`, is
+`invalid-contribution`. The exceptions are the [popup and video presenters](#popups-and-videos),
+which must return promises. See [Errors](#errors) for attribution and result checks.
+
 **`RuntimeHost`** (what `start` receives):
 
 | Member | Meaning |
@@ -65,6 +70,9 @@ draws any readout its own way, and the others stay the engine's. Each is a facto
   a second, so draw only what changed.
 - `readout.dispose()`, optional, runs when the HUD is rebuilt or its game closes. The slot goes
   with the HUD, so dispose only what the readout keeps elsewhere, such as listeners on the window.
+
+Readout factories, `update` and optional `dispose` finish synchronously; a promise-like result
+is `invalid-contribution`. Extra readouts obey the same rule.
 
 | `HudFrame` field | Meaning |
 | --- | --- |
@@ -215,6 +223,10 @@ of its kind:
 - `dispose()` runs when the game closes, once the view has let go of the look's passes: free its
   geometries and materials. `inspect()`, optional, reports to the Workshop's diagnostics, in
   `window.gettingOver.level().rendering.looks`.
+
+Every look factory and method finishes synchronously, including enemy and phantom methods and
+optional `inspect`. A promise-like result is `invalid-contribution`, attributed to that look's
+contributing plugin and point.
 
 At the simulation/view boundary, `PhysicsFrame.platforms` is a reused `PlatformFrame`,
 with `changes`, `revision` and `acknowledge(revision)`. `LevelLooks` owns acknowledgement,
@@ -1052,6 +1064,8 @@ interface SceneFrame {
 Factories run once per Game, and their roots are added in manifest order to the selected pass.
 The returned root, pass and methods stay the same for the layer's lifetime.
 Only layers with `update` receive a per-frame callback; static layers are still drawn.
+Factories, `update` and optional `dispose` finish synchronously: a promise-like result is
+`invalid-contribution`. This also applies to the Workshop's overlay `update` and `dispose`.
 `SceneFrame` is one reused, read-only view of the simulation at the drawn time, unaffected by
 a temporary character presentation preview. `time` is simulation seconds and rewinds on a
 restart; all member references are borrowed. Read during the call, never keep the frame as a
@@ -1480,6 +1494,9 @@ interface Toasts {
 
 `MessageAction` is `{ type: 'message', title: string, message: string }`.
 
+The factory and every toast method, including optional `inspect`, finish synchronously.
+A promise-like result is `invalid-contribution`, not a queued asynchronous presentation.
+
 - `show` accepts or queues a message and returns `true`; return `false` when no more can wait.
   The engine reports that as an event failure; any non-boolean result is `invalid-contribution`,
   naming the plugin. A toast never pauses play, takes input or holds up a trigger's next event.
@@ -1590,36 +1607,42 @@ see [order and conflicts](plugins.md#order-and-conflicts).
 
 - A default export that is not an object with `start(host)` fails with `invalid-facet`, naming
   the plugin.
-- A `start` that throws fails with `plugin-failed`, naming the plugin, and the plugins that
+- A `start` that throws fails with `plugin-failed`; a promise-like return is
+  `invalid-contribution`. Each names the plugin, and the plugins that
   started before it have their signals aborted, in reverse order. Contributions that break the
   rules fail with their [codes](plugins.md#errors), naming the plugin and the point.
-- Points reject non-function factories or writers. Creating a readout, director, backdrop, marks,
-  hurt or block effects, death screen, look, layer, audio output, toast presenter, character choice,
-  gameplay observer or input device
-  checks the returned object's required and optional methods and, where applicable, roots
-  and passes. A factory, or a wrap, that throws fails with `plugin-failed`; a malformed return
-  fails with `invalid-contribution`. Each names the plugin and point, including the contributor
-  of an extra readout or other list item. A director that writes a non-finite aim or a
-  non-positive height also fails explicitly.
-- A death screen's methods and a death-pose writer must finish synchronously.
-  Malformed poses and promise-like results fail with `invalid-contribution`; throws
-  are `plugin-failed`, with the owner and point. No invalid output is clamped or masked.
-- Key bindings must be a lowercase-key record of the three bindable actions. An observer's
-  `event` and a device's `poll` must complete synchronously, without a promise-like return;
-  a device must add finite movement. Violations fail with `invalid-contribution`, naming
-  the plugin and point; a thrown callback is `plugin-failed` with its cause.
-- Audio and toasts require their lifecycle methods, and an optional `inspect` must be a
-  function. Popup/video results must be promises of a valid `EventOutcome`, and a toast's
-  `show` must return a boolean, as hurt and block effects' `update` must; malformed results fail with
-  `invalid-contribution`, naming the plugin and point.
+- Attribution travels with each resolved contribution. A slot belongs to its last contributor,
+  whether it replaced or wrapped it; a list item belongs to its plugin. The engine defaults
+  have `plugin: null`. Startup has no point (`point: null`).
+- Points check their contributed values, and factories apply declared instance contracts
+  once at creation: required and optional methods, roots and passes. A throwing factory is
+  `plugin-failed` with action `create`; a malformed return is `invalid-contribution`.
+- Every synchronous plugin call uses the kernel's checked adapters. A thrown call is
+  `plugin-failed`, with its plugin, point, method/action, original message and cause. A
+  `PluginError` passes through only when both its plugin and point already match; an error
+  from another plugin, another point or engine code is attributed to the executing plugin.
+  Promise-like returns are `invalid-contribution`, including from `void` and optional methods.
+- Point-specific results are checked explicitly: hurt/block effect `update` and toast `show`
+  return booleans; camera aims have finite coordinates and positive height; death-pose writers
+  fill every required finite transform, unit quaternion and brightness within 0–1; devices add
+  finite movement. Key bindings and requested device actions must be valid, and character
+  choices must select an integer in their labels' range. Violations are `invalid-contribution`,
+  naming the caller's plugin and point; invalid outputs are never clamped or masked.
+- Popup/video presenters remain asynchronous: a non-promise or invalid `EventOutcome` is
+  `invalid-contribution`, and throws/rejections use action `present`. An expected
+  `EventExecutionError` instead fails that trigger event and reports a notice without stopping
+  play. Release content/phantom services and Workshop guarded callbacks retain their documented
+  asynchronous semantics.
 - At facet startup, contribution validation, point resolution or consumer creation, a refusal
   stops the environment that encounters it with a fatal error naming the plugin. The engine
   never falls back to its own presentation silently.
 - An error a runtime presentation object throws while the game runs stops the game and shows
-  the error, as any error in the game does. Workshop overlays retain their
-  [isolated plugin lifecycle](workshop-plugins.md#lifecycle).
-- An expected `EventExecutionError`, such as a video that cannot load or a full toast queue,
-  instead fails that trigger event and reports a notice, without stopping play.
+  the attributed error; a failing consumer is never silently removed. Workshop overlays and
+  previews retain their [isolated plugin lifecycle](workshop-plugins.md#lifecycle), and their
+  failures name the plugin and action with no catalogue point. Workshop validation keeps typed
+  data refusals separate from plugin failures.
+- Engine invariants, including `DeathSequenceError`, `PlayerDeathError` and a call to a
+  non-method, remain engine errors rather than plugin refusals.
 
 ## Complete example
 

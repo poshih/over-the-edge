@@ -1,4 +1,5 @@
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 
 // The engine owns selection and persistence. Views read the current index and request a choice through select().
 export interface CharacterChoiceModel {
@@ -59,19 +60,13 @@ export const DEFAULT_CHARACTER_CHOICE: CharacterChoiceFactory = (mount, choice) 
   };
 };
 
-export function createCharacterChoice(factory: CharacterChoiceFactory, mount: HTMLElement, choice: CharacterChoiceModel,
-  plugin: string | null): CharacterChoiceView {
-  try {
-    const view: unknown = factory(mount, choice);
-    if (typeof view !== 'object' || view === null || Array.isArray(view) ||
-      typeof Reflect.get(view, 'setEnabled') !== 'function' || typeof Reflect.get(view, 'dispose') !== 'function') {
-      throw new PluginError('invalid-contribution',
-        `Plugin "${plugin ?? 'engine'}": "${CHARACTER_CHOICE.id}" must return setEnabled(enabled) and dispose().`, plugin, CHARACTER_CHOICE.id);
-    }
-    return view as CharacterChoiceView;
-  } catch (error) {
-    if (error instanceof PluginError && error.plugin === plugin && error.point === CHARACTER_CHOICE.id) throw error;
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${CHARACTER_CHOICE.id}".`,
-      plugin, CHARACTER_CHOICE.id, { cause: error });
-  }
+const CHARACTER_CHOICE_CONTRACT = instanceContract({
+  returns: 'setEnabled(enabled) and dispose()',
+  methods: ['setEnabled', 'dispose'],
+});
+
+export function createCharacterChoice(factory: Attributed<CharacterChoiceFactory>, mount: HTMLElement,
+  choice: CharacterChoiceModel): Attributed<CharacterChoiceView> {
+  const create = factory.value;
+  return createInstance(CHARACTER_CHOICE_CONTRACT, factory, () => create(mount, choice));
 }

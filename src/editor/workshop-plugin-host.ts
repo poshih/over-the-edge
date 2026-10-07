@@ -11,7 +11,7 @@ import type { PluginData } from '../plugin-data';
 import { isPluginId } from '../plugin-data';
 import { isProjectDataError } from '../project';
 import type { PresentationPreview } from '../view';
-import { checkSceneLayer } from '../scene-layer';
+import { SCENE_LAYER_CONTRACT } from '../scene-layer';
 import type { SceneLayer } from '../scene-layer';
 import type { Appearance } from './appearance';
 import type { WorkshopGameState } from './game-state';
@@ -20,7 +20,7 @@ import { PROJECT_SECTIONS } from './project-session';
 import type { ProjectPlugins, ProjectSession } from './project-session';
 import type { SpriteEditorHandle } from './sprite-editor';
 import type { GameUi, PluginSectionTab, PluginWorkshopTab, WorkshopState } from './ui-types';
-import { PluginError, pluginRefusal } from '../plugins/kernel';
+import { apply1, attributed, call0, call1, call2, checkInstance, PluginError, pluginFailure, pluginRefusal } from '../plugins/kernel';
 import type { PluginEntry } from '../plugins/kernel';
 import type { Kinds } from '../plugins/kinds';
 import { composeWorkshop } from './workshop';
@@ -39,10 +39,6 @@ const SECTION_TABS: readonly WorkshopSectionTab[] = ['character', 'level', 'phys
 const POINTER_TYPES: Readonly<Record<string, WorkshopPointerEvent['type']>> = {
   pointerdown: 'down', pointermove: 'move', pointerup: 'up', pointercancel: 'cancel',
 };
-
-function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
 
 type RegistryEvent = { readonly kind: 'replaced' } | { readonly kind: 'failed'; readonly id: string; readonly error: Error };
 
@@ -97,20 +93,26 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
   validate(id: string, data: PluginData): Error | null {
     const plugin = this.definitions.get(id);
     if (plugin?.validate === undefined || this.failures.has(id)) return null;
+    // A typed data refusal is not a thrown plugin fault. Intercept it before the adapter attributes thrown faults.
+    let refusal: PluginError | null = null;
+    const validate = attributed(id, null, (value: PluginData) => {
+      try { return plugin.validate!(value); } catch (error) {
+        refusal = pluginRefusal(error, id);
+        if (refusal === null) throw error;
+      }
+    });
     try {
-      plugin.validate(data);
-      return null;
+      apply1(validate, 'validate', data);
+      return refusal;
     } catch (error) {
-      const refusal = pluginRefusal(error, id);
-      if (refusal !== null) return refusal;
-      this.fail(id, new Error(`Checking its data failed: ${asError(error).message}`, { cause: error }));
+      this.fail(id, error, 'validate');
       return null;
     }
   }
 
-  fail(id: string, error: unknown): void {
+  fail(id: string, error: unknown, action: string): void {
     if (!this.definitions.has(id) || this.failures.has(id)) return;
-    const failure = new PluginError('plugin-failed', `Workshop plugin "${id}" failed: ${asError(error).message}`, id, null, { cause: error });
+    const failure = pluginFailure(error, id, null, action);
     this.failures.add(id);
     this.errors.set(id, failure);
     for (const listener of this.listeners) listener({ kind: 'failed', id, error: failure });
@@ -212,22 +214,22 @@ class RunningPlugin {
   }
 
   // `callback`, so that an error it throws, or a promise it rejects, stops this plugin.
-  guard<A extends unknown[]>(callback: (...args: A) => unknown): (...args: A) => void {
+  guard<A extends unknown[]>(callback: (...args: A) => unknown, action = 'callback'): (...args: A) => void {
     return (...args: A) => {
       if (this.stopping) return;
       try {
         const result = callback(...args);
-        if (result instanceof Promise) result.catch((error: unknown) => this.fail(error));
+        if (result instanceof Promise) result.catch((error: unknown) => this.fail(error, action));
       } catch (error) {
-        this.fail(error);
+        this.fail(error, action);
       }
     };
   }
 
-  fail(error: unknown): void {
+  fail(error: unknown, action: string): void {
     if (this.stopping) return;
     this.stopping = true;
-    this.registry.fail(this.id, error);
+    this.registry.fail(this.id, error, action);
   }
 
   // Refuses a host operation once the plugin has stopped, so late work of a stopped plugin adds nothing.
@@ -324,7 +326,7 @@ export class WorkshopPluginHost {
       const plugin = new RunningPlugin(id, this.options.registry, this.options.project.pluginDataOf(id));
       const host = this.createHost(plugin);
       this.running.set(plugin.id, plugin);
-      plugin.guard(() => facet.start(host))();
+      plugin.guard(() => facet.start(host), 'start')();
     }
   }
 
@@ -338,7 +340,7 @@ export class WorkshopPluginHost {
   private registryChanged(event: RegistryEvent): void {
     if (event.kind === 'failed') {
       console.error(`Workshop plugin "${event.id}" failed.`, event.error);
-      this.options.notice(`Workshop plugin "${event.id}" failed and stopped: ${asError(event.error.cause).message}`, 'error');
+      this.options.notice(`Workshop plugin "${event.id}" failed and stopped: ${event.error.message}`, 'error');
       const plugin = this.running.get(event.id);
       if (plugin === undefined) return;
       plugin.stopping = true;
@@ -522,28 +524,28 @@ export class WorkshopPluginHost {
     return Object.freeze({
       addOverlay: (overlay: SceneLayer) => {
         live();
-        checkSceneLayer(overlay, { plugin: plugin.id, code: 'invalid-plugin', point: null, label: 'an overlay' });
+        const target = checkInstance<SceneLayer>(SCENE_LAYER_CONTRACT, overlay, { plugin: plugin.id, point: null }, 'invalid-plugin');
         const layer: SceneLayer = {
           root: overlay.root, pass: overlay.pass,
           update: overlay.update === undefined ? undefined : (frame) => {
             if (plugin.stopping) return;
             try {
-              overlay.update!(frame);
+              call1(target, 'update', frame);
             } catch (error) {
-              plugin.fail(error);
+              plugin.fail(error, 'update');
             }
           },
           // Frees the overlay's resources even while the plugin stops.
           dispose: overlay.dispose === undefined ? undefined : () => {
             try {
-              overlay.dispose?.();
+              call0(target, 'dispose');
             } catch (error) {
               if (plugin.stopping) console.error(`Workshop plugin "${plugin.id}" failed freeing an overlay.`, error);
-              else plugin.fail(error);
+              else plugin.fail(error, 'dispose');
             }
           },
         };
-        game.view.addLayer(layer);
+        game.view.addLayer(layer, target);
         plugin.overlays.add(layer);
         return () => {
           if (plugin.overlays.delete(layer)) game.view.removeLayer(layer);
@@ -598,6 +600,7 @@ export class WorkshopPluginHost {
       throw new PluginError('invalid-plugin', `A preview lasts more than 0 and at most ${WORKSHOP_PREVIEW_LIMITS.duration} seconds.`, plugin.id);
     }
     const limit = WORKSHOP_PREVIEW_LIMITS.distance;
+    const target = attributed(plugin.id, null, value);
     const preview: PresentationPreview = {
       duration,
       // A non-finite offset ends the preview: so does a failure, or the plugin stopping.
@@ -607,9 +610,9 @@ export class WorkshopPluginHost {
           return;
         }
         try {
-          value.offset(elapsed, out);
+          call2(target, 'offset', elapsed, out);
         } catch (error) {
-          plugin.fail(error);
+          plugin.fail(error, 'offset');
           out.x = Number.NaN;
           return;
         }

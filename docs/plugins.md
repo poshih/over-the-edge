@@ -54,7 +54,8 @@ GAME_PLUGINS=games/my-game/plugins.json GAME_PROJECT=projects/my-game npm run bu
 
 Breaking public contract changes bump `PLUGIN_API_VERSION`; manifests must name the current
 version, without legacy readers or aliases. Version 2 uses the numeric death-pose point and
-phase/attachment rig contexts.
+phase/attachment rig contexts, enforces synchronous plugin contracts, and gives platform
+looks only changed poses.
 
 A plugin's identity comes from the manifest alone, and facet modules never repeat it. Each host
 tells its facet the ID, as `host.plugin`. The ID names the plugin in errors, keys its Workshop
@@ -222,13 +223,13 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | `reserved-plugin` | A plugin is named `engine` |
 | `invalid-facet` | A facet's default export has the wrong shape; a build refused a facet file its boundary forbids; a build was asked for a virtual module it does not serve |
 | `unknown-point` | A contribution names a point its environment does not have |
-| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value the point refuses or the build cannot use, such as motion controls for a kind no kinds facet registers; a factory returned an object without what its contract needs, such as a built-in or extra readout, look, camera director, backdrop, aim marks, hurt or block effects, death screen, scene layer, audio output, toasts, character choice view, notices, fatal display, gameplay observer or input device; a character choice view selected a non-integer index or an index outside its labels; input bindings are malformed or a device action is not bindable; an observer's `event`, a device's `poll`, a death-screen method or death-pose writer returned a promise-like value, a device added non-finite movement, or a death writer omitted an output or wrote a non-finite transform, non-unit quaternion or out-of-range brightness; a message presenter returned a non-promise or invalid outcome; or a toast's show or hurt or block effects' update returned a non-boolean |
+| `invalid-contribution` | A contribution is malformed, uses a verb its point does not take, or holds a value its point or build refuses; an instance lacks its contract's required methods, optional methods, roots or passes; a synchronous contract returns a promise-like value; or a call violates its point's input or output rules, including a presenter that returns a non-promise or invalid outcome |
 | `duplicate-contribution` | A plugin contributes to one point twice |
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
 | `foreign-namespace` | A keyed item is not named `<plugin>/<name>` under its own plugin |
 | `too-many` | A point holds more items than its limit, or a session more than 32 plugins |
-| `plugin-failed` | A plugin's own code threw: a `start`, a wrap, a factory, a release callback or a Workshop plugin; a gameplay observer's `event` or `dispose`; an input device's `poll`, `dispose` or `host.action`; the audio output's `handle`; the enemy look's `apply`, the bonfire look's `setLit`, the hurt effects' `hurt` or `clear`, the block effects' `block`, a death-screen method or a death-pose writer |
+| `plugin-failed` | Plugin code throws or an asynchronous plugin call rejects, including startup, wrapping, creation, instance methods and callbacks. The error names the executing plugin, point and action and retains the original error as its cause. A `PluginError` already attributed to that same plugin and point passes through; an error from another plugin, point or the engine is attributed to the executing plugin instead. Documented content, phantom, event and Workshop-validation refusals keep their own semantics |
 | `plugin-stopped` | A stopped Workshop plugin's host, or a closed release session, refused a call |
 
 A plugin may refuse with codes of its own, as a Workshop plugin's `validate` does for its data:
@@ -327,17 +328,20 @@ library models.
 
 ## Performance
 
-Plugin code runs in the engine's frame and shares its budget. The engine adds no per-frame work
-for a plugin beyond the plugin's own, and keeps per-frame work proportional to what is active.
+Plugin code runs in the engine's frame and shares its budget. The engine keeps per-frame work
+proportional to what is active, including allocation-free checks around active plugin calls.
 
 - **Set up once.** Points resolve once per session. Build geometry, materials and elements in
-  `start`, in factories and when objects change, never per frame.
+  `start`, in factories and when objects change, never per frame. Attribution and instance
+  contracts are checked and cached at creation; frame calls use fixed-arity adapters without
+  rest arrays, closures, freezing or point resolution.
 - **Allocate nothing per frame.** `update` runs 60 or more times a second. Reuse vectors,
   matrices, arrays and objects, and write only what changed: a readout compares the frame with
   what it last drew, and a look uploads only the instances it moved.
 - **Never keep borrowed data.** HUD and scene frames, camera inputs/aims, phantom figure frames,
   gameplay events, audio cues and input-device output are reused: read what you need during the
-  call and treat nested references as borrowed.
+  call and treat nested references as borrowed. Synchronous contracts must finish in that call;
+  returning a promise-like value is `invalid-contribution`, even from a `void` method.
 - **Pay only while active.** A look's `update` runs only while the level has objects of its
   kind, so an unused look costs nothing per frame. The front pass draws only while some look's
   front is visible, so hide yours while it shows nothing. Enemy looks update only with enemies

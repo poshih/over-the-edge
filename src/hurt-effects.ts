@@ -3,7 +3,8 @@ import type { Object3D } from 'three';
 import type { HurtCause } from './hazards';
 import { HitBursts } from './hit-bursts';
 import { LavaFire } from './lava-fire';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { SceneFrame } from './scene-layer';
 
@@ -69,20 +70,13 @@ class EngineHurtEffects implements HurtEffects {
 
 export const DEFAULT_HURT_EFFECTS: HurtEffectsFactory = () => new EngineHurtEffects();
 
-export function createHurtEffects(plugins: RuntimePlugins): HurtEffects {
+const HURT_EFFECTS_CONTRACT = instanceContract({
+  returns: 'a three.js root, hurt(cause, fatal), clear(), update(frame) and dispose()',
+  methods: ['hurt', 'clear', 'update', 'dispose'],
+  root: true,
+});
+
+export function createHurtEffects(plugins: RuntimePlugins): Attributed<HurtEffects> {
   const factory = plugins.slot(HURT_EFFECTS, DEFAULT_HURT_EFFECTS);
-  const plugin = plugins.owner(HURT_EFFECTS);
-  let effects: unknown;
-  try { effects = factory(); } catch (error) {
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${HURT_EFFECTS.id}".`, plugin, HURT_EFFECTS.id, { cause: error });
-  }
-  const root: unknown = typeof effects === 'object' && effects !== null ? Reflect.get(effects, 'root') : undefined;
-  if (typeof root !== 'object' || root === null || Reflect.get(root, 'isObject3D') !== true ||
-    typeof Reflect.get(effects as object, 'hurt') !== 'function' || typeof Reflect.get(effects as object, 'clear') !== 'function' ||
-    typeof Reflect.get(effects as object, 'update') !== 'function' || typeof Reflect.get(effects as object, 'dispose') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": hurt effects must return a three.js root, hurt(cause, fatal), clear(), update(frame) and dispose().`,
-      plugin, HURT_EFFECTS.id);
-  }
-  return effects as HurtEffects;
+  return createInstance(HURT_EFFECTS_CONTRACT, factory, factory.value);
 }

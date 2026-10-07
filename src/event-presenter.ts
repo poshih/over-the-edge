@@ -5,7 +5,8 @@ import { EventExecutionError } from './trigger-events';
 import { urlMediaHost } from './media-host';
 import type { MediaHost } from './media-host';
 import { MessageToasts } from './message-toast';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { call0, call1, createInstance, instanceContract, invalidResult, pluginFailure, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 
 export type EventPresenterState = 'idle' | 'popup' | 'loading' | 'awaiting-input' | 'playing';
@@ -48,22 +49,15 @@ export const MESSAGES = Object.freeze({
 
 export const DEFAULT_MESSAGE_TOASTS: ToastsFactory = (mount) => new MessageToasts({ mount });
 
-function createToasts(factory: ToastsFactory, mount: HTMLElement, plugin: string | null): Toasts {
-  try {
-    const toasts: unknown = factory(mount);
-    if (typeof toasts !== 'object' || toasts === null || Array.isArray(toasts) ||
-      !['show', 'clear', 'setHeld', 'dispose'].every((method) => typeof Reflect.get(toasts, method) === 'function') ||
-      Reflect.get(toasts, 'inspect') !== undefined && typeof Reflect.get(toasts, 'inspect') !== 'function') {
-      throw new PluginError('invalid-contribution',
-        `Plugin "${plugin ?? 'engine'}": "${MESSAGES.toasts.id}" must return show(message), clear(), setHeld(held), dispose() and, when given, inspect().`,
-        plugin, MESSAGES.toasts.id);
-    }
-    return toasts as Toasts;
-  } catch (error) {
-    if (error instanceof PluginError && error.plugin === plugin && error.point === MESSAGES.toasts.id) throw error;
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${MESSAGES.toasts.id}".`,
-      plugin, MESSAGES.toasts.id, { cause: error });
-  }
+const TOASTS_CONTRACT = instanceContract({
+  returns: 'show(message), clear(), setHeld(held), dispose() and, when given, inspect()',
+  methods: ['show', 'clear', 'setHeld', 'dispose'],
+  optional: ['inspect'],
+});
+
+function createToasts(factory: Attributed<ToastsFactory>, mount: HTMLElement): Attributed<Toasts> {
+  const create = factory.value;
+  return createInstance(TOASTS_CONTRACT, factory, () => create(mount));
 }
 
 export interface EventPresenterStatus {
@@ -421,23 +415,18 @@ interface ActivePresentation {
   cancel(): void;
 }
 
-function presentationFailure(error: unknown, point: string, plugin: string | null): unknown {
+function presentationFailure(error: unknown, presenter: Attributed<unknown>): unknown {
   // Media failures are event refusals, not plugin faults: the trigger reports them and play goes on.
-  if (error instanceof EventExecutionError ||
-    error instanceof PluginError && error.plugin === plugin && error.point === point) return error;
-  return new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed presenting "${point}".`,
-    plugin, point, { cause: error });
+  if (error instanceof EventExecutionError) return error;
+  return pluginFailure(error, presenter.plugin, presenter.point, 'present');
 }
 
 export class EventPresenter {
   private readonly mount: HTMLElement;
   private readonly onModalChange: (state: { active: boolean }) => void;
-  private readonly toasts: Toasts;
-  private readonly popup: PopupPresenter;
-  private readonly video: VideoPresenter;
-  private readonly toastsOwner: string | null;
-  private readonly popupOwner: string | null;
-  private readonly videoOwner: string | null;
+  private readonly toasts: Attributed<Toasts>;
+  private readonly popup: Attributed<PopupPresenter>;
+  private readonly video: Attributed<VideoPresenter>;
   private readonly lifecycle = new AbortController();
   private media: MediaHost;
   private active: ActivePresentation | null = null;
@@ -451,10 +440,7 @@ export class EventPresenter {
     const toasts = plugins.slot(MESSAGES.toasts, DEFAULT_MESSAGE_TOASTS);
     this.popup = plugins.slot(MESSAGES.popup, DEFAULT_MESSAGE_POPUP);
     this.video = plugins.slot(MESSAGES.video, DEFAULT_MESSAGE_VIDEO);
-    this.toastsOwner = plugins.owner(MESSAGES.toasts);
-    this.popupOwner = plugins.owner(MESSAGES.popup);
-    this.videoOwner = plugins.owner(MESSAGES.video);
-    this.toasts = createToasts(toasts, options.mount, this.toastsOwner);
+    this.toasts = createToasts(toasts, options.mount);
     // Independent holds: a closing modal cannot release a death's hold.
     this.onModalChange = (state) => {
       this.holdToasts(state.active || this.deathHeld);
@@ -474,9 +460,7 @@ export class EventPresenter {
   }
 
   private holdToasts(held: boolean): void {
-    try { this.toasts.setHeld(held); } catch (error) {
-      throw presentationFailure(error, MESSAGES.toasts.id, this.toastsOwner);
-    }
+    call1(this.toasts, 'setHeld', held);
   }
 
   /** True while a full-window video presentation is covering the game view. */
@@ -490,8 +474,7 @@ export class EventPresenter {
     if (signal.aborted) return Promise.resolve('cancelled');
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const cancellation = AbortSignal.any([signal, this.lifecycle.signal]);
-    const point = action.type === 'message' ? MESSAGES.popup.id : MESSAGES.video.id;
-    const plugin = action.type === 'message' ? this.popupOwner : this.videoOwner;
+    const presenter = action.type === 'message' ? this.popup : this.video;
     const controller = new AbortController();
     let settled = false;
     let closed = false;
@@ -517,7 +500,7 @@ export class EventPresenter {
       settled = true;
       controller.abort();
       close();
-      rejectOutcome(presentationFailure(error, point, plugin));
+      rejectOutcome(presentationFailure(error, presenter));
     };
     const presentation: ActivePresentation = {
       kind: action.type === 'message' ? 'popup' : 'video',
@@ -541,8 +524,7 @@ export class EventPresenter {
       setState: (state) => {
         if (controller.signal.aborted || closed || this.active !== presentation) return;
         if (state !== 'popup' && state !== 'loading' && state !== 'awaiting-input' && state !== 'playing') {
-          throw new PluginError('invalid-contribution',
-            `Plugin "${plugin ?? 'engine'}": "${point}" reported an invalid presentation state.`, plugin, point);
+          throw invalidResult(presenter, 'reported an invalid presentation state');
         }
         presentation.state = state;
       },
@@ -558,20 +540,18 @@ export class EventPresenter {
       try { presentation.cancel(); } finally { throw error; }
     }
     if (settled) return outcome; // The modal callback synchronously cancelled us.
-    const popup = this.popup;
-    const video = this.video;
+    const popup = this.popup.value;
+    const video = this.video.value;
     try {
       invoked = true;
       const pending: unknown = action.type === 'message' ? popup(action, context) : video(action, context);
       if (typeof pending !== 'object' || pending === null || typeof Reflect.get(pending, 'then') !== 'function') {
-        throw new PluginError('invalid-contribution',
-          `Plugin "${plugin ?? 'engine'}": "${point}" must return a Promise<EventOutcome>.`, plugin, point);
+        throw invalidResult(presenter, 'must return a Promise<EventOutcome>');
       }
       void Promise.resolve(pending as Promise<unknown>).then((result) => {
         if (settled) return;
         if (result !== 'completed' && result !== 'skipped' && result !== 'cancelled') {
-          fail(new PluginError('invalid-contribution',
-            `Plugin "${plugin ?? 'engine'}": "${point}" returned an invalid EventOutcome.`, plugin, point));
+          fail(invalidResult(presenter, 'returned an invalid EventOutcome'));
           return;
         }
         settled = true;
@@ -580,7 +560,7 @@ export class EventPresenter {
         resolveOutcome(result);
       }, fail);
     } catch (error) {
-      try { presentation.cancel(); } finally { throw presentationFailure(error, point, plugin); }
+      try { presentation.cancel(); } finally { throw presentationFailure(error, presenter); }
     }
     return outcome;
   }
@@ -588,14 +568,9 @@ export class EventPresenter {
   // Shows a message as a toast; it never pauses the game or takes input, so its event is done at once.
   toast(action: MessageAction): void {
     if (this.disposed) throw new Error('EventPresenter.toast was called after dispose().');
-    let accepted: unknown;
-    try { accepted = this.toasts.show(action); } catch (error) {
-      throw presentationFailure(error, MESSAGES.toasts.id, this.toastsOwner);
-    }
+    const accepted = call1(this.toasts, 'show', action);
     if (typeof accepted !== 'boolean') {
-      throw new PluginError('invalid-contribution',
-        `Plugin "${this.toastsOwner ?? 'engine'}": "${MESSAGES.toasts.id}" show(message) must return a boolean.`,
-        this.toastsOwner, MESSAGES.toasts.id);
+      throw invalidResult(this.toasts, 'show(message) must return a boolean');
     }
     if (!accepted) {
       throw new EventExecutionError('Too many trigger messages are already waiting.');
@@ -604,11 +579,11 @@ export class EventPresenter {
 
   // A new run begins: the toast showing leaves quickly and waiting ones are dropped.
   clearToasts(): void {
-    this.toasts.clear();
+    call0(this.toasts, 'clear');
   }
 
   inspect(): EventPresenterStatus {
-    const toasts = this.toasts.inspect?.() ?? null;
+    const toasts = this.toasts.value.inspect === undefined ? null : call0(this.toasts, 'inspect') ?? null;
     if (!this.active) return { state: 'idle', action: null, toasts };
     return { state: this.active.state, action: this.active.action, toasts };
   }
@@ -619,6 +594,6 @@ export class EventPresenter {
     this.lifecycle.abort();
     this.active?.cancel();
     this.active = null;
-    this.toasts.dispose();
+    call0(this.toasts, 'dispose');
   }
 }

@@ -5,7 +5,7 @@ import { PHYSICS } from './config';
 import type { PlayerSpawn, Point, UiAction, UiActionOptions } from './config';
 import { DEFAULT_GAME_SETTINGS } from './game-settings';
 import type { GameSettings } from './game-settings';
-import { checkInputDevice, DEFAULT_INPUT_BINDINGS, INPUT_BINDINGS, INPUT_DEVICES, isBindableAction, PointerInput } from './input';
+import { DEFAULT_INPUT_BINDINGS, INPUT_BINDINGS, INPUT_DEVICE_CONTRACT, INPUT_DEVICES, isBindableAction, PointerInput } from './input';
 import type { BindableAction, InputDevice, InputDeviceHost } from './input';
 import { isTriggerObject } from './level';
 import type { LevelChange, LevelDefinition } from './level';
@@ -37,15 +37,12 @@ import type { PartModel } from './view';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { HudFrame } from './hud-readouts';
-import { checkGameObserver, EVENTS } from './game-events';
+import { EVENTS, GAME_OBSERVER_CONTRACT } from './game-events';
 import type { GameEvent, GameObserver } from './game-events';
 import { GameNotifications, stageCause } from './game-notifications';
 import type { HurtCause } from './hazards';
-import { HURT_EFFECTS } from './hurt-effects';
-import { BLOCK_EFFECTS } from './block-effects';
-import { AUDIO } from './game-audio';
-import { LOOKS } from './object-looks';
-import { checkSynchronous, PluginError } from './plugins/kernel';
+import { AUDIO, SILENT_AUDIO_OUTPUT } from './game-audio';
+import { apply1, attributed, call0, call1, call2, createInstance, invalidResult, pluginFailure } from './plugins/kernel';
 import type { Attributed } from './plugins/kernel';
 import { Disposal } from './disposal';
 import { createDeathSeed } from './player-pose';
@@ -72,7 +69,7 @@ export class Game {
   readonly input: PointerInput;
   readonly triggers: TriggerRuntime;
   private readonly presenter: EventPresenter;
-  private readonly deathScreen: DeathScreen;
+  private readonly deathScreen: Attributed<DeathScreen>;
   private deathScreenDisposed = false;
   private readonly canvas: HTMLCanvasElement;
   private readonly onFatal: (message: string) => void;
@@ -83,14 +80,8 @@ export class Game {
   private readonly unsubscribeEnemies: () => void;
   private readonly unsubscribeBonfires: () => void;
   private readonly onAction: (action: UiAction, options?: UiActionOptions) => void;
-  private readonly onCue: ((cue: GameCue) => void) | null;
-  private readonly onPauseChange: ((paused: boolean) => void) | null;
-  private readonly audioPlugin: string | null;
-  private readonly enemyPlugin: string | null;
-  private readonly bonfirePlugin: string | null;
-  private readonly switchPlugin: string | null;
-  private readonly hurtPlugin: string | null;
-  private readonly blockPlugin: string | null;
+  private readonly onCue: Attributed<(cue: GameCue) => void> | null;
+  private readonly onPauseChange: Attributed<(paused: boolean) => void> | null;
   private hurtPlacement: number;
   private readonly observers: Attributed<GameObserver>[] = [];
   private readonly devices: Attributed<InputDevice>[] = [];
@@ -165,14 +156,9 @@ export class Game {
     this.canvas = options.canvas;
     this.onFatal = options.onFatal;
     this.onAction = options.onAction;
-    this.onCue = options.onCue ?? null;
-    this.onPauseChange = options.onPauseChange ?? null;
-    this.audioPlugin = options.plugins.owner(AUDIO);
-    this.enemyPlugin = options.plugins.owner(LOOKS.enemies);
-    this.bonfirePlugin = options.plugins.owner(LOOKS.bonfire);
-    this.switchPlugin = options.plugins.owner(LOOKS.switch);
-    this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
-    this.blockPlugin = options.plugins.owner(BLOCK_EFFECTS);
+    const audio = options.onCue === undefined && options.onPauseChange === undefined ? null : options.plugins.slot(AUDIO, SILENT_AUDIO_OUTPUT);
+    this.onCue = options.onCue === undefined ? null : attributed(audio!.plugin, audio!.point, options.onCue);
+    this.onPauseChange = options.onPauseChange === undefined ? null : attributed(audio!.plugin, audio!.point, options.onPauseChange);
     this.hud = options.hud ?? DEFAULT_HUD;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     const listen = { signal: this.lifecycle.signal };
@@ -187,7 +173,7 @@ export class Game {
         decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
       });
       this.input = new PointerInput(options.canvas, {
-        bindings: options.plugins.slot(INPUT_BINDINGS, DEFAULT_INPUT_BINDINGS),
+        bindings: options.plugins.slot(INPUT_BINDINGS, DEFAULT_INPUT_BINDINGS).value,
         onAction: options.onAction, onNotice: options.onNotice, onShortcut: options.onShortcut,
       });
       this.presenter = new EventPresenter({
@@ -205,14 +191,8 @@ export class Game {
         onFailure: ({ triggerId, eventIndex, message }) => options.onNotice(`Trigger "${triggerId}", event ${eventIndex + 1}: ${message}`),
         onFault: (error) => this.stop(error instanceof Error ? error.message : String(error)),
       });
-      for (const { plugin, value: factory } of options.plugins.list(EVENTS)) {
-        try {
-          this.observers.push({ plugin, value: checkGameObserver(factory(), plugin) });
-        } catch (error) {
-          if (error instanceof PluginError && error.plugin === plugin && error.point === EVENTS.id) throw error;
-          throw new PluginError('plugin-failed', `Plugin "${plugin}" failed creating "${EVENTS.id}".`,
-            plugin, EVENTS.id, { cause: error });
-        }
+      for (const factory of options.plugins.list(EVENTS)) {
+        this.observers.push(createInstance(GAME_OBSERVER_CONTRACT, factory, factory.value));
       }
       this.eventConsumers = this.onCue !== null || this.observers.length > 0;
       if (this.eventConsumers) this.simulation.trackImpacts(true);
@@ -229,28 +209,21 @@ export class Game {
         }
         this.bonfire = state.current;
       });
-      for (const { plugin, value: factory } of options.plugins.list(INPUT_DEVICES)) {
+      for (const factory of options.plugins.list(INPUT_DEVICES)) {
+        const create = factory.value;
         const host: InputDeviceHost = Object.freeze({
           signal: this.lifecycle.signal,
           action: (action: BindableAction) => {
             if (!isBindableAction(action)) {
-              throw new PluginError('invalid-contribution', `Plugin "${plugin}": "${INPUT_DEVICES.id}" action must be reset, pause or recenter.`,
-                plugin, INPUT_DEVICES.id);
+              throw invalidResult(factory, 'action must be reset, pause or recenter');
             }
             if (this.stopped || this.inputBlocks.size > 0) return;
             try { this.onAction(action); } catch (error) {
-              throw new PluginError('plugin-failed', `Plugin "${plugin}" failed handling an "${INPUT_DEVICES.id}" action.`,
-                plugin, INPUT_DEVICES.id, { cause: error });
+              throw pluginFailure(error, factory.plugin, factory.point, 'action');
             }
           },
         });
-        try {
-          this.devices.push({ plugin, value: checkInputDevice(factory(host), plugin) });
-        } catch (error) {
-          if (error instanceof PluginError && error.plugin === plugin && error.point === INPUT_DEVICES.id) throw error;
-          throw new PluginError('plugin-failed', `Plugin "${plugin}" failed creating "${INPUT_DEVICES.id}".`,
-            plugin, INPUT_DEVICES.id, { cause: error });
-        }
+        this.devices.push(createInstance(INPUT_DEVICE_CONTRACT, factory, () => create(host)));
       }
       document.addEventListener('visibilitychange', () => {
         this.accumulator = 0;
@@ -273,7 +246,7 @@ export class Game {
   start(onFrame: (state: HudFrame) => void): void {
     if (this.started) throw new Error('The game loop is already running.');
     this.started = true;
-    this.onPauseChange?.(this.pauseReasons.size > 0);
+    if (this.onPauseChange !== null) apply1(this.onPauseChange, 'setPaused', this.pauseReasons.size > 0);
     this.previousTime = performance.now();
     const animate = (now: number): void => {
       if (this.stopped) return;
@@ -385,7 +358,7 @@ export class Game {
         frame.duration = dying.duration;
         frame.poseProgress = Math.min(1, frame.elapsed / DEATH_POSE_SECONDS);
         frame.reducedMotion = dying.reducedMotion;
-        if (visible) this.deathScreen.update(frame);
+        if (visible) call1(this.deathScreen, 'update', frame);
         if (this.death === dying) this.renderState.death = frame;
       }
       if (this.stopped) return;
@@ -484,7 +457,7 @@ export class Game {
 
   setTheme(theme: GameTheme): void { this.view.setTheme(theme); }
 
-  setEnemyArt(art: EnemyArtSettings): void { this.view.enemies.setArt(art); }
+  setEnemyArt(art: EnemyArtSettings): void { this.view.setEnemyArt(art); }
 
   setMedia(media: MediaHost): void { this.presenter.setMedia(media); }
 
@@ -506,7 +479,7 @@ export class Game {
     this.settleDeathClock();
     this.clearMovement();
     const paused = this.pauseReasons.size > 0;
-    if (this.started && !this.stopped && paused !== wasPaused) this.onPauseChange?.(paused);
+    if (this.started && !this.stopped && paused !== wasPaused && this.onPauseChange !== null) apply1(this.onPauseChange, 'setPaused', paused);
   }
 
   setInputBlock(options: { reason: string; blocked: boolean }): void {
@@ -610,22 +583,12 @@ export class Game {
     disposal.run(() => this.unsubscribeEnemies?.());
     disposal.run(() => this.unsubscribeBonfires?.());
     for (let index = this.devices.length - 1; index >= 0; index--) {
-      const { plugin, value: device } = this.devices[index]!;
-      disposal.run(() => {
-        try { device.dispose?.(); } catch (error) {
-          throw new PluginError('plugin-failed', `Plugin "${plugin}" failed disposing "${INPUT_DEVICES.id}".`,
-            plugin, INPUT_DEVICES.id, { cause: error });
-        }
-      });
+      const device = this.devices[index]!;
+      if (device.value.dispose !== undefined) disposal.run(() => call0(device, 'dispose'));
     }
     for (let index = this.observers.length - 1; index >= 0; index--) {
-      const { plugin, value: observer } = this.observers[index]!;
-      disposal.run(() => {
-        try { observer.dispose?.(); } catch (error) {
-          throw new PluginError('plugin-failed', `Plugin "${plugin}" failed disposing "${EVENTS.id}".`,
-            plugin, EVENTS.id, { cause: error });
-        }
-      });
+      const observer = this.observers[index]!;
+      if (observer.value.dispose !== undefined) disposal.run(() => call0(observer, 'dispose'));
     }
     disposal.run(() => this.input?.dispose());
     disposal.run(() => this.view?.dispose());
@@ -695,7 +658,7 @@ export class Game {
     this.presenter.setDeathHeld(true);
     this.triggers.interrupt();
     this.stageSwitches();
-    if (this.death === dying && !this.stopped) this.deathScreen.show(info, settings);
+    if (this.death === dying && !this.stopped) call2(this.deathScreen, 'show', info, settings);
   }
 
   private finishDeath(dying: Dying): void {
@@ -717,7 +680,7 @@ export class Game {
     this.renderState.death = null;
     const disposal = new Disposal();
     disposal.run(() => this.view.cancelDeath());
-    disposal.run(() => this.deathScreen.clear());
+    disposal.run(() => call0(this.deathScreen, 'clear'));
     disposal.run(() => this.presenter.setDeathHeld(false));
     disposal.finish();
   }
@@ -725,7 +688,7 @@ export class Game {
   private disposeDeathScreen(): void {
     if (this.deathScreenDisposed || this.deathScreen === undefined) return;
     this.deathScreenDisposed = true;
-    this.deathScreen.dispose();
+    call0(this.deathScreen, 'dispose');
   }
 
   // Discard interpolation with the accumulator, so resuming cannot rewind the presentation by one step.
@@ -778,17 +741,10 @@ export class Game {
 
   private pollDevices(dt: number): void {
     const placement = this.simulation.placement;
-    for (const { plugin, value: device } of this.devices) {
-      try {
-        checkSynchronous(device.poll(dt, this.deviceMovement), plugin, INPUT_DEVICES.id, 'poll');
-      } catch (error) {
-        if (error instanceof PluginError && error.plugin === plugin && error.point === INPUT_DEVICES.id) throw error;
-        throw new PluginError('plugin-failed', `Plugin "${plugin}" failed polling "${INPUT_DEVICES.id}".`,
-          plugin, INPUT_DEVICES.id, { cause: error });
-      }
+    for (const device of this.devices) {
+      call2(device, 'poll', dt, this.deviceMovement);
       if (!Number.isFinite(this.deviceMovement.x) || !Number.isFinite(this.deviceMovement.y)) {
-        throw new PluginError('invalid-contribution', `Plugin "${plugin}": "${INPUT_DEVICES.id}" must add finite movement in metres.`,
-          plugin, INPUT_DEVICES.id);
+        throw invalidResult(device, 'must add finite movement in metres');
       }
       if (this.stopped) break;
     }
@@ -813,11 +769,7 @@ export class Game {
     const placement = this.simulation.placement;
     if (this.hurtPlacement === placement) return;
     this.hurtPlacement = placement;
-    try { this.view.clearHurt(); } catch (error) {
-      if (error instanceof PluginError && error.plugin === this.hurtPlugin && error.point === HURT_EFFECTS.id) throw error;
-      throw new PluginError('plugin-failed', `Plugin "${this.hurtPlugin ?? 'engine'}" failed applying "${HURT_EFFECTS.id}" clear.`,
-        this.hurtPlugin, HURT_EFFECTS.id, { cause: error });
-    }
+    this.view.clearHurt();
   }
 
   private stageSwitches(): void {
@@ -854,10 +806,7 @@ export class Game {
   }
 
   private sendAudio(cue: GameCue): void {
-    try { this.onCue?.(cue); } catch (error) {
-      throw new PluginError('plugin-failed', `Plugin "${this.audioPlugin ?? 'engine'}" failed handling "${AUDIO.id}".`,
-        this.audioPlugin, AUDIO.id, { cause: error });
-    }
+    if (this.onCue !== null) apply1(this.onCue, 'handle', cue);
   }
 
   private flushNotifications(): void {
@@ -871,22 +820,13 @@ export class Game {
       // a. Looks: all enemy changes, then only the latest bonfire state.
       for (let index = 0; index < batch.enemyCount; index++) {
         if (this.lifecycle.signal.aborted) return;
-        try { this.view.enemies.apply(batch.enemies[index]!); } catch (error) {
-          throw new PluginError('plugin-failed', `Plugin "${this.enemyPlugin ?? 'engine'}" failed applying "${LOOKS.enemies.id}".`,
-            this.enemyPlugin, LOOKS.enemies.id, { cause: error });
-        }
+        this.view.applyEnemy(batch.enemies[index]!);
       }
       if (batch.lit !== null && !this.lifecycle.signal.aborted) {
-        try { this.view.setLitBonfires(batch.lit); } catch (error) {
-          throw new PluginError('plugin-failed', `Plugin "${this.bonfirePlugin ?? 'engine'}" failed applying "${LOOKS.bonfire.id}".`,
-            this.bonfirePlugin, LOOKS.bonfire.id, { cause: error });
-        }
+        this.view.setLitBonfires(batch.lit);
       }
       if (batch.switches !== null && !this.lifecycle.signal.aborted) {
-        try { this.view.setPressedSwitches(batch.switches); } catch (error) {
-          throw new PluginError('plugin-failed', `Plugin "${this.switchPlugin ?? 'engine'}" failed applying "${LOOKS.switch.id}".`,
-            this.switchPlugin, LOOKS.switch.id, { cause: error });
-        }
+        this.view.setPressedSwitches(batch.switches);
       }
       // Then hits and placements for the hurt effects, in the order they happened.
       for (let index = 0; index < batch.hurtCount; index++) {
@@ -896,25 +836,13 @@ export class Game {
         this.prepareHurtPlacement();
         if (this.lifecycle.signal.aborted) return;
         if (notice.clear || notice.placement !== this.simulation.placement) continue;
-        try {
-          this.view.hurt(notice.cause, notice.fatal);
-        } catch (error) {
-          if (error instanceof PluginError && error.plugin === this.hurtPlugin && error.point === HURT_EFFECTS.id) throw error;
-          throw new PluginError('plugin-failed', `Plugin "${this.hurtPlugin ?? 'engine'}" failed applying "${HURT_EFFECTS.id}".`,
-            this.hurtPlugin, HURT_EFFECTS.id, { cause: error });
-        }
+        this.view.hurt(notice.cause, notice.fatal);
       }
       for (let index = 0; index < batch.blockCount; index++) {
         if (this.lifecycle.signal.aborted) return;
         const notice = batch.blocks[index]!;
         if (notice.placement !== this.simulation.placement) continue;
-        try {
-          this.view.block(notice.hit);
-        } catch (error) {
-          if (error instanceof PluginError && error.plugin === this.blockPlugin && error.point === BLOCK_EFFECTS.id) throw error;
-          throw new PluginError('plugin-failed', `Plugin "${this.blockPlugin ?? 'engine'}" failed applying "${BLOCK_EFFECTS.id}".`,
-            this.blockPlugin, BLOCK_EFFECTS.id, { cause: error });
-        }
+        this.view.block(notice.hit);
       }
       // b. Audio: the same source order as the gameplay notifications, with impacts already limited.
       if (this.onCue !== null) {
@@ -933,15 +861,9 @@ export class Game {
       if (this.observers.length > 0) {
         for (let index = 0; index < batch.eventCount; index++) {
           const event = batch.events[index]!;
-          for (const { plugin, value: observer } of this.observers) {
+          for (const observer of this.observers) {
             if (this.lifecycle.signal.aborted) return;
-            try {
-              checkSynchronous(observer.event(event), plugin, EVENTS.id, 'event');
-            } catch (error) {
-              if (error instanceof PluginError && error.plugin === plugin && error.point === EVENTS.id) throw error;
-              throw new PluginError('plugin-failed', `Plugin "${plugin}" failed observing "${EVENTS.id}" event "${event.type}".`,
-                plugin, EVENTS.id, { cause: error });
-            }
+            call1(observer, 'event', event);
           }
         }
       }

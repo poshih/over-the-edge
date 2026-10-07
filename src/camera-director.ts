@@ -1,7 +1,8 @@
 import { RIG } from './config';
 import type { Point } from './config';
 import { clamp } from './math';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, invalidResult, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { DeathKind } from './death-sequence';
 // Plain data, also used by course scripts running in Node to place scenery for this framing.
@@ -109,26 +110,20 @@ class FollowCamera implements CameraDirector {
 
 export const DEFAULT_CAMERA_DIRECTOR: CameraDirectorFactory = () => new FollowCamera();
 
-export function createCameraDirector(plugins: RuntimePlugins): CameraDirector {
+const CAMERA_DIRECTOR_CONTRACT = instanceContract({
+  returns: 'aim(view, out), snap(view, out) and, when given, inspect()',
+  methods: ['aim', 'snap'],
+  optional: ['inspect'],
+});
+
+export function createCameraDirector(plugins: RuntimePlugins): Attributed<CameraDirector> {
   const factory = plugins.slot(CAMERA, DEFAULT_CAMERA_DIRECTOR);
-  const plugin = plugins.owner(CAMERA);
-  let director: unknown;
-  try { director = factory(); } catch (error) {
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${CAMERA.id}".`, plugin, CAMERA.id, { cause: error });
-  }
-  if (typeof director !== 'object' || director === null || typeof Reflect.get(director, 'aim') !== 'function' ||
-    typeof Reflect.get(director, 'snap') !== 'function' ||
-    Reflect.get(director, 'inspect') !== undefined && typeof Reflect.get(director, 'inspect') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": a camera director must return aim(view, out), snap(view, out) and, when given, inspect().`, plugin, CAMERA.id);
-  }
-  return director as CameraDirector;
+  return createInstance(CAMERA_DIRECTOR_CONTRACT, factory, factory.value);
 }
 
 // Check each written aim, not just the factory: an invalid frame must fail explicitly, never poison the projection.
-export function checkCameraAim(aim: CameraAim, plugin: string | null): void {
+export function checkCameraAim(aim: CameraAim, director: Attributed<CameraDirector>): void {
   if (!Number.isFinite(aim.x) || !Number.isFinite(aim.y) || !Number.isFinite(aim.worldHeight) || aim.worldHeight <= 0) {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": "${CAMERA.id}" must write finite coordinates and a positive worldHeight.`, plugin, CAMERA.id);
+    throw invalidResult(director, 'must write finite coordinates and a positive worldHeight');
   }
 }

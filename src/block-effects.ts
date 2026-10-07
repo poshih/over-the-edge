@@ -1,7 +1,8 @@
 import type { Object3D } from 'three';
 import type { ProjectileBlock } from './hazards';
 import { HitBursts } from './hit-bursts';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { SceneFrame } from './scene-layer';
 
@@ -48,20 +49,13 @@ class EngineBlockEffects implements BlockEffects {
 
 export const DEFAULT_BLOCK_EFFECTS: BlockEffectsFactory = () => new EngineBlockEffects();
 
-export function createBlockEffects(plugins: RuntimePlugins): BlockEffects {
+const BLOCK_EFFECTS_CONTRACT = instanceContract({
+  returns: 'a three.js root, block(hit), update(frame) and dispose()',
+  methods: ['block', 'update', 'dispose'],
+  root: true,
+});
+
+export function createBlockEffects(plugins: RuntimePlugins): Attributed<BlockEffects> {
   const factory = plugins.slot(BLOCK_EFFECTS, DEFAULT_BLOCK_EFFECTS);
-  const plugin = plugins.owner(BLOCK_EFFECTS);
-  let effects: unknown;
-  try { effects = factory(); } catch (error) {
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${BLOCK_EFFECTS.id}".`, plugin, BLOCK_EFFECTS.id, { cause: error });
-  }
-  const root: unknown = typeof effects === 'object' && effects !== null ? Reflect.get(effects, 'root') : undefined;
-  if (typeof root !== 'object' || root === null || Reflect.get(root, 'isObject3D') !== true ||
-    typeof Reflect.get(effects as object, 'block') !== 'function' || typeof Reflect.get(effects as object, 'update') !== 'function' ||
-    typeof Reflect.get(effects as object, 'dispose') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": block effects must return a three.js root, block(hit), update(frame) and dispose().`,
-      plugin, BLOCK_EFFECTS.id);
-  }
-  return effects as BlockEffects;
+  return createInstance(BLOCK_EFFECTS_CONTRACT, factory, factory.value);
 }

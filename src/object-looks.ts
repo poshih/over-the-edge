@@ -17,7 +17,8 @@ import type { PlatformFrame, PlatformPose } from './platform-world';
 import { ProjectileView, ShooterView } from './shooter-view';
 import { SwitchView } from './switch-view';
 import { UpdraftView } from './updraft-view';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { call0, call1, call2, createInstance, instanceContract, isObject3D, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 
 // How the level's objects of each kind look, replaced or wrapped by runtime facets (docs/runtime-plugins.md):
@@ -213,34 +214,58 @@ const SELECTED: Readonly<Record<PlacedLookName, (object: LevelObject) => boolean
   swamp: (object) => object.kind === 'pool' && object.liquid === 'swamp',
 };
 
-// Builds `name`'s look, checking what the factory returns.
-function create<L>(name: LookName, factory: () => L, plugin: string | null): L {
-  const point = LOOKS[name];
-  let look: unknown;
-  try { look = factory(); } catch (error) {
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${point.id}".`, plugin, point.id, { cause: error });
-  }
-  const object = typeof look === 'object' && look !== null;
-  const method = (key: string): boolean => object && typeof Reflect.get(look as object, key) === 'function';
-  const node = (value: unknown): boolean => typeof value === 'object' && value !== null && Reflect.get(value, 'isObject3D') === true;
-  const passes: unknown = object ? Reflect.get(look as object, 'passes') : undefined;
-  const validPasses = typeof passes === 'object' && passes !== null &&
+function validLookPasses(look: object): boolean {
+  const passes: unknown = Reflect.get(look, 'passes');
+  return typeof passes === 'object' && passes !== null &&
     (['course', 'actors', 'front'] as const).every((pass) => {
       const group: unknown = Reflect.get(passes, pass);
-      return group === undefined || node(group);
+      return group === undefined || isObject3D(group);
     });
-  const methods = name === 'phantoms' ? ['draw', 'dispose'] : name === 'enemies' ? ['apply', 'update', 'setArt', 'dispose']
-    : name === 'projectile' ? ['update', 'dispose'] : name === 'bonfire' ? ['set', 'setLit', 'update', 'dispose']
-      : name === 'switch' ? ['set', 'setPressed', 'update', 'dispose'] : ['set', 'update', 'dispose'];
-  const valid = (name === 'phantoms' ? object && node(Reflect.get(look as object, 'root')) : validPasses) && methods.every(method) &&
-    (name === 'phantoms' || Reflect.get(look as object, 'inspect') === undefined || method('inspect'));
-  if (!valid) {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": the ${name} look must return ${name === 'phantoms' ? 'its root' : 'its passes'}, as three.js objects, and ${
-        methods.join(', ')}${name === 'phantoms' ? '' : ' and, when given, inspect()'}.`, plugin, point.id);
-  }
-  return look as L;
 }
+
+const OBJECT_LOOK_CONTRACT = instanceContract({
+  returns: 'three.js passes, set(objects), update(time), dispose() and, when given, inspect()',
+  methods: ['set', 'update', 'dispose'],
+  optional: ['inspect'],
+  check: validLookPasses,
+});
+const LOOK_CONTRACTS = Object.freeze({
+  flag: OBJECT_LOOK_CONTRACT,
+  updraft: OBJECT_LOOK_CONTRACT,
+  switch: instanceContract({
+    ...OBJECT_LOOK_CONTRACT,
+    returns: 'three.js passes, set(objects), setPressed(ids), update(time), dispose() and, when given, inspect()',
+    methods: ['set', 'setPressed', 'update', 'dispose'],
+  }),
+  bonfire: instanceContract({
+    ...OBJECT_LOOK_CONTRACT,
+    returns: 'three.js passes, set(objects), setLit(ids), update(time), dispose() and, when given, inspect()',
+    methods: ['set', 'setLit', 'update', 'dispose'],
+  }),
+  platform: instanceContract({
+    ...OBJECT_LOOK_CONTRACT,
+    returns: 'three.js passes, set(objects), update(changes, time), dispose() and, when given, inspect()',
+  }),
+  shooter: OBJECT_LOOK_CONTRACT,
+  projectile: instanceContract({
+    ...OBJECT_LOOK_CONTRACT,
+    returns: 'three.js passes, update(projectiles, time), dispose() and, when given, inspect()',
+    methods: ['update', 'dispose'],
+  }),
+  axe: OBJECT_LOOK_CONTRACT,
+  lava: OBJECT_LOOK_CONTRACT,
+  swamp: OBJECT_LOOK_CONTRACT,
+  enemies: instanceContract({
+    ...OBJECT_LOOK_CONTRACT,
+    returns: 'three.js passes, apply(event), update(poses, time), setArt(art), dispose() and, when given, inspect()',
+    methods: ['apply', 'update', 'setArt', 'dispose'],
+  }),
+  phantoms: instanceContract({
+    returns: 'a three.js root, draw(figures, head) and dispose()',
+    methods: ['draw', 'dispose'],
+    root: true,
+  }),
+});
 
 function sameObjects(a: readonly LevelObject[], b: readonly LevelObject[]): boolean {
   return a.length === b.length && a.every((object, index) => object === b[index]);
@@ -248,7 +273,7 @@ function sameObjects(a: readonly LevelObject[], b: readonly LevelObject[]): bool
 
 interface Placed {
   readonly name: PlacedLookName;
-  readonly look: ObjectLook<LevelObject>;
+  readonly look: Attributed<ObjectLook<LevelObject>>;
   // The objects it was last given; null before the level loads.
   objects: readonly LevelObject[] | null;
 }
@@ -259,13 +284,13 @@ const NO_PROJECTILES: readonly ProjectilePose[] = Object.freeze([]);
  * Each gets its kind's objects when the level loads and again only when one of them changes.
  */
 export class LevelLooks {
-  readonly enemies: EnemyLook;
+  private readonly enemies: Attributed<EnemyLook>;
   private readonly placed: readonly Placed[];
-  private readonly bonfire: BonfireLook;
-  private readonly switch: SwitchLook;
-  private readonly platform: PlatformLook;
+  private readonly bonfire: Attributed<BonfireLook>;
+  private readonly switch: Attributed<SwitchLook>;
+  private readonly platform: Attributed<PlatformLook>;
   private platformObjects: readonly PlatformObject[] | null = null;
-  private readonly projectile: ProjectileLook;
+  private readonly projectile: Attributed<ProjectileLook>;
   private readonly passList: readonly LookPasses[];
   private fronts: readonly Object3D[] = [];
   private active: readonly Placed[] = [];
@@ -275,7 +300,7 @@ export class LevelLooks {
   private projectileActive = false;
 
   constructor(plugins: RuntimePlugins, objects: readonly LevelObject[], art: EnemyArtSettings) {
-    const factories: ObjectLooks & { readonly enemies: EnemyLookFactory } = {
+    const factories = {
       flag: plugins.slot(LOOKS.flag, DEFAULT_LOOKS.flag),
       updraft: plugins.slot(LOOKS.updraft, DEFAULT_LOOKS.updraft),
       switch: plugins.slot(LOOKS.switch, DEFAULT_LOOKS.switch),
@@ -288,30 +313,31 @@ export class LevelLooks {
       swamp: plugins.slot(LOOKS.swamp, DEFAULT_LOOKS.swamp),
       enemies: plugins.slot(LOOKS.enemies, DEFAULT_LOOKS.enemies),
     };
-    const created: { dispose(): void }[] = [];
-    const build = <L extends { dispose(): void }>(name: LookName, factory: () => L): L => {
-      const look = create(name, factory, plugins.owner(LOOKS[name]));
+    const createEnemies = factories.enemies.value;
+    const created: Attributed<{ dispose(): void }>[] = [];
+    const build = <L extends { dispose(): void }>(name: LookName, factory: Attributed<unknown>, create: () => L): Attributed<L> => {
+      const look = createInstance<L>(LOOK_CONTRACTS[name], factory, create);
       created.push(look);
       return look;
     };
     try {
-      this.enemies = build('enemies', () => factories.enemies(art));
-      this.bonfire = build('bonfire', factories.bonfire);
-      this.switch = build('switch', factories.switch);
-      this.platform = build('platform', factories.platform);
-      this.projectile = build('projectile', factories.projectile);
+      this.enemies = build('enemies', factories.enemies, () => createEnemies(art));
+      this.bonfire = build('bonfire', factories.bonfire, factories.bonfire.value);
+      this.switch = build('switch', factories.switch, factories.switch.value);
+      this.platform = build('platform', factories.platform, factories.platform.value);
+      this.projectile = build('projectile', factories.projectile, factories.projectile.value);
       this.placed = (['flag', 'updraft', 'switch', 'bonfire', 'shooter', 'axe', 'lava', 'swamp'] as const).map((name): Placed => {
         if (name === 'bonfire') return { name, look: this.bonfire, objects: null };
         if (name === 'switch') return { name, look: this.switch, objects: null };
-        const factory: () => ObjectLook<LevelObject> = factories[name];
-        return { name, look: build(name, factory), objects: null };
+        const factory = factories[name];
+        return { name, look: build<ObjectLook<LevelObject>>(name, factory, factory.value), objects: null };
       });
       this.passList = Object.freeze([
-        this.enemies.passes, ...this.placed.map(({ look }) => look.passes), this.platform.passes, this.projectile.passes,
+        this.enemies.value.passes, ...this.placed.map(({ look }) => look.value.passes), this.platform.value.passes, this.projectile.value.passes,
       ]);
       this.setLevel(objects);
     } catch (error) {
-      for (let index = created.length - 1; index >= 0; index--) created[index]!.dispose();
+      for (let index = created.length - 1; index >= 0; index--) call0(created[index]!, 'dispose');
       throw error;
     }
   }
@@ -328,44 +354,56 @@ export class LevelLooks {
       const next = objects.filter(SELECTED[placed.name]);
       if (placed.objects !== null && sameObjects(placed.objects, next)) continue;
       placed.objects = next;
-      placed.look.set(next);
+      call1(placed.look, 'set', next);
     }
     const platforms = objects.filter(isPlatformObject);
     if (this.platformObjects === null || !sameObjects(this.platformObjects, platforms)) {
       this.platformObjects = platforms;
-      this.platform.set(platforms);
+      call1(this.platform, 'set', platforms);
     }
     this.active = this.placed.filter(placed => placed.objects!.length > 0);
     this.hasShooters = this.active.some(placed => placed.name === 'shooter');
     this.hasEnemies = objects.some(object => object.kind === 'enemy');
     this.hasPlatforms = platforms.length > 0;
-    const passes = this.active.map(({ look }) => look.passes);
-    if (this.hasEnemies) passes.push(this.enemies.passes);
-    if (this.hasPlatforms) passes.push(this.platform.passes);
+    const passes = this.active.map(({ look }) => look.value.passes);
+    if (this.hasEnemies) passes.push(this.enemies.value.passes);
+    if (this.hasPlatforms) passes.push(this.platform.value.passes);
     this.fronts = passes.flatMap(({ front }) => front === undefined ? [] : [front]);
   }
 
   setLit(ids: readonly string[]): void {
-    this.bonfire.setLit(ids);
+    call1(this.bonfire, 'setLit', ids);
   }
 
   setPressedSwitches(ids: readonly string[]): void {
-    this.switch.setPressed(ids);
+    call1(this.switch, 'setPressed', ids);
+  }
+
+  applyEnemy(event: EnemyEvent): void {
+    call1(this.enemies, 'apply', event);
+  }
+
+  setEnemyArt(art: EnemyArtSettings): void {
+    call1(this.enemies, 'setArt', art);
+  }
+
+  inspectEnemies(): unknown {
+    return this.enemies.value.inspect === undefined ? null : call0(this.enemies, 'inspect') ?? null;
   }
 
   update(time: number, projectiles: readonly ProjectilePose[], enemies: readonly EnemyPose[], platforms: PlatformFrame): void {
-    for (const { look } of this.active) look.update(time);
+    for (const { look } of this.active) call1(look, 'update', time);
     if (this.hasPlatforms) {
       const revision = platforms.revision;
-      this.platform.update(platforms.changes, time);
+      call2(this.platform, 'update', platforms.changes, time);
       platforms.acknowledge(revision);
     }
-    if (this.hasEnemies) this.enemies.update(enemies, time);
+    if (this.hasEnemies) call2(this.enemies, 'update', enemies, time);
     if (this.hasShooters || projectiles.length > 0) {
-      this.projectile.update(projectiles, time);
+      call2(this.projectile, 'update', projectiles, time);
       this.projectileActive = true;
     } else if (this.projectileActive) {
-      this.projectile.update(NO_PROJECTILES, time);
+      call2(this.projectile, 'update', NO_PROJECTILES, time);
       this.projectileActive = false;
     }
   }
@@ -373,14 +411,14 @@ export class LevelLooks {
   // Whether some look draws in front of the obstacle line now.
   drawsFront(): boolean {
     for (const front of this.fronts) if (front.visible) return true;
-    return this.projectileActive && this.projectile.passes.front?.visible === true;
+    return this.projectileActive && this.projectile.value.passes.front?.visible === true;
   }
 
   inspect() {
     return Object.fromEntries([
-      ...this.placed.map(({ name, look }) => [name, look.inspect?.() ?? null] as const),
-      ['platform', this.platform.inspect?.() ?? null] as const,
-      ['projectile', this.projectile.inspect?.() ?? null] as const,
+      ...this.placed.map(({ name, look }) => [name, look.value.inspect === undefined ? null : call0(look, 'inspect') ?? null] as const),
+      ['platform', this.platform.value.inspect === undefined ? null : call0(this.platform, 'inspect') ?? null] as const,
+      ['projectile', this.projectile.value.inspect === undefined ? null : call0(this.projectile, 'inspect') ?? null] as const,
     ]);
   }
 
@@ -389,15 +427,16 @@ export class LevelLooks {
     for (const passes of this.passes()) {
       for (const pass of ['course', 'actors', 'front'] as const) disposal.run(() => passes[pass]?.removeFromParent());
     }
-    for (const { look } of this.placed) disposal.run(() => look.dispose());
-    disposal.run(() => this.platform.dispose());
-    disposal.run(() => this.projectile.dispose());
-    disposal.run(() => this.enemies.dispose());
+    for (const { look } of this.placed) disposal.run(() => call0(look, 'dispose'));
+    disposal.run(() => call0(this.platform, 'dispose'));
+    disposal.run(() => call0(this.projectile, 'dispose'));
+    disposal.run(() => call0(this.enemies, 'dispose'));
     disposal.finish();
   }
 }
 
 // Playback creates a look only when needed, using the factory resolved by its phantom consumer.
-export function createPhantomLook(factory: PhantomLookFactory, figures: number, plugin: string | null): PhantomLook {
-  return create('phantoms', () => factory({ figures }), plugin);
+export function createPhantomLook(factory: Attributed<PhantomLookFactory>, figures: number): Attributed<PhantomLook> {
+  const create = factory.value;
+  return createInstance(LOOK_CONTRACTS.phantoms, factory, () => create({ figures }));
 }

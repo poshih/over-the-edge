@@ -2,13 +2,15 @@ import { createHudReadout, DEFAULT_HUD_READOUTS, HUD, HUD_READOUTS } from './hud
 import type { HudFrame, HudReadout, HudReadoutName } from './hud-readouts';
 import type { HudSettings } from './hud';
 import type { RuntimePlugins } from './plugins/runtime';
+import { call0, call1 } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import { Disposal } from './disposal';
 import './hud-bar.css';
 
 interface Shown {
   readonly name: HudReadoutName | 'extras';
   readonly slot: HTMLElement;
-  readonly readout: HudReadout;
+  readonly readout: Attributed<HudReadout>;
 }
 
 // Both release and Workshop resolve the same factories. Settings changes rebuild the bar, not the session.
@@ -20,7 +22,9 @@ export function createHudBar(plugins: RuntimePlugins, settings: HudSettings) {
   const shown: Shown[] = [];
   const dispose = (): void => {
     const disposal = new Disposal();
-    for (const { readout } of shown.splice(0)) disposal.run(() => readout.dispose?.());
+    for (const { readout } of shown.splice(0)) {
+      if (readout.value.dispose !== undefined) disposal.run(() => call0(readout, 'dispose'));
+    }
     disposal.run(() => root.remove());
     disposal.finish();
   };
@@ -34,20 +38,19 @@ export function createHudBar(plugins: RuntimePlugins, settings: HudSettings) {
     };
     for (const name of HUD_READOUTS) {
       if (name === 'height' && !settings.height.visible || name === 'timer' && !settings.timer.visible) continue;
-      const point = HUD[name];
       const factory = factories[name];
       const slot = document.createElement('div');
       slot.className = `hud-slot hud-${name}`;
       slot.hidden = name === 'health';
       root.append(slot);
-      const readout = createHudReadout(name, factory, slot, settings, plugins.owner(point));
+      const readout = createHudReadout(factory, slot, settings);
       shown.push({ name, slot, readout });
     }
-    for (const { plugin, value: factory } of plugins.list(HUD.extras)) {
+    for (const factory of plugins.list(HUD.extras)) {
       const slot = document.createElement('div');
       slot.className = 'hud-slot hud-extra';
       root.append(slot);
-      const readout = createHudReadout('extras', factory, slot, settings, plugin);
+      const readout = createHudReadout(factory, slot, settings);
       shown.push({ name: 'extras', slot, readout });
     }
   } catch (error) {
@@ -59,7 +62,7 @@ export function createHudBar(plugins: RuntimePlugins, settings: HudSettings) {
     update(frame: HudFrame): void {
       for (const { name, slot, readout } of shown) {
         if (name === 'health' && slot.hidden !== (frame.health === null)) slot.hidden = frame.health === null;
-        readout.update(frame);
+        call1(readout, 'update', frame);
       }
     },
     dispose,

@@ -1,5 +1,5 @@
 import type { HurtCause } from './hazards';
-import { listPoint, PluginError } from './plugins/kernel';
+import { instanceContract, listPoint } from './plugins/kernel';
 
 /**
  * Gameplay notifications, delivered in source order after the frame's physics steps, looks and audio.
@@ -42,12 +42,8 @@ export const EVENTS = listPoint('game.events', 'runtime', GAME_OBSERVER_LIMITS.o
   return value as GameObserverFactory;
 });
 
-export function checkGameObserver(value: unknown, plugin: string): GameObserver {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    typeof Reflect.get(value, 'event') !== 'function' ||
-    Reflect.get(value, 'dispose') !== undefined && typeof Reflect.get(value, 'dispose') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin}": "${EVENTS.id}" must return event(event) and, when given, dispose().`, plugin, EVENTS.id);
-  }
-  return value as GameObserver;
-}
+export const GAME_OBSERVER_CONTRACT = instanceContract({
+  returns: 'event(event) and, when given, dispose()',
+  methods: ['event'],
+  optional: ['dispose'],
+});

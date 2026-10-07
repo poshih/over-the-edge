@@ -2,7 +2,8 @@ import { BufferAttribute, BufferGeometry, CircleGeometry, Group, Line, LineDashe
 import type { Object3D } from 'three';
 import type { Point } from './config';
 import type { DeathKind } from './death-sequence';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { GameTheme } from './theme';
 
@@ -80,19 +81,14 @@ class RingAimMarks implements AimMarks {
 
 export const DEFAULT_AIM_MARKS: AimMarksFactory = (theme) => new RingAimMarks(theme);
 
-export function createAimMarks(plugins: RuntimePlugins, theme: GameTheme): AimMarks {
+const AIM_MARKS_CONTRACT = instanceContract({
+  returns: 'a three.js root, setTheme(theme), update(tip, cursor, death) and dispose()',
+  methods: ['setTheme', 'update', 'dispose'],
+  root: true,
+});
+
+export function createAimMarks(plugins: RuntimePlugins, theme: GameTheme): Attributed<AimMarks> {
   const factory = plugins.slot(AIM_MARKS, DEFAULT_AIM_MARKS);
-  const plugin = plugins.owner(AIM_MARKS);
-  let marks: unknown;
-  try { marks = factory(theme); } catch (error) {
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${AIM_MARKS.id}".`, plugin, AIM_MARKS.id, { cause: error });
-  }
-  const root: unknown = typeof marks === 'object' && marks !== null ? Reflect.get(marks, 'root') : undefined;
-  if (typeof root !== 'object' || root === null || Reflect.get(root, 'isObject3D') !== true ||
-    typeof Reflect.get(marks as object, 'setTheme') !== 'function' || typeof Reflect.get(marks as object, 'update') !== 'function' ||
-    typeof Reflect.get(marks as object, 'dispose') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": aim marks must return a three.js root, setTheme(theme), update(tip, cursor, death) and dispose().`, plugin, AIM_MARKS.id);
-  }
-  return marks as AimMarks;
+  const create = factory.value;
+  return createInstance(AIM_MARKS_CONTRACT, factory, () => create(theme));
 }

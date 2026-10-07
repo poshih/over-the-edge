@@ -1,7 +1,8 @@
 import type { AudioSettings, GameCue } from './audio-settings';
 import type { MediaHost } from './media-host';
 import type { AudioDevice } from './audio-device';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { attributed, call0, call1, createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 
 export interface GameAudio {
   handle(cue: GameCue): void;
@@ -37,36 +38,29 @@ export const SILENT_AUDIO_OUTPUT: GameAudioFactory = () => ({
   dispose() {},
 });
 
-export function createGameAudio(factory: GameAudioFactory, setup: GameAudioSetup, plugin: string | null): GameAudio {
-  try {
-    const audio: unknown = factory(setup);
-    if (typeof audio !== 'object' || audio === null || Array.isArray(audio) ||
-      !['handle', 'setPaused', 'setSettings', 'setMedia', 'dispose'].every((method) => typeof Reflect.get(audio, method) === 'function') ||
-      Reflect.get(audio, 'inspect') !== undefined && typeof Reflect.get(audio, 'inspect') !== 'function') {
-      throw new PluginError('invalid-contribution',
-        `Plugin "${plugin ?? 'engine'}": "${AUDIO.id}" must return handle(cue), setPaused(paused), setSettings(settings), setMedia(media), dispose() and, when given, inspect().`,
-        plugin, AUDIO.id);
-    }
-    const output = audio as GameAudio;
-    let disposed = false;
-    // The output's lifetime is independent of gameplay: editor previews can outlive a halted Game,
-    // but neither a staged gameplay cue nor a preview may call a disposed output.
-    const owned: GameAudio = {
-      handle(cue) { if (!disposed) output.handle(cue); },
-      setPaused(paused) { if (!disposed) output.setPaused(paused); },
-      setSettings(settings) { if (!disposed) output.setSettings(settings); },
-      setMedia(media) { if (!disposed) output.setMedia(media); },
-      dispose() {
-        if (disposed) return;
-        disposed = true;
-        output.dispose();
-      },
-    };
-    if (output.inspect !== undefined) owned.inspect = () => output.inspect!();
-    return owned;
-  } catch (error) {
-    if (error instanceof PluginError && error.plugin === plugin && error.point === AUDIO.id) throw error;
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${AUDIO.id}".`,
-      plugin, AUDIO.id, { cause: error });
-  }
+const AUDIO_CONTRACT = instanceContract({
+  returns: 'handle(cue), setPaused(paused), setSettings(settings), setMedia(media), dispose() and, when given, inspect()',
+  methods: ['handle', 'setPaused', 'setSettings', 'setMedia', 'dispose'],
+  optional: ['inspect'],
+});
+
+export function createGameAudio(factory: Attributed<GameAudioFactory>, setup: GameAudioSetup): Attributed<GameAudio> {
+  const create = factory.value;
+  const output = createInstance<GameAudio>(AUDIO_CONTRACT, factory, () => create(setup));
+  let disposed = false;
+  // The output's lifetime is independent of gameplay: editor previews can outlive a halted Game,
+  // but neither a staged gameplay cue nor a preview may call a disposed output.
+  const owned: GameAudio = {
+    handle(cue) { if (!disposed) call1(output, 'handle', cue); },
+    setPaused(paused) { if (!disposed) call1(output, 'setPaused', paused); },
+    setSettings(settings) { if (!disposed) call1(output, 'setSettings', settings); },
+    setMedia(media) { if (!disposed) call1(output, 'setMedia', media); },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      call0(output, 'dispose');
+    },
+  };
+  if (output.value.inspect !== undefined) owned.inspect = () => call0(output, 'inspect');
+  return attributed(output.plugin, output.point, owned);
 }

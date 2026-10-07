@@ -48,20 +48,20 @@ import type { RigGeometry } from './rig';
 import { DEFAULT_HAMMER_HEAD, hammerHeadRadius } from './hammer-head';
 import type { HammerHead } from './hammer-head';
 import { LevelLooks } from './object-looks';
-import type { EnemyLook } from './object-looks';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
-import { PluginError } from './plugins/kernel';
-import { createCameraDirector, checkCameraAim, CAMERA } from './camera-director';
+import { attributed, call0, call1, call2, call3, invalidResult } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
+import { createCameraDirector, checkCameraAim } from './camera-director';
 import type { CameraAim, CameraDirector } from './camera-director';
 import { createBackdrop } from './backdrop';
 import type { Backdrop } from './backdrop';
 import { createAimMarks } from './aim-marks';
 import type { AimMarks } from './aim-marks';
 import type { HurtCause, ProjectileBlock } from './hazards';
-import { createHurtEffects, HURT_EFFECTS } from './hurt-effects';
+import { createHurtEffects } from './hurt-effects';
 import type { HurtEffects } from './hurt-effects';
-import { BLOCK_EFFECTS, createBlockEffects } from './block-effects';
+import { createBlockEffects } from './block-effects';
 import type { BlockEffects } from './block-effects';
 import { createDeathAppearance, createDeathPoseWriter, DEFAULT_DEATH_POSE } from './death-pose';
 import type { DeathAppearance, DeathPoseInput, DeathPoseWriter } from './death-pose';
@@ -86,6 +86,7 @@ import type { RigTarget } from './skeleton-pose';
 import { DEFAULT_THEME } from './theme';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
+import type { EnemyEvent } from './enemy-types';
 import { DEFAULT_ENEMY_ART } from './enemy-art-data';
 import type { ContentLoader } from './content-ref';
 import type { LibraryAvatarSettings, PartRole } from './model-library';
@@ -102,6 +103,7 @@ const VISUAL = {
 } as const;
 // The brass sleeve near the start of each two-part hammer segment.
 const SLEEVE_INSET = 0.07;
+const ENGINE = Object.freeze({ plugin: null, point: null });
 
 function solid(geometry: BoxGeometry | SphereGeometry | CylinderGeometry | LatheGeometry | TorusGeometry,
   material: MeshStandardMaterial, position: [number, number, number] = [0, 0, 0]): Mesh {
@@ -306,7 +308,6 @@ function disposeResources(...roots: Object3D[]): void {
 export class GameView {
   readonly canvas: HTMLCanvasElement;
   readonly terrain = new TerrainView();
-  readonly enemies: EnemyLook;
   readonly sprites: SpriteRig;
   // How the level's flags, updrafts, bonfires, traps, projectiles, liquid pools and enemies look.
   private readonly looks: LevelLooks;
@@ -336,19 +337,16 @@ export class GameView {
   // shows it `worldHeight` tall, so the plane maps to the screen the same way in both.
   private camera: OrthographicCamera | PerspectiveCamera;
   private distance: number = VISUAL.depth;
-  private readonly director: CameraDirector;
-  private readonly cameraPlugin: string | null;
+  private readonly director: Attributed<CameraDirector>;
   private readonly cameraView = {
     focus: { x: 0, y: 0 }, reach: { x: 0, y: 0 }, reachRadius: 0, maxReach: 0, width: 1, height: 1, dt: 0,
     death: null as DeathKind | null,
   };
   private readonly cameraAim: CameraAim = { x: 0, y: 0, worldHeight: 0 };
-  private readonly backdrop: Backdrop;
-  private readonly aimMarks: AimMarks;
-  private readonly hurtEffects: HurtEffects;
-  private readonly hurtPlugin: string | null;
-  private readonly blockEffects: BlockEffects;
-  private readonly blockPlugin: string | null;
+  private readonly backdrop: Attributed<Backdrop>;
+  private readonly aimMarks: Attributed<AimMarks>;
+  private readonly hurtEffects: Attributed<HurtEffects>;
+  private readonly blockEffects: Attributed<BlockEffects>;
   private readonly deathWriter: DeathPoseWriter;
   private readonly deathInput: { -readonly [K in keyof DeathPoseInput]: DeathPoseInput[K] } = {
     elapsed: 0, duration: 0, poseProgress: 0, reducedMotion: false, character: DEFAULT_CHARACTER_RIGGING_TYPE, direction: 1,
@@ -383,8 +381,8 @@ export class GameView {
   // Null in a release whose level has no decorations; its shell then carries none of their code.
   readonly decorations: DecorationView | null;
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
-  private readonly layers = new Set<SceneLayer>();
-  private readonly updatingLayers = new Set<SceneLayer>();
+  private readonly layers = new Map<SceneLayer, Attributed<SceneLayer>>();
+  private readonly updatingLayers = new Set<Attributed<SceneLayer>>();
   private readonly sceneFrame: { -readonly [K in keyof SceneFrame]: SceneFrame[K] };
   // Internal collision diagnostics read these after the player's arms are posed, outside the public layer contract.
   private readonly posedArms: ArmPose[] = [];
@@ -532,15 +530,14 @@ export class GameView {
     this.camera = theme.camera.perspective ? this.perspective : this.orthographic;
     // Resolve and check plugin factories before creating a WebGL renderer or attaching any view listeners.
     // A later factory failure frees every presentation object already made.
-    const created: { dispose(): void }[] = [];
-    let layers: readonly SceneLayer[];
+    const created: Attributed<{ dispose(): void }>[] = [];
+    let layers: readonly Attributed<SceneLayer>[];
+    let looks: LevelLooks | null = null;
     try {
       this.director = createCameraDirector(options.plugins);
-      this.cameraPlugin = options.plugins.owner(CAMERA);
       this.deathWriter = createDeathPoseWriter(options.plugins);
-      this.looks = new LevelLooks(options.plugins, level.objects, options.enemyArt === undefined ? DEFAULT_ENEMY_ART : options.enemyArt);
-      created.push(this.looks);
-      this.enemies = this.looks.enemies;
+      looks = new LevelLooks(options.plugins, level.objects, options.enemyArt === undefined ? DEFAULT_ENEMY_ART : options.enemyArt);
+      this.looks = looks;
       this.backdrop = createBackdrop(options.plugins, theme);
       created.push(this.backdrop);
       this.aimMarks = createAimMarks(options.plugins, theme);
@@ -551,12 +548,11 @@ export class GameView {
       created.push(this.blockEffects);
       layers = createSceneLayers(options.plugins);
     } catch (error) {
-      for (let index = created.length - 1; index >= 0; index--) created[index]!.dispose();
+      for (let index = created.length - 1; index >= 0; index--) call0(created[index]!, 'dispose');
+      looks?.dispose();
       this.terrain.dispose();
       throw error;
     }
-    this.hurtPlugin = options.plugins.owner(HURT_EFFECTS);
-    this.blockPlugin = options.plugins.owner(BLOCK_EFFECTS);
     const root = initial.player.centre;
     const head = this.part(initial, 'head');
     this.cameraView.focus.x = root.x;
@@ -567,7 +563,7 @@ export class GameView {
     this.sceneFrame = { time: initial.time, parts: initial.parts, player: this.scenePlayer(initial.player),
       cursor: initial.cursor, enemies: initial.enemies, rig: initial.rig };
     // Keep unmounted runtime layers owned too, if subsequent renderer/player construction fails.
-    for (const layer of layers) this.layers.add(layer);
+    for (const layer of layers) this.layers.set(layer.value, layer);
     try {
       this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -597,7 +593,7 @@ export class GameView {
         this.lights.sun.push(sunlight);
         this.lights.rim.push(rimLight);
       }
-      this.backdropScene.add(this.backdrop.root);
+      this.backdropScene.add(this.backdrop.value.root);
       this.decorations = options.decorations?.() ?? null;
       this.decorations?.setObjects(level.objects);
       this.course.add(this.terrain.root);
@@ -615,10 +611,10 @@ export class GameView {
       this.buildPlayer();
       this.sprites = this.createSlot().rig;
 
-      this.marks.add(this.aimMarks.root);
-      this.marks.add(this.hurtEffects.root);
-      this.marks.add(this.blockEffects.root);
-      for (const layer of layers) this.addLayer(layer);
+      this.marks.add(this.aimMarks.value.root);
+      this.marks.add(this.hurtEffects.value.root);
+      this.marks.add(this.blockEffects.value.root);
+      for (const layer of layers) this.addLayer(layer.value, layer);
 
       this.observer = new ResizeObserver(() => this.resize());
       this.observer.observe(canvas);
@@ -657,26 +653,33 @@ export class GameView {
         light.intensity = setting.intensity;
       }
     }
-    this.backdrop.setTheme(theme);
-    this.aimMarks.setTheme(theme);
+    call1(this.backdrop, 'setTheme', theme);
+    call1(this.aimMarks, 'setTheme', theme);
     if (this.palette !== null) {
       for (const key of Object.keys(this.palette) as (keyof GameTheme['character'])[]) this.palette[key].color.set(theme.character[key]);
     }
   }
 
-  addLayer(layer: SceneLayer): void {
-    this.layers.add(layer);
-    if (layer.update !== undefined) this.updatingLayers.add(layer);
+  applyEnemy(event: EnemyEvent): void { this.looks.applyEnemy(event); }
+
+  setEnemyArt(art: EnemyArtSettings): void { this.looks.setEnemyArt(art); }
+
+  addLayer(layer: SceneLayer, source: Pick<Attributed<unknown>, 'plugin' | 'point'> = ENGINE): void {
+    const target = this.layers.get(layer) ?? attributed(source.plugin, source.point, layer);
+    this.layers.set(layer, target);
+    if (layer.update !== undefined) this.updatingLayers.add(target);
     const pass = layer.pass === 'course' ? this.course : layer.pass === 'actors' ? this.actors : this.marks;
     pass.add(layer.root);
   }
 
   // Removes a layer added with addLayer() and disposes it.
   removeLayer(layer: SceneLayer): void {
-    if (!this.layers.delete(layer)) return;
-    this.updatingLayers.delete(layer);
+    const target = this.layers.get(layer);
+    if (target === undefined) return;
+    this.layers.delete(layer);
+    this.updatingLayers.delete(target);
     layer.root.removeFromParent();
-    layer.dispose?.();
+    if (layer.dispose !== undefined) call0(target, 'dispose');
   }
 
   // The current rig's read-only geometry, for a layer's initial state before its first drawn frame.
@@ -1179,9 +1182,9 @@ export class GameView {
     const frame = this.presentedFrame(physics);
     const tip = this.part(frame, 'head');
     this.updateCamera(options.dt, false);
-    this.backdrop.follow(this.cameraAim);
+    call1(this.backdrop, 'follow', this.cameraAim);
     this.posePlayer(frame, options, frame === physics ? 0 : this.previewOffset.turn);
-    this.aimMarks.update(tip, frame.cursor, this.cameraView.death);
+    call3(this.aimMarks, 'update', tip, frame.cursor, this.cameraView.death);
     this.terrain.update(frame.time);
     this.decorations?.update();
     this.looks.update(frame.time, frame.projectiles, frame.enemies, frame.platforms);
@@ -1193,13 +1196,13 @@ export class GameView {
       shown.cursor = physics.cursor;
       shown.enemies = physics.enemies;
       shown.rig = physics.rig;
-      for (const layer of this.updatingLayers) layer.update!(shown);
+      for (const layer of this.updatingLayers) call1(layer, 'update', shown);
       if (this.hurtShowing) this.hurtShowing = this.updateHurt(shown);
       if (this.blockShowing) this.blockShowing = this.updateBlock(shown);
     }
     this.renderer.info.reset();
     this.renderer.clear();
-    if (this.backdrop.root.visible) this.renderer.render(this.backdropScene, this.camera);
+    if (this.backdrop.value.root.visible) this.renderer.render(this.backdropScene, this.camera);
     this.renderer.render(this.course, this.camera);
     this.renderer.clearDepth();
     this.renderer.render(this.actors, this.camera);
@@ -1421,12 +1424,12 @@ export class GameView {
 
   // A hit took health, the killing one when `fatal`: the hurt effects take it, then update on drawn frames until done.
   hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
-    this.hurtEffects.hurt(cause, fatal);
+    call2(this.hurtEffects, 'hurt', cause, fatal);
     this.hurtShowing = true;
   }
 
   block(hit: Readonly<ProjectileBlock>): void {
-    this.blockEffects.block(hit);
+    call1(this.blockEffects, 'block', hit);
     this.blockShowing = true;
   }
 
@@ -1452,24 +1455,22 @@ export class GameView {
 
   // The player was placed anew: the hurt effects following the character end.
   clearHurt(): void {
-    this.hurtEffects.clear();
+    call0(this.hurtEffects, 'clear');
     this.hurtShowing = true;
   }
 
   private updateHurt(frame: SceneFrame): boolean {
-    const showing: unknown = this.hurtEffects.update(frame);
+    const showing = call1(this.hurtEffects, 'update', frame);
     if (typeof showing !== 'boolean') {
-      throw new PluginError('invalid-contribution', `Plugin "${this.hurtPlugin ?? 'engine'}": hurt effects' update(frame) must return true or false.`,
-        this.hurtPlugin, HURT_EFFECTS.id);
+      throw invalidResult(this.hurtEffects, 'update(frame) must return a boolean');
     }
     return showing;
   }
 
   private updateBlock(frame: SceneFrame): boolean {
-    const showing: unknown = this.blockEffects.update(frame);
+    const showing = call1(this.blockEffects, 'update', frame);
     if (typeof showing !== 'boolean') {
-      throw new PluginError('invalid-contribution', `Plugin "${this.blockPlugin ?? 'engine'}": block effects' update(frame) must return true or false.`,
-        this.blockPlugin, BLOCK_EFFECTS.id);
+      throw invalidResult(this.blockEffects, 'update(frame) must return a boolean');
     }
     return showing;
   }
@@ -1528,14 +1529,8 @@ export class GameView {
       aim.y = this.framing.y;
       aim.worldHeight = this.framing.worldHeight;
     } else {
-      try {
-        if (snap) this.director.snap(view, aim);
-        else this.director.aim(view, aim);
-      } catch (error) {
-        throw new PluginError('plugin-failed', `Plugin "${this.cameraPlugin ?? 'engine'}" failed directing "${CAMERA.id}".`,
-          this.cameraPlugin, CAMERA.id, { cause: error });
-      }
-      checkCameraAim(aim, this.cameraPlugin);
+      call2(this.director, snap ? 'snap' : 'aim', view, aim);
+      checkCameraAim(aim, this.director);
     }
     this.updateFrustum();
     this.camera.position.set(aim.x, aim.y, this.distance);
@@ -1612,7 +1607,7 @@ export class GameView {
       terrain: this.terrain.inspect(),
       decorations: this.decorations?.inspect() ?? null,
       looks: this.looks.inspect(),
-      enemies: this.enemies.inspect?.() ?? null,
+      enemies: this.looks.inspectEnemies(),
       sprites: this.sprites.inspect(),
       headAim: { rotation: this.headAim.rotation.toArray() },
       avatar: this.avatar === null ? null : { ...this.avatar.inspect(), visible: this.avatar.root.visible },
@@ -1649,7 +1644,7 @@ export class GameView {
   cameraState() {
     return {
       x: this.camera.position.x, y: this.camera.position.y, width: this.width, height: this.height,
-      worldHeight: this.worldHeight, director: this.director.inspect?.() ?? null,
+      worldHeight: this.worldHeight, director: this.director.value.inspect === undefined ? null : call0(this.director, 'inspect') ?? null,
     };
   }
 
@@ -1666,17 +1661,17 @@ export class GameView {
     disposal.run(() => this.terrain.dispose());
     disposal.run(() => this.decorations?.dispose());
     disposal.run(() => this.looks.dispose());
-    disposal.run(() => this.backdrop.root.removeFromParent());
-    disposal.run(() => this.backdrop.dispose());
-    disposal.run(() => this.aimMarks.root.removeFromParent());
-    disposal.run(() => this.aimMarks.dispose());
-    disposal.run(() => this.hurtEffects.root.removeFromParent());
-    disposal.run(() => this.hurtEffects.dispose());
-    disposal.run(() => this.blockEffects.root.removeFromParent());
-    disposal.run(() => this.blockEffects.dispose());
-    for (const layer of this.layers) {
-      disposal.run(() => layer.root.removeFromParent());
-      disposal.run(() => layer.dispose?.());
+    disposal.run(() => this.backdrop.value.root.removeFromParent());
+    disposal.run(() => call0(this.backdrop, 'dispose'));
+    disposal.run(() => this.aimMarks.value.root.removeFromParent());
+    disposal.run(() => call0(this.aimMarks, 'dispose'));
+    disposal.run(() => this.hurtEffects.value.root.removeFromParent());
+    disposal.run(() => call0(this.hurtEffects, 'dispose'));
+    disposal.run(() => this.blockEffects.value.root.removeFromParent());
+    disposal.run(() => call0(this.blockEffects, 'dispose'));
+    for (const layer of this.layers.values()) {
+      disposal.run(() => layer.value.root.removeFromParent());
+      if (layer.value.dispose !== undefined) disposal.run(() => call0(layer, 'dispose'));
     }
     this.layers.clear();
     this.updatingLayers.clear();

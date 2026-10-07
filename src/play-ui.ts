@@ -1,4 +1,4 @@
-import { createNotices, DEFAULT_NOTICES } from './notice';
+import { createNotices, DEFAULT_NOTICES, NOTICES } from './notice';
 import type { NoticesFactory } from './notice';
 import { CHARACTER_CHOICE, createCharacterChoice, DEFAULT_CHARACTER_CHOICE } from './character-choice';
 import type { CharacterChoiceModel, CharacterChoiceView } from './character-choice';
@@ -7,7 +7,8 @@ import type { HudSettings } from './hud';
 import { createHudBar } from './hud-bar';
 import type { HudFrame } from './hud-readouts';
 import type { RuntimePlugins } from './plugins/runtime';
-import { PluginError } from './plugins/kernel';
+import { attributed, call0, call1, call2, invalidResult } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import { Disposal } from './disposal';
 
 const CHARACTER_KEY = 'over-the-edge:play:character';
@@ -51,11 +52,11 @@ export function createPlayUI(options: { mount: HTMLElement }) {
   root.className = 'game-ui play-ui';
   // Release facets can report notices while starting, before their contributions compose.
   // The resolved replacement, if any, then serves the release until the UI is disposed.
-  let notice = createNotices(DEFAULT_NOTICES, root, null);
+  let notice = createNotices(attributed(null, NOTICES.id, DEFAULT_NOTICES), root);
   options.mount.append(root);
   let bar: ReturnType<typeof createHudBar> | null = null;
   let selected = 0;
-  let characterView: CharacterChoiceView | null = null;
+  let characterView: Attributed<CharacterChoiceView> | null = null;
   let characterMount: HTMLElement | null = null;
   const clear = (): void => {
     const disposal = new Disposal();
@@ -66,16 +67,16 @@ export function createPlayUI(options: { mount: HTMLElement }) {
     characterView = null;
     characterMount = null;
     disposal.run(() => previousBar?.dispose());
-    disposal.run(() => previousView?.dispose());
+    if (previousView !== null) disposal.run(() => call0(previousView, 'dispose'));
     disposal.run(() => previousMount?.remove());
     disposal.finish();
   };
   return {
     // Called once after the release facets compose, never for an individual load attempt.
-    setNotices(factory: NoticesFactory, plugin: string | null): void {
-      if (factory === DEFAULT_NOTICES) return;
-      const next = createNotices(factory, root, plugin);
-      notice.dispose();
+    setNotices(factory: Attributed<NoticesFactory>): void {
+      if (factory.value === DEFAULT_NOTICES) return;
+      const next = createNotices(factory, root);
+      call0(notice, 'dispose');
       notice = next;
     },
     // The project's settings choose visibility and labels; the runtime session chooses implementations.
@@ -89,16 +90,13 @@ export function createPlayUI(options: { mount: HTMLElement }) {
       // A single-profile release shows no settings, exactly as before.
       if (characters !== null && characters.types.length === 2) {
         selected = storedCharacter(characters.types.length);
-        const plugin = settings.plugins.owner(CHARACTER_CHOICE);
         const labels = Object.freeze(characterLabels(characters.types));
         const choice: CharacterChoiceModel = Object.freeze({
           labels,
           get selected() { return selected; },
           select(index: number): void {
             if (!Number.isInteger(index) || index < 0 || index >= labels.length) {
-              throw new PluginError('invalid-contribution',
-                `Plugin "${plugin ?? 'engine'}": "${CHARACTER_CHOICE.id}" must select an index from 0 to ${labels.length - 1}.`,
-                plugin, CHARACTER_CHOICE.id);
+              throw invalidResult(factory, `must select an index from 0 to ${labels.length - 1}`);
             }
             selected = index;
             storeCharacter(index);
@@ -106,8 +104,8 @@ export function createPlayUI(options: { mount: HTMLElement }) {
           },
         });
         characterMount = document.createElement('div');
-        characterView = createCharacterChoice(factory, characterMount, choice, plugin);
-        characterView.setEnabled(false);
+        characterView = createCharacterChoice(factory, characterMount, choice);
+        call1(characterView, 'setEnabled', false);
         shown.push(characterMount);
       }
       root.prepend(...shown);
@@ -116,18 +114,18 @@ export function createPlayUI(options: { mount: HTMLElement }) {
       bar?.update(frame);
     },
     notice(text: string, kind: 'info' | 'error'): void {
-      notice.show(text, kind);
+      call2(notice, 'show', text, kind);
     },
     clear,
     // Enables the character choice once every profile has loaded; returns the restored choice.
     enableCharacters(): number {
-      characterView?.setEnabled(true);
+      if (characterView !== null) call1(characterView, 'setEnabled', true);
       return selected;
     },
     dispose(): void {
       const disposal = new Disposal();
       disposal.run(clear);
-      disposal.run(() => notice.dispose());
+      disposal.run(() => call0(notice, 'dispose'));
       disposal.run(() => root.remove());
       disposal.finish();
     },

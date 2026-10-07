@@ -20,7 +20,7 @@ export function createGameUI(options: {
   const events = new AbortController();
   const listen = { signal: events.signal };
   const desktop = window.matchMedia(DESKTOP_QUERY);
-  const bindings = options.plugins.slot(INPUT_BINDINGS, DEFAULT_INPUT_BINDINGS);
+  const bindings = options.plugins.slot(INPUT_BINDINGS, DEFAULT_INPUT_BINDINGS).value;
   const shortcuts = { pause: '', reset: '' };
   for (const [key, action] of Object.entries(bindings)) {
     if (action !== 'pause' && action !== 'reset') continue;

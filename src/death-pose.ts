@@ -1,6 +1,5 @@
 import type { DeathFrame } from './death-sequence';
-import { deathPluginFailure } from './death-sequence';
-import { checkSynchronous, PluginError, slotPoint } from './plugins/kernel';
+import { apply2, invalidResult, slotPoint } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import { copyDeathPose, copyRotation, createDeathPose, validDeathPose, validHeadFacing } from './player-pose';
 import type { DeathPose, ReadonlyDeathArmPose, ReadonlyDeathLayout, ReadonlyDeathPose, Rotation3 } from './player-pose';
@@ -93,17 +92,13 @@ function invalidate(out: DeathAppearance): void {
   out.headFacing.x = out.headFacing.y = out.headFacing.z = out.headFacing.w = out.spriteBrightness = NaN;
 }
 export function createDeathPoseWriter(plugins: RuntimePlugins): DeathPoseWriter {
-  const writer = plugins.slot(DEATH_POSE, DEFAULT_DEATH_POSE), plugin = plugins.owner(DEATH_POSE);
+  const writer = plugins.slot(DEATH_POSE, DEFAULT_DEATH_POSE);
   return (frame, out) => {
     invalidate(out);
-    try {
-      checkSynchronous(writer(frame, out), plugin, DEATH_POSE.id, 'write');
-      if (!validDeathPose(out) || !validHeadFacing(out.headFacing) ||
-        !Number.isFinite(out.spriteBrightness) || out.spriteBrightness < 0 || out.spriteBrightness > 1) {
-        throw new PluginError('invalid-contribution',
-          `Plugin "${plugin ?? 'engine'}": "${DEATH_POSE.id}" must write every finite transform, a unit headFacing quaternion and spriteBrightness within 0–1.`,
-          plugin, DEATH_POSE.id);
-      }
-    } catch (error) { throw deathPluginFailure(error, plugin, DEATH_POSE.id, 'write'); }
+    apply2(writer, 'write', frame, out);
+    if (!validDeathPose(out) || !validHeadFacing(out.headFacing) ||
+      !Number.isFinite(out.spriteBrightness) || out.spriteBrightness < 0 || out.spriteBrightness > 1) {
+      throw invalidResult(writer, 'must write every finite transform, a unit headFacing quaternion and spriteBrightness within 0–1');
+    }
   };
 }

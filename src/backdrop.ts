@@ -1,7 +1,8 @@
 import { CircleGeometry, ExtrudeGeometry, Group, Mesh, MeshBasicMaterial, Shape } from 'three';
 import type { Object3D } from 'three';
 import type { Point } from './config';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { GameTheme } from './theme';
 
@@ -95,19 +96,14 @@ class SceneryBackdrop implements Backdrop {
 
 export const DEFAULT_BACKDROP: BackdropFactory = (theme) => new SceneryBackdrop(theme);
 
-export function createBackdrop(plugins: RuntimePlugins, theme: GameTheme): Backdrop {
+const BACKDROP_CONTRACT = instanceContract({
+  returns: 'a three.js root, setTheme(theme), follow(camera) and dispose()',
+  methods: ['setTheme', 'follow', 'dispose'],
+  root: true,
+});
+
+export function createBackdrop(plugins: RuntimePlugins, theme: GameTheme): Attributed<Backdrop> {
   const factory = plugins.slot(BACKDROP, DEFAULT_BACKDROP);
-  const plugin = plugins.owner(BACKDROP);
-  let backdrop: unknown;
-  try { backdrop = factory(theme); } catch (error) {
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${BACKDROP.id}".`, plugin, BACKDROP.id, { cause: error });
-  }
-  const root: unknown = typeof backdrop === 'object' && backdrop !== null ? Reflect.get(backdrop, 'root') : undefined;
-  if (typeof root !== 'object' || root === null || Reflect.get(root, 'isObject3D') !== true ||
-    typeof Reflect.get(backdrop as object, 'setTheme') !== 'function' || typeof Reflect.get(backdrop as object, 'follow') !== 'function' ||
-    typeof Reflect.get(backdrop as object, 'dispose') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": a backdrop must return a three.js root, setTheme(theme), follow(camera) and dispose().`, plugin, BACKDROP.id);
-  }
-  return backdrop as Backdrop;
+  const create = factory.value;
+  return createInstance(BACKDROP_CONTRACT, factory, () => create(theme));
 }

@@ -1,4 +1,5 @@
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 
 export interface FatalDisplay {
   show(message: string): void;
@@ -20,19 +21,13 @@ export const DEFAULT_FATAL: FatalDisplayFactory = (element) => ({
   },
 });
 
-export function createFatalDisplay(factory: FatalDisplayFactory, element: HTMLElement, plugin: string | null): FatalDisplay {
-  try {
-    const display: unknown = factory(element);
-    if (typeof display !== 'object' || display === null || Array.isArray(display) ||
-      typeof Reflect.get(display, 'show') !== 'function' ||
-      Reflect.get(display, 'dispose') !== undefined && typeof Reflect.get(display, 'dispose') !== 'function') {
-      throw new PluginError('invalid-contribution',
-        `Plugin "${plugin ?? 'engine'}": "${FATAL.id}" must return show(message) and, when given, dispose().`, plugin, FATAL.id);
-    }
-    return display as FatalDisplay;
-  } catch (error) {
-    if (error instanceof PluginError && error.plugin === plugin && error.point === FATAL.id) throw error;
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${FATAL.id}".`,
-      plugin, FATAL.id, { cause: error });
-  }
+const FATAL_DISPLAY_CONTRACT = instanceContract({
+  returns: 'show(message) and, when given, dispose()',
+  methods: ['show'],
+  optional: ['dispose'],
+});
+
+export function createFatalDisplay(factory: Attributed<FatalDisplayFactory>, element: HTMLElement): Attributed<FatalDisplay> {
+  const create = factory.value;
+  return createInstance(FATAL_DISPLAY_CONTRACT, factory, () => create(element));
 }

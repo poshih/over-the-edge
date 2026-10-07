@@ -1,5 +1,4 @@
 import type { HurtCause } from './hazards';
-import { PluginError } from './plugins/kernel';
 
 export type DeathKind = 'health' | 'fall';
 
@@ -31,10 +30,4 @@ export class DeathSequenceError extends Error {
     this.name = 'DeathSequenceError';
     this.code = code;
   }
-}
-
-export function deathPluginFailure(error: unknown, plugin: string | null, point: string, method: string): unknown {
-  if (error instanceof PluginError && error.plugin === plugin && error.point === point) return error;
-  return new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed "${point}" ${method}.`,
-    plugin, point, { cause: error });
 }

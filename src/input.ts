@@ -1,5 +1,5 @@
 import type { InputMode, Point, UiAction, UiActionOptions } from './config';
-import { listPoint, PluginError, slotPoint } from './plugins/kernel';
+import { instanceContract, listPoint, slotPoint } from './plugins/kernel';
 
 const BINDABLE_ACTIONS = Object.freeze(['reset', 'pause', 'recenter'] as const);
 export type BindableAction = (typeof BINDABLE_ACTIONS)[number];
@@ -52,15 +52,11 @@ export const INPUT_DEVICES = listPoint('input.devices', 'runtime', INPUT_DEVICE_
   return value as InputDeviceFactory;
 });
 
-export function checkInputDevice(value: unknown, plugin: string): InputDevice {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-    typeof Reflect.get(value, 'poll') !== 'function' ||
-    Reflect.get(value, 'dispose') !== undefined && typeof Reflect.get(value, 'dispose') !== 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin}": "${INPUT_DEVICES.id}" must return poll(dt, out) and, when given, dispose().`, plugin, INPUT_DEVICES.id);
-  }
-  return value as InputDevice;
-}
+export const INPUT_DEVICE_CONTRACT = instanceContract({
+  returns: 'poll(dt, out) and, when given, dispose()',
+  methods: ['poll'],
+  optional: ['dispose'],
+});
 
 interface InputCallbacks {
   readonly bindings: InputBindings;

@@ -3,7 +3,7 @@ import type { PhantomService } from '../phantom-service-types';
 import type { ModelLibraryApi } from '../release-library';
 import { NOTICES } from '../notice';
 import { FATAL } from '../fatal-display';
-import { checkFacetEntries, Composition, listPoint, PLUGIN_LIMITS, PluginError, slotPoint } from './kernel';
+import { apply1, checkFacetEntries, Composition, listPoint, PLUGIN_LIMITS, PluginError, pluginFailure, slotPoint } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';
 
 export interface ReleaseHost {
@@ -88,8 +88,7 @@ export class ReleasePlugins {
         let contributions: readonly Contribution[];
         try { contributions = await facet.start(host); } catch (error) {
           options.signal.throwIfAborted();
-          throw new PluginError('plugin-failed',
-            `Release plugin "${id}" failed to start: ${error instanceof Error ? error.message : String(error)}`, id, null, { cause: error });
+          throw pluginFailure(error, id, null, 'start');
         }
         options.signal.throwIfAborted();
         plugins.push({ plugin: id, contributions });
@@ -110,19 +109,13 @@ export class ReleasePlugins {
     return this.composition;
   }
 
-  slot<T>(point: SlotPoint<T>, base: T): T { return this.live().slot(point, base); }
+  slot<T>(point: SlotPoint<T>, base: T): Attributed<T> { return this.live().slot(point, base); }
   keyed<T extends { readonly id: string }>(point: KeyedPoint<T>, builtIns: readonly T[]): ReadonlyMap<string, T> {
     return this.live().keyed(point, builtIns);
   }
   list<T>(point: ListPoint<T>): readonly Attributed<T>[] { return this.live().list(point); }
-  owner(point: SlotPoint<unknown>): string | null { return this.live().owner(point); }
-
-  notify<T>(point: ListPoint<T>, call: (value: T, plugin: string) => void): void {
-    for (const { value, plugin } of this.list(point)) {
-      try { call(value, plugin); } catch (error) {
-        throw new PluginError('plugin-failed', `Release plugin "${plugin}" failed at "${point.id}".`, plugin, point.id, { cause: error });
-      }
-    }
+  notify<A>(point: ListPoint<(argument: A) => void>, argument: (plugin: string) => A): void {
+    for (const item of this.list(point)) apply1(item, 'callback', argument(item.plugin!));
   }
 
   dispose(): void {

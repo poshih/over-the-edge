@@ -1,5 +1,6 @@
 import { element, setText } from './dom';
-import { PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 
 export interface Notices {
   show(text: string, kind: 'info' | 'error'): void;
@@ -14,20 +15,14 @@ export const NOTICES = slotPoint('release.notices', 'release', (value: unknown):
 });
 export const DEFAULT_NOTICES: NoticesFactory = (mount) => createNotice({ mount });
 
-export function createNotices(factory: NoticesFactory, mount: HTMLElement, plugin: string | null): Notices {
-  try {
-    const notices: unknown = factory(mount);
-    if (typeof notices !== 'object' || notices === null || Array.isArray(notices) ||
-      typeof Reflect.get(notices, 'show') !== 'function' || typeof Reflect.get(notices, 'dispose') !== 'function') {
-      throw new PluginError('invalid-contribution',
-        `Plugin "${plugin ?? 'engine'}": "${NOTICES.id}" must return show(text, kind) and dispose().`, plugin, NOTICES.id);
-    }
-    return notices as Notices;
-  } catch (error) {
-    if (error instanceof PluginError && error.plugin === plugin && error.point === NOTICES.id) throw error;
-    throw new PluginError('plugin-failed', `Plugin "${plugin ?? 'engine'}" failed creating "${NOTICES.id}".`,
-      plugin, NOTICES.id, { cause: error });
-  }
+const NOTICES_CONTRACT = instanceContract({
+  returns: 'show(text, kind) and dispose()',
+  methods: ['show', 'dispose'],
+});
+
+export function createNotices(factory: Attributed<NoticesFactory>, mount: HTMLElement): Attributed<Notices> {
+  const create = factory.value;
+  return createInstance(NOTICES_CONTRACT, factory, () => create(mount));
 }
 
 export function createNotice(options: { mount: HTMLElement }): Notices {

@@ -28,14 +28,176 @@ export class PluginError extends Error {
   }
 }
 
-export function checkSynchronous(result: unknown, plugin: string | null, point: string, method: string): void {
+export interface Attributed<T> {
+  readonly plugin: string | null;
+  readonly point: string | null;
+  readonly value: T;
+}
+
+export function attributed<T>(plugin: string | null, point: string | null, value: T): Attributed<T> {
+  return Object.freeze({ plugin, point, value });
+}
+
+export function pluginFailure(error: unknown, plugin: string | null, point: string | null, action: string): PluginError {
+  if (error instanceof PluginError && error.plugin === plugin && error.point === point) return error;
+  return new PluginError('plugin-failed',
+    `Plugin "${plugin ?? 'engine'}" failed ${point === null ? '' : `"${point}" `}${action}: ${error instanceof Error ? error.message : String(error)}`,
+    plugin, point, { cause: error });
+}
+
+export function invalidResult(target: Pick<Attributed<unknown>, 'plugin' | 'point'>, requirement: string,
+  code: 'invalid-contribution' | 'invalid-plugin' = 'invalid-contribution'): PluginError {
+  return new PluginError(code,
+    `Plugin "${target.plugin ?? 'engine'}": ${target.point === null ? '' : `"${target.point}" `}${requirement}.`,
+    target.plugin, target.point);
+}
+
+export function checkSynchronous(result: unknown, target: Pick<Attributed<unknown>, 'plugin' | 'point'>, action: string): void {
   // A void callback may return an incidental value (for example Array.push's count). Only async work is invalid:
   // a promise would outlive borrowed input or output, and the engine never awaits these callbacks.
-  if (result !== null && (typeof result === 'object' || typeof result === 'function') &&
-    typeof Reflect.get(result, 'then') === 'function') {
-    throw new PluginError('invalid-contribution',
-      `Plugin "${plugin ?? 'engine'}": "${point}" ${method} must finish synchronously, not return a promise.`, plugin, point);
+  let asynchronous = false;
+  try {
+    asynchronous = result !== null && (typeof result === 'object' || typeof result === 'function') &&
+      typeof Reflect.get(result, 'then') === 'function';
+  } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, action);
   }
+  if (asynchronous) throw invalidResult(target, `${action} must finish synchronously, not return a promise`);
+}
+
+export interface InstanceContract {
+  readonly returns: string;
+  readonly methods: readonly string[];
+  readonly optional?: readonly string[];
+  readonly root?: true;
+  readonly passes?: readonly string[];
+  readonly check?: (value: object) => boolean;
+}
+
+export function instanceContract(contract: InstanceContract): InstanceContract {
+  return Object.freeze({
+    ...contract,
+    methods: Object.freeze([...contract.methods]),
+    ...(contract.optional === undefined ? {} : { optional: Object.freeze([...contract.optional]) }),
+    ...(contract.passes === undefined ? {} : { passes: Object.freeze([...contract.passes]) }),
+  });
+}
+
+export function isObject3D(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && Reflect.get(value, 'isObject3D') === true;
+}
+
+export function checkInstance<T extends object>(contract: InstanceContract, value: unknown,
+  source: Pick<Attributed<unknown>, 'plugin' | 'point'>,
+  code: 'invalid-contribution' | 'invalid-plugin' = 'invalid-contribution'): Attributed<T> {
+  let valid = false;
+  try {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      valid = contract.methods.every((method) => typeof Reflect.get(value, method) === 'function') &&
+        (contract.optional === undefined || contract.optional.every((method) => {
+          const member: unknown = Reflect.get(value, method);
+          return member === undefined || typeof member === 'function';
+        }));
+      if (valid && contract.root) {
+        valid = isObject3D(Reflect.get(value, 'root'));
+      }
+      if (valid && contract.passes !== undefined) valid = contract.passes.includes(Reflect.get(value, 'pass') as string);
+      if (valid && contract.check !== undefined) valid = contract.check(value);
+    }
+  } catch (error) {
+    throw pluginFailure(error, source.plugin, source.point, 'create');
+  }
+  if (!valid) throw invalidResult(source, `must return ${contract.returns}`, code);
+  return attributed(source.plugin, source.point, value as T);
+}
+
+export function createInstance<T extends object>(contract: InstanceContract, source: Attributed<unknown>,
+  create: () => unknown): Attributed<T> {
+  let value: unknown;
+  try { value = create(); } catch (error) {
+    throw pluginFailure(error, source.plugin, source.point, 'create');
+  }
+  checkSynchronous(value, source, 'create');
+  return checkInstance<T>(contract, value, source);
+}
+
+type Callable = (...args: never[]) => unknown;
+export type MethodKey<T> = { [K in keyof T]-?: NonNullable<T[K]> extends Callable ? K : never }[keyof T] & string;
+type MethodOf<T, K extends keyof T> = Extract<NonNullable<T[K]>, Callable>;
+
+function method<T, K extends MethodKey<T>>(target: Attributed<T>, key: K): MethodOf<T, K> {
+  let value: unknown;
+  try { value = target.value[key]; } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, key);
+  }
+  if (typeof value !== 'function') throw new Error(`Cannot call non-method "${key}".`);
+  return value as MethodOf<T, K>;
+}
+
+export function call0<T, K extends MethodKey<T>>(target: Attributed<T>, key: K): ReturnType<MethodOf<T, K>> {
+  const fn = method(target, key);
+  let result: ReturnType<MethodOf<T, K>>;
+  try { result = fn.call(target.value) as ReturnType<MethodOf<T, K>>; } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, key);
+  }
+  checkSynchronous(result, target, key);
+  return result;
+}
+
+export function call1<T, K extends MethodKey<T>>(target: Attributed<T>, key: K,
+  a: Parameters<MethodOf<T, K>>[0]): ReturnType<MethodOf<T, K>> {
+  const fn = method(target, key);
+  let result: ReturnType<MethodOf<T, K>>;
+  try { result = fn.call(target.value, a as never) as ReturnType<MethodOf<T, K>>; } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, key);
+  }
+  checkSynchronous(result, target, key);
+  return result;
+}
+
+export function call2<T, K extends MethodKey<T>>(target: Attributed<T>, key: K,
+  a: Parameters<MethodOf<T, K>>[0], b: Parameters<MethodOf<T, K>>[1]): ReturnType<MethodOf<T, K>> {
+  const fn = method(target, key);
+  let result: ReturnType<MethodOf<T, K>>;
+  try { result = fn.call(target.value, a as never, b as never) as ReturnType<MethodOf<T, K>>; } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, key);
+  }
+  checkSynchronous(result, target, key);
+  return result;
+}
+
+export function call3<T, K extends MethodKey<T>>(target: Attributed<T>, key: K,
+  a: Parameters<MethodOf<T, K>>[0], b: Parameters<MethodOf<T, K>>[1],
+  c: Parameters<MethodOf<T, K>>[2]): ReturnType<MethodOf<T, K>> {
+  const fn = method(target, key);
+  let result: ReturnType<MethodOf<T, K>>;
+  try { result = fn.call(target.value, a as never, b as never, c as never) as ReturnType<MethodOf<T, K>>; } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, key);
+  }
+  checkSynchronous(result, target, key);
+  return result;
+}
+
+export function apply1<A, R>(target: Attributed<(a: A) => R>, action: string, a: A): R {
+  const fn = target.value;
+  if (typeof fn !== 'function') throw new Error(`Cannot apply non-function "${action}".`);
+  let result: R;
+  try { result = fn(a); } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, action);
+  }
+  checkSynchronous(result, target, action);
+  return result;
+}
+
+export function apply2<A, B, R>(target: Attributed<(a: A, b: B) => R>, action: string, a: A, b: B): R {
+  const fn = target.value;
+  if (typeof fn !== 'function') throw new Error(`Cannot apply non-function "${action}".`);
+  let result: R;
+  try { result = fn(a, b); } catch (error) {
+    throw pluginFailure(error, target.plugin, target.point, action);
+  }
+  checkSynchronous(result, target, action);
+  return result;
 }
 
 // Rebuild a typed refusal crossing a module-runner boundary. Never match error messages.
@@ -98,10 +260,6 @@ export interface PluginEntry<F> {
   readonly id: string;
   readonly facet: F;
 }
-export interface Attributed<T> {
-  readonly plugin: string;
-  readonly value: T;
-}
 const NO_ADDITIONS: readonly Attributed<never>[] = Object.freeze([]);
 
 export function replace<T>(point: SlotPoint<T>, value: T): Contribution {
@@ -161,7 +319,7 @@ export class Composition {
   private readonly catalogue: ReadonlyMap<string, PluginPoint>;
   private readonly slots = new Map<string, readonly SlotContribution[]>();
   private readonly additions = new Map<string, readonly Attributed<unknown>[]>();
-  private readonly resolvedSlots = new Map<string, unknown>();
+  private readonly resolvedSlots = new Map<string, Attributed<unknown>>();
   private readonly resolvedKeyed = new Map<string, ReadonlyMap<string, { readonly id: string }>>();
 
   constructor(environment: PluginEnvironment, catalogue: readonly PluginPoint[], plugins: readonly PluginContributions[]) {
@@ -204,7 +362,7 @@ export class Composition {
           if (verb === 'wrap' && typeof value !== 'function') {
             throw new PluginError('invalid-contribution', `Plugin "${plugin}" must wrap "${id}" with a function.`, plugin, id);
           }
-          previous.push(Object.freeze({ plugin, verb: verb as 'replace' | 'wrap', value: verb === 'replace' ? checked(point, value, plugin) : value }));
+          previous.push(Object.freeze({ plugin, point: id, verb: verb as 'replace' | 'wrap', value: verb === 'replace' ? checked(point, value, plugin) : value }));
           slots.set(id, previous);
           continue;
         }
@@ -225,7 +383,7 @@ export class Composition {
             keys.add(key);
             ids.set(id, keys);
           }
-          items.push(Object.freeze({ plugin, value: result }));
+          items.push(attributed(plugin, id, result));
         }
         additions.set(id, items);
       }
@@ -240,26 +398,24 @@ export class Composition {
     return point;
   }
 
-  slot<T>(descriptor: SlotPoint<T>, base: T): T {
+  slot<T>(descriptor: SlotPoint<T>, base: T): Attributed<T> {
     const point = this.point(descriptor.id, 'slot') as SlotPoint<T>;
-    if (this.resolvedSlots.has(point.id)) return this.resolvedSlots.get(point.id) as T;
+    const cached = this.resolvedSlots.get(point.id);
+    if (cached !== undefined) return cached as Attributed<T>;
     let result = base;
     let owner: string | null = null;
     for (const contribution of this.slots.get(point.id) ?? []) {
       owner = contribution.plugin;
       if (contribution.verb === 'replace') result = contribution.value as T;
       else {
-        try {
-          result = (contribution.value as (previous: T) => T)(result);
-        } catch (error) {
-          throw new PluginError('plugin-failed', `Plugin "${owner}" failed wrapping "${point.id}".`, owner, point.id, { cause: error });
-        }
+        result = apply1(contribution as Attributed<(previous: T) => T>, 'wrap', result);
       }
       result = checked(point, result, owner);
     }
     if (owner === null) result = checked(point, result, null);
-    this.resolvedSlots.set(point.id, result);
-    return result;
+    const resolved = attributed(owner, point.id, result);
+    this.resolvedSlots.set(point.id, resolved);
+    return resolved;
   }
 
   keyed<T extends { readonly id: string }>(descriptor: KeyedPoint<T>, builtIns: readonly T[]): ReadonlyMap<string, T> {
@@ -287,11 +443,5 @@ export class Composition {
   list<T>(descriptor: ListPoint<T>): readonly Attributed<T>[] {
     this.point(descriptor.id, 'list');
     return (this.additions.get(descriptor.id) ?? NO_ADDITIONS) as readonly Attributed<T>[];
-  }
-
-  // The last contributor owns a slot's resolved value, for host restrictions and creation diagnostics.
-  owner(point: SlotPoint<unknown>): string | null {
-    this.point(point.id, 'slot');
-    return this.slots.get(point.id)?.at(-1)?.plugin ?? null;
   }
 }

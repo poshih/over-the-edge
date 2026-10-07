@@ -7,6 +7,8 @@ import { phantomTool, samplePhantom } from './phantom-format';
 import type { PhantomPose, PhantomTool, PhantomTrack } from './phantom-format';
 import { DEFAULT_PHANTOM_LOOK } from './phantom-view';
 import type { RuntimePlugins } from './plugins/runtime';
+import { call0, call2 } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { SceneFrame, SceneLayer } from './scene-layer';
 import type { GameView } from './view';
 
@@ -22,9 +24,8 @@ export const PHANTOM_TIMING = {
 // layer until its Game closes or the consumer removes it. GameView and the catalogue never import playback.
 export function createPhantomPlayback(view: GameView, plugins: RuntimePlugins, figures: number): PhantomPlayback {
   const factory = plugins.slot(LOOKS.phantoms, DEFAULT_PHANTOM_LOOK);
-  const plugin = plugins.owner(LOOKS.phantoms);
-  const playback = new PhantomPlayback(factory, plugin, { figures, head: view.rigGeometry.head });
-  view.addLayer(playback);
+  const playback = new PhantomPlayback(factory, { figures, head: view.rigGeometry.head });
+  view.addLayer(playback, factory);
   return playback;
 }
 
@@ -56,7 +57,7 @@ function figure(): Figure {
 export class PhantomPlayback implements SceneLayer {
   readonly root: Object3D;
   readonly pass = 'actors';
-  private readonly look: PhantomLook;
+  private readonly look: Attributed<PhantomLook>;
   private readonly figures: readonly Figure[];
   // A dedicated slot for the replay viewer, never advanced by game time.
   private readonly held: Figure = figure();
@@ -65,12 +66,12 @@ export class PhantomPlayback implements SceneLayer {
   private time: number | null = null;
   private count = 0;
 
-  constructor(factory: PhantomLookFactory, plugin: string | null, options: { readonly figures: number; readonly head: HammerHead }) {
+  constructor(factory: Attributed<PhantomLookFactory>, options: { readonly figures: number; readonly head: HammerHead }) {
     this.figures = Array.from({ length: options.figures }, figure);
     this.frames = [...this.figures.map(figure => figure.frame), this.held.frame];
     this.head = options.head;
-    this.look = createPhantomLook(factory, this.frames.length, plugin);
-    this.root = this.look.root;
+    this.look = createPhantomLook(factory, this.frames.length);
+    this.root = this.look.value.root;
     this.root.visible = false;
   }
 
@@ -144,7 +145,7 @@ export class PhantomPlayback implements SceneLayer {
 
   dispose(): void {
     this.clear();
-    this.look.dispose();
+    call0(this.look, 'dispose');
   }
 
   private stop(figure: Figure): void {
@@ -169,7 +170,7 @@ export class PhantomPlayback implements SceneLayer {
   private draw(): void {
     this.root.visible = this.count > 0 || this.held.frame.visible;
     if (!this.root.visible) return;
-    this.look.draw(this.frames, this.head);
+    call2(this.look, 'draw', this.frames, this.head);
     // play() and hold() may draw between game frames. Other slots must not advance their drawing history twice.
     for (const frame of this.frames as readonly Figure['frame'][]) {
       frame.dt = 0;

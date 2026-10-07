@@ -1,8 +1,8 @@
 import './death-screen.css';
-import { deathPluginFailure } from './death-sequence';
 import type { DeathFrame, DeathInfo } from './death-sequence';
 import type { HudSettings } from './hud';
-import { checkSynchronous, PluginError, slotPoint } from './plugins/kernel';
+import { createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import type { Attributed } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 
 export interface DeathScreen {
@@ -96,42 +96,13 @@ class EngineDeathScreen implements DeathScreen {
 
 export const DEFAULT_DEATH_SCREEN: DeathScreenFactory = (mount) => new EngineDeathScreen(mount);
 
-export function createDeathScreen(plugins: RuntimePlugins, mount: HTMLElement): DeathScreen {
+const DEATH_SCREEN_CONTRACT = instanceContract({
+  returns: 'show(info, settings), update(frame), clear() and dispose()',
+  methods: ['show', 'update', 'clear', 'dispose'],
+});
+
+export function createDeathScreen(plugins: RuntimePlugins, mount: HTMLElement): Attributed<DeathScreen> {
   const factory = plugins.slot(DEATH_SCREEN, DEFAULT_DEATH_SCREEN);
-  const plugin = plugins.owner(DEATH_SCREEN);
-  let screen: DeathScreen;
-  try {
-    const value: unknown = factory(mount);
-    if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-      !['show', 'update', 'clear', 'dispose'].every((method) => typeof Reflect.get(value, method) === 'function')) {
-      throw new PluginError('invalid-contribution',
-        `Plugin "${plugin ?? 'engine'}": "${DEATH_SCREEN.id}" must return show(info, settings), update(frame), clear() and dispose().`,
-        plugin, DEATH_SCREEN.id);
-    }
-    screen = value as DeathScreen;
-  } catch (error) {
-    throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'create');
-  }
-  return {
-    show(info, settings) {
-      try { checkSynchronous(screen.show(info, settings), plugin, DEATH_SCREEN.id, 'show'); } catch (error) {
-        throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'show');
-      }
-    },
-    update(frame) {
-      try { checkSynchronous(screen.update(frame), plugin, DEATH_SCREEN.id, 'update'); } catch (error) {
-        throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'update');
-      }
-    },
-    clear() {
-      try { checkSynchronous(screen.clear(), plugin, DEATH_SCREEN.id, 'clear'); } catch (error) {
-        throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'clear');
-      }
-    },
-    dispose() {
-      try { checkSynchronous(screen.dispose(), plugin, DEATH_SCREEN.id, 'dispose'); } catch (error) {
-        throw deathPluginFailure(error, plugin, DEATH_SCREEN.id, 'dispose');
-      }
-    },
-  };
+  const create = factory.value;
+  return createInstance(DEATH_SCREEN_CONTRACT, factory, () => create(mount));
 }

@@ -13,7 +13,7 @@ import { AUDIO } from '../game-audio';
 import { MESSAGES } from '../event-presenter';
 import { EVENTS } from '../game-events';
 import { INPUT_BINDINGS, INPUT_DEVICES } from '../input';
-import { checkFacetEntries, Composition, PluginError } from './kernel';
+import { attributed, call1, checkFacetEntries, Composition, PluginError } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';
 
 export interface RuntimeHost {
@@ -58,13 +58,7 @@ export class RuntimePlugins {
         const controller = new AbortController();
         controllers.push(controller);
         const host: RuntimeHost = Object.freeze({ plugin: id, signal: controller.signal, notice: options.notice });
-        let contributions: readonly Contribution[];
-        try {
-          contributions = facet.start(host);
-        } catch (error) {
-          throw new PluginError('plugin-failed',
-            `Runtime plugin "${id}" failed to start: ${error instanceof Error ? error.message : String(error)}`, id, null, { cause: error });
-        }
+        const contributions = call1(attributed(id, null, facet), 'start', host);
         return { plugin: id, contributions };
       });
       return new RuntimePlugins(new Composition('runtime', RUNTIME, plugins), controllers);
@@ -74,12 +68,11 @@ export class RuntimePlugins {
     }
   }
 
-  slot<T>(point: SlotPoint<T>, base: T): T { return this.composition.slot(point, base); }
+  slot<T>(point: SlotPoint<T>, base: T): Attributed<T> { return this.composition.slot(point, base); }
   keyed<T extends { readonly id: string }>(point: KeyedPoint<T>, builtIns: readonly T[]): ReadonlyMap<string, T> {
     return this.composition.keyed(point, builtIns);
   }
   list<T>(point: ListPoint<T>): readonly Attributed<T>[] { return this.composition.list(point); }
-  owner(point: SlotPoint<unknown>): string | null { return this.composition.owner(point); }
 
   dispose(): void {
     for (let index = this.controllers.length - 1; index >= 0; index--) this.controllers[index]!.abort();

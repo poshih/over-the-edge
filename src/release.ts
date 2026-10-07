@@ -23,8 +23,8 @@ import { ACCESS, FAILED, MODEL_FAILED, PHANTOMS, PROGRESS, READY, ReleasePlugins
 import type { ReleaseApi, ReleaseFacet } from './plugins/release';
 import { RuntimePlugins } from './plugins/runtime';
 import type { RuntimeFacet } from './plugins/runtime';
-import { PluginError } from './plugins/kernel';
-import type { PluginEntry } from './plugins/kernel';
+import { attributed, call0, call1, invalidResult } from './plugins/kernel';
+import type { Attributed, PluginEntry } from './plugins/kernel';
 import type { Kinds } from './plugins/kinds';
 import type { PhantomBuild, Phantoms } from './phantoms';
 import { readSelection, ReleaseModelLibrary } from './release-library';
@@ -50,7 +50,7 @@ interface Loaded {
   readonly session: ContentSession;
   readonly manifest: ContentManifest;
   readonly game: Game;
-  readonly audio: GameAudio;
+  readonly audio: Attributed<GameAudio>;
   readonly audioDevice: AudioDevice;
   readonly library: ReleaseModelLibrary;
   readonly plugins: RuntimePlugins;
@@ -60,7 +60,7 @@ interface Loaded {
 interface Attempt {
   readonly session: ContentSession;
   game: Game | null;
-  audio: GameAudio | null;
+  audio: Attributed<GameAudio> | null;
   audioDevice: AudioDevice | null;
   library: ReleaseModelLibrary | null;
   readonly plugins: RuntimePlugins;
@@ -79,7 +79,7 @@ export class Release {
   private readonly canvas: HTMLCanvasElement;
   private readonly mount: HTMLElement;
   private readonly fatalElement: HTMLElement;
-  private fatalDisplay: FatalDisplay;
+  private fatalDisplay: Attributed<FatalDisplay>;
   private readonly code: ReleaseCode;
   private readonly lifecycle = new AbortController();
   private readonly ui: ReturnType<typeof createPlayUI>;
@@ -92,7 +92,7 @@ export class Release {
     this.canvas = elements.canvas;
     this.mount = elements.mount;
     this.fatalElement = elements.fatal;
-    this.fatalDisplay = createFatalDisplay(DEFAULT_FATAL, elements.fatal, null);
+    this.fatalDisplay = createFatalDisplay(attributed(null, FATAL.id, DEFAULT_FATAL), elements.fatal);
     this.code = code;
     this.ui = createPlayUI({ mount: elements.mount });
   }
@@ -112,20 +112,18 @@ export class Release {
       }
       const plugins = this.plugins;
       const fatalFactory = plugins.slot(FATAL, DEFAULT_FATAL);
-      if (fatalFactory !== DEFAULT_FATAL) {
-        const display = createFatalDisplay(fatalFactory, this.fatalElement, plugins.owner(FATAL));
-        this.fatalDisplay.dispose?.();
+      if (fatalFactory.value !== DEFAULT_FATAL) {
+        const display = createFatalDisplay(fatalFactory, this.fatalElement);
+        if (this.fatalDisplay.value.dispose !== undefined) call0(this.fatalDisplay, 'dispose');
         this.fatalDisplay = display;
       }
-      this.ui.setNotices(plugins.slot(NOTICES, DEFAULT_NOTICES), plugins.owner(NOTICES));
-      if (this.code.phantoms === null && plugins.slot(PHANTOMS, null) !== null) {
-        const phantomPlugin = plugins.owner(PHANTOMS);
-        throw new PluginError('invalid-contribution',
-          `Plugin "${phantomPlugin}" supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL.`,
-          phantomPlugin, PHANTOMS.id);
+      this.ui.setNotices(plugins.slot(NOTICES, DEFAULT_NOTICES));
+      const phantoms = plugins.slot(PHANTOMS, null);
+      if (this.code.phantoms === null && phantoms.value !== null) {
+        throw invalidResult(phantoms, 'supplies phantoms, but this release was built without them: set GAME_PHANTOMS_URL');
       }
-      const access = plugins.slot(ACCESS, publicAccess(contentUrl));
-      const failed = plugins.slot(FAILED, async (error: ContentError) => { throw error; });
+      const access = plugins.slot(ACCESS, publicAccess(contentUrl)).value;
+      const failed = plugins.slot(FAILED, async (error: ContentError) => { throw error; }).value;
       for (;;) {
         try {
           this.loaded = await this.load(access);
@@ -146,7 +144,7 @@ export class Release {
       disposal.run(() => this.discardAttempt());
       disposal.run(() => this.discardLoaded());
       if (!this.lifecycle.signal.aborted || !isAbort(error)) {
-        disposal.run(() => this.fatalDisplay.show(`The game could not load: ${message(error)}`));
+        disposal.run(() => call1(this.fatalDisplay, 'show', `The game could not load: ${message(error)}`));
       }
       disposal.finish();
     }
@@ -158,7 +156,7 @@ export class Release {
     disposal.run(() => this.discardAttempt());
     disposal.run(() => this.discardLoaded());
     disposal.run(() => this.ui.dispose());
-    disposal.run(() => this.fatalDisplay.dispose?.());
+    if (this.fatalDisplay.value.dispose !== undefined) disposal.run(() => call0(this.fatalDisplay, 'dispose'));
     disposal.run(() => this.plugins?.dispose());
     disposal.finish();
   }
@@ -172,7 +170,7 @@ export class Release {
     disposal.run(() => phantoms?.dispose());
     if (loaded !== null) {
       disposal.run(() => loaded.lifecycle.abort(new DOMException('The game closed.', 'AbortError')));
-      disposal.run(() => loaded.audio.dispose());
+      disposal.run(() => call0(loaded.audio, 'dispose'));
       disposal.run(() => loaded.audioDevice.dispose());
       // The game's views let go of library models before the library disposes them.
       disposal.run(() => loaded.game.dispose());
@@ -189,7 +187,8 @@ export class Release {
     if (attempt === null) return;
     this.loading = null;
     const disposal = new Disposal();
-    disposal.run(() => attempt.audio?.dispose());
+    const audio = attempt.audio;
+    if (audio !== null) disposal.run(() => call0(audio, 'dispose'));
     disposal.run(() => attempt.audioDevice?.dispose());
     disposal.run(() => attempt.lifecycle.abort(new DOMException('The load attempt closed.', 'AbortError')));
     disposal.run(() => attempt.game?.dispose());
@@ -206,7 +205,7 @@ export class Release {
       notice: (text, kind = 'info') => this.ui.notice(text, kind),
     });
     const session = new ContentSession({
-      access, pins: this.code.pins, onProgress: (progress) => this.plugins!.notify(PROGRESS, (callback) => callback(progress)),
+      access, pins: this.code.pins, onProgress: (progress) => this.plugins!.notify(PROGRESS, () => progress),
     });
     const attempt: Attempt = { session, game: null, audio: null, audioDevice: null, library: null, plugins, lifecycle };
     this.loading = attempt;
@@ -228,21 +227,21 @@ export class Release {
     };
     const notice = (text: string): void => this.ui.notice(text, 'error');
     const audioFactory = plugins.slot(AUDIO, this.code.audioOutput === null ? SILENT_AUDIO_OUTPUT : this.code.audioOutput);
-    const receivesCues = audioFactory !== SILENT_AUDIO_OUTPUT;
+    const receivesCues = audioFactory.value !== SILENT_AUDIO_OUTPUT;
     const audioDevice = new AudioDevice(manifest.audio.volume, receivesCues);
     attempt.audioDevice = audioDevice;
     const audio = createGameAudio(audioFactory, {
       settings: manifest.audio, sounds: levelSoundSources(manifest.level), media, device: audioDevice, notice,
-    }, plugins.owner(AUDIO));
+    });
     attempt.audio = audio;
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const game = new Game({
-      canvas: this.canvas, onFatal: (message) => this.fatalDisplay.show(message),
+      canvas: this.canvas, onFatal: (message) => call1(this.fatalDisplay, 'show', message),
       eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
       theme: manifest.theme, enemyArt: manifest.enemies, hud: manifest.hud,
-      onCue: receivesCues ? (cue) => audio.handle(cue) : undefined,
-      onPauseChange: receivesCues ? (paused) => audio.setPaused(paused) : undefined,
+      onCue: receivesCues ? (cue) => call1(audio, 'handle', cue) : undefined,
+      onPauseChange: receivesCues ? (paused) => call1(audio, 'setPaused', paused) : undefined,
       onAction: (action, options) => game.perform(action, options),
       onNotice: notice,
     });
@@ -284,7 +283,7 @@ export class Release {
 
   private modelFailed(error: unknown): void {
     const failure = error instanceof Error ? error : new Error(String(error));
-    this.plugins!.notify(MODEL_FAILED, (callback) => callback(failure));
+    this.plugins!.notify(MODEL_FAILED, () => failure);
   }
 
   private play(loaded: Loaded): void {
@@ -301,21 +300,21 @@ export class Release {
     if (game.halted) return;
     game.selectCharacter(this.ui.enableCharacters());
     game.setInputBlock({ reason: 'loading', blocked: false });
-    this.plugins!.notify(READY, (callback, plugin) => {
+    this.plugins!.notify(READY, (plugin): ReleaseApi => {
       const api: ReleaseApi = Object.freeze({
         setPause: (paused: boolean) => game.setPause({ reason: `release:${plugin}`, paused }),
         setInputBlock: (blocked: boolean) => game.setInputBlock({ reason: `release:${plugin}`, blocked }),
         get halted() { return game.halted; },
         modelLibrary: library.api,
       });
-      callback(api);
+      return api;
     });
     const phantoms = this.code.phantoms;
     if (phantoms !== null) {
       const releasePlugins = this.plugins!;
       this.phantoms = phantoms.start({
         game, plugins: loaded.plugins, course: phantoms.course, url: this.phantomsUrl(),
-        phantomService: (base) => releasePlugins.slot(PHANTOMS, base),
+        phantomService: (base) => releasePlugins.slot(PHANTOMS, base).value,
         packs: manifest.phantoms, content: (source, request) => loaded.session.bytes(source, request),
       });
     }

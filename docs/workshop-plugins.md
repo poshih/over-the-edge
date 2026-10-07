@@ -50,12 +50,18 @@ as `host.plugin`.
 
 - The Workshop starts each plugin once the project is open, with a host of its own.
   `host.signal` aborts when the plugin stops.
-- An error a plugin throws, or a promise it rejects, in `start`, `validate`, a listener, a UI
-  kit callback, an overlay or a preview, stops that plugin alone, with `plugin-failed`. The
-  Workshop shows the error with the plugin's ID; the Workshop and the other plugins go on. A
+- An error a plugin throws, or a promise it rejects, in `start`, a listener, a UI kit callback,
+  an overlay or a preview, stops that plugin alone. It carries `plugin-failed`, or the code of
+  a `PluginError` already attributed to that plugin and point. The Workshop shows the error's
+  message with the plugin's ID and action; the Workshop and the other plugins go on. A
   failed plugin stays stopped until the workshop facets change. Callbacks the plugin registers
   elsewhere, such as its own timers, get the same treatment through `host.guard(callback)` and
   `host.listen(target, type, listener)`.
+- `start` and guarded callbacks may return promises. `validate(data)`, overlay `update` and
+  `dispose`, and preview `offset` are synchronous; a promise-like result is
+  `invalid-contribution` and stops that plugin. `validate` keeps a thrown typed data refusal
+  separate from failure: a refusal blocks the data operation, while another throw or a
+  promise-like return stops the plugin and leaves its data unchecked.
 - Stopping removes everything the plugin added: its tabs and sections, overlays, listeners,
   preview, pause and drag. A stopped plugin's host then refuses anything that would add or
   change something, with `plugin-stopped`.
@@ -173,6 +179,8 @@ allocates nothing per frame on its behalf.
   ignore depth (`depthTest: false`), leaving the arms/tool depth alone. Only overlays with
   `update(frame: SceneFrame)` run each drawn frame. That frame is reused and read-only (time,
   parts, cursor, enemies and rig), so never retain it as a snapshot and allocate nothing.
+  `update` and optional `dispose` finish synchronously; a promise-like result is
+  `invalid-contribution` and stops only the contributing plugin.
   Static overlays have no frame callback. The host checks the root, pass and methods when
   added, naming the plugin in a refusal. It returns the removal; removal or plugin stop
   detaches the root and calls the optional `dispose()` once to free owned resources.
@@ -201,7 +209,8 @@ allocates nothing per frame on its behalf.
   `pot` exactly as they see real movement, so a drop, a bounce or a shake swings hair and
   [secondary motion](characters.md#secondary-motion). The camera and overlays keep the
   simulation's frame. A preview ends early on a rewind, a restart or another preview, and
-  `game.preview(null)` ends the plugin's own.
+  `game.preview(null)` ends the plugin's own. `offset` finishes synchronously; a promise-like
+  result is `invalid-contribution`, attributed to the preview's plugin and `offset` action.
 
 ## Example
 
