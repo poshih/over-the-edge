@@ -61,7 +61,8 @@ export class LiquidWorld {
   private readonly index = new DynamicTree<string>();
   private readonly pools = new Map<string, Pool>();
   private readonly query: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
-  private readonly nearby: Pool[] = [];
+  private readonly nearby: (Pool | undefined)[] = [];
+  private nearbyCount = 0;
   private readonly points = new Float64Array(MAX_POINTS * 2);
   private readonly clipped = new Float64Array(MAX_POINTS * 2);
   // The part of the latest fixture under the surface: its area, its centroid, and its polar moment about it.
@@ -102,7 +103,7 @@ export class LiquidWorld {
       return bath;
     }
     let mass = 0;
-    for (const { body } of rig.bodies) mass += body.getMass();
+    for (let index = 0; index < rig.bodies.length; index++) mass += rig.bodies[index]!.body.getMass();
     return this.pushSubject(rig.bodies, rig.potFixture, mass, tuning);
   }
 
@@ -113,7 +114,8 @@ export class LiquidWorld {
     const { lowerBound, upperBound } = this.query;
     lowerBound.x = lowerBound.y = Infinity;
     upperBound.x = upperBound.y = -Infinity;
-    for (const { body } of bodies) {
+    for (let index = 0; index < bodies.length; index++) {
+      const body = bodies[index]!.body;
       for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) {
         const bounds = fixture.getAABB(0);
         lowerBound.x = Math.min(lowerBound.x, bounds.lowerBound.x);
@@ -123,18 +125,20 @@ export class LiquidWorld {
       }
     }
     if (lowerBound.x > upperBound.x) return null;
-    this.nearby.length = 0;
+    this.nearbyCount = 0;
     this.index.query(this.query, this.collect);
-    if (this.nearby.length === 0) return null;
+    if (this.nearbyCount === 0) return null;
     let bath: PoolObject | null = null;
-    for (const pool of this.nearby) {
+    for (let index = 0; index < this.nearbyCount; index++) {
+      const pool = this.nearby[index]!;
       const { liquid } = pool.object;
       const settings = LIQUID_SETTINGS[liquid];
       // A square metre of the pot under the surface: its share of the player's buoyancy, and of its drag, which slows
       // the hammer alike.
       const lift = tuning[settings.buoyancy] / 100 * mass * PHYSICS.gravity / POT_AREA;
       const thickness = tuning[settings.drag] * mass / POT_AREA;
-      for (const { body } of bodies) {
+      for (let part = 0; part < bodies.length; part++) {
+        const body = bodies[part]!.body;
         for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) {
           if (!this.submerge(fixture, pool)) continue;
           const pot = fixture === potFixture;
@@ -143,7 +147,8 @@ export class LiquidWorld {
         }
       }
     }
-    this.nearby.length = 0;
+    for (let index = 0; index < this.nearbyCount; index++) this.nearby[index] = undefined;
+    this.nearbyCount = 0;
     return bath;
   }
 
@@ -164,6 +169,7 @@ export class LiquidWorld {
     const maxY = object.y + object.height / 2;
     const proxy = this.index.createProxy({ lowerBound: { x: minX, y: minY }, upperBound: { x: maxX, y: maxY } }, object.id);
     this.pools.set(object.id, { object, proxy, minX, maxX, minY, maxY });
+    if (this.nearby.length < this.pools.size) this.nearby.length = this.pools.size;
   }
 
   private remove(id: string): void {
@@ -175,7 +181,7 @@ export class LiquidWorld {
 
   private readonly collect = (node: number): boolean => {
     const pool = this.pools.get(this.index.getUserData(node));
-    if (pool !== undefined) this.nearby.push(pool);
+    if (pool !== undefined) this.nearby[this.nearbyCount++] = pool;
     return true;
   };
 
@@ -242,14 +248,16 @@ export class LiquidWorld {
   private press(body: Body, lift: number, thickness: number): void {
     this.point.x = this.centerX;
     this.point.y = this.centerY;
+    const center = body.getWorldCenter();
     if (lift > 0) {
       this.vector.x = 0;
       this.vector.y = lift * this.area;
-      body.applyForce(this.vector, this.point, true);
+      // Planck's point-force helper allocates; apply its identical force and torque separately.
+      body.applyForceToCenter(this.vector, true);
+      body.applyTorque((this.point.x - center.x) * this.vector.y - (this.point.y - center.y) * this.vector.x, true);
     }
     const mass = body.getMass();
     if (mass <= 0 || thickness <= 0) return;
-    const center = body.getWorldCenter();
     const velocity = body.getLinearVelocity();
     const spin = body.getAngularVelocity();
     const share = mass * (1 - Math.exp(-thickness * this.area * PHYSICS.dt / mass));

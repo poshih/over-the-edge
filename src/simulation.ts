@@ -136,6 +136,7 @@ export class Simulation {
   private readonly velocityScratch = new Vec2();
   private readonly originScratch: Point = { x: 0, y: 0 };
   private readonly targetScratch: Point = { x: 0, y: 0 };
+  private readonly footScratch: Point = { x: 0, y: 0 };
   private impactTracking = false;
   private headTouching = false;
   private lastImpactAt = -Infinity;
@@ -253,7 +254,7 @@ export class Simulation {
       }
       if (!this.dying && (next.cursor.maxTargetRadius !== previous.cursor.maxTargetRadius || next.cursor.deadZone !== previous.cursor.deadZone)) {
         // A smaller radius pulls the target straight in; the cursor keeps to its dead zone.
-        this.aim = limitAim(this.aim, next.cursor.maxTargetRadius, next.cursor.deadZone);
+        limitAim(this.aim, next.cursor.maxTargetRadius, next.cursor.deadZone);
         this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
         this.current = { ...this.current, cursorOffset: { ...this.aim.cursor } };
       }
@@ -334,9 +335,10 @@ export class Simulation {
   // Changes whenever the player is placed anew: at every restart and every return to a bonfire.
   get placement(): number { return this.placements; }
 
-  playerPosition(): Readonly<Point> {
+  playerPosition(out: Point): Point {
     const root = playerAnchor(this.rig).getPosition();
-    return { x: root.x, y: root.y + RIG.potBottom };
+    out.x = root.x; out.y = root.y + RIG.potBottom;
+    return out;
   }
 
   // Writes the rig's current pose into `out`, allocating nothing, so it can be read every step.
@@ -453,7 +455,7 @@ export class Simulation {
         throw new Error('Pointer target must remain finite.');
       }
       const previousY = this.aim.target.y;
-      this.aim = moveAim(this.aim, pointerDelta, this.settings.cursor.maxTargetRadius, this.settings.cursor.deadZone);
+      moveAim(this.aim, pointerDelta, this.settings.cursor.maxTargetRadius, this.settings.cursor.deadZone);
       this.lastAimInput = this.elapsed;
       // Input that lowers the target swings the hammer down.
       swinging = this.aim.target.y < previousY;
@@ -463,7 +465,7 @@ export class Simulation {
       const tip = partPoint(this.rig.tool.head, this.headPoint);
       const target = this.targetScratch;
       target.x = tip.x + returnOffsetX - origin.x; target.y = tip.y + returnOffsetY - origin.y;
-      this.aim = returnAim(this.aim, target,
+      returnAim(this.aim, target,
         1 - Math.exp(-returnRate * PHYSICS.dt), maxTargetRadius);
     }
     const rig = this.rig;
@@ -526,7 +528,8 @@ export class Simulation {
     }
     if (!this.dying && this.terminal() === null) {
       this.platforms.board(this.rig.potFixture, this.manifold, SUPPORT_NORMAL);
-      const foot = this.playerPosition();
+      const foot = this.playerPosition(this.footScratch);
+      const height = foot.y;
       const bonfire = this.bonfires.update(foot);
       if (bonfire !== null) {
         const moment = this.moments.append('bonfire', this.placements, this.elapsed);
@@ -534,7 +537,7 @@ export class Simulation {
         moment.x = bonfire.x;
         moment.y = bonfire.y;
       }
-      this.bestHeight = Math.max(this.bestHeight, foot.y);
+      this.bestHeight = Math.max(this.bestHeight, height);
     }
     this.capture(this.current);
     if (this.dying || this.terminalRaised) return null;
@@ -780,7 +783,8 @@ export class Simulation {
   // Auto-restart only arms once the pot or head stood on terrain, so a start with nothing beneath it
   // (or one inside rock that it drops out of) keeps falling instead of restarting in a loop.
   private detectSupport(): void {
-    for (const fixture of [this.rig.potFixture, this.rig.tool.head.fixture]) {
+    for (let index = 0; index < 2; index++) {
+      const fixture = index === 0 ? this.rig.potFixture : this.rig.tool.head.fixture;
       const body = fixture.getBody();
       for (let edge = body.getContactList(); edge; edge = edge.next) {
         const contact = edge.contact;
@@ -830,7 +834,7 @@ export class Simulation {
     const root = playerAnchor(this.rig).getPosition();
     const lag = 1 - followCharacter / 100;
     const dx = (fromX - root.x) * lag, dy = (fromY - root.y) * lag;
-    if (dx !== 0 || dy !== 0) this.aim = shiftAim(this.aim, dx, dy, maxTargetRadius);
+    if (dx !== 0 || dy !== 0) shiftAim(this.aim, dx, dy, maxTargetRadius);
   }
 
   // Whether the target returns to the hammer this step: the settings turn it on, aiming has paused for the return

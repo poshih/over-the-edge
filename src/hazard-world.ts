@@ -48,13 +48,13 @@ interface Projectile {
   // Where it was before the latest step, for drawing between steps.
   fromX: number;
   fromY: number;
-  readonly directionX: number;
-  readonly directionY: number;
-  readonly angle: number;
-  readonly speed: number;
-  readonly damage: number;
+  directionX: number;
+  directionY: number;
+  angle: number;
+  speed: number;
+  damage: number;
   // The trap that fired it.
-  readonly trap: string;
+  trap: string;
   travelled: number;
 }
 
@@ -93,7 +93,11 @@ export class HazardWorld {
   private readonly axeIndex = new DynamicTree<string>();
   // Shooters by their next shot, earliest first.
   private schedule: Shooter[] = [];
-  private readonly projectiles: Projectile[] = [];
+  // Live shots occupy the prefix; removal swaps the last live shot in and recycles the vacated slot.
+  private readonly projectiles: Projectile[] = Array.from({ length: SHOOTER.projectiles }, () => ({
+    x: 0, y: 0, fromX: 0, fromY: 0, directionX: 0, directionY: 0, angle: 0, speed: 0, damage: 0, trap: '', travelled: 0,
+  }));
+  private projectileCount = 0;
   private readonly posePool: { -readonly [K in keyof ProjectilePose]: ProjectilePose[K] }[] = [];
   // One array per populated length keeps its backing storage even after empty frames.
   private readonly framePosePool: ProjectilePose[][] = [[]];
@@ -101,7 +105,8 @@ export class HazardWorld {
   private readonly blade: Bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private readonly push: Point = { x: 0, y: 0 };
   private readonly query: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
-  private readonly nearby: Axe[] = [];
+  private readonly nearby: (Axe | undefined)[] = [];
+  private nearbyCount = 0;
   private readonly span = { near: 0, far: 1 };
   private readonly rayFrom = new Vec2();
   private readonly rayTo = new Vec2();
@@ -158,7 +163,7 @@ export class HazardWorld {
   // A new run: no projectiles fly, and every shooter waits for its first shot.
   reset(time: number): void {
     this.ensureLive();
-    this.projectiles.length = 0;
+    this.projectileCount = 0;
     for (const shooter of this.shooters.values()) {
       shooter.next = shooter.object.firing === 'timer' ? shotFrom(shooter.object, time) : Infinity;
       shooter.burstShots = 0;
@@ -171,7 +176,7 @@ export class HazardWorld {
   // After the physics step that ended at `time`, with the player's root at `root`.
   afterStep(time: number, root: Readonly<Point>): void {
     this.ensureLive();
-    if (this.count === 0 && this.projectiles.length === 0) return;
+    if (this.count === 0 && this.projectileCount === 0) return;
     const vulnerable = this.hooks.vulnerable();
     this.box.minX = root.x - this.tuning.hurtWidth / 2;
     this.box.maxX = root.x + this.tuning.hurtWidth / 2;
@@ -183,7 +188,7 @@ export class HazardWorld {
   }
 
   frame(alpha: number): readonly ProjectilePose[] {
-    const count = this.projectiles.length;
+    const count = this.projectileCount;
     while (this.posePool.length < count) {
       this.posePool.push({ x: 0, y: 0, angle: 0 });
       this.framePosePool.push(this.posePool.slice());
@@ -203,7 +208,7 @@ export class HazardWorld {
     return {
       shooters: [...this.shooters.values()].map(({ object, next }) => ({ id: object.id, next })),
       axes: [...this.axes.values()].map(({ object, pass }) => ({ id: object.id, pass })),
-      projectiles: this.projectiles.length,
+      projectiles: this.projectileCount,
     };
   }
 
@@ -220,7 +225,7 @@ export class HazardWorld {
   dispose(): void {
     if (this.disposed) return;
     for (const id of [...this.shooters.keys(), ...this.axes.keys()]) this.remove(id);
-    this.projectiles.length = 0;
+    this.projectileCount = 0;
     this.schedule = [];
     this.disposed = true;
   }
@@ -234,6 +239,7 @@ export class HazardWorld {
       return;
     }
     this.axes.set(object.id, { object, proxy: this.indexAxe(object), pass: -Infinity });
+    if (this.nearby.length < this.axes.size) this.nearby.length = this.axes.size;
   }
 
   private indexAxe(object: AxeObject): number {
@@ -253,7 +259,7 @@ export class HazardWorld {
   }
 
   private fly(vulnerable: boolean): void {
-    for (let index = 0; index < this.projectiles.length;) {
+    for (let index = 0; index < this.projectileCount;) {
       const shot = this.projectiles[index];
       shot.fromX = shot.x;
       shot.fromY = shot.y;
@@ -322,14 +328,16 @@ export class HazardWorld {
 
   private shoot(shooter: Shooter, root: Readonly<Point>): void {
     const { object } = shooter;
-    if (this.projectiles.length >= SHOOTER.projectiles ||
+    if (this.projectileCount >= SHOOTER.projectiles ||
       (root.x - object.x) ** 2 + (root.y - object.y) ** 2 > SHOOTER.range ** 2) return;
     const directionX = Math.cos(object.angle);
     const directionY = Math.sin(object.angle);
-    this.projectiles.push({
-      x: object.x, y: object.y, fromX: object.x, fromY: object.y, directionX, directionY,
-      angle: object.angle, speed: object.speed, damage: object.damage, trap: object.id, travelled: 0,
-    });
+    const shot = this.projectiles[this.projectileCount++]!;
+    shot.x = shot.fromX = object.x;
+    shot.y = shot.fromY = object.y;
+    shot.directionX = directionX; shot.directionY = directionY;
+    shot.angle = object.angle; shot.speed = object.speed; shot.damage = object.damage; shot.trap = object.id;
+    shot.travelled = 0;
   }
 
   private swing(time: number, root: Readonly<Point>): void {
@@ -338,9 +346,10 @@ export class HazardWorld {
     this.query.lowerBound.y = this.box.minY;
     this.query.upperBound.x = this.box.maxX;
     this.query.upperBound.y = this.box.maxY;
-    this.nearby.length = 0;
+    this.nearbyCount = 0;
     this.axeIndex.query(this.query, this.collect);
-    for (const axe of this.nearby) {
+    for (let index = 0; index < this.nearbyCount; index++) {
+      const axe = this.nearby[index]!;
       const { object } = axe;
       if (!axeBlade(object, axeAngle(object, time), this.tuning.hurtDepth / 2, this.blade) || !overlaps(this.blade, this.box)) continue;
       // The blade is near the line only around a crossing, so the nearest crossing names this pass.
@@ -355,12 +364,13 @@ export class HazardWorld {
       this.hooks.hurt(object.damage, this.push, 'axe', object.id, atX, atY);
       break;
     }
-    this.nearby.length = 0;
+    for (let index = 0; index < this.nearbyCount; index++) this.nearby[index] = undefined;
+    this.nearbyCount = 0;
   }
 
   private readonly collect = (node: number): boolean => {
     const axe = this.axes.get(this.axeIndex.getUserData(node));
-    if (axe !== undefined) this.nearby.push(axe);
+    if (axe !== undefined) this.nearby[this.nearbyCount++] = axe;
     return true;
   };
 
@@ -383,8 +393,13 @@ export class HazardWorld {
   };
 
   private discard(index: number): void {
-    const last = this.projectiles.pop();
-    if (last !== undefined && index < this.projectiles.length) this.projectiles[index] = last;
+    if (this.projectileCount === 0) return;
+    const last = this.projectiles[--this.projectileCount]!;
+    if (index < this.projectileCount) {
+      const discarded = this.projectiles[index]!;
+      this.projectiles[index] = last;
+      this.projectiles[this.projectileCount] = discarded;
+    }
   }
 
   private reschedule(): void {
@@ -401,7 +416,9 @@ export class HazardWorld {
       if (left < heap.length && this.due(heap[left]) < this.due(heap[first])) first = left;
       if (right < heap.length && this.due(heap[right]) < this.due(heap[first])) first = right;
       if (first === index) return;
-      [heap[index], heap[first]] = [heap[first], heap[index]];
+      const previous = heap[index]!;
+      heap[index] = heap[first]!;
+      heap[first] = previous;
       index = first;
     }
   }

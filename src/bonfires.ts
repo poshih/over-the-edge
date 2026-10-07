@@ -25,7 +25,7 @@ export class Bonfires {
   private readonly index = new DynamicTree<string>();
   private readonly records = new Map<string, Bonfire>();
   private readonly lit = new Set<string>();
-  private readonly listeners = new Set<(state: BonfireState) => void>();
+  private listeners: readonly ((state: BonfireState) => void)[] = [];
   private readonly query: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
   private current: string | null = null;
   // The nearest bonfire in reach of `foot`, while a query runs.
@@ -97,9 +97,11 @@ export class Bonfires {
 
   // Calls `listener` with the state now and after every change. Returns its removal.
   subscribe(listener: (state: BonfireState) => void): () => void {
-    this.listeners.add(listener);
+    if (!this.listeners.includes(listener)) this.listeners = [...this.listeners, listener];
     listener(this.state());
-    return () => { this.listeners.delete(listener); };
+    return () => {
+      if (this.listeners.includes(listener)) this.listeners = this.listeners.filter(registered => registered !== listener);
+    };
   }
 
   state(): BonfireState {
@@ -108,7 +110,7 @@ export class Bonfires {
 
   dispose(): void {
     for (const id of [...this.records.keys()]) this.remove(id);
-    this.listeners.clear();
+    this.listeners = [];
   }
 
   private add(object: BonfireObject): void {
@@ -139,7 +141,9 @@ export class Bonfires {
   };
 
   private emit(): void {
+    if (this.listeners.length === 0) return;
     const state = this.state();
-    for (const listener of [...this.listeners]) listener(state);
+    const listeners = this.listeners;
+    for (let index = 0; index < listeners.length; index++) listeners[index]!(state);
   }
 }

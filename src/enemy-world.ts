@@ -1,5 +1,5 @@
 import { Box, Circle, DynamicTree, Vec2, WorldManifold } from 'planck';
-import type { Body, Contact, Fixture, Vec2Value, World } from 'planck';
+import type { AABBValue, Body, Contact, Fixture, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
 import type { Point, Tuning } from './config';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
@@ -22,7 +22,8 @@ interface EnemyRecord {
   lastHitAt: number;
   nextDecisionAt: number;
   desiredX: number;
-  target: Point | null;
+  readonly target: Point;
+  hasTarget: boolean;
   defeatedBy: 'hammer' | 'fall' | null;
 }
 
@@ -50,11 +51,20 @@ function distanceSquared(a: Readonly<Point>, b: Readonly<Point>): number {
   return (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
 }
 
-function wakeBounds(position: Readonly<Point>) {
-  return {
-    lowerBound: { x: position.x - ENEMY_BEHAVIOR.wakeDistance, y: position.y - ENEMY_BEHAVIOR.wakeDistance },
-    upperBound: { x: position.x + ENEMY_BEHAVIOR.wakeDistance, y: position.y + ENEMY_BEHAVIOR.wakeDistance },
-  };
+function wakeBounds(position: Readonly<Point>, out: AABBValue): AABBValue {
+  out.lowerBound.x = position.x - ENEMY_BEHAVIOR.wakeDistance;
+  out.lowerBound.y = position.y - ENEMY_BEHAVIOR.wakeDistance;
+  out.upperBound.x = position.x + ENEMY_BEHAVIOR.wakeDistance;
+  out.upperBound.y = position.y + ENEMY_BEHAVIOR.wakeDistance;
+  return out;
+}
+
+function pointVelocity(body: Body, point: Vec2Value, out: Point): Point {
+  const center = body.getWorldCenter(), velocity = body.getLinearVelocity();
+  const spin = body.getAngularVelocity();
+  out.x = velocity.x + -spin * (point.y - center.y);
+  out.y = velocity.y + spin * (point.x - center.x);
+  return out;
 }
 
 export class EnemyWorld {
@@ -74,11 +84,26 @@ export class EnemyWorld {
   private readonly bumpVelocity: Point = { x: 0, y: 0 };
   private readonly zero = new Vec2();
   private readonly manifold = new WorldManifold();
+  private readonly headVelocity = new Vec2();
+  private readonly enemyVelocity = new Vec2();
+  private readonly probeFrom = new Vec2();
+  private readonly probeTo = new Vec2();
+  private groundFound = false;
+  private stepPlayer: Readonly<Point> = this.zero;
+  private beforeTime = 0;
+  private afterTime = 0;
+  private bumpPlayer: Readonly<Point> = this.zero;
+  private nearestBump: EnemyRecord | null = null;
+  private bumpDistance = Infinity;
+  private emittedEvent: EnemyEvent | null = null;
   private readonly framePool = Array.from({ length: ENEMY_LIMITS.objects }, emptyPose);
   private readonly framePosePool = Array.from({ length: ENEMY_LIMITS.objects + 1 }, (_, count) => this.framePool.slice(0, count));
   private frameAlpha = 1;
   private frameCount = 0;
-  private queryPosition: Point | null = null;
+  private readonly queryPosition: Point = { x: 0, y: 0 };
+  private hasQueryPosition = false;
+  private readonly wakeQuery: AABBValue = { lowerBound: this.queryPosition, upperBound: this.queryPosition };
+  private readonly wakeBox: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
   private time = 0;
   private nextBumpAt = 0;
   private activeUpdates = 0;
@@ -150,7 +175,7 @@ export class EnemyWorld {
       } else record = this.createRecord(object);
       this.emit({ type: 'upsert', pose: this.pose(record) });
     }
-    this.queryPosition = null;
+    this.hasQueryPosition = false;
   }
 
   reset(time: number): void {
@@ -161,7 +186,7 @@ export class EnemyWorld {
     this.bumps.clear();
     this.obstacles.clear();
     this.nextBumpAt = time;
-    this.queryPosition = null;
+    this.hasQueryPosition = false;
     this.bumpCount = 0;
     this.emit({ type: 'reset', poses: [...this.records.values()].map((record) => this.pose(record)) });
   }
@@ -170,72 +195,91 @@ export class EnemyWorld {
     this.ensureMutable();
     this.time = time;
     this.wakeNearby(player);
-    for (const record of this.active) {
-      record.previous.x = record.current.x;
-      record.previous.y = record.current.y;
-      if (distanceSquared(record.current, player) > ENEMY_BEHAVIOR.sleepDistance ** 2) {
-        // Distant enemies get no AI; gravity-bound ones sleep only after they settle.
-        if (this.canSleep(record)) this.sleep(record);
-        continue;
-      }
-      this.activeUpdates++;
-      if (record.phase === 'hurt') {
-        if (time - record.changedAt < ENEMY_BEHAVIOR.hurtSeconds) {
-          this.drive(record, 0, record.object.species === 'bird' ? 0 : null);
-          continue;
-        }
-        this.transition(record, record.object.species === 'bird' ? 'recover' : 'patrol');
-      }
-      if (record.object.species === 'bird') this.fly(record, player);
-      else this.walk(record);
-    }
+    const previousPlayer = this.stepPlayer, previousTime = this.beforeTime;
+    this.stepPlayer = player;
+    this.beforeTime = time;
+    try { this.active.forEach(this.driveActive); }
+    finally { this.stepPlayer = previousPlayer; this.beforeTime = previousTime; }
   }
+
+  private readonly driveActive = (record: EnemyRecord): void => {
+    record.previous.x = record.current.x;
+    record.previous.y = record.current.y;
+    if (distanceSquared(record.current, this.stepPlayer) > ENEMY_BEHAVIOR.sleepDistance ** 2) {
+      // Distant enemies get no AI; gravity-bound ones sleep only after they settle.
+      if (this.canSleep(record)) this.sleep(record);
+      return;
+    }
+    this.activeUpdates++;
+    if (record.phase === 'hurt') {
+      if (this.beforeTime - record.changedAt < ENEMY_BEHAVIOR.hurtSeconds) {
+        this.drive(record, 0, record.object.species === 'bird' ? 0 : null);
+        return;
+      }
+      this.transition(record, record.object.species === 'bird' ? 'recover' : 'patrol');
+    }
+    if (record.object.species === 'bird') this.fly(record, this.stepPlayer);
+    else this.walk(record);
+  };
 
   afterStep(time: number): void {
     this.ensureMutable();
     this.time = time;
-    for (const record of this.active) {
-      const body = this.body(record);
-      const position = body.getPosition();
-      const velocity = body.getLinearVelocity();
-      if (![position.x, position.y, velocity.x, velocity.y].every(Number.isFinite)) {
-        throw new Error(`Non-finite physics state on enemy "${record.object.id}".`);
-      }
-      record.current.x = position.x;
-      record.current.y = position.y;
-      if (position.y < record.object.y - ENEMY_BEHAVIOR.fallenDistance) this.defeat(record, 'fall');
-    }
-    // Contacts only enqueue identities while World.step is locked. Resolve hits before bumps.
-    for (const record of this.hits) {
-      if (record.health === 0 || time - record.lastHitAt < ENEMY_BEHAVIOR.hitSeconds) continue;
-      record.lastHitAt = time;
-      record.health--;
-      if (record.health === 0) this.defeat(record, 'hammer');
-      else {
-        this.transition(record, 'hurt');
-        this.callbacks.onHit(record.object.id, record.current.x, record.current.y);
-      }
-    }
-    for (const record of this.obstacles) {
-      if (record.health === 0) continue;
-      if (record.object.species === 'bird') {
-        if (record.phase === 'dive') this.transition(record, 'recover');
-        else if (record.phase === 'patrol') this.face(record, -ENEMY_DIRECTION[record.facing]);
-      } else {
-        this.face(record, -ENEMY_DIRECTION[record.facing]);
-        record.desiredX = ENEMY_DIRECTION[record.facing] * record.object.speed;
-      }
-    }
-    this.resolveBump();
-    this.hits.clear();
-    this.bumps.clear();
-    this.obstacles.clear();
-    for (const record of this.dying) {
-      if (time < record.changedAt + ENEMY_BEHAVIOR.deathSeconds) continue;
-      this.dying.delete(record);
-      this.emit({ type: 'remove', id: record.object.id });
-    }
+    const previousTime = this.afterTime;
+    this.afterTime = time;
+    try {
+      this.active.forEach(this.captureActive);
+      // Contacts only enqueue identities while World.step is locked. Resolve hits before bumps.
+      this.hits.forEach(this.resolveHit);
+      this.obstacles.forEach(this.resolveObstacle);
+      this.resolveBump();
+      this.hits.clear();
+      this.bumps.clear();
+      this.obstacles.clear();
+      this.dying.forEach(this.removeExpired);
+    } finally { this.afterTime = previousTime; }
   }
+
+  private readonly captureActive = (record: EnemyRecord): void => {
+    const body = this.body(record);
+    const position = body.getPosition();
+    const velocity = body.getLinearVelocity();
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y) ||
+      !Number.isFinite(velocity.x) || !Number.isFinite(velocity.y)) {
+      throw new Error(`Non-finite physics state on enemy "${record.object.id}".`);
+    }
+    record.current.x = position.x;
+    record.current.y = position.y;
+    if (position.y < record.object.y - ENEMY_BEHAVIOR.fallenDistance) this.defeat(record, 'fall');
+  };
+
+  private readonly resolveHit = (record: EnemyRecord): void => {
+    if (record.health === 0 || this.afterTime - record.lastHitAt < ENEMY_BEHAVIOR.hitSeconds) return;
+    record.lastHitAt = this.afterTime;
+    record.health--;
+    if (record.health === 0) this.defeat(record, 'hammer');
+    else {
+      this.transition(record, 'hurt');
+      this.callbacks.onHit(record.object.id, record.current.x, record.current.y);
+    }
+  };
+
+  private readonly resolveObstacle = (record: EnemyRecord): void => {
+    if (record.health === 0) return;
+    if (record.object.species === 'bird') {
+      if (record.phase === 'dive') this.transition(record, 'recover');
+      else if (record.phase === 'patrol') this.face(record, -ENEMY_DIRECTION[record.facing]);
+    } else {
+      this.face(record, -ENEMY_DIRECTION[record.facing]);
+      record.desiredX = ENEMY_DIRECTION[record.facing] * record.object.speed;
+    }
+  };
+
+  private readonly removeExpired = (record: EnemyRecord): void => {
+    if (this.afterTime < record.changedAt + ENEMY_BEHAVIOR.deathSeconds) return;
+    this.dying.delete(record);
+    if (this.listeners.size > 0) this.emit({ type: 'remove', id: record.object.id });
+  };
 
   // The array and every pose are pooled and borrowed until the next frame().
   frame(alpha: number): readonly EnemyPose[] {
@@ -297,8 +341,8 @@ export class EnemyWorld {
     if (otherFixture === this.callbacks.getHeadFixture()) {
       const manifold = contact.getWorldManifold(this.manifold);
       if (!manifold || manifold.pointCount === 0) throw new Error('A hammer impact needs a solid contact manifold.');
-      const head = other.getLinearVelocityFromWorldPoint(manifold.points[0]);
-      const enemy = this.body(record).getLinearVelocityFromWorldPoint(manifold.points[0]);
+      const head = pointVelocity(other, manifold.points[0], this.headVelocity);
+      const enemy = pointVelocity(this.body(record), manifold.points[0], this.enemyVelocity);
       const orientation = a === record.body ? -1 : 1;
       const speed = ((head.x - enemy.x) * manifold.normal.x + (head.y - enemy.y) * manifold.normal.y) * orientation;
       if (speed >= ENEMY_BEHAVIOR.hitSpeed) this.hits.add(record);
@@ -332,21 +376,24 @@ export class EnemyWorld {
   };
 
   private wakeNearby(player: Readonly<Point>): void {
-    if (this.records.size === 0 || this.queryPosition &&
+    if (this.records.size === 0 || this.hasQueryPosition &&
       distanceSquared(player, this.queryPosition) < ENEMY_BEHAVIOR.queryMovement ** 2) return;
-    this.queryPosition = { ...player };
+    this.queryPosition.x = player.x; this.queryPosition.y = player.y;
+    this.hasQueryPosition = true;
     this.queries++;
-    this.index.query({ lowerBound: player, upperBound: player }, (node) => {
-      const record = this.records.get(this.index.getUserData(node));
-      if (!record) throw new Error('The enemy activation index is inconsistent.');
-      if (!this.active.has(record) && distanceSquared(record.current, player) <= ENEMY_BEHAVIOR.wakeDistance ** 2) {
-        this.createCollider(record);
-        record.nextDecisionAt = this.time;
-        this.active.add(record);
-      }
-      return true;
-    });
+    this.index.query(this.wakeQuery, this.wakeEnemy);
   }
+
+  private readonly wakeEnemy = (node: number): boolean => {
+    const record = this.records.get(this.index.getUserData(node));
+    if (!record) throw new Error('The enemy activation index is inconsistent.');
+    if (!this.active.has(record) && distanceSquared(record.current, this.queryPosition) <= ENEMY_BEHAVIOR.wakeDistance ** 2) {
+      this.createCollider(record);
+      record.nextDecisionAt = this.time;
+      this.active.add(record);
+    }
+    return true;
+  };
 
   private sleep(record: EnemyRecord): void {
     this.destroyBody(record);
@@ -354,8 +401,8 @@ export class EnemyWorld {
     this.transition(record, 'patrol');
     this.faceAuthored(record);
     if (record.proxy === null) throw new Error('A living enemy must have an activation proxy.');
-    this.index.moveProxy(record.proxy, wakeBounds(record.current), this.zero);
-    this.emit({ type: 'upsert', pose: this.pose(record) });
+    this.index.moveProxy(record.proxy, wakeBounds(record.current, this.wakeBox), this.zero);
+    this.emitPose(record);
   }
 
   private canSleep(record: EnemyRecord): boolean {
@@ -380,7 +427,7 @@ export class EnemyWorld {
       this.transition(record, 'dive');
     }
     if (record.phase === 'dive') {
-      if (record.target === null) throw new Error('A diving bird needs its telegraphed target.');
+      if (!record.hasTarget) throw new Error('A diving bird needs its telegraphed target.');
       const dx = record.target.x - record.current.x;
       const dy = record.target.y - record.current.y;
       const distance = Math.hypot(dx, dy);
@@ -405,7 +452,8 @@ export class EnemyWorld {
     }
     if (distanceSquared(record.current, player) <= this.tuning.birdSight ** 2 &&
       distanceSquared(object, player) <= (object.patrolDistance + this.tuning.birdSight) ** 2) {
-      record.target = { ...player };
+      record.target.x = player.x; record.target.y = player.y;
+      record.hasTarget = true;
       this.face(record, player.x - record.current.x);
       this.transition(record, 'windup');
       this.drive(record, 0, 0);
@@ -449,14 +497,18 @@ export class EnemyWorld {
     if (collider.type !== 'box') throw new Error('Ground patrol probes need a ground enemy collider.');
     const ahead = record.current.x + direction * (collider.halfWidth + ENEMY_BEHAVIOR.ledgeAhead);
     const foot = record.current.y - collider.halfHeight;
-    let found = false;
-    this.world.rayCast({ x: ahead, y: foot + ENEMY_BEHAVIOR.probeRise }, { x: ahead, y: foot - ENEMY_BEHAVIOR.ledgeDepth }, (fixture) => {
-      if ((fixture.getFilterCategoryBits() & PHYSICS.terrainCategory) === 0) return -1;
-      found = true;
-      return 0;
-    });
-    return found;
+    this.probeFrom.set(ahead, foot + ENEMY_BEHAVIOR.probeRise);
+    this.probeTo.set(ahead, foot - ENEMY_BEHAVIOR.ledgeDepth);
+    this.groundFound = false;
+    this.world.rayCast(this.probeFrom, this.probeTo, this.probeGround);
+    return this.groundFound;
   }
+
+  private readonly probeGround = (fixture: Fixture): number => {
+    if ((fixture.getFilterCategoryBits() & PHYSICS.terrainCategory) === 0) return -1;
+    this.groundFound = true;
+    return 0;
+  };
 
   private turnAtPatrolEdge(record: EnemyRecord): void {
     const offset = record.current.x - record.object.x;
@@ -488,13 +540,7 @@ export class EnemyWorld {
   private resolveBump(): void {
     if (!this.callbacks.canBump() || this.bumps.size === 0 || this.time < this.nextBumpAt) return;
     const player = this.callbacks.getPot().getWorldCenter();
-    let nearest: EnemyRecord | null = null;
-    let distance = Infinity;
-    for (const record of this.bumps) {
-      if (record.health === 0 || record.phase === 'hurt' || record.phase === 'recover') continue;
-      const candidate = distanceSquared(record.current, player);
-      if (candidate < distance) { nearest = record; distance = candidate; }
-    }
+    const nearest = this.findBump(player);
     if (nearest === null) return;
     const dx = player.x - nearest.current.x;
     const direction = dx === 0 ? ENEMY_DIRECTION[nearest.facing] : Math.sign(dx);
@@ -507,12 +553,32 @@ export class EnemyWorld {
       (player.x + nearest.current.x) / 2, (player.y + nearest.current.y) / 2);
   }
 
+  private findBump(player: Readonly<Point>): EnemyRecord | null {
+    this.bumpPlayer = player;
+    this.nearestBump = null;
+    this.bumpDistance = Infinity;
+    try {
+      this.bumps.forEach(this.chooseBump);
+      const nearest = this.nearestBump;
+      return nearest;
+    } finally {
+      this.nearestBump = null;
+      this.bumpPlayer = this.zero;
+    }
+  }
+
+  private readonly chooseBump = (record: EnemyRecord): void => {
+    if (record.health === 0 || record.phase === 'hurt' || record.phase === 'recover') return;
+    const candidate = distanceSquared(record.current, this.bumpPlayer);
+    if (candidate < this.bumpDistance) { this.nearestBump = record; this.bumpDistance = candidate; }
+  };
+
   private transition(record: EnemyRecord, phase: EnemyPhase): void {
     record.phase = phase;
     record.changedAt = this.time;
-    if (phase !== 'windup' && phase !== 'dive') record.target = null;
+    if (phase !== 'windup' && phase !== 'dive') record.hasTarget = false;
     // Accepted surviving hits enter hurt once, after World.step unlocks. Publish the same pose snapshot as other upserts.
-    if (phase === 'hurt') this.emit({ type: 'upsert', pose: this.pose(record) });
+    if (phase === 'hurt') this.emitPose(record);
   }
 
   private defeat(record: EnemyRecord, reason: 'hammer' | 'fall'): void {
@@ -521,7 +587,7 @@ export class EnemyWorld {
     this.transition(record, 'dead');
     this.destroyCollider(record);
     this.dying.add(record);
-    this.emit({ type: 'upsert', pose: this.pose(record) });
+    this.emitPose(record);
     this.callbacks.onDefeat(record.object.id, record.current.x, record.current.y, reason);
   }
 
@@ -531,7 +597,7 @@ export class EnemyWorld {
     const record: EnemyRecord = {
       object, body: null, proxy: null, previous: { x: object.x, y: object.y }, current: { x: object.x, y: object.y },
       facing: object.facing, phase: 'patrol', changedAt: this.time, health: 0, maxHealth: 0,
-      lastHitAt: -Infinity, nextDecisionAt: this.time, desiredX: 0, target: null, defeatedBy: null,
+      lastHitAt: -Infinity, nextDecisionAt: this.time, desiredX: 0, target: { x: 0, y: 0 }, hasTarget: false, defeatedBy: null,
     };
     this.records.set(object.id, record);
     this.resetRecord(record);
@@ -555,8 +621,8 @@ export class EnemyWorld {
     record.defeatedBy = null;
     this.transition(record, 'patrol');
     this.destroyBody(record);
-    if (record.proxy === null) record.proxy = this.index.createProxy(wakeBounds(object), object.id);
-    else this.index.moveProxy(record.proxy, wakeBounds(object), this.zero);
+    if (record.proxy === null) record.proxy = this.index.createProxy(wakeBounds(object, this.wakeBox), object.id);
+    else this.index.moveProxy(record.proxy, wakeBounds(object, this.wakeBox), this.zero);
   }
 
   private createCollider(record: EnemyRecord): void {
@@ -633,7 +699,18 @@ export class EnemyWorld {
   }
 
   private emit(event: EnemyEvent): void {
-    for (const listener of this.listeners) listener(event);
+    const previous = this.emittedEvent;
+    this.emittedEvent = event;
+    try { this.listeners.forEach(this.publishEvent); }
+    finally { this.emittedEvent = previous; }
+  }
+
+  private readonly publishEvent = (listener: (event: EnemyEvent) => void): void => {
+    listener(this.emittedEvent!);
+  };
+
+  private emitPose(record: EnemyRecord): void {
+    if (this.listeners.size > 0) this.emit({ type: 'upsert', pose: this.pose(record) });
   }
 
   private ensureMutable(): void {

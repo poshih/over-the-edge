@@ -38,6 +38,8 @@ export class TerrainWorld {
   private readonly fading = new Map<string, number>();
   private readonly disappeared = new Set<string>();
   private readonly listeners = new Set<(event: TerrainEvent) => void>();
+  private advanceTime = 0;
+  private emittedEvent: TerrainEvent | null = null;
   private readonly manifold = new WorldManifold();
   // Fixtures own collision geometry even when a compound body's COM lies elsewhere. Shapes are
   // replaced, never resized in place, so local centroids stay valid for each fixture's lifetime.
@@ -103,19 +105,27 @@ export class TerrainWorld {
   advance(time: number): void {
     this.ensureMutable();
     if (!Number.isFinite(time) || time < 0) throw new Error('Terrain time must be finite and nonnegative.');
-    for (const id of this.candidates) {
-      this.fading.set(id, time);
-      this.emit({ type: 'fade', id, startedAt: time });
-    }
-    this.candidates.clear();
-    for (const [id, startedAt] of this.fading) {
-      if (time < startedAt + ILLUSION.fadeSeconds) continue;
-      this.destroyBody(id);
-      this.fading.delete(id);
-      this.disappeared.add(id);
-      this.emit({ type: 'disappear', id });
-    }
+    const previousTime = this.advanceTime;
+    this.advanceTime = time;
+    try {
+      this.candidates.forEach(this.startFade);
+      this.candidates.clear();
+      this.fading.forEach(this.finishFade);
+    } finally { this.advanceTime = previousTime; }
   }
+
+  private readonly startFade = (id: string): void => {
+    this.fading.set(id, this.advanceTime);
+    if (this.listeners.size > 0) this.emit({ type: 'fade', id, startedAt: this.advanceTime });
+  };
+
+  private readonly finishFade = (startedAt: number, id: string): void => {
+    if (this.advanceTime < startedAt + ILLUSION.fadeSeconds) return;
+    this.destroyBody(id);
+    this.fading.delete(id);
+    this.disappeared.add(id);
+    if (this.listeners.size > 0) this.emit({ type: 'disappear', id });
+  };
 
   subscribe(listener: (event: TerrainEvent) => void): () => void {
     this.ensureMutable();
@@ -232,6 +242,7 @@ export class TerrainWorld {
   private upsert(object: TerrainObject): void {
     const previous = this.objects.get(object.id);
     const body = this.bodies.get(object.id);
+    terrainCollision(object);
     this.objects.set(object.id, object);
     if (body) {
       if (!previous) throw new Error(`Terrain body has no authored object: ${object.id}.`);
@@ -307,8 +318,15 @@ export class TerrainWorld {
   }
 
   private emit(event: TerrainEvent): void {
-    for (const listener of this.listeners) listener(event);
+    const previous = this.emittedEvent;
+    this.emittedEvent = event;
+    try { this.listeners.forEach(this.publishEvent); }
+    finally { this.emittedEvent = previous; }
   }
+
+  private readonly publishEvent = (listener: (event: TerrainEvent) => void): void => {
+    listener(this.emittedEvent!);
+  };
 
   private ensureMutable(): void {
     this.ensureLive();

@@ -143,7 +143,8 @@ function transform(body: Body, out: Transform2): void {
 }
 export function writeRagdollPose(ragdoll: PhysicalRagdoll, out: DeathPose): void {
   transform(ragdoll.torso, out.torso); transform(ragdoll.head, out.head);
-  for (const side of ARM_SIDES) {
+  for (let index = 0; index < ARM_SIDES.length; index++) {
+    const side = ARM_SIDES[index]!;
     const arm = ragdoll.arms[side], pose = out.arms[side];
     endpoint(arm.upper, -1, pose.shoulder); endpoint(arm.upper, 1, pose.elbow);
     endpoint(arm.forearm, 1, pose.hand); pose.hand.angle = arm.forearm.body.getAngle();

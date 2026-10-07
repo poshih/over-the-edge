@@ -290,20 +290,20 @@ export function shapeOutline(shape: ShapeKind): Outline {
   return SHAPE_VERTICES[shape];
 }
 
-function cross(a: Readonly<Point>, b: Readonly<Point>, c: Readonly<Point>): number {
-  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+function cross(a: Readonly<Point>, b: Readonly<Point>, x: number, y: number): number {
+  return (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
 }
 
-function onSegment(a: Readonly<Point>, b: Readonly<Point>, p: Readonly<Point>, tolerance = 1e-10): boolean {
-  const area = cross(a, b, p);
-  return (area === 0 || Math.abs(area) < tolerance) && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) &&
-    p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y);
+function onSegment(a: Readonly<Point>, b: Readonly<Point>, x: number, y: number, tolerance = 1e-10): boolean {
+  const area = cross(a, b, x, y);
+  return (area === 0 || Math.abs(area) < tolerance) && x >= Math.min(a.x, b.x) && x <= Math.max(a.x, b.x) &&
+    y >= Math.min(a.y, b.y) && y <= Math.max(a.y, b.y);
 }
 
 // True when segment ab crosses or overlaps segment cd.
 function segmentsTouch(a: Readonly<Point>, b: Readonly<Point>, c: Readonly<Point>, d: Readonly<Point>): boolean {
-  return (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) ||
-    onSegment(a, b, c) || onSegment(a, b, d) || onSegment(c, d, a) || onSegment(c, d, b);
+  return (cross(a, b, c.x, c.y) * cross(a, b, d.x, d.y) < 0 && cross(c, d, a.x, a.y) * cross(c, d, b.x, b.y) < 0) ||
+    onSegment(a, b, c.x, c.y) || onSegment(a, b, d.x, d.y) || onSegment(c, d, a.x, a.y) || onSegment(c, d, b.x, b.y);
 }
 
 export function polygonArea(vertices: readonly Readonly<Point>[]): number {
@@ -563,29 +563,37 @@ export type PointLocation = 'outside' | 'boundary' | 'inside';
 
 /** Even-odd location; contact queries retain the engine's unit-space edge tolerance, geometric queries pass zero. */
 export function loopsPointLocation(loops: readonly Outline[], p: Readonly<Point>, boundaryTolerance = 1e-10): PointLocation {
+  return loopsLocation(loops, p.x, p.y, boundaryTolerance);
+}
+
+function loopsLocation(loops: readonly Outline[], x: number, y: number, boundaryTolerance: number): PointLocation {
   if (!Number.isFinite(boundaryTolerance) || boundaryTolerance < 0) throw new LevelError('Boundary tolerance must be finite and nonnegative.');
   let inside = false;
-  for (const vertices of loops) {
+  for (let loop = 0; loop < loops.length; loop++) {
+    const vertices = loops[loop]!;
     for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
       const a = vertices[j];
       const b = vertices[i];
-      if (onSegment(a, b, p, boundaryTolerance)) return 'boundary';
-      if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+      if (onSegment(a, b, x, y, boundaryTolerance)) return 'boundary';
+      if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
     }
   }
   return inside ? 'inside' : 'outside';
 }
 
 export function objectPointLocation(object: TerrainObject, position: Readonly<Point>, boundaryTolerance = 1e-10): PointLocation {
-  const local = transformPoint({ x: position.x - object.x, y: position.y - object.y }, { x: 0, y: 0 }, -object.angle);
-  const p = { x: local.x / object.width, y: local.y / object.height };
-  if (Math.abs(p.x) > 0.5 || Math.abs(p.y) > 0.5) return 'outside';
+  const dx = position.x - object.x, dy = position.y - object.y;
+  const cosine = Math.cos(-object.angle), sine = Math.sin(-object.angle);
+  // Preserve transformPoint's origin addition and rounding order.
+  const x = (0 + dx * cosine - dy * sine) / object.width;
+  const y = (0 + dx * sine + dy * cosine) / object.height;
+  if (Math.abs(x) > 0.5 || Math.abs(y) > 0.5) return 'outside';
   const collision = terrainCollision(object);
   if (collision.type === 'circle') {
-    const radiusSquared = p.x ** 2 + p.y ** 2;
+    const radiusSquared = x ** 2 + y ** 2;
     return radiusSquared < 0.25 ? 'inside' : radiusSquared === 0.25 ? 'boundary' : 'outside';
   }
-  return loopsPointLocation(collision.loops, p, boundaryTolerance);
+  return loopsLocation(collision.loops, x, y, boundaryTolerance);
 }
 
 export function objectContains(object: TerrainObject, position: Point): boolean {

@@ -83,6 +83,7 @@ export class Game {
   private pendingLooks = new LookUpdates();
   private deliveringLooks = new LookUpdates();
   private readonly stepMovement: Point = { x: 0, y: 0 };
+  private readonly triggerPosition: Point = { x: 0, y: 0 };
   // This frame's device sum, discarded unless input-enabled physics steps consume it.
   private readonly deviceMovement: Point = { x: 0, y: 0 };
   private readonly pressedSwitches: string[] = [];
@@ -273,7 +274,7 @@ export class Game {
                 interrupted = true;
                 break;
               }
-              this.triggers.update(this.simulation.playerPosition(), this.simulation.time);
+              this.triggers.update(this.simulation.playerPosition(this.triggerPosition), this.simulation.time);
               this.stageSwitches();
               if (this.stopped) return;
               // A trigger or an observer can reset synchronously. Never sample the placement it made.

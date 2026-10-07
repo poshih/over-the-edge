@@ -133,11 +133,15 @@ export function launchPlayer(rig: PlayerRig, settings: LaunchSettings, tuning: R
   return { speed, impulse: mass * delta, mass };
 }
 
+const velocityImpulse = new Vec2();
+
 export function changePlayerVelocity(rig: PlayerRig, delta: Readonly<Point>): void {
   // Each physical body receives this once, even when several visual parts share it.
-  for (const { body } of rig.bodies) {
+  for (let index = 0; index < rig.bodies.length; index++) {
+    const body = rig.bodies[index]!.body;
     const mass = body.getMass();
-    body.applyLinearImpulse(new Vec2(delta.x * mass, delta.y * mass), body.getWorldCenter());
+    velocityImpulse.set(delta.x * mass, delta.y * mass);
+    body.applyLinearImpulse(velocityImpulse, body.getWorldCenter());
   }
 }
 
