@@ -24,10 +24,8 @@ export { BACKDROP, DEFAULT_BACKDROP } from '../backdrop';
 export type { Backdrop, BackdropFactory } from '../backdrop';
 export { AIM_MARKS, DEFAULT_AIM_MARKS } from '../aim-marks';
 export type { AimMarks, AimMarksFactory } from '../aim-marks';
-export { DEFAULT_HURT_EFFECTS, HURT_EFFECTS } from '../hurt-effects';
-export type { HurtEffects, HurtEffectsFactory } from '../hurt-effects';
-export { BLOCK_EFFECTS, DEFAULT_BLOCK_EFFECTS } from '../block-effects';
-export type { BlockEffects, BlockEffectsFactory } from '../block-effects';
+export { DEFAULT_EFFECTS, EFFECT_LIMITS, EFFECTS } from '../effects';
+export type { MomentEffect, MomentEffectFactory } from '../effects';
 export { DEFAULT_DEATH_POSE, DEATH_POSE } from '../death-pose';
 export type {
   DeathAppearance, DeathArmPose, DeathLayout, DeathPose, DeathPoseInput, DeathPoseWriter,
@@ -57,14 +55,14 @@ export type { DeathPlayerFrame, LivePlayerFrame, PlayerFrameState } from '../pla
 export type { PlatformPose } from '../platform-world';
 export type { ProjectilePose } from '../hazard-world';
 export { AXE, axeAngle, BONFIRE, HURT_SOURCES, SHOOTER } from '../hazards';
-export type { HurtCause, HurtSource, ProjectileBlock } from '../hazards';
+export type { HurtCause, HurtSource } from '../hazards';
 export { triggerBounds } from '../level';
 export type { AxeObject, BonfireObject, LevelObject, PlatformObject, PoolObject, ShooterObject, TriggerObject } from '../level';
-export { AUDIO, SILENT_AUDIO_OUTPUT } from '../game-audio';
+export { AUDIO, momentCue, SILENT_AUDIO_OUTPUT } from '../game-audio';
 export type { GameAudio, GameAudioFactory, GameAudioSetup } from '../game-audio';
 export type { AudioDevice } from '../audio-device';
 export { AUDIO_CUES, DEFAULT_AUDIO } from '../audio-settings';
-export type { AudioClip, AudioCue, AudioSettings, GameCue } from '../audio-settings';
+export type { AudioClip, AudioCue, AudioSettings } from '../audio-settings';
 export {
   DEFAULT_MESSAGE_POPUP, DEFAULT_MESSAGE_TOASTS, DEFAULT_MESSAGE_VIDEO, MESSAGES,
 } from '../event-presenter';
@@ -74,7 +72,12 @@ export type {
 export type { EventOutcome, MessageAction, PresentationAction, VideoAction } from '../trigger-events';
 export { EventExecutionError } from '../trigger-events';
 export type { MediaHost, MediaStream } from '../media-host';
-export { EVENTS, GAME_OBSERVER_LIMITS } from '../game-events';
-export type { GameEvent, GameObserver, GameObserverFactory } from '../game-events';
+export { IMPACTS, MOMENT_TYPES } from '../moments';
+export type {
+  BlockMoment, BonfireMoment, DeathMoment, EnemyDefeatMoment, EnemyHitMoment, FallMoment, FinishMoment, HurtMoment,
+  ImpactMoment, LaunchMoment, Moment, MomentOf, MomentStamp, MomentType, PlacedMoment, SoundMoment, TerminalMoment,
+} from '../moments';
+export { GAME_OBSERVER_LIMITS, OBSERVERS } from '../game-observers';
+export type { GameObserver, GameObserverFactory } from '../game-observers';
 export { DEFAULT_INPUT_BINDINGS, INPUT_BINDINGS, INPUT_DEVICES, INPUT_DEVICE_LIMITS } from '../input';
 export type { BindableAction, InputBindings, InputDevice, InputDeviceFactory, InputDeviceHost } from '../input';

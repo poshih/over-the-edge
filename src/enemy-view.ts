@@ -18,6 +18,7 @@ const FRAME_RATE: Readonly<Record<EnemySpecies, number>> = { bird: 8, 'hollow-so
 const PHASE: Readonly<Record<EnemyPhase, number>> = {
   patrol: 0, windup: 1, dive: 2, recover: 3, hurt: 4, dead: 5,
 };
+type MutableEnemyPose = { -readonly [K in keyof EnemyPose]: EnemyPose[K] };
 
 function dynamicAttribute(attribute: InstancedBufferAttribute): InstancedBufferAttribute {
   attribute.setUsage(DynamicDrawUsage);
@@ -36,7 +37,7 @@ function writeVector(attribute: InstancedBufferAttribute, slot: number, value: V
 export class EnemyView implements EnemyLook {
   readonly root = new Group();
   readonly passes = { actors: this.root };
-  private readonly instances = new InstanceSlots<EnemyPose>({ capacity: ENEMY_LIMITS.objects, label: 'Enemy sprite' });
+  private readonly instances = new InstanceSlots<MutableEnemyPose>({ capacity: ENEMY_LIMITS.objects, label: 'Enemy sprite' });
   private art: EnemyArtSettings;
   private atlas: ReturnType<typeof createEnemyAtlas>;
   private readonly geometry = new PlaneGeometry(1, 1);
@@ -218,10 +219,22 @@ export class EnemyView implements EnemyLook {
   }
 
   private upsert(pose: EnemyPose): void {
+    // Drawn poses are borrowed and can change identity next frame. Keep one owned pose per live sprite.
+    let owned = this.instances.get(pose.id);
+    if (owned === undefined) owned = { ...pose };
+    else {
+      owned.species = pose.species;
+      owned.x = pose.x;
+      owned.y = pose.y;
+      owned.facing = pose.facing;
+      owned.phase = pose.phase;
+      owned.changedAt = pose.changedAt;
+      owned.moving = pose.moving;
+    }
     const count = this.instances.size;
-    const slot = this.instances.upsert(pose);
+    const slot = this.instances.upsert(owned);
     if (this.instances.size !== count) this.syncCount();
-    this.writePose(slot, pose);
+    this.writePose(slot, owned);
     this.poseUpdates++;
   }
 
@@ -243,7 +256,14 @@ export class EnemyView implements EnemyLook {
     this.matrix.makeScale(spec.width, spec.height, 1).setPosition(pose.x, pose.y, OBSTACLE_LINE);
     const values = this.mesh.instanceMatrix.array;
     const offset = slot * this.mesh.instanceMatrix.itemSize;
-    if (this.matrix.elements.some((value, index) => Math.fround(value) !== values[offset + index])) {
+    const elements = this.matrix.elements;
+    let changed = false;
+    for (let index = 0; index < elements.length; index++) {
+      if (Math.fround(elements[index]!) === values[offset + index]) continue;
+      changed = true;
+      break;
+    }
+    if (changed) {
       this.mesh.setMatrixAt(slot, this.matrix);
       markInstanceSlot(this.mesh.instanceMatrix, slot);
       this.matrixWrites++;

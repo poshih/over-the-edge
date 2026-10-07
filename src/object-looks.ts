@@ -79,6 +79,7 @@ export interface ProjectileLook {
 export interface EnemyLook {
   readonly passes: LookPasses;
   apply(event: EnemyEvent): void;
+  // The array and its poses are pooled, borrowed until the next frame. Copy individual values kept.
   update(poses: readonly EnemyPose[], time: number): void;
   setArt(art: EnemyArtSettings): void;
   dispose(): void;

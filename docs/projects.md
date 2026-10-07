@@ -6,9 +6,9 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 13**; their release content uses **schema 12**.
-Both embed game settings' death wait and the HUD's death text/fade. Other versions are
-rejected, not converted.
+Project manifests and bundles use **schema 14**; their release content uses **schema 13**.
+Both embed the audio record's `block` cue, game settings' death wait and the HUD's death
+text/fade. Other versions are rejected, not converted.
 
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
 - `GAME_PROJECT=<project> npm run build:game` builds any project into a
@@ -77,7 +77,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
@@ -115,7 +115,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 8, "labels": [], "objects": [] },
@@ -504,8 +504,8 @@ An open Workshop page shows each change within two seconds.
 ## Section reference
 
 **Game settings.** The nested settings schema is **14**, exported in code as
-`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **13**, release content
-**12**, and browser game-settings snapshots **7**. All settings are required and
+`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **14**, release content
+**13**, and browser game-settings snapshots **7**. All settings are required and
 unknown fields or other versions are rejected, with no legacy reader or conversion.
 `death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
 returning at a bonfire, or restarting when none was reached. A death captures this
@@ -626,13 +626,17 @@ separate project settings.
 
 **Audio.** `volume` (master) and each clip's `volume` are 0-1. `music` loops while
 the game runs and pauses with it. Cues: `impact` (hammer strikes, louder when
-faster), `enemy-hit`, `enemy-defeat`, `launch` (Launch player events), `finish`
+faster), `block` (a projectile strikes the hammer head, held or released),
+`enemy-hit`, `enemy-defeat`, `launch` (Launch player events), `finish`
 (Stop timer events), `hurt` (an enemy, trap or lava hurts the player, who survives),
 `death` (health runs out), `fall` (falling out of the level) and `bonfire` (the
 player reaches a bonfire that becomes the place a death returns to; see
 [health and bonfires](../README.md#health-and-bonfires)). Browsers start audio only
 after the player first clicks, taps or presses a key; sounds are fetched ahead of
-time and decoded then. Impact cues reach the output at most once per 70 ms. A game's
+time and decoded then. Impact moments are limited at their source in Simulation to one
+per 70 ms of run time in a placement, before effects, audio or observers receive them.
+Workshop cue tests call the output's `preview` at full strength, without that limit and
+without gameplay moments, even after gameplay stops. A game's
 [runtime audio plugin](runtime-plugins.md#audio) can replace or wrap the output in the
 Workshop, studio previews and releases, for example synthesizing just impacts while
 music and the other cues keep their authored clips. Releases without audio or sound

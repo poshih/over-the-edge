@@ -1,4 +1,5 @@
 import type { HurtCause } from './hazards';
+import type { TerminalMoment } from './moments';
 
 export type DeathKind = 'health' | 'fall';
 
@@ -6,6 +7,11 @@ export type DeathKind = 'health' | 'fall';
 export type DeathInfo =
   | { readonly kind: 'health'; readonly cause: Readonly<HurtCause> }
   | { readonly kind: 'fall' };
+
+// A terminal moment is borrowed until the drain; the active death keeps its own cause.
+export function deathInfo(moment: Readonly<TerminalMoment>): DeathInfo {
+  return moment.type === 'fall' ? { kind: 'fall' } : { kind: 'health', cause: { ...moment.cause } };
+}
 
 // Reused presentation input. The engine owns the fixed-step clock and the return to play.
 export interface DeathFrame {

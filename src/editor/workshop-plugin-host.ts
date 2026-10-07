@@ -526,7 +526,7 @@ export class WorkshopPluginHost {
         live();
         const target = checkInstance<SceneLayer>(SCENE_LAYER_CONTRACT, overlay, { plugin: plugin.id, point: null }, 'invalid-plugin');
         const layer: SceneLayer = {
-          root: overlay.root, pass: overlay.pass,
+          root: overlay.root, pass: target.captured.pass!,
           update: overlay.update === undefined ? undefined : (frame) => {
             if (plugin.stopping) return;
             try {

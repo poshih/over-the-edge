@@ -37,6 +37,8 @@ import type { DeathKind } from './death-sequence';
 import { PlayerDeathError, validateDeathSeed, writeRagdollPose } from './player-ragdoll';
 import { copyDeathPose, createDeathPose, interpolateDeathPose, interpolateTransform } from './player-pose';
 import type { DeathPose, DeathSeed, MutablePlayerFrameState, PlayerFrameState } from './player-pose';
+import { copyCause, impactStrength, IMPACTS } from './moments';
+import type { MomentWriter, TerminalMoment } from './moments';
 
 export interface PartPose extends Point {
   id: string;
@@ -92,6 +94,7 @@ export class Simulation {
   private readonly platforms: PlatformWorld;
   private readonly bonfires: Bonfires;
   private readonly liquids: LiquidWorld;
+  private readonly moments: MomentWriter;
   private level: LevelDefinition;
   private settings: GameSettings;
   // Where the current run started; a rebuilt rig restarts from here.
@@ -114,13 +117,8 @@ export class Simulation {
   // Whether the authored level has hurt sources, so HUD health shows; removed shooters can still have shots in flight.
   private hurts: boolean;
   private readonly healthReading = { current: 0, max: 0 };
-  // Whether a hit hurt the player, who survived it, since takeHurt last looked.
-  private hurtTaken = false;
-  // What dealt the latest hit that took health: reused, and read at once by whoever is given it.
+  // What dealt the latest hit that took health: reused, and copied into hurt/death moments.
   private readonly cause: { -readonly [K in keyof HurtCause]: HurtCause[K] } = { source: 'enemy', id: '', x: 0, y: 0, pushX: 0, pushY: 0 };
-  // Blocks since the last take; storage keeps its high-water capacity.
-  private readonly blocks = { hits: [] as { -readonly [K in keyof ProjectileBlock]: ProjectileBlock[K] }[], count: 0 };
-  private blockCount = 0;
   // How many times the player has been placed: at every restart and every return to a bonfire.
   private placements = 0;
   private disposed = false;
@@ -133,12 +131,14 @@ export class Simulation {
   private readonly velocityScratch = new Vec2();
   private impactTracking = false;
   private headTouching = false;
-  private impactSpeed = 0;
+  private lastImpactAt = -Infinity;
+  private terminalRaised = false;
   // The hammer's own head when it is a library hammer, which overrides the settings' default head; null for the default.
   private hammerHead: HammerHead | null = null;
 
-  constructor(settings: Readonly<GameSettings>, level: LevelDefinition) {
+  constructor(settings: Readonly<GameSettings>, level: LevelDefinition, moments: MomentWriter) {
     this.settings = validateGameSettings(settings);
+    this.moments = moments;
     this.level = level;
     this.spawn = levelSpawn(level);
     this.voidY = this.outOfBoundsY(level);
@@ -157,6 +157,19 @@ export class Simulation {
       canBump: () => !this.dying,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
+      onHit: (id, x, y) => {
+        const moment = this.moments.append('enemy-hit', this.placements, this.elapsed);
+        moment.id = id;
+        moment.x = x;
+        moment.y = y;
+      },
+      onDefeat: (id, x, y, by) => {
+        const moment = this.moments.append('enemy-defeat', this.placements, this.elapsed);
+        moment.id = id;
+        moment.x = x;
+        moment.y = y;
+        moment.by = by;
+      },
       onBump: (delta, enemy, atX, atY) => {
         changePlayerVelocity(this.rig, delta);
         this.hurt(this.settings.physics.bumpDamage, 'enemy', enemy, atX, atY, delta.x, delta.y);
@@ -284,7 +297,6 @@ export class Simulation {
     this.platforms.reset();
     this.enemies.reset(this.elapsed);
     this.hazards.reset(this.elapsed);
-    this.blockCount = this.blocks.count = 0;
     this.bonfires.reset();
   }
 
@@ -323,15 +335,15 @@ export class Simulation {
     return out;
   }
 
-  fellOutOfLevel(): boolean {
+  private fellOutOfLevel(): boolean {
     return this.supported && this.voidY !== null && playerAnchor(this.rig).getPosition().y + RIG.potBottom < this.voidY;
   }
 
-  dead(): boolean {
+  private dead(): boolean {
     return this.health <= 0;
   }
 
-  terminal(): DeathKind | null {
+  private terminal(): DeathKind | null {
     if (this.fellOutOfLevel()) return 'fall';
     return this.dead() ? 'health' : null;
   }
@@ -349,8 +361,6 @@ export class Simulation {
     this.deathTarget.y = origin.y + this.aim.target.y;
     this.rig = beginPlayerDeath(this.world, this.rig, seed, this.settings.physics, this.settings.death);
     this.preparePlayerFixtures();
-    this.hurtTaken = false;
-    this.impactSpeed = 0;
     this.current = this.createPlayerFrame();
     this.previous = this.createPlayerFrame();
     this.interpolated = this.createPlayerFrame();
@@ -366,29 +376,6 @@ export class Simulation {
     return this.healthReading;
   }
 
-  // What dealt a hit that hurt the player, who survived it, since the previous call; null when none did. Reused and
-  // read-only: consume it immediately.
-  takeHurt(): Readonly<HurtCause> | null {
-    const taken = this.hurtTaken;
-    this.hurtTaken = false;
-    return taken ? this.cause : null;
-  }
-
-  // Projectile blocks since the previous take, also during death. The batch, its array and hits are borrowed:
-  // consume the first `count` hits immediately, never retain them. Only a larger batch grows the pool.
-  takeBlocks(): { readonly hits: readonly ProjectileBlock[]; readonly count: number } {
-    this.ensureLive();
-    this.blocks.count = this.blockCount;
-    this.blockCount = 0;
-    return this.blocks;
-  }
-
-  // What dealt the latest hit that took health; after a death, the killing one. Reused and read-only: consume it
-  // immediately.
-  hurtCause(): Readonly<HurtCause> {
-    return this.cause;
-  }
-
   // Brings a fallen player back at the bonfire reached last, healed and unharmed for a moment, holding the hammer as
   // at the start. The run goes on: its clock, best height and level objects carry on. False, changing nothing, when
   // no bonfire has been reached.
@@ -396,24 +383,17 @@ export class Simulation {
     this.ensureLive();
     const bonfire = this.bonfires.currentBonfire();
     if (bonfire === null) return false;
-    this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level)));
+    this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level)), bonfire.id);
     this.safeUntil = this.elapsed + this.settings.physics.respawnInvulnerability;
     return true;
   }
 
-  // Impact sounds need the hammer head's approach speed whenever it starts touching something.
+  // Track head contacts only while audio, effects or observers take impact moments.
   trackImpacts(enabled: boolean): void {
     this.ensureLive();
     this.impactTracking = enabled;
-    this.impactSpeed = 0;
+    this.lastImpactAt = -Infinity;
     this.headTouching = enabled && this.headContactCount() > 0;
-  }
-
-  // The fastest hammer-head impact since the previous call, in m/s; 0 when there was none.
-  takeImpact(): number {
-    const speed = this.impactSpeed;
-    this.impactSpeed = 0;
-    return speed;
   }
 
   launch(settings: LaunchSettings) {
@@ -438,7 +418,8 @@ export class Simulation {
     this.platforms.move(id, to);
   }
 
-  step(pointerDelta: Point): void {
+  // The terminal moment this step raised, borrowed until the frame's journal drain.
+  step(pointerDelta: Point): Readonly<TerminalMoment> | null {
     this.ensureLive();
     if (!Number.isFinite(pointerDelta.x) || !Number.isFinite(pointerDelta.y)) {
       throw new Error('Pointer movement must be finite.');
@@ -485,12 +466,37 @@ export class Simulation {
     this.platforms.afterStep();
     if (!this.dying) this.lagCharacter(rootX, rootY);
     if (!this.dying && !this.supported) this.detectSupport();
+    this.elapsed += PHYSICS.dt;
     if (this.impactTracking && !this.dying) {
       const touching = this.headContactCount() > 0;
-      if (touching && !this.headTouching) this.impactSpeed = Math.max(this.impactSpeed, Math.hypot(approachX, approachY));
+      const speed = Math.hypot(approachX, approachY);
+      if (touching && !this.headTouching && speed >= IMPACTS.minimumSpeed && this.elapsed - this.lastImpactAt >= IMPACTS.interval) {
+        const fixture = this.rig.tool.head.fixture;
+        for (let edge = fixture.getBody().getContactList(); edge; edge = edge.next) {
+          const contact = edge.contact;
+          if (contact.getFixtureA() !== fixture && contact.getFixtureB() !== fixture) continue;
+          if (!contact.isTouching() || !contact.isEnabled()) continue;
+          const manifold = contact.getWorldManifold(this.manifold);
+          if (!manifold || manifold.pointCount === 0) continue;
+          let x = 0, y = 0;
+          for (let index = 0; index < manifold.pointCount; index++) {
+            x += manifold.points[index]!.x;
+            y += manifold.points[index]!.y;
+          }
+          const orientation = contact.getFixtureA() === fixture ? -1 : 1;
+          const moment = this.moments.append('impact', this.placements, this.elapsed);
+          moment.x = x / manifold.pointCount;
+          moment.y = y / manifold.pointCount;
+          moment.normalX = manifold.normal.x * orientation;
+          moment.normalY = manifold.normal.y * orientation;
+          moment.speed = speed;
+          moment.strength = impactStrength(speed);
+          this.lastImpactAt = this.elapsed;
+          break;
+        }
+      }
       this.headTouching = touching;
     }
-    this.elapsed += PHYSICS.dt;
     this.terrain.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
     this.hazards.afterStep(this.elapsed, playerAnchor(this.rig).getPosition());
@@ -502,10 +508,24 @@ export class Simulation {
     if (!this.dying && this.terminal() === null) {
       this.platforms.board(this.rig.potFixture, this.manifold, SUPPORT_NORMAL);
       const foot = this.playerPosition();
-      this.bonfires.update(foot);
+      const bonfire = this.bonfires.update(foot);
+      if (bonfire !== null) {
+        const moment = this.moments.append('bonfire', this.placements, this.elapsed);
+        moment.id = bonfire.id;
+        moment.x = bonfire.x;
+        moment.y = bonfire.y;
+      }
       this.bestHeight = Math.max(this.bestHeight, foot.y);
     }
     this.capture(this.current);
+    if (this.dying || this.terminalRaised) return null;
+    const terminal = this.terminal();
+    if (terminal === null) return null;
+    this.terminalRaised = true;
+    if (terminal === 'fall') return this.moments.append('fall', this.placements, this.elapsed);
+    const moment = this.moments.append('death', this.placements, this.elapsed);
+    copyCause(moment.cause, this.cause);
+    return moment;
   }
 
   frame(alpha: number): PhysicsFrame {
@@ -679,12 +699,12 @@ export class Simulation {
   private resetPlayer(): void {
     this.elapsed = 0;
     this.safeUntil = 0;
-    this.placePlayer(this.spawn);
+    this.placePlayer(this.spawn, null);
     this.bestHeight = Math.max(0, playerAnchor(this.rig).getPosition().y + RIG.potBottom);
   }
 
   // A new player at `spawn`, at full health.
-  private placePlayer(spawn: Readonly<PlayerSpawn>): void {
+  private placePlayer(spawn: Readonly<PlayerSpawn>, bonfire: string | null): void {
     destroyPlayer(this.world, this.rig);
     const geometry = sameRig(this.rig.geometry, this.settings.rig) && sameHammerHead(this.rig.geometry.head, this.settings.rig.head)
       ? this.rig.geometry : rigGeometry(this.settings.rig);
@@ -693,10 +713,9 @@ export class Simulation {
     this.platforms.resetRiders();
     this.supported = false;
     this.headTouching = false;
-    this.impactSpeed = 0;
+    this.lastImpactAt = -Infinity;
+    this.terminalRaised = false;
     this.health = this.settings.physics.health;
-    this.hurtTaken = false;
-    this.blockCount = this.blocks.count = 0;
     this.placements++;
     this.aim = this.initialAim();
     this.lastAimInput = this.elapsed;
@@ -706,6 +725,8 @@ export class Simulation {
     this.interpolated = this.createPlayerFrame();
     this.capture(this.current);
     this.capture(this.previous);
+    const moment = this.moments.append('placed', this.placements, this.elapsed);
+    moment.bonfire = bonfire;
   }
 
   private vulnerable(): boolean {
@@ -713,19 +734,14 @@ export class Simulation {
   }
 
   private block(hit: Readonly<ProjectileBlock>): void {
-    let staged = this.blocks.hits[this.blockCount];
-    if (staged === undefined) {
-      staged = { trap: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0 };
-      this.blocks.hits[this.blockCount] = staged;
-    }
-    staged.trap = hit.trap;
-    staged.x = hit.x;
-    staged.y = hit.y;
-    staged.directionX = hit.directionX;
-    staged.directionY = hit.directionY;
-    staged.normalX = hit.normalX;
-    staged.normalY = hit.normalY;
-    this.blockCount++;
+    const moment = this.moments.append('block', this.placements, this.elapsed);
+    moment.trap = hit.trap;
+    moment.x = hit.x;
+    moment.y = hit.y;
+    moment.directionX = hit.directionX;
+    moment.directionY = hit.directionY;
+    moment.normalX = hit.normalX;
+    moment.normalY = hit.normalY;
   }
 
   // Takes `damage` from the player's health, dealt by the level object `id` striking at (x, y) and knocking the player
@@ -734,13 +750,16 @@ export class Simulation {
     if (damage === 0 || !this.vulnerable()) return;
     this.health = Math.max(0, this.health - damage);
     this.safeUntil = this.elapsed + this.settings.physics.hurtInvulnerability;
-    this.hurtTaken = this.health > 0;
     this.cause.source = source;
     this.cause.id = id;
     this.cause.x = x;
     this.cause.y = y;
     this.cause.pushX = pushX;
     this.cause.pushY = pushY;
+    const moment = this.moments.append('hurt', this.placements, this.elapsed);
+    copyCause(moment.cause, this.cause);
+    moment.health = this.health;
+    moment.max = this.settings.physics.health;
   }
 
   private outOfBoundsY(level: LevelDefinition): number | null {

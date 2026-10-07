@@ -55,7 +55,9 @@ GAME_PLUGINS=games/my-game/plugins.json GAME_PROJECT=projects/my-game npm run bu
 Breaking public contract changes bump `PLUGIN_API_VERSION`; manifests must name the current
 version, without legacy readers or aliases. Version 2 uses the numeric death-pose point and
 phase/attachment rig contexts, enforces synchronous plugin contracts, and gives platform
-looks only changed poses.
+looks only changed poses. It also introduces the stamped gameplay-moment journal,
+`effects.strikes` / `effects.lava` / `effects.extras`, filtered `game.observers`, and the
+audio contract's `moment` / `preview` methods.
 
 A plugin's identity comes from the manifest alone, and facet modules never repeat it. Each host
 tells its facet the ID, as `host.plugin`. The ID names the plugin in errors, keys its Workshop
@@ -66,7 +68,7 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | Facet | Runs in | SDK | For | Virtual module |
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
-| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, hurt and block effects, death pose and screen, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
+| `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, strike, lava and extra effects, death pose and screen, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
 | `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
@@ -152,7 +154,7 @@ one of three types:
   per frame. A wrap runs, and its result is checked, when its point is first resolved.
 
 To extend the engine's audio, use `wrap(AUDIO, previous => ...)`, as the
-[audio example](runtime-plugins.md#synthesizing-one-cue) does: `previous` supplies the engine's
+[audio example](runtime-plugins.md#synthesizing-one-sound) does: `previous` supplies the engine's
 selected base or an earlier plugin's factory.
 Feature-gated defaults, such as the audio director and the phantom look, are reached through
 `wrap`, not imported from the runtime SDK.
@@ -338,22 +340,25 @@ proportional to what is active, including allocation-free checks around active p
 - **Allocate nothing per frame.** `update` runs 60 or more times a second. Reuse vectors,
   matrices, arrays and objects, and write only what changed: a readout compares the frame with
   what it last drew, and a look uploads only the instances it moved.
-- **Never keep borrowed data.** HUD and scene frames, camera inputs/aims, phantom figure frames,
-  gameplay events, audio cues and input-device output are reused: read what you need during the
+- **Never keep borrowed data.** HUD and scene frames, pooled enemy arrays/poses, camera inputs/aims,
+  phantom figure frames, gameplay moments and nested causes, and input-device output are reused: read what you need during the
   call and treat nested references as borrowed. Synchronous contracts must finish in that call;
   returning a promise-like value is `invalid-contribution`, even from a `void` method.
 - **Pay only while active.** A look's `update` runs only while the level has objects of its
   kind, so an unused look costs nothing per frame. The front pass draws only while some look's
   front is visible, so hide yours while it shows nothing. Enemy looks update only with enemies
   in the level, and phantom looks draw only while a figure shows. Scene layers and Workshop
-  overlays without `update` have no per-frame callback; others run only while added. Gameplay
-  observers run only on events, and absent input devices have no polling call.
+  overlays without `update` have no per-frame callback; others run only while added. Effects
+  update only after a routed moment until returning false; observers run only on routed
+  moments, and absent input devices have no polling call. Routes are built once, and the
+  double-buffered journal grows only at a new high-water mark.
 - **Keep callbacks light.** `PROGRESS` runs as each piece of the boot downloads arrives.
-  Audio handles cues and pause/settings changes, not frames. Toasts request frames only while
+  Audio handles moments, explicit previews and pause/settings changes, not frames. Toasts request frames only while
   showing; notices and modal presenters need no idle animation loop.
 - **Stay out of physics.** No plugin code runs inside the physics step or its callbacks.
-  Devices poll before stepping; enemy and bonfire look notifications, audio and gameplay
-  observers flush after the step loop, before rendering. A motion kind's
+  Devices poll before stepping; look updates flush after the step loop, then each moment
+  goes to effects, audio and observers before rendering. Terrain stays synchronous and
+  engine-only. A motion kind's
   `update` and a [rig strategy's](characters.md#rig-strategies) frame phases run every frame:
   allocate nothing there either.
 
@@ -421,8 +426,9 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`camera.director`](runtime-plugins.md#camera-director) | `CAMERA` | `runtime` | Slot, `CameraDirectorFactory` | `DEFAULT_CAMERA_DIRECTOR` |
 | [`scene.backdrop`](runtime-plugins.md#backdrop) | `BACKDROP` | `runtime` | Slot, `BackdropFactory` | `DEFAULT_BACKDROP` |
 | [`scene.aim-marks`](runtime-plugins.md#aim-marks) | `AIM_MARKS` | `runtime` | Slot, `AimMarksFactory` | `DEFAULT_AIM_MARKS`; hidden while dying |
-| [`scene.hurt-effects`](runtime-plugins.md#hurt-effects) | `HURT_EFFECTS` | `runtime` | Slot, `HurtEffectsFactory` | `DEFAULT_HURT_EFFECTS` |
-| [`scene.block-effects`](runtime-plugins.md#block-effects) | `BLOCK_EFFECTS` | `runtime` | Slot, `BlockEffectsFactory` | `DEFAULT_BLOCK_EFFECTS` |
+| [`effects.strikes`](runtime-plugins.md#effects) | `EFFECTS.strikes` | `runtime` | Slot, `MomentEffectFactory` | `DEFAULT_EFFECTS.strikes`: one shared pool for character strikes and hammer blocks |
+| [`effects.lava`](runtime-plugins.md#effects) | `EFFECTS.lava` | `runtime` | Slot, `MomentEffectFactory` | `DEFAULT_EFFECTS.lava` |
+| [`effects.extras`](runtime-plugins.md#effects) | `EFFECTS.extras` | `runtime` | List, 32 `MomentEffectFactory` | None |
 | [`scene.death-pose`](runtime-plugins.md#death-pose) | `DEATH_POSE` | `runtime` | Slot, `DeathPoseWriter` | `DEFAULT_DEATH_POSE` |
 | [`looks.enemies`](runtime-plugins.md#enemy-looks) | `LOOKS.enemies` | `runtime` | Slot, `EnemyLookFactory` | `DEFAULT_LOOKS.enemies` |
 | [`looks.phantoms`](runtime-plugins.md#phantom-looks) | `LOOKS.phantoms` | `runtime` | Slot, `PhantomLookFactory` | `DEFAULT_PHANTOM_LOOK` |
@@ -432,7 +438,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`messages.popup`](runtime-plugins.md#messages) | `MESSAGES.popup` | `runtime` | Slot, `PopupPresenter` | `DEFAULT_MESSAGE_POPUP` |
 | [`messages.video`](runtime-plugins.md#messages) | `MESSAGES.video` | `runtime` | Slot, `VideoPresenter` | `DEFAULT_MESSAGE_VIDEO` |
 | [`messages.death`](runtime-plugins.md#death-screen) | `DEATH_SCREEN` | `runtime` | Slot, `DeathScreenFactory` | `DEFAULT_DEATH_SCREEN` |
-| [`game.events`](runtime-plugins.md#gameplay-events) | `EVENTS` | `runtime` | List, 32 `GameObserverFactory` | None |
+| [`game.observers`](runtime-plugins.md#gameplay-moments) | `OBSERVERS` | `runtime` | List, 32 `GameObserverFactory` | None |
 | [`input.bindings`](runtime-plugins.md#input) | `INPUT_BINDINGS` | `runtime` | Slot, frozen `InputBindings` | `DEFAULT_INPUT_BINDINGS`: r / p / Space / c |
 | [`input.devices`](runtime-plugins.md#input) | `INPUT_DEVICES` | `runtime` | List, 32 `InputDeviceFactory` | None; pointer input remains built in |
 | [`release.notices`](release-plugins.md#notices) | `NOTICES` | `release` | Slot, `NoticesFactory` | `DEFAULT_NOTICES`; studio previews keep the engine default |

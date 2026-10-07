@@ -104,7 +104,7 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
 - **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
-  aim marks, hurt and block effects, death pose and screen, object, enemy and phantom looks,
+  aim marks, strike, lava and extra effects, death pose and screen, object, enemy and phantom looks,
   scene layers, audio, message presentation,
   gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
   studio previews and releases; character choice in releases and studio previews;
@@ -248,8 +248,9 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 13**, and release content **schema 12**,
-including game settings' death wait and the HUD's death text/fade; other versions are rejected.
+Project manifests and bundles use **schema 14**, and release content **schema 13**,
+including the audio record's `block` cue, game settings' death wait and the HUD's death
+text/fade; other versions are rejected.
 
 ### Included full-length course
 
@@ -309,7 +310,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -937,16 +938,18 @@ the obstacle line, behind the player.
 
 Health, lit bonfires and deaths are runtime state: saves and exports keep only the
 authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/projects.md)
-sound them; death/fall arrive at entry, respawn after placement. Both
+sound them; the `block` cue sounds a trap's projectile striking the hammer head.
+`death`/`fall` moments arrive at entry and `placed`
+after placement. The fatal hurt still reaches effects and observers, but has no hurt cue. Both
 [phantom recorders](docs/phantoms.md) stop before the fatal sample: no corpse movement,
 teleport or placement pose becomes a phantom. Reset, replacement, Workshop placement and
 entering Level editing cancel the sequence; incremental edits apply while it continues. A
 game's runtime plugin can draw the [health readout](docs/runtime-plugins.md#hud-readouts) and
 [bonfires](docs/runtime-plugins.md#object-looks) its own way. Each hit says what dealt it, an
 enemy, a trap's projectile, an axe or lava, which level object did, where it struck and how hard
-it knocked the player, so a game's [hurt effects](docs/runtime-plugins.md#hurt-effects) can show
-its own effect for each and its [gameplay observers](docs/runtime-plugins.md#gameplay-events) can
-tell them apart. The engine's sets the character alight while lava burns it, and shows a blade's
+it knocked the player, so a game's [effects](docs/runtime-plugins.md#effects) can show
+its own effect for each and its [gameplay observers](docs/runtime-plugins.md#gameplay-moments) can
+tell them apart. The engine's defaults set the character alight while lava burns it, and show a blade's
 or a projectile's blow where it lands.
 Two independent runtime points replace the [death screen and pose](docs/runtime-plugins.md#death-sequence).
 Fatal lava follows the presented corpse's torso and keeps it alight until placement clears it.
@@ -973,7 +976,8 @@ between burst shots. Projectiles fly straight for up to 40 m. Terrain and elevat
 stop them, and so does the hammer head, which makes the hammer a shield. When the head
 stops one, held or released, the bolt breaks against it in a steel flash with sparks
 glancing off and glowing chips dropping: a game's
-[block effects](docs/runtime-plugins.md#block-effects) can draw that strike its own way.
+[strike effects](docs/runtime-plugins.md#effects) can draw that strike its own way, and the
+authored `block` cue can sound it. Character blows and hammer blocks share one default burst pool.
 Terrain stops them only from outside, so a muzzle set into a wall's face shoots out of it.
 A hit on the character costs the trap's **Damage** and knocks the player along the shot,
 by `projectilePush` (**4 m/s** by default) plus `projectileLift` (**1.5 m/s** upward),

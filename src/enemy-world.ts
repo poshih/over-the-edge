@@ -35,9 +35,16 @@ interface EnemyCallbacks {
   readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
   // A bump: borrowed velocity change, the enemy that dealt it and where they met, in world metres.
   readonly onBump: (velocityChange: Readonly<Point>, enemy: string, atX: number, atY: number) => void;
+  readonly onHit: (enemy: string, x: number, y: number) => void;
+  readonly onDefeat: (enemy: string, x: number, y: number, by: 'hammer' | 'fall') => void;
 }
 
 const ENEMY_FRICTION = 0.15;
+type MutableEnemyPose = { -readonly [K in keyof EnemyPose]: EnemyPose[K] };
+
+function emptyPose(): MutableEnemyPose {
+  return { id: '', species: 'bird', x: 0, y: 0, facing: 'right', phase: 'patrol', changedAt: 0, moving: false };
+}
 
 function distanceSquared(a: Readonly<Point>, b: Readonly<Point>): number {
   return (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
@@ -67,6 +74,10 @@ export class EnemyWorld {
   private readonly bumpVelocity: Point = { x: 0, y: 0 };
   private readonly zero = new Vec2();
   private readonly manifold = new WorldManifold();
+  private readonly framePool = Array.from({ length: ENEMY_LIMITS.objects }, emptyPose);
+  private readonly framePosePool = Array.from({ length: ENEMY_LIMITS.objects + 1 }, (_, count) => this.framePool.slice(0, count));
+  private frameAlpha = 1;
+  private frameCount = 0;
   private queryPosition: Point | null = null;
   private time = 0;
   private nextBumpAt = 0;
@@ -200,7 +211,10 @@ export class EnemyWorld {
       record.lastHitAt = time;
       record.health--;
       if (record.health === 0) this.defeat(record, 'hammer');
-      else this.transition(record, 'hurt');
+      else {
+        this.transition(record, 'hurt');
+        this.callbacks.onHit(record.object.id, record.current.x, record.current.y);
+      }
     }
     for (const record of this.obstacles) {
       if (record.health === 0) continue;
@@ -223,12 +237,20 @@ export class EnemyWorld {
     }
   }
 
+  // The array and every pose are pooled and borrowed until the next frame().
   frame(alpha: number): readonly EnemyPose[] {
     this.ensureLive();
-    const poses: EnemyPose[] = [];
-    for (const record of this.active) poses.push(this.pose(record, alpha));
-    return poses;
+    this.frameAlpha = alpha;
+    this.frameCount = 0;
+    this.active.forEach(this.writeFramePose);
+    return this.framePosePool[this.frameCount]!;
   }
+
+  // A cached visitor also avoids creating a Set iterator on each drawn frame.
+  private readonly writeFramePose = (record: EnemyRecord): void => {
+    const pose = this.framePool[this.frameCount++]!;
+    this.writePose(record, pose, this.frameAlpha);
+  };
 
   subscribe(listener: (event: EnemyEvent) => void): () => void {
     this.ensureMutable();
@@ -500,6 +522,7 @@ export class EnemyWorld {
     this.destroyCollider(record);
     this.dying.add(record);
     this.emit({ type: 'upsert', pose: this.pose(record) });
+    this.callbacks.onDefeat(record.object.id, record.current.x, record.current.y, reason);
   }
 
   private createRecord(object: EnemyObject): EnemyRecord {
@@ -591,15 +614,22 @@ export class EnemyWorld {
     return record.body;
   }
 
-  private pose(record: EnemyRecord, alpha = 1): EnemyPose {
+  private pose(record: EnemyRecord): EnemyPose {
+    const pose = emptyPose();
+    this.writePose(record, pose, 1);
+    return pose;
+  }
+
+  private writePose(record: EnemyRecord, pose: MutableEnemyPose, alpha: number): void {
     const velocity = this.active.has(record) ? this.body(record).getLinearVelocity() : null;
-    return {
-      id: record.object.id, species: record.object.species,
-      x: record.previous.x + (record.current.x - record.previous.x) * alpha,
-      y: record.previous.y + (record.current.y - record.previous.y) * alpha, facing: record.facing,
-      phase: record.phase, changedAt: record.changedAt,
-      moving: velocity !== null && Math.hypot(velocity.x, velocity.y) > ENEMY_BEHAVIOR.movingSpeed,
-    };
+    pose.id = record.object.id;
+    pose.species = record.object.species;
+    pose.x = record.previous.x + (record.current.x - record.previous.x) * alpha;
+    pose.y = record.previous.y + (record.current.y - record.previous.y) * alpha;
+    pose.facing = record.facing;
+    pose.phase = record.phase;
+    pose.changedAt = record.changedAt;
+    pose.moving = velocity !== null && Math.hypot(velocity.x, velocity.y) > ENEMY_BEHAVIOR.movingSpeed;
   }
 
   private emit(event: EnemyEvent): void {

@@ -34,6 +34,10 @@ export interface Attributed<T> {
   readonly value: T;
 }
 
+export interface CheckedInstance<T extends object> extends Attributed<T> {
+  readonly captured: Readonly<Partial<T>>;
+}
+
 export function attributed<T>(plugin: string | null, point: string | null, value: T): Attributed<T> {
   return Object.freeze({ plugin, point, value });
 }
@@ -71,6 +75,8 @@ export interface InstanceContract {
   readonly optional?: readonly string[];
   readonly root?: true;
   readonly passes?: readonly string[];
+  // Read once with attribution. When given, check receives these captured members (and pass), not the instance.
+  readonly capture?: readonly string[];
   readonly check?: (value: object) => boolean;
 }
 
@@ -80,6 +86,7 @@ export function instanceContract(contract: InstanceContract): InstanceContract {
     methods: Object.freeze([...contract.methods]),
     ...(contract.optional === undefined ? {} : { optional: Object.freeze([...contract.optional]) }),
     ...(contract.passes === undefined ? {} : { passes: Object.freeze([...contract.passes]) }),
+    ...(contract.capture === undefined ? {} : { capture: Object.freeze([...contract.capture]) }),
   });
 }
 
@@ -87,10 +94,14 @@ export function isObject3D(value: unknown): boolean {
   return typeof value === 'object' && value !== null && Reflect.get(value, 'isObject3D') === true;
 }
 
+const EMPTY_CAPTURED: Record<string, unknown> = Object.freeze({});
+
 export function checkInstance<T extends object>(contract: InstanceContract, value: unknown,
   source: Pick<Attributed<unknown>, 'plugin' | 'point'>,
-  code: 'invalid-contribution' | 'invalid-plugin' = 'invalid-contribution'): Attributed<T> {
+  code: 'invalid-contribution' | 'invalid-plugin' = 'invalid-contribution'): CheckedInstance<T> {
   let valid = false;
+  const captured = contract.passes === undefined && contract.capture === undefined
+    ? EMPTY_CAPTURED : Object.create(null) as Record<string, unknown>;
   try {
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       valid = contract.methods.every((method) => typeof Reflect.get(value, method) === 'function') &&
@@ -101,18 +112,30 @@ export function checkInstance<T extends object>(contract: InstanceContract, valu
       if (valid && contract.root) {
         valid = isObject3D(Reflect.get(value, 'root'));
       }
-      if (valid && contract.passes !== undefined) valid = contract.passes.includes(Reflect.get(value, 'pass') as string);
-      if (valid && contract.check !== undefined) valid = contract.check(value);
+      if (valid && contract.passes !== undefined) {
+        const pass: unknown = Reflect.get(value, 'pass');
+        captured.pass = pass;
+        valid = contract.passes.includes(pass as string);
+      }
+      if (valid && contract.capture !== undefined) {
+        for (const member of contract.capture) {
+          if (!Object.hasOwn(captured, member)) captured[member] = Reflect.get(value, member);
+        }
+      }
+      if (valid && contract.check !== undefined) valid = contract.check(contract.capture === undefined ? value : captured);
     }
   } catch (error) {
     throw pluginFailure(error, source.plugin, source.point, 'create');
   }
   if (!valid) throw invalidResult(source, `must return ${contract.returns}`, code);
-  return attributed(source.plugin, source.point, value as T);
+  return Object.freeze({
+    plugin: source.plugin, point: source.point, value: value as T,
+    captured: Object.freeze(captured) as Readonly<Partial<T>>,
+  });
 }
 
 export function createInstance<T extends object>(contract: InstanceContract, source: Attributed<unknown>,
-  create: () => unknown): Attributed<T> {
+  create: () => unknown): CheckedInstance<T> {
   let value: unknown;
   try { value = create(); } catch (error) {
     throw pluginFailure(error, source.plugin, source.point, 'create');

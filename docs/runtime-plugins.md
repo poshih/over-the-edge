@@ -1,7 +1,7 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, hurt and block effects, death pose and screen, object,
+camera following, backdrop, aim marks, strike, lava and extra effects, death pose and screen, object,
 enemy and phantom looks, scene layers, audio, event messages, gameplay observers, key bindings
 and additional input devices; character choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
@@ -35,7 +35,7 @@ export default defineRuntime({
 - `start` returns its contributions at once; it cannot wait for anything. Keep the session's
   state in its closures and in the factories' own.
 - The engine resolves each point once per session and keeps direct references to its factories
-  and presenters; it never resolves a point on a frame or a cue.
+  and presenters; it never resolves a point on a frame or a moment.
 
 `start`, wrapping functions, factories and every runtime instance method are synchronous.
 Returning a promise-like value, including from a `void` method or optional `inspect`, is
@@ -445,201 +445,89 @@ const dot: AimMarksFactory = theme => {
 export default defineRuntime({ start: () => [replace(AIM_MARKS, dot)] });
 ```
 
-## Hurt effects
+## Effects
 
-`HURT_EFFECTS`, the slot `scene.hurt-effects`, holds a `HurtEffectsFactory`,
-`() => HurtEffects`: what shows when something hurts the character, by what did, where and how hard.
+All effects consume the same [gameplay moments](#gameplay-moments), but can be replaced piece by
+piece. Each point holds a `MomentEffectFactory`, `() => MomentEffect`:
+
+| Point | Type | Engine base |
+| --- | --- | --- |
+| `EFFECTS.strikes` (`effects.strikes`) | Slot | `DEFAULT_EFFECTS.strikes`: one shared burst pool for character strikes and hammer blocks |
+| `EFFECTS.lava` (`effects.lava`) | Slot | `DEFAULT_EFFECTS.lava`: fire while lava burns the character |
+| `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes and lava in manifest order |
 
 ```ts
-interface HurtEffects {
+interface MomentEffect {
   readonly root: Object3D;
-  hurt(cause: Readonly<HurtCause>, fatal: boolean): void;
-  clear(): void;
+  readonly pass: ScenePass; // 'course' | 'actors' | 'marks'
+  readonly moments?: readonly MomentType[];
+  moment(moment: Moment): void;
   update(frame: SceneFrame): boolean;
   dispose(): void;
 }
-
-interface HurtCause {
-  readonly source: HurtSource; // 'enemy' | 'projectile' | 'axe' | 'lava'
-  readonly id: string;
-  readonly x: number;      // where it struck, in world metres
-  readonly y: number;
-  readonly pushX: number;  // the velocity it knocked the player with, in m/s
-  readonly pushY: number;
-}
 ```
 
-- `hurt` takes each hit that cost health, `fatal` for the killing one. `cause.source` says what
-  dealt it, an enemy's bump, a trap's projectile, an axe's blade or lava (swamp never hurts), and
-  `cause.id` names the level object that did: the enemy, the trap that fired the projectile, the
-  axe or the pool. `x` and `y` are where it struck: midway between the enemy and the pot, where
-  the projectile's path entered the character, the middle of where the blade met the character,
-  or the character's centre in lava. `pushX` and `pushY` are the velocity the hit added to the
-  player, along the shot, away from the blade or the enemy and upward; lava pushes nothing. A hit
-  lands at most once a second, as the character is then unharmed for a while, so lava burns once
-  a second while the pot stays in it.
-- `clear` follows every placement of the player anew, a restart or a return to a bonfire: end what
-  follows the character. The killing hit arrives at death entry; the return and `clear` follow
-  after the [death sequence](#death-sequence). What shows where a blow landed, at the cause's
-  `x` and `y`, can play on.
-- `update` runs on each drawn frame from a `hurt` or a `clear` until it returns `false`, and then
-  not again until the next one, so an idle point costs nothing. It receives the borrowed
-  [`SceneFrame`](#scene-layers): the drawn time, which a restart rewinds, and the character's
-  physical `parts` and typed `player` phase. Use `player.centre` in either phase, or
-  `player.presented.torso` while dying to follow the corpse as drawn. There is no `root`
-  part during a ragdoll death. Return `true` while anything still shows;
-  anything else than a boolean is an error.
+- `root`, `pass`, the filter and methods stay fixed for the effect's lifetime. An absent
+  `moments` filter takes every type; a supplied filter is a **non-empty** array of known
+  `MOMENT_TYPES`, without repeats. Invalid filters fail at creation. Include `placed` if the
+  effect needs to end or reset at placement.
+- `moment` runs in journal order, after the frame's physics steps and look updates, never
+  inside physics. Moments and nested causes are borrowed for this call only: copy scalar
+  fields you keep. Every hit that took health arrives, including the killing one
+  (`health === 0`); blocks also arrive while dying.
+- Effects receive only moments stamped with the **current** player placement, checked live
+  at each moment, not the placement at the start of the batch. Audio and observers still
+  receive superseded moments as history. `placed` reaches effects at most once.
+- A reset during a delivery callback appends to the next batch. Before drawing, the engine
+  catches effects up with that new placement's pending `placed`, without draining it:
+  audio and observers receive it in the next drain, and effects skip its duplicate.
+  A reset inside one effect's `moment` can leave later effects receiving that superseded
+  moment; the pre-draw placement catch-up follows before anything is drawn.
+- After a moment, `update` runs each drawn frame until it returns `false`; only active effects
+  update, after scene layers. It receives the borrowed [`SceneFrame`](#scene-layers), unaffected
+  by Workshop character previews. Return a boolean, `true` while anything still shows.
+  Reuse geometry, materials and scratch; allocate nothing in either method.
+- End/reset at `placed`, **not when time moves backward**. A new run rewinds the clock, but
+  the first resumed frame may interpolate one physics step backward too. Clamp ages and
+  time steps at zero, such as `Math.max(0, frame.time - born)`.
+- Roots draw in the selected pass and detach before `dispose`. Collider visuals belong on
+  `OBSTACLE_LINE` in actors. **Marks materials ignore depth (`depthTest: false`)** and should
+  use `depthWrite: false`, over the characters and arms but under the tool. Follow the
+  [pass rules](#pass-rules-for-presentation-points); effects never mutate physics or authored data.
 
-`hurt` and `clear` arrive with the [gameplay events](#gameplay-events), after the frame's physics
-steps and before the frame is drawn, in the order they happened; never inside a physics step. The
-cause is borrowed: copy its fields to keep them. The root draws in **marks**, over the characters
-and their arms, under the tool, so **all its materials must ignore depth (`depthTest: false`)**,
-as the [pass rules](#pass-rules-for-presentation-points) require. Reuse geometry, materials and
-scratch, and allocate nothing on a frame. The engine detaches the root before `dispose`.
+**Default strikes.** `DEFAULT_EFFECTS.strikes` draws in marks and takes `hurt`, `block` and
+`placed`. An axe leaves a cold steel flash and glint, a ring rushing outward, a bright bowed
+slash and sparks thrown with the blow, cooling as they slow and fall. A projectile hitting
+the character leaves a hot flash and ring, back-spray and glowing chips that tumble away.
+Enemy bumps show nothing more.
 
-`DEFAULT_HURT_EFFECTS` shows:
+A projectile blocked by the head, held or released, instead leaves a cold white-steel flash,
+glint and ring six centimetres off the contact along its outward normal, on the obstacle line.
+Sparks glance off along the reflected flight `r = d - 2 * (d · n) * n`, fanned toward that
+normal and cooling to blue-grey; the bolt's chips drop from the strike. Both character hits
+and blocks share **one four-burst instanced pool**, geometry, materials and scratch, with no
+textures or frame allocations. The newest pending blow replaces the oldest when full, whatever
+its kind. Blows stay where they landed and can finish after a checkpoint return. A new run's
+`placed { bonfire: null }` ends active bursts and drops pending ones.
 
-- **Lava:** the character alight while it burns: tongues of flame shaded from turbulence rising
-  through them and warped by itself, deep red to a white-hot core, that lick up the character,
-  bend away from its motion and flare at each burn, with embers rising from it, smoke above it and
-  a flickering glow about it. Each burn keeps the fire going a little over a second; then the
-  flames die down and the last embers and smoke finish rising. Embers and smoke each live their
-  own life from where they were born, so a later burn grows the flames again from where they are
-  and starts new embers and smoke at the character, without anything appearing mid-flight.
-  A fatal lava burn keeps the corpse alight until placement clears it, without further damage.
-- **An axe:** where the blade struck, a cold steel flash with a glint, a ring rushing outward, a
-  bright slash across the character bowed the way the blow knocks it, and a spray of sparks
-  thrown that way, cooling from white through orange to red as they slow and fall.
-- **A projectile:** where it struck, a hot flash and ring, sparks sprayed back from the impact and
-  on along its flight, and the burning bolt broken into glowing chips that tumble away.
+**Default lava.** `DEFAULT_EFFECTS.lava` draws in marks and takes `hurt` and `placed`.
+Lava burns kindle turbulent tongues of flame, deep red to white-hot, bending away from motion
+and flaring at each burn, with embers, smoke and a flickering glow. Each burn keeps the fire
+going a little over a second; when burns stop, the flames die down and the last particles finish
+rising from where they were born. A fatal lava burn keeps the corpse alight until **any**
+`placed` puts it out. Live fire follows `player.centre`; dying fire follows
+`player.presented.torso`. Replacing lava does not change strikes, and replacing strikes does
+not change lava.
 
-Blows play out where they landed, also when a death returns the player to a bonfire. Enemy bumps
-show nothing more. It all needs no textures, draws only while something shows and allocates
-nothing on a frame.
-
-To keep the engine's effects and add one of your own, wrap the point and forward every hit to the
-base. This adds a flash where an enemy bumps the character:
-
-```ts
-import { CircleGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
-import { defineRuntime, HURT_EFFECTS, wrap } from '../../src/plugins/runtime-sdk';
-import type { HurtEffectsFactory } from '../../src/plugins/runtime-sdk';
-
-const withBumpFlash = (previous: HurtEffectsFactory): HurtEffectsFactory => () => {
-  const base = previous();
-  const flash = new Mesh(new CircleGeometry(0.5, 24),
-    new MeshBasicMaterial({ color: 0xffffff, transparent: true, depthTest: false, depthWrite: false }));
-  flash.visible = false;
-  const root = new Group().add(base.root, flash);
-  // When the flash started; a new one starts on the next drawn frame.
-  let start: number | null = null;
-  let pending = false;
-  return {
-    root,
-    hurt(cause, fatal) {
-      base.hurt(cause, fatal);
-      if (cause.source !== 'enemy') return;
-      // Copy what is kept: the cause is borrowed.
-      flash.position.set(cause.x, cause.y, 1);
-      pending = true;
-    },
-    clear() {
-      base.clear();
-    },
-    update(frame) {
-      const showing = base.update(frame);
-      if (pending) { pending = false; start = frame.time; }
-      if (start === null) return showing;
-      const age = frame.time - start;
-      flash.material.opacity = Math.max(0, 0.6 - age * 2);
-      flash.visible = age >= 0 && age < 0.3;
-      if (!flash.visible) start = null;
-      return showing || flash.visible;
-    },
-    dispose() {
-      base.dispose();
-      flash.geometry.dispose();
-      flash.material.dispose();
-    },
-  };
-};
-
-export default defineRuntime({ start: () => [wrap(HURT_EFFECTS, withBumpFlash)] });
-```
-
-To draw one source your own way and keep the others, wrap the point the same way but leave that
-source's hits out of what you forward to the base. Replace the point instead to draw every cause
-your own way. The same causes reach [gameplay observers](#gameplay-events) on `hurt` and `death`,
-for sounds or scores of a game's own.
-
-## Block effects
-
-`BLOCK_EFFECTS`, the slot `scene.block-effects`, holds a `BlockEffectsFactory`,
-`() => BlockEffects`: what shows where a projectile strikes the hammer head, independently
-of the character's [hurt effects](#hurt-effects).
-
-```ts
-interface BlockEffects {
-  readonly root: Object3D;
-  block(hit: Readonly<ProjectileBlock>): void;
-  update(frame: SceneFrame): boolean;
-  dispose(): void;
-}
-
-interface ProjectileBlock {
-  readonly trap: string;        // the ID of the trap that fired the projectile
-  readonly x: number;           // where the bolt struck the head, in world metres
-  readonly y: number;
-  readonly directionX: number;  // the projectile's unit flight direction
-  readonly directionY: number;
-  readonly normalX: number;     // the head's outward unit surface normal there
-  readonly normalY: number;
-}
-```
-
-- `block` receives each projectile stopped by the hammer head, whether held or released.
-  It runs after the frame's physics steps and before drawing, once per block, including
-  during death and while the character is unharmed. A projectile that hurt the character
-  first is not also a block. Terrain and platform stops do not call this point.
-  `hit` is borrowed: copy the scalar fields you keep. Pending blocks from a superseded
-  player placement, restart or replacement level are dropped before delivery.
-- `update` runs on each drawn frame from a `block` until it returns `false`, then not again
-  until the next block, so an idle point costs nothing. It receives the borrowed
-  [`SceneFrame`](#scene-layers), reused by the engine; return `true` while anything still
-  shows. Anything else than a boolean is an error.
-- There is no `clear`: blocks stay where they struck, not on the character or hammer,
-  and can finish when the player returns to a bonfire. A restart rewinds `frame.time`;
-  end the bursts when time moves backward.
-
-The root draws in **marks**, over the characters and their arms, **under the tool**, held
-or released. **All its materials must use `depthTest: false`**; `depthWrite: false` leaves
-the depth shared by arms and tool alone, as the [pass rules](#pass-rules-for-presentation-points)
-require. Reuse geometry, materials and scratch; allocate nothing on a block or drawn frame.
-The engine detaches the root before `dispose`. This is presentation only: it changes
-neither health nor the hammer's motion, and adds no gameplay event or audio cue.
-
-`DEFAULT_BLOCK_EFFECTS` shows a projectile-sized **cold white-steel flash**, a glint and
-a small ring, six centimetres off the contact point along the outward normal, on the
-obstacle line. Sparks glance off the head along the reflected flight
-`r = d - 2 * (d · n) * n`, fanned toward the outward normal, cooling to dim blue-grey as
-they slow and fall. The burning bolt breaks into glowing chips that drop from the strike.
-It reads differently from the hot orange flash and back-spray of a character hit.
-
-The default shares the instanced burst implementation and shader sources with the hurt
-effects, but owns a separate root and four-burst pool. The oldest is replaced when full,
-so a three-shot burst shows each block. It needs no textures, reuses its geometry,
-materials and scratch, allocates nothing per block or frame, and hides its root while idle.
-A rewound drawn time ends the old bursts before newly delivered blocks start.
-
-To keep the engine's effect and add one of your own, wrap the point and forward every
-method. This adds a short blue ring at the strike:
+To add a ring to the default strikes, wrap the factory and forward every method, keeping its
+pass and filter (the default includes `block` and `placed`):
 
 ```ts
 import { Group, Mesh, MeshBasicMaterial, RingGeometry } from 'three';
-import { BLOCK_EFFECTS, defineRuntime, wrap } from '../../src/plugins/runtime-sdk';
-import type { BlockEffectsFactory } from '../../src/plugins/runtime-sdk';
+import { defineRuntime, EFFECTS, OBSTACLE_LINE, wrap } from '../../src/plugins/runtime-sdk';
+import type { MomentEffectFactory } from '../../src/plugins/runtime-sdk';
 
-const withRing = (previous: BlockEffectsFactory): BlockEffectsFactory => () => {
+const withRing = (previous: MomentEffectFactory): MomentEffectFactory => () => {
   const base = previous();
   const ring = new Mesh(new RingGeometry(0.12, 0.16, 32),
     new MeshBasicMaterial({ color: 0xa8d9ff, transparent: true, depthTest: false, depthWrite: false }));
@@ -647,25 +535,27 @@ const withRing = (previous: BlockEffectsFactory): BlockEffectsFactory => () => {
   const root = new Group().add(base.root, ring);
   let start: number | null = null;
   let pending = false;
-  let lastTime = 0;
   return {
-    root,
-    block(hit) {
-      base.block(hit);
-      // Copy what is kept: the hit is borrowed.
-      ring.position.set(hit.x + hit.normalX * 0.06, hit.y + hit.normalY * 0.06, 0);
-      pending = true;
+    root, pass: base.pass, moments: base.moments,
+    moment(moment) {
+      base.moment(moment);
+      if (moment.type === 'placed' && moment.bonfire === null) {
+        start = null;
+        pending = false;
+        ring.visible = false;
+      } else if (moment.type === 'block') {
+        ring.position.set(moment.x + moment.normalX * 0.06, moment.y + moment.normalY * 0.06, OBSTACLE_LINE);
+        pending = true;
+      }
     },
     update(frame) {
       const showing = base.update(frame);
-      if (frame.time < lastTime) { start = null; pending = false; }
-      lastTime = frame.time;
       if (pending) { pending = false; start = frame.time; }
-      if (start === null) { ring.visible = false; return showing; }
-      const age = frame.time - start;
+      if (start === null) return showing;
+      const age = Math.max(0, frame.time - start);
       ring.scale.setScalar(1 + age * 4);
       ring.material.opacity = Math.max(0, 1 - age / 0.25);
-      ring.visible = age >= 0 && age < 0.25;
+      ring.visible = age < 0.25;
       if (!ring.visible) start = null;
       return showing || ring.visible;
     },
@@ -677,11 +567,53 @@ const withRing = (previous: BlockEffectsFactory): BlockEffectsFactory => () => {
   };
 };
 
-export default defineRuntime({ start: () => [wrap(BLOCK_EFFECTS, withRing)] });
+export default defineRuntime({ start: () => [wrap(EFFECTS.strikes, withRing)] });
 ```
 
-Replace the point instead to draw every block your own way. Replacing it does not
-change the character's hurt effects or how projectiles are stopped.
+An independent enemy-hit spark belongs in the extras list, not in a new channel:
+
+```ts
+import { CircleGeometry, Mesh, MeshBasicMaterial } from 'three';
+import { add, defineRuntime, EFFECTS, OBSTACLE_LINE } from '../../src/plugins/runtime-sdk';
+import type { MomentEffectFactory } from '../../src/plugins/runtime-sdk';
+
+const enemySpark: MomentEffectFactory = () => {
+  const spark = new Mesh(new CircleGeometry(0.2, 16),
+    new MeshBasicMaterial({ color: 0xffdb8a, transparent: true, depthTest: false, depthWrite: false }));
+  spark.visible = false;
+  let start: number | null = null;
+  let pending = false;
+  return {
+    root: spark, pass: 'marks', moments: ['enemy-hit', 'placed'],
+    moment(moment) {
+      if (moment.type === 'placed') {
+        start = null;
+        pending = false;
+        spark.visible = false;
+      } else if (moment.type === 'enemy-hit') {
+        spark.position.set(moment.x, moment.y, OBSTACLE_LINE);
+        pending = true;
+      }
+    },
+    update(frame) {
+      if (pending) { pending = false; start = frame.time; }
+      if (start === null) return false;
+      const age = Math.max(0, frame.time - start);
+      spark.material.opacity = Math.max(0, 1 - age / 0.2);
+      spark.visible = age < 0.2;
+      if (!spark.visible) start = null;
+      return spark.visible;
+    },
+    dispose() { spark.geometry.dispose(); spark.material.dispose(); },
+  };
+};
+
+export default defineRuntime({ start: () => [add(EFFECTS.extras, enemySpark)] });
+```
+
+Replace a slot to draw it entirely your own way; wrap to keep selected default moments, and
+add extras to leave both slots alone. Their filters also determine whether visual consumers
+need impact tracking.
 
 ## Death sequence
 
@@ -756,8 +688,8 @@ The [phantom recorders](phantoms.md) are interrupted at entry, before the termin
 Neither dying steps nor the teleport or placement pose is sampled; capture resumes on a
 subsequent live step. Incremental level edits apply without ending the sequence. Reset,
 level replacement, Workshop placement/play-from-here, entering Level editing and disposal
-cancel it, with no automatic `respawn` from cancellation. A rig rebuild is an ordinary
-restart. There is no wall-clock timeout or deferred completion callback to survive a
+cancel it. New-run placements emit `placed { bonfire: null }`; a checkpoint return carries
+its bonfire ID. There is no separate automatic return notification. There is no wall-clock timeout or deferred completion callback to survive a
 cancellation.
 
 Two independent runtime slots replace the presentation without taking over its clock:
@@ -777,7 +709,7 @@ interface DeathFrame {
 }
 ```
 
-`cause` is the killing hit, as for [hurt effects](#hurt-effects). Copy its fields to keep
+`cause` is the killing hit, as for [gameplay moments](#gameplay-moments). Copy its fields to keep
 them, and never retain a frame. Reduced motion is captured at entry: the defaults show the
 static dead appearance and text immediately, but keep the same total wait.
 
@@ -941,14 +873,17 @@ interface EnemyLook {
 `DEFAULT_LOOKS.enemies` creates `EnemyView`, the engine's shared atlas and instanced sprites,
 including animation, windup, hurt and death effects. The game forwards simulation membership
 events to `apply`: `reset` with every pose, `upsert` with one pose and `remove` with an ID.
-A surviving hammer hit publishes one `upsert` when the enemy enters hurt, so the look, the
-`enemy-hit` cue and gameplay observers all receive the hit. Hit cooldown and contact
-deduplication still apply; notifications are raised only for accepted hits.
+A surviving hammer hit publishes an `upsert` and an `enemy-hit` moment at every accepted
+hit, even when the enemy was already hurt. The cue and gameplay observers consume that
+moment, not a diff of look phases. Hit cooldown and contact deduplication still apply.
 These notifications are staged and applied in order after the frame's step loop, before audio,
 gameplay observers and rendering; the look never runs inside physics. Event envelopes are reused
 and read-only: consume them during `apply`, never retain them.
 `update` receives only the active poses and simulation seconds, **only while the level has
-enemies**; sleeping sprites remain from `apply`. `setArt` receives the project's pixel-art
+enemies**; sleeping sprites remain from `apply`. **The array and every drawn pose are pooled,
+borrowed until the next frame**: copy individual fields into your own state if needed later,
+never retain a pose or the array as a snapshot. The default look keeps its own poses for
+sleeping sprites, compaction and art changes. `setArt` receives the project's pixel-art
 settings when they change. `inspect`, optional, appears in the rendering diagnostics' `enemies`.
 
 Collider visuals stand on `OBSTACLE_LINE` and draw in **actors**, never hidden by terrain.
@@ -1068,7 +1003,8 @@ Factories, `update` and optional `dispose` finish synchronously: a promise-like 
 `invalid-contribution`. This also applies to the Workshop's overlay `update` and `dispose`.
 `SceneFrame` is one reused, read-only view of the simulation at the drawn time, unaffected by
 a temporary character presentation preview. `time` is simulation seconds and rewinds on a
-restart; all member references are borrowed. Read during the call, never keep the frame as a
+restart; all member references are borrowed. In particular, `enemies` and its poses are pooled
+until the next frame, also in Workshop previews. Read during the call, never keep the frame as a
 previous snapshot, allocate nothing and update changed objects only.
 
 `player.phase` is `'alive'`, `'dying-rigid'` or `'dying-ragdoll'`. All expose `centre`;
@@ -1076,7 +1012,7 @@ live frames expose `shoulder`, and death frames expose the interpolated physical
 captured `layout` and `headFacing`, and the death writer's `presented` appearance, including
 its facial quaternion and sprite brightness. Use these
 typed phases rather than searching for a `root` part: ragdolls have no live root.
-`parts` still describe physics and collision, not authored death-pose changes. Hurt effects
+`parts` still describe physics and collision, not authored death-pose changes. Effects
 use this same frame; fatal lava follows `player.presented.torso` until placement.
 
 Layers obey the [obstacle-line and pass rules](#pass-rules-for-presentation-points): collider
@@ -1125,7 +1061,8 @@ interface GameAudioSetup {
 }
 
 interface GameAudio {
-  handle(cue: GameCue): void;
+  moment(moment: Moment): void;
+  preview(cue: AudioCue): void;
   setPaused(paused: boolean): void;
   setSettings(settings: AudioSettings): void;
   setMedia(media: MediaHost): void;
@@ -1139,19 +1076,27 @@ interface GameAudio {
   play-sound sources to preload. `media` loads authored sound bytes and streams music; a release
   resolves these sources through its packaged content and access grants. `notice(message)`
   reports an audio failure without stopping play.
-- `handle` receives a `GameCue`: `{ type: 'cue', cue: AudioCue, strength: number }` for a gameplay
-  moment, or `{ type: 'sound', source: string, volume: number }` for a play-sound event. The
-  closed cue list is `AUDIO_CUES`: `impact`, `enemy-hit`, `enemy-defeat`, `launch`, `finish`,
-  `hurt`, `death`, `fall` and `bonfire`. Impact strength is 0-1; other cues have strength 1.
-  Gameplay cues arrive in source order after the frame's step loop and look notifications, before
-  gameplay observers and rendering, outside `Simulation.step` and physics callbacks. Closing or
-  stopping the Game drops staged deliveries. Cue objects are reused and read-only: consume during
-  `handle`, never retain them.
-  **Game limits impacts at the source to one per 70 ms**, before any output or wrapper sees
-  them, when staging the impact event, not in the output. The Workshop's cue preview shares
-  that limit but goes directly to the output, independently of gameplay staging and observers,
-  and remains available after gameplay stops; previews are guarded by the audio output's
-  disposal, not the Game's lifecycle.
+- `moment` receives every [gameplay moment](#gameplay-moments), in journal order, after that
+  moment's effects and before its observers. It runs after the step loop and look updates,
+  outside physics. Moments and nested causes are reused, read-only and borrowed for the call:
+  copy scalar fields you keep. Superseded placements still reach audio as history.
+  The SDK's `momentCue(moment)` supplies the engine mapping: surviving `hurt` → `hurt`;
+  `block`, `impact`, `death`, `fall`, `bonfire`, `enemy-hit`, `enemy-defeat`, `launch` and
+  `finish` → their own cue; `placed`, `sound` and fatal hurts → `null`.
+  The default output plays `sound.source` at `sound.volume` directly.
+- The authored cue record, `AUDIO_CUES`, is `impact`, **`block`**, `enemy-hit`, `enemy-defeat`,
+  `launch`, `finish`, `hurt`, `death`, `fall` and `bonfire`. "Hammer block" means a projectile
+  strikes the head, held or released. Impact strength is 0–1; the default maps it to 25–100%
+  of the clip volume; other moments use full clip volume.
+- **Simulation limits impacts at their emission site** to one per `IMPACTS.interval`
+  (70 ms of run time) in a placement. The live head must start touching at least
+  `IMPACTS.minimumSpeed` (1 m/s); `IMPACTS.fullSpeed` (8 m/s) gives full strength. The moment
+  includes the contact point and outward surface normal. Pauses do not consume that limit.
+- `preview(cue)` is the Workshop's direct test of one authored cue at full strength.
+  It is not a moment, is **not rate-limited**, and reaches neither effects nor observers.
+  The host-owned `AudioOutput` outlives a halted Game, so previews remain available after
+  gameplay stops. Every output method no-ops after disposal; Game receives that output
+  directly and never owns its disposal.
 - `setPaused` receives the initial state when play starts, then only pause-state changes.
   `setSettings` previews new project audio settings in the Workshop, and `setMedia` tells the
   output to drop media cached for files that changed. Forward all three in a wrap so the
@@ -1160,7 +1105,7 @@ interface GameAudio {
   the shared device after the output, and the runtime session after its consumers.
   `inspect`, optional, supplies `window.gettingOver.gameProject().playback` in the Workshop.
 
-The engine provides **one `AudioDevice` per Game**:
+The host provides **one shared `AudioDevice` for its audio output**:
 
 | Member | Meaning |
 | --- | --- |
@@ -1182,10 +1127,11 @@ The Workshop always uses this base. A release
 whose content has no audio or sound events gets `null` from `virtual:game-audio` and uses
 `SILENT_AUDIO_OUTPUT` as its base instead. The lightweight `game-audio.ts` module has no
 dependency on `AudioDirector`. The release still resolves and creates `AUDIO`, so a replacement
-or a wrap works without authored audio. Without gameplay observers, the unchanged silent base
-enables neither impact tracking nor a Web Audio context; a replacement or wrapper enables the
-shared device and cue delivery. Gameplay observers enable impact tracking even with silent
-audio, but do not enable a Web Audio context.
+or a wrap works without authored audio. The unchanged silent base is not passed to Game and
+enables no Web Audio context; a replacement or wrapper enables the shared device and moment
+delivery. Impact tracking is enabled iff Game has audio, an effect takes `impact`, or an
+observer takes `impact` (an absent filter takes every type). Visual/observer interest does
+not enable a Web Audio context.
 
 To extend the engine's audio, use `wrap(AUDIO, previous => ...)`: `previous` is the engine's
 selected base or an earlier plugin's factory, so the wrap preserves music and every cue it
@@ -1193,7 +1139,7 @@ passes on without importing the director.
 Feature-gated defaults, such as the audio director and the phantom look, are reached through
 `wrap`, not imported from the runtime SDK.
 
-### Synthesizing one cue
+### Synthesizing one sound
 
 This complete runtime facet extends the engine's audio through `wrap(AUDIO, ...)`, composing
 with whichever output precedes it, even the silent release base.
@@ -1210,30 +1156,34 @@ export default defineRuntime({
     return [wrap(AUDIO, (previous) => (setup) => {
       const inner = previous(setup);
       const tones = new Map<OscillatorNode, GainNode>();
+      const thud = (strength: number): void => {
+        const { context, output } = setup.device; // null until the player's first gesture
+        if (context === null || output === null) return;
+        const tone = context.createOscillator();
+        const gain = context.createGain();
+        const now = context.currentTime;
+        tone.frequency.value = 70;
+        // An exponential envelope stays positive, including for the weakest impact.
+        gain.gain.setValueAtTime(Math.max(0.001, 0.6 * strength), now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        tone.connect(gain).connect(output);
+        tones.set(tone, gain);
+        tone.onended = () => {
+          tone.disconnect();
+          gain.disconnect();
+          tones.delete(tone);
+        };
+        tone.start();
+        tone.stop(now + 0.25);
+      };
       return {
-        handle(cue) {
-          if (cue.type !== 'cue' || cue.cue !== 'impact') {
-            inner.handle(cue);
-            return;
-          }
-          const { context, output } = setup.device; // null until the player's first gesture
-          if (context === null || output === null) return;
-          const tone = context.createOscillator();
-          const gain = context.createGain();
-          const now = context.currentTime;
-          tone.frequency.value = 70;
-          // An exponential envelope stays positive, including for the weakest impact.
-          gain.gain.setValueAtTime(Math.max(0.001, 0.6 * cue.strength), now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-          tone.connect(gain).connect(output);
-          tones.set(tone, gain);
-          tone.onended = () => {
-            tone.disconnect();
-            gain.disconnect();
-            tones.delete(tone);
-          };
-          tone.start();
-          tone.stop(now + 0.25);
+        moment(moment) {
+          if (moment.type === 'impact') thud(moment.strength);
+          else inner.moment(moment);
+        },
+        preview(cue) {
+          if (cue === 'impact') thud(1);
+          else inner.preview(cue);
         },
         setPaused: (paused) => inner.setPaused(paused),
         setSettings: (settings) => inner.setSettings(settings),
@@ -1258,71 +1208,105 @@ export default defineRuntime({
 The shared master gain applies project volume to the synthesized tone too. Its short-lived
 nodes exist only while sounding, and disposal stops any still in flight.
 
-## Gameplay events
+## Gameplay moments
 
-`EVENTS`, the list `game.events`, adds up to 32 `GameObserverFactory` values. The engine's base
+`OBSERVERS`, the list `game.observers`, adds up to `GAME_OBSERVER_LIMITS.observers` (32)
+`GameObserverFactory` values. The engine's base
 is an empty list. Each factory runs once per Game, in manifest order, with no engine objects:
 
 ```ts
 type GameObserverFactory = () => GameObserver;
 interface GameObserver {
-  event(event: GameEvent): void;
+  readonly moments?: readonly MomentType[];
+  moment(moment: Moment): void;
   dispose?(): void;
 }
 ```
 
-`GameEvent` is a small discriminated union exported by the runtime SDK:
+`Moment` is the read-only discriminated union exported by the runtime SDK, alongside
+`MOMENT_TYPES`, `MomentType`, `MomentOf<T>`, each named moment type and `TerminalMoment`.
+Every moment carries a stamp: `placement` is the simulation's placement counter when it
+happened, and `time` is run seconds at the end of its physics step, or when a run-level
+action happened. A new run rewinds time to 0; a checkpoint return does not. A `placed` carries
+its new placement. The filter has the same rules as [effects](#effects): absent means every
+type; otherwise a non-empty array of known types without repeats, fixed for the observer's life.
 
 | `type` | Additional fields and meaning |
 | --- | --- |
-| `hurt` | `health`, `max`: the simulation's remaining health and maximum after a nonlethal hurt in the step batch, independent of whether the HUD shows health; `cause`: what dealt the hit, a [`HurtCause`](#hurt-effects) with its `source` (`enemy`, `projectile`, `axe` or `lava`), the `id` of the level object that dealt it, where it struck (`x`, `y`) and the velocity it knocked the player with (`pushX`, `pushY`) |
+| `hurt` | `health`, `max`: health remaining after **each** accepted hurt, including 0 for the killing hit, independent of HUD visibility; `cause`: the `HurtCause` below |
+| `block` | `trap`: firing trap ID; `x`, `y`: strike on the head; `directionX`, `directionY`: projectile's unit flight direction; `normalX`, `normalY`: head's outward unit normal there. Held or released, also while dying; a projectile that hurt the character is not also a block |
+| `impact` | `x`, `y`: mean contact point; `normalX`, `normalY`: struck surface's unit normal toward the head; `speed`: head approach speed (m/s); `strength`: 0–1. The live head began touching, limited per `IMPACTS` in run time; raised only while a consumer takes impacts |
 | `death` | The health death sequence started; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
-| `respawn` | `bonfire`: the checkpoint's ID, or `null` when the automatic reset path returns to the attempt's start |
-| `restart` | A new attempt: Reset, a rebuilt rig or a replacement level, not a checkpoint return |
-| `bonfire` | `id`: a newly reached checkpoint, including a previously lit bonfire other than the current checkpoint |
-| `enemy-hit` | `id`: an enemy transitioned to hurt after a surviving hit |
-| `enemy-defeat` | `id`: an enemy transitioned to defeated |
-| `impact` | `strength`: normalized 0–1 hammer-impact strength, limited at the source to one per 70 ms |
+| `placed` | `bonfire`: the checkpoint returned to, continuing the run; `null` starts a new run from its spawn, including Reset, rig rebuild, level replacement, Workshop placement or death before any bonfire |
+| `bonfire` | `id`, `x`, `y`: checkpoint ID and base; another bonfire became current, including a previously lit one |
+| `enemy-hit` | `id`, `x`, `y`: enemy ID and centre, on **every accepted surviving hit**, not just phase transitions |
+| `enemy-defeat` | `id`, `x`, `y`: enemy ID and centre; `by`: `'hammer'` or `'fall'` |
 | `launch` | An authored Launch player action executed |
 | `finish` | An authored Stop timer action executed |
 | `sound` | `source`, `volume`: an authored play-sound action executed |
 
-There is no boot `restart` event. An automatic return without a checkpoint uses the ordinary
-reset action, so it emits `death` or `fall`, then `restart`, then `respawn` with `bonfire: null`
-once the player has been placed. A checkpoint return emits `death` or `fall`, then `respawn`
-with its bonfire ID; its timer and attempt continue. Messages and videos keep their
-[presentation contracts](#messages); they are not additional `GameEvent` variants. Cue previews
-do not notify observers.
+```ts
+interface HurtCause {
+  readonly source: HurtSource; // 'enemy' | 'projectile' | 'axe' | 'lava'
+  readonly id: string;         // enemy, trap, axe or lava pool
+  readonly x: number;          // strike in world metres
+  readonly y: number;
+  readonly pushX: number;      // added velocity, m/s
+  readonly pushY: number;
+}
+```
 
-`death`/`fall` arrive at sequence entry, not placement. `restart`/`respawn` arrive only
-after its snapshotted `death.wait` and placement. An explicit cancellation such as Reset emits
-the ordinary `restart`, never an automatic `respawn`. A simultaneous killing hit and fall
-still stages fatal hurt effects, but only the `fall` gameplay event and cue.
+An enemy bump strikes midway to the pot, a projectile where its path entered the character,
+an axe at the middle of its blade contact and lava at the character's centre. Lava pushes
+nothing; swamp never hurts. Invulnerability comes from the gameplay tuning. Zero-damage hits
+do not raise `hurt`.
 
-**Schedule and ownership.** The Game stages notifications in reusable storage while its
-physics-step loop runs. After the loop, and before rendering, it flushes:
+There is no boot moment. `death`/`fall` arrive at sequence entry; a fall takes precedence
+over health death in the same step, but **all preceding hurts stay**, including a fatal hurt.
+The default audio skips the fatal hurt. The terminal moment is latched once per placement;
+while dying, no further hurts, impacts, bonfires or terminal moments occur, but blocks and
+enemy moments can continue. After the snapshotted death wait, placement emits just `placed`,
+with its bonfire ID or `null` when the ordinary synchronous Reset returns to the spawn.
+Explicit cancellations also emit ordinary `placed`, not another return variant. Messages
+and videos keep their [presentation contracts](#messages); cue previews notify no observers.
 
-1. Enemy look changes in order, the bonfire look's latest lit set at most once, then hits and
-   placements for the [hurt effects](#hurt-effects) in order, followed by
-   [projectile blocks](#block-effects), whether or not anything else consumes events.
-2. Audio, mapping those gameplay events to the existing cues and authored sounds in source order.
-   `restart` and `respawn` have no cues.
-3. Gameplay observers: each event in source order, with observers called in manifest order.
+**Source order within a physics step:**
 
-Terrain changes stay synchronous and engine-only. No look, audio output, gameplay observer or
-input device runs inside `Simulation.step` or a physics callback. Notifications from asynchronous
-trigger continuations or a reset between frames join the next flush, even while paused.
-Notifications raised by delivery callbacks join the following flush, not the batch being
-delivered. Hurt and block notices carry their placement: superseded notices cannot ignite
-a newly placed character or show an old block, and its hurt clear is applied before drawing
-even when a delivery callback resets again. Started world-anchored bursts can still finish.
-Pools grow only when a burst exceeds their previous high-water capacity.
+1. Hammer `impact`.
+2. Enemies: defeats by falling, then accepted hammer hits/defeats, then bump hurt.
+3. Traps: each projectile's hurt or block, then axe hurt.
+4. Lava hurt.
+5. Bonfire.
+6. Terminal `death` or `fall`.
 
-Events are **read-only borrowed objects, reused by the engine**. Read them only during
-`event`; never retain one or compare it with an event from an earlier call. Save scalar fields
-into your own state instead. `event` must finish synchronously; promise-like returns are errors.
-Observers run only when events occur, never on idle frames. The engine checks factories and
+Trigger `launch`, `finish` and `sound` follow their step. `placed` occurs wherever placement
+happens, including a death return inside the frame or a Reset between frames.
+
+**Schedule and ownership.** Game owns one pooled, double-buffered journal. Simulation writes
+plain data at the source and calls no consumer. There is one drain after stepping, before
+rendering (and one initial look-only flush):
+
+1. Looks: enemy state changes in order, then the latest lit set, then the latest switch set.
+2. **For each moment**, in journal order: its effects, then audio, then its routed observers
+   in manifest order. Lifecycle abort is checked before each group and observer.
+
+Terrain stays **synchronous and engine-only**. No look, effect, audio output, gameplay
+observer or input device runs inside `Simulation.step` or a physics callback. Appends are
+never reordered or retracted; stopping/disposal closes the journal and drops waiting work.
+The drain always releases its batch and clears delivered looks, even on failure.
+Moments and look updates raised during delivery wait for the **next** drain; the current
+borrowed slots cannot be overwritten, and a re-entrant drain is an engine error.
+A Reset during a callback does not erase history: remaining moments still reach audio and
+observers, while effects skip superseded placements and catch up before drawing as described
+under [Effects](#effects). A stop/disposal instead ends delivery. Pools retain high-water
+capacity, routes are built once, and idle frames call no moment consumers.
+
+Moments and nested causes are **read-only borrowed objects, reused by the engine**.
+Read them only during `moment`; never retain one or compare references with an earlier call.
+Copy individual fields into your own state instead. `moment` and optional `dispose` must
+finish synchronously; promise-like returns are errors. Observers run only for their routed
+moments, never on idle frames. The engine checks factories, filters and
 returned observers with `PluginError`, naming the plugin and point; a throwing observer stops
 the game with the same attribution, never silently removing it. `dispose`, when supplied,
 runs with Game cleanup; every part is attempted before the first cleanup error is rethrown.
@@ -1330,17 +1314,18 @@ runs with Game cleanup; every part is attempted before the first cleanup error i
 For example, report reached checkpoints without changing the gameplay rules:
 
 ```ts
-import { add, defineRuntime, EVENTS } from '../../src/plugins/runtime-sdk';
+import { add, defineRuntime, OBSERVERS } from '../../src/plugins/runtime-sdk';
 import type { GameObserverFactory } from '../../src/plugins/runtime-sdk';
 
 export default defineRuntime({
   start(host) {
     const checkpoints: GameObserverFactory = () => ({
-      event(event) {
-        if (event.type === 'bonfire') host.notice(`Reached checkpoint ${event.id}.`);
+      moments: ['bonfire'],
+      moment(moment) {
+        if (moment.type === 'bonfire') host.notice(`Reached checkpoint ${moment.id}.`);
       },
     });
-    return [add(EVENTS, checkpoints)];
+    return [add(OBSERVERS, checkpoints)];
   },
 });
 ```
@@ -1565,7 +1550,7 @@ Defaults and replacements do work only while presenting; do not add an idle anim
 factory, the engine's own or an earlier plugin's, and returns the factory the game uses. The
 previous factory still draws, and the wrapper adds to it. `DEFAULT_HUD_READOUTS`,
 `DEFAULT_LOOKS`, `DEFAULT_CAMERA_DIRECTOR`, `DEFAULT_BACKDROP`, `DEFAULT_AIM_MARKS`,
-`DEFAULT_HURT_EFFECTS`, `DEFAULT_BLOCK_EFFECTS`, `DEFAULT_DEATH_SCREEN` and `DEFAULT_CHARACTER_CHOICE` are the engine's
+`DEFAULT_EFFECTS`, `DEFAULT_DEATH_SCREEN` and `DEFAULT_CHARACTER_CHOICE` are the engine's
 own factories, the points' bases, for a plugin that replaces a point but draws the engine's
 part inside its own. Forward every contract method explicitly when wrapping an instance;
 its methods may live on a prototype, so spreading it does not copy them.
@@ -1615,14 +1600,14 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   whether it replaced or wrapped it; a list item belongs to its plugin. The engine defaults
   have `plugin: null`. Startup has no point (`point: null`).
 - Points check their contributed values, and factories apply declared instance contracts
-  once at creation: required and optional methods, roots and passes. A throwing factory is
+  once at creation: required and optional methods, roots, passes and moment filters. A throwing factory is
   `plugin-failed` with action `create`; a malformed return is `invalid-contribution`.
 - Every synchronous plugin call uses the kernel's checked adapters. A thrown call is
   `plugin-failed`, with its plugin, point, method/action, original message and cause. A
   `PluginError` passes through only when both its plugin and point already match; an error
   from another plugin, another point or engine code is attributed to the executing plugin.
   Promise-like returns are `invalid-contribution`, including from `void` and optional methods.
-- Point-specific results are checked explicitly: hurt/block effect `update` and toast `show`
+- Point-specific results are checked explicitly: effect `update` and toast `show`
   return booleans; camera aims have finite coordinates and positive height; death-pose writers
   fill every required finite transform, unit quaternion and brightness within 0–1; devices add
   finite movement. Key bindings and requested device actions must be valid, and character
@@ -1641,8 +1626,9 @@ see [order and conflicts](plugins.md#order-and-conflicts).
   previews retain their [isolated plugin lifecycle](workshop-plugins.md#lifecycle), and their
   failures name the plugin and action with no catalogue point. Workshop validation keeps typed
   data refusals separate from plugin failures.
-- Engine invariants, including `DeathSequenceError`, `PlayerDeathError` and a call to a
-  non-method, remain engine errors rather than plugin refusals.
+- Engine invariants, including `DeathSequenceError`, `PlayerDeathError`, a missing pending
+  `placed`, a re-entrant journal drain and a call to a non-method, remain engine errors
+  rather than plugin refusals.
 
 ## Complete example
 

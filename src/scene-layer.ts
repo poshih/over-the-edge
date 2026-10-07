@@ -2,7 +2,7 @@ import type { Object3D } from 'three';
 import type { Point } from './config';
 import type { EnemyPose } from './enemy-types';
 import { call0, createInstance, instanceContract, listPoint } from './plugins/kernel';
-import type { Attributed } from './plugins/kernel';
+import type { CheckedInstance } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { RigGeometry } from './rig';
 import type { PartPose } from './simulation';
@@ -23,6 +23,7 @@ export interface SceneFrame {
   readonly parts: readonly Readonly<PartPose>[];
   readonly player: ScenePlayerFrame;
   readonly cursor: Readonly<Point>;
+  // The array and its poses are pooled, borrowed until the next frame; copy individual values kept.
   readonly enemies: readonly EnemyPose[];
   readonly rig: RigGeometry;
 }
@@ -61,8 +62,8 @@ export const SCENE_LAYER_CONTRACT = instanceContract({
 });
 
 // An empty list is the engine default. Factories run once per Game, in the manifest's order.
-export function createSceneLayers(plugins: RuntimePlugins): readonly Attributed<SceneLayer>[] {
-  const layers: Attributed<SceneLayer>[] = [];
+export function createSceneLayers(plugins: RuntimePlugins): readonly CheckedInstance<SceneLayer>[] {
+  const layers: CheckedInstance<SceneLayer>[] = [];
   try {
     for (const factory of plugins.list(SCENE_LAYERS)) {
       layers.push(createInstance(SCENE_LAYER_CONTRACT, factory, factory.value));

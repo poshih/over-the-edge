@@ -4,14 +4,13 @@ import { LOOKS } from '../object-looks';
 import { CAMERA } from '../camera-director';
 import { BACKDROP } from '../backdrop';
 import { AIM_MARKS } from '../aim-marks';
-import { HURT_EFFECTS } from '../hurt-effects';
-import { BLOCK_EFFECTS } from '../block-effects';
+import { EFFECTS } from '../effects';
 import { DEATH_POSE } from '../death-pose';
 import { DEATH_SCREEN } from '../death-screen';
 import { SCENE_LAYERS } from '../scene-layer';
 import { AUDIO } from '../game-audio';
 import { MESSAGES } from '../event-presenter';
-import { EVENTS } from '../game-events';
+import { OBSERVERS } from '../game-observers';
 import { INPUT_BINDINGS, INPUT_DEVICES } from '../input';
 import { attributed, call1, checkFacetEntries, Composition, PluginError } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';
@@ -29,8 +28,8 @@ export function defineRuntime<T extends RuntimeFacet>(facet: T): T { return face
 
 export const RUNTIME = Object.freeze([
   ...Object.values(HUD), CHARACTER_CHOICE, ...Object.values(LOOKS),
-  CAMERA, BACKDROP, AIM_MARKS, HURT_EFFECTS, BLOCK_EFFECTS, DEATH_POSE, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES), DEATH_SCREEN,
-  EVENTS, INPUT_BINDINGS, INPUT_DEVICES,
+  CAMERA, BACKDROP, AIM_MARKS, ...Object.values(EFFECTS), DEATH_POSE, SCENE_LAYERS, AUDIO, ...Object.values(MESSAGES), DEATH_SCREEN,
+  OBSERVERS, INPUT_BINDINGS, INPUT_DEVICES,
 ]);
 
 function checkRuntime(value: unknown, plugin: string): RuntimeFacet {

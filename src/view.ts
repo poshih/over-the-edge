@@ -50,26 +50,22 @@ import type { HammerHead } from './hammer-head';
 import { LevelLooks } from './object-looks';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
-import { attributed, call0, call1, call2, call3, invalidResult } from './plugins/kernel';
-import type { Attributed } from './plugins/kernel';
+import { call0, call1, call2, call3, checkInstance } from './plugins/kernel';
+import type { Attributed, CheckedInstance } from './plugins/kernel';
 import { createCameraDirector, checkCameraAim } from './camera-director';
 import type { CameraAim, CameraDirector } from './camera-director';
 import { createBackdrop } from './backdrop';
 import type { Backdrop } from './backdrop';
 import { createAimMarks } from './aim-marks';
 import type { AimMarks } from './aim-marks';
-import type { HurtCause, ProjectileBlock } from './hazards';
-import { createHurtEffects } from './hurt-effects';
-import type { HurtEffects } from './hurt-effects';
-import { createBlockEffects } from './block-effects';
-import type { BlockEffects } from './block-effects';
+import { SceneEffects } from './effects';
 import { createDeathAppearance, createDeathPoseWriter, DEFAULT_DEATH_POSE } from './death-pose';
 import type { DeathAppearance, DeathPoseInput, DeathPoseWriter } from './death-pose';
 import { copyRotation, createDeathPose } from './player-pose';
 import type { DeathPose, DeathSeed, MutableLivePlayerFrame, PlayerFrameState } from './player-pose';
 import { PlacementHold } from './placement-hold';
 import type { DeathFrame, DeathKind } from './death-sequence';
-import { createSceneLayers } from './scene-layer';
+import { createSceneLayers, SCENE_LAYER_CONTRACT } from './scene-layer';
 import type { SceneDeathPlayerFrame, SceneFrame, SceneLayer, ScenePlayerFrame } from './scene-layer';
 import type { PartPose, PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
@@ -345,8 +341,7 @@ export class GameView {
   private readonly cameraAim: CameraAim = { x: 0, y: 0, worldHeight: 0 };
   private readonly backdrop: Attributed<Backdrop>;
   private readonly aimMarks: Attributed<AimMarks>;
-  private readonly hurtEffects: Attributed<HurtEffects>;
-  private readonly blockEffects: Attributed<BlockEffects>;
+  readonly effects: SceneEffects;
   private readonly deathWriter: DeathPoseWriter;
   private readonly deathInput: { -readonly [K in keyof DeathPoseInput]: DeathPoseInput[K] } = {
     elapsed: 0, duration: 0, poseProgress: 0, reducedMotion: false, character: DEFAULT_CHARACTER_RIGGING_TYPE, direction: 1,
@@ -373,15 +368,12 @@ export class GameView {
   private readonly capturedArmIk = { ...DEFAULT_ARM_IK };
   private capturedHeadAngle = 0;
   private capturedTorsoAngle = 0;
-  // Whether the hurt effects update on drawn frames: from a hurt or a clear until they say nothing shows.
-  private hurtShowing = false;
-  private blockShowing = false;
   // Course labels.
   private readonly labels = new Group();
   // Null in a release whose level has no decorations; its shell then carries none of their code.
   readonly decorations: DecorationView | null;
   private readonly bindings = new Map<VisualPartId, VisualBinding>();
-  private readonly layers = new Map<SceneLayer, Attributed<SceneLayer>>();
+  private readonly layers = new Map<SceneLayer, CheckedInstance<SceneLayer>>();
   private readonly updatingLayers = new Set<Attributed<SceneLayer>>();
   private readonly sceneFrame: { -readonly [K in keyof SceneFrame]: SceneFrame[K] };
   // Internal collision diagnostics read these after the player's arms are posed, outside the public layer contract.
@@ -531,8 +523,9 @@ export class GameView {
     // Resolve and check plugin factories before creating a WebGL renderer or attaching any view listeners.
     // A later factory failure frees every presentation object already made.
     const created: Attributed<{ dispose(): void }>[] = [];
-    let layers: readonly Attributed<SceneLayer>[];
+    let layers: readonly CheckedInstance<SceneLayer>[];
     let looks: LevelLooks | null = null;
+    let effects: SceneEffects | null = null;
     try {
       this.director = createCameraDirector(options.plugins);
       this.deathWriter = createDeathPoseWriter(options.plugins);
@@ -542,15 +535,19 @@ export class GameView {
       created.push(this.backdrop);
       this.aimMarks = createAimMarks(options.plugins, theme);
       created.push(this.aimMarks);
-      this.hurtEffects = createHurtEffects(options.plugins);
-      created.push(this.hurtEffects);
-      this.blockEffects = createBlockEffects(options.plugins);
-      created.push(this.blockEffects);
+      this.effects = effects = new SceneEffects(options.plugins, initial.placement);
       layers = createSceneLayers(options.plugins);
     } catch (error) {
-      for (let index = created.length - 1; index >= 0; index--) call0(created[index]!, 'dispose');
-      looks?.dispose();
-      this.terrain.dispose();
+      const disposal = new Disposal();
+      disposal.run(() => { throw error; });
+      disposal.run(() => effects?.dispose());
+      for (let index = created.length - 1; index >= 0; index--) {
+        const target = created[index]!;
+        disposal.run(() => call0(target, 'dispose'));
+      }
+      disposal.run(() => looks?.dispose());
+      disposal.run(() => this.terrain.dispose());
+      disposal.finish();
       throw error;
     }
     const root = initial.player.centre;
@@ -612,8 +609,10 @@ export class GameView {
       this.sprites = this.createSlot().rig;
 
       this.marks.add(this.aimMarks.value.root);
-      this.marks.add(this.hurtEffects.value.root);
-      this.marks.add(this.blockEffects.value.root);
+      for (const effect of this.effects.all) {
+        const pass = effect.captured.pass === 'course' ? this.course : effect.captured.pass === 'actors' ? this.actors : this.marks;
+        pass.add(effect.value.root);
+      }
       for (const layer of layers) this.addLayer(layer.value, layer);
 
       this.observer = new ResizeObserver(() => this.resize());
@@ -665,10 +664,10 @@ export class GameView {
   setEnemyArt(art: EnemyArtSettings): void { this.looks.setEnemyArt(art); }
 
   addLayer(layer: SceneLayer, source: Pick<Attributed<unknown>, 'plugin' | 'point'> = ENGINE): void {
-    const target = this.layers.get(layer) ?? attributed(source.plugin, source.point, layer);
+    const target = this.layers.get(layer) ?? checkInstance<SceneLayer>(SCENE_LAYER_CONTRACT, layer, source);
     this.layers.set(layer, target);
     if (layer.update !== undefined) this.updatingLayers.add(target);
-    const pass = layer.pass === 'course' ? this.course : layer.pass === 'actors' ? this.actors : this.marks;
+    const pass = target.captured.pass === 'course' ? this.course : target.captured.pass === 'actors' ? this.actors : this.marks;
     pass.add(layer.root);
   }
 
@@ -1188,7 +1187,7 @@ export class GameView {
     this.terrain.update(frame.time);
     this.decorations?.update();
     this.looks.update(frame.time, frame.projectiles, frame.enemies, frame.platforms);
-    if (this.updatingLayers.size > 0 || this.hurtShowing || this.blockShowing) {
+    if (this.updatingLayers.size > 0 || this.effects.active) {
       const shown = this.sceneFrame;
       shown.time = physics.time;
       shown.parts = physics.parts;
@@ -1197,8 +1196,7 @@ export class GameView {
       shown.enemies = physics.enemies;
       shown.rig = physics.rig;
       for (const layer of this.updatingLayers) call1(layer, 'update', shown);
-      if (this.hurtShowing) this.hurtShowing = this.updateHurt(shown);
-      if (this.blockShowing) this.blockShowing = this.updateBlock(shown);
+      this.effects.update(shown);
     }
     this.renderer.info.reset();
     this.renderer.clear();
@@ -1422,17 +1420,6 @@ export class GameView {
     return shown;
   }
 
-  // A hit took health, the killing one when `fatal`: the hurt effects take it, then update on drawn frames until done.
-  hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
-    call2(this.hurtEffects, 'hurt', cause, fatal);
-    this.hurtShowing = true;
-  }
-
-  block(hit: Readonly<ProjectileBlock>): void {
-    call1(this.blockEffects, 'block', hit);
-    this.blockShowing = true;
-  }
-
   beginDeath(frame: PhysicsFrame, kind: DeathKind): void {
     this.cameraView.death = kind;
     this.presentationPreview = null;
@@ -1451,28 +1438,6 @@ export class GameView {
       slot.rig.setDying(false);
       slot.rig.setDeathBrightness(1);
     }
-  }
-
-  // The player was placed anew: the hurt effects following the character end.
-  clearHurt(): void {
-    call0(this.hurtEffects, 'clear');
-    this.hurtShowing = true;
-  }
-
-  private updateHurt(frame: SceneFrame): boolean {
-    const showing = call1(this.hurtEffects, 'update', frame);
-    if (typeof showing !== 'boolean') {
-      throw invalidResult(this.hurtEffects, 'update(frame) must return a boolean');
-    }
-    return showing;
-  }
-
-  private updateBlock(frame: SceneFrame): boolean {
-    const showing = call1(this.blockEffects, 'update', frame);
-    if (typeof showing !== 'boolean') {
-      throw invalidResult(this.blockEffects, 'update(frame) must return a boolean');
-    }
-    return showing;
   }
 
   recenter(frame: PhysicsFrame): void {
@@ -1665,10 +1630,7 @@ export class GameView {
     disposal.run(() => call0(this.backdrop, 'dispose'));
     disposal.run(() => this.aimMarks.value.root.removeFromParent());
     disposal.run(() => call0(this.aimMarks, 'dispose'));
-    disposal.run(() => this.hurtEffects.value.root.removeFromParent());
-    disposal.run(() => call0(this.hurtEffects, 'dispose'));
-    disposal.run(() => this.blockEffects.value.root.removeFromParent());
-    disposal.run(() => call0(this.blockEffects, 'dispose'));
+    disposal.run(() => this.effects.dispose());
     for (const layer of this.layers.values()) {
       disposal.run(() => layer.value.root.removeFromParent());
       if (layer.value.dispose !== undefined) disposal.run(() => call0(layer, 'dispose'));

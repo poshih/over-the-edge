@@ -1,8 +1,10 @@
 import { AUDIO_CUES } from './audio-settings';
-import type { AudioClip, AudioSettings, GameCue } from './audio-settings';
+import type { AudioClip, AudioCue, AudioSettings } from './audio-settings';
+import type { Moment } from './moments';
 import type { MediaHost } from './media-host';
 import type { AudioDevice } from './audio-device';
 import type { GameAudio, GameAudioFactory, GameAudioSetup } from './game-audio';
+import { momentCue } from './game-audio';
 
 export const DEFAULT_AUDIO_OUTPUT: GameAudioFactory = (setup) => new AudioDirector(setup);
 
@@ -71,16 +73,25 @@ export class AudioDirector implements GameAudio {
     for (const source of sources) this.sound(source);
   }
 
-  handle(cue: GameCue): void {
+  moment(moment: Moment): void {
     if (this.disposed) return;
-    if (cue.type === 'sound') {
-      this.play(cue.source, cue.volume);
+    if (moment.type === 'sound') {
+      this.play(moment.source, moment.volume);
       return;
     }
-    const clip = this.settings.cues[cue.cue];
+    const cue = momentCue(moment);
+    if (cue !== null) this.cue(cue, moment.type === 'impact' ? moment.strength : 1);
+  }
+
+  preview(cue: AudioCue): void {
+    if (!this.disposed) this.cue(cue, 1);
+  }
+
+  private cue(cue: AudioCue, strength: number): void {
+    const clip = this.settings.cues[cue];
     if (clip === null) return;
-    if (cue.cue === 'impact') {
-      this.play(clip.source, clip.volume * (0.25 + 0.75 * cue.strength));
+    if (cue === 'impact') {
+      this.play(clip.source, clip.volume * (0.25 + 0.75 * strength));
     } else {
       this.play(clip.source, clip.volume);
     }

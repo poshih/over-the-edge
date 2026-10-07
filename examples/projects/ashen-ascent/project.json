@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -228,6 +228,7 @@
         "source": "/media/clank.wav",
         "volume": 0.55
       },
+      "block": null,
       "enemy-hit": {
         "source": "/media/thud.wav",
         "volume": 0.8

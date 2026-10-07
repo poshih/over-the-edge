@@ -43,8 +43,8 @@ export class Bonfires {
   }
 
   // After each step, with the player's foot.
-  update(foot: Readonly<Point>): void {
-    if (this.records.size === 0) return;
+  update(foot: Readonly<Point>): BonfireObject | null {
+    if (this.records.size === 0) return null;
     this.foot.x = foot.x;
     this.foot.y = foot.y;
     this.query.lowerBound.x = this.query.upperBound.x = foot.x;
@@ -52,10 +52,13 @@ export class Bonfires {
     this.nearest = null;
     this.nearestDistance = Infinity;
     this.index.query(this.query, this.visit);
-    if (this.nearest === null || this.nearest === this.current) return;
+    if (this.nearest === null || this.nearest === this.current) return null;
+    const bonfire = this.records.get(this.nearest);
+    if (bonfire === undefined) throw new Error('The bonfire reach index is inconsistent.');
     this.current = this.nearest;
     this.lit.add(this.nearest);
     this.emit();
+    return bonfire.object;
   }
 
   // A new run: every bonfire is out.

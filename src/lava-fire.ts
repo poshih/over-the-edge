@@ -2,8 +2,8 @@ import {
   AdditiveBlending, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, Mesh, PlaneGeometry,
   ShaderMaterial,
 } from 'three';
-import type { HurtCause } from './hazards';
-import type { HurtEffects } from './hurt-effects';
+import type { MomentEffect } from './effects';
+import type { Moment } from './moments';
 import type { SceneFrame } from './scene-layer';
 
 // A fire that takes the character while lava burns it: tongues of flame shaded from a turbulence field, licking up the
@@ -258,7 +258,7 @@ class Particles {
   progress(index: number, time: number): number {
     const born = this.born[index]!;
     if (born < 0) return -1;
-    const progress = (time - born) / this.life[index]!;
+    const progress = Math.max(0, time - born) / this.life[index]!;
     if (progress < 1) return progress;
     this.born[index] = -1;
     return -1;
@@ -276,9 +276,11 @@ class Particles {
   }
 }
 
-/** The engine's hurt effects: the character catches fire while lava burns it. Other hits show nothing more. */
-export class LavaFire implements HurtEffects {
+/** The character catches fire while lava burns it; placement puts the fire out. */
+export class LavaFire implements MomentEffect {
   readonly root = new Group();
+  readonly pass = 'marks';
+  readonly moments = Object.freeze(['hurt', 'placed'] as const);
   private readonly flameUniforms = { time: { value: 0 }, intensity: { value: 0 }, lean: { value: 0 } };
   private readonly glowUniforms = { time: { value: 0 }, intensity: { value: 0 } };
   private readonly smokeUniforms = { time: { value: 0 } };
@@ -338,15 +340,14 @@ export class LavaFire implements HurtEffects {
     this.root.visible = false;
   }
 
-  hurt(cause: Readonly<HurtCause>, fatal: boolean): void {
-    if (cause.source !== 'lava') return;
-    this.igniting = true;
-    if (fatal) this.fatalBurn = true;
-  }
-
-  clear(): void {
-    this.igniting = false;
-    this.reset();
+  moment(moment: Moment): void {
+    if (moment.type === 'placed') {
+      this.igniting = false;
+      this.reset();
+    } else if (moment.type === 'hurt' && moment.cause.source === 'lava') {
+      this.igniting = true;
+      if (moment.health === 0) this.fatalBurn = true;
+    }
   }
 
   update(frame: SceneFrame): boolean {
@@ -366,9 +367,8 @@ export class LavaFire implements HurtEffects {
       root.x = torso.x - Math.sin(torso.angle) * FIRE.anchorHeight;
       root.y = torso.y + (Math.cos(torso.angle) - 1) * FIRE.anchorHeight;
     }
-    if (time < this.lastTime) this.reset();
     // Time passes for the fire only while it shows: a fire just lit starts here.
-    const dt = this.showing ? time - this.lastTime : 0;
+    const dt = this.showing ? Math.max(0, time - this.lastTime) : 0;
     if (!this.showing) this.lean = 0;
     if (this.igniting) {
       this.igniting = false;
@@ -377,7 +377,7 @@ export class LavaFire implements HurtEffects {
     }
     const burning = this.fatalBurn || time <= this.burnUntil;
     this.heat = burning ? Math.min(1, this.heat + dt / FIRE.kindle) : Math.max(0, this.heat - dt / FIRE.fade);
-    const intensity = this.heat * (1 + FIRE.flare * Math.exp(-(time - this.flaredAt) / FIRE.flareFade));
+    const intensity = this.heat * (1 + FIRE.flare * Math.exp(-Math.max(0, time - this.flaredAt) / FIRE.flareFade));
     // The flames trail the character's motion, easing toward the lean it calls for.
     if (dt > 0) {
       const target = Math.max(-FIRE.maxLean, Math.min(FIRE.maxLean, -(root.x - this.lastX) / dt * FIRE.lean));

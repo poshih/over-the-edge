@@ -1,11 +1,15 @@
-import type { AudioSettings, GameCue } from './audio-settings';
+import type { AudioCue, AudioSettings } from './audio-settings';
+import type { Moment } from './moments';
 import type { MediaHost } from './media-host';
 import type { AudioDevice } from './audio-device';
-import { attributed, call0, call1, createInstance, instanceContract, slotPoint } from './plugins/kernel';
+import { call0, call1, createInstance, instanceContract, slotPoint } from './plugins/kernel';
 import type { Attributed } from './plugins/kernel';
 
 export interface GameAudio {
-  handle(cue: GameCue): void;
+  // Every moment, after effects; borrowed only for this synchronous call.
+  moment(moment: Moment): void;
+  // Workshop tests one authored cue at full strength, without gameplay's impact limit.
+  preview(cue: AudioCue): void;
   setPaused(paused: boolean): void;
   setSettings(settings: AudioSettings): void;
   setMedia(media: MediaHost): void;
@@ -31,36 +35,52 @@ export const AUDIO = slotPoint('audio.output', 'runtime', (value: unknown): Game
 
 // The silent release base has no dependency on the optional AudioDirector implementation.
 export const SILENT_AUDIO_OUTPUT: GameAudioFactory = () => ({
-  handle() {},
+  moment() {},
+  preview() {},
   setPaused() {},
   setSettings() {},
   setMedia() {},
   dispose() {},
 });
 
-const AUDIO_CONTRACT = instanceContract({
-  returns: 'handle(cue), setPaused(paused), setSettings(settings), setMedia(media), dispose() and, when given, inspect()',
-  methods: ['handle', 'setPaused', 'setSettings', 'setMedia', 'dispose'],
+export function momentCue(moment: Moment): AudioCue | null {
+  switch (moment.type) {
+    case 'hurt': return moment.health > 0 ? 'hurt' : null;
+    case 'placed':
+    case 'sound': return null;
+    default: return moment.type;
+  }
+}
+
+export const AUDIO_CONTRACT = instanceContract({
+  returns: 'moment(moment), preview(cue), setPaused(paused), setSettings(settings), setMedia(media), dispose() and, when given, inspect()',
+  methods: ['moment', 'preview', 'setPaused', 'setSettings', 'setMedia', 'dispose'],
   optional: ['inspect'],
 });
 
-export function createGameAudio(factory: Attributed<GameAudioFactory>, setup: GameAudioSetup): Attributed<GameAudio> {
+// Host-owned: it can outlive a halted Game, but no method calls the plugin after disposal.
+export class AudioOutput {
+  private disposed = false;
+  private readonly output: Attributed<GameAudio>;
+
+  constructor(output: Attributed<GameAudio>) { this.output = output; }
+
+  moment(moment: Moment): void { if (!this.disposed) call1(this.output, 'moment', moment); }
+  preview(cue: AudioCue): void { if (!this.disposed) call1(this.output, 'preview', cue); }
+  setPaused(paused: boolean): void { if (!this.disposed) call1(this.output, 'setPaused', paused); }
+  setSettings(settings: AudioSettings): void { if (!this.disposed) call1(this.output, 'setSettings', settings); }
+  setMedia(media: MediaHost): void { if (!this.disposed) call1(this.output, 'setMedia', media); }
+  inspect(): unknown {
+    return this.disposed || this.output.value.inspect === undefined ? null : call0(this.output, 'inspect');
+  }
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    call0(this.output, 'dispose');
+  }
+}
+
+export function createAudioOutput(factory: Attributed<GameAudioFactory>, setup: GameAudioSetup): AudioOutput {
   const create = factory.value;
-  const output = createInstance<GameAudio>(AUDIO_CONTRACT, factory, () => create(setup));
-  let disposed = false;
-  // The output's lifetime is independent of gameplay: editor previews can outlive a halted Game,
-  // but neither a staged gameplay cue nor a preview may call a disposed output.
-  const owned: GameAudio = {
-    handle(cue) { if (!disposed) call1(output, 'handle', cue); },
-    setPaused(paused) { if (!disposed) call1(output, 'setPaused', paused); },
-    setSettings(settings) { if (!disposed) call1(output, 'setSettings', settings); },
-    setMedia(media) { if (!disposed) call1(output, 'setMedia', media); },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      call0(output, 'dispose');
-    },
-  };
-  if (output.value.inspect !== undefined) owned.inspect = () => call0(output, 'inspect');
-  return attributed(output.plugin, output.point, owned);
+  return new AudioOutput(createInstance<GameAudio>(AUDIO_CONTRACT, factory, () => create(setup)));
 }

@@ -1,8 +1,8 @@
 // Release boot: release facets compose access and load-flow services; each load attempt owns its runtime session.
 // Nothing here decides who may load what. See docs/release-plugins.md.
 import type { DecorationView } from './decoration-view';
-import { AUDIO, createGameAudio, SILENT_AUDIO_OUTPUT } from './game-audio';
-import type { GameAudio, GameAudioFactory } from './game-audio';
+import { AUDIO, createAudioOutput, SILENT_AUDIO_OUTPUT } from './game-audio';
+import type { AudioOutput, GameAudioFactory } from './game-audio';
 import { AudioDevice } from './audio-device';
 import { bootSources, levelSoundSources } from './content';
 import type { ContentArt, ContentManifest, ContentPins } from './content';
@@ -50,7 +50,7 @@ interface Loaded {
   readonly session: ContentSession;
   readonly manifest: ContentManifest;
   readonly game: Game;
-  readonly audio: Attributed<GameAudio>;
+  readonly audio: AudioOutput;
   readonly audioDevice: AudioDevice;
   readonly library: ReleaseModelLibrary;
   readonly plugins: RuntimePlugins;
@@ -60,7 +60,7 @@ interface Loaded {
 interface Attempt {
   readonly session: ContentSession;
   game: Game | null;
-  audio: Attributed<GameAudio> | null;
+  audio: AudioOutput | null;
   audioDevice: AudioDevice | null;
   library: ReleaseModelLibrary | null;
   readonly plugins: RuntimePlugins;
@@ -170,7 +170,7 @@ export class Release {
     disposal.run(() => phantoms?.dispose());
     if (loaded !== null) {
       disposal.run(() => loaded.lifecycle.abort(new DOMException('The game closed.', 'AbortError')));
-      disposal.run(() => call0(loaded.audio, 'dispose'));
+      disposal.run(() => loaded.audio.dispose());
       disposal.run(() => loaded.audioDevice.dispose());
       // The game's views let go of library models before the library disposes them.
       disposal.run(() => loaded.game.dispose());
@@ -188,7 +188,7 @@ export class Release {
     this.loading = null;
     const disposal = new Disposal();
     const audio = attempt.audio;
-    if (audio !== null) disposal.run(() => call0(audio, 'dispose'));
+    if (audio !== null) disposal.run(() => audio.dispose());
     disposal.run(() => attempt.audioDevice?.dispose());
     disposal.run(() => attempt.lifecycle.abort(new DOMException('The load attempt closed.', 'AbortError')));
     disposal.run(() => attempt.game?.dispose());
@@ -227,10 +227,10 @@ export class Release {
     };
     const notice = (text: string): void => this.ui.notice(text, 'error');
     const audioFactory = plugins.slot(AUDIO, this.code.audioOutput === null ? SILENT_AUDIO_OUTPUT : this.code.audioOutput);
-    const receivesCues = audioFactory.value !== SILENT_AUDIO_OUTPUT;
-    const audioDevice = new AudioDevice(manifest.audio.volume, receivesCues);
+    const receivesAudio = audioFactory.value !== SILENT_AUDIO_OUTPUT;
+    const audioDevice = new AudioDevice(manifest.audio.volume, receivesAudio);
     attempt.audioDevice = audioDevice;
-    const audio = createGameAudio(audioFactory, {
+    const audio = createAudioOutput(audioFactory, {
       settings: manifest.audio, sounds: levelSoundSources(manifest.level), media, device: audioDevice, notice,
     });
     attempt.audio = audio;
@@ -240,8 +240,7 @@ export class Release {
       eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
       theme: manifest.theme, enemyArt: manifest.enemies, hud: manifest.hud,
-      onCue: receivesCues ? (cue) => call1(audio, 'handle', cue) : undefined,
-      onPauseChange: receivesCues ? (paused) => call1(audio, 'setPaused', paused) : undefined,
+      audio: receivesAudio ? audio : null,
       onAction: (action, options) => game.perform(action, options),
       onNotice: notice,
     });

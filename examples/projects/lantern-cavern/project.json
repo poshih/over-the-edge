@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -194,6 +194,7 @@
         "source": "/media/clink.wav",
         "volume": 0.7
       },
+      "block": null,
       "enemy-hit": {
         "source": "/media/thud.wav",
         "volume": 0.8

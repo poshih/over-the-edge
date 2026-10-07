@@ -2,7 +2,8 @@ import {
   AdditiveBlending, DoubleSide, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, PlaneGeometry,
   ShaderMaterial,
 } from 'three';
-import type { HurtCause, ProjectileBlock } from './hazards';
+import type { MomentEffect } from './effects';
+import type { Moment } from './moments';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { SceneFrame } from './scene-layer';
 
@@ -179,9 +180,11 @@ function setTint(tint: InstancedBufferAttribute, index: number, color: readonly 
   values[index * 3 + 2] = color[2]! * brightness;
 }
 
-/** Shared instanced impact bursts; each presentation point owns its own pool and root. */
-export class HitBursts {
+/** One instanced pool serves blows on the character and projectile strikes on the hammer. */
+export class HitBursts implements MomentEffect {
   readonly root = new Group();
+  readonly pass = 'marks';
+  readonly moments = Object.freeze(['hurt', 'block', 'placed'] as const);
   private readonly flashes = tintedQuads(FLASH_FRAGMENT, BURST.count, 12);
   private readonly rings = tintedQuads(RING_FRAGMENT, BURST.count, 11);
   private readonly sparks = tintedQuads(SPARK_FRAGMENT, BURST.count * BURST.sparks, 14);
@@ -225,7 +228,6 @@ export class HitBursts {
   private active = 0;
   // Every burst started so far, which seeds the next one's sparks and chips.
   private started = 0;
-  private lastTime = 0;
 
   constructor() {
     const geometry = new PlaneGeometry(1, 1);
@@ -240,17 +242,21 @@ export class HitBursts {
     this.root.visible = false;
   }
 
-  hurt(cause: Readonly<HurtCause>): void {
-    if ((cause.source !== 'axe' && cause.source !== 'projectile') || this.pending === BURST.count) return;
-    this.queue(cause.source, cause.x, cause.y, cause.pushX, cause.pushY, 0, 0);
-  }
-
-  block(hit: Readonly<ProjectileBlock>): void {
-    const dot = hit.directionX * hit.normalX + hit.directionY * hit.normalY;
-    const reflectedX = hit.directionX - 2 * dot * hit.normalX;
-    const reflectedY = hit.directionY - 2 * dot * hit.normalY;
-    this.queue('block', hit.x + hit.normalX * BURST.blockOffset, hit.y + hit.normalY * BURST.blockOffset,
-      reflectedX, reflectedY, hit.normalX, hit.normalY);
+  moment(moment: Moment): void {
+    if (moment.type === 'placed') {
+      if (moment.bonfire === null) this.reset();
+    } else if (moment.type === 'hurt') {
+      const cause = moment.cause;
+      if (cause.source === 'axe' || cause.source === 'projectile') {
+        this.queue(cause.source, cause.x, cause.y, cause.pushX, cause.pushY, 0, 0);
+      }
+    } else if (moment.type === 'block') {
+      const dot = moment.directionX * moment.normalX + moment.directionY * moment.normalY;
+      const reflectedX = moment.directionX - 2 * dot * moment.normalX;
+      const reflectedY = moment.directionY - 2 * dot * moment.normalY;
+      this.queue('block', moment.x + moment.normalX * BURST.blockOffset, moment.y + moment.normalY * BURST.blockOffset,
+        reflectedX, reflectedY, moment.normalX, moment.normalY);
+    }
   }
 
   private queue(kind: BurstKind, x: number, y: number, directionX: number, directionY: number, normalX: number, normalY: number): void {
@@ -266,23 +272,14 @@ export class HitBursts {
     this.pendingNormalY[index] = normalY;
   }
 
-  // Bursts stay where the blow landed, so placing the player anew leaves them to play out.
-  clear(): void {}
-
-  update(frame: SceneFrame, rewind: 'discard-pending' | 'keep-pending' = 'discard-pending'): boolean {
+  update(frame: SceneFrame): boolean {
     const time = frame.time;
-    if (this.pending === 0 && this.active === 0) {
-      this.lastTime = time;
-      return false;
-    }
-    // A rewound run time ends the old bursts; blocks delivered for this frame can still start afterward.
-    if (time < this.lastTime) this.reset(rewind === 'discard-pending');
-    this.lastTime = time;
+    if (this.pending === 0 && this.active === 0) return false;
     for (let index = 0; index < this.pending; index++) this.start((this.pendingHead + index) % BURST.count, time);
     this.pending = this.pendingHead = 0;
     for (let burst = 0; burst < BURST.count; burst++) {
       if (this.born[burst]! < 0) continue;
-      const age = time - this.born[burst]!;
+      const age = Math.max(0, time - this.born[burst]!);
       if (age >= BURST.life) this.end(burst);
       else this.place(burst, age);
     }
@@ -304,9 +301,10 @@ export class HitBursts {
     }
   }
 
-  private reset(discardPending: boolean): void {
+  private reset(): void {
     for (let burst = 0; burst < BURST.count; burst++) if (this.born[burst]! >= 0) this.end(burst);
-    if (discardPending) this.pending = this.pendingHead = 0;
+    this.pending = this.pendingHead = 0;
+    this.root.visible = false;
   }
 
   // Starts the pending blow in `index`, in a free slot or, with none, the oldest burst's.

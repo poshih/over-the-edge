@@ -36,6 +36,7 @@ export const AUDIO = {
   music: { source: '/media/ashen-loop.wav', volume: 0.45 },
   cues: {
     impact: { source: '/media/clank.wav', volume: 0.55 },
+    block: null,
     'enemy-hit': { source: '/media/thud.wav', volume: 0.8 },
     'enemy-defeat': { source: '/media/soul.wav', volume: 0.8 },
     launch: { source: '/media/gust.wav', volume: 0.7 },

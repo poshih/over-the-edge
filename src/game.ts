@@ -20,34 +20,30 @@ import { DEFAULT_HUD } from './hud';
 import type { HudSettings } from './hud';
 import { createDeathScreen } from './death-screen';
 import type { DeathScreen } from './death-screen';
-import { DEATH_POSE_SECONDS, DeathSequenceError } from './death-sequence';
+import { deathInfo, DEATH_POSE_SECONDS, DeathSequenceError } from './death-sequence';
 import type { DeathFrame, DeathInfo, DeathKind } from './death-sequence';
 import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
 import type { MediaHost } from './media-host';
 import type { ContentLoader } from './content-ref';
-import { impactStrength, IMPACT_SPEED } from './audio-settings';
-import type { AudioCue, GameCue } from './audio-settings';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
-import type { EnemyEvent, EnemyPhase } from './enemy-types';
 import type { HammerHead } from './hammer-head';
 import type { PartRole } from './model-library';
 import type { PartModel } from './view';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { HudFrame } from './hud-readouts';
-import { EVENTS, GAME_OBSERVER_CONTRACT } from './game-events';
-import type { GameEvent, GameObserver } from './game-events';
-import { GameNotifications, stageCause } from './game-notifications';
-import type { HurtCause } from './hazards';
-import { AUDIO, SILENT_AUDIO_OUTPUT } from './game-audio';
-import { apply1, attributed, call0, call1, call2, createInstance, invalidResult, pluginFailure } from './plugins/kernel';
-import type { Attributed } from './plugins/kernel';
+import { OBSERVERS, OBSERVER_CONTRACT } from './game-observers';
+import type { GameObserver } from './game-observers';
+import { LookUpdates } from './look-updates';
+import { MomentJournal, momentRoutes } from './moments';
+import type { MomentType } from './moments';
+import type { AudioOutput } from './game-audio';
+import { call0, call1, call2, createInstance, invalidResult, pluginFailure } from './plugins/kernel';
+import type { Attributed, CheckedInstance } from './plugins/kernel';
 import { Disposal } from './disposal';
 import { createDeathSeed } from './player-pose';
-
-const IMPACT_INTERVAL = 0.07;
 
 export interface StepObserver {
   step(): void;
@@ -80,26 +76,18 @@ export class Game {
   private readonly unsubscribeEnemies: () => void;
   private readonly unsubscribeBonfires: () => void;
   private readonly onAction: (action: UiAction, options?: UiActionOptions) => void;
-  private readonly onCue: Attributed<(cue: GameCue) => void> | null;
-  private readonly onPauseChange: Attributed<(paused: boolean) => void> | null;
-  private hurtPlacement: number;
-  private readonly observers: Attributed<GameObserver>[] = [];
+  private readonly audio: AudioOutput | null;
+  private readonly observers: CheckedInstance<GameObserver>[] = [];
+  private readonly observerRoutes: Readonly<Record<MomentType, readonly Attributed<GameObserver>[]>>;
   private readonly devices: Attributed<InputDevice>[] = [];
-  private readonly eventConsumers: boolean;
-  private pending = new GameNotifications();
-  private delivery = new GameNotifications();
+  private readonly journal = new MomentJournal();
+  private pendingLooks = new LookUpdates();
+  private deliveringLooks = new LookUpdates();
   private readonly stepMovement: Point = { x: 0, y: 0 };
   // This frame's device sum, discarded unless input-enabled physics steps consume it.
   private readonly deviceMovement: Point = { x: 0, y: 0 };
-  private readonly audioCue: { type: 'cue'; cue: AudioCue; strength: number } = { type: 'cue', cue: 'impact', strength: 1 };
-  private readonly previewCue: { type: 'cue'; cue: AudioCue; strength: number } = { type: 'cue', cue: 'impact', strength: 1 };
   private readonly pressedSwitches: string[] = [];
-  private lastImpact = -Infinity;
   private readonly stepObservers = new Set<StepObserver>();
-  // Last phase of each enemy, so cues fire on hit and defeat transitions only.
-  private readonly enemyPhases = new Map<string, EnemyPhase>();
-  // The bonfire a death returns to, so its cue plays when another becomes it.
-  private bonfire: string | null = null;
   private readonly renderState: CharacterState & { dt: number; death: DeathFrame | null } = { armIk: DEFAULT_ARM_IK, dt: 0, death: null };
   private hud: HudSettings;
   private death: Dying | null = null;
@@ -143,11 +131,8 @@ export class Game {
     videos?: VideoPlayback;
     // Streams authored video sources; by default sources are URLs.
     media?: MediaHost;
-    // Receives staged cues after the step loop, before observers and rendering.
-    // Impacts are tracked only while this output or gameplay observers need them.
-    onCue?: (cue: GameCue) => void;
-    // The initial pause state at start(), then changes only, so audio needs no per-frame polling.
-    onPauseChange?: (paused: boolean) => void;
+    // Host-owned and not disposed by the Game. Receives moments after effects, before observers.
+    audio?: AudioOutput | null;
     // 'reset' must place the player synchronously through Game; death's return without a bonfire relies on it.
     onAction: (action: UiAction, options?: UiActionOptions) => void;
     onNotice: (message: string) => void;
@@ -156,9 +141,7 @@ export class Game {
     this.canvas = options.canvas;
     this.onFatal = options.onFatal;
     this.onAction = options.onAction;
-    const audio = options.onCue === undefined && options.onPauseChange === undefined ? null : options.plugins.slot(AUDIO, SILENT_AUDIO_OUTPUT);
-    this.onCue = options.onCue === undefined ? null : attributed(audio!.plugin, audio!.point, options.onCue);
-    this.onPauseChange = options.onPauseChange === undefined ? null : attributed(audio!.plugin, audio!.point, options.onPauseChange);
+    this.audio = options.audio ?? null;
     this.hud = options.hud ?? DEFAULT_HUD;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     const listen = { signal: this.lifecycle.signal };
@@ -166,8 +149,7 @@ export class Game {
     window.addEventListener('unhandledrejection', (event) =>
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     try {
-      this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level);
-      this.hurtPlacement = this.simulation.placement;
+      this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level, this.journal);
       this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
         characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
         decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
@@ -191,23 +173,18 @@ export class Game {
         onFailure: ({ triggerId, eventIndex, message }) => options.onNotice(`Trigger "${triggerId}", event ${eventIndex + 1}: ${message}`),
         onFault: (error) => this.stop(error instanceof Error ? error.message : String(error)),
       });
-      for (const factory of options.plugins.list(EVENTS)) {
-        this.observers.push(createInstance(GAME_OBSERVER_CONTRACT, factory, factory.value));
+      for (const factory of options.plugins.list(OBSERVERS)) {
+        this.observers.push(createInstance(OBSERVER_CONTRACT, factory, factory.value));
       }
-      this.eventConsumers = this.onCue !== null || this.observers.length > 0;
-      if (this.eventConsumers) this.simulation.trackImpacts(true);
+      this.observerRoutes = momentRoutes(this.observers, observer => observer.captured.moments);
+      this.simulation.trackImpacts(this.audio !== null || this.view.effects.takes('impact') || this.observerRoutes.impact.length > 0);
       // TerrainView is engine-only. Its incremental physics hand-off stays synchronous.
       this.unsubscribeTerrain = this.simulation.subscribeTerrain((event) => this.view.terrain.apply(event));
-      this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => this.stageEnemy(event));
+      this.unsubscribeEnemies = this.simulation.subscribeEnemies((event) => {
+        if (!this.stopped) this.pendingLooks.enemy(event);
+      });
       this.unsubscribeBonfires = this.simulation.subscribeBonfires((state) => {
-        if (!this.stopped) {
-          this.pending.lit = state.lit;
-          if (state.current !== null && state.current !== this.bonfire) {
-            const event = this.stageEvent('bonfire');
-            if (event !== null) event.id = state.current;
-          }
-        }
-        this.bonfire = state.current;
+        if (!this.stopped) this.pendingLooks.lit = state.lit;
       });
       for (const factory of options.plugins.list(INPUT_DEVICES)) {
         const create = factory.value;
@@ -231,9 +208,9 @@ export class Game {
         this.settleDeathClock();
         this.clearMovement();
       }, listen);
-      // Seed the looks before the first frame. There are no boot gameplay events.
+      // Seed the looks before the first frame. There are no boot gameplay moments.
       this.stageSwitches();
-      this.flushNotifications();
+      this.flush();
     } catch (error) {
       const disposal = new Disposal();
       disposal.run(() => { throw error; });
@@ -246,7 +223,7 @@ export class Game {
   start(onFrame: (state: HudFrame) => void): void {
     if (this.started) throw new Error('The game loop is already running.');
     this.started = true;
-    if (this.onPauseChange !== null) apply1(this.onPauseChange, 'setPaused', this.pauseReasons.size > 0);
+    this.audio?.setPaused(this.pauseReasons.size > 0);
     this.previousTime = performance.now();
     const animate = (now: number): void => {
       if (this.stopped) return;
@@ -279,7 +256,7 @@ export class Game {
           for (; completed < steps;) {
             const placement = this.simulation.placement;
             const dying = this.death;
-            this.simulation.step(perStep);
+            const ended = this.simulation.step(perStep);
             if (this.timerRunning) this.timerElapsed += PHYSICS.dt;
             completed++;
             if (dying !== null) {
@@ -291,9 +268,8 @@ export class Game {
                 break;
               }
             } else {
-              const terminal = this.simulation.terminal();
-              if (terminal !== null) {
-                this.beginDeath(terminal);
+              if (ended !== null) {
+                this.beginDeath(deathInfo(ended));
                 interrupted = true;
                 break;
               }
@@ -315,31 +291,6 @@ export class Game {
           }
           if (interrupted) this.accumulator = 0;
           else if (this.pauseReasons.size === 0) this.accumulator -= completed * PHYSICS.dt;
-          // The held or released hammer blocks even during death; never gate its effects on vulnerability.
-          const blocks = this.simulation.takeBlocks();
-          for (let index = 0; index < blocks.count; index++) {
-            if (!this.stopped) this.pending.block(blocks.hits[index]!, this.simulation.placement);
-          }
-          if (this.death === null && !interrupted) {
-            const hurt = this.simulation.takeHurt();
-            if (hurt !== null) {
-              this.stageHurt(hurt, false);
-              const event = this.stageEvent('hurt');
-              if (event !== null) {
-                const health = this.simulation.readHealth();
-                event.health = health.current;
-                event.max = health.max;
-                stageCause(event.cause, hurt);
-              }
-            }
-            if (this.eventConsumers) {
-              const impact = this.simulation.takeImpact();
-              if (impact >= IMPACT_SPEED.minimum && this.allowImpact()) {
-                const event = this.stageEvent('impact');
-                if (event !== null) event.strength = impactStrength(impact);
-              }
-            }
-          }
         }
       } else {
         this.accumulator = 0;
@@ -347,7 +298,7 @@ export class Game {
       }
       // Never carry device movement from paused, blocked or zero-step frames into a later frame.
       if (hasDevices) this.deviceMovement.x = this.deviceMovement.y = 0;
-      this.flushNotifications();
+      this.flush();
       if (this.stopped) return;
       const alpha = this.pauseReasons.size > 0 || !visible ? 1 : clamp(this.accumulator / PHYSICS.dt, 0, 1);
       const dying = this.death;
@@ -363,7 +314,7 @@ export class Game {
       }
       if (this.stopped) return;
       if (!this.presenter.coversGame) {
-        this.prepareHurtPlacement();
+        this.showPlacement();
         if (this.stopped) return;
         const frame = this.simulation.frame(alpha);
         this.renderState.dt = dt;
@@ -461,13 +412,6 @@ export class Game {
 
   setMedia(media: MediaHost): void { this.presenter.setMedia(media); }
 
-  // Editor previews remain available after gameplay stops, but share the gameplay impact limit.
-  playCue(cue: AudioCue): void {
-    if (this.onCue === null || cue === 'impact' && !this.allowImpact()) return;
-    this.previewCue.cue = cue;
-    this.sendAudio(this.previewCue);
-  }
-
   // Applies to future messages and deaths; an active death keeps the text and duration it started with.
   setHud(settings: HudSettings): void { this.hud = settings; }
 
@@ -479,7 +423,7 @@ export class Game {
     this.settleDeathClock();
     this.clearMovement();
     const paused = this.pauseReasons.size > 0;
-    if (this.started && !this.stopped && paused !== wasPaused && this.onPauseChange !== null) apply1(this.onPauseChange, 'setPaused', paused);
+    if (this.started && !this.stopped && paused !== wasPaused) this.audio?.setPaused(paused);
   }
 
   setInputBlock(options: { reason: string; blocked: boolean }): void {
@@ -490,7 +434,7 @@ export class Game {
   }
 
   // Engine-only recording/diagnostics. Only eligible live steps are sampled; death interrupts before its fatal sample.
-  // Runtime plugins observe staged EVENTS instead. Returns this observer's removal.
+  // Runtime plugins observe gameplay moments instead. Returns this observer's removal.
   observeSteps(observer: StepObserver): () => void {
     this.stepObservers.add(observer);
     return () => { this.stepObservers.delete(observer); };
@@ -511,9 +455,6 @@ export class Game {
     this.accumulator = 0;
     this.clearMovement();
     this.view.recenter(this.simulation.frame(1));
-    this.stageHurtClear();
-    const event = this.stageEvent('respawn');
-    if (event !== null) event.bonfire = this.bonfire;
   }
 
   // Everything a reset restarts besides the player and level objects.
@@ -526,8 +467,6 @@ export class Game {
     this.accumulator = 0;
     this.clearMovement();
     this.view.recenter(this.simulation.frame(1));
-    this.stageHurtClear();
-    this.stageEvent('restart');
     this.stageSwitches();
   }
 
@@ -544,8 +483,6 @@ export class Game {
       this.accumulator = 0;
       this.clearMovement();
       this.view.recenter(this.simulation.frame(1));
-      this.stageHurtClear();
-      this.stageEvent('restart');
     }
   }
 
@@ -571,6 +508,7 @@ export class Game {
     if (this.disposed) return;
     this.disposed = true;
     this.stopped = true;
+    this.journal.close();
     const disposal = new Disposal();
     disposal.run(() => cancelAnimationFrame(this.animationFrame));
     disposal.run(() => this.lifecycle.abort());
@@ -593,10 +531,9 @@ export class Game {
     disposal.run(() => this.input?.dispose());
     disposal.run(() => this.view?.dispose());
     disposal.run(() => this.simulation?.dispose());
-    this.pending.clear();
-    this.delivery.clear();
+    this.pendingLooks.clear();
+    this.deliveringLooks.clear();
     this.stepObservers.clear();
-    this.enemyPhases.clear();
     disposal.finish();
   }
 
@@ -604,8 +541,9 @@ export class Game {
     if (this.stopped) return;
     this.stopped = true;
     cancelAnimationFrame(this.animationFrame);
-    this.pending.clear();
-    this.delivery.clear();
+    this.journal.close();
+    this.pendingLooks.clear();
+    this.deliveringLooks.clear();
     this.deviceMovement.x = this.deviceMovement.y = 0;
     const disposal = new Disposal();
     try {
@@ -634,21 +572,14 @@ export class Game {
     this.timerRunning = true;
   }
 
-  private beginDeath(kind: DeathKind): void {
-    const info: DeathInfo = kind === 'fall' ? { kind } : { kind, cause: { ...this.simulation.hurtCause() } };
+  private beginDeath(info: DeathInfo): void {
+    const kind = info.kind;
     const settings = this.hud.death;
     const dying: Dying = {
       info, duration: this.settings().death.wait, placement: this.simulation.placement,
       elapsed: 0, previousElapsed: 0, reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     };
     this.death = dying;
-    // Falling wins the cue, but the killing hit still reaches the hurt effects.
-    if (this.simulation.dead()) this.stageHurt(this.simulation.hurtCause(), true);
-    if (kind === 'fall') this.stageEvent('fall');
-    else {
-      const event = this.stageEvent('death');
-      if (event !== null && info.kind === 'health') stageCause(event.cause, info.cause);
-    }
     this.view.writeDeathSeed(this.simulation.frame(1), this.deathSeed, this.renderState.armIk);
     this.simulation.beginDeath(this.deathSeed);
     this.view.beginDeath(this.simulation.frame(1), kind);
@@ -669,8 +600,6 @@ export class Game {
       this.onAction('reset');
       if (this.stopped) return;
       if (this.simulation.placement === dying.placement) throw new DeathSequenceError('placement-failed');
-      const event = this.stageEvent('respawn');
-      if (event !== null) event.bonfire = null;
     }
   }
 
@@ -700,12 +629,12 @@ export class Game {
     if (signal.aborted || this.death !== null || this.stopped) return 'cancelled';
     if (action.type === 'stop-timer') {
       this.timerRunning = false;
-      this.stageEvent('finish');
+      this.stageMoment('finish');
       return 'completed';
     }
     if (action.type === 'launch-player') {
       this.simulation.launch(action);
-      this.stageEvent('launch');
+      this.stageMoment('launch');
       return 'completed';
     }
     if (action.type === 'fire-trap') {
@@ -717,11 +646,9 @@ export class Game {
       return 'completed';
     }
     if (action.type === 'play-sound') {
-      const event = this.stageEvent('sound');
-      if (event !== null) {
-        event.source = action.source;
-        event.volume = action.volume;
-      }
+      const moment = this.stageMoment('sound');
+      moment.source = action.source;
+      moment.volume = action.volume;
       return 'completed';
     }
     // A toast never holds up the triggers: the next event, or the next trigger, starts at once.
@@ -751,124 +678,58 @@ export class Game {
     if (this.simulation.placement !== placement || this.pauseReasons.size > 0 || this.inputBlocks.size > 0 || this.death !== null) this.clearMovement();
   }
 
-  private stageEvent<T extends GameEvent['type']>(type: T) {
-    return this.eventConsumers && !this.stopped ? this.pending.event(type) : null;
+  private stageMoment<T extends 'launch' | 'finish' | 'sound'>(type: T) {
+    return this.journal.append(type, this.simulation.placement, this.simulation.time);
   }
 
-  // The hurt effects always show, so their hits and clears are staged whoever else consumes events.
-  private stageHurt(cause: Readonly<HurtCause>, fatal: boolean): void {
-    if (!this.stopped) this.pending.hurt(cause, fatal, this.simulation.placement);
-  }
-
-  private stageHurtClear(): void {
-    if (!this.stopped) this.pending.clearHurt(this.simulation.placement);
-  }
-
-  // Delivery callbacks may place the player again. Clear the latest placement before drawing, not one frame later.
-  private prepareHurtPlacement(): void {
+  // A callback can place the player during the drain. Effects catch up before interpolation and drawing.
+  private showPlacement(): void {
     const placement = this.simulation.placement;
-    if (this.hurtPlacement === placement) return;
-    this.hurtPlacement = placement;
-    this.view.clearHurt();
+    if (this.view.effects.placement === placement) return;
+    const moment = this.journal.pendingPlacement(placement);
+    if (moment === null) throw new Error('The current player placement has no pending placed moment.');
+    this.view.effects.moment(moment, placement);
   }
 
   private stageSwitches(): void {
     if (this.stopped || !this.triggers.writePressedSwitches(this.pressedSwitches)) return;
-    this.pending.switches = this.pressedSwitches.slice();
+    this.pendingLooks.switches = this.pressedSwitches.slice();
   }
 
-  // Called synchronously by the simulation: copy only into engine-owned staging, never call a look or a plugin here.
-  private stageEnemy(event: EnemyEvent): void {
-    if (this.stopped) return;
-    this.pending.enemy(event);
-    if (!this.eventConsumers) return;
-    if (event.type === 'reset') {
-      this.enemyPhases.clear();
-      for (const pose of event.poses) this.enemyPhases.set(pose.id, pose.phase);
-    } else if (event.type === 'remove') {
-      this.enemyPhases.delete(event.id);
-    } else {
-      const previous = this.enemyPhases.get(event.pose.id);
-      this.enemyPhases.set(event.pose.id, event.pose.phase);
-      if (previous === undefined || previous === event.pose.phase) return;
-      if (event.pose.phase === 'hurt' || event.pose.phase === 'dead') {
-        const notification = this.stageEvent(event.pose.phase === 'hurt' ? 'enemy-hit' : 'enemy-defeat');
-        if (notification !== null) notification.id = event.pose.id;
-      }
-    }
-  }
-
-  private allowImpact(): boolean {
-    const now = performance.now() / 1000;
-    if (now - this.lastImpact < IMPACT_INTERVAL) return false;
-    this.lastImpact = now;
-    return true;
-  }
-
-  private sendAudio(cue: GameCue): void {
-    if (this.onCue !== null) apply1(this.onCue, 'handle', cue);
-  }
-
-  private flushNotifications(): void {
-    if (this.lifecycle.signal.aborted || !this.pending.pending) return;
-    // Callbacks can raise more notifications. Give them the other buffer; never overwrite a borrowed event
-    // being delivered, and defer their new notifications to the next flush.
-    const batch = this.pending;
-    this.pending = this.delivery;
-    this.delivery = batch;
+  private flush(): void {
+    if (this.lifecycle.signal.aborted) return;
+    // Take both channels before any consumer runs: callback writes wait for the next drain.
+    const batch = this.journal.take();
+    const looks = this.pendingLooks;
+    if (!looks.pending && batch === null) return;
+    this.pendingLooks = this.deliveringLooks;
+    this.deliveringLooks = looks;
     try {
-      // a. Looks: all enemy changes, then only the latest bonfire state.
-      for (let index = 0; index < batch.enemyCount; index++) {
+      for (let index = 0; index < looks.enemyCount; index++) {
         if (this.lifecycle.signal.aborted) return;
-        this.view.applyEnemy(batch.enemies[index]!);
+        this.view.applyEnemy(looks.enemies[index]!);
       }
-      if (batch.lit !== null && !this.lifecycle.signal.aborted) {
-        this.view.setLitBonfires(batch.lit);
-      }
-      if (batch.switches !== null && !this.lifecycle.signal.aborted) {
-        this.view.setPressedSwitches(batch.switches);
-      }
-      // Then hits and placements for the hurt effects, in the order they happened.
-      for (let index = 0; index < batch.hurtCount; index++) {
+      if (this.lifecycle.signal.aborted) return;
+      if (looks.lit !== null) this.view.setLitBonfires(looks.lit);
+      if (this.lifecycle.signal.aborted) return;
+      if (looks.switches !== null) this.view.setPressedSwitches(looks.switches);
+      if (batch === null) return;
+      for (let index = 0; index < batch.count; index++) {
+        const moment = batch.moments[index]!;
         if (this.lifecycle.signal.aborted) return;
-        const notice = batch.hurts[index]!;
-        if (notice.placement !== this.simulation.placement) continue;
-        this.prepareHurtPlacement();
+        this.view.effects.moment(moment, this.simulation.placement);
         if (this.lifecycle.signal.aborted) return;
-        if (notice.clear || notice.placement !== this.simulation.placement) continue;
-        this.view.hurt(notice.cause, notice.fatal);
-      }
-      for (let index = 0; index < batch.blockCount; index++) {
+        this.audio?.moment(moment);
         if (this.lifecycle.signal.aborted) return;
-        const notice = batch.blocks[index]!;
-        if (notice.placement !== this.simulation.placement) continue;
-        this.view.block(notice.hit);
-      }
-      // b. Audio: the same source order as the gameplay notifications, with impacts already limited.
-      if (this.onCue !== null) {
-        for (let index = 0; index < batch.eventCount; index++) {
+        const observers = this.observerRoutes[moment.type];
+        for (let observer = 0; observer < observers.length; observer++) {
           if (this.lifecycle.signal.aborted) return;
-          const event = batch.events[index]!;
-          if (event.type === 'sound') this.sendAudio(event);
-          else if (event.type !== 'restart' && event.type !== 'respawn') {
-            this.audioCue.cue = event.type;
-            this.audioCue.strength = event.type === 'impact' ? event.strength : 1;
-            this.sendAudio(this.audioCue);
-          }
-        }
-      }
-      // c. Observers: event order first, manifest order within each event; no calls on an idle frame.
-      if (this.observers.length > 0) {
-        for (let index = 0; index < batch.eventCount; index++) {
-          const event = batch.events[index]!;
-          for (const observer of this.observers) {
-            if (this.lifecycle.signal.aborted) return;
-            call1(observer, 'event', event);
-          }
+          call1(observers[observer]!, 'moment', moment);
         }
       }
     } finally {
-      batch.clear();
+      looks.clear();
+      if (batch !== null) this.journal.release(batch);
     }
   }
 }
