@@ -274,6 +274,15 @@ export class PlatformWorld {
     return this.drawnFrame;
   }
 
+  // Retain moving and unacknowledged draws; settling an arrival must not consume its final pose change.
+  settleInterpolation(): void {
+    this.ensureLive();
+    for (let index = 0; index < this.drawing.count; index++) {
+      this.settlePose(this.drawing.at(index));
+    }
+    this.arrived.clear();
+  }
+
   frame(alpha: number): PlatformFrame {
     this.ensureLive();
     let count = 0;

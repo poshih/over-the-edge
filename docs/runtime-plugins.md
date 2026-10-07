@@ -487,9 +487,9 @@ interface MomentEffect {
   update, after scene layers. It receives the borrowed [`SceneFrame`](#scene-layers), unaffected
   by Workshop character previews. Return a boolean, `true` while anything still shows.
   Reuse geometry, materials and scratch; allocate nothing in either method.
-- End/reset at `placed`, **not when time moves backward**. A new run rewinds the clock, but
-  the first resumed frame may interpolate one physics step backward too. Clamp ages and
-  time steps at zero, such as `Math.max(0, frame.time - born)`.
+- End/reset at `placed`, **not when time moves backward**. A new run rewinds the clock;
+  pauses and tab visibility changes settle interpolation at the current step, so resuming
+  never rewinds it. Clamp ages and time steps at zero, such as `Math.max(0, frame.time - born)`.
 - Roots draw in the selected pass and detach before `dispose`. Collider visuals belong on
   `OBSTACLE_LINE` in actors. **Marks materials ignore depth (`depthTest: false`)** and should
   use `depthWrite: false`, over the characters and arms but under the tool. Follow the
@@ -676,7 +676,8 @@ Each death snapshots its wait, text and fade; edits affect the next death.
 A fade longer than the wait ends unfinished without an error, never extending the wait.
 Death settings and timing do not count toward the phantom course because recordings
 never include dying. The clock advances by `PHYSICS.dt` with each dying physics step and presentation
-interpolates it with the frame's alpha. Pause and a hidden tab hold it, with no catch-up.
+interpolates it with the frame's alpha. Pause and a hidden tab hold both the clock and world at
+the current step, with no catch-up or interpolation rewind when play resumes.
 Reset and other control actions remain available; only movement is discarded.
 
 `Game` hosts must handle `onAction('reset')` by placing the player synchronously through

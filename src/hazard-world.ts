@@ -187,6 +187,15 @@ export class HazardWorld {
     if (vulnerable && this.hooks.vulnerable()) this.swing(time, root);
   }
 
+  settleInterpolation(): void {
+    this.ensureLive();
+    for (let index = 0; index < this.projectileCount; index++) {
+      const shot = this.projectiles[index]!;
+      shot.fromX = shot.x;
+      shot.fromY = shot.y;
+    }
+  }
+
   frame(alpha: number): readonly ProjectilePose[] {
     const count = this.projectileCount;
     while (this.posePool.length < count) {

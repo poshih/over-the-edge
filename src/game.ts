@@ -204,9 +204,8 @@ export class Game {
         this.devices.push(createInstance(INPUT_DEVICE_CONTRACT, factory, () => create(host)));
       }
       document.addEventListener('visibilitychange', () => {
-        this.accumulator = 0;
         this.previousTime = performance.now();
-        this.settleDeathClock();
+        this.settleInterpolation();
         this.clearMovement();
       }, listen);
       // Seed the looks before the first frame. There are no boot gameplay moments.
@@ -423,8 +422,7 @@ export class Game {
     const wasPaused = this.pauseReasons.size > 0;
     if (options.paused) this.pauseReasons.add(options.reason);
     else this.pauseReasons.delete(options.reason);
-    this.accumulator = 0;
-    this.settleDeathClock();
+    this.settleInterpolation();
     this.clearMovement();
     const paused = this.pauseReasons.size > 0;
     if (this.started && !this.stopped && paused !== wasPaused) this.audio?.setPaused(paused);
@@ -624,7 +622,10 @@ export class Game {
   }
 
   // Discard interpolation with the accumulator, so resuming cannot rewind the presentation by one step.
-  private settleDeathClock(): void {
+  // Stopped games never draw, and their simulation may already be disposed.
+  private settleInterpolation(): void {
+    this.accumulator = 0;
+    if (!this.stopped) this.simulation.settleInterpolation();
     if (this.death !== null) this.death.previousElapsed = this.death.elapsed;
   }
 

@@ -35,7 +35,7 @@ import { PlatformWorld } from './platform-world';
 import type { PlatformFrame } from './platform-world';
 import type { DeathKind } from './death-sequence';
 import { PlayerDeathError, writeRagdollPose } from './player-ragdoll';
-import { createDeathPose, interpolateDeathPose, interpolateTransform } from './player-pose';
+import { copyDeathPose, copyPoint, copyTransform, createDeathPose, interpolateDeathPose, interpolateTransform } from './player-pose';
 import type { MutablePlayerFrameState, PlayerFrameState } from './player-pose';
 import { validateCharacterFigure } from './character-figure';
 import type { CharacterFigure } from './character-figure';
@@ -548,6 +548,29 @@ export class Simulation {
     const moment = this.moments.append('death', this.placements, this.elapsed);
     copyCause(moment.cause, this.cause);
     return moment;
+  }
+
+  // Collapse the interpolation sources without changing physics; the next step starts from this endpoint.
+  settleInterpolation(): void {
+    this.ensureLive();
+    const current = this.current, previous = this.previous;
+    const player = previous.player, from = current.player;
+    if (player.phase === 'alive' && from.phase === 'alive') {
+      copyPoint(player.shoulder, from.shoulder);
+    } else if (player.phase === 'dying' && from.phase === 'dying') {
+      copyDeathPose(player.pose, from.pose);
+    } else throw new PlayerDeathError('phase-mismatch', 'Player interpolation cannot settle across a placement or death phase.');
+    copyTransform(player.centre, from.centre);
+    previous.time = current.time;
+    copyPoint(previous.cursorOffset, current.cursorOffset);
+    for (let index = 0; index < current.parts.length; index++) {
+      const part = current.parts[index]!, out = previous.parts[index]!;
+      copyTransform(out, part);
+      out.vertices = part.vertices; out.collides = part.collides;
+    }
+    this.enemies.settleInterpolation();
+    this.hazards.settleInterpolation();
+    this.platforms.settleInterpolation();
   }
 
   // The frame and every mutable member are borrowed until the next call. Consume immediately, never retain them.

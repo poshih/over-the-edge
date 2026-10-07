@@ -281,6 +281,17 @@ export class EnemyWorld {
     if (this.listeners.size > 0) this.emit({ type: 'remove', id: record.object.id });
   };
 
+  settleInterpolation(): void {
+    this.ensureLive();
+    this.active.forEach(this.settlePose);
+    this.dying.forEach(this.settlePose);
+  }
+
+  private readonly settlePose = (record: EnemyRecord): void => {
+    record.previous.x = record.current.x;
+    record.previous.y = record.current.y;
+  };
+
   // The array and every pose are pooled and borrowed until the next frame().
   frame(alpha: number): readonly EnemyPose[] {
     this.ensureLive();
