@@ -1,4 +1,3 @@
-import { RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
 import type { AxeObject, StartObject } from './level';
 
@@ -39,17 +38,6 @@ export interface ProjectileBlock {
   readonly normalY: number;
 }
 
-export const HEALTH = {
-  // A hit leaves the player unharmed this long, so one blow counts once.
-  hurtSeconds: 1,
-  // Coming back at a bonfire leaves the player unharmed this long.
-  respawnSeconds: 2,
-} as const;
-
-// The character as traps see it, around the player's root: the pot and the body above it, and how far it reaches
-// either side of the obstacle line.
-export const HURT_BOX = { halfWidth: 0.5, bottom: RIG.potBottom, top: 1.1, halfDepth: 0.45 } as const;
-
 export const BONFIRE = {
   // The player's foot lights a bonfire this near its base.
   reach: 1.5,
@@ -64,8 +52,6 @@ export const SHOOTER = {
   range: 40,
   // Projectiles in flight at once across the level; a trap skips its shot while they all fly.
   projectiles: 256,
-  // Velocity a hit adds to the player, along the shot and upward, in m/s.
-  push: 4, lift: 1.5,
   // The drawn trap, its muzzle on its position facing along its angle: how far its body reaches back, and its height.
   length: 0.9, height: 0.7,
   // The drawn projectile, its tip on its position.
@@ -86,8 +72,6 @@ export const AXE = {
   // width runs across the obstacle line, toward the camera and away, its height along the haft, centred the axe's
   // length below the pivot, and its thickness along the line.
   bladeWidth: 1.3, bladeHeight: 0.7, bladeThickness: 0.06,
-  // Velocity a hit adds to the player, away from where the blade struck and upward, in m/s: a heavy blow.
-  push: 9, lift: 4,
 } as const;
 
 export const AXE_FIELDS = {

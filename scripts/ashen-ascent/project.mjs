@@ -25,7 +25,7 @@ export const HUD = {
   timer: { visible: true, label: 'HOLLOWING' },
   // Lore rises as embers and drifts away while the climb goes on.
   messages: { style: 'toast' },
-  death: { text: 'You are dead...', fadeIn: 1.5, hold: 2.5 },
+  death: { text: 'You are dead...', fadeIn: 1.5 },
 };
 
 export const MEDIA = ['ashen-loop.wav', 'ember.wav', 'bell.wav', 'chime.wav', 'triumph.wav', 'clank.wav', 'thud.wav', 'soul.wav',

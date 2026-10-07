@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 13,
+    "schemaVersion": 14,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -45,6 +45,26 @@
       "handleDamping": 0.9,
       "mouseSensitivity": 1,
       "health": 5,
+      "hurtInvulnerability": 1,
+      "respawnInvulnerability": 2,
+      "hurtWidth": 1,
+      "hurtHeight": 1.58,
+      "hurtDepth": 0.9,
+      "projectilePush": 4,
+      "projectileLift": 1.5,
+      "axePush": 9,
+      "axeLift": 4,
+      "birdHealth": 1,
+      "birdMass": 0.55,
+      "birdAcceleration": 22,
+      "birdSight": 6,
+      "birdDiveSpeed": 5,
+      "soldierHealth": 2,
+      "soldierMass": 3,
+      "soldierAcceleration": 28,
+      "bumpDamage": 1,
+      "bumpSpeed": 3,
+      "bumpLift": 1.4,
       "lavaBuoyancy": 160,
       "lavaDrag": 3,
       "lavaDamage": 1,
@@ -72,6 +92,7 @@
     },
     "death": {
       "mode": "ragdoll",
+      "wait": 4,
       "angularDamping": 2,
       "friction": 0.45
     }
@@ -159,8 +180,7 @@
     },
     "death": {
       "text": "You are dead...",
-      "fadeIn": 1.5,
-      "hold": 2.5
+      "fadeIn": 1.5
     }
   },
   "audio": {

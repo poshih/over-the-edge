@@ -675,7 +675,7 @@ export class Game {
     const info: DeathInfo = kind === 'fall' ? { kind } : { kind, cause: { ...this.simulation.hurtCause() } };
     const settings = this.hud.death;
     const dying: Dying = {
-      info, duration: settings.fadeIn + settings.hold, placement: this.simulation.placement,
+      info, duration: this.settings().death.wait, placement: this.simulation.placement,
       elapsed: 0, previousElapsed: 0, reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     };
     this.death = dying;

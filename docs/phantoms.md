@@ -202,7 +202,7 @@ length and its bytes. A **pack**, a release's bundled recordings, is laid out th
 Recordings belong to a **course**, which the build and the project server compute: the SHA-256,
 in lowercase hex, of the level's **play layout** and the game's **physics**
 (`src/phantom-course.ts`). They hold only what moves the player. The layout, without object IDs
-and in a fixed order, uses **course format 6**:
+and in a fixed order, uses **course format 7**:
 
 - each terrain object's collision as mirrored, position, size, angle, illusion and surface;
 - each enemy's species, position, facing, patrol distance and speed;
@@ -218,17 +218,16 @@ and in a fixed order, uses **course format 6**:
 - the start's position, angle and reach.
 
 The physics: every physics setting but control sensitivity, so the masses, motors, downswing
-boosts, response, friction, damping, bounciness, handle compliance, health and liquids, and the hammer rig's
+boosts, response, friction, damping, bounciness, handle compliance, health, hurt/respawn
+invulnerability, trap hurt-box dimensions and knockback, enemy health, masses,
+acceleration, sight, dive speed and bumps, and liquids, and the hammer rig's
 handle length, maximum extension, minimum reach and default head. A model-library hammer's
 own head is a cosmetic's and is left out: recordings made with any hammer share the course,
 and phantom looks receive the game's current default head rather than the recorded player's.
 
-The game settings' `death.mode`, `death.angularDamping` and `death.friction` also count,
-in canonical key order. Death itself is not recorded, but corpse and released-tool contacts
-can change the surviving world before a bonfire respawn. Death timing, text and `DEATH_POSE`
-presentation remain outside the hash. The seed uses the resolved character's displayed
-proportions: matching state, settings and seed reproduce fixed-step integration, not necessarily
-the same seed across render cadences or cosmetics.
+All death settings, including `death.wait`, and death timing, HUD text/fade and
+`DEATH_POSE` presentation are excluded: recordings never include dying. These settings
+shape only the death sequence, not the alive play a phantom records.
 
 Decorations, labels, colours, depth, which mesh draws a collision, trigger events other than
 launches, trap bursts and platform moves, control sensitivity and the cursor settings are

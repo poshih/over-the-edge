@@ -34,7 +34,9 @@ const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title
   Response: { id: 'physics-response', hint: 'How closely the hammer follows aim' },
   Materials: { id: 'physics-materials', hint: 'Friction, bounciness, damping and handle flex' },
   Input: { id: 'physics-input', hint: 'Control sensitivity' },
-  Health: { id: 'physics-health', hint: 'Hits the character can take' },
+  Health: { id: 'physics-health', hint: 'Health and invulnerability' },
+  Hazards: { id: 'physics-hazards', hint: 'Hurt box and trap knockback' },
+  Enemies: { id: 'physics-enemies', hint: 'Health, mass, movement and bumps' },
   Liquids: { id: 'physics-liquids', hint: 'Lava and swamp: lift, drag and burn' },
 };
 
@@ -183,7 +185,7 @@ export function createUI(options: UiOptions): GameUi {
     for (const field of DEATH_FIELDS) {
       const control = deathControls.get(field.key);
       if (!control) throw new Error(`Missing death control: ${field.key}`);
-      const inactive = settings.death.mode === 'hold';
+      const inactive = settings.death.mode === 'hold' && field.key !== 'wait';
       control.setValue(settings.death[field.key], { disabled: inactive });
       control.row.classList.toggle('is-inactive', inactive);
     }
@@ -323,7 +325,7 @@ export function createUI(options: UiOptions): GameUi {
     id: 'physics-saved', title: 'Saved game settings', hint: 'Named profiles and JSON files',
   });
   const deathGroup = tuningSection({
-    id: 'physics-death', title: 'Death', hint: 'Physical collapse or a held pose',
+    id: 'physics-death', title: 'Death', hint: 'Respawn wait, physical collapse or a held pose',
   }, 'Death');
   const deathLabel = document.createElement('label');
   deathLabel.htmlFor = deathMode.id = 'death-mode';
@@ -337,7 +339,7 @@ export function createUI(options: UiOptions): GameUi {
   }), listen);
   const deathHelp = document.createElement('p');
   deathHelp.className = 'rig-settings-help';
-  deathHelp.textContent = 'Ragdoll releases the hands and hammer and simulates a passive corpse. Hold keeps the motors and grips at the last aim. Changes apply to the next death; the HUD controls its text and wait.';
+  deathHelp.textContent = 'Ragdoll releases the hands and hammer and simulates a passive corpse. Hold keeps the motors and grips at the last aim. Changes apply to the next death; Respawn wait controls placement, while the HUD controls only text and fade.';
   deathGroup.append(deathLabel, deathMode, deathHelp);
   for (const field of DEATH_FIELDS) {
     const control = createRangeControl(field, {

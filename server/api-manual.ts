@@ -10,11 +10,14 @@ import { WAIST_LEAN_LIMITS } from '../src/waist-lean';
 import { VISUAL_PART_IDS } from '../src/character';
 import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
-import { CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEATH_FIELDS, DEFAULT_DEATH_SETTINGS, RIG_FIELDS, TUNING_FIELDS } from '../src/game-settings';
+import {
+  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEATH_FIELDS, DEFAULT_DEATH_SETTINGS, GAME_SETTINGS_SCHEMA_VERSION, RIG_FIELDS, TUNING_FIELDS,
+} from '../src/game-settings';
 import { DEFAULT_HUD, HUD_FIELDS } from '../src/hud';
 import { CONTENT_SCHEMA_VERSION } from '../src/content';
 import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, PLATFORM_LIMITS, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
 import { BOARD_CELL } from '../src/level-board';
+import { PHANTOM_COURSE_FORMAT } from '../src/phantom-course';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../src/media';
 import { MODEL_LIBRARY_LIMITS } from '../src/model-library';
 import { PLUGIN_DATA_LIMITS } from '../src/plugin-data';
@@ -105,7 +108,8 @@ export function apiManual(auth: 'token' | 'loopback') {
     levelVersions: {
       description: 'A version is the stored level together with the game settings it plays with. Whenever either changes, they become the project\'s next version unless they match the latest: a change to the level, level/objects, level/labels or settings sections, a bundle, or a level.json or project.json changed on disk (numbered when the project is next read). '
         + 'Every answer about revisions (section changes, GET revision, GET project, bundles) carries "level": { "version", "course" }, null while the stored level is invalid; GET level answers with X-Level-Version and X-Level-Course headers.',
-      course: 'The SHA-256 of the level\'s play layout and the physics. The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, bonfires, traps, liquid pools and platforms (including ride), the triggers that launch the player, fire traps or move platforms (including to), and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, and the rig and death settings; not the cursor. '
+      course: `The SHA-256 of the level's play layout and the physics, course format ${PHANTOM_COURSE_FORMAT}. `
+        + 'The layout: each terrain object\'s collision as mirrored, position, size, angle, illusion and surface, the enemies, bonfires, traps, liquid pools and platforms (including ride), the triggers that launch the player, fire traps or move platforms (including to), and the start, without IDs, depth, colours, the meshes drawn, labels, other trigger events or decorations. The physics: every physics setting but mouseSensitivity, including health, invulnerability, hurt-box, knockback and enemy rules, and the rig; not the cursor or any death settings or timing, because recordings never include dying. '
         + 'Versions that play the same share a course and its recordings; a release bundles the recordings of its level and settings\' course.',
       phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records alive play on the version it plays, one session per run, in consecutive clips. Death ends the clip and session before the terminal step; dying movement, teleport and placement poses are never sampled.',
     },
@@ -137,12 +141,12 @@ export function apiManual(auth: 'token' | 'loopback') {
           platform: { kind: 'platform', id: 'lift-1', x: 8, y: 4, ride: true, travelX: 0, travelY: 6, width: 3, height: 0.4, depth: 2, speed: 1.5, surface: SURFACES.join(' | ') },
         },
         hazards: 'A bonfire (x, y: the centre of its base on the ground) lights when the player\'s foot comes within '
-          + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, makes the corpse go limp and releases the hammer to fall in death.mode "ragdoll", or keeps the aim held and the hammer gripped in "hold". It shows hud.death.text over hud.death.fadeIn + hud.death.hold seconds of physics time. The world and timer (unless stopped) carry on but the player has no input, takes no damage, hits no enemies and lights no bonfires; Reset stays available, and Pause and a hidden tab hold the sequence. It then brings the player back at the one reached last, the run going on, or restarts the run before any. `
+          + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, makes the corpse go limp and releases the hammer to fall in death.mode "ragdoll", or keeps the aim held and the hammer gripped in "hold". It waits the game settings\' snapshotted death.wait seconds of physics time before placement; hud.death.text fades over hud.death.fadeIn independently, ending unfinished if its fade is longer than the wait. The world and timer (unless stopped) carry on but the player has no input, takes no damage, hits no enemies and lights no bonfires; Reset stays available, and Pause and a hidden tab hold the sequence. It then brings the player back at the one reached last, healed and protected for physics.respawnInvulnerability seconds, the run going on, or restarts the run before any. `
           + 'A shooter fires a projectile from its muzzle (x, y) along angle (radians, 0 = +x). Firing "timer" shoots at delay and every interval seconds of run time after; '
           + 'firing "trigger" shoots only bursts from trigger events, using delay after the trigger and interval between burst shots. '
           + `Shots require the player within ${SHOOTER.range} m; projectiles fly straight up to that far and stop on terrain, platforms or the hammer head. `
           + 'An axe hangs its blade length below its pivot (x, y) and swings in and out of the view, through the play line at offset and every half period after. '
-          + 'Traps never collide; a hit costs its damage (whole numbers) from the player\'s health, settings physics.health. '
+          + 'Traps never collide; a hit costs its damage (whole numbers) from the player\'s health, settings physics.health, then protects it for physics.hurtInvulnerability seconds. Physics hurtWidth, hurtHeight (from the pot\'s bottom up) and hurtDepth shape their hurt box; projectilePush/projectileLift and axePush/axeLift set knockback in m/s. '
           + 'Bonfires, traps, platforms and the trigger actions that fire traps or move platforms count toward the course.',
         liquids: 'A pool fills its box (x, y: its centre; width, height; depth: how far it reaches across the play line, '
           + 'only drawn) with still liquid, its top the surface. It never collides: fit it into a basin of terrain. The player\'s pot '
@@ -183,11 +187,12 @@ export function apiManual(auth: 'token' | 'loopback') {
         notes: 'Coordinates are metres, y up; angle is radians. Terrain is a mesh in a box: the mesh\'s bounds fill width and height, and depth centred on the obstacle line, where the 2D physics plays out; mirror reflects it, collision included, left to right before it turns; a circle collision needs equal width and height. A built-in shape or drawn outline is extruded in color, a 0xRRGGBB integer, which also draws an asset mesh in the shapes look. Terrain surface is required, one of ' + SURFACES.join(', ') + ' (the Workshop starts new terrain as rock), and takes that surface\'s friction and bounciness from the game settings. A level has exactly one start; its reach is the hammer head\'s distance from the shoulder hinge, capped at the rig\'s reach. Message events appear as the project HUD\'s messages.style says: a toast that fades in and away while play goes on, or a popup that pauses the game until Continue.',
       },
       settings: {
-        value: '{ schemaVersion: 13, physics: {...}, rig: { handleLength, maxExtension, minReach, head: [{ x, y }, ...] }, cursor: { maxTargetRadius, deadZone, followCharacter, returnToHammer, returnDelay, returnRate, returnOffsetX, returnOffsetY }, death: { mode: "ragdoll" | "hold", angularDamping, friction } }', patch: true,
+        value: `{ schemaVersion: ${GAME_SETTINGS_SCHEMA_VERSION}, physics: {...}, rig: { handleLength, maxExtension, minReach, head: [{ x, y }, ...] }, cursor: { maxTargetRadius, deadZone, followCharacter, returnToHammer, returnDelay, returnRate, returnOffsetX, returnOffsetY }, death: { mode: "ragdoll" | "hold", wait, angularDamping, friction } }`, patch: true,
         fields: { physics: TUNING_FIELDS, rig: RIG_FIELDS, cursor: [...CURSOR_FIELDS, ...CURSOR_RETURN_FIELDS], death: DEATH_FIELDS },
         deathDefault: DEFAULT_DEATH_SETTINGS,
         deathModes: ['ragdoll', 'hold'],
-        deathNotes: 'Ragdoll replaces the live root with six passive bodies and releases the hammer; hold retains the motors, last aim and grips. A death captures its construction settings. angularDamping is 0-10 /s (step 0.1), friction 0.05-2 (step 0.05); the pot and head keep their own materials. Character/model/head changes while dying apply at placement. The HUD separately owns death text and timing.',
+        deathNotes: 'Ragdoll replaces the live root with six passive bodies and releases the hammer; hold retains the motors, last aim and grips. A death captures its construction settings and wait: 0.5-15 s (step 0.1), default 4. angularDamping is 0-10 /s (step 0.1), friction 0.05-2 (step 0.05); the pot and head keep their own materials. Character/model/head changes while dying apply at placement. The HUD separately owns only death text and visual fade.',
+        gameplayNotes: 'Physics / Health owns hurtInvulnerability and respawnInvulnerability; an active protection keeps its deadline. Physics / Hazards owns hurtWidth, hurtHeight (from the pot\'s bottom up), hurtDepth and projectile/axe push and lift. Only a hurtDepth change rebuilds axe index proxies; widths, heights and knockback apply live. Physics / Enemies owns birdHealth, birdMass, birdAcceleration, birdSight, birdDiveSpeed, soldierHealth, soldierMass, soldierAcceleration, bumpDamage, bumpSpeed and bumpLift. Mass updates live bodies; movement, sight, dive speed and bump rules apply immediately. Species health applies at the next reset or spawn; existing enemies retain their current and maximum health. Zero bump damage leaves knockback but causes no damage or invulnerability. All these alive-play rules count toward the phantom course.',
         notes: 'The reach is rig.handleLength + rig.maxExtension; rig.minReach, the closest the head comes to the shoulder hinge (0 lets it reach the hinge), must stay at least 0.05 m short of it so the slider can move, and cursor.maxTargetRadius may not exceed it, and the cursor reaches cursor.deadZone beyond it. cursor.followCharacter (0-100 %, 100 by default) is how much of the character\'s movement the cursor and target share: 100 keeps their offset from the shoulder hinge, 0 leaves them where they were in the world. cursor.returnToHammer (true or false, false by default) eases the target toward the centre of the hammer head plus (returnOffsetX, returnOffsetY), world metres, at returnRate per second, once aiming has paused for returnDelay seconds while the head touches a surface. The physics *Friction fields are contact friction coefficients: gripFriction the hammer head\'s, potFriction the pot\'s and rockFriction, woodFriction, metalFriction, iceFriction and rubberFriction each terrain surface\'s; a contact\'s friction is the geometric mean of its two sides\'. The *Bounciness fields are percentages: potBounciness the pot\'s, hammerBounciness the hammer head\'s and rockBounciness, woodBounciness, metalBounciness, iceBounciness and rubberBounciness each terrain surface\'s; a contact bounces as much as its bouncier side, and only above 1 m/s. The Downswing physics boosts multiply the strength of a motor while input lowers the target and that motor speeds the hammer head up downward. A rig change rebuilds the player and restarts the run, except rig.head. ' + HEAD_NOTES,
         head: HAMMER_HEAD_LIMITS,
       },
@@ -213,9 +218,9 @@ export function apiManual(auth: 'token' | 'loopback') {
       },
       theme: { value: 'scene look', patch: true, fields: THEME_FIELDS },
       hud: {
-        value: 'game readouts, trigger-message style and death text/timing', patch: true, fields: HUD_FIELDS,
+        value: 'game readouts, trigger-message style and death text/fade', patch: true, fields: HUD_FIELDS,
         deathDefault: DEFAULT_HUD.death,
-        description: 'death is { text, fadeIn, hold }; the engine waits fadeIn + hold seconds of dying physics steps before placement. An active sequence keeps its entry settings. Runtime points messages.death and scene.death-pose replace its presentation, not its clock.',
+        description: 'death is { text, fadeIn }; these are presentation only. The game settings death.wait controls the dying physics steps before placement, independently of fadeIn. A fade longer than the wait ends unfinished, without an error. An active sequence keeps its entry wait, text and fade. Runtime points messages.death and scene.death-pose replace its presentation, not its clock.',
       },
       audio: {
         value: '{ volume, music: { source, volume } | null, cues: { <cue>: { source, volume } | null } }',

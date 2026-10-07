@@ -1,9 +1,9 @@
 import { Box, Circle, DynamicTree, Vec2, WorldManifold } from 'planck';
 import type { Body, Contact, Fixture, Vec2Value, World } from 'planck';
 import { PHYSICS } from './config';
-import type { Point } from './config';
+import type { Point, Tuning } from './config';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
-import type { EnemyEvent, EnemyFacing, EnemyPhase, EnemyPose } from './enemy-types';
+import type { EnemyEvent, EnemyFacing, EnemyPhase, EnemyPose, EnemySpecies } from './enemy-types';
 import { isEnemyObject } from './level';
 import type { EnemyObject, LevelChange } from './level';
 import { clamp } from './math';
@@ -18,6 +18,7 @@ interface EnemyRecord {
   phase: EnemyPhase;
   changedAt: number;
   health: number;
+  maxHealth: number;
   lastHitAt: number;
   nextDecisionAt: number;
   desiredX: number;
@@ -32,7 +33,7 @@ interface EnemyCallbacks {
   readonly canBump: () => boolean;
   readonly isTransientTerrain: (body: Body) => boolean;
   readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
-  // A bump: the velocity it adds to the player, the enemy that dealt it and where they met, in world metres.
+  // A bump: borrowed velocity change, the enemy that dealt it and where they met, in world metres.
   readonly onBump: (velocityChange: Readonly<Point>, enemy: string, atX: number, atY: number) => void;
 }
 
@@ -52,6 +53,7 @@ function wakeBounds(position: Readonly<Point>) {
 export class EnemyWorld {
   private readonly world: World;
   private readonly callbacks: EnemyCallbacks;
+  private tuning: Readonly<Tuning>;
   private readonly records = new Map<string, EnemyRecord>();
   private readonly bodies = new Map<Body, EnemyRecord>();
   private readonly active = new Set<EnemyRecord>();
@@ -62,6 +64,7 @@ export class EnemyWorld {
   private readonly obstacles = new Set<EnemyRecord>();
   private readonly listeners = new Set<(event: EnemyEvent) => void>();
   private readonly force = new Vec2();
+  private readonly bumpVelocity: Point = { x: 0, y: 0 };
   private readonly zero = new Vec2();
   private readonly manifold = new WorldManifold();
   private queryPosition: Point | null = null;
@@ -73,13 +76,30 @@ export class EnemyWorld {
   private bumpCount = 0;
   private disposed = false;
 
-  constructor(world: World, objects: readonly EnemyObject[], callbacks: EnemyCallbacks) {
+  constructor(world: World, objects: readonly EnemyObject[], tuning: Readonly<Tuning>, callbacks: EnemyCallbacks) {
     this.world = world;
     this.callbacks = callbacks;
+    this.tuning = tuning;
     this.ensureMutable();
     for (const object of objects) this.createRecord(object);
     world.on('begin-contact', this.onBeginContact);
     world.on('pre-solve', this.onPreSolve);
+  }
+
+  setTuning(tuning: Readonly<Tuning>): void {
+    this.ensureMutable();
+    const previous = this.tuning;
+    this.tuning = tuning;
+    if (previous.birdMass === tuning.birdMass && previous.soldierMass === tuning.soldierMass) return;
+    for (const [body, record] of this.bodies) {
+      const species = record.object.species;
+      if (species === 'bird' ? previous.birdMass === tuning.birdMass : previous.soldierMass === tuning.soldierMass) continue;
+      const fixture = body.getFixtureList();
+      if (fixture === null) throw new Error(`Enemy "${record.object.id}" has no collider.`);
+      fixture.setDensity(this.density(species));
+      body.resetMassData();
+      body.setAwake(true);
+    }
   }
 
   apply(change: LevelChange, time: number): void {
@@ -228,7 +248,7 @@ export class EnemyWorld {
       activeCount: this.active.size, fadingCount: this.dying.size,
       activeUpdates: this.activeUpdates, decisions: this.decisions, queries: this.queries, bumps: this.bumpCount,
       enemies: [...this.records.values()].map((record) => ({
-        ...this.pose(record), health: record.health, maxHealth: ENEMY_SPECS[record.object.species].health,
+        ...this.pose(record), health: record.health, maxHealth: record.maxHealth,
         active: this.active.has(record), defeatedBy: record.defeatedBy,
         velocity: record.body ? { ...record.body.getLinearVelocity() } : { x: 0, y: 0 },
       })),
@@ -344,7 +364,7 @@ export class EnemyWorld {
       const distance = Math.hypot(dx, dy);
       if (distance > ENEMY_BEHAVIOR.birdReturnTolerance && this.time - record.changedAt < ENEMY_BEHAVIOR.birdDiveSeconds) {
         this.face(record, dx);
-        this.drive(record, dx / distance * ENEMY_BEHAVIOR.birdDiveSpeed, dy / distance * ENEMY_BEHAVIOR.birdDiveSpeed);
+        this.drive(record, dx / distance * this.tuning.birdDiveSpeed, dy / distance * this.tuning.birdDiveSpeed);
         return;
       }
       this.transition(record, 'recover');
@@ -361,8 +381,8 @@ export class EnemyWorld {
       }
       this.transition(record, 'patrol');
     }
-    if (distanceSquared(record.current, player) <= ENEMY_BEHAVIOR.birdSight ** 2 &&
-      distanceSquared(object, player) <= (object.patrolDistance + ENEMY_BEHAVIOR.birdSight) ** 2) {
+    if (distanceSquared(record.current, player) <= this.tuning.birdSight ** 2 &&
+      distanceSquared(object, player) <= (object.patrolDistance + this.tuning.birdSight) ** 2) {
       record.target = { ...player };
       this.face(record, player.x - record.current.x);
       this.transition(record, 'windup');
@@ -437,7 +457,8 @@ export class EnemyWorld {
     const dx = x - velocity.x;
     const dy = y === null ? 0 : y - velocity.y;
     if (dx === 0 && dy === 0) return;
-    const scale = body.getMass() * Math.min(1 / PHYSICS.dt, ENEMY_SPECS[record.object.species].acceleration / Math.hypot(dx, dy));
+    const acceleration = record.object.species === 'bird' ? this.tuning.birdAcceleration : this.tuning.soldierAcceleration;
+    const scale = body.getMass() * Math.min(1 / PHYSICS.dt, acceleration / Math.hypot(dx, dy));
     this.force.set(dx * scale, dy * scale);
     body.applyForceToCenter(this.force, true);
   }
@@ -458,7 +479,9 @@ export class EnemyWorld {
     this.nextBumpAt = this.time + ENEMY_BEHAVIOR.bumpSeconds;
     this.bumpCount++;
     this.transition(nearest, 'recover');
-    this.callbacks.onBump({ x: direction * ENEMY_BEHAVIOR.bumpSpeed, y: ENEMY_BEHAVIOR.bumpLift }, nearest.object.id,
+    this.bumpVelocity.x = direction * this.tuning.bumpSpeed;
+    this.bumpVelocity.y = this.tuning.bumpLift;
+    this.callbacks.onBump(this.bumpVelocity, nearest.object.id,
       (player.x + nearest.current.x) / 2, (player.y + nearest.current.y) / 2);
   }
 
@@ -484,7 +507,7 @@ export class EnemyWorld {
     if (this.records.size >= ENEMY_LIMITS.objects) throw new Error('Enemy capacity exceeded.');
     const record: EnemyRecord = {
       object, body: null, proxy: null, previous: { x: object.x, y: object.y }, current: { x: object.x, y: object.y },
-      facing: object.facing, phase: 'patrol', changedAt: this.time, health: ENEMY_SPECS[object.species].health,
+      facing: object.facing, phase: 'patrol', changedAt: this.time, health: 0, maxHealth: 0,
       lastHitAt: -Infinity, nextDecisionAt: this.time, desiredX: 0, target: null, defeatedBy: null,
     };
     this.records.set(object.id, record);
@@ -502,7 +525,7 @@ export class EnemyWorld {
     record.current.x = record.previous.x = object.x;
     record.current.y = record.previous.y = object.y;
     record.facing = object.facing;
-    record.health = ENEMY_SPECS[object.species].health;
+    record.health = record.maxHealth = object.species === 'bird' ? this.tuning.birdHealth : this.tuning.soldierHealth;
     record.lastHitAt = -Infinity;
     record.nextDecisionAt = this.time;
     record.desiredX = 0;
@@ -515,21 +538,26 @@ export class EnemyWorld {
 
   private createCollider(record: EnemyRecord): void {
     if (record.body !== null) throw new Error('Cannot allocate a second collider for an enemy.');
-    const spec = ENEMY_SPECS[record.object.species];
-    const collider = spec.collider;
+    const collider = ENEMY_SPECS[record.object.species].collider;
     const shape = collider.type === 'circle' ? new Circle(collider.radius) : new Box(collider.halfWidth, collider.halfHeight);
-    const area = collider.type === 'circle' ? Math.PI * collider.radius ** 2 : 4 * collider.halfWidth * collider.halfHeight;
     const body = this.world.createDynamicBody({
       position: record.current, fixedRotation: true, bullet: true,
       gravityScale: record.object.species === 'bird' ? 0 : 1,
     });
     body.createFixture(shape, {
-      density: spec.mass / area, friction: ENEMY_FRICTION, restitution: 0,
+      density: this.density(record.object.species), friction: ENEMY_FRICTION, restitution: 0,
       filterCategoryBits: PHYSICS.enemyCategory,
       filterMaskBits: PHYSICS.terrainCategory | PHYSICS.playerCategory | PHYSICS.toolCategory,
     });
     record.body = body;
     this.bodies.set(body, record);
+  }
+
+  private density(species: EnemySpecies): number {
+    const collider = ENEMY_SPECS[species].collider;
+    const area = collider.type === 'circle' ? Math.PI * collider.radius ** 2 : 4 * collider.halfWidth * collider.halfHeight;
+    const mass = species === 'bird' ? this.tuning.birdMass : this.tuning.soldierMass;
+    return mass / area;
   }
 
   private destroyCollider(record: EnemyRecord): void {

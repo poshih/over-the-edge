@@ -78,8 +78,8 @@ the release bundles two character profiles. The project's
 [HUD settings](docs/projects.md#section-reference) choose whether the height and timer
 show, health shows in levels where something can hurt the player, and a game's runtime
 plugin can replace any readout; see [HUD readouts](docs/runtime-plugins.md#hud-readouts).
-The HUD settings also author the death message and its fade/hold timing, shared by
-Workshop play-tests and releases.
+The HUD settings also author the death message and its visual fade, shared by
+Workshop play-tests and releases. Game settings own the separate respawn wait.
 On-screen Play/Pause/Reset, peak height, branding, and help remain in the editor build,
 not the release.
 
@@ -248,8 +248,8 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 12**, and release content **schema 11**,
-including the required HUD death text and timing; other versions are rejected.
+Project manifests and bundles use **schema 13**, and release content **schema 12**,
+including game settings' death wait and the HUD's death text/fade; other versions are rejected.
 
 ### Included full-length course
 
@@ -488,7 +488,9 @@ terrain collider.
 
 The workshop applies parameters without restarting, except rig dimensions and
 crossing between zero and positive handle compliance, which rebuild the player
-and restart the run. Its first section, **Mass & recoil**, groups head mass, player
+and restart the run. Enemy health applies at reset or spawn, death settings at the
+next death, and invulnerability durations at the next hit or respawn. Its first
+section, **Mass & recoil**, groups head mass, player
 mass and rotation speed with total shaft mass, hinge component mass and carriage
 mass. Shaft mass is uniform along the handle, in one body when rigid and divided
 equally among three segments when compliant. Component inertia scales with mass;
@@ -497,7 +499,11 @@ component. All masses stay positive.
 
 The other sections include motor strength and speed limits, the downswing boost,
 response gains, damping, contact friction, handle compliance, control
-sensitivity, the player's [health](#health-and-bonfires) and [liquids](#liquid-pools). **Downswing** has a **Hinge downswing boost** and a **Slider
+sensitivity, the player's [health and invulnerability](#health-and-bonfires),
+[hazard hurt box and knockback](#traps), [enemy rules](#enemies) and [liquids](#liquid-pools).
+These alive-play rules are typed, validated fields in `physics`; their ranges, defaults
+and live-application rules are in the [project settings reference](docs/projects.md#section-reference).
+**Downswing** has a **Hinge downswing boost** and a **Slider
 downswing boost**, each 1-3x (default **1.3x**; 1 turns it off), multiplying that
 motor's strength while input moves the target down and the motor speeds the head
 up downward.
@@ -587,8 +593,8 @@ restarts the attempt or changes a phantom course.
 
 In **Workshop / Physics / Saved game settings**, enter a **Game settings name** and choose
 **Save game settings** (or press Enter). Each save creates a separate timestamped
-profile containing every physics setting, the hammer rig, the target radius and
-the dead zone.
+profile containing every physics setting, the hammer rig, all cursor settings and
+the death settings.
 Reusing a name keeps both versions. Choose an entry in **Past game settings**,
 then **Load game settings** to apply it. Selecting an entry alone does not
 change the game. History survives reloads; loading remains manual.
@@ -606,8 +612,9 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 13**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
-in any other version are rejected, not converted. Unreadable saves are marked and
+**schema version 14**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
+in any other version are rejected, not converted. Browser snapshots use storage format
+**7**; earlier storage keys are not read. Unreadable current-format saves are marked and
 retained, while other valid snapshots remain available.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,
@@ -848,10 +855,21 @@ then dive. Soldiers only patrol their configured range, turning at terrain
 obstacles and edges.
 
 A **hammer-head strike** with a closing speed of **at least 0.8 m/s** defeats a
-bird in one hit; a hollow soldier takes **two separated strikes**. Damage has a
+bird in one hit by default; a hollow soldier defaults to **two separated strikes**. Damage has a
 **0.25 s anti-jitter cooldown**: brushing or holding the head against an enemy
 does not repeatedly deal damage. The shaft does not deal damage.
-Body collisions knock the player back and cost **1** [health](#health-and-bonfires).
+Body collisions knock the player back and default to costing **1** [health](#health-and-bonfires).
+**Physics / Enemies** owns `birdHealth` and `soldierHealth` (1–20 whole strikes),
+`birdMass` and `soldierMass` (default **0.55 kg** and **3 kg**), and their
+`birdAcceleration` and `soldierAcceleration` (default **22** and **28 m/s²**).
+`birdSight` defaults to **6 m**, and `birdDiveSpeed` to **5 m/s**.
+`bumpDamage`, `bumpSpeed` and `bumpLift` default to **1**, **3 m/s** horizontally
+and **1.4 m/s** upward. Zero bump damage leaves knockback but deals no damage and
+grants no invulnerability.
+Mass updates existing bodies immediately; acceleration, sight, dive speed and bumps
+read the live settings. Species health applies only at an enemy's next reset or new
+spawn: it does not heal or resize the health of an existing enemy, and waking is not
+a new spawn. Collider/drawn sizes and AI scheduling remain engine constants.
 Dead enemies stay dead until Reset or an editor rebuild. Patrol positions,
 damage and deaths are runtime state: editor gizmos, saves and exports retain
 authored homes. Entering Level mode restores both authored enemy poses and terrain
@@ -872,8 +890,13 @@ added to the built-in course.
 
 In levels with enemies, [traps](#traps) or [lava](#liquid-pools) the player has **health**,
 set in **Physics / Health**: 1-20 damage points, 5 by default, shown as a row of pips beside
-the readouts. An enemy's bump costs 1, a trap its own damage and lava its damage each second.
-A hit leaves the character unharmed for **1 s**, so one blow counts once. Levels without
+the readouts. An enemy's bump costs its configured damage (default 1), a trap its own damage
+and lava its damage each second.
+**Hurt invulnerability** (`hurtInvulnerability`, 0–5 s, step 0.05) leaves the character
+unharmed for **1 s** by default after a damaging hit. **Respawn invulnerability**
+(`respawnInvulnerability`, 0–10 s, step 0.1) protects a bonfire return for **2 s** by default.
+Both are in **Physics / Health**; zero turns that protection off. An active protection
+keeps its deadline, so edits apply at the next hit or respawn. Levels without
 enemies, traps or lava show no health.
 
 Choose **Workshop / Level / Bonfire**, then click/tap: its base rests on the terrain top
@@ -883,9 +906,12 @@ or a fall out of the level starts a physical death: the character collapses as a
 ragdoll, lets go of the hammer and drops it. The jar and hammer keep their motion; the corpse
 and released hammer collide with the course, platforms and active enemies, never each other.
 2D sprites freeze their facing and flipbook frame but follow the physical body, head and hands,
-and dim. **“You are dead...”** slowly fades in over **1.5 s**
-and stays for **2.5 s** before the player returns. Author its text and timing in
-**Workshop / Project / HUD**. The world and run timer (unless stopped) keep going while the dead player
+and dim. The player returns after **Respawn wait** in **Physics / Death**
+(`death.wait`, **0.5–15 s**, step **0.1**, default **4 s**), snapshotted at entry.
+**“You are dead...”** slowly fades in over **1.5 s** by default.
+Author only its text and visual fade in **Workshop / Project / HUD**: the fade cannot
+change the wait, and a fade longer than the wait ends unfinished without an error.
+The world and run timer (unless stopped) keep going while the dead player
 has no input, takes no damage, deals no hammer hits or scripted bumps, lights no bonfires and gains no best
 height. Outstanding trigger runs cancel and pressure switches release. Pause and a
 hidden tab hold the sequence; movement is discarded, but Reset and other controls remain.
@@ -893,7 +919,7 @@ hidden tab hold the sequence; movement is discarded, but Reset and other control
 **Physics / Death** selects `ragdoll` (the default) or `hold`, which keeps the last aim,
 motors and grips, with the former 20° slump and 35° nod. Ragdoll angular damping is
 **0–10 /s**, default **2**, and friction **0.05–2**, default **0.45**; the jar and hammer
-head keep their own materials. A death snapshots its construction settings. Runtime
+head keep their own materials. A death snapshots its wait and construction settings. Runtime
 character selections and accepted model/head changes while dying wait for placement;
 Workshop character-authoring edits refuse with a transient notice and leave the draft
 unchanged. Player-body tuning stays live in `hold`, but takes effect at placement in
@@ -901,7 +927,8 @@ unchanged. Player-body tuning stays live in `hold`, but takes effect at placemen
 separately queried dropped hammer take liquid drag only. A hammer that strays far from
 the corpse can miss sleeping enemies, whose colliders are inactive there.
 
-After the wait the player returns at that bonfire, healed and unharmed for **2 s**,
+After the wait the player returns at that bonfire, healed and protected for the configured
+respawn invulnerability (**2 s** by default),
 holding the hammer as at the level's start. The run goes on: its clock, best height,
 consumed once-triggers and level state carry on. Before any
 bonfire is reached, a death restarts the attempt exactly like Reset; Reset always
@@ -930,6 +957,13 @@ Traps hurt the character as it is drawn, the pot and the body standing in it. Th
 collide, so they can sit anywhere, and a hit knocks the player as well as costing health.
 Choose **Workshop / Level / Projectile trap** or **Swinging axe**, then click/tap.
 
+**Physics / Hazards** owns their hurt box: `hurtWidth` defaults to **1 m**,
+`hurtHeight` to **1.58 m**, measured from the pot's bottom up, and `hurtDepth` to
+**0.9 m**, half either side of the obstacle line. This changes trap reach, not the
+player's collider. Width and height apply live without a rebuild; only a depth change
+rebuilds the axe reach-index proxies, outside the physics-step path. Trap knockback also
+applies live, including to projectiles already in flight.
+
 A **projectile trap** fires from its muzzle, its position, along its rotation: at
 **First shot** seconds into the run and every **Shot interval** after, at its
 **Projectile speed**, while the player is within **40 m**, when **Fires** is **On its timer**.
@@ -942,6 +976,7 @@ glancing off and glowing chips dropping: a game's
 [block effects](docs/runtime-plugins.md#block-effects) can draw that strike its own way.
 Terrain stops them only from outside, so a muzzle set into a wall's face shoots out of it.
 A hit on the character costs the trap's **Damage** and knocks the player along the shot,
+by `projectilePush` (**4 m/s** by default) plus `projectileLift` (**1.5 m/s** upward),
 and where it strikes the burning bolt bursts in a hot flash, sparks and glowing chips.
 
 A **swinging axe** hangs its blade **Length** below its pivot, its position, and swings in
@@ -950,8 +985,9 @@ and out of the view, toward the camera and away, up to 63° either side, once ev
 swing, its curved edge below, so it swings edge first and is edge-on to the camera: 1.3 m
 toward the camera and away, 0.7 m tall and 6 cm thick along the climb. It cuts through the
 play line at **Swing offset** seconds and every half period after. There a blade that meets
-the player costs its **Damage** and knocks the player hard away from where it struck, 9 m/s
-along the climb and 4 m/s up, with a steel flash, a slash and a spray of sparks. The half of the swing in
+the player costs its **Damage** and knocks the player hard away from where it struck,
+by `axePush` (**9 m/s** along the climb by default) and `axeLift` (**4 m/s** up),
+with a steel flash, a slash and a spray of sparks. The half of the swing in
 front of the obstacle line draws over the player, the half behind it under the player.
 Stagger neighbouring axes with their offsets.
 

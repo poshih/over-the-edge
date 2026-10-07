@@ -1,8 +1,8 @@
 import { DynamicTree, Vec2 } from 'planck';
 import type { AABBValue, Body, Fixture, World } from 'planck';
-import { PHYSICS } from './config';
-import type { Point } from './config';
-import { AXE, axeAngle, axeBlade, axeReach, HURT_BOX, SHOOTER } from './hazards';
+import { PHYSICS, RIG } from './config';
+import type { Point, Tuning } from './config';
+import { axeAngle, axeBlade, axeReach, SHOOTER } from './hazards';
 import type { Bounds, ProjectileBlock } from './hazards';
 import { isTrapObject } from './level';
 import type { AxeObject, LevelChange, ShooterObject, TrapObject } from './level';
@@ -20,7 +20,7 @@ export interface HazardHooks {
   readonly insideTerrain: (body: Body, point: Readonly<Point>) => boolean;
   // Whether a hit would hurt the player now; traps pass through a player who cannot be hurt.
   readonly vulnerable: () => boolean;
-  // A hit: its damage, the velocity it adds to the player, the trap that dealt it and where it struck, in world metres.
+  // A hit: its damage, borrowed velocity change, the trap that dealt it and where it struck, in world metres.
   readonly hurt: (damage: number, push: Readonly<Point>, source: 'projectile' | 'axe', trap: string, atX: number, atY: number) => void;
   // A projectile stopped by the hammer head, held or released. Borrowed: copy what is kept.
   readonly block: (hit: Readonly<ProjectileBlock>) => void;
@@ -37,7 +37,7 @@ interface Shooter {
 
 interface Axe {
   readonly object: AxeObject;
-  readonly proxy: number;
+  proxy: number;
   // The latest pass through the obstacle line that hit the player, counted in half periods from the offset.
   pass: number;
 }
@@ -87,6 +87,7 @@ function overlaps(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
 export class HazardWorld {
   private readonly world: World;
   private readonly hooks: HazardHooks;
+  private tuning: Readonly<Tuning>;
   private readonly shooters = new Map<string, Shooter>();
   private readonly axes = new Map<string, Axe>();
   private readonly axeIndex = new DynamicTree<string>();
@@ -98,6 +99,7 @@ export class HazardWorld {
   private readonly framePosePool: ProjectilePose[][] = [[]];
   private readonly box: Bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private readonly blade: Bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  private readonly push: Point = { x: 0, y: 0 };
   private readonly query: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
   private readonly nearby: Axe[] = [];
   private readonly span = { near: 0, far: 1 };
@@ -110,15 +112,27 @@ export class HazardWorld {
   };
   private disposed = false;
 
-  constructor(world: World, objects: readonly TrapObject[], hooks: HazardHooks) {
+  constructor(world: World, objects: readonly TrapObject[], tuning: Readonly<Tuning>, hooks: HazardHooks) {
     this.world = world;
     this.hooks = hooks;
+    this.tuning = tuning;
     for (const object of objects) this.add(object, 0);
     this.reschedule();
   }
 
   get count(): number {
     return this.shooters.size + this.axes.size;
+  }
+
+  setTuning(tuning: Readonly<Tuning>): void {
+    this.ensureLive();
+    const depthChanged = tuning.hurtDepth !== this.tuning.hurtDepth;
+    this.tuning = tuning;
+    if (!depthChanged) return;
+    for (const axe of this.axes.values()) {
+      this.axeIndex.destroyProxy(axe.proxy);
+      axe.proxy = this.indexAxe(axe.object);
+    }
   }
 
   apply(change: LevelChange, time: number): void {
@@ -159,10 +173,10 @@ export class HazardWorld {
     this.ensureLive();
     if (this.count === 0 && this.projectiles.length === 0) return;
     const vulnerable = this.hooks.vulnerable();
-    this.box.minX = root.x - HURT_BOX.halfWidth;
-    this.box.maxX = root.x + HURT_BOX.halfWidth;
-    this.box.minY = root.y + HURT_BOX.bottom;
-    this.box.maxY = root.y + HURT_BOX.top;
+    this.box.minX = root.x - this.tuning.hurtWidth / 2;
+    this.box.maxX = root.x + this.tuning.hurtWidth / 2;
+    this.box.minY = root.y + RIG.potBottom;
+    this.box.maxY = this.box.minY + this.tuning.hurtHeight;
     this.fly(vulnerable);
     this.fire(time, root);
     if (vulnerable && this.hooks.vulnerable()) this.swing(time, root);
@@ -219,10 +233,13 @@ export class HazardWorld {
       });
       return;
     }
-    const reach = axeReach(object, HURT_BOX.halfDepth);
-    const proxy = this.axeIndex.createProxy(
+    this.axes.set(object.id, { object, proxy: this.indexAxe(object), pass: -Infinity });
+  }
+
+  private indexAxe(object: AxeObject): number {
+    const reach = axeReach(object, this.tuning.hurtDepth / 2);
+    return this.axeIndex.createProxy(
       { lowerBound: { x: reach.minX, y: reach.minY }, upperBound: { x: reach.maxX, y: reach.maxY } }, object.id);
-    this.axes.set(object.id, { object, proxy, pass: -Infinity });
   }
 
   private remove(id: string): boolean {
@@ -249,13 +266,12 @@ export class HazardWorld {
       this.rayShield = false;
       if (distance > 0) this.world.rayCast(this.rayFrom, this.rayTo, this.stopRay);
       if (vulnerable && this.enters(shot.x, shot.y, toX - shot.x, toY - shot.y)) {
-        // Only the first hit of a step hurts: the player then cannot be hurt for a while.
-        vulnerable = false;
         // It strikes where its path enters the character.
         const along = this.span.near;
-        this.hooks.hurt(shot.damage, {
-          x: shot.directionX * SHOOTER.push, y: shot.directionY * SHOOTER.push + SHOOTER.lift,
-        }, 'projectile', shot.trap, shot.x + (toX - shot.x) * along, shot.y + (toY - shot.y) * along);
+        this.push.x = shot.directionX * this.tuning.projectilePush;
+        this.push.y = shot.directionY * this.tuning.projectilePush + this.tuning.projectileLift;
+        this.hooks.hurt(shot.damage, this.push, 'projectile', shot.trap, shot.x + (toX - shot.x) * along, shot.y + (toY - shot.y) * along);
+        vulnerable = this.hooks.vulnerable();
         this.discard(index);
         continue;
       }
@@ -326,7 +342,7 @@ export class HazardWorld {
     this.axeIndex.query(this.query, this.collect);
     for (const axe of this.nearby) {
       const { object } = axe;
-      if (!axeBlade(object, axeAngle(object, time), HURT_BOX.halfDepth, this.blade) || !overlaps(this.blade, this.box)) continue;
+      if (!axeBlade(object, axeAngle(object, time), this.tuning.hurtDepth / 2, this.blade) || !overlaps(this.blade, this.box)) continue;
       // The blade is near the line only around a crossing, so the nearest crossing names this pass.
       const pass = Math.round(2 * (time - object.offset) / object.period);
       if (pass === axe.pass) continue;
@@ -334,7 +350,9 @@ export class HazardWorld {
       // It strikes in the middle of where the blade meets the character, and knocks the character away from there.
       const atX = (Math.max(this.blade.minX, this.box.minX) + Math.min(this.blade.maxX, this.box.maxX)) / 2;
       const atY = (Math.max(this.blade.minY, this.box.minY) + Math.min(this.blade.maxY, this.box.maxY)) / 2;
-      this.hooks.hurt(object.damage, { x: (root.x < atX ? -1 : 1) * AXE.push, y: AXE.lift }, 'axe', object.id, atX, atY);
+      this.push.x = (root.x < atX ? -1 : 1) * this.tuning.axePush;
+      this.push.y = this.tuning.axeLift;
+      this.hooks.hurt(object.damage, this.push, 'axe', object.id, atX, atY);
       break;
     }
     this.nearby.length = 0;

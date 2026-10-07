@@ -49,6 +49,28 @@ export interface Tuning {
   mouseSensitivity: number;
   // Hits the character takes before dying, in damage points.
   health: number;
+  hurtInvulnerability: number;
+  respawnInvulnerability: number;
+  // Traps' hurt box around the player's root; height rises from the pot's bottom, depth straddles the obstacle line.
+  hurtWidth: number;
+  hurtHeight: number;
+  hurtDepth: number;
+  projectilePush: number;
+  projectileLift: number;
+  axePush: number;
+  axeLift: number;
+  // Species health applies at reset or spawn; the other enemy rules apply live.
+  birdHealth: number;
+  birdMass: number;
+  birdAcceleration: number;
+  birdSight: number;
+  birdDiveSpeed: number;
+  soldierHealth: number;
+  soldierMass: number;
+  soldierAcceleration: number;
+  bumpDamage: number;
+  bumpSpeed: number;
+  bumpLift: number;
   // Each liquid's buoyancy, in percent of the player's weight it holds up with the pot all under its surface, and its
   // drag, the rate it then slows the player at, per second (src/liquids.ts); and the damage lava deals each second.
   lavaBuoyancy: number;
@@ -93,6 +115,26 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   handleDamping: 0.9,
   mouseSensitivity: 1,
   health: 5,
+  hurtInvulnerability: 1,
+  respawnInvulnerability: 2,
+  hurtWidth: 1,
+  hurtHeight: 1.58,
+  hurtDepth: 0.9,
+  projectilePush: 4,
+  projectileLift: 1.5,
+  axePush: 9,
+  axeLift: 4,
+  birdHealth: 1,
+  birdMass: 0.55,
+  birdAcceleration: 22,
+  birdSight: 6,
+  birdDiveSpeed: 5,
+  soldierHealth: 2,
+  soldierMass: 3,
+  soldierAcceleration: 28,
+  bumpDamage: 1,
+  bumpSpeed: 3,
+  bumpLift: 1.4,
   lavaBuoyancy: 160,
   lavaDrag: 3,
   lavaDamage: 1,

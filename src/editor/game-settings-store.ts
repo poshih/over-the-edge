@@ -3,8 +3,9 @@ import type { GameSettings } from '../game-settings';
 import { NamedSnapshots } from './named-snapshots';
 import type { SnapshotEntry } from './named-snapshots';
 
+const SNAPSHOT_VERSION = 7;
 const profiles = new NamedSnapshots<GameSettings>({
-  prefix: 'over-the-edge:game-settings:snapshot:v6:', version: 6, field: 'settings',
+  prefix: `over-the-edge:game-settings:snapshot:v${SNAPSHOT_VERSION}:`, version: SNAPSHOT_VERSION, field: 'settings',
   label: 'game settings', namePrompt: 'Enter a game settings name',
   validate: validateGameSettings, isDataError: (error: unknown) => error instanceof GameSettingsError,
 });

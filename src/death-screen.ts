@@ -65,7 +65,7 @@ class EngineDeathScreen implements DeathScreen {
   }
 
   update(frame: DeathFrame): void {
-    const progress = frame.reducedMotion ? 1 : Math.min(1, frame.elapsed / this.fadeIn);
+    const progress = frame.reducedMotion ? 1 : Math.min(1, Math.min(frame.elapsed, frame.duration) / this.fadeIn);
     if (progress !== this.progress) {
       this.progress = progress;
       this.fade.currentTime = progress * 1000;

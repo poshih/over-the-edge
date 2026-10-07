@@ -688,12 +688,13 @@ impacts are staged.
 Running and queued trigger runs are cancelled, their signals close popups and videos, and
 pressed switches release; once-triggers keep their consumption and history.
 
-The game settings (schema **13**) own `death: { mode, angularDamping, friction }`.
+The game settings (schema **14**) own `death: { mode, wait, angularDamping, friction }`.
 Workshop / Physics / Death exposes the same fields:
 
 | Field | Values | Default |
 | --- | --- | --- |
 | `mode` | `'ragdoll'` or `'hold'` | `'ragdoll'` |
+| `wait` | 0.5–15 s, step 0.1 | 4 |
 | `angularDamping` | 0–10 /s, step 0.1 | 2 |
 | `friction` | 0.05–2, step 0.05 | 0.45 |
 
@@ -703,7 +704,7 @@ platforms and active enemies, never the corpse. The detached head still blocks p
 rays, without new damage or impulses. Corpse and tool query liquids separately with their
 own masses; only the pot supplies buoyancy, while limbs and tool take drag. Enemy activity
 remains centred on the corpse: a stray hammer can pass through sleeping enemies far away.
-Construction settings are captured at entry. Player-body tuning stays live in `hold`;
+Wait and construction settings are captured at entry. Player-body tuning stays live in `hold`;
 in `ragdoll` it takes effect at the next placement, not by retuning the corpse.
 Runtime character selections and accepted model/head changes wait for placement;
 synchronous character-authoring edits are refused with a transient Workshop notice,
@@ -720,11 +721,14 @@ Thus an `align()` after an accepted, deferred `setModel()` is valid; after `rese
 refuses until another model is accepted. Application installs the prepared fit without
 revalidating caller input.
 
-The project's HUD owns `death: { text, fadeIn, hold }`, not a runtime timing slot. The
-engine waits `fadeIn + hold` seconds before returning to the last bonfire, or requesting the
-ordinary Reset when none was reached. Defaults are **“You are dead...”**, a **1.5 s** fade
-and **2.5 s** hold. Each death takes a snapshot of those settings; edits affect the next
-death. The clock advances by `PHYSICS.dt` with each dying physics step and presentation
+Game settings' `death.wait` owns the gameplay delay, not a runtime timing slot. The
+engine waits its snapshotted **4 s** default before returning to the last bonfire, or
+requesting the ordinary Reset when none was reached. The project's HUD owns only
+`death: { text, fadeIn }`: **“You are dead...”** and a **1.5 s** visual fade by default.
+Each death snapshots its wait, text and fade; edits affect the next death.
+A fade longer than the wait ends unfinished without an error, never extending the wait.
+Death settings and timing do not count toward the phantom course because recordings
+never include dying. The clock advances by `PHYSICS.dt` with each dying physics step and presentation
 interpolates it with the frame's alpha. Pause and a hidden tab hold it, with no catch-up.
 Reset and other control actions remain available; only movement is discarded.
 
@@ -755,7 +759,7 @@ type DeathInfo =
   | { readonly kind: 'fall' };
 interface DeathFrame {
   readonly elapsed: number;       // interpolated seconds since entry
-  readonly duration: number;      // the HUD's fadeIn + hold
+  readonly duration: number;      // game settings' death.wait, snapshotted at entry
   readonly poseProgress: number;  // linear 0–1 over 0.65 s
   readonly reducedMotion: boolean;
 }
@@ -784,9 +788,10 @@ Cover that layer with absolute positioning (`position: absolute; inset: 0; z-ind
 under modal presentations, not the browser viewport with a fixed overlay.
 
 - Create only your own nodes in `mount`, and remove only those nodes.
-- `show` runs once at entry, with the HUD's validated text and timing.
+- `show` runs once at entry, with the HUD's validated text and visual fade only.
 - `update` runs on visible frames while dying. Animate with the engine's `elapsed`,
-  not a timer or another animation loop. Pausing cannot consume the wait.
+  not a timer or another animation loop. Clamp presentation elapsed time to `duration`;
+  a fade may be longer than that duration and end unfinished. Pausing cannot consume the wait.
 - `clear` runs at placement or cancellation: hide the screen and clear pending
   announcements immediately. `dispose` releases it when the game closes or stops.
 - Keep it passive: no focus steal, focus trap, pointer interception or input blocking.
@@ -795,7 +800,8 @@ under modal presentations, not the browser viewport with a fixed overlay.
 `DEFAULT_DEATH_SCREEN` centres the project's text over a restrained dark scrim. One paused
 Web Animation follows the engine's clock; it requests no frames of its own. A persistent
 polite, atomic live region announces once on a subsequent visible frame, and cancellation
-clears pending speech. Reduced motion reveals the text at once.
+clears pending speech. Fade progress uses the HUD fade and elapsed time clamped to the
+gameplay duration; it never moves placement. Reduced motion reveals the text at once.
 
 ### Death pose
 
@@ -1276,7 +1282,7 @@ with its bonfire ID; its timer and attempt continue. Messages and videos keep th
 do not notify observers.
 
 `death`/`fall` arrive at sequence entry, not placement. `restart`/`respawn` arrive only
-after its `fadeIn + hold` wait and placement. An explicit cancellation such as Reset emits
+after its snapshotted `death.wait` and placement. An explicit cancellation such as Reset emits
 the ordinary `restart`, never an automatic `respawn`. A simultaneous killing hit and fall
 still stages fatal hurt effects, but only the `fall` gameplay event and cue.
 

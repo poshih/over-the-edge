@@ -4,6 +4,8 @@ import { HammerHeadError, validateHammerHead } from './hammer-head';
 import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, MIN_SLIDER_TRAVEL, minReachLimit, RIG_LIMITS, rigGeometry } from './rig';
 import type { RigLength, RigSettings } from './rig';
 
+export const GAME_SETTINGS_SCHEMA_VERSION = 14;
+
 export interface CursorSettings {
   // The farthest from the shoulder hinge the hammer aims; at most the rig's reach.
   readonly maxTargetRadius: number;
@@ -25,12 +27,13 @@ export interface CursorSettings {
 
 export interface DeathSettings {
   readonly mode: 'ragdoll' | 'hold';
+  readonly wait: number;
   readonly angularDamping: number;
   readonly friction: number;
 }
 
 export interface GameSettings {
-  readonly schemaVersion: 13;
+  readonly schemaVersion: typeof GAME_SETTINGS_SCHEMA_VERSION;
   readonly physics: Readonly<Tuning>;
   readonly rig: Readonly<RigSettings>;
   readonly cursor: Readonly<CursorSettings>;
@@ -46,10 +49,10 @@ export const DEFAULT_CURSOR_SETTINGS: Readonly<CursorSettings> = Object.freeze({
   returnToHammer: false, returnDelay: 0.15, returnRate: 8, returnOffsetX: 0, returnOffsetY: 0,
 });
 export const DEFAULT_DEATH_SETTINGS: Readonly<DeathSettings> = Object.freeze({
-  mode: 'ragdoll', angularDamping: 2, friction: 0.45,
+  mode: 'ragdoll', wait: 4, angularDamping: 2, friction: 0.45,
 });
 export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
-  schemaVersion: 13, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS, death: DEFAULT_DEATH_SETTINGS,
+  schemaVersion: GAME_SETTINGS_SCHEMA_VERSION, physics: DEFAULT_TUNING, rig: DEFAULT_RIG_SETTINGS, cursor: DEFAULT_CURSOR_SETTINGS, death: DEFAULT_DEATH_SETTINGS,
 });
 
 interface NumericSetting {
@@ -63,7 +66,7 @@ interface NumericSetting {
 
 interface TuningField extends NumericSetting {
   key: keyof Tuning;
-  group: 'Mass & recoil' | 'Motors' | 'Downswing' | 'Response' | 'Materials' | 'Input' | 'Health' | 'Liquids';
+  group: 'Mass & recoil' | 'Motors' | 'Downswing' | 'Response' | 'Materials' | 'Input' | 'Health' | 'Hazards' | 'Enemies' | 'Liquids';
   // Whether the setting takes whole numbers only.
   whole?: true;
 }
@@ -73,6 +76,7 @@ type CursorField = NumericSetting & { key: Exclude<keyof CursorSettings, 'return
 type DeathField = NumericSetting & { key: Exclude<keyof DeathSettings, 'mode'> };
 
 export const DEATH_FIELDS: readonly DeathField[] = [
+  { key: 'wait', label: 'Respawn wait', min: 0.5, max: 15, step: 0.1, unit: 's', description: 'Time from death to returning at the last bonfire, or restarting when none was reached. A death keeps the wait it entered with; the HUD fade does not change it.' },
   { key: 'angularDamping', label: 'Corpse angular damping', min: 0, max: 10, step: 0.1, unit: '/s', description: 'Passive rotational drag on the six ragdoll bodies. A death keeps the settings it entered with.' },
   { key: 'friction', label: 'Corpse friction', min: 0.05, max: 2, step: 0.05, unit: '', description: 'Contact friction on the ragdoll and released hammer shaft. The jar and hammer head keep their own materials. Applies at the next death.' },
 ];
@@ -135,7 +139,27 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'handleFrequency', label: 'Handle compliance', group: 'Materials', min: 0, max: 30, step: 1, unit: 'Hz', description: 'Zero uses one rigid tool body. Positive values enable rotational spring compliance. Crossing zero rebuilds the rig and restarts the run.' },
   { key: 'handleDamping', label: 'Handle damping', group: 'Materials', min: 0.1, max: 1, step: 0.05, unit: '', description: 'Damping ratio of compliant handle welds; only active above zero Hz.' },
   { key: 'mouseSensitivity', label: 'Control sensitivity', group: 'Input', min: 0.3, max: 2.5, step: 0.05, unit: 'x', description: 'Relative pointer movement. Touch uses the same CSS-pixel gain in either orientation; mouse follows the scene scale.' },
-  { key: 'health', label: 'Health', group: 'Health', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Damage the character takes before dying. Enemies deal 1 a bump, traps their own damage and lava its damage each second; each hit leaves the character unharmed for a second. A death, like a fall out of the level, brings the player back at the bonfire reached last, or restarts the run when none was. Shown only in levels with enemies, traps or lava.' },
+  { key: 'health', label: 'Health', group: 'Health', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Damage the character takes before dying. Enemies deal the Enemies group\'s bump damage, traps their own damage and lava its damage each second. A death, like a fall out of the level, brings the player back at the bonfire reached last, or restarts the run when none was. Shown only in levels with enemies, traps or lava.' },
+  { key: 'hurtInvulnerability', label: 'Hurt invulnerability', group: 'Health', min: 0, max: 5, step: 0.05, unit: 's', description: 'How long an accepted damaging hit leaves the character unharmed. Zero turns this protection off. Applies to the next hit; an active protection keeps its deadline.' },
+  { key: 'respawnInvulnerability', label: 'Respawn invulnerability', group: 'Health', min: 0, max: 10, step: 0.1, unit: 's', description: 'How long returning at a bonfire leaves the character unharmed. Zero turns this protection off. Applies at the next respawn.' },
+  { key: 'hurtWidth', label: 'Hurt box width', group: 'Hazards', min: 0.2, max: 4, step: 0.05, unit: 'm', description: 'Width of the character box traps can hit, centred on the player\'s root. Changes apply live without changing the player collider.' },
+  { key: 'hurtHeight', label: 'Hurt box height', group: 'Hazards', min: 0.2, max: 4, step: 0.02, unit: 'm', description: 'Height of the traps\' hurt box measured from the pot\'s bottom up. Changes apply live without changing the player collider.' },
+  { key: 'hurtDepth', label: 'Hurt box depth', group: 'Hazards', min: 0.1, max: 3, step: 0.05, unit: 'm', description: 'Total depth, half either side of the obstacle line, where axe blades can hit the character. Changes apply live and rebuild only the axe reach index.' },
+  { key: 'projectilePush', label: 'Projectile push', group: 'Hazards', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Velocity a projectile hit adds along its flight direction. Changes apply to the next hit, including projectiles already in flight.' },
+  { key: 'projectileLift', label: 'Projectile lift', group: 'Hazards', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Upward velocity a projectile hit adds on top of its push along the shot. Changes apply to the next hit.' },
+  { key: 'axePush', label: 'Axe push', group: 'Hazards', min: 0, max: 30, step: 0.1, unit: 'm/s', description: 'Horizontal velocity an axe hit adds away from where its blade struck. Changes apply to the next hit.' },
+  { key: 'axeLift', label: 'Axe lift', group: 'Hazards', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Upward velocity an axe hit adds. Changes apply to the next hit.' },
+  { key: 'birdHealth', label: 'Bird health', group: 'Enemies', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Separate hammer-head strikes needed to defeat a bird. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'birdMass', label: 'Bird mass', group: 'Enemies', min: 0.1, max: 10, step: 0.05, unit: 'kg', description: 'Mass of a bird\'s collider. Changes update live bodies immediately; inactive birds take it when they wake.' },
+  { key: 'birdAcceleration', label: 'Bird acceleration', group: 'Enemies', min: 1, max: 80, step: 1, unit: 'm/s²', description: 'Maximum acceleration as a bird steers toward its patrol, dive or recovery velocity. Applies live.' },
+  { key: 'birdSight', label: 'Bird sight', group: 'Enemies', min: 0, max: 30, step: 0.5, unit: 'm', description: 'How far an active bird sees a player before warning and diving, also limited to this distance beyond its authored patrol radius. Applies live.' },
+  { key: 'birdDiveSpeed', label: 'Bird dive speed', group: 'Enemies', min: 0.5, max: 20, step: 0.1, unit: 'm/s', description: 'Speed toward a bird\'s telegraphed target during its dive. Changes apply immediately, including during a dive.' },
+  { key: 'soldierHealth', label: 'Soldier health', group: 'Enemies', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Separate hammer-head strikes needed to defeat a hollow soldier. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'soldierMass', label: 'Soldier mass', group: 'Enemies', min: 0.5, max: 30, step: 0.1, unit: 'kg', description: 'Mass of a hollow soldier\'s collider. Changes update live bodies immediately; inactive soldiers take it when they wake.' },
+  { key: 'soldierAcceleration', label: 'Soldier acceleration', group: 'Enemies', min: 1, max: 80, step: 1, unit: 'm/s²', description: 'Maximum acceleration toward a hollow soldier\'s patrol velocity. Applies live.' },
+  { key: 'bumpDamage', label: 'Enemy bump damage', group: 'Enemies', min: 0, max: 20, step: 1, unit: '', whole: true, description: 'Damage an enemy\'s scripted bump deals the player, in addition to knockback. Zero turns off bump damage. Applies to the next bump.' },
+  { key: 'bumpSpeed', label: 'Enemy bump speed', group: 'Enemies', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Horizontal velocity an enemy\'s scripted bump adds away from the enemy. Applies to the next bump.' },
+  { key: 'bumpLift', label: 'Enemy bump lift', group: 'Enemies', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Upward velocity an enemy\'s scripted bump adds. Applies to the next bump.' },
   { key: 'lavaBuoyancy', label: 'Lava buoyancy', group: 'Liquids', min: 0, max: 300, step: 5, unit: '%', description: 'How much of the player\'s weight lava holds up with the pot all under its surface: above 100% the player floats with part of the pot out, below it sinks. Only the pot floats: lava slows the hammer but does not hold it up.' },
   { key: 'lavaDrag', label: 'Lava drag', group: 'Liquids', min: 0, max: 20, step: 0.1, unit: '/s', description: 'How thick lava is: with the pot all under its surface the player slows at this rate, losing 63% of its speed in 1/rate seconds. The hammer meets it too, so swinging it through lava rows the player along.' },
   { key: 'lavaDamage', label: 'Lava damage', group: 'Liquids', min: 1, max: 20, step: 1, unit: '/s', whole: true, description: 'Damage lava deals the character while the pot is in it: on touching it, then each second it stays. The hammer does not burn.' },
@@ -203,7 +227,9 @@ export function withRig(settings: Readonly<GameSettings>, rig: Readonly<RigSetti
 
 export function validateGameSettings(value: unknown): GameSettings {
   settingsFields(value, ['schemaVersion', 'physics', 'rig', 'cursor', 'death'], 'Game settings profile');
-  if (value.schemaVersion !== 13) throw new GameSettingsError('Game settings require schema version 13.');
+  if (value.schemaVersion !== GAME_SETTINGS_SCHEMA_VERSION) {
+    throw new GameSettingsError(`Game settings require schema version ${GAME_SETTINGS_SCHEMA_VERSION}.`);
+  }
   const rig = validateRig(value.rig);
   const numbers = [...CURSOR_FIELDS, ...CURSOR_RETURN_FIELDS];
   settingsFields(value.cursor, ['returnToHammer', ...numbers.map((field) => field.key)], 'Cursor settings');
@@ -218,5 +244,5 @@ export function validateGameSettings(value: unknown): GameSettings {
   if (value.death.mode !== 'ragdoll' && value.death.mode !== 'hold') throw new GameSettingsError('Death mode must be ragdoll or hold.');
   const death: { -readonly [K in keyof DeathSettings]: DeathSettings[K] } = { ...DEFAULT_DEATH_SETTINGS, mode: value.death.mode };
   for (const field of DEATH_FIELDS) death[field.key] = settingNumber(value.death[field.key], field);
-  return Object.freeze({ schemaVersion: 13, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor), death: Object.freeze(death) });
+  return Object.freeze({ schemaVersion: GAME_SETTINGS_SCHEMA_VERSION, physics: validateTuning(value.physics), rig, cursor: Object.freeze(cursor), death: Object.freeze(death) });
 }

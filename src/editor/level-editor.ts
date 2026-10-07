@@ -11,7 +11,7 @@ import type {
   AxeObject, BonfireObject, DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, PlatformObject, PoolObject, ShapeKind,
   ShooterObject, StartObject, TerrainMesh, TerrainObject, TriggerObject, TriggerRegion,
 } from '../level';
-import { AXE, AXE_FIELDS, BONFIRE, HAZARD_LIMITS, HEALTH, SHOOTER, SHOOTER_FIELDS } from '../hazards';
+import { AXE, AXE_FIELDS, BONFIRE, HAZARD_LIMITS, SHOOTER, SHOOTER_FIELDS } from '../hazards';
 import { LIQUID_LABELS, LIQUID_LIMITS, LIQUIDS } from '../liquids';
 import type { Liquid } from '../liquids';
 import type { MeshTerrain } from '../mesh-collision';
@@ -499,7 +499,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <p class="level-help level-enemy-help"></p>
           <p class="level-help">Position X/Y is the authored center/home; placement uses the clicked base.
             The guide shows the patrol radius on either side. Body collisions knock the player back and cost
-            ${ENEMY_BEHAVIOR.bumpDamage} health (Physics / Health). Dead enemies return on Reset or an editor rebuild,
+            the configured bump damage (Physics / Enemies). Dead enemies return on Reset or an editor rebuild,
             including entering Level mode.
             Patrol motion and deaths never change saved positions.</p>
         </div>
@@ -507,7 +507,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <p class="level-help">Position is the centre of its base; placing it rests the base on the terrain top under the
             pointer. It lights when the player's foot comes within ${BONFIRE.reach} m of the base, the dashed circle. A
             death, from health running out or a fall out of the level, brings the player back at the bonfire reached
-            last, healed and unharmed for ${HEALTH.respawnSeconds} s; the run, its clock and the level go on. Before
+            last, healed and protected for Physics / Health's Respawn invulnerability; the run, its clock and the level go on. Before
             any bonfire, a death restarts the run. Bonfires never collide.</p>
         </div>
         <div class="level-fields-shooter">
@@ -995,7 +995,6 @@ Export the level first if you want to keep them. Continue without saving?`);
       select('platform-surface').value = platform.surface;
       input('platform-ride').checked = platform.ride;
     } else if (enemy !== null) {
-      const spec = ENEMY_SPECS[enemy.species];
       select('enemy-facing').value = enemy.facing;
       for (const name of ['patrolDistance', 'speed'] as const) {
         input(`enemy-${name}`).value = String(Number(enemy[name].toFixed(4)));
@@ -1004,7 +1003,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         ? 'Birds patrol, warn, then dive toward nearby players.'
         : 'Hollow soldiers patrol their configured range, turning at terrain obstacles and edges.';
       element(root, '.level-enemy-help').textContent =
-        `${behavior} Takes ${spec.health} separate hammer-head strike${spec.health === 1 ? '' : 's'} to defeat. ` +
+        `${behavior} Physics / Enemies sets how many separate hammer-head strikes defeat each species; health applies at reset or spawn. ` +
         `Strikes need at least ${ENEMY_BEHAVIOR.hitSpeed} m/s closing speed, with a ${ENEMY_BEHAVIOR.hitSeconds}s anti-jitter cooldown. ` +
         'Brushing or holding the head against an enemy does not repeatedly deal damage.';
     } else if (trigger !== null) {

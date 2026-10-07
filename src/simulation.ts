@@ -22,13 +22,12 @@ import { aimAt, limitAim, moveAim, returnAim, shiftAim } from './aim';
 import type { Aim } from './aim';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
-import { ENEMY_BEHAVIOR } from './enemy-types';
 import type { EnemyEvent, EnemyPose } from './enemy-types';
 import { HazardWorld } from './hazard-world';
 import type { ProjectilePose } from './hazard-world';
 import { Bonfires } from './bonfires';
 import type { BonfireState } from './bonfires';
-import { bonfireSpawn, HEALTH } from './hazards';
+import { bonfireSpawn } from './hazards';
 import type { HurtCause, HurtSource, ProjectileBlock } from './hazards';
 import { LiquidWorld } from './liquid-world';
 import type { HealthReading } from './health-meter';
@@ -152,7 +151,7 @@ export class Simulation {
     this.platforms = new PlatformWorld(this.world, level.objects.filter(isPlatformObject), surfaceMaterials(this.settings.physics));
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
     this.preparePlayerFixtures();
-    this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), {
+    this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), this.settings.physics, {
       getPot: () => this.rig.pot,
       getHeadFixture: () => this.dying ? null : this.rig.tool.head.fixture,
       canBump: () => !this.dying,
@@ -160,10 +159,10 @@ export class Simulation {
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
       onBump: (delta, enemy, atX, atY) => {
         changePlayerVelocity(this.rig, delta);
-        this.hurt(ENEMY_BEHAVIOR.bumpDamage, 'enemy', enemy, atX, atY, delta.x, delta.y);
+        this.hurt(this.settings.physics.bumpDamage, 'enemy', enemy, atX, atY, delta.x, delta.y);
       },
     });
-    this.hazards = new HazardWorld(this.world, level.objects.filter(isTrapObject), {
+    this.hazards = new HazardWorld(this.world, level.objects.filter(isTrapObject), this.settings.physics, {
       shield: () => this.rig.tool.head.fixture,
       isTerrain: (body) => this.terrain.isTerrain(body) || this.platforms.isPlatform(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point) || this.platforms.isInside(terrain, point),
@@ -208,34 +207,34 @@ export class Simulation {
       // The terrain outlives a rebuilt player, so it takes new surfaces either way.
       this.terrain.setMaterials(surfaceMaterials(next.physics));
       this.platforms.setMaterials(surfaceMaterials(next.physics));
-      // Existing contacts cache mixed material values independently of fixtures.
-      for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
-        contact.resetFriction();
-        contact.resetRestitution();
-      }
+      this.enemies.setTuning(next.physics);
+      this.hazards.setTuning(next.physics);
     }
+    let effect: SettingsEffect = 'applied';
     if (!sameRig(next.rig, previous.rig) || !this.rig.tool.acceptsTuning(next.physics)) {
       this.reset(this.spawn);
-      return 'restarted';
+      effect = 'restarted';
+    } else {
+      if (!this.dying && !sameHammerHead(next.rig.head, previous.rig.head)) {
+        this.rig = { ...this.rig, geometry: rigGeometry(next.rig) };
+        this.applyHead();
+      }
+      if (!this.dying && (next.cursor.maxTargetRadius !== previous.cursor.maxTargetRadius || next.cursor.deadZone !== previous.cursor.deadZone)) {
+        // A smaller radius pulls the target straight in; the cursor keeps to its dead zone.
+        this.aim = limitAim(this.aim, next.cursor.maxTargetRadius, next.cursor.deadZone);
+        this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
+        this.current = { ...this.current, cursorOffset: { ...this.aim.cursor } };
+      }
+      if (tuned && this.rig.phase !== 'dying-ragdoll') tunePlayer(this.rig, next.physics);
     }
-    if (!this.dying && !sameHammerHead(next.rig.head, previous.rig.head)) {
-      this.rig = { ...this.rig, geometry: rigGeometry(next.rig) };
-      this.applyHead();
-    }
-    if (!this.dying && (next.cursor.maxTargetRadius !== previous.cursor.maxTargetRadius || next.cursor.deadZone !== previous.cursor.deadZone)) {
-      // A smaller radius pulls the target straight in; the cursor keeps to its dead zone.
-      this.aim = limitAim(this.aim, next.cursor.maxTargetRadius, next.cursor.deadZone);
-      this.previous = { ...this.previous, cursorOffset: { ...this.aim.cursor } };
-      this.current = { ...this.current, cursorOffset: { ...this.aim.cursor } };
-    }
-    if (tuned && this.rig.phase !== 'dying-ragdoll') {
-      tunePlayer(this.rig, next.physics);
+    if (tuned) {
+      // Reset cached mixed materials once, after every fixture update or rig rebuild.
       for (let contact = this.world.getContactList(); contact; contact = contact.getNext()) {
         contact.resetFriction();
         contact.resetRestitution();
       }
     }
-    return 'applied';
+    return effect;
   }
 
   reset(spawn: Readonly<PlayerSpawn> = levelSpawn(this.level)): void {
@@ -398,7 +397,7 @@ export class Simulation {
     const bonfire = this.bonfires.currentBonfire();
     if (bonfire === null) return false;
     this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level)));
-    this.safeUntil = this.elapsed + HEALTH.respawnSeconds;
+    this.safeUntil = this.elapsed + this.settings.physics.respawnInvulnerability;
     return true;
   }
 
@@ -732,9 +731,9 @@ export class Simulation {
   // Takes `damage` from the player's health, dealt by the level object `id` striking at (x, y) and knocking the player
   // with (pushX, pushY), unless a hit hurt it moments ago; each hit leaves it unharmed for a while.
   private hurt(damage: number, source: HurtSource, id: string, x: number, y: number, pushX: number, pushY: number): void {
-    if (!this.vulnerable()) return;
+    if (damage === 0 || !this.vulnerable()) return;
     this.health = Math.max(0, this.health - damage);
-    this.safeUntil = this.elapsed + HEALTH.hurtSeconds;
+    this.safeUntil = this.elapsed + this.settings.physics.hurtInvulnerability;
     this.hurtTaken = this.health > 0;
     this.cause.source = source;
     this.cause.id = id;

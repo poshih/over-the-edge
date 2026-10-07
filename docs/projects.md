@@ -6,8 +6,9 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 12**; their release content uses **schema 11**.
-Both require the HUD's death text and timing. Other versions are rejected, not converted.
+Project manifests and bundles use **schema 13**; their release content uses **schema 12**.
+Both embed game settings' death wait and the HUD's death text/fade. Other versions are
+rejected, not converted.
 
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
 - `GAME_PROJECT=<project> npm run build:game` builds any project into a
@@ -36,14 +37,14 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 8, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 13: physics (including the downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death mode/materials |
+| `settings` | `project.json` | Game-settings profile, schema 14: physics (including health, invulnerability, hurt box, knockback, enemy rules, downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death wait/mode/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
 | `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
 | `theme` | `project.json` | Sky, fog, exposure, camera, lights, sun disc, backdrop, aim marker, procedural character colours |
-| `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, in Workshop play-tests and releases; how trigger messages appear, and death text/fade/hold |
+| `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, in Workshop play-tests and releases; how trigger messages appear, and death text/fade |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the course look, the GLB meshes terrain places and the GLBs replacing decoration models |
@@ -76,18 +77,18 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 13, "physics": { "...": "..." },
+    "schemaVersion": 14, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
     "cursor": {
       "maxTargetRadius": 2.65, "deadZone": 0.1, "followCharacter": 100,
       "returnToHammer": false, "returnDelay": 0.15, "returnRate": 8, "returnOffsetX": 0, "returnOffsetY": 0
     },
-    "death": { "mode": "ragdoll", "angularDamping": 2, "friction": 0.45 }
+    "death": { "mode": "ragdoll", "wait": 4, "angularDamping": 2, "friction": 0.45 }
   },
   "characters": { "primary": null, "alternate": null },
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
@@ -96,7 +97,7 @@ The paths are fixed, so a manifest only says which files exist:
   "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30 }, "...": "..." },
   "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
            "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" },
-           "death": { "text": "You are dead...", "fadeIn": 1.5, "hold": 2.5 } },
+           "death": { "text": "You are dead...", "fadeIn": 1.5 } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
   "enemies": { "bird": { "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null },
   "media": [{ "path": "/media/cavern-loop.wav" }],
@@ -114,7 +115,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 8, "labels": [], "objects": [] },
@@ -502,17 +503,89 @@ An open Workshop page shows each change within two seconds.
 
 ## Section reference
 
-**Game settings.** The nested settings schema is **13** (the outer project schema remains
-12). `death.mode` is `ragdoll` by default, or `hold` to retain the old motors, aim and
+**Game settings.** The nested settings schema is **14**, exported in code as
+`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **13**, release content
+**12**, and browser game-settings snapshots **7**. All settings are required and
+unknown fields or other versions are rejected, with no legacy reader or conversion.
+`death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
+returning at a bonfire, or restarting when none was reached. A death captures this
+wait at entry, independently of its HUD fade.
+`death.mode` is `ragdoll` by default, or `hold` to retain the live motors, aim and
 grips. `death.angularDamping` is 0–10 /s, step 0.1, default 2; `death.friction` is
 0.05–2, step 0.05, default 0.45. The corpse and released shaft use that friction;
 the pot and hammer head keep their own materials. These fields appear in **Physics / Death**,
-are saved/exported with the physics, rig and cursor, and count toward the phantom course.
-Construction settings apply to the next death. Runtime character selections and accepted
+are saved/exported with the physics, rig and cursor. Death settings and timing do not
+count toward the phantom course because recordings never include dying.
+Wait and construction settings apply to the next death. Runtime character selections and accepted
 model/head changes wait for placement, never a rebuilt corpse; synchronous Workshop
 character edits refuse with a transient notice and keep the draft unchanged.
 Player-body tuning stays live in `hold`, but takes effect at placement in `ragdoll`.
-The separate HUD fields below own death text and wait.
+The separate HUD fields below own only death text and visual fade.
+
+Alive-play rules belong to `physics`, with the same fields in Workshop / Physics and
+release builds. They all count toward the [phantom course](phantoms.md#courses).
+Defaults reproduce the engine's original rules.
+
+**Physics / Health**
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `health` | 1–20 whole damage points | 5 |
+| `hurtInvulnerability` | 0–5 s, step 0.05 | 1 |
+| `respawnInvulnerability` | 0–10 s, step 0.1 | 2 |
+
+Invulnerability durations apply at the next damaging hit or bonfire respawn; an active
+protection keeps its deadline. Zero turns off that protection. A reset before any
+bonfire starts a new attempt, not a protected bonfire return.
+
+**Physics / Hazards**
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `hurtWidth` | 0.2–4 m, step 0.05 | 1 |
+| `hurtHeight` | 0.2–4 m, step 0.02 | 1.58 |
+| `hurtDepth` | 0.1–3 m, step 0.05 | 0.9 |
+| `projectilePush` | 0–20 m/s, step 0.1 | 4 |
+| `projectileLift` | 0–20 m/s, step 0.1 | 1.5 |
+| `axePush` | 0–30 m/s, step 0.1 | 9 |
+| `axeLift` | 0–20 m/s, step 0.1 | 4 |
+
+The hurt box is centred on the player's root horizontally, rises from the pot's bottom
+by `hurtHeight`, and reaches half of `hurtDepth` either side of the obstacle line.
+It is a trap-hit region, not a new collider. Width and height apply live without
+rebuilding anything; a depth change rebuilds only the axe reach-index proxies.
+Projectile push follows the shot's direction plus an upward lift; axe push is horizontal
+away from its strike plus an upward lift. These velocity changes apply at the next hit,
+including to projectiles already in flight. No setting change mutates the authored level.
+
+**Physics / Enemies**
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `birdHealth` | 1–20 whole hammer-head strikes | 1 |
+| `birdMass` | 0.1–10 kg, step 0.05 | 0.55 |
+| `birdAcceleration` | 1–80 m/s², step 1 | 22 |
+| `birdSight` | 0–30 m, step 0.5 | 6 |
+| `birdDiveSpeed` | 0.5–20 m/s, step 0.1 | 5 |
+| `soldierHealth` | 1–20 whole hammer-head strikes | 2 |
+| `soldierMass` | 0.5–30 kg, step 0.1 | 3 |
+| `soldierAcceleration` | 1–80 m/s², step 1 | 28 |
+| `bumpDamage` | 0–20 whole damage points | 1 |
+| `bumpSpeed` | 0–20 m/s, step 0.1 | 3 |
+| `bumpLift` | 0–20 m/s, step 0.1 | 1.4 |
+
+Mass updates live enemy bodies immediately; inactive enemies use it when their bodies
+next wake. Acceleration limits steering toward a desired velocity; sight and dive speed
+apply immediately, including mid-dive. Sight is for active birds, also limited to that
+distance beyond their authored patrol radius; wake/sleep distances and AI scheduling
+remain engine internals. Bump damage, horizontal speed away from the enemy and upward
+lift apply at the next bump. Zero bump damage retains knockback, but causes no damage,
+hurt effects or invulnerability.
+
+A species' health applies only at its next reset or new spawn. Existing enemies keep
+their current and maximum health, including when sleeping/waking; a tuning edit does not
+heal, damage or revive them. Collider/drawn sizes, per-object patrol settings and
+presentation timings are unchanged.
 
 **Theme.** Colours are lowercase `#rrggbb`. `fog.near` and `fog.far` are depths in
 metres behind the course (`near` up to 1,000 and `far` up to 2,000, past the deepest
@@ -541,13 +614,15 @@ and away as play goes on; `popup` pauses the game until the player continues. Se
 exactly the original one.
 
 `death.text` is single-line text of 1-64 characters, **“You are dead...”** by default.
-`death.fadeIn` is 0.1-5 seconds (default 1.5) and `death.hold` is 0.5-10 seconds
-(default 2.5), both with 0.1-second slider steps in **Project / HUD**. Health deaths
-and falls show the [death sequence](runtime-plugins.md#death-sequence) for their sum
-before placement. The world and run timer keep going; Pause and a hidden tab hold the
-clock. An active death keeps the values it started with. A runtime facet can replace
-the screen and character death pose independently; timing and wording remain
-project content.
+`death.fadeIn` is 0.1-5 seconds (default 1.5), with 0.1-second slider steps in
+**Project / HUD**. It is presentation only: game settings' `death.wait` in
+**Physics / Death** decides when health deaths and falls end their
+[death sequence](runtime-plugins.md#death-sequence) and return to play. Presentation
+elapsed time is clamped to that wait; a longer fade ends unfinished, without an error
+or a longer wait. The world and run timer keep going; Pause and a hidden tab hold the
+clock. An active death keeps its entry wait, text and fade. A runtime facet can replace
+the screen and character death pose independently; gameplay timing and wording remain
+separate project settings.
 
 **Audio.** `volume` (master) and each clip's `volume` are 0-1. `music` loops while
 the game runs and pauses with it. Cues: `impact` (hammer strikes, louder when

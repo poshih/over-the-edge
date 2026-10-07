@@ -11,6 +11,7 @@ export type DeathInfo =
 // Reused presentation input. The engine owns the fixed-step clock and the return to play.
 export interface DeathFrame {
   readonly elapsed: number;
+  // The game settings' death.wait, captured at entry; independent of the HUD fade.
   readonly duration: number;
   readonly poseProgress: number;
   readonly reducedMotion: boolean;
