@@ -1,6 +1,6 @@
 # Feature request: level streaming roadmap
 
-**Date:** 2026-10-07 · **Baseline:** `7b32b4e` · **Status:** requested; nothing is implemented.
+**Date:** 2026-10-07 · **Baseline:** `7b32b4e` · **Status:** Stage 0 instruments implemented; measurements pending (see [docs/level-streaming-measurements.md](docs/level-streaming-measurements.md)).
 
 A level is one document. `LevelDefinition` (`src/level.ts`) is a flat `objects` array; the Workshop edits it whole, the
 project server versions it whole, and a release embeds it in its content manifest. As courses grow toward
