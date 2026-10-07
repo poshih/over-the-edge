@@ -1,5 +1,5 @@
 // The built-in course, which every new game starts from: rock meshes from the engine's own course artwork in
-// src/default-course/ and one of each hazard, placed and sliced by scripts/default-course/generate.mjs, which writes
+// src/default-course/ and one of each hazard, placed and sliced by scripts/default-course/generate.ts, which writes
 // course.json. The ground
 // declares a box; the cliff, the boulder and the crags, one of them mirrored, collide as their slices on the obstacle line.
 import COURSE from './default-course/course.json' with { type: 'json' };

@@ -1,7 +1,15 @@
 // Small, deterministic media files for the example projects.
 
+export interface WavOptions {
+  frequency?: number;
+  seconds?: number;
+  rate?: number;
+  decay?: number;
+  noise?: number;
+}
+
 // A mono 16-bit PCM WAV: a tone with a short attack and exponential decay.
-export function wavFixture({ frequency = 440, seconds = 0.25, rate = 22050, decay = 12, noise = 0 } = {}) {
+export function wavFixture({ frequency = 440, seconds = 0.25, rate = 22050, decay = 12, noise = 0 }: WavOptions = {}) {
   const samples = Math.round(seconds * rate);
   const data = Buffer.alloc(samples * 2);
   let seed = 1;
@@ -31,7 +39,7 @@ export function wavFixture({ frequency = 440, seconds = 0.25, rate = 22050, deca
 }
 
 // A seamless loop of two alternating low tones, for background music tests.
-export function musicFixture({ seconds = 2, rate = 22050 } = {}) {
+export function musicFixture({ seconds = 2, rate = 22050 }: Pick<WavOptions, 'seconds' | 'rate'> = {}) {
   const samples = Math.round(seconds * rate);
   const data = Buffer.alloc(samples * 2);
   for (let index = 0; index < samples; index++) {
@@ -60,7 +68,7 @@ export function lanternCavernMedia() {
 }
 
 // A mono 16-bit PCM WAV of `samples` (-1..1) at `rate`.
-function pcm(samples, rate = 22050) {
+function pcm(samples: readonly number[], rate = 22050) {
   const data = Buffer.alloc(samples.length * 2);
   samples.forEach((value, index) => data.writeInt16LE(Math.round(Math.max(-1, Math.min(1, value)) * 0x5fff), index * 2));
   const header = wavFixture({ seconds: 0, rate }).subarray(0, 44);
@@ -70,7 +78,7 @@ function pcm(samples, rate = 22050) {
 }
 
 // Deterministic noise and a one-pole low-pass, for wind, crackle and booms.
-function noise(seed) {
+function noise(seed: number) {
   let state = seed;
   return () => {
     state = (state * 1103515245 + 12345) & 0x7fffffff;
@@ -78,17 +86,17 @@ function noise(seed) {
   };
 }
 
-function render(seconds, voice, rate = 22050) {
+function render(seconds: number, voice: (time: number, index: number) => number, rate = 22050) {
   return pcm(Array.from({ length: Math.round(seconds * rate) }, (_, index) => voice(index / rate, index)), rate);
 }
 
 // Inharmonic partials with their own decays: bells, chimes and clanks.
-function struck(partials, seconds, rate = 22050) {
+function struck(partials: readonly (readonly [number, number, number])[], seconds: number, rate = 22050) {
   return render(seconds, (time) => partials.reduce((sum, [frequency, gain, decay]) =>
     sum + gain * Math.exp(-decay * time) * Math.sin(2 * Math.PI * frequency * time), 0) * Math.min(1, time / 0.004), rate);
 }
 
-function filtered(seconds, seed, cutoff, envelope, rate = 22050) {
+function filtered(seconds: number, seed: number, cutoff: (time: number) => number, envelope: (time: number) => number, rate = 22050) {
   const next = noise(seed);
   let low = 0;
   return render(seconds, (time) => {
@@ -99,7 +107,7 @@ function filtered(seconds, seed, cutoff, envelope, rate = 22050) {
 }
 
 // The sound set of the example project in examples/projects/ashen-ascent: all procedural.
-export function ashenAscentMedia() {
+export function ashenAscentMedia(): Record<string, Buffer<ArrayBuffer>> {
   const rate = 22050;
   // A slow, dark drone in A minor: root, fifth and a minor third that swells in and out; loops seamlessly.
   const loop = 12;

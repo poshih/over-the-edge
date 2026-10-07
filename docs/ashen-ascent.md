@@ -152,13 +152,13 @@ all terrain shares **6 collision shapes**, the five and the mirrored ramp, and n
 the climb, about half of them scenery; the eight added pieces reuse the same shapes and have
 not been re-measured. Only nearby enemies run physics. Idle frames upload nothing for
 the scenery. The project's 11 WAV files, about 1.2 MB in total, are synthesized by
-`ashenAscentMedia()` in [`scripts/project-fixtures.mjs`](../scripts/project-fixtures.mjs).
+`ashenAscentMedia()` in [`scripts/project-fixtures.ts`](../scripts/project-fixtures.ts).
 
 ## Regenerate
 
 ```sh
-node scripts/ashen-ascent/generate.mjs            # write the project and the map
-node scripts/ashen-ascent/generate.mjs --preview  # also write zone crops and a reach overlay to artifacts/ashen-ascent/
+npm run generate:ashen-ascent               # write the project and the map
+npm run generate:ashen-ascent -- --preview  # also write zone crops and a reach overlay to artifacts/ashen-ascent/
 ```
 
 Change the generator, not `level.json`, and regenerate: hand edits are lost the next time
@@ -190,11 +190,11 @@ prove or disprove physics-based play.
 
 | File | Contents |
 | --- | --- |
-| `generate.mjs` | Builds the course, runs the checks and writes the project and the map |
-| `zones.mjs` | The eight zones, their palettes, route and props, which are decorations |
-| `scenery.mjs` | Each zone's scenery, placed with the course kit's depth helpers |
-| `lore.mjs` | Every message title and text |
-| `project.mjs` | Theme, HUD, audio cues and enemy art |
+| `generate.ts` | Builds the course, runs the checks and writes the project and the map |
+| `zones.ts` | The eight zones, their palettes, route and props, which are decorations |
+| `scenery.ts` | Each zone's scenery, placed with the course kit's depth helpers |
+| `lore.ts` | Every message title and text |
+| `project.ts` | Theme, HUD, audio cues and enemy art |
 
 The builder, the trail, the pieces' travel paths, the checks, the depth helpers and the map
 come from the [course kit](course-kit.md) in `scripts/course-kit/`. The generator calls

@@ -1,25 +1,25 @@
 // A map of exactly the prepared authored collision, with world coordinates under one SVG transform.
-import { CourseMapError } from './errors.mjs';
-export { CourseMapError } from './errors.mjs';
+import { CourseMapError } from './errors.ts';
+import type { CourseSnapshot } from './job.ts';
+import type { reachGraph } from './checks.ts';
+import type { Bounds } from '../../src/collision-queries.ts';
+export { CourseMapError } from './errors.ts';
 
-/** @typedef {import('./job.mjs').CourseSnapshot} CourseSnapshot */
-/** @typedef {import('../../src/collision-queries.ts').Bounds} Bounds */
-/**
- * @typedef {object} MapOptions
- * @property {readonly string[]} sky
- * @property {number} [scale]
- * @property {Bounds} [viewport]
- * @property {readonly {name: string, from: number}[]} [zones]
- * @property {ReturnType<typeof import('./checks.mjs').reachGraph>} [reach]
- */
+export interface MapOptions {
+  sky: readonly string[];
+  scale?: number;
+  viewport?: Bounds;
+  zones?: readonly { name: string; from: number }[];
+  reach?: ReturnType<typeof reachGraph>;
+}
+export interface MapCrop extends Bounds { name: string; zoom?: number }
 
-const hex = (color) => `#${color.toString(16).padStart(6, '0')}`;
-const escape = (text) => text.replace(/[&<>"]/g, (character) => `&#${character.charCodeAt(0)};`);
+const hex = (color: number) => `#${color.toString(16).padStart(6, '0')}`;
+const escape = (text: string) => text.replace(/[&<>"]/g, (character) => `&#${character.charCodeAt(0)};`);
 const SKY_STOPS = [0, 0.7, 1];
 const COLOR = /^#[0-9a-f]{6}$/i;
 
-/** @param {CourseSnapshot} snapshot @param {MapOptions} options */
-export function courseMap(snapshot, options) {
+export function courseMap(snapshot: CourseSnapshot, options: MapOptions) {
   if (options === null || typeof options !== 'object' || Array.isArray(options) ||
     Object.keys(options).some((field) => !['sky', 'scale', 'viewport', 'zones', 'reach'].includes(field))) {
     throw new CourseMapError('options', options, 'Unknown or invalid course map options.');
@@ -49,7 +49,7 @@ export function courseMap(snapshot, options) {
   if (options.reach !== undefined && (options.reach === null || typeof options.reach !== 'object' || options.reach.snapshot !== snapshot)) {
     throw new CourseMapError('reach', options.reach, 'The reach overlay must come from this same course snapshot.');
   }
-  const level = snapshot.level, X = (x) => (x - left) * scale, Y = (y) => (top - y) * scale;
+  const level = snapshot.level, X = (x: number) => (x - left) * scale, Y = (y: number) => (top - y) * scale;
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" font-family="monospace" data-map="${escape(JSON.stringify({ left, top, scale }))}">`,
     `<defs><linearGradient id="sky" x1="0" y1="1" x2="0" y2="0">${SKY_STOPS.map((offset, index) =>
@@ -113,7 +113,7 @@ export function courseMap(snapshot, options) {
 }
 
 /** Renders map crops to PNG files with Playwright, for reviewing a course without the game. */
-export async function renderCrops(map, crops, directory) {
+export async function renderCrops(map: ReturnType<typeof courseMap>, crops: readonly MapCrop[], directory: string) {
   const { chromium } = await import('playwright');
   const { join } = await import('node:path');
   const body = map.svg.slice(map.svg.indexOf('>') + 1, map.svg.lastIndexOf('</svg>'));

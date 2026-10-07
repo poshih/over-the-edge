@@ -1,58 +1,64 @@
 // Policies over one prepared snapshot of the engine's authored collision.
-import { CourseLevelError, CourseQueryError, ReachModelError } from './errors.mjs';
-export { ReachModelError } from './errors.mjs';
+import { CourseLevelError, CourseQueryError, ReachModelError } from './errors.ts';
+import type { CourseSnapshot } from './job.ts';
+import type { Bounds } from '../../src/collision-queries.ts';
+import type { Point } from '../../src/config.ts';
+import type { LevelObject, TerrainObject, TriggerObject } from '../../src/level.ts';
+export { ReachModelError } from './errors.ts';
 
-/** @typedef {import('./job.mjs').CourseSnapshot} CourseSnapshot */
-/** @typedef {import('../../src/collision-queries.ts').Bounds} Bounds */
-/** @typedef {import('../../src/level.ts').TerrainObject} TerrainObject */
-/** @typedef {Map<string, {group: string, zone: string}>} Groups */
-/**
- * @typedef {object} PieceRecord
- * @property {string} id
- * @property {string} stamp
- * @property {string} group
- * @property {'any' | 'down'} direction
- * @property {Bounds | null} bounds
- * @property {readonly import('../../src/level.ts').LevelObject[]} objects
- *
- * @typedef {object} ReachModel
- * @property {number} shoulder
- * @property {number} pull
- * @property {number} rise
- * @property {number} hop
- * @property {number} drop
- * @property {number} maxStandSlope
- * @property {number} shoulderLipOffset
- * @property {number} transitHeight
- * @property {readonly number[]} clearanceHeights
- * @property {readonly number[]} sideClearanceHeights
- * @property {number} clearanceHalfWidth
- * @property {number} standingInset
- * @property {number} startFootOffset
- * @property {number} fallDriftBase
- * @property {number} fallDriftPerMetre
- * @property {number} hopDrop
- * @property {number} hopRise
- * @property {number} moveRiseThreshold
- * @property {number} fallMinimum
- * @property {readonly number[]} fallProbeOffsets
- * @property {number} fallColumnSpacing
- * @property {number} fallInitialProbeHeight
- * @property {number} fallProbeStartHeight
- * @property {number} fallSurfaceOffset
- * @property {number} anchorRadius
- * @property {number} ventRiderMargin
- * @property {number} ventRiderBelow
- * @property {number} ventRiderAbove
- * @property {number} ventTargetMargin
- * @property {number} ventTargetAbove
- * @property {number} endingBelow
- * @property {number} goalRadius
- *
- * @typedef {ReachModel & {standNormal: number}} ReachRules
- * @typedef {{id: number, x: number, y: number, object: TerrainObject, group: string, zone: string, illusion: boolean}} StandPoint
- * @typedef {{from: {x: number, y: number}, to: {x: number, y: number}, why: string}} DesignedLink
- */
+export type Groups = Map<string, { group: string; zone: string }>;
+export interface PieceRecord {
+  id: string;
+  stamp: string;
+  group: string;
+  direction: 'any' | 'down';
+  bounds: Bounds | null;
+  objects: readonly LevelObject[];
+}
+export interface ReachModel {
+  shoulder: number;
+  pull: number;
+  rise: number;
+  hop: number;
+  drop: number;
+  maxStandSlope: number;
+  shoulderLipOffset: number;
+  transitHeight: number;
+  clearanceHeights: readonly number[];
+  sideClearanceHeights: readonly number[];
+  clearanceHalfWidth: number;
+  standingInset: number;
+  startFootOffset: number;
+  fallDriftBase: number;
+  fallDriftPerMetre: number;
+  hopDrop: number;
+  hopRise: number;
+  moveRiseThreshold: number;
+  fallMinimum: number;
+  fallProbeOffsets: readonly number[];
+  fallColumnSpacing: number;
+  fallInitialProbeHeight: number;
+  fallProbeStartHeight: number;
+  fallSurfaceOffset: number;
+  anchorRadius: number;
+  ventRiderMargin: number;
+  ventRiderBelow: number;
+  ventRiderAbove: number;
+  ventTargetMargin: number;
+  ventTargetAbove: number;
+  endingBelow: number;
+  goalRadius: number;
+}
+export type ReachRules = ReachModel & { standNormal: number };
+export interface StandPoint extends Point {
+  id: number;
+  object: TerrainObject;
+  group: string;
+  zone: string;
+  illusion: boolean;
+}
+export interface DesignedLink { from: Point; to: Point; why: string }
+interface ReachTrap extends Point { group: string; count: number }
 
 /** The old engine-default distances and body/rig probes, now completely caller-supplied. */
 export const ENGINE_DEFAULT_REACH = Object.freeze({
@@ -66,8 +72,8 @@ export const ENGINE_DEFAULT_REACH = Object.freeze({
   fallInitialProbeHeight: 0.3, fallProbeStartHeight: 0, fallSurfaceOffset: 0.3,
   anchorRadius: 1.6, ventRiderMargin: 1.6, ventRiderBelow: 1, ventRiderAbove: 0.2,
   ventTargetMargin: 2.6, ventTargetAbove: 0.3, endingBelow: 0.1, goalRadius: 1.5,
-});
-const REACH_FIELDS = Object.keys(ENGINE_DEFAULT_REACH);
+} satisfies ReachModel);
+const REACH_FIELDS = Object.keys(ENGINE_DEFAULT_REACH) as (keyof ReachModel)[];
 const REACH_ARRAYS = ['clearanceHeights', 'sideClearanceHeights', 'fallProbeOffsets'];
 
 // Seam/merge policy, not numerical tolerances. Compare to the inscribed-disk thickness of an overlap.
@@ -77,12 +83,11 @@ const OVERLAP_REPORT_RADIUS_TOLERANCE = 0.0005;
 const TRUSTED_DESCENT_RISE = 0.05;
 const ENEMY_HALF_BOUNDS = Object.freeze({ bird: { x: 0.26, y: 0.26 }, ground: { x: 0.26, y: 0.7 } });
 
-/** @param {ReachModel} model @param {CourseSnapshot} snapshot @returns {ReachRules} */
-function reachRules(model, snapshot) {
+function reachRules(model: ReachModel, snapshot: CourseSnapshot): ReachRules {
   if (model === null || typeof model !== 'object' || Array.isArray(model)) {
     throw new ReachModelError('model', model, 'A complete reach model is required; pass ENGINE_DEFAULT_REACH or your own.');
   }
-  const unknown = Object.keys(model).filter((field) => !REACH_FIELDS.includes(field));
+  const unknown = Object.keys(model).filter((field) => !REACH_FIELDS.includes(field as keyof ReachModel));
   if (unknown.length > 0) throw new ReachModelError('fields', unknown, `Unknown reach model fields: ${unknown.join(', ')}.`);
   for (const field of REACH_FIELDS) {
     const value = model[field];
@@ -108,8 +113,7 @@ function reachRules(model, snapshot) {
   });
 }
 
-/** @param {Groups} groups @param {{id: string}} object */
-function membership(groups, object) {
+function membership(groups: Groups, object: { id: string }) {
   const member = groups.get(object.id);
   if (typeof member?.group !== 'string' || typeof member?.zone !== 'string') {
     throw new CourseLevelError({ field: 'course group/zone membership', value: member }, object.id);
@@ -117,26 +121,22 @@ function membership(groups, object) {
   return member;
 }
 
-/** @param {Bounds} bounds @param {number} margin @returns {Bounds} */
-const expand = (bounds, margin) => ({
+const expand = (bounds: Bounds, margin: number): Bounds => ({
   left: bounds.left - margin, right: bounds.right + margin, bottom: bounds.bottom - margin, top: bounds.top + margin,
 });
-/** @param {import('../../src/level.ts').TriggerObject} trigger @param {CourseSnapshot} snapshot @returns {Bounds} */
-function triggerBounds(trigger, snapshot) {
+function triggerBounds(trigger: TriggerObject, snapshot: CourseSnapshot): Bounds {
   const box = snapshot.engine.level.triggerBounds(trigger);
   return { left: box.minX, right: box.maxX, bottom: box.minY, top: box.maxY };
 }
 
-/** Terrain of separately built groups must not merge into a piece's parts; retain the authored illusion policy.
- * @param {CourseSnapshot} snapshot @param {Groups} groups @param {Set<string>} [supports]
- */
-export function overlaps(snapshot, groups, supports = new Set()) {
+/** Terrain of separately built groups must not merge into a piece's parts; retain the authored illusion policy. */
+export function overlaps(snapshot: CourseSnapshot, groups: Groups, supports = new Set<string>()) {
   const problems = [];
   for (const record of snapshot.solids) {
     for (const other of snapshot.candidates(record.bounds)) {
       if (other.order <= record.order) continue;
       const a = membership(groups, record.object).group, b = membership(groups, other.object).group;
-      const part = (object, group) => group.startsWith('piece:') && !supports.has(object.id);
+      const part = (object: TerrainObject, group: string) => group.startsWith('piece:') && !supports.has(object.id);
       if (a === b || (!part(record.object, a) && !part(other.object, b))) continue;
       if (!snapshot.queries.overlapExceeds(record.solid, other.solid, POLICY_ALLOWANCES.overlap)) continue;
       const depth = snapshot.queries.overlapDepth(record.solid, other.solid, OVERLAP_REPORT_RADIUS_TOLERANCE);
@@ -159,11 +159,10 @@ export function overlaps(snapshot, groups, supports = new Set()) {
 /**
  * Apply smallness and clearance to connected solid components, including islands in one mesh.
  * Only actual parts of the same recorded set-piece placement are exempt; group names and supports are not proof.
- * @param {CourseSnapshot} snapshot @param {Groups} groups @param {readonly PieceRecord[]} pieces
  */
-export function crampedColliders(snapshot, groups, pieces) {
+export function crampedColliders(snapshot: CourseSnapshot, groups: Groups, pieces: readonly PieceRecord[]) {
   snapshot.work.spend('geometry', pieces.length);
-  const owners = new Map();
+  const owners = new Map<string, PieceRecord>();
   const terrainIds = new Set(snapshot.solids.map((record) => record.object.id));
   for (const piece of pieces) {
     snapshot.work.spend('geometry', piece.objects.length);
@@ -175,7 +174,7 @@ export function crampedColliders(snapshot, groups, pieces) {
       owners.set(object.id, piece);
     }
   }
-  const size = (bounds) => Math.max(bounds.right - bounds.left, bounds.top - bounds.bottom);
+  const size = (bounds: Bounds) => Math.max(bounds.right - bounds.left, bounds.top - bounds.bottom);
   const small = new Set(snapshot.components.filter((record) => size(record.bounds) <= CRAMPED.small));
   const problems = [];
   for (const record of small) {
@@ -192,10 +191,8 @@ export function crampedColliders(snapshot, groups, pieces) {
   return problems;
 }
 
-/** A piece's bounds deliberately reserve its movement space, including empty air.
- * @param {CourseSnapshot} snapshot @param {Groups} groups @param {readonly PieceRecord[]} pieces @param {Set<string>} [allowed]
- */
-export function keepOut(snapshot, groups, pieces, allowed = new Set()) {
+/** A piece's bounds deliberately reserve its movement space, including empty air. */
+export function keepOut(snapshot: CourseSnapshot, groups: Groups, pieces: readonly PieceRecord[], allowed = new Set<string>()) {
   snapshot.work.spend('geometry', pieces.length);
   const problems = [];
   for (const piece of pieces) {
@@ -215,10 +212,8 @@ export function keepOut(snapshot, groups, pieces, allowed = new Set()) {
   return problems;
 }
 
-/** A course's own drafts rise through open air above their region, up to the first launch event's apex.
- * @param {CourseSnapshot} snapshot @param {Groups} groups
- */
-export function ventShafts(snapshot, groups) {
+/** A course's own drafts rise through open air above their region, up to the first launch event's apex. */
+export function ventShafts(snapshot: CourseSnapshot, groups: Groups) {
   const problems = [];
   for (const vent of snapshot.level.objects) {
     if (vent.kind !== 'trigger' || membership(groups, vent).group.startsWith('piece:')) continue;
@@ -235,9 +230,8 @@ export function ventShafts(snapshot, groups) {
   return problems;
 }
 
-/** @param {CourseSnapshot} snapshot @param {{x: number, y: number}} point @param {ReachRules} rules */
-function standingClearance(snapshot, point, rules) {
-  const clearColumn = (x, heights) => {
+function standingClearance(snapshot: CourseSnapshot, point: Point, rules: ReachRules) {
+  const clearColumn = (x: number, heights: readonly number[]) => {
     for (let i = 0; i < heights.length; i++) {
       const probe = { x, y: point.y + heights[i] };
       if (snapshot.inside(probe) !== null) return false;
@@ -251,17 +245,13 @@ function standingClearance(snapshot, point, rules) {
     clearColumn(point.x + rules.clearanceHalfWidth, rules.sideClearanceHeights);
 }
 
-/** Upward oriented edges and analytic circle arcs, sampled only for the conservative reach model.
- * @param {CourseSnapshot} snapshot @param {Groups} groups @param {ReachModel} reach
- */
-export function standPoints(snapshot, groups, reach) {
+/** Upward oriented edges and analytic circle arcs, sampled only for the conservative reach model. */
+export function standPoints(snapshot: CourseSnapshot, groups: Groups, reach: ReachModel) {
   return collectStandPoints(snapshot, groups, reachRules(reach, snapshot));
 }
 
-/** @param {CourseSnapshot} snapshot @param {Groups} groups @param {ReachRules} rules */
-function collectStandPoints(snapshot, groups, rules) {
-  /** @type {StandPoint[]} */
-  const points = [];
+function collectStandPoints(snapshot: CourseSnapshot, groups: Groups, rules: ReachRules) {
+  const points: StandPoint[] = [];
   const sampled = new Set();
   for (const record of snapshot.solids) {
     const object = record.object, member = membership(groups, object);
@@ -286,33 +276,29 @@ function collectStandPoints(snapshot, groups, rules) {
   return { points, index: snapshot.index };
 }
 
-/** @param {{x: number, y: number}} from @param {{x: number, y: number}} to @param {CourseSnapshot} snapshot */
-const clearLine = (from, to, snapshot) => !snapshot.blocksSegment(from, to);
+const clearLine = (from: Point, to: Point, snapshot: CourseSnapshot) => !snapshot.blocksSegment(from, to);
 
 /**
  * A conservative authoring model, not a physics/playability proof. The complete model is mandatory.
  * Trusted piece membership remains explicit policy: hubs for any-direction pieces, an ordered chain for descents.
- * @param {CourseSnapshot} snapshot @param {Groups} groups @param {readonly PieceRecord[]} pieces
- * @param {readonly DesignedLink[]} links @param {ReachModel} reach @param {{x: number, y: number} | null} [goal]
  */
-export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) {
+export function reachGraph(snapshot: CourseSnapshot, groups: Groups, pieces: readonly PieceRecord[], links: readonly DesignedLink[], reach: ReachModel, goal: Point | null = null) {
   const rules = reachRules(reach, snapshot);
   const maximumDrift = rules.fallDriftBase + rules.fallDriftPerMetre * rules.drop;
   if (!Number.isFinite(maximumDrift)) throw new ReachModelError('fallDriftPerMetre/drop', maximumDrift, 'The modeled fall drift must stay finite.');
   const { points } = collectStandPoints(snapshot, groups, rules);
   const pointIndex = snapshot.createIndex(points,
     (point) => ({ left: point.x, right: point.x, bottom: point.y, top: point.y }));
-  /** @type {Set<number>[]} */
-  const neighbours = [];
+  const neighbours: Set<number>[] = [];
   const node = () => { snapshot.work.spend('graphNodes'); neighbours.push(new Set()); return neighbours.length - 1; };
   for (let i = 0; i < points.length; i++) node();
-  const connect = (from, to) => {
+  const connect = (from: number, to: number) => {
     if (from === to || neighbours[from].has(to)) return;
     snapshot.work.spend('graphEdges');
     neighbours[from].add(to);
   };
-  const candidates = (bounds) => pointIndex.query(bounds);
-  const solid = (point) => !point.illusion;
+  const candidates = (bounds: Bounds) => pointIndex.query(bounds);
+  const solid = (point: StandPoint) => !point.illusion;
   for (const a of points) {
     if (!solid(a)) continue;
     const shoulder = { x: a.x, y: a.y + rules.shoulder }, horizontal = Math.max(rules.pull, rules.hop);
@@ -334,8 +320,8 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
       if (clearLine({ x: a.x, y: a.y + rules.transitHeight }, { x: b.x, y: b.y + rules.transitHeight }, snapshot)) connect(a.id, b.id);
     }
   }
-  const columns = new Map();
-  const bin = (x) => {
+  const columns = new Map<number, StandPoint[]>();
+  const bin = (x: number) => {
     const column = Math.round(x / rules.fallColumnSpacing);
     if (!Number.isFinite(column)) throw new ReachModelError('fallColumnSpacing', rules.fallColumnSpacing, 'The modeled fall column must stay finite.');
     return column;
@@ -343,7 +329,7 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
   for (const point of points) {
     if (!solid(point)) continue;
     if (!columns.has(bin(point.x))) columns.set(bin(point.x), []);
-    columns.get(bin(point.x)).push(point);
+    columns.get(bin(point.x))!.push(point);
   }
   for (const list of columns.values()) list.sort((a, b) => {
     snapshot.work.spend('reachCandidates');
@@ -370,10 +356,10 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
       }
     }
   }
-  const byGroup = new Map();
+  const byGroup = new Map<string, StandPoint[]>();
   for (const point of points) {
     if (!byGroup.has(point.group)) byGroup.set(point.group, []);
-    byGroup.get(point.group).push(point);
+    byGroup.get(point.group)!.push(point);
   }
   snapshot.work.spend('reachCandidates', pieces.length);
   for (const piece of pieces) {
@@ -415,8 +401,8 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
     for (const point of riders) connect(point.id, hub);
     for (const point of targets) connect(hub, point.id);
   }
-  const nearest = (target) => {
-    let best = null;
+  const nearest = (target: Point) => {
+    let best: { point: StandPoint; distance: number } | null = null;
     for (const point of candidates({ left: target.x - rules.anchorRadius, right: target.x + rules.anchorRadius,
       bottom: target.y - rules.anchorRadius, top: target.y + rules.anchorRadius })) {
       snapshot.work.spend('reachCandidates');
@@ -432,8 +418,8 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
   for (const link of links) connect(nearest(link.from).id, nearest(link.to).id);
 
   const start = snapshot.level.objects.find((object) => object.kind === 'start');
-  const ending = snapshot.level.objects.find((object) => object.kind === 'trigger' && object.events.some((event) => event.type === 'stop-timer'));
-  const origin = nearest({ x: start.x, y: start.y - rules.startFootOffset });
+  const ending = snapshot.level.objects.find((object): object is TriggerObject => object.kind === 'trigger' && object.events.some((event) => event.type === 'stop-timer'));
+  const origin = nearest({ x: start!.x, y: start!.y - rules.startFootOffset });
   const seenNodes = new Uint8Array(neighbours.length), queue = [origin.id];
   seenNodes[origin.id] = 1;
   for (let head = 0; head < queue.length; head++) {
@@ -442,10 +428,10 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
     }
   }
   const inEnding = ending !== undefined
-    ? (point) => snapshot.engine.level.triggerContains(ending, point) ||
+    ? (point: Point) => snapshot.engine.level.triggerContains(ending, point) ||
       snapshot.engine.level.triggerContains(ending, { x: point.x, y: point.y + rules.endingBelow })
-    : (point) => goal !== null && Math.hypot(point.x - goal.x, point.y - goal.y) <= rules.goalRadius;
-  const incoming = neighbours.map(() => []);
+    : (point: Point) => goal !== null && Math.hypot(point.x - goal.x, point.y - goal.y) <= rules.goalRadius;
+  const incoming = neighbours.map((): number[] => []);
   neighbours.forEach((targets, from) => { for (const to of targets) incoming[to].push(from); });
   const finishNodes = new Uint8Array(neighbours.length), back = points.filter(inEnding).map((point) => point.id);
   for (const id of back) finishNodes[id] = 1;
@@ -455,17 +441,17 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
     }
   }
   const seen = seenNodes.slice(0, points.length), finish = finishNodes.slice(0, points.length);
-  const traps = new Map();
+  const traps = new Map<string, ReachTrap>();
   for (const point of points) {
     if (!seen[point.id] || finish[point.id] || !solid(point)) continue;
     if (!traps.has(point.group)) traps.set(point.group, { group: point.group, count: 0, x: point.x, y: point.y });
-    traps.get(point.group).count++;
+    traps.get(point.group)!.count++;
   }
   const reached = points.filter((point) => seen[point.id]);
   const unreachedPieces = pieces.filter((piece) => (byGroup.get(piece.group) ?? []).length > 0 &&
     !(byGroup.get(piece.group) ?? []).some((point) => seen[point.id])).map((piece) => `${piece.id} (${piece.stamp})`);
   return {
-    model: 'conservative-authoring-model', playabilityProof: false, snapshot,
+    model: 'conservative-authoring-model' as const, playabilityProof: false as const, snapshot,
     points, seen, reached: reached.length, total: points.length,
     ending: points.some((point) => seen[point.id] && inEnding(point)),
     highest: reached.reduce((best, point) => point.y > best.y ? point : best, origin),
@@ -473,8 +459,7 @@ export function reachGraph(snapshot, groups, pieces, links, reach, goal = null) 
   };
 }
 
-/** @param {ReturnType<typeof reachGraph>} result @returns {string[]} */
-export function reachSuggestions(result) {
+export function reachSuggestions(result: ReturnType<typeof reachGraph>): string[] {
   if (result?.model !== 'conservative-authoring-model') {
     throw new ReachModelError('result.model', result?.model, 'reachSuggestions requires a reachGraph result.');
   }
@@ -490,9 +475,8 @@ export function reachSuggestions(result) {
   return suggestions;
 }
 
-/** @param {CourseSnapshot} snapshot */
-export function budget(snapshot) {
-  const level = snapshot.level, count = (kind) => level.objects.filter((object) => object.kind === kind).length;
+export function budget(snapshot: CourseSnapshot) {
+  const level = snapshot.level, count = (kind: LevelObject['kind']) => level.objects.filter((object) => object.kind === kind).length;
   return {
     terrain: snapshot.solids.length, illusions: snapshot.solids.filter((record) => record.object.illusion).length,
     triggers: count('trigger'), updrafts: level.objects.filter((object) => object.kind === 'trigger' &&

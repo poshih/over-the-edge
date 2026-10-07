@@ -8,15 +8,15 @@ API. [Ashen Ascent](ashen-ascent.md) is an in-repository consumer.
 
 | Module | Contents |
 | --- | --- |
-| `engine.mjs` | `loadCourseEngine(server)`, loading the engine through a caller-owned Vite server |
-| `job.mjs` | `createCourseJob(engine, options)`, template caches, work accounting and prepared snapshots |
-| `errors.mjs` | Typed errors with a stable `code`, original `cause` and actionable `repair` |
-| `course.mjs` | `CourseBuilder(library, job)`, terrain, triggers, enemies, scenery, set pieces and group metadata; seeded `random` |
-| `trail.mjs` | `Trail`, a route cursor for floors, steps, stairs and set pieces |
-| `pieces.mjs` | `PIECE_PATHS`, designed entry, exit and ground for library pieces |
-| `checks.mjs` | Blocking overlap, reservation, vent and component-clearance checks; advisory reach modelling and suggestions; `budget` |
-| `scenery.mjs` | Perspective-camera depth placement for non-colliding decorations |
-| `map.mjs` | Collision SVG maps and optional Playwright PNG crops |
+| `engine.ts` | `loadCourseEngine(server)`, loading the engine through a caller-owned Vite server |
+| `job.ts` | `createCourseJob(engine, options)`, template caches, work accounting and prepared snapshots |
+| `errors.ts` | Typed errors with a stable `code`, original `cause` and actionable `repair` |
+| `course.ts` | `CourseBuilder(library, job)`, terrain, triggers, enemies, scenery, set pieces and group metadata; seeded `random` |
+| `trail.ts` | `Trail`, a route cursor for floors, steps, stairs and set pieces |
+| `pieces.ts` | `PIECE_PATHS`, designed entry, exit and ground for library pieces |
+| `checks.ts` | Blocking overlap, reservation, vent and component-clearance checks; advisory reach modelling and suggestions; `budget` |
+| `scenery.ts` | Perspective-camera depth placement for non-colliding decorations |
+| `map.ts` | Collision SVG maps and optional Playwright PNG crops |
 
 The typed, DOM-free, three.js-free query kernel is
 [`src/collision-queries.ts`](../src/collision-queries.ts). It imports no editor modules.
@@ -30,15 +30,15 @@ TypeScript from Node:
 
 ```js
 import { createServer } from 'vite';
-import { loadCourseEngine } from '../course-kit/engine.mjs';
-import { createCourseJob } from '../course-kit/job.mjs';
-import { CourseBuilder, random } from '../course-kit/course.mjs';
-import { Trail } from '../course-kit/trail.mjs';
+import { loadCourseEngine } from '../course-kit/engine.ts';
+import { createCourseJob } from '../course-kit/job.ts';
+import { CourseBuilder, random } from '../course-kit/course.ts';
+import { Trail } from '../course-kit/trail.ts';
 import {
   overlaps, keepOut, ventShafts, crampedColliders, reachGraph, reachSuggestions,
   ENGINE_DEFAULT_REACH,
-} from '../course-kit/checks.mjs';
-import { courseMap } from '../course-kit/map.mjs';
+} from '../course-kit/checks.ts';
+import { courseMap } from '../course-kit/map.ts';
 
 const server = await createServer({
   configFile: false, root: process.cwd(), logLevel: 'silent',
@@ -447,9 +447,9 @@ measured throughput or a guarantee that a particular large course fits the defau
 
 ### Typed errors
 
-All kit error classes extend the JSDoc-typed `CourseError<Code, Cause>`, with `code`,
-`cause` and `repair`. Capability causes name `capability` and optionally retain
-`detail` or the original loader `failure`.
+The kit is TypeScript, checked by `tsconfig.scripts.json`. All kit error classes
+extend `CourseError<Code, Cause>`, with `code`, `cause` and `repair`. Capability causes
+name `capability` and optionally retain `detail` or the original loader `failure`.
 Engine art/level/query errors remain their typed causes; classification never parses
 error messages.
 
@@ -465,7 +465,7 @@ error messages.
 | `SceneryCameraError` | `SCENERY_CAMERA_INVALID` | Camera field/value record; use a valid perspective camera |
 
 ```js
-import { CourseError } from '../course-kit/errors.mjs';
+import { CourseError } from '../course-kit/errors.ts';
 try {
   // Prepare and check an authoring job.
 } catch (error) {

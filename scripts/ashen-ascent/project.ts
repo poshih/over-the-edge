@@ -1,4 +1,10 @@
 // The project around the Ashen Ascent course: a souls-like look, readout, sound and enemy art.
+import type { AudioSettings } from '../../src/audio-settings.ts';
+import type { EnemyArtSettings } from '../../src/enemy-art-data.ts';
+import type { HudSettings } from '../../src/hud.ts';
+import type { ProjectManifest } from '../../src/project.ts';
+import type { GameTheme } from '../../src/theme.ts';
+
 export const TITLE = 'Ashen Ascent';
 
 export const THEME = {
@@ -18,7 +24,7 @@ export const THEME = {
   backdrop: { visible: false, far: '#36333d', middle: '#2d2a33', near: '#232128' },
   aim: { cursor: '#ffb35c', line: '#c98a4a' },
   character: { pot: '#3c3b40', trim: '#b08a3e', dark: '#19191d', suit: '#5a2a28', ceramic: '#c9bfae', wood: '#3e2e22' },
-};
+} satisfies GameTheme;
 
 export const HUD = {
   height: { visible: true, label: 'ASCENT', unit: 'm', scale: 1, decimals: 0 },
@@ -26,7 +32,7 @@ export const HUD = {
   // Lore rises as embers and drifts away while the climb goes on.
   messages: { style: 'toast' },
   death: { text: 'You are dead...', fadeIn: 1.5 },
-};
+} satisfies HudSettings;
 
 export const MEDIA = ['ashen-loop.wav', 'ember.wav', 'bell.wav', 'chime.wav', 'triumph.wav', 'clank.wav', 'thud.wav', 'soul.wav',
   'gust.wav', 'mist.wav', 'boom.wav'];
@@ -46,7 +52,7 @@ export const AUDIO = {
     fall: { source: '/media/boom.wav', volume: 0.75 },
     bonfire: { source: '/media/ember.wav', volume: 0.8 },
   },
-};
+} satisfies AudioSettings;
 
 // Original pixel art: a carrion crow, and a hollow in a rusted helm with a broken blade. Facing right.
 export const ENEMIES = {
@@ -124,10 +130,10 @@ export const ENEMIES = {
       ],
     ],
   },
-};
+} satisfies EnemyArtSettings;
 
 /** The project manifest, from the engine's defaults for everything the course does not change. */
-export function projectManifest(defaults) {
+export function projectManifest(defaults: ProjectManifest): ProjectManifest {
   return {
     ...defaults,
     theme: THEME,

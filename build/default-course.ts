@@ -17,7 +17,7 @@ export function defaultCourseMeshPath(mesh: DefaultCourseMesh): string {
 export function readDefaultCourseMesh(mesh: DefaultCourseMesh): Uint8Array {
   const bytes = new Uint8Array(readFileSync(defaultCourseMeshPath(mesh)));
   if (bytes.byteLength !== mesh.bytes || `asset-${sha256Hex(bytes)}` !== mesh.id) {
-    throw new Error(`src/default-course/meshes/${mesh.file} does not match course.json; run node scripts/default-course/generate.mjs.`);
+    throw new Error(`src/default-course/meshes/${mesh.file} does not match course.json; run npm run generate:default-course.`);
   }
   return bytes;
 }

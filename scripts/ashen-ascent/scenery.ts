@@ -1,10 +1,11 @@
 // The scenery of Ashen Ascent: decorations that never collide, from the far horizon to the foreground.
 // Each zone's scenery is built right after the zone, so its IDs share the zone's prefix. The course kit
-// places distant scenery for the theme's camera (see scripts/course-kit/scenery.mjs). A prop standing on
+// places distant scenery for the theme's camera (see scripts/course-kit/scenery.ts). A prop standing on
 // the course stands within its terrain, which reaches half its depth behind the obstacle line, and clear
 // of the pot, which reaches 0.5 m behind it.
-import { sceneryHelpers } from '../course-kit/scenery.mjs';
-import { THEME } from './project.mjs';
+import { sceneryHelpers } from '../course-kit/scenery.ts';
+import type { CourseBuilder } from '../course-kit/course.ts';
+import { THEME } from './project.ts';
 
 const { far, landmark, shelves, row } = sceneryHelpers(THEME.camera);
 
@@ -12,7 +13,7 @@ const TINT = { dusk: 0x8c8a9a, night: 0x6f6d7e, ash: 0xb3ada2, moss: 0x9fb08a, f
 
 export const SCENERY = {
   // I · Ashen Hollow: a graveyard on ash-grey ground under a far range, the golden tree on the horizon.
-  z1(b) {
+  z1(b: CourseBuilder) {
     far(b, 'mountain-ridge', [-20, 6], [0, -2.1], -1000, 3.1, { tint: TINT.dusk });
     far(b, 'mountain-ridge', [-20, 6], [8, -2.5], -1000, 3.6, { mirror: true, tint: TINT.night });
     far(b, 'great-tree', [0, 14], [5.5, -1.4], -900, 4.4);
@@ -22,7 +23,7 @@ export const SCENERY = {
     shelves(b, -110, 80, 9, -110, 20, TINT.night);
     b.decoration('watchtower', 'watchtower', -61, 9 + 0.5, -110, 26, { tint: TINT.ash });
     b.decoration('gothic-arch', 'gothic-arch', -44, 2.5, -30, 11, { tint: TINT.ash });
-    for (const [x, z, height, mirror] of [[-62, -6, 7, false], [-27, -9, 9, true], [-8, -20, 11, false], [14, -6, 6, true]]) {
+    for (const [x, z, height, mirror] of [[-62, -6, 7, false], [-27, -9, 9, true], [-8, -20, 11, false], [14, -6, 6, true]] as const) {
       b.decoration('dead-tree', 'dead-tree', x, 0, z, height, { mirror, angle: mirror ? 0.06 : -0.05 });
     }
     for (const [x, z] of [[-47, -4], [-38, -12], [-24, -5]]) b.decoration('ruined-pillar', 'ruined-pillar', x, 0, z, 5.5);
@@ -34,7 +35,7 @@ export const SCENERY = {
   },
 
   // II · Hollow Hamlet: a lit street, a wall behind it, the cathedral far off above the roofs.
-  z2(b) {
+  z2(b: CourseBuilder) {
     landmark(b, 'cathedral', 30, -3.6, -400, 2.6, { tint: TINT.ash });
     shelves(b, 8, 66, 35.7, -14, 4, TINT.ash);
     row(b, 'lantern-post', 22, 60, 35.7, -0.75, 3.4, 12.5);
@@ -46,7 +47,7 @@ export const SCENERY = {
   },
 
   // III · The Ossuary: a crypt wall, skulls and candles on the catacomb floor, cages hung in front.
-  z3(b) {
+  z3(b: CourseBuilder) {
     row(b, 'broken-wall', -78, -30, 26, -3, 7, 9.5, { tint: 0x6a6470 });
     row(b, 'skull-pile', -74, -34, 26, -0.95, 0.9, 8);
     for (const x of [-70, -56, -43]) b.decoration('candelabra', 'candelabra', x, 26, -0.95, 2.3);
@@ -57,7 +58,7 @@ export const SCENERY = {
   },
 
   // IV · Blighted Mire: drowned trees and thorns on moss, a rune stone, crags on the horizon.
-  z4(b) {
+  z4(b: CourseBuilder) {
     far(b, 'rock-spire', [0, 76], [-4.8, -1.3], -60, 2.8, { tint: TINT.moss });
     far(b, 'rock-spire', [0, 76], [5.2, -1.6], -60, 3.4, { mirror: true, tint: TINT.moss });
     shelves(b, -46, 40, 71, -14, 4, TINT.moss);
@@ -71,7 +72,7 @@ export const SCENERY = {
 
   // V · Cinder Forge: braziers on the catwalk, chains overhead, and far off a castle adrift in the sky: it
   // peeks over the top of the view from the graveyard, is level with the forge, and lies below the keep.
-  z5(b) {
+  z5(b: CourseBuilder) {
     far(b, 'castle', [-10, 150], [-3.2, 0], -600, 2.6, { tint: TINT.dusk });
     for (const [dx, size] of [[-0.85, 3], [0.1, 4.4], [0.95, 2.4]]) {
       far(b, 'rock-spire', [-10, 150], [-3.2 + dx, 0.15], -601, size, { angle: Math.PI, mirror: dx > 0, tint: TINT.night });
@@ -85,7 +86,7 @@ export const SCENERY = {
   },
 
   // VI · Frostbound Ramparts: banners on the walls, a far watchtower, knights on guard.
-  z6(b) {
+  z6(b: CourseBuilder) {
     far(b, 'mountain-ridge', [0, 150], [-6.5, -2.9], -1000, 3.8, { tint: TINT.frost });
     far(b, 'watchtower', [0, 150], [4.6, -0.9], -80, 3.2, { tint: TINT.frost });
     for (const [x, y] of [[-41, 145.1], [-24, 145.1], [1, 157.1], [21, 157.1]]) b.decoration('banner', 'banner', x, y, -1.4, 5, { tint: TINT.frost });
@@ -94,7 +95,7 @@ export const SCENERY = {
   },
 
   // VII · Windward Stair: crags adrift in the wind, a lone obelisk on the highest of them.
-  z7(b) {
+  z7(b: CourseBuilder) {
     for (const [x, y, z, height] of [[-14, 188, -35, 22], [2, 222, -70, 30], [36, 205, -24, 16], [-24, 246, -50, 26], [30, 250, -90, 34]]) {
       b.decoration('crag', 'rock-spire', x, y, z, height, { angle: Math.PI, tint: TINT.dusk });
     }
@@ -104,7 +105,7 @@ export const SCENERY = {
 
   // VIII · The Drifting Keep: candles and banners in the courtyard, knights at the gate; far below, the
   // golden tree of the graveyard's horizon.
-  z8(b) {
+  z8(b: CourseBuilder) {
     for (const x of [-9, -19]) b.decoration('candelabra', 'candelabra', x, 367.1, -0.95, 2.2);
     b.decoration('knight-statue', 'knight-statue', 3.5, 367.1, -1.35, 4.8);
     b.decoration('knight-statue', 'knight-statue', -10.5, 367.1, -1.35, 4.8, { mirror: true });

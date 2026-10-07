@@ -140,7 +140,7 @@ ledge's riser; a swinging axe over the last step below the summit; and a lava la
 basin past the summit's far edge, **over the edge**. So it shows health, and a new game starts
 with an example of each to keep, move or delete.
 
-`node scripts/default-course/generate.mjs` makes all of it. It models each rock from an
+`npm run generate:default-course` makes all of it. It models each rock from an
 outline: through the middle of its depth the walls are the outline itself, so the slice is
 that outline; toward the front and back they chamfer in and the faces bulge, roughened by
 seeded noise. The GLBs have rough, non-metallic PBR materials coloured per vertex and no

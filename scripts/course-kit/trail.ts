@@ -1,12 +1,47 @@
 // A cursor that walks the course: floors, stairs and set pieces are added where the last element
 // ended, so the route stays continuous. `dir` is +1 travelling right and -1 travelling left.
-import { PIECE_PATHS } from './pieces.mjs';
-import { CourseLevelError, CourseQueryError } from './errors.mjs';
+import { PIECE_PATHS } from './pieces.ts';
+import { CourseLevelError, CourseQueryError } from './errors.ts';
+import type { CourseBuilder, PieceOptions, PlacedPiece, TerrainOptions } from './course.ts';
+import type { Point } from '../../src/config.ts';
+import type { Surface } from '../../src/surfaces.ts';
 
-const tidy = (value) => Number(value.toFixed(4)) + 0;
+type Range = number | [number, number];
+type StairShape = 'shelf' | 'column' | 'slab' | 'crate' | 'rock';
+export interface FloorOptions extends TerrainOptions { thickness?: number; back?: number; name?: string }
+export interface StairMotif extends TerrainOptions {
+  rise?: number;
+  shapes?: readonly StairShape[];
+  last?: StairShape;
+  width?: Range;
+  tones?: readonly string[];
+  floor?: number;
+  thickness?: Range;
+  name?: string;
+}
+export interface TrailPieceOptions extends PieceOptions {
+  gap?: number;
+  lift?: number;
+  floor?: boolean;
+  floorName?: string;
+  floorThickness?: number;
+  floorTone?: string;
+  floorDepth?: number;
+  floorSurface?: Surface;
+  exit?: readonly [number, number];
+}
+export interface TrailPiece extends PlacedPiece { entry: Point; exit: Point }
+
+const tidy = (value: number) => Number(value.toFixed(4)) + 0;
 
 export class Trail {
-  constructor(builder, rng, x, y, dir = 1) {
+  declare readonly b: CourseBuilder;
+  declare rng: () => number;
+  declare x: number;
+  declare y: number;
+  declare dir: number;
+
+  constructor(builder: CourseBuilder, rng: () => number, x: number, y: number, dir = 1) {
     this.b = builder;
     this.rng = rng;
     this.x = x;
@@ -14,23 +49,23 @@ export class Trail {
     this.dir = dir;
   }
 
-  between(range) {
+  between(range: Range) {
     return Array.isArray(range) ? range[0] + this.rng() * (range[1] - range[0]) : range;
   }
 
-  at(x, y) {
+  at(x: number, y: number) {
     this.x = x;
     this.y = y;
     return this;
   }
 
-  go(dx) {
+  go(dx: number) {
     this.x += this.dir * dx;
     return this;
   }
 
   // To a set piece's far side, keeping the height.
-  edge(record) {
+  edge(record: Pick<PlacedPiece, 'bounds' | 'id'>) {
     if (record.bounds === null) throw new CourseQueryError('QUERY_CAPABILITY_UNSUPPORTED', { capability: 'piece.terrainBounds', detail: { pieceId: record.id } },
       'A trail cannot move to the terrain edge of a piece with no terrain.');
     this.x = this.dir > 0 ? record.bounds.right : record.bounds.left;
@@ -47,7 +82,7 @@ export class Trail {
   }
 
   // A flat platform from the cursor, `length` metres ahead, its top at the cursor's height.
-  floor(length, options = {}) {
+  floor(length: number, options: FloorOptions = {}) {
     const thickness = options.thickness ?? 1;
     const back = options.back ?? 0;
     const left = this.dir > 0 ? this.x - back : this.x - length;
@@ -57,7 +92,7 @@ export class Trail {
   }
 
   // One step up or down to a platform `dx` ahead whose top is `dy` above the cursor.
-  step(dx, dy, width, options = {}) {
+  step(dx: number, dy: number, width: number, options: FloorOptions = {}) {
     const thickness = options.thickness ?? this.between([0.5, 0.9]);
     const near = this.x + this.dir * dx;
     const left = this.dir > 0 ? near : near - width;
@@ -73,7 +108,7 @@ export class Trail {
    * first from a switchback, whose steps alternate sides so none roofs the step beneath it. The motif
    * chooses shapes: shelves, slabs, crates, rocks or columns standing on `floor`.
    */
-  stairs(run, rise, motif = {}) {
+  stairs(run: number, rise: number, motif: StairMotif = {}) {
     const maxRise = motif.rise ?? 1.55;
     let inline = run < 1.45 ? 0 : Math.max(1, Math.ceil(run / 3.2));
     while (inline > 1 && run / inline < 1.45) inline--;
@@ -82,11 +117,11 @@ export class Trail {
     if (switchback % 2 === 0 && switchback > 0) switchback += 1;
     const switchRise = rise - inlineRise;
     const shapes = motif.shapes ?? ['shelf'];
-    const shape = (final) => final && motif.last ? motif.last : shapes[Math.floor(this.rng() * shapes.length)];
+    const shape = (final: boolean) => final && motif.last ? motif.last : shapes[Math.floor(this.rng() * shapes.length)];
     // Switchback: ahead steps start past the divider, back steps end before it; the divider wanders.
     let divider = this.x + this.dir * this.between([0.3, 0.7]);
     let y = this.y;
-    let exit = null;
+    let exit: Point | null = null;
     for (let index = 1; index <= switchback; index++) {
       const ahead = index % 2 === 1;
       const width = this.between(motif.width ?? [1.5, 2.2]);
@@ -115,7 +150,7 @@ export class Trail {
     return this;
   }
 
-  stepShape(shape, center, top, width, motif, placement = 'inline') {
+  stepShape(shape: StairShape, center: number, top: number, width: number, motif: StairMotif, placement = 'inline') {
     const b = this.b;
     const name = motif.name ?? 'stair';
     const tone = motif.tones ? motif.tones[Math.floor(this.rng() * motif.tones.length)] : motif.tone;
@@ -143,7 +178,7 @@ export class Trail {
    * Places a set piece so that its designed entry is at the cursor, adds the ground it needs, and
    * moves the cursor to its designed exit. Travelling left mirrors the piece's orientation.
    */
-  piece(id, options = {}) {
+  piece(id: string, options: TrailPieceOptions = {}): TrailPiece {
     const path = PIECE_PATHS[id];
     if (path === undefined) throw new CourseLevelError({ field: 'set piece travel path', value: id });
     const mirror = (path.mirror ?? false) !== (this.dir < 0);
@@ -169,6 +204,6 @@ export class Trail {
     const designed = { x: x + flip * path.exit[0], y: y + path.exit[1] };
     this.b.link(record.entry, designed, `enter ${id}`);
     if (options.exit) this.b.link(designed, record.exit, `leave ${id}`);
-    return record;
+    return record as TrailPiece;
   }
 }

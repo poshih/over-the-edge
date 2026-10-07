@@ -1,17 +1,20 @@
 #!/usr/bin/env node
-// Builds the special-object showcase: node scripts/showcase/generate.mjs
+// Builds the special-object showcase: npm run generate:showcase
 // Open showcase in Workshop / Level / Server levels, or use GAME_LEVEL=levels/showcase.json.
 // Change this authored layout, not the generated JSON; engine validation and geometry gates run before writing.
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
-import { loadCourseEngine } from '../course-kit/engine.mjs';
-import { createCourseJob } from '../course-kit/job.mjs';
-import { crampedColliders, overlaps, ventShafts } from '../course-kit/checks.mjs';
+import { createEngineServer } from '../engine-loader.ts';
+import { loadCourseEngine } from '../course-kit/engine.ts';
+import type { CourseEngine } from '../course-kit/engine.ts';
+import { createCourseJob } from '../course-kit/job.ts';
+import type { CourseSnapshot } from '../course-kit/job.ts';
+import { crampedColliders, overlaps, ventShafts } from '../course-kit/checks.ts';
+import type { DecorationObject, LevelDefinition, LevelLabel, LevelObject, TerrainObject, TriggerObject } from '../../src/level.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = new URL('../../levels/showcase.json', import.meta.url);
-const tidy = (value) => Number(value.toFixed(4)) + 0;
+const tidy = (value: number) => Number(value.toFixed(4)) + 0;
 
 // The surfaces heading shares Rock's label to fit the engine's 16-label limit.
 const LABELS = [
@@ -31,7 +34,7 @@ const LABELS = [
   { x: 101.5, y: 2.5, text: '10 / UPDRAFT: REACH THE LEDGE' },
   { x: 109.3, y: 2.8, text: '11 / LIFT: STEP ON; SWITCHES CALL' },
   { x: 122, y: 8.3, text: '12 / FINISH: TIMER STOPPED' },
-];
+] satisfies readonly LevelLabel[];
 
 const SURFACES = [
   { surface: 'rock', x: 6, color: 0x71817a },
@@ -39,28 +42,29 @@ const SURFACES = [
   { surface: 'metal', x: 13.2, color: 0x8b94a0 },
   { surface: 'ice', x: 16.8, color: 0x9fd8e6 },
   { surface: 'rubber', x: 20.4, color: 0x766596 },
-];
+] satisfies readonly Pick<TerrainObject, 'surface' | 'x' | 'color'>[];
 
-function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }) {
+function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'], 'shapeMesh' | 'LEVEL_SCHEMA_VERSION'>): LevelDefinition {
   const mesh = shapeMesh('box');
-  const block = (id, left, right, bottom, top, {
+  const block = (id: string, left: number, right: number, bottom: number, top: number, {
     surface = 'rock', color = 0x56684c, illusion = false, depth = 3,
-  } = {}) => ({
+  }: Partial<Pick<TerrainObject, 'surface' | 'color' | 'illusion' | 'depth'>> = {}): TerrainObject => ({
     kind: 'terrain', id, mesh,
     x: tidy((left + right) / 2), y: tidy((bottom + top) / 2),
     width: tidy(right - left), height: tidy(top - bottom),
     angle: 0, depth, mirror: false, color, illusion, surface,
   });
-  const trigger = (id, name, x, floor, width, height, marker, events, activation = 'on-enter') => ({
+  const trigger = (id: string, name: string, x: number, floor: number, width: number, height: number,
+    marker: TriggerObject['marker'], events: TriggerObject['events'], activation: TriggerObject['activation'] = 'on-enter'): TriggerObject => ({
     kind: 'trigger', id, name, x, y: tidy(floor + height / 2),
     region: { type: 'box', width, height }, activation, marker, events,
   });
-  const decoration = (id, model, x, y, height) => ({
+  const decoration = (id: string, model: string, x: number, y: number, height: number): DecorationObject => ({
     kind: 'decoration', id, model, x, y, z: -0.8,
     height, angle: 0, mirror: false, tint: 0xffffff,
   });
 
-  const objects = [
+  const objects: LevelObject[] = [
     block('start-ground', -4, 28, -2, 0),
     { kind: 'start', id: 'player-start', x: 0, y: 0.65, angle: -0.42, reach: 1.7 },
     trigger('welcome', 'Welcome to the showcase', 0.5, 0, 3, 1.8, 'none', [{
@@ -156,8 +160,8 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }) {
 }
 
 // The kit indexes terrain, not platforms. Check the lift's entire vertical sweep explicitly.
-function liftClearance(snapshot) {
-  const lift = snapshot.level.objects.find((object) => object.kind === 'platform');
+function liftClearance(snapshot: CourseSnapshot) {
+  const lift = snapshot.level.objects.find((object) => object.kind === 'platform')!;
   const bounds = {
     left: lift.x - lift.width / 2, right: lift.x + lift.width / 2,
     bottom: lift.y - lift.height / 2, top: lift.y + lift.travelY + lift.height / 2,
@@ -168,10 +172,7 @@ function liftClearance(snapshot) {
     .map((record) => `${lift.id} travels through ${record.object.id}`);
 }
 
-const server = await createServer({
-  configFile: false, root, logLevel: 'silent',
-  server: { middlewareMode: true }, appType: 'custom',
-});
+const server = await createEngineServer(root);
 try {
   const engine = await loadCourseEngine(server);
   const snapshot = createCourseJob(engine).prepare(showcase(engine.level));
@@ -189,7 +190,7 @@ try {
     process.exitCode = 1;
   } else {
     await writeFile(output, `${JSON.stringify(snapshot.level, null, 2)}\n`);
-    const counts = {};
+    const counts: Partial<Record<LevelObject['kind'], number>> = {};
     for (const object of snapshot.level.objects) counts[object.kind] = (counts[object.kind] ?? 0) + 1;
     console.log(`Wrote levels/showcase.json: schema ${snapshot.level.schemaVersion}, ${snapshot.level.objects.length} objects, ${snapshot.level.labels.length} labels.`);
     console.log(Object.entries(counts).map(([kind, count]) => `${kind}: ${count}`).join(', '));

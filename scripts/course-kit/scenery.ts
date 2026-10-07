@@ -2,8 +2,10 @@
 // foreground. Distant scenery is placed by where it should appear on screen while the camera looks at a
 // point of the climb: it barely drifts from there, while scenery near the course moves almost with it.
 import VIEW_FRAME from '../../src/view-frame.json' with { type: 'json' };
-import { SceneryCameraError } from './errors.mjs';
-export { SceneryCameraError } from './errors.mjs';
+import { SceneryCameraError } from './errors.ts';
+import type { CourseBuilder, DecorationOptions } from './course.ts';
+import type { GameTheme } from '../../src/theme.ts';
+export { SceneryCameraError } from './errors.ts';
 
 // The rock shelf model's proportions, and its slab top as a share of its height; boulders stand above it.
 const SHELF_SIZE = { width: 24, height: 5.01 };
@@ -18,7 +20,7 @@ const ROW_SHRINK = 0.12;
  * `fieldOfView` is in degrees. The camera frames the engine's course view height, so its distance from the
  * course plane follows from the angle.
  */
-export function sceneryHelpers({ perspective, fieldOfView }) {
+export function sceneryHelpers({ perspective, fieldOfView }: GameTheme['camera']) {
   if (perspective !== true) {
     throw new SceneryCameraError('perspective', perspective,
       'Depth-placed scenery needs the theme\'s perspective camera; an orthographic camera does not shrink distant decorations.');
@@ -30,16 +32,16 @@ export function sceneryHelpers({ perspective, fieldOfView }) {
   // The perspective camera's distance from the course plane.
   const distance = VIEW_FRAME.viewHeight / 2 / Math.tan(fieldOfView * Math.PI / 360);
   // How much larger than it looks a decoration at depth z must be, measured on the course plane.
-  const depthScale = (z) => (distance - z) / distance;
+  const depthScale = (z: number) => (distance - z) / distance;
 
   /** A decoration placed to appear `offset` from the view's centre, `size` tall, while the camera looks at `from`. */
-  function far(b, model, from, [dx, dy], z, size, options) {
+  function far(b: CourseBuilder, model: string, from: readonly [number, number], [dx, dy]: readonly [number, number], z: number, size: number, options?: DecorationOptions) {
     const scale = depthScale(z);
     b.decoration(model, model, from[0] + dx * scale, from[1] + dy * scale, z, size * scale, options);
   }
 
   /** A far decoration standing on the valley floor, appearing `dx` from the view's centre and `size` tall seen from `x`. */
-  function landmark(b, model, x, dx, z, size, options) {
+  function landmark(b: CourseBuilder, model: string, x: number, dx: number, z: number, size: number, options?: DecorationOptions) {
     const scale = depthScale(z);
     b.decoration(model, model, x + dx * scale, 0, z, size * scale, options);
   }
@@ -48,7 +50,7 @@ export function sceneryHelpers({ perspective, fieldOfView }) {
 }
 
 /** Rock shelves side by side from `left` to `right`, their tops level with `top`: ground behind the course. */
-function shelves(b, left, right, top, z, height, tint) {
+function shelves(b: CourseBuilder, left: number, right: number, top: number, z: number, height: number, tint: number) {
   const width = height * SHELF_SIZE.width / SHELF_SIZE.height;
   for (let x = left + width / 2; x - width / 2 < right; x += width * SHELF_STEP) {
     b.decoration('shelf', 'rock-shelf', x, top - height * SHELF_TOP, z, height, { tint, mirror: Math.round(x) % 2 === 0 });
@@ -56,7 +58,7 @@ function shelves(b, left, right, top, z, height, tint) {
 }
 
 /** A row of models along a line, spaced `step` apart, alternating mirror and leaning a little. */
-function row(b, model, from, to, y, z, height, step, options = {}) {
+function row(b: CourseBuilder, model: string, from: number, to: number, y: number, z: number, height: number, step: number, options: DecorationOptions & { lean?: number } = {}) {
   for (let x = from, index = 0; x <= to; x += step, index++) {
     b.decoration(model, model, x, y, z, height * (1 - ROW_SHRINK * (index % 3)), {
       ...options, mirror: index % 2 === 1, angle: (options.lean ?? 0) * ((index % 3) - 1),

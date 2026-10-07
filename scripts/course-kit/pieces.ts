@@ -3,7 +3,15 @@
 // its base centre; entries and exits at height sit on the outer edge, so neighbours touch), `floor` the
 // local x-range that needs ground at the piece's base, if any, and `down` marks descents. Coordinates
 // follow the placed pieces (see src/editor/set-pieces.ts), whose parts are centred on their footprint.
-export const PIECE_PATHS = {
+export interface PiecePath {
+  mirror?: boolean;
+  entry: readonly [number, number];
+  exit: readonly [number, number];
+  floor: readonly [number, number] | null;
+  down?: boolean;
+}
+
+export const PIECE_PATHS: Readonly<Record<string, PiecePath>> = {
   'first-boulder': { entry: [-2.3, 0], exit: [2.3, 0], floor: [-2.8, 2.8] },
   'rising-steps': { entry: [-3.4, 0], exit: [3, 2.7], floor: [-3.8, 3] },
   'the-tree': { entry: [-2.6, 0], exit: [0.6, 7.6], floor: [-2.9, 2.6] },

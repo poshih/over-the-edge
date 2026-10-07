@@ -1,4 +1,6 @@
 // Every message title and text of Ashen Ascent, in one place so the words can be edited together.
+export interface LoreMessage { title: string; message: string }
+
 export const TEXT = {
   intro: {
     title: 'Ashen Ascent',
@@ -68,4 +70,4 @@ export const TEXT = {
     title: 'Ember reclaimed',
     message: 'At the top of the drifting keep a single ember still burns.\n\nIt is warm, and small, and it fits inside your pot.\n\nBelow, for the first time in a thousand years, the ash stops falling.',
   },
-};
+} satisfies Record<string, LoreMessage>;

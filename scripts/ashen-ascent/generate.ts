@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds the Ashen Ascent example: node scripts/ashen-ascent/generate.mjs [--preview]
+// Builds the Ashen Ascent example: npm run generate:ashen-ascent -- [--preview]
 // It places every set piece of the Workshop's library once along a continuous route,
 // checks geometry, reports reach suggestions and writes examples/projects/ashen-ascent/
 // and docs/ashen-ascent-map.svg.
@@ -7,28 +7,29 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
-import { CourseBuilder } from '../course-kit/course.mjs';
-import { loadCourseEngine } from '../course-kit/engine.mjs';
-import { createCourseJob } from '../course-kit/job.mjs';
-import { CourseError } from '../course-kit/errors.mjs';
-import { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, reachSuggestions, ventShafts } from '../course-kit/checks.mjs';
-import { courseMap, renderCrops } from '../course-kit/map.mjs';
-import { buildCourse } from './zones.mjs';
-import { projectManifest, TITLE } from './project.mjs';
-import { ashenAscentMedia } from '../project-fixtures.mjs';
+import { createEngineServer, loadEngineModule } from '../engine-loader.ts';
+import { CourseBuilder } from '../course-kit/course.ts';
+import { loadCourseEngine } from '../course-kit/engine.ts';
+import { createCourseJob } from '../course-kit/job.ts';
+import { CourseError } from '../course-kit/errors.ts';
+import { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, reachSuggestions, ventShafts } from '../course-kit/checks.ts';
+import { courseMap, renderCrops } from '../course-kit/map.ts';
+import { buildCourse } from './zones.ts';
+import type { AscentZone } from './zones.ts';
+import { projectManifest, TITLE } from './project.ts';
+import { ashenAscentMedia } from '../project-fixtures.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 // The map's background, from the valley floor to the sky above the keep.
 const MAP_SKY = ['#1d1b1f', '#2b2a33', '#4a3f3a'];
 const flags = new Set(process.argv.slice(2));
-const server = await createServer({ configFile: false, root, logLevel: 'silent', server: { middlewareMode: true }, appType: 'custom' });
+const server = await createEngineServer(root);
 try {
-  const library = await server.ssrLoadModule('/src/editor/set-pieces.ts');
+  const library = await loadEngineModule(server, '/src/editor/set-pieces.ts');
   const engine = await loadCourseEngine(server);
   const job = createCourseJob(engine);
-  const project = await server.ssrLoadModule('/src/project.ts');
-  const builder = new CourseBuilder(library, job);
+  const project = await loadEngineModule(server, '/src/project.ts');
+  const builder = new CourseBuilder<AscentZone>(library, job);
   const trail = buildCourse(builder);
   const snapshot = job.prepare(builder.level(engine.level.LEVEL_SCHEMA_VERSION));
   const level = snapshot.level;
@@ -69,10 +70,10 @@ try {
   const media = ashenAscentMedia();
   project.loadProjectContent(manifest, (ref) => ref.kind === 'level' ? level : media[ref.path.slice('media/'.length)]);
   const example = 'examples/projects/ashen-ascent';
-  const outputs = new Map([
+  const outputs = new Map<string, string | Uint8Array>([
     [`${example}/project.json`, `${JSON.stringify(manifest, null, 2)}\n`],
     [`${example}/level.json`, `${JSON.stringify(level)}\n`],
-    ...Object.entries(media).map(([name, bytes]) => [`${example}/media/${name}`, bytes]),
+    ...Object.entries(media).map(([name, bytes]): [string, Uint8Array] => [`${example}/media/${name}`, bytes]),
     ['docs/ashen-ascent-map.svg', `${courseMap(snapshot, { zones, scale: 6, sky: MAP_SKY }).svg}\n`],
   ]);
   const strays = (await readdir(join(root, example, 'media')).catch(() => []))

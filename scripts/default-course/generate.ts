@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds the built-in course, the level every new game starts from: node scripts/default-course/generate.mjs
+// Builds the built-in course, the level every new game starts from: npm run generate:default-course
 // It models the course's rocks as GLB meshes, works out each one's collision as the engine does (src/mesh-collision.ts),
 // places them with one of each hazard and writes src/default-course/: the GLBs, and course.json, which lists them and
 // holds the level.
@@ -12,7 +12,30 @@ import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ShapeUtils, Vector2 } from 'three';
-import { createServer } from 'vite';
+import { createEngineServer, loadEngineModule } from '../engine-loader.ts';
+import type { LevelLabel, LevelObject, ShapeKind, StartObject, TerrainObject, TriggerObject } from '../../src/level.ts';
+import type { MeshTerrain } from '../../src/mesh-collision.ts';
+
+type XY = readonly [number, number];
+interface RockSpec {
+  id: string;
+  file: string;
+  name: string;
+  collision?: ShapeKind;
+  color: number;
+  palette: readonly [string, string];
+  depth: number;
+  bevel: number;
+  chamfer: number;
+  bulge: number;
+  reach: number;
+  segment: number;
+  face: number;
+  seed: number;
+  outline: readonly XY[];
+}
+interface RockModel { center: XY; positions: number[]; indices: number[]; colors: number[] }
+interface BuiltRock { spec: RockSpec; model: RockModel; bytes: Uint8Array<ArrayBuffer>; id: string; terrain: MeshTerrain }
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const OUTPUT = 'src/default-course';
@@ -20,7 +43,7 @@ const OUTPUT = 'src/default-course';
 // The course: each rock's outline as first placed, in metres, counterclockwise. The climb keeps the shape the
 // practice positions were tuned on; rocks reach a little below the ground's top, so they stand in it. `face` is the
 // longest inside edge of a rock's faces, which are split so they can bulge.
-const ROCKS = [
+const ROCKS: readonly RockSpec[] = [
   {
     id: 'ground', file: 'ground.glb', name: 'Ground slab', collision: 'box', color: 0x485d5a, palette: ['#485d5a', '#56684c'],
     depth: 3, bevel: 0.22, chamfer: 0.35, bulge: 0.18, reach: 0.6, segment: 0.7, face: 0.9, seed: 11,
@@ -54,7 +77,7 @@ const ROCKS = [
 ];
 
 // Where each rock stands: the crag closes both ends of the course, mirrored on the right.
-const PLACEMENTS = [
+const PLACEMENTS: readonly { id: string; rock: string; x?: number; mirror?: boolean }[] = [
   { id: 'ground', rock: 'ground' },
   { id: 'ascent', rock: 'cliff' },
   { id: 'vault', rock: 'boulder' },
@@ -62,10 +85,10 @@ const PLACEMENTS = [
   { id: 'crag-right', rock: 'crag', x: 31.6, mirror: true },
 ];
 
-const START = { kind: 'start', id: 'player-start', x: 0, y: 0.65, angle: -0.42, reach: 1.7 };
+const START: StartObject = { kind: 'start', id: 'player-start', x: 0, y: 0.65, angle: -0.42, reach: 1.7 };
 // The top of the cliff, where the ending trigger stands.
 const SUMMIT = { left: 15.25, right: 18.1, y: 12.2, arrivalTolerance: 0.08 };
-const LABELS = [
+const LABELS: readonly LevelLabel[] = [
   { x: 4.2, y: 1.1, text: '01 / THE LEDGE' },
   { x: 6.8, y: 2.7, text: '02 / KEEP GOING' },
   { x: 10, y: 6.05, text: '03 / REACH BACK' },
@@ -81,7 +104,7 @@ const LABELS = [
 // - a shallow swamp in the corner of the fourth ledge, against its riser, the ledge's floor holding the player up;
 // - an axe swinging over the last step below the summit, its blade at the height of a player standing there;
 // - a lava lake filling the basin past the summit's far edge, between the cliff and the right crag.
-const HAZARDS = [
+const HAZARDS: readonly LevelObject[] = [
   { kind: 'bonfire', id: 'ledge-bonfire', x: 3.75, y: 2.1 },
   { kind: 'shooter', id: 'crag-shooter', firing: 'timer', x: -17.95, y: 4.2, angle: 0, interval: 3, delay: 1, speed: 10, damage: 1 },
   { kind: 'pool', id: 'bog', liquid: 'swamp', x: 12.34, y: 9.25, width: 1.28, height: 0.5, depth: 1.2 },
@@ -89,36 +112,36 @@ const HAZARDS = [
   { kind: 'pool', id: 'lava-lake', liquid: 'lava', x: 24.175, y: 0.6, width: 11.65, height: 1.2, depth: 2 },
 ];
 
-const tidy = (value, digits = 4) => Number(value.toFixed(digits)) + 0;
+const tidy = (value: number, digits = 4) => Number(value.toFixed(digits)) + 0;
 
 // Smooth value noise in -1 to 1, the same for a seed on every run.
-function valueNoise(seed) {
-  const hash = (x, y, z) => {
+function valueNoise(seed: number) {
+  const hash = (x: number, y: number, z: number) => {
     let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(z, 0x9e3779b1) ^ Math.imul(seed, 0x85ebca77);
     h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
     h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
     return ((h ^ (h >>> 15)) >>> 0) / 4294967295 * 2 - 1;
   };
-  const fade = (t) => t * t * (3 - 2 * t);
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const sample = (x, y, z) => {
+  const fade = (t: number) => t * t * (3 - 2 * t);
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const sample = (x: number, y: number, z: number) => {
     const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
     const fx = fade(x - ix), fy = fade(y - iy), fz = fade(z - iz);
-    const at = (dx, dy, dz) => hash(ix + dx, iy + dy, iz + dz);
+    const at = (dx: number, dy: number, dz: number) => hash(ix + dx, iy + dy, iz + dz);
     return lerp(
       lerp(lerp(at(0, 0, 0), at(1, 0, 0), fx), lerp(at(0, 1, 0), at(1, 1, 0), fx), fy),
       lerp(lerp(at(0, 0, 1), at(1, 0, 1), fx), lerp(at(0, 1, 1), at(1, 1, 1), fx), fy), fz);
   };
-  return (x, y, z) => 0.57 * sample(x, y, z) + 0.29 * sample(x * 2.1 + 17.3, y * 2.1 - 4.1, z * 2.1 + 9.7) +
+  return (x: number, y: number, z: number) => 0.57 * sample(x, y, z) + 0.29 * sample(x * 2.1 + 17.3, y * 2.1 - 4.1, z * 2.1 + 9.7) +
     0.14 * sample(x * 4.3 - 31.1, y * 4.3 + 12.9, z * 4.3 - 2.3);
 }
 
-const smoothstep = (edge0, edge1, value) => {
+const smoothstep = (edge0: number, edge1: number, value: number) => {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 };
 
-function signedArea(points) {
+function signedArea(points: readonly XY[]) {
   let area = 0;
   for (let index = 0; index < points.length; index++) {
     const [ax, ay] = points[index];
@@ -129,8 +152,8 @@ function signedArea(points) {
 }
 
 // Points along a closed outline, at most `segment` metres apart.
-function densify(outline, segment) {
-  const points = [];
+function densify(outline: readonly XY[], segment: number) {
+  const points: XY[] = [];
   outline.forEach(([x, y], index) => {
     const [nx, ny] = outline[(index + 1) % outline.length];
     const steps = Math.max(1, Math.ceil(Math.hypot(nx - x, ny - y) / segment));
@@ -140,12 +163,12 @@ function densify(outline, segment) {
 }
 
 // Each point's inward direction, scaled so a point moved `d` along it stays `d` from both its edges; spikes are capped.
-function inwards(points) {
-  const unit = (x, y) => {
+function inwards(points: readonly XY[]) {
+  const unit = (x: number, y: number): XY => {
     const length = Math.hypot(x, y);
     return [x / length, y / length];
   };
-  return points.map(([x, y], index) => {
+  return points.map(([x, y], index): XY => {
     const [px, py] = points[(index + points.length - 1) % points.length];
     const [nx, ny] = points[(index + 1) % points.length];
     const before = unit(-(y - py), x - px);
@@ -156,7 +179,7 @@ function inwards(points) {
   });
 }
 
-function distanceToOutline(x, y, outline) {
+function distanceToOutline(x: number, y: number, outline: readonly XY[]) {
   let nearest = Infinity;
   for (let index = 0; index < outline.length; index++) {
     const [ax, ay] = outline[index];
@@ -170,17 +193,17 @@ function distanceToOutline(x, y, outline) {
 
 // Flips a face's inside edges until each is locally Delaunay, so the face keeps no needless slivers; its own edges
 // stay, and so does every triangle's winding.
-function delaunay(faces, positions) {
-  const x = (index) => positions[index * 3];
-  const y = (index) => positions[index * 3 + 1];
-  const orient = (a, b, c) => (x(b) - x(a)) * (y(c) - y(a)) - (x(c) - x(a)) * (y(b) - y(a));
+function delaunay(faces: number[][], positions: readonly number[]) {
+  const x = (index: number) => positions[index * 3];
+  const y = (index: number) => positions[index * 3 + 1];
+  const orient = (a: number, b: number, c: number) => (x(b) - x(a)) * (y(c) - y(a)) - (x(c) - x(a)) * (y(b) - y(a));
   // Positive when d lies inside the circle through a, b and c, taken counterclockwise.
-  const inCircle = (a, b, c, d) => {
+  const inCircle = (a: number, b: number, c: number, d: number) => {
     const ax = x(a) - x(d), ay = y(a) - y(d), bx = x(b) - x(d), by = y(b) - y(d), cx = x(c) - x(d), cy = y(c) - y(d);
     return (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) + (cx * cx + cy * cy) * (ax * by - bx * ay);
   };
   for (let sweep = 0; sweep < 256; sweep++) {
-    const owners = new Map();
+    const owners = new Map<string, { at: number; corner: number }[]>();
     faces.forEach((face, at) => {
       for (let corner = 0; corner < 3; corner++) {
         const a = face[corner];
@@ -212,11 +235,11 @@ function delaunay(faces, positions) {
 
 // Splits a face's inside edges, longest first, until none is longer than `longest`, flipping it back to Delaunay after
 // each round. The face's own edges stay whole, so it still meets its walls, and every split keeps the winding.
-function refine(faces, positions, longest) {
+function refine(faces: number[][], positions: number[], longest: number) {
   faces = delaunay(faces, positions);
-  const length = (a, b) => Math.hypot(positions[a * 3] - positions[b * 3], positions[a * 3 + 1] - positions[b * 3 + 1]);
+  const length = (a: number, b: number) => Math.hypot(positions[a * 3] - positions[b * 3], positions[a * 3 + 1] - positions[b * 3 + 1]);
   for (let pass = 0; pass < 64; pass++) {
-    const owners = new Map();
+    const owners = new Map<string, number[]>();
     faces.forEach((face, at) => {
       for (let corner = 0; corner < 3; corner++) {
         const a = face[corner];
@@ -253,25 +276,25 @@ function refine(faces, positions, longest) {
   return faces;
 }
 
-const srgbToLinear = (value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-const hexColor = (hex) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255);
+const srgbToLinear = (value: number) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+const hexColor = (hex: string) => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16) / 255);
 
 /**
  * A rock around `outline`, `depth` deep around z = 0 and centred on its outline's bounds. Its walls are the outline
  * through the middle of its depth; over `chamfer` metres toward each face they lean in by up to `bevel` metres, and each
  * face bulges out by up to `bulge` metres, fully `reach` metres in from its edge.
  */
-function rock(spec, isSimplePolygon) {
+function rock(spec: RockSpec, isSimplePolygon: typeof import('../../src/level.ts').isSimplePolygon): RockModel {
   if (signedArea(spec.outline) <= 0) throw new Error(`${spec.id}: outlines run counterclockwise.`);
   const xs = spec.outline.map(([x]) => x);
   const ys = spec.outline.map(([, y]) => y);
-  const center = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+  const center: XY = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
   const noise = valueNoise(spec.seed);
   const points = densify(spec.outline.map(([x, y]) => [x - center[0], y - center[1]]), spec.segment);
   const toward = inwards(points);
   const half = spec.depth / 2;
-  const positions = [];
-  const add = (x, y, z) => {
+  const positions: number[] = [];
+  const add = (x: number, y: number, z: number) => {
     positions.push(x, y, z);
     return positions.length / 3 - 1;
   };
@@ -289,7 +312,7 @@ function rock(spec, isSimplePolygon) {
     if (!isSimplePolygon(outline)) throw new Error(`${spec.id}: its chamfer folds over; use a smaller bevel.`);
     return ring;
   });
-  const indices = [];
+  const indices: number[] = [];
   for (let k = 0; k + 1 < rings.length; k++) {
     for (let i = 0; i < points.length; i++) {
       const j = (i + 1) % points.length;
@@ -297,8 +320,8 @@ function rock(spec, isSimplePolygon) {
       indices.push(a, b, c, a, c, d);
     }
   }
-  const face = (ring, side) => {
-    const outline = ring.map((index) => [positions[index * 3], positions[index * 3 + 1]]);
+  const face = (ring: readonly number[], side: number) => {
+    const outline = ring.map((index): XY => [positions[index * 3], positions[index * 3 + 1]]);
     let faces = ShapeUtils.triangulateShape(outline.map(([x, y]) => new Vector2(x, y)), []).map((corners) => corners.map((at) => ring[at]));
     const used = new Set(faces.flat());
     if (ring.some((index) => !used.has(index))) throw new Error(`${spec.id}: a face lost a point of its edge.`);
@@ -322,7 +345,7 @@ function rock(spec, isSimplePolygon) {
   face(rings[0], -1);
   face(rings[rings.length - 1], 1);
   const [base, accent] = spec.palette.map(hexColor);
-  const colors = [];
+  const colors: number[] = [];
   for (let index = 0; index < positions.length / 3; index++) {
     const [x, y, z] = [positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]];
     const shade = 1 + 0.16 * noise(x * 0.45 + 40, y * 0.45 - 12, z * 0.45);
@@ -334,7 +357,7 @@ function rock(spec, isSimplePolygon) {
 
 // A one-mesh GLB: positions, linear vertex colours and triangles, with one rough, non-metallic PBR material. It has no
 // normals, so it is drawn flat-shaded, faceted like cut stone.
-function glb({ name, positions, colors, indices }, collision) {
+function glb({ name, positions, colors, indices }: Pick<RockModel, 'positions' | 'colors' | 'indices'> & { name: string }, collision?: ShapeKind): Uint8Array<ArrayBuffer> {
   const count = positions.length / 3;
   const position = new Float32Array(positions);
   const color = Uint8Array.from(colors);
@@ -345,7 +368,7 @@ function glb({ name, positions, colors, indices }, collision) {
     min[at % 3] = Math.min(min[at % 3], position[at]);
     max[at % 3] = Math.max(max[at % 3], position[at]);
   }
-  const padded = (length) => (length + 3) & ~3;
+  const padded = (length: number) => (length + 3) & ~3;
   const colorOffset = padded(position.byteLength);
   const indexOffset = colorOffset + padded(color.byteLength);
   const binary = new Uint8Array(padded(indexOffset + index.byteLength));
@@ -388,13 +411,13 @@ function glb({ name, positions, colors, indices }, collision) {
   return new Uint8Array(file.buffer, file.byteOffset, file.byteLength);
 }
 
-const server = await createServer({ configFile: false, root, logLevel: 'silent', server: { middlewareMode: true }, appType: 'custom' });
+const server = await createEngineServer(root);
 try {
-  const { isSimplePolygon, LEVEL_SCHEMA_VERSION, TRIGGER_LIMITS, validateLevel } = await server.ssrLoadModule('/src/level.ts');
-  const { meshTerrain } = await server.ssrLoadModule('/src/mesh-collision.ts');
-  const { ENDING_EVENTS } = await server.ssrLoadModule('/src/trigger-events.ts');
-  const { DEFAULT_SURFACE } = await server.ssrLoadModule('/src/surfaces.ts');
-  const built = new Map();
+  const { isSimplePolygon, LEVEL_SCHEMA_VERSION, TRIGGER_LIMITS, validateLevel } = await loadEngineModule(server, '/src/level.ts');
+  const { meshTerrain } = await loadEngineModule(server, '/src/mesh-collision.ts');
+  const { ENDING_EVENTS } = await loadEngineModule(server, '/src/trigger-events.ts');
+  const { DEFAULT_SURFACE } = await loadEngineModule(server, '/src/surfaces.ts');
+  const built = new Map<string, BuiltRock>();
   for (const spec of ROCKS) {
     const model = rock(spec, isSimplePolygon);
     const bytes = glb({ name: spec.name, ...model }, spec.collision);
@@ -405,15 +428,15 @@ try {
     console.log(`${spec.file}: ${model.indices.length / 3} triangles, ${bytes.byteLength} bytes, collides as ${collision.type === 'slice'
       ? `a slice of ${collision.loops.map((loop) => loop.length).join(' + ')} points` : `its declared ${collision.type}`}.`);
   }
-  const terrain = PLACEMENTS.map(({ id, rock: name, x, mirror }) => {
-    const { spec, model, terrain: placed } = built.get(name);
+  const terrain = PLACEMENTS.map(({ id, rock: name, x, mirror }): TerrainObject => {
+    const { spec, model, terrain: placed } = built.get(name)!;
     return {
       kind: 'terrain', id, mesh: placed.mesh, x: tidy(x ?? model.center[0]), y: tidy(model.center[1]),
       width: tidy(placed.width), height: tidy(placed.height), angle: 0, depth: tidy(placed.depth), mirror: mirror ?? false,
       color: spec.color, illusion: false, surface: DEFAULT_SURFACE,
     };
   });
-  const ending = {
+  const ending: TriggerObject = {
     kind: 'trigger', id: 'ending-trigger', name: 'Ending',
     x: (SUMMIT.left + SUMMIT.right) / 2, y: SUMMIT.y - SUMMIT.arrivalTolerance + TRIGGER_LIMITS.endingHeight / 2,
     region: { type: 'box', width: tidy(SUMMIT.right - SUMMIT.left), height: TRIGGER_LIMITS.endingHeight },
@@ -421,7 +444,7 @@ try {
   };
   const level = validateLevel({ schemaVersion: LEVEL_SCHEMA_VERSION, labels: LABELS, objects: [...terrain, START, ending, ...HAZARDS] });
   const meshes = ROCKS.map(({ id: name, file }) => {
-    const { spec, bytes, id } = built.get(name);
+    const { spec, bytes, id } = built.get(name)!;
     return { id, name: spec.name, file, bytes: bytes.byteLength };
   });
   const directory = join(root, OUTPUT, 'meshes');
