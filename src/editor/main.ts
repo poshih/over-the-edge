@@ -465,7 +465,14 @@ plugins = new WorkshopPluginHost({
   notice: ui.notice,
 });
 
+const rendering = () => ({ ...game.view.statistics(), courseArt: courseMeshes.inspect() });
 const diagnostics = Object.freeze({
+  rendering,
+  measurements: Object.freeze({
+    start: (label: string): void => game.view.measurements.start(label),
+    stop: (): void => game.view.measurements.stop(),
+    samples: (): number[] => game.view.measurements.samples(),
+  }),
   snapshot: () => gameDiagnostics(game, gameContext()),
   project: (point: Point) => game.view.project(point),
   settings: () => game.settings(),
@@ -479,7 +486,7 @@ const diagnostics = Object.freeze({
     terrain: game.simulation.terrainState(),
     enemies: game.simulation.enemyState(),
     editor: levelEditor.snapshot(),
-    rendering: game.view.statistics(),
+    rendering: rendering(),
   }),
 });
 

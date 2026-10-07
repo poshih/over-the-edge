@@ -41,6 +41,7 @@ import type { EnemyArtSettings } from './enemy-art-data';
 import type { EnemyEvent } from './enemy-types';
 import { DEFAULT_ENEMY_ART } from './enemy-art-data';
 import type { ContentLoader } from './content-ref';
+import { ViewMeasurements } from './view-measurements';
 
 const VISUAL = {
   // The orthographic camera's distance from the course plane (z = 0).
@@ -63,6 +64,7 @@ export interface CameraFraming extends Point {
 export class GameView {
   readonly canvas: HTMLCanvasElement;
   readonly terrain = new TerrainView();
+  readonly measurements = new ViewMeasurements();
   readonly character: CharacterView;
   // How the level's flags, updrafts, bonfires, traps, projectiles, liquid pools and enemies look.
   private readonly looks: LevelLooks;
@@ -311,6 +313,16 @@ export class GameView {
   drawnPhysicsFrame(): PhysicsFrame { return this.drawnPhysics; }
 
   render(physics: PhysicsFrame, options: { dt: number; death: DeathFrame | null }): void {
+    if (this.measurements.capturing) {
+      const startedAt = performance.now();
+      this.renderFrame(physics, options);
+      this.measurements.record(performance.now() - startedAt);
+      return;
+    }
+    this.renderFrame(physics, options);
+  }
+
+  private renderFrame(physics: PhysicsFrame, options: { dt: number; death: DeathFrame | null }): void {
     this.drawnPhysics = physics;
     this.renders++;
     this.syncRig(physics);
@@ -467,8 +479,12 @@ export class GameView {
     return {
       frames: this.renderer.info.render.frame,
       renders: this.renders,
+      // Totals of the last completed game render, including every pass.
       calls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
+      lines: this.renderer.info.render.lines,
+      points: this.renderer.info.render.points,
+      renderTime: this.measurements.read(),
       geometries: this.renderer.info.memory.geometries,
       textures: this.renderer.info.memory.textures,
       terrain: this.terrain.inspect(),

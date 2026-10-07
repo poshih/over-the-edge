@@ -29,6 +29,7 @@ interface Phase {
 
 interface Batch {
   readonly key: string;
+  readonly cell: string;
   readonly template: Template;
   readonly phase: Phase | null;
   readonly entries: Instance[];
@@ -52,8 +53,12 @@ function materials(options: { fading: boolean }): MaterialPair {
   return [front, side];
 }
 
+function cellKey(object: TerrainObject): string {
+  return `${Math.floor(object.x / CHUNK_SIZE)},${Math.floor(object.y / CHUNK_SIZE)}`;
+}
+
 function batchKey(object: TerrainObject, shapeKey: string): string {
-  return `${Math.floor(object.x / CHUNK_SIZE)},${Math.floor(object.y / CHUNK_SIZE)}:${shapeKey}`;
+  return `${cellKey(object)}:${shapeKey}`;
 }
 
 export class TerrainView {
@@ -160,22 +165,33 @@ export class TerrainView {
   }
 
   inspect() {
+    const cells = new Set<string>();
+    const buffers = new Set<ArrayBufferLike>();
     let capacity = 0;
+    let usedInstanceSlots = 0;
+    let instanceBufferBytes = 0;
     let fadingInstances = 0;
     let unusedGeometries = 0;
     for (const batch of this.batches) {
+      cells.add(batch.cell);
       capacity += batch.mesh.instanceMatrix.count;
+      usedInstanceSlots += batch.mesh.count;
+      buffers.add(batch.mesh.instanceMatrix.array.buffer);
+      if (batch.mesh.instanceColor !== null) buffers.add(batch.mesh.instanceColor.array.buffer);
       if (batch.phase) fadingInstances += batch.entries.length;
     }
+    for (const buffer of buffers) instanceBufferBytes += buffer.byteLength;
     for (const template of this.templates.values()) {
       if (template.references === 0) unusedGeometries++;
     }
     return {
-      instances: this.instances.size, fadingInstances, batches: this.batches.size,
+      instances: this.instances.size, fadingInstances, chunks: cells.size,
+      batches: this.batches.size,
       opaqueBatches: this.opaque.size, activePhases: this.phases.size,
       geometries: this.templates.size, unusedGeometries,
       materials: this.disposed ? 0 : this.opaqueMaterials.length + this.phases.size * 2,
-      capacity, dirtyBounds: this.dirtyBounds.size, ...this.counters,
+      capacity, usedInstanceSlots, instanceBufferBytes,
+      dirtyBounds: this.dirtyBounds.size, ...this.counters,
     };
   }
 
@@ -243,7 +259,7 @@ export class TerrainView {
     if (existing) return existing;
     const template = this.getTemplate(object, shapeKey);
     const batch: Batch = {
-      key, template, phase, entries: [],
+      key, cell: cellKey(object), template, phase, entries: [],
       mesh: this.createMesh(template, phase ? phase.materials : this.opaqueMaterials, INITIAL_CAPACITY),
     };
     template.references++;

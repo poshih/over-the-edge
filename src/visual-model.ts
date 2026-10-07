@@ -1,7 +1,7 @@
 import {
-  Box3, Camera, InstancedMesh, Light, Line, LoadingManager, Mesh, Points, SkinnedMesh, Texture, Vector3,
+  Box3, Camera, InstancedMesh, InterleavedBufferAttribute, Light, Line, LoadingManager, Mesh, Points, SkinnedMesh, Texture, Vector3,
 } from 'three';
-import type { BufferGeometry, Group, Material, Object3D, Skeleton } from 'three';
+import type { BufferAttribute, BufferGeometry, Group, Material, Object3D, Skeleton } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { ModelError as AppearanceError, MODEL_LIMITS } from './model-data';
 
@@ -112,12 +112,35 @@ function resources(roots: readonly Object3D[]) {
   return { geometry, materials, textures, skeletons };
 }
 
+export function geometryBytes(geometries: Iterable<BufferGeometry>): number {
+  const buffers = new Set<ArrayBufferLike>();
+  const add = (attribute: BufferAttribute | InterleavedBufferAttribute): void => {
+    const array = attribute instanceof InterleavedBufferAttribute ? attribute.data.array : attribute.array;
+    buffers.add(array.buffer);
+  };
+  for (const geometry of geometries) {
+    for (const attribute of Object.values(geometry.attributes)) add(attribute);
+    if (geometry.index !== null) add(geometry.index);
+    for (const attributes of Object.values(geometry.morphAttributes)) for (const attribute of attributes) add(attribute);
+  }
+  let bytes = 0;
+  // Attribute views sharing a backing buffer count that allocation once.
+  for (const buffer of buffers) bytes += buffer.byteLength;
+  return bytes;
+}
+
+export interface VisualFootprint {
+  readonly textureBytes: number;
+  readonly geometryBytes: number;
+}
+
 export interface LoadedVisual {
   scene: Group;
   bounds: Box3;
   triangles: number;
   // Scene objects by glTF node index; loader-assigned names are sanitized and deduplicated.
   nodes: ReadonlyMap<number, Object3D>;
+  footprint: () => VisualFootprint;
   dispose: () => void;
 }
 
@@ -153,6 +176,20 @@ export async function loadVisualModel(blob: Blob): Promise<LoadedVisual> {
     for (const url of objectUrls) URL.revokeObjectURL(url);
   }
   const owned = resources(gltf.scenes);
+  const footprint = (): VisualFootprint => {
+    const images = new Set<object>();
+    let pixels = 0;
+    for (const texture of owned.textures) {
+      const image: unknown = texture.image;
+      if (typeof image !== 'object' || image === null || images.has(image)) continue;
+      images.add(image);
+      const width: unknown = Reflect.get(image, 'width');
+      const height: unknown = Reflect.get(image, 'height');
+      if (typeof width === 'number' && typeof height === 'number') pixels += width * height;
+    }
+    // Normalised RGBA8 estimate of distinct decoded images, not GPU residency.
+    return { textureBytes: 4 * pixels, geometryBytes: geometryBytes(owned.geometry) };
+  };
   let released = false;
   const dispose = (): void => {
     if (released) return;
@@ -209,7 +246,7 @@ export async function loadVisualModel(blob: Blob): Promise<LoadedVisual> {
       const node = gltf.parser.associations.get(object)?.nodes;
       if (node !== undefined) nodes.set(node, object);
     });
-    return { scene: gltf.scene, bounds, triangles, nodes, dispose };
+    return { scene: gltf.scene, bounds, triangles, nodes, footprint, dispose };
   } catch (error) {
     dispose();
     throw error;

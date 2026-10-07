@@ -26,6 +26,8 @@ export interface DecorationMesh {
   readonly width: number;
   readonly height: number;
   readonly depth: number;
+  // Accounts for lazy mirrors in the source model's footprint.
+  readonly onMirror?: (geometry: BufferGeometry) => void;
 }
 
 /** Where decoration models come from; null while a model is unknown or still loading. */
@@ -40,6 +42,7 @@ interface Look {
 
 interface Batch {
   readonly key: string;
+  readonly cell: string;
   readonly artwork: boolean;
   // `root` or `front`, by the batch's side of the obstacle line.
   readonly group: Group;
@@ -58,11 +61,15 @@ function inFront(object: DecorationObject): boolean {
   return object.z >= OBSTACLE_LINE;
 }
 
-function batchKey(object: DecorationObject, look: Look, model: DecorationMesh): string {
+function cellKey(object: DecorationObject): string {
   const band = Math.floor(Math.log2(1 + Math.max(0, -object.z) / BAND_DEPTH));
   const size = CHUNK_SIZE * 2 ** band;
+  return `${inFront(object) ? 'front' : 'back'}:${band}:${Math.floor(object.x / size)},${Math.floor(object.y / size)}`;
+}
+
+function batchKey(object: DecorationObject, look: Look, model: DecorationMesh): string {
   const side = mirroredGeometryFor(object, model) ? 'mirrored' : 'plain';
-  return `${inFront(object) ? 'front' : 'back'}:${band}:${Math.floor(object.x / size)},${Math.floor(object.y / size)}:${look.key}:${side}`;
+  return `${cellKey(object)}:${look.key}:${side}`;
 }
 
 // Whether a mirrored decoration draws mirrored geometry rather than a negative scale.
@@ -179,7 +186,7 @@ export class DecorationView {
     if (key !== this.previewKey) {
       this.preview.clear();
       for (const part of model.parts) {
-        const mesh = new Mesh(mirrored ? this.mirror(part.geometry) : part.geometry, this.translucentMaterial(part.material));
+        const mesh = new Mesh(mirrored ? this.mirror(part.geometry, model) : part.geometry, this.translucentMaterial(part.material));
         mesh.renderOrder = 10;
         this.preview.add(mesh);
       }
@@ -203,17 +210,32 @@ export class DecorationView {
   }
 
   inspect() {
+    const cells = new Set<string>();
+    const buffers = new Set<ArrayBufferLike>();
     let capacity = 0;
+    let instanceCapacity = 0;
+    let usedInstanceSlots = 0;
+    let instanceBufferBytes = 0;
     let meshes = 0;
     let artwork = 0;
     for (const batch of this.batches.values()) {
+      cells.add(batch.cell);
       meshes += batch.meshes.length;
       capacity += batch.meshes[0]?.instanceMatrix.count ?? 0;
+      for (const mesh of batch.meshes) {
+        instanceCapacity += mesh.instanceMatrix.count;
+        usedInstanceSlots += mesh.count;
+        buffers.add(mesh.instanceMatrix.array.buffer);
+        if (mesh.instanceColor !== null) buffers.add(mesh.instanceColor.array.buffer);
+      }
       if (batch.artwork) artwork += batch.entries.length;
     }
+    for (const buffer of buffers) instanceBufferBytes += buffer.byteLength;
     return {
       instances: this.instances.size, artwork, waiting: [...new Set([...this.waiting.values()].map((object) => object.model))],
-      batches: this.batches.size, meshes, capacity, preview: this.preview.children.length > 0, ...this.counters,
+      chunks: cells.size, batches: this.batches.size, meshes,
+      capacity, instanceCapacity, usedInstanceSlots, instanceBufferBytes,
+      preview: this.preview.children.length > 0, previewMeshes: this.preview.children.length, ...this.counters,
     };
   }
 
@@ -290,8 +312,8 @@ export class DecorationView {
     if (existing !== undefined) return existing;
     const mirrored = mirroredGeometryFor(object, model);
     const batch: Batch = {
-      key, artwork: look.artwork, group: inFront(object) ? this.front : this.root, entries: [],
-      meshes: model.parts.map((part) => this.mesh(mirrored ? this.mirror(part.geometry) : part.geometry, part.material, INITIAL_CAPACITY)),
+      key, cell: cellKey(object), artwork: look.artwork, group: inFront(object) ? this.front : this.root, entries: [],
+      meshes: model.parts.map((part) => this.mesh(mirrored ? this.mirror(part.geometry, model) : part.geometry, part.material, INITIAL_CAPACITY)),
     };
     for (const mesh of batch.meshes) batch.group.add(mesh);
     this.batches.set(key, batch);
@@ -375,11 +397,12 @@ export class DecorationView {
     return { key: `art:${asset}`, mesh: this.artwork!.mesh(asset), artwork: true };
   }
 
-  private mirror(geometry: BufferGeometry): BufferGeometry {
+  private mirror(geometry: BufferGeometry, model: DecorationMesh): BufferGeometry {
     let mirrored = this.mirrored.get(geometry);
     if (mirrored === undefined) {
       mirrored = mirroredGeometry(geometry);
       this.mirrored.set(geometry, mirrored);
+      model.onMirror?.(mirrored);
     }
     return mirrored;
   }

@@ -11,7 +11,7 @@ import { OBSTACLE_LINE } from './obstacle-line';
 import type { SceneFrame } from './scene-frame';
 import type { SceneLayer } from './scene-layer';
 import type { TerrainView } from './terrain-view';
-import { loadVisualModel } from './visual-model';
+import { geometryBytes, loadVisualModel } from './visual-model';
 import type { LoadedVisual } from './visual-model';
 import { validateCourseModel } from './course-art-model';
 import type { DecorationMesh } from './decoration-view';
@@ -23,12 +23,22 @@ interface Asset {
   templates: Map<boolean, Primitive[]>;
   // The asset as a decoration model, built when a decoration first draws it.
   decoration: DecorationMesh | null;
+  readonly decorationMirrors: Set<BufferGeometry>;
   pixels: number;
   bytes: number;
+  loadMs: number;
+}
+interface AssetFootprint {
+  readonly compressedBytes: number;
+  readonly textureBytes: number;
+  readonly modelGeometryBytes: number;
+  readonly derivedGeometryBytes: number;
+  readonly loadMs: number;
 }
 interface Entry { object: TerrainObject; batch: Batch; slot: number }
 interface Batch {
   key: string;
+  readonly cell: string;
   entries: Entry[];
   meshes: InstancedMesh[];
   fade: number | null;
@@ -151,7 +161,10 @@ export class CourseArtView implements SceneLayer {
     if ([...this.assets.values()].reduce((sum, asset) => sum + asset.pixels, pixels) > ART_LIMITS.texturePixels) {
       throw new ArtError('The course meshes exceed 32 million decoded texture pixels. Reuse meshes or reduce texture sizes.');
     }
+    const startedAt = performance.now();
     const model = await loadVisualModel(blob);
+    // Wall time of loadVisualModel: Blob read and GLB parse, excluding fetch.
+    const loadMs = performance.now() - startedAt;
     try {
       signal.throwIfAborted();
       if (this.disposed) throw new ArtError('The course mesh renderer was closed.');
@@ -177,7 +190,7 @@ export class CourseArtView implements SceneLayer {
       model.dispose();
       return;
     }
-    this.assets.set(id, { model, pixels, bytes: blob.size, templates: new Map(), decoration: null });
+    this.assets.set(id, { model, pixels, bytes: blob.size, loadMs, templates: new Map(), decoration: null, decorationMirrors: new Set() });
     if (this.mode === 'meshes') for (const state of this.states.values()) if (meshAsset(state.object) === id) this.sync(state);
   }
 
@@ -196,7 +209,10 @@ export class CourseArtView implements SceneLayer {
       asset.model.scene.traverse((node) => {
         if (node instanceof Mesh) parts.push({ geometry: bake(node, base), material: node.material });
       });
-      asset.decoration = Object.freeze({ parts: Object.freeze(parts), flatShaded: false, width: size.x, height: size.y, depth: size.z });
+      asset.decoration = Object.freeze({
+        parts: Object.freeze(parts), flatShaded: false, width: size.x, height: size.y, depth: size.z,
+        onMirror: (geometry: BufferGeometry): void => { asset.decorationMirrors.add(geometry); },
+      });
     }
     return asset.decoration;
   }
@@ -233,9 +249,37 @@ export class CourseArtView implements SceneLayer {
   }
 
   inspect() {
+    const cells = new Set<string>();
+    const buffers = new Set<ArrayBufferLike>();
+    let meshes = 0;
+    let instanceCapacity = 0;
+    let usedInstanceSlots = 0;
+    let instanceBufferBytes = 0;
+    for (const batch of this.batches.values()) {
+      cells.add(batch.cell);
+      meshes += batch.meshes.length;
+      for (const mesh of batch.meshes) {
+        instanceCapacity += mesh.instanceMatrix.count;
+        usedInstanceSlots += mesh.count;
+        buffers.add(mesh.instanceMatrix.array.buffer);
+        if (mesh.instanceColor !== null) buffers.add(mesh.instanceColor.array.buffer);
+      }
+    }
+    for (const buffer of buffers) instanceBufferBytes += buffer.byteLength;
+    const assets: Record<string, AssetFootprint> = Object.fromEntries([...this.assets].map(([id, asset]): [string, AssetFootprint] => {
+      const footprint = asset.model.footprint();
+      const derived = new Set<BufferGeometry>(asset.decorationMirrors);
+      for (const primitives of asset.templates.values()) for (const primitive of primitives) derived.add(primitive.geometry);
+      for (const part of asset.decoration?.parts ?? []) derived.add(part.geometry);
+      return [id, {
+        compressedBytes: asset.bytes, textureBytes: footprint.textureBytes, modelGeometryBytes: footprint.geometryBytes,
+        derivedGeometryBytes: geometryBytes(derived), loadMs: asset.loadMs,
+      }];
+    }));
     return {
-      mode: this.mode, assets: this.assets.size, loading: this.loading.size, failed: [...this.failed],
-      instances: this.entries.size, batches: this.batches.size,
+      mode: this.mode, assets, loading: this.loading.size, failed: [...this.failed],
+      instances: this.entries.size, chunks: cells.size, batches: this.batches.size, meshes,
+      instanceCapacity, usedInstanceSlots, instanceBufferBytes,
       fadingBatches: this.fading.size, matrixWrites: this.matrixWrites, boundsUpdates: this.boundsUpdates,
       materialUpdates: this.materialUpdates,
     };
@@ -321,7 +365,8 @@ export class CourseArtView implements SceneLayer {
       }
       return;
     }
-    const key = `${Math.floor(object.x / 32)},${Math.floor(object.y / 32)}:${asset}:${object.mirror}:${fade ?? 'solid'}`;
+    const cell = `${Math.floor(object.x / 32)},${Math.floor(object.y / 32)}`;
+    const key = `${cell}:${asset}:${object.mirror}:${fade ?? 'solid'}`;
     if (entry?.batch.key === key) {
       const previous = entry.object;
       entry.object = object;
@@ -346,7 +391,7 @@ export class CourseArtView implements SceneLayer {
       };
       const meshes = primitives.map((primitive) => this.mesh(primitive.geometry,
         Array.isArray(primitive.material) ? primitive.material.map(material) : material(primitive.material), 8));
-      batch = { key, entries: [], meshes, fade, materials };
+      batch = { key, cell, entries: [], meshes, fade, materials };
       this.batches.set(key, batch);
       if (fade !== null) this.fading.add(batch);
       this.root.add(...meshes);
