@@ -21,7 +21,8 @@ export interface HurtMoment extends MomentStamp {
 
 export interface BlockMoment extends MomentStamp {
   readonly type: 'block';
-  readonly trap: string;
+  // The level object that fired the blocked projectile: a projectile trap or an archer.
+  readonly id: string;
   readonly x: number;
   readonly y: number;
   readonly directionX: number;
@@ -119,7 +120,7 @@ export function copyCause(target: Readonly<HurtCause>, source: Readonly<HurtCaus
 
 const MOMENT_SEEDS: { readonly [T in MomentType]: () => MomentSlot<T> } = {
   hurt: () => ({ type: 'hurt', placement: 0, time: 0, cause: noCause(), health: 0, max: 0 }),
-  block: () => ({ type: 'block', placement: 0, time: 0, trap: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0 }),
+  block: () => ({ type: 'block', placement: 0, time: 0, id: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0 }),
   impact: () => ({ type: 'impact', placement: 0, time: 0, x: 0, y: 0, normalX: 0, normalY: 0, speed: 0, strength: 0 }),
   death: () => ({ type: 'death', placement: 0, time: 0, cause: noCause() }),
   fall: () => ({ type: 'fall', placement: 0, time: 0 }),

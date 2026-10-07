@@ -68,6 +68,13 @@ export interface Tuning {
   soldierHealth: number;
   soldierMass: number;
   soldierAcceleration: number;
+  archerHealth: number;
+  archerMass: number;
+  archerAcceleration: number;
+  archerSight: number;
+  // An archer's arrows: the speed they leave the bow at, in m/s, and the damage each deals.
+  arrowSpeed: number;
+  arrowDamage: number;
   bumpDamage: number;
   bumpSpeed: number;
   bumpLift: number;
@@ -132,6 +139,12 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   soldierHealth: 2,
   soldierMass: 3,
   soldierAcceleration: 28,
+  archerHealth: 1,
+  archerMass: 2.5,
+  archerAcceleration: 24,
+  archerSight: 14,
+  arrowSpeed: 12,
+  arrowDamage: 1,
   bumpDamage: 1,
   bumpSpeed: 3,
   bumpLift: 1.4,

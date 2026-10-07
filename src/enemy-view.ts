@@ -14,7 +14,7 @@ const VISUAL = {
   alphaCutoff: 0.5, warningColor: 0xffae53,
   warningPulseHz: 5, warningMinimum: 0.3, warningAmplitude: 0.4, hurtFlash: 0.9,
 } as const;
-const FRAME_RATE: Readonly<Record<EnemySpecies, number>> = { bird: 8, 'hollow-soldier': 6 };
+const FRAME_RATE: Readonly<Record<EnemySpecies, number>> = { bird: 8, 'hollow-soldier': 6, 'hollow-archer': 6 };
 const PHASE: Readonly<Record<EnemyPhase, number>> = {
   patrol: 0, windup: 1, dive: 2, recover: 3, hurt: 4, dead: 5,
 };

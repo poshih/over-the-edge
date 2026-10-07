@@ -130,6 +130,7 @@ export const ENEMIES = {
       ],
     ],
   },
+  'hollow-archer': null,
 } satisfies EnemyArtSettings;
 
 /** The project manifest, from the engine's defaults for everything the course does not change. */

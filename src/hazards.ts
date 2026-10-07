@@ -1,3 +1,4 @@
+import { PHYSICS } from './config';
 import type { PlayerSpawn, Point } from './config';
 import type { AxeObject, StartObject } from './level';
 
@@ -6,12 +7,17 @@ import type { AxeObject, StartObject } from './level';
 
 export const HAZARD_LIMITS = { bonfires: 32, traps: 128 } as const;
 
-// What hurt the player: an enemy's bump, a trap's projectile, an axe's blade or a lava pool. Swamp never hurts.
+// What hurt the player: an enemy's bump, a trap's or an archer's projectile, an axe's blade or a lava pool. Swamp
+// never hurts.
 export const HURT_SOURCES = ['enemy', 'projectile', 'axe', 'lava'] as const;
 export type HurtSource = (typeof HURT_SOURCES)[number];
 
-// A hit's cause: its source and the ID of the level object that dealt it, for a projectile the trap that fired it;
-// where it struck, in world metres; and the velocity it knocked the player with, in m/s, none for lava.
+// What flies: a trap's bolt, straight, or an archer's arrow, falling as it flies.
+export const PROJECTILE_KINDS = ['bolt', 'arrow'] as const;
+export type ProjectileKind = (typeof PROJECTILE_KINDS)[number];
+
+// A hit's cause: its source and the ID of the level object that dealt it, for a projectile the trap or archer that
+// fired it; where it struck, in world metres; and the velocity it knocked the player with, in m/s, none for lava.
 export interface HurtCause {
   readonly source: HurtSource;
   readonly id: string;
@@ -22,8 +28,8 @@ export interface HurtCause {
 }
 
 export interface ProjectileBlock {
-  // The ID of the trap that fired the projectile.
-  readonly trap: string;
+  // The ID of the level object that fired the projectile: a projectile trap or an archer.
+  readonly id: string;
   // Where the bolt struck the hammer head, in world metres.
   readonly x: number;
   // Where the bolt struck the hammer head, in world metres.
@@ -48,14 +54,22 @@ export const BONFIRE = {
 } as const;
 
 export const SHOOTER = {
-  // Projectiles fly this far, and a trap fires only while the player's root is this near it.
+  // Every projectile flies at most this far, and a trap fires only while the player's root is this near it.
   range: 40,
-  // Projectiles in flight at once across the level; a trap skips its shot while they all fly.
+  // Projectiles in flight at once across the level, traps' bolts and archers' arrows alike; a shot is skipped while
+  // they all fly.
   projectiles: 256,
   // The drawn trap, its muzzle on its position facing along its angle: how far its body reaches back, and its height.
   length: 0.9, height: 0.7,
   // The drawn projectile, its tip on its position.
   boltLength: 0.55, boltRadius: 0.05,
+} as const;
+
+export const ARROW = {
+  // How fast an arrow falls, as everything else does, in m/s².
+  gravity: PHYSICS.gravity,
+  // The drawn arrow, its tip on its position: its length and its shaft's radius.
+  length: 0.75, radius: 0.022,
 } as const;
 
 export const SHOOTER_FIELDS = {

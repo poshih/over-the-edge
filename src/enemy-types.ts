@@ -1,6 +1,6 @@
 import type { Point } from './config';
 
-export const ENEMY_SPECIES = ['bird', 'hollow-soldier'] as const;
+export const ENEMY_SPECIES = ['bird', 'hollow-soldier', 'hollow-archer'] as const;
 export type EnemySpecies = (typeof ENEMY_SPECIES)[number];
 export const ENEMY_FACINGS = ['left', 'right'] as const;
 export type EnemyFacing = (typeof ENEMY_FACINGS)[number];
@@ -23,6 +23,12 @@ export const ENEMY_SPECS = {
     collider: { type: 'box', halfWidth: 0.26, halfHeight: 0.7 },
     speed: 0.8, patrolDistance: 2,
   },
+  // Placed archers hold their post until given a patrol.
+  'hollow-archer': {
+    label: 'Hollow archer', width: 1.1, height: 1.4,
+    collider: { type: 'box', halfWidth: 0.24, halfHeight: 0.7 },
+    speed: 0.6, patrolDistance: 0,
+  },
 } as const;
 
 export const ENEMY_BEHAVIOR = {
@@ -33,6 +39,9 @@ export const ENEMY_BEHAVIOR = {
   birdWindupSeconds: 0.5, birdDiveSeconds: 1,
   birdRecoverSeconds: 1.6, birdReturnSpeed: 2.8,
   birdReturnTolerance: 0.3, birdHeightGain: 2,
+  // An archer draws, warning, this long before it looses; then it stands to reload, as it does after a bump. Its
+  // arrows leave from this high above its centre.
+  archerDrawSeconds: 0.8, archerReloadSeconds: 1.6, archerBowHeight: 0.1,
   fallenDistance: 30, movingSpeed: 0.08,
 } as const;
 

@@ -2,12 +2,14 @@ import { DynamicTree, Vec2 } from 'planck';
 import type { AABBValue, Body, Fixture, World } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { Point, Tuning } from './config';
-import { axeAngle, axeBlade, axeReach, SHOOTER } from './hazards';
-import type { Bounds, ProjectileBlock } from './hazards';
+import { ARROW, axeAngle, axeBlade, axeReach, SHOOTER } from './hazards';
+import type { Bounds, ProjectileBlock, ProjectileKind } from './hazards';
 import { isTrapObject } from './level';
 import type { AxeObject, LevelChange, ShooterObject, TrapObject } from './level';
 
 export interface ProjectilePose extends Readonly<Point> {
+  // What flies: a trap's bolt or an archer's arrow.
+  readonly kind: ProjectileKind;
   // The direction it flies; its position is its tip.
   readonly angle: number;
 }
@@ -20,8 +22,8 @@ export interface HazardHooks {
   readonly insideTerrain: (body: Body, point: Readonly<Point>) => boolean;
   // Whether a hit would hurt the player now; traps pass through a player who cannot be hurt.
   readonly vulnerable: () => boolean;
-  // A hit: its damage, borrowed velocity change, the trap that dealt it and where it struck, in world metres.
-  readonly hurt: (damage: number, push: Readonly<Point>, source: 'projectile' | 'axe', trap: string, atX: number, atY: number) => void;
+  // A hit: its damage, borrowed velocity change, the level object that dealt it and where it struck, in world metres.
+  readonly hurt: (damage: number, push: Readonly<Point>, source: 'projectile' | 'axe', id: string, atX: number, atY: number) => void;
   // A projectile stopped by the hammer head, held or released. Borrowed: copy what is kept.
   readonly block: (hit: Readonly<ProjectileBlock>) => void;
 }
@@ -43,20 +45,27 @@ interface Axe {
 }
 
 interface Projectile {
+  kind: ProjectileKind;
   x: number;
   y: number;
   // Where it was before the latest step, for drawing between steps.
   fromX: number;
   fromY: number;
-  directionX: number;
-  directionY: number;
+  // Its velocity, in m/s, and how fast it falls, in m/s².
+  velocityX: number;
+  velocityY: number;
+  gravity: number;
   angle: number;
-  speed: number;
   damage: number;
-  // The trap that fired it.
-  trap: string;
+  // The level object that fired it: a trap or an archer.
+  owner: string;
   travelled: number;
 }
+
+// How fast each kind of projectile falls, in m/s².
+const GRAVITY: Readonly<Record<ProjectileKind, number>> = { bolt: 0, arrow: ARROW.gravity };
+// A path is checked for terrain as this many straight chords along its arc.
+const CLEARANCE_CHORDS = 12;
 
 // The first shot of `shooter` at or after `time`.
 function shotFrom(shooter: ShooterObject, time: number): number {
@@ -79,8 +88,9 @@ function overlaps(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
 }
 
 /**
- * The level's traps, stepped with the physics. Shooters fire on a schedule, kept in a heap so only due shots cost a
- * step anything; their projectiles fly straight, each step a ray against the terrain and the hammer head, until they
+ * The level's traps and every projectile in flight, stepped with the physics. Shooters fire on a schedule, kept in a
+ * heap so only due shots cost a step anything, and archers loose arrows through launch(). Projectiles fly, bolts
+ * straight and arrows along their falling arcs, each step a ray against the terrain and the hammer head, until they
  * hit the player, are blocked or have flown their range. Axes hurt the player when the blade crosses the character's
  * depth over it; an index of where each blade can reach finds the few near the player.
  */
@@ -94,8 +104,8 @@ export class HazardWorld {
   // Shooters by their next shot, earliest first.
   private schedule: Shooter[] = [];
   // Live shots occupy the prefix; removal swaps the last live shot in and recycles the vacated slot.
-  private readonly projectiles: Projectile[] = Array.from({ length: SHOOTER.projectiles }, () => ({
-    x: 0, y: 0, fromX: 0, fromY: 0, directionX: 0, directionY: 0, angle: 0, speed: 0, damage: 0, trap: '', travelled: 0,
+  private readonly projectiles: Projectile[] = Array.from({ length: SHOOTER.projectiles }, (): Projectile => ({
+    kind: 'bolt', x: 0, y: 0, fromX: 0, fromY: 0, velocityX: 0, velocityY: 0, gravity: 0, angle: 0, damage: 0, owner: '', travelled: 0,
   }));
   private projectileCount = 0;
   private readonly posePool: { -readonly [K in keyof ProjectilePose]: ProjectilePose[K] }[] = [];
@@ -112,8 +122,9 @@ export class HazardWorld {
   private readonly rayTo = new Vec2();
   private rayStop = 1;
   private rayShield = false;
+  private pathClear = true;
   private readonly rayBlock: { -readonly [K in keyof ProjectileBlock]: ProjectileBlock[K] } = {
-    trap: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0,
+    id: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0,
   };
   private disposed = false;
 
@@ -199,13 +210,14 @@ export class HazardWorld {
   frame(alpha: number): readonly ProjectilePose[] {
     const count = this.projectileCount;
     while (this.posePool.length < count) {
-      this.posePool.push({ x: 0, y: 0, angle: 0 });
+      this.posePool.push({ kind: 'bolt', x: 0, y: 0, angle: 0 });
       this.framePosePool.push(this.posePool.slice());
     }
     const poses = this.framePosePool[count]!;
     for (let index = 0; index < count; index++) {
       const shot = this.projectiles[index]!;
       const pose = this.posePool[index]!;
+      pose.kind = shot.kind;
       pose.x = shot.fromX + (shot.x - shot.fromX) * alpha;
       pose.y = shot.fromY + (shot.y - shot.fromY) * alpha;
       pose.angle = shot.angle;
@@ -229,6 +241,51 @@ export class HazardWorld {
     if (shooter.burstShots === 0) shooter.burstNext = time + shooter.object.delay;
     shooter.burstShots += shots;
     this.reschedule();
+  }
+
+  // Looses a projectile of `kind`, fired by the level object `owner`, from (x, y) at (velocityX, velocityY) in m/s; it
+  // flies from the next step. Nothing flies while every projectile the level allows already does.
+  launch(kind: ProjectileKind, owner: string, x: number, y: number, velocityX: number, velocityY: number, damage: number): void {
+    this.ensureLive();
+    if (this.projectileCount >= SHOOTER.projectiles) return;
+    const shot = this.projectiles[this.projectileCount++]!;
+    shot.kind = kind;
+    shot.x = shot.fromX = x;
+    shot.y = shot.fromY = y;
+    shot.velocityX = velocityX;
+    shot.velocityY = velocityY;
+    shot.gravity = GRAVITY[kind];
+    shot.angle = Math.atan2(velocityY, velocityX);
+    shot.damage = damage;
+    shot.owner = owner;
+    shot.travelled = 0;
+  }
+
+  // Whether a projectile of `kind` loosed from (x, y) at (velocityX, velocityY) flies on for `seconds`: within its range,
+  // with neither terrain nor a platform in its way, checked along straight chords of its path. The hammer head, which
+  // moves, does not count.
+  reaches(kind: ProjectileKind, x: number, y: number, velocityX: number, velocityY: number, seconds: number): boolean {
+    this.ensureLive();
+    const gravity = GRAVITY[kind];
+    this.pathClear = true;
+    let fromX = x;
+    let fromY = y;
+    let travelled = 0;
+    for (let chord = 1; chord <= CLEARANCE_CHORDS && this.pathClear; chord++) {
+      const time = seconds * chord / CLEARANCE_CHORDS;
+      const toX = x + velocityX * time;
+      const toY = y + (velocityY - gravity * time / 2) * time;
+      travelled += Math.hypot(toX - fromX, toY - fromY);
+      if (travelled > SHOOTER.range) return false;
+      if (toX !== fromX || toY !== fromY) {
+        this.rayFrom.set(fromX, fromY);
+        this.rayTo.set(toX, toY);
+        this.world.rayCast(this.rayFrom, this.rayTo, this.obstructRay);
+      }
+      fromX = toX;
+      fromY = toY;
+    }
+    return this.pathClear;
   }
 
   dispose(): void {
@@ -269,32 +326,44 @@ export class HazardWorld {
 
   private fly(vulnerable: boolean): void {
     for (let index = 0; index < this.projectileCount;) {
-      const shot = this.projectiles[index];
+      const shot = this.projectiles[index]!;
       shot.fromX = shot.x;
       shot.fromY = shot.y;
-      const distance = Math.min(shot.speed * PHYSICS.dt, SHOOTER.range - shot.travelled);
-      const toX = shot.x + shot.directionX * distance;
-      const toY = shot.y + shot.directionY * distance;
+      // One step along its flight, exact under constant gravity, cut short where its range runs out.
+      let stepX = shot.velocityX * PHYSICS.dt;
+      let stepY = (shot.velocityY - shot.gravity * PHYSICS.dt / 2) * PHYSICS.dt;
+      let distance = Math.hypot(stepX, stepY);
+      const left = SHOOTER.range - shot.travelled;
+      if (distance > left) {
+        stepX *= left / distance;
+        stepY *= left / distance;
+        distance = left;
+      }
+      // The unit direction it flies this step.
+      const across = distance > 0 ? stepX / distance : 0;
+      const up = distance > 0 ? stepY / distance : 0;
+      const toX = shot.x + stepX;
+      const toY = shot.y + stepY;
       this.rayFrom.set(shot.x, shot.y);
       this.rayTo.set(toX, toY);
       this.rayStop = 1;
       this.rayShield = false;
       if (distance > 0) this.world.rayCast(this.rayFrom, this.rayTo, this.stopRay);
-      if (vulnerable && this.enters(shot.x, shot.y, toX - shot.x, toY - shot.y)) {
-        // It strikes where its path enters the character.
+      if (vulnerable && this.enters(shot.x, shot.y, stepX, stepY)) {
+        // It strikes where its path enters the character, and knocks it along its flight.
         const along = this.span.near;
-        this.push.x = shot.directionX * this.tuning.projectilePush;
-        this.push.y = shot.directionY * this.tuning.projectilePush + this.tuning.projectileLift;
-        this.hooks.hurt(shot.damage, this.push, 'projectile', shot.trap, shot.x + (toX - shot.x) * along, shot.y + (toY - shot.y) * along);
+        this.push.x = across * this.tuning.projectilePush;
+        this.push.y = up * this.tuning.projectilePush + this.tuning.projectileLift;
+        this.hooks.hurt(shot.damage, this.push, 'projectile', shot.owner, shot.x + stepX * along, shot.y + stepY * along);
         vulnerable = this.hooks.vulnerable();
         this.discard(index);
         continue;
       }
       if (this.rayStop < 1 || shot.travelled + distance >= SHOOTER.range) {
         if (this.rayStop < 1 && this.rayShield) {
-          this.rayBlock.trap = shot.trap;
-          this.rayBlock.directionX = shot.directionX;
-          this.rayBlock.directionY = shot.directionY;
+          this.rayBlock.id = shot.owner;
+          this.rayBlock.directionX = across;
+          this.rayBlock.directionY = up;
           this.hooks.block(this.rayBlock);
         }
         this.discard(index);
@@ -303,6 +372,10 @@ export class HazardWorld {
       shot.x = toX;
       shot.y = toY;
       shot.travelled += distance;
+      if (shot.gravity !== 0) {
+        shot.velocityY -= shot.gravity * PHYSICS.dt;
+        shot.angle = Math.atan2(shot.velocityY, shot.velocityX);
+      }
       index++;
     }
   }
@@ -337,16 +410,9 @@ export class HazardWorld {
 
   private shoot(shooter: Shooter, root: Readonly<Point>): void {
     const { object } = shooter;
-    if (this.projectileCount >= SHOOTER.projectiles ||
-      (root.x - object.x) ** 2 + (root.y - object.y) ** 2 > SHOOTER.range ** 2) return;
-    const directionX = Math.cos(object.angle);
-    const directionY = Math.sin(object.angle);
-    const shot = this.projectiles[this.projectileCount++]!;
-    shot.x = shot.fromX = object.x;
-    shot.y = shot.fromY = object.y;
-    shot.directionX = directionX; shot.directionY = directionY;
-    shot.angle = object.angle; shot.speed = object.speed; shot.damage = object.damage; shot.trap = object.id;
-    shot.travelled = 0;
+    if ((root.x - object.x) ** 2 + (root.y - object.y) ** 2 > SHOOTER.range ** 2) return;
+    this.launch('bolt', object.id, object.x, object.y,
+      Math.cos(object.angle) * object.speed, Math.sin(object.angle) * object.speed, object.damage);
   }
 
   private swing(time: number, root: Readonly<Point>): void {
@@ -386,10 +452,7 @@ export class HazardWorld {
   // The nearest terrain or hammer head along the ray; everything else lets projectiles through.
   private readonly stopRay = (fixture: Fixture, point: Vec2, normal: Vec2, fraction: number): number => {
     const shield = fixture === this.hooks.shield();
-    if (!shield) {
-      const body = fixture.getBody();
-      if (!this.hooks.isTerrain(body) || this.hooks.insideTerrain(body, this.rayFrom)) return -1;
-    }
+    if (!shield && !this.stops(fixture)) return -1;
     if (fraction > this.rayStop) return this.rayStop;
     this.rayStop = fraction;
     this.rayShield = shield;
@@ -400,6 +463,19 @@ export class HazardWorld {
     this.rayBlock.normalY = normal.y;
     return fraction;
   };
+
+  // Any terrain along the ray, ending the check.
+  private readonly obstructRay = (fixture: Fixture): number => {
+    if (!this.stops(fixture)) return -1;
+    this.pathClear = false;
+    return 0;
+  };
+
+  // Whether the fixture stops a projectile on the ray from rayFrom: terrain or a platform it starts outside.
+  private stops(fixture: Fixture): boolean {
+    const body = fixture.getBody();
+    return this.hooks.isTerrain(body) && !this.hooks.insideTerrain(body, this.rayFrom);
+  }
 
   private discard(index: number): void {
     if (this.projectileCount === 0) return;

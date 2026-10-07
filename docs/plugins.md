@@ -81,6 +81,8 @@ version, without legacy readers or aliases. Version 2 breaks version-1 contracts
   live-only; pose context has `attachment: 'gripped' | 'released'`. `AvatarMotionFrame.reset`
   no longer fires because time steps backward; Workshop presentation previews now end early
   on placement rather than rewind.
+- `BlockMoment.trap` is now `id`, the trap or hollow archer that fired the blocked projectile,
+  and `ProjectilePose` gains `kind`, `'bolt'` or `'arrow'`.
 
 A plugin's identity comes from the manifest alone, and facet modules never repeat it. Each host
 tells its facet the ID, as `host.plugin`. The ID names the plugin in errors, keys its Workshop

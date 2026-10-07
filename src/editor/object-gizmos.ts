@@ -41,6 +41,11 @@ const ENEMY_GLYPHS: Record<EnemySpecies, { body: string; detail: string }> = {
     body: 'M -.2 .46 L .12 .49 L .24 .31 L .22 .17 L .11 .1 L .17 -.05 L .32 -.02 L .34 .38 L .42 .46 L .47 .37 L .43 -.14 L .26 -.16 L .17 -.13 L .14 -.28 L .25 -.49 L .01 -.49 L -.06 -.24 L -.15 -.49 L -.37 -.49 L -.23 -.24 L -.22 -.05 L -.43 -.12 L -.49 .12 L -.32 .23 L -.2 .17 L -.23 .29 Z',
     detail: 'M -.12 .3 L .14 .3 M -.32 .15 L -.34 -.04 M -.12 .08 L .05 .08 M -.08 .04 L -.08 -.13',
   },
+  // Hooded, a quiver on its back, drawing a longbow with an arrow nocked.
+  'hollow-archer': {
+    body: 'M -.1 .5 L .06 .44 L .1 .3 L .09 .2 L .03 .16 L .16 .11 L .13 -.16 L .14 -.3 L .2 -.49 L .02 -.49 L -.04 -.3 L -.1 -.49 L -.28 -.49 L -.2 -.3 L -.22 -.16 L -.3 .1 L -.2 .2 L -.2 .36 Z',
+    detail: 'M .22 .43 Q .5 .04 .22 -.35 M .22 .43 L .12 .06 L .22 -.35 M .06 .06 L .47 .06 M -.24 .34 L -.3 -.04',
+  },
 };
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {

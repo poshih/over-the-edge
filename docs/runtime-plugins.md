@@ -193,7 +193,9 @@ of its kind:
   objects of the look's kind: a kind the level lacks costs nothing per frame. It runs 60 or more
   times a second, so move only what moves.
 - The projectile look's `update(projectiles, time)` also receives the projectiles in flight,
-  each `{ x, y, angle }` (`ProjectilePose`) with its tip at its position. It runs while the level
+  each `{ kind, x, y, angle }` (`ProjectilePose`) with its tip at its position. `kind`, one of
+  `PROJECTILE_KINDS`, is `'bolt'`, a trap's, which flies straight, or `'arrow'`, a hollow
+  archer's, which falls along its arc, its `angle` turning with its flight. It runs while the level
   has projectile traps or shots fly, then once more with none, so the look can clear its last
   shots. The array and its mutable pose slots are pooled, bounded by `SHOOTER.projectiles`,
   and borrowed read-only until the next frame sample. Never retain or mutate either; copy
@@ -240,7 +242,7 @@ placed. An axe's blade lies in the plane of its swing, edge-on to the camera wit
 edge below: `AXE.bladeWidth` across the obstacle line, toward the camera and away,
 `AXE.bladeHeight` along the haft and `AXE.bladeThickness` along the line. It hangs `axe.length`
 below its pivot and turns about the x axis by `axeAngle(axe, time)` radians, positive away from
-the camera. `BONFIRE`, `SHOOTER` and `triggerBounds(trigger)` give the engine's sizes and a
+the camera. `BONFIRE`, `SHOOTER`, `ARROW` and `triggerBounds(trigger)` give the engine's sizes and a
 trigger's region. Platforms collide, so draw their slabs centred at z = 0. A switch plate is
 drawn on its trigger's floor and never collides; a rideable platform's deck plate is scenery
 centred on the obstacle line, on its deck top, and stays within the slab's depth. The default
@@ -650,8 +652,8 @@ Workshop / Physics / Death exposes the same fields:
 
 Ragdoll fixtures and the released shaft use corpse friction; the pot and hammer head
 retain their own materials. Every corpse and tool fixture collides with terrain and
-platforms only, never enemies or each other. Enemy activity, bird dives and trap range
-checks use the live root's point frozen at entry, not the moving corpse. The dying jar
+platforms only, never enemies or each other. Enemy activity, bird dives, archers' aim and trap
+range checks use the live root's point frozen at entry, not the moving corpse. The dying jar
 cannot start an illusion's fade; fades already started continue. Enemies pass through
 the corpse and birds dive at the death point. Persistent level state is independent of
 the corpse's figure and presentation. The detached head still blocks projectile rays,
@@ -877,7 +879,9 @@ interface EnemyLook {
 ```
 
 `DEFAULT_LOOKS.enemies` creates `EnemyView`, the engine's shared atlas and instanced sprites,
-including animation, windup, hurt and death effects. The game forwards simulation membership
+including animation, windup, hurt and death effects. A bird's `windup` warns of its `dive`,
+and it `recover`s home; a hollow archer's `windup` is its draw, warned alike, and `recover` its
+reload, also after a bump; a soldier `recover`s after a bump. The game forwards simulation membership
 events to `apply`: `reset` with every pose, `upsert` with one pose and `remove` with an ID.
 A surviving hammer hit publishes an `upsert` and an `enemy-hit` moment at every accepted
 hit, even when the enemy was already hurt. The cue and gameplay observers consume that
@@ -1267,7 +1271,7 @@ type; otherwise a non-empty array of known types without repeats, fixed for the 
 | `type` | Additional fields and meaning |
 | --- | --- |
 | `hurt` | `health`, `max`: health remaining after **each** accepted hurt, including 0 for the killing hit, independent of HUD visibility; `cause`: the `HurtCause` below |
-| `block` | `trap`: firing trap ID; `x`, `y`: strike on the head; `directionX`, `directionY`: projectile's unit flight direction; `normalX`, `normalY`: head's outward unit normal there. Held or released, also while dying; a projectile that hurt the character is not also a block |
+| `block` | `id`: the trap or hollow archer that fired the projectile; `x`, `y`: strike on the head; `directionX`, `directionY`: projectile's unit flight direction; `normalX`, `normalY`: head's outward unit normal there. Held or released, also while dying; a projectile that hurt the character is not also a block |
 | `impact` | `x`, `y`: mean contact point; `normalX`, `normalY`: struck surface's unit normal toward the head; `speed`: head approach speed (m/s); `strength`: 0–1. The live head began touching, limited per `IMPACTS` in run time; raised only while a consumer takes impacts |
 | `death` | The health death sequence started; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
@@ -1282,7 +1286,7 @@ type; otherwise a non-empty array of known types without repeats, fixed for the 
 ```ts
 interface HurtCause {
   readonly source: HurtSource; // 'enemy' | 'projectile' | 'axe' | 'lava'
-  readonly id: string;         // enemy, trap, axe or lava pool
+  readonly id: string;         // enemy, trap or archer that fired, axe or lava pool
   readonly x: number;          // strike in world metres
   readonly y: number;
   readonly pushX: number;      // added velocity, m/s
@@ -1308,7 +1312,7 @@ and videos keep their [presentation contracts](#messages); cue previews notify n
 
 1. Hammer `impact`.
 2. Enemies: defeats by falling, then accepted hammer hits/defeats, then bump hurt.
-3. Traps: each projectile's hurt or block, then axe hurt.
+3. Hazards: each projectile's hurt or block, traps' bolts and archers' arrows alike, then axe hurt.
 4. Lava hurt.
 5. Bonfire.
 6. Terminal `death` or `fall`.

@@ -249,9 +249,9 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 14**, and release content **schema 13**,
-including the audio record's `block` cue, game settings' death wait and the HUD's death
-text/fade; other versions are rejected.
+Project manifests and bundles use **schema 15**, and release content **schema 14**,
+including the audio record's `block` cue, game settings' death wait and archer rules, the
+HUD's death text/fade and the hollow archer's enemy art; other versions are rejected.
 
 ### Included full-length course
 
@@ -624,9 +624,9 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 15**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
+**schema version 16**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
 in any other version are rejected, not converted. Browser snapshots use storage format
-**7**; earlier storage keys are not read. Unreadable current-format saves are marked and
+**8**; earlier storage keys are not read. Unreadable current-format saves are marked and
 retained, while other valid snapshots remain available.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,
@@ -859,27 +859,41 @@ A game's runtime plugin can draw flag and updraft markers its own way; see
 
 ### Enemies
 
-Choose **Workshop / Level / Bird** or **Hollow soldier**, then click/tap the
-desired base position. Select the enemy's body to drag or delete it. The inspector
+Choose **Workshop / Level / Bird**, **Hollow soldier** or **Hollow archer**, then click/tap
+the desired base position. Select the enemy's body to drag or delete it. The inspector
 edits its center/home position, facing, **Patrol radius** and **Patrol speed**;
 the selection guide shows the radius on each side of home. Birds patrol, warn,
 then dive. Soldiers only patrol their configured range, turning at terrain
 obstacles and edges.
 
+Hollow archers hold their post, facing as placed, unless given a patrol radius, when they
+walk it as soldiers do. An archer that sees the player within `archerSight` aims at the
+middle of the player's hurt box: it works out the arc an arrow leaving at `arrowSpeed` takes
+under gravity, the low, flat arc first and the high, lobbed one when terrain or a platform
+blocks it, and it draws only when one of them is clear and within the **40 m** every
+projectile flies. The draw flashes the bird's warning for **0.8 s**; then the archer aims
+again at where the player is now and looses, or walks on if the shot is gone, and stands
+**1.6 s** to reload, as it does after a bump. Like any recovering enemy it does not bump the
+player meanwhile. The hammer head shields arrows as it does trap bolts, and a strike
+interrupts the draw.
+
 A **hammer-head strike** with a closing speed of **at least 0.8 m/s** defeats a
-bird in one hit by default; a hollow soldier defaults to **two separated strikes**. Damage has a
+bird or a hollow archer in one hit by default; a hollow soldier defaults to **two separated strikes**. Damage has a
 **0.25 s anti-jitter cooldown**: brushing or holding the head against an enemy
 does not repeatedly deal damage. The shaft does not deal damage.
 Body collisions knock the player back and default to costing **1** [health](#health-and-bonfires).
-**Physics / Enemies** owns `birdHealth` and `soldierHealth` (1–20 whole strikes),
-`birdMass` and `soldierMass` (default **0.55 kg** and **3 kg**), and their
-`birdAcceleration` and `soldierAcceleration` (default **22** and **28 m/s²**).
-`birdSight` defaults to **6 m**, and `birdDiveSpeed` to **5 m/s**.
+**Physics / Enemies** owns `birdHealth`, `soldierHealth` and `archerHealth` (1–20 whole
+strikes), `birdMass`, `soldierMass` and `archerMass` (default **0.55 kg**, **3 kg** and
+**2.5 kg**), and their `birdAcceleration`, `soldierAcceleration` and `archerAcceleration`
+(default **22**, **28** and **24 m/s²**). `birdSight` defaults to **6 m**, and `birdDiveSpeed`
+to **5 m/s**. `archerSight` defaults to **14 m**; `arrowSpeed`, **12 m/s**, sets the arrows'
+reach, **14.7 m** on level ground and less uphill; and `arrowDamage` defaults to **1**, with
+the [projectile](#traps) push and lift as knockback.
 `bumpDamage`, `bumpSpeed` and `bumpLift` default to **1**, **3 m/s** horizontally
 and **1.4 m/s** upward. Zero bump damage leaves knockback but deals no damage and
 grants no invulnerability.
 Mass updates existing bodies immediately; acceleration, sight, dive speed and bumps
-read the live settings. Species health applies only at an enemy's next reset or new
+read the live settings, and arrow speed and damage apply from the next shot. Species health applies only at an enemy's next reset or new
 spawn: it does not heal or resize the health of an existing enemy, and waking is not
 a new spawn. Collider/drawn sizes and AI scheduling remain engine constants.
 Dead enemies stay dead until Reset or an editor rebuild. Patrol positions,
@@ -902,8 +916,8 @@ added to the built-in course.
 
 In levels with enemies, [traps](#traps) or [lava](#liquid-pools) the player has **health**,
 set in **Physics / Health**: 1-20 damage points, 5 by default, shown as a row of pips beside
-the readouts. An enemy's bump costs its configured damage (default 1), a trap its own damage
-and lava its damage each second.
+the readouts. An enemy's bump costs its configured damage (default 1), an archer's arrow
+its arrow damage (default 1), a trap its own damage and lava its damage each second.
 **Hurt invulnerability** (`hurtInvulnerability`, 0–5 s, step 0.05) leaves the character
 unharmed for **1 s** by default after a damaging hit. **Respawn invulnerability**
 (`respawnInvulnerability`, 0–10 s, step 0.1) protects a bonfire return for **2 s** by default.
@@ -917,7 +931,7 @@ base, and the one reached last is where a death returns the player. Health runni
 or a fall out of the level starts a physical death: the character collapses as a passive
 ragdoll, lets go of the hammer and drops it. The jar and hammer keep their motion; the corpse
 and released hammer collide only with the course and platforms, never enemies or each other.
-Enemies, bird dives and trap range checks use the frozen entry point, and the dying jar
+Enemies, bird dives, archers' aim and trap range checks use the frozen entry point, and the dying jar
 cannot trigger illusions. The released head still blocks projectile rays. The figure
 and corpse never steer persistent world state after a bonfire return.
 2D sprites freeze their facing and flipbook frame but follow the physical body, head and hands,
@@ -1014,7 +1028,8 @@ front of the obstacle line draws over the player, the half behind it under the p
 Stagger neighbouring axes with their offsets.
 
 Traps run on the run's clock, so their rhythm is the same every attempt. Up to **256**
-projectiles fly at once across a level; a trap skips its shot while they all fly. A game's
+projectiles fly at once across a level, traps' bolts and [archers'](#enemies) arrows alike;
+a shot is skipped while they all fly. A game's
 runtime plugin can draw traps and projectiles its own way; see [object looks](docs/runtime-plugins.md#object-looks).
 
 ### Pressure switches and elevator platforms

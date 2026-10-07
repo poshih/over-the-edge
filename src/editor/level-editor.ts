@@ -336,6 +336,14 @@ function triggerPlacement(preset: TriggerPreset, at: Point): TriggerObject {
   }, preset);
 }
 
+// How each species behaves, shown in the enemy inspector.
+const ENEMY_HELP: Readonly<Record<EnemySpecies, string>> = {
+  bird: 'Birds patrol, warn, then dive toward nearby players.',
+  'hollow-soldier': 'Hollow soldiers patrol their configured range, turning at terrain obstacles and edges.',
+  'hollow-archer': 'Hollow archers hold their post, or walk a patrol radius as soldiers do. Within Physics / Enemies archer ' +
+    'sight they warn as they draw, then shoot arrows that arc under gravity, low or else high, only along an arc clear of terrain.',
+};
+
 function anchorEnemy(object: EnemyObject): EnemyObject {
   return { ...object, y: object.y + ENEMY_SPECS[object.species].height / 2 };
 }
@@ -999,11 +1007,8 @@ Export the level first if you want to keep them. Continue without saving?`);
       for (const name of ['patrolDistance', 'speed'] as const) {
         input(`enemy-${name}`).value = String(Number(enemy[name].toFixed(4)));
       }
-      const behavior = enemy.species === 'bird'
-        ? 'Birds patrol, warn, then dive toward nearby players.'
-        : 'Hollow soldiers patrol their configured range, turning at terrain obstacles and edges.';
       element(root, '.level-enemy-help').textContent =
-        `${behavior} Physics / Enemies sets how many separate hammer-head strikes defeat each species; health applies at reset or spawn. ` +
+        `${ENEMY_HELP[enemy.species]} Physics / Enemies sets how many separate hammer-head strikes defeat each species; health applies at reset or spawn. ` +
         `Strikes need at least ${ENEMY_BEHAVIOR.hitSpeed} m/s closing speed, with a ${ENEMY_BEHAVIOR.hitSeconds}s anti-jitter cooldown. ` +
         'Brushing or holding the head against an enemy does not repeatedly deal damage.';
     } else if (trigger !== null) {

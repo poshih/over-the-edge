@@ -30,7 +30,7 @@ const LABELS = [
   { x: 55.8, y: 3, text: '06 / SWITCH: SHIELD THE BURST' },
   { x: 64, y: 4.2, text: '07 / AXE: TIME YOUR CROSSING' },
   { x: 73.5, y: 2.2, text: '08 / SWAMP; LAVA AHEAD - DANGER' },
-  { x: 90.5, y: 3.5, text: '09 / BIRD & HOLLOW SOLDIER' },
+  { x: 92, y: 3.5, text: '09 / BIRD, SOLDIER & ARCHER' },
   { x: 101.5, y: 2.5, text: '10 / UPDRAFT: REACH THE LEDGE' },
   { x: 109.3, y: 2.8, text: '11 / LIFT: STEP ON; SWITCHES CALL' },
   { x: 122, y: 8.3, text: '12 / FINISH: TIMER STOPPED' },
@@ -69,7 +69,7 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
     { kind: 'start', id: 'player-start', x: 0, y: 0.65, angle: -0.42, reach: 1.7 },
     trigger('welcome', 'Welcome to the showcase', 0.5, 0, 3, 1.8, 'none', [{
       type: 'message', title: 'Special-object showcase',
-      message: 'Head right through twelve labelled stations. Try each surface, let the illusion give way, and light the bonfire. The hammer head can shield trap bolts. Wait for the axe, keep the pot out of lava, then take the updraft and lift to the finish.',
+      message: 'Head right through twelve labelled stations. Try each surface, let the illusion give way, and light the bonfire. The hammer head can shield trap bolts and arrows. Wait for the axe, keep the pot out of lava, then take the updraft and lift to the finish.',
     }], 'once'),
     decoration('start-lantern', 'lantern-post', 2, 0, 2.6),
 
@@ -119,9 +119,11 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
     }], 'once'),
     block('enemy-ground', 78.8, 103, -2, 0),
 
-    // Separate patrols on an open apron leave room to retreat or hammer over the soldier.
+    // Separate patrols on an open apron leave room to retreat or hammer over the soldier. The archer holds the
+    // apron's far end, short of the updraft, and arcs arrows at a player crossing it; the head can shield them.
     { kind: 'enemy', id: 'showcase-bird', species: 'bird', x: 87, y: 2.4, facing: 'right', patrolDistance: 1, speed: 0.8 },
     { kind: 'enemy', id: 'showcase-soldier', species: 'hollow-soldier', x: 94, y: 0.71, facing: 'left', patrolDistance: 1.5, speed: 0.5 },
+    { kind: 'enemy', id: 'showcase-archer', species: 'hollow-archer', x: 99.6, y: 0.71, facing: 'left', patrolDistance: 0, speed: 0.6 },
 
     // The draft's column ends at x = 102.5; its ledge starts at 103, outside the shaft.
     trigger('ledge-updraft', 'Updraft to the ledge', 101.9, 0, 1.2, 1.4, 'updraft', [

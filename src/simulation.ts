@@ -188,14 +188,17 @@ export class Simulation {
         changePlayerVelocity(this.rig, delta);
         this.hurt(this.settings.physics.bumpDamage, 'enemy', enemy, atX, atY, delta.x, delta.y);
       },
+      clearShot: (x, y, velocityX, velocityY, seconds) => this.hazards.reaches('arrow', x, y, velocityX, velocityY, seconds),
+      shoot: (enemy, x, y, velocityX, velocityY) =>
+        this.hazards.launch('arrow', enemy, x, y, velocityX, velocityY, this.settings.physics.arrowDamage),
     });
     this.hazards = new HazardWorld(this.world, level.objects.filter(isTrapObject), this.settings.physics, {
       shield: () => this.rig.tool.head.fixture,
       isTerrain: (body) => this.terrain.isTerrain(body) || this.platforms.isPlatform(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point) || this.platforms.isInside(terrain, point),
       vulnerable: () => this.vulnerable(),
-      hurt: (damage, push, source, trap, atX, atY) => {
-        this.hurt(damage, source, trap, atX, atY, push.x, push.y);
+      hurt: (damage, push, source, id, atX, atY) => {
+        this.hurt(damage, source, id, atX, atY, push.x, push.y);
         changePlayerVelocity(this.rig, push);
       },
       block: (hit) => this.block(hit),
@@ -789,7 +792,7 @@ export class Simulation {
 
   private block(hit: Readonly<ProjectileBlock>): void {
     const moment = this.moments.append('block', this.placements, this.elapsed);
-    moment.trap = hit.trap;
+    moment.id = hit.id;
     moment.x = hit.x;
     moment.y = hit.y;
     moment.directionX = hit.directionX;

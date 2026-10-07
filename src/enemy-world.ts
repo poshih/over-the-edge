@@ -1,9 +1,12 @@
 import { Box, Circle, DynamicTree, Vec2, WorldManifold } from 'planck';
 import type { AABBValue, Body, Contact, Fixture, Vec2Value, World } from 'planck';
-import { PHYSICS } from './config';
+import { aimArc } from './ballistics';
+import type { Launch } from './ballistics';
+import { PHYSICS, RIG } from './config';
 import type { Point, Tuning } from './config';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
 import type { EnemyEvent, EnemyFacing, EnemyPhase, EnemyPose, EnemySpecies } from './enemy-types';
+import { ARROW } from './hazards';
 import { isEnemyObject } from './level';
 import type { EnemyObject, LevelChange } from './level';
 import { clamp } from './math';
@@ -38,9 +41,20 @@ interface EnemyCallbacks {
   readonly onBump: (velocityChange: Readonly<Point>, enemy: string, atX: number, atY: number) => void;
   readonly onHit: (enemy: string, x: number, y: number) => void;
   readonly onDefeat: (enemy: string, x: number, y: number, by: 'hammer' | 'fall') => void;
+  // Whether an arrow loosed from (x, y) at (velocityX, velocityY), in m/s, flies on for `seconds`, within its range and
+  // with no terrain in its way.
+  readonly clearShot: (x: number, y: number, velocityX: number, velocityY: number, seconds: number) => boolean;
+  // An archer looses an arrow from (x, y) at (velocityX, velocityY), in m/s.
+  readonly shoot: (enemy: string, x: number, y: number, velocityX: number, velocityY: number) => void;
 }
 
 const ENEMY_FRICTION = 0.15;
+// The settings each species takes its health, mass and acceleration from.
+const SPECIES_TUNING = {
+  bird: { health: 'birdHealth', mass: 'birdMass', acceleration: 'birdAcceleration' },
+  'hollow-soldier': { health: 'soldierHealth', mass: 'soldierMass', acceleration: 'soldierAcceleration' },
+  'hollow-archer': { health: 'archerHealth', mass: 'archerMass', acceleration: 'archerAcceleration' },
+} as const satisfies Readonly<Record<EnemySpecies, Readonly<Record<'health' | 'mass' | 'acceleration', keyof Tuning>>>>;
 type MutableEnemyPose = { -readonly [K in keyof EnemyPose]: EnemyPose[K] };
 
 function emptyPose(): MutableEnemyPose {
@@ -88,6 +102,7 @@ export class EnemyWorld {
   private readonly enemyVelocity = new Vec2();
   private readonly probeFrom = new Vec2();
   private readonly probeTo = new Vec2();
+  private readonly launch: Launch = { velocityX: 0, velocityY: 0, seconds: 0 };
   private groundFound = false;
   private stepPlayer: Readonly<Point> = this.zero;
   private beforeTime = 0;
@@ -126,10 +141,10 @@ export class EnemyWorld {
     this.ensureMutable();
     const previous = this.tuning;
     this.tuning = tuning;
-    if (previous.birdMass === tuning.birdMass && previous.soldierMass === tuning.soldierMass) return;
     for (const [body, record] of this.bodies) {
       const species = record.object.species;
-      if (species === 'bird' ? previous.birdMass === tuning.birdMass : previous.soldierMass === tuning.soldierMass) continue;
+      const mass = SPECIES_TUNING[species].mass;
+      if (previous[mass] === tuning[mass]) continue;
       const fixture = body.getFixtureList();
       if (fixture === null) throw new Error(`Enemy "${record.object.id}" has no collider.`);
       fixture.setDensity(this.density(species));
@@ -218,7 +233,9 @@ export class EnemyWorld {
       }
       this.transition(record, record.object.species === 'bird' ? 'recover' : 'patrol');
     }
-    if (record.object.species === 'bird') this.fly(record, this.stepPlayer);
+    const species = record.object.species;
+    if (species === 'bird') this.fly(record, this.stepPlayer);
+    else if (species === 'hollow-archer') this.archer(record, this.stepPlayer);
     else this.walk(record);
   };
 
@@ -498,9 +515,58 @@ export class EnemyWorld {
           clear = this.groundAhead(record, ENEMY_DIRECTION[record.facing]);
         }
         if (clear) record.desiredX = ENEMY_DIRECTION[record.facing] * object.speed;
-      }
+      } else this.faceAuthored(record);
     }
     this.drive(record, record.desiredX, null);
+  }
+
+  // An archer walks its patrol as a soldier does until it has a shot at the player, then stands, turned to the player,
+  // and draws. At the end of the draw it aims again and looses, then reloads, or walks on if it has lost its shot.
+  private archer(record: EnemyRecord, player: Readonly<Point>): void {
+    const age = this.time - record.changedAt;
+    if (record.phase === 'windup') {
+      this.face(record, player.x - record.current.x);
+      this.drive(record, 0, null);
+      if (age < ENEMY_BEHAVIOR.archerDrawSeconds) return;
+      if (this.aim(record, player)) {
+        this.callbacks.shoot(record.object.id, record.current.x, record.current.y + ENEMY_BEHAVIOR.archerBowHeight,
+          this.launch.velocityX, this.launch.velocityY);
+        this.transition(record, 'recover');
+      } else this.transition(record, 'patrol');
+      return;
+    }
+    if (record.phase === 'recover') {
+      if (age < ENEMY_BEHAVIOR.archerReloadSeconds) { this.drive(record, 0, null); return; }
+      this.transition(record, 'patrol');
+    }
+    if (this.time >= record.nextDecisionAt && this.aim(record, player)) {
+      this.decisions++;
+      record.nextDecisionAt = this.time + ENEMY_BEHAVIOR.decisionSeconds;
+      record.desiredX = 0;
+      this.face(record, player.x - record.current.x);
+      this.transition(record, 'windup');
+      this.drive(record, 0, null);
+      return;
+    }
+    this.walk(record);
+  }
+
+  // Whether an archer has a shot at the middle of the player's hurt box: a player within its sight whom an arrow can
+  // reach within its range, along an arc clear of terrain, the low one or else the high one. Leaves the launch in
+  // `launch`.
+  private aim(record: EnemyRecord, player: Readonly<Point>): boolean {
+    if (distanceSquared(record.current, player) > this.tuning.archerSight ** 2) return false;
+    const x = record.current.x;
+    const y = record.current.y + ENEMY_BEHAVIOR.archerBowHeight;
+    const dx = player.x - x;
+    const dy = player.y + RIG.potBottom + this.tuning.hurtHeight / 2 - y;
+    return this.clearArc(x, y, dx, dy, false) || this.clearArc(x, y, dx, dy, true);
+  }
+
+  private clearArc(x: number, y: number, dx: number, dy: number, high: boolean): boolean {
+    const launch = this.launch;
+    return aimArc(dx, dy, this.tuning.arrowSpeed, ARROW.gravity, high, launch) &&
+      this.callbacks.clearShot(x, y, launch.velocityX, launch.velocityY, launch.seconds);
   }
 
   private groundAhead(record: EnemyRecord, direction: number): boolean {
@@ -527,9 +593,10 @@ export class EnemyWorld {
     else if (offset <= -record.object.patrolDistance + ENEMY_BEHAVIOR.patrolTolerance) record.facing = 'right';
   }
 
-  // Zero-patrol birds hover facing their authored direction whenever they patrol.
+  // Enemies without a patrol face their authored direction whenever they patrol: a hovering bird, or an archer that
+  // turned to shoot.
   private faceAuthored(record: EnemyRecord): void {
-    if (record.object.species === 'bird' && record.object.patrolDistance === 0) record.facing = record.object.facing;
+    if (record.object.patrolDistance === 0) record.facing = record.object.facing;
   }
 
   private face(record: EnemyRecord, dx: number): void {
@@ -542,7 +609,7 @@ export class EnemyWorld {
     const dx = x - velocity.x;
     const dy = y === null ? 0 : y - velocity.y;
     if (dx === 0 && dy === 0) return;
-    const acceleration = record.object.species === 'bird' ? this.tuning.birdAcceleration : this.tuning.soldierAcceleration;
+    const acceleration = this.tuning[SPECIES_TUNING[record.object.species].acceleration];
     const scale = body.getMass() * Math.min(1 / PHYSICS.dt, acceleration / Math.hypot(dx, dy));
     this.force.set(dx * scale, dy * scale);
     body.applyForceToCenter(this.force, true);
@@ -625,7 +692,7 @@ export class EnemyWorld {
     record.current.x = record.previous.x = object.x;
     record.current.y = record.previous.y = object.y;
     record.facing = object.facing;
-    record.health = record.maxHealth = object.species === 'bird' ? this.tuning.birdHealth : this.tuning.soldierHealth;
+    record.health = record.maxHealth = this.tuning[SPECIES_TUNING[object.species].health];
     record.lastHitAt = -Infinity;
     record.nextDecisionAt = this.time;
     record.desiredX = 0;
@@ -656,7 +723,7 @@ export class EnemyWorld {
   private density(species: EnemySpecies): number {
     const collider = ENEMY_SPECS[species].collider;
     const area = collider.type === 'circle' ? Math.PI * collider.radius ** 2 : 4 * collider.halfWidth * collider.halfHeight;
-    const mass = species === 'bird' ? this.tuning.birdMass : this.tuning.soldierMass;
+    const mass = this.tuning[SPECIES_TUNING[species].mass];
     return mass / area;
   }
 

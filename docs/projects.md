@@ -6,9 +6,9 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 14**; their release content uses **schema 13**.
-Both embed the audio record's `block` cue, game settings' death wait and the HUD's death
-text/fade. Other versions are rejected, not converted.
+Project manifests and bundles use **schema 15**; their release content uses **schema 14**.
+Both embed the audio record's `block` cue, game settings' death wait and archer rules, the
+HUD's death text/fade and the hollow archer's enemy art. Other versions are rejected, not converted.
 
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
 - `GAME_PROJECT=<project> npm run build:game` builds any project into a
@@ -37,7 +37,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 8, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 15: physics (including health, invulnerability, hurt box, knockback, enemy rules, downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death wait/materials |
+| `settings` | `project.json` | Game-settings profile, schema 16: physics (including health, invulnerability, hurt box, knockback, enemy rules and archers' arrows, downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death wait/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -77,12 +77,12 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 14,
+  "schemaVersion": 15,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 15, "physics": { "...": "..." },
+    "schemaVersion": 16, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
     "cursor": {
       "maxTargetRadius": 2.65, "deadZone": 0.1, "followCharacter": 100,
@@ -99,7 +99,7 @@ The paths are fixed, so a manifest only says which files exist:
            "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" },
            "death": { "text": "You are dead...", "fadeIn": 1.5 } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
-  "enemies": { "bird": { "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null },
+  "enemies": { "bird": { "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null, "hollow-archer": null },
   "media": [{ "path": "/media/cavern-loop.wav" }],
   "plugins": { "tuner": { "joint": 12, "radius": 0.1 } }
 }
@@ -115,7 +115,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 14,
+  "schemaVersion": 15,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 8, "labels": [], "objects": [] },
@@ -575,6 +575,12 @@ including to projectiles already in flight. No setting change mutates the author
 | `soldierHealth` | 1–20 whole hammer-head strikes | 2 |
 | `soldierMass` | 0.5–30 kg, step 0.1 | 3 |
 | `soldierAcceleration` | 1–80 m/s², step 1 | 28 |
+| `archerHealth` | 1–20 whole hammer-head strikes | 1 |
+| `archerMass` | 0.5–30 kg, step 0.1 | 2.5 |
+| `archerAcceleration` | 1–80 m/s², step 1 | 24 |
+| `archerSight` | 0–30 m, step 0.5 | 14 |
+| `arrowSpeed` | 2–30 m/s, step 0.5 | 12 |
+| `arrowDamage` | 0–20 whole damage points | 1 |
 | `bumpDamage` | 0–20 whole damage points | 1 |
 | `bumpSpeed` | 0–20 m/s, step 0.1 | 3 |
 | `bumpLift` | 0–20 m/s, step 0.1 | 1.4 |
@@ -583,7 +589,14 @@ Mass updates live enemy bodies immediately; inactive enemies use it when their b
 next wake. Acceleration limits steering toward a desired velocity; sight and dive speed
 apply immediately, including mid-dive. Sight is for active birds, also limited to that
 distance beyond their authored patrol radius; wake/sleep distances and AI scheduling
-remain engine internals. Bump damage, horizontal speed away from the enemy and upward
+remain engine internals. An active hollow archer that sees the player within `archerSight`
+draws only when an arrow leaving at `arrowSpeed` can reach the middle of the player's hurt
+box, within the 40 m projectiles fly, along an arc clear of terrain and platforms, the low arc or else the high one; at the end
+of its draw it aims again and looses, or walks on. Arrows fall under gravity, so `arrowSpeed`
+sets their reach, its square over gravity on level ground (14.7 m at 12 m/s). An arrow deals
+`arrowDamage`, fixed as it is loosed, and knocks the player like any projectile, by the
+Hazards group's `projectilePush` along its flight plus `projectileLift`; zero damage keeps
+that knockback without hurting. Bump damage, horizontal speed away from the enemy and upward
 lift apply at the next bump. Zero bump damage retains knockback, but causes no damage,
 hurt effects or invulnerability.
 
@@ -652,7 +665,7 @@ silent base, so plugin audio works there too.
 `{ "type": "play-sound", "source": "/media/bell.wav", "volume": 1 }`. The next event
 starts immediately. Levels using it need an updated runtime.
 
-**Enemy art.** Per species (`bird`, `hollow-soldier`): `null` for the built-in art,
+**Enemy art.** Per species (`bird`, `hollow-soldier`, `hollow-archer`): `null` for the built-in art,
 or `{ "frames": [rows, rows], "palette": { "<char>": "#rrggbb" } }` with exactly two
 frames of equal size, at most 64 x 64 pixels and 32 palette colours. Rows read top
 to bottom and face right; `.` is transparent. Art is cosmetic: colliders, health,

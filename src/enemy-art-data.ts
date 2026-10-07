@@ -96,6 +96,58 @@ const BUILT_IN_FRAMES: Readonly<Record<EnemySpecies, Frames>> = {
       '.####.....####..',
     ],
   ],
+  'hollow-archer': [
+    [
+      '......###.........',
+      '.....#rrr#........',
+      '....#rrrrr#..#....',
+      '....#rrHHh#..hR...',
+      '....#rrG#G#..hR...',
+      '..CC#rrhHh#.h..R..',
+      '.#CC#rr#h#..h..R..',
+      '.#R#rraaaA#.h...R.',
+      '.#R#raaAaAA#h...R.',
+      '.#R#raAahHHCCCCCCS',
+      '.#R#raaAaaaaaaaHX.',
+      '.#R#raaaAa#h....R.',
+      '..##rRRRRR#.h...R.',
+      '...#raaAaa#.h...R.',
+      '...#rraaaaa#h..R..',
+      '....#aa#aa#.h..R..',
+      '....#a#.#a#..hR...',
+      '....#h#.#h#..hR...',
+      '....#h#.#h#..#....',
+      '....#h#.#h#.......',
+      '....#a#.#a#.......',
+      '...#AA#.#AA#......',
+      '...####.####......',
+    ],
+    [
+      '......###.........',
+      '.....#rrr#........',
+      '....#rrrrr#..#....',
+      '....#rrHHh#..hR...',
+      '....#rrG#G#..hR...',
+      '..CC#rrhHh#.h..R..',
+      '.#CC#rr#h#..h..R..',
+      '.#R#rraaaA#.h...R.',
+      '.#R#raaAaAA#h...R.',
+      '.#R#raAahHHCCCCCCS',
+      '.#R#raaAaaaaaaaHX.',
+      '.#R#raaaAa#h....R.',
+      '..##rRRRRR#.h...R.',
+      '...#raaAaa#.h...R.',
+      '...#rraaaaa#h..R..',
+      '....#aa#aa#.h..R..',
+      '....#a#.#a#..hR...',
+      '...#ah#..#h#.hR...',
+      '..#hh#...#h#.#....',
+      '..#h#.....#h#.....',
+      '..#a#.....#a#.....',
+      '.#AA#.....#AA#....',
+      '.####.....####....',
+    ],
+  ],
 };
 
 const BUILT_IN_PALETTE: Readonly<Record<string, string>> = {
@@ -116,7 +168,7 @@ export type EnemyArtSettings = Readonly<Record<EnemySpecies, SpeciesArt | null>>
 
 export const ENEMY_ART_LIMITS = { frames: 2, size: 64, palette: 32 } as const;
 
-export const DEFAULT_ENEMY_ART: EnemyArtSettings = Object.freeze({ bird: null, 'hollow-soldier': null });
+export const DEFAULT_ENEMY_ART: EnemyArtSettings = Object.freeze({ bird: null, 'hollow-soldier': null, 'hollow-archer': null });
 
 export function builtInEnemyArt(species: EnemySpecies): SpeciesArt {
   const frames = BUILT_IN_FRAMES[species];

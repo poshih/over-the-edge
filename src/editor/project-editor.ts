@@ -3,7 +3,7 @@ import type { AudioClip, AudioCue, AudioSettings } from '../audio-settings';
 import { element } from '../dom';
 import { builtInEnemyArt } from '../enemy-art-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
-import { ENEMY_SPECIES } from '../enemy-types';
+import { ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import { DEFAULT_HUD, HUD_FIELDS } from '../hud';
 import { MEDIA_LIMITS, MEDIA_TYPES } from '../media';
@@ -21,7 +21,6 @@ import type { ServerModels } from './server-models';
 import { sectionMarkup } from './workshop-section';
 import './project-editor.css';
 
-const SPECIES_LABELS: Readonly<Record<EnemySpecies, string>> = { bird: 'Bird', 'hollow-soldier': 'Hollow soldier' };
 const MEDIA_ACCEPT = Object.entries(MEDIA_TYPES).flatMap(([extension, type]) => [`.${extension}`, type]).join(',');
 
 function formatSize(bytes: number): string {
@@ -317,7 +316,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     const label = document.createElement('label');
     label.className = 'appearance-label';
     label.htmlFor = `project-enemy-${species}`;
-    label.textContent = `${SPECIES_LABELS[species]} art (JSON)`;
+    label.textContent = `${ENEMY_SPECS[species].label} art (JSON)`;
     const area = document.createElement('textarea');
     area.id = `project-enemy-${species}`;
     area.rows = 6;
@@ -330,7 +329,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       button.type = 'button';
       button.className = 'button';
       button.textContent = text;
-      button.setAttribute('aria-label', `${text}: ${SPECIES_LABELS[species]}`);
+      button.setAttribute('aria-label', `${text}: ${ENEMY_SPECS[species].label}`);
       button.addEventListener('click', run, listen);
       actions.append(button);
     };
@@ -344,7 +343,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
           apply(JSON.parse(area.value));
         } catch (error) {
           if (!(error instanceof SyntaxError)) throw error;
-          options.onNotice(`${SPECIES_LABELS[species]} art is not valid JSON: ${error.message}`, 'error');
+          options.onNotice(`${ENEMY_SPECS[species].label} art is not valid JSON: ${error.message}`, 'error');
         }
       }
     });

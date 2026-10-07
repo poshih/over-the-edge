@@ -1,8 +1,8 @@
-import { DynamicDrawUsage, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial } from 'three';
-import type { BufferGeometry } from 'three';
+import { DynamicDrawUsage, Group, InstancedMesh, Matrix4, MeshBasicMaterial, MeshStandardMaterial } from 'three';
+import type { BufferGeometry, Material } from 'three';
 import { ModelKit } from './decoration-geometry';
 import type { ProjectilePose } from './hazard-world';
-import { HAZARD_LIMITS, SHOOTER } from './hazards';
+import { ARROW, HAZARD_LIMITS, SHOOTER } from './hazards';
 import type { LevelObject, ShooterObject } from './level';
 import { ObjectView } from './object-view';
 
@@ -13,6 +13,9 @@ const IRON_LIGHT = 0x767a80;
 const BORE = 0x0e0d0d;
 const EMBER = 0xff7a1f;
 const FLAME = 0xffc35a;
+const SHAFT = 0x8a6440;
+const STEEL = 0x9ba1a8;
+const FLETCHING = 0xd8cfb6;
 
 // A carved block reaching back from its muzzle at the origin, which faces +x.
 function shooterModel() {
@@ -40,6 +43,44 @@ function projectileModel() {
   return model.glow;
 }
 
+// A wooden arrow, its tip at the origin, pointing +x: a steel head, the shaft and two vanes of fletching at its tail,
+// one in the view's plane and one across it.
+function arrowModel() {
+  const kit = new ModelKit(0xa770);
+  const head = 0.1;
+  const shaft = ARROW.length - head;
+  const vane = 0.14;
+  kit.cylinder(ARROW.radius, ARROW.radius, shaft, SHAFT, { x: -head - shaft / 2, rz: Math.PI / 2 }, 6);
+  kit.cone(ARROW.radius * 2.6, head, STEEL, { x: -head / 2, rz: -Math.PI / 2 }, 4);
+  kit.box(vane, ARROW.radius * 4.5, 0.008, FLETCHING, { x: vane / 2 + 0.03 - ARROW.length });
+  kit.box(vane, 0.008, ARROW.radius * 4.5, FLETCHING, { x: vane / 2 + 0.03 - ARROW.length });
+  const model = kit.build('own');
+  if (model.lit === null) throw new Error('An arrow needs its shaft.');
+  return model.lit;
+}
+
+// One kind of projectile's instances, rewritten every frame.
+function flight<M extends Material>(geometry: BufferGeometry, material: M): InstancedMesh<BufferGeometry, M> {
+  const mesh = new InstancedMesh(geometry, material, SHOOTER.projectiles);
+  mesh.count = 0;
+  // They move every frame, so bounds would be recomputed every frame for the few they could cull.
+  mesh.frustumCulled = false;
+  mesh.matrixAutoUpdate = false;
+  mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  return mesh;
+}
+
+// Draws the first `count` instances written this frame, through a reused update range.
+function show(mesh: InstancedMesh, count: number, range: { start: number; count: number }): void {
+  mesh.count = count;
+  if (count === 0) return;
+  const attribute = mesh.instanceMatrix;
+  range.count = count * attribute.itemSize;
+  attribute.updateRanges.length = 0;
+  attribute.updateRanges.push(range);
+  attribute.needsUpdate = true;
+}
+
 /** The level's projectile traps, on the obstacle line in the course pass, each turned to fire along its angle. */
 export class ShooterView extends ObjectView<ShooterObject> {
   constructor() {
@@ -57,44 +98,50 @@ export class ShooterView extends ObjectView<ShooterObject> {
   }
 }
 
-/** Projectiles in flight, in the actors pass. Each frame writes only the instances of those flying. */
+/**
+ * Projectiles in flight, in the actors pass: traps' glowing bolts and archers' wooden arrows, each kind one instanced
+ * mesh. Each frame writes only the instances of those flying.
+ */
 export class ProjectileView {
-  readonly root: InstancedMesh<BufferGeometry, MeshBasicMaterial>;
+  readonly root = new Group();
+  private readonly bolts = flight(projectileModel(), new MeshBasicMaterial({ vertexColors: true, toneMapped: false }));
+  private readonly arrows = flight(arrowModel(),
+    new MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.1, flatShading: true }));
+  private readonly boltRange = { start: 0, count: 0 };
+  private readonly arrowRange = { start: 0, count: 0 };
   private readonly matrix = new Matrix4();
 
   constructor() {
-    this.root = new InstancedMesh(projectileModel(), new MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
-      SHOOTER.projectiles);
-    this.root.count = 0;
-    // They move every frame, so bounds would be recomputed every frame for the few they could cull.
-    this.root.frustumCulled = false;
+    this.root.name = 'projectiles';
     this.root.matrixAutoUpdate = false;
-    this.root.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.root.add(this.bolts, this.arrows);
   }
 
   update(projectiles: readonly ProjectilePose[]): void {
     const count = projectiles.length;
-    if (count === 0 && this.root.count === 0) return;
+    if (count === 0 && this.bolts.count === 0 && this.arrows.count === 0) return;
+    let bolts = 0;
+    let arrows = 0;
     for (let index = 0; index < count; index++) {
-      const projectile = projectiles[index];
-      this.root.setMatrixAt(index, this.matrix.makeRotationZ(projectile.angle).setPosition(projectile.x, projectile.y, 0));
+      const projectile = projectiles[index]!;
+      this.matrix.makeRotationZ(projectile.angle).setPosition(projectile.x, projectile.y, 0);
+      if (projectile.kind === 'arrow') this.arrows.setMatrixAt(arrows++, this.matrix);
+      else this.bolts.setMatrixAt(bolts++, this.matrix);
     }
-    this.root.count = count;
-    if (count === 0) return;
-    const attribute = this.root.instanceMatrix;
-    attribute.clearUpdateRanges();
-    attribute.addUpdateRange(0, count * attribute.itemSize);
-    attribute.needsUpdate = true;
+    show(this.bolts, bolts, this.boltRange);
+    show(this.arrows, arrows, this.arrowRange);
   }
 
   inspect() {
-    return { instances: this.root.count };
+    return { instances: this.bolts.count + this.arrows.count, bolts: this.bolts.count, arrows: this.arrows.count };
   }
 
   dispose(): void {
-    this.root.dispose();
-    this.root.geometry.dispose();
-    this.root.material.dispose();
     this.root.removeFromParent();
+    for (const mesh of [this.bolts, this.arrows]) {
+      mesh.dispose();
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
   }
 }
