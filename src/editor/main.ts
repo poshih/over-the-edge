@@ -299,7 +299,7 @@ const spriteEditor = createSpriteEditor({
     return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
   }),
 });
-const collisionOverlay = new CollisionOverlay(() => game.view.character.armPoses(), () => game.view.drawnPhysicsFrame());
+const collisionOverlay = new CollisionOverlay(game.simulation.world, () => game.view.character.armPoses());
 game.view.addLayer(collisionOverlay);
 // The course draws as the project's look says, as its releases draw it: placed GLBs, loaded from the project as the level
 // uses them, or every terrain object as its collision.
@@ -321,7 +321,6 @@ const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins,
   audioDevice.dispose();
   game.dispose();
 });
-const unsubscribeOverlay = game.simulation.subscribeTerrain((event) => collisionOverlay.apply(event));
 const decorations = game.view.decorations;
 if (decorations === null) throw new Error('The Workshop draws decorations.');
 const levelEditor = createLevelEditor({
@@ -560,7 +559,6 @@ if (import.meta.hot) {
     disposal.run(() => audioDevice.dispose());
     disposal.run(() => unsubscribeLevel());
     disposal.run(() => unsubscribeAppearance());
-    disposal.run(() => unsubscribeOverlay());
     disposal.run(() => unsubscribeCourseLook());
     disposal.run(() => levelEditor.dispose());
     disposal.run(() => levelChecks.dispose());

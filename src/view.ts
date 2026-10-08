@@ -29,7 +29,7 @@ import type { DeathFrame, DeathKind } from './death-sequence';
 import { createSceneFrame } from './scene-frame';
 import type { MutableSceneFrame } from './scene-frame';
 import { createSceneLayers, SCENE_LAYER_CONTRACT } from './scene-layer';
-import type { SceneLayer } from './scene-layer';
+import type { SceneLayer, ScenePass } from './scene-layer';
 import { disposeResources } from './scene-resources';
 import { physicsPart } from './simulation';
 import type { PhysicsFrame } from './simulation';
@@ -93,6 +93,8 @@ export class GameView {
   private readonly actors = new Scene();
   private readonly front = new Scene();
   private readonly marks = new Scene();
+  // Over everything, the tool included; drawn only while something there shows.
+  private readonly top = new Scene();
   private readonly orthographic = new OrthographicCamera();
   private readonly perspective = new PerspectiveCamera();
   // The theme's camera. Either looks along -z at the course plane, the obstacle line (z = 0), from `distance`, and
@@ -115,7 +117,6 @@ export class GameView {
   private readonly layers = new Map<SceneLayer, CheckedInstance<SceneLayer>>();
   private updatingLayers: readonly Attributed<SceneLayer>[] = [];
   private readonly sceneFrame: MutableSceneFrame;
-  private drawnPhysics: PhysicsFrame;
   private renders = 0;
   private rig: RigGeometry;
   private headOutline: HammerHead = DEFAULT_HAMMER_HEAD;
@@ -198,7 +199,6 @@ export class GameView {
     this.cameraView.reach.x = head.x;
     this.cameraView.reach.y = head.y;
     this.rig = initial.rig;
-    this.drawnPhysics = initial;
     this.sceneFrame = createSceneFrame(head.vertices);
     // Keep unmounted runtime layers owned too, if subsequent renderer/player construction fails.
     for (const layer of layers) this.layers.set(layer.value, layer);
@@ -215,8 +215,9 @@ export class GameView {
       this.renderer.shadowMap.enabled = true;
       this.renderer.setClearColor(theme.sky);
       this.fog = new Fog(theme.fog.color);
-      // The marks are unlit; they only take the fog.
+      // The marks and top are unlit; they only take the fog.
       this.marks.fog = this.fog;
+      this.top.fog = this.fog;
       let characterSun: DirectionalLight | null = null;
       for (const pass of [this.backdropScene, this.course, this.actors, this.front]) {
         pass.fog = this.fog;
@@ -259,10 +260,7 @@ export class GameView {
       this.characterLight = new CharacterLight(characterSun!, this.actors, theme);
       this.characterParts = new CharacterShadowParts(this.character.actors, this.character.foreground);
       this.marks.add(this.aimMarks.value.root);
-      for (const effect of this.effects.all) {
-        const pass = effect.captured.pass === 'course' ? this.course : effect.captured.pass === 'actors' ? this.actors : this.marks;
-        pass.add(effect.value.root);
-      }
+      for (const effect of this.effects.all) this.passScene(effect.captured.pass).add(effect.value.root);
       for (const layer of layers) this.addLayer(layer.value, layer);
       this.observer = new ResizeObserver(() => this.resize());
       this.observer.observe(canvas);
@@ -313,8 +311,7 @@ export class GameView {
     if (layer.update !== undefined && !this.updatingLayers.includes(target)) {
       this.updatingLayers = [...this.updatingLayers, target];
     }
-    const pass = target.captured.pass === 'course' ? this.course : target.captured.pass === 'actors' ? this.actors : this.marks;
-    pass.add(layer.root);
+    this.passScene(target.captured.pass).add(layer.root);
   }
 
   // Removes a layer added with addLayer() and disposes it.
@@ -332,9 +329,6 @@ export class GameView {
   // Internal rig settings for phantom playback, including before its first drawn frame.
   get rigGeometry(): RigGeometry { return this.rig; }
 
-  // Internal collision diagnostics: the physics frame last passed to render(), borrowed, not a snapshot.
-  drawnPhysicsFrame(): PhysicsFrame { return this.drawnPhysics; }
-
   render(physics: PhysicsFrame, options: { dt: number; death: DeathFrame | null }): void {
     if (this.measurements.capturing) {
       const startedAt = performance.now();
@@ -346,7 +340,6 @@ export class GameView {
   }
 
   private renderFrame(physics: PhysicsFrame, options: { dt: number; death: DeathFrame | null }): void {
-    this.drawnPhysics = physics;
     this.renders++;
     this.syncRig(physics);
     this.syncHead(physicsPart(physics, 'head').vertices);
@@ -371,6 +364,7 @@ export class GameView {
       shown.time = frame.time;
       shown.cursor.x = frame.cursor.x; shown.cursor.y = frame.cursor.y;
       shown.enemies = frame.enemies;
+      this.writeView(shown.view);
       this.character.writeScene(shown);
       for (let index = 0; index < layers.length; index++) {
         const layer = layers[index]!;
@@ -398,6 +392,8 @@ export class GameView {
     if (this.character.stance.upperBody3d) this.drawActorsLayer(ARM_LAYER);
     this.renderer.render(this.marks, this.camera);
     this.drawActorsLayer(TOOL_LAYER);
+    // Like the marks, the top ignores depth.
+    if (this.drawsTop()) this.renderer.render(this.top, this.camera);
   }
 
   // Draws only the actors on `layer`, as the actors pass placed them.
@@ -582,7 +578,7 @@ export class GameView {
     }
     this.layers.clear();
     this.updatingLayers = [];
-    disposal.run(() => disposeResources(this.backdropScene, this.course, this.actors, this.front, this.marks));
+    disposal.run(() => disposeResources(this.backdropScene, this.course, this.actors, this.front, this.marks, this.top));
     disposal.run(() => this.defocus.dispose());
     disposal.run(() => this.renderer?.dispose());
     disposal.finish();
@@ -639,9 +635,30 @@ export class GameView {
     return { halfWidth: halfHeight * this.width / this.height, halfHeight };
   }
 
+  // The course plane's rectangle the camera shows, as halfExtents() sizes it, without allocating.
+  private writeView(out: MutableSceneFrame['view']): void {
+    const { x, y } = this.camera.position, halfHeight = this.worldHeight / 2, halfWidth = halfHeight * this.width / this.height;
+    out.left = x - halfWidth;
+    out.right = x + halfWidth;
+    out.bottom = y - halfHeight;
+    out.top = y + halfHeight;
+  }
+
+  // The scene drawing a validated pass.
+  private passScene(pass: ScenePass | undefined): Scene {
+    return pass === 'course' ? this.course : pass === 'actors' ? this.actors : pass === 'top' ? this.top : this.marks;
+  }
+
   // Whether anything draws in front of the obstacle line, over the actors.
   private drawsFront(): boolean {
     return (this.decorations !== null && this.decorations.front.children.length > 0) || this.looks.drawsFront();
+  }
+
+  // Whether anything shows over the tool.
+  private drawsTop(): boolean {
+    const children = this.top.children;
+    for (let index = 0; index < children.length; index++) if (children[index]!.visible) return true;
+    return false;
   }
 
   // Burns the bonfires the player has reached this run, and puts the rest out.

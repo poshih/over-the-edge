@@ -4,14 +4,15 @@ import type { CheckedInstance } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
 import type { SceneFrame } from './scene-frame';
 
-export const SCENE_PASSES = Object.freeze(['course', 'actors', 'marks'] as const);
+export const SCENE_PASSES = Object.freeze(['course', 'actors', 'marks', 'top'] as const);
 export type ScenePass = (typeof SCENE_PASSES)[number];
 
 export interface SceneLayer {
   // Root, pass and methods stay the same for the layer's lifetime.
   readonly root: Object3D;
   // Course with the terrain; actors over it with the characters; marks over the characters and their arms,
-  // under the tool. Marks' materials ignore depth (depthTest: false), leaving the arms/tool depth alone.
+  // under the tool; top over everything, the tool included. Marks' and top's materials ignore depth
+  // (depthTest: false), leaving the arms/tool depth alone.
   readonly pass: ScenePass;
   // Only layers with update() run each drawn frame. Allocate nothing and draw only what changed.
   update?(frame: SceneFrame): void;
@@ -30,7 +31,7 @@ function layerFactory(value: unknown): SceneLayerFactory {
 export const SCENE_LAYERS = listPoint('scene.layers', 'runtime', SCENE_LAYER_LIMITS.layers, layerFactory);
 
 export const SCENE_LAYER_CONTRACT = instanceContract({
-  returns: 'a three.js root, a course, actors or marks pass and, when given, update(frame) and dispose()',
+  returns: 'a three.js root, a course, actors, marks or top pass and, when given, update(frame) and dispose()',
   methods: [],
   optional: ['update', 'dispose'],
   root: true,

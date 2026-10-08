@@ -15,7 +15,7 @@ import type { ScenePass } from './scene-layer';
 export interface MomentEffect {
   readonly root: Object3D;
   readonly pass: ScenePass;
-  // Fixed for its lifetime; absent means every type. Marks materials must ignore depth.
+  // Fixed for its lifetime; absent means every type. Marks and top materials must ignore depth.
   readonly moments?: readonly MomentType[];
   // In journal order, current placement only. Borrow the moment and nested cause only for this call.
   moment(moment: Moment): void;
@@ -49,7 +49,7 @@ export const DEFAULT_EFFECTS: Readonly<{
 });
 
 const EFFECT_CONTRACT = instanceContract({
-  returns: 'a three.js root, a course, actors or marks pass, a valid optional moments filter, moment(moment), update(frame) and dispose()',
+  returns: 'a three.js root, a course, actors, marks or top pass, a valid optional moments filter, moment(moment), update(frame) and dispose()',
   methods: ['moment', 'update', 'dispose'],
   root: true,
   passes: SCENE_PASSES,

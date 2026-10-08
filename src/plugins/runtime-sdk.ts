@@ -40,7 +40,7 @@ export type { PlayerDeathErrorCode } from '../player-ragdoll';
 export type { CharacterRiggingType } from '../sprite-data';
 export { SCENE_LAYERS, SCENE_LAYER_LIMITS } from '../scene-layer';
 export type { SceneLayer, SceneLayerFactory, ScenePass } from '../scene-layer';
-export type { SceneCharacter, SceneFrame, SceneHammer, ScenePoint, ScenePose } from '../scene-frame';
+export type { SceneBounds, SceneCharacter, SceneFrame, SceneHammer, ScenePoint, ScenePose } from '../scene-frame';
 export { OBSTACLE_LINE } from '../obstacle-line';
 export { ARM_LAYER } from '../arm-layer';
 export type { Point } from '../config';

@@ -277,11 +277,13 @@ The engine keeps the renderer and the pass sequence. Each pass draws over the la
 5. **Marks**, ignoring depth, over the arms.
 6. The player's **tool**, the actors' tool layer, sharing the arms' depth, over the marks so the
    hands hold it.
+7. **Top**, ignoring depth, only while something shows there: over everything, the tool included,
+   such as the Workshop's collision overlay.
 
 Everything that collides is centred on `OBSTACLE_LINE`, z = 0: terrain reaches half its depth
 each side, and the pot and enemies stand there. Do not move collider visuals away from it.
 Decorations never collide; a prop standing on a collider stays within that collider's depth.
-New 3D player-arm visuals use `ARM_LAYER`. Every marks material must use `depthTest: false`,
+New 3D player-arm visuals use `ARM_LAYER`. Every marks and top material must use `depthTest: false`,
 leaving the depth shared by arms and tool alone; `depthWrite: false` may make that intent
 explicit too. The SDK exports `OBSTACLE_LINE` and `ARM_LAYER`.
 
@@ -478,7 +480,7 @@ piece. Each point holds a `MomentEffectFactory`, `() => MomentEffect`:
 ```ts
 interface MomentEffect {
   readonly root: Object3D;
-  readonly pass: ScenePass; // 'course' | 'actors' | 'marks'
+  readonly pass: ScenePass; // 'course' | 'actors' | 'marks' | 'top'
   readonly moments?: readonly MomentType[];
   moment(moment: Moment): void;
   update(frame: SceneFrame): boolean;
@@ -511,8 +513,9 @@ interface MomentEffect {
   pauses and tab visibility changes settle interpolation at the current step, so resuming
   never rewinds it. Clamp ages and time steps at zero, such as `Math.max(0, frame.time - born)`.
 - Roots draw in the selected pass and detach before `dispose`. Collider visuals belong on
-  `OBSTACLE_LINE` in actors. **Marks materials ignore depth (`depthTest: false`)** and should
-  use `depthWrite: false`, over the characters and arms but under the tool. Follow the
+  `OBSTACLE_LINE` in actors. **Marks and top materials ignore depth (`depthTest: false`)** and
+  should use `depthWrite: false`; marks draw over the characters and arms but under the tool, top
+  over everything. Follow the
   [pass rules](#pass-rules-for-presentation-points); effects never mutate physics or authored data.
 
 **Default strikes.** `DEFAULT_EFFECTS.strikes` draws in marks and takes `hurt`, `block` and
@@ -997,7 +1000,7 @@ shared and target vectors, solver scratch, poses and quaternions are reused: no 
 allocation. Keep your own figures pooled too; never retain the input as a snapshot.
 The root draws in **actors**, over the course; phantoms never collide and the input preserves
 the recorded course-plane positions. The default translucent parts retain their nearer-part-first
-depth ordering; the [front, arms, marks and tool passes](#pass-rules-for-presentation-points) are
+depth ordering; the [front, arms, marks, tool and top passes](#pass-rules-for-presentation-points) are
 unchanged. The engine detaches the root before `dispose`. Recording and network services stay
 outside this point; see [phantoms](phantoms.md).
 
@@ -1028,12 +1031,13 @@ extend it without importing a feature that a release may omit.
 ```ts
 interface SceneLayer {
   readonly root: Object3D;
-  readonly pass: 'course' | 'actors' | 'marks';
+  readonly pass: 'course' | 'actors' | 'marks' | 'top';
   update?(frame: SceneFrame): void;
   dispose?(): void;
 }
 interface ScenePoint { readonly x: number; readonly y: number }
 interface ScenePose extends ScenePoint { readonly angle: number }
+interface SceneBounds { readonly left: number; readonly right: number; readonly bottom: number; readonly top: number }
 interface SceneCharacter {
   readonly phase: 'alive' | 'dying';
   readonly centre: ScenePose;
@@ -1054,6 +1058,7 @@ interface SceneFrame {
   readonly hammer: SceneHammer;
   readonly cursor: ScenePoint;
   readonly enemies: readonly EnemyPose[];
+  readonly view: SceneBounds;
 }
 ```
 
@@ -1066,7 +1071,9 @@ Factories, `update` and optional `dispose` finish synchronously: a promise-like 
 character presentation previews; releases have no such previews. It exposes no physics parts,
 rig geometry or physical-player frames. Positions are world metres on the course plane,
 angles radians counterclockwise. `time` is the drawn frame's simulation seconds and rewinds
-on a restart; `cursor` is the drawn cursor and `enemies` are the drawn enemy poses.
+on a restart; `cursor` is the drawn cursor and `enemies` are the drawn enemy poses. `view` is
+the rectangle of the course plane the camera shows; in perspective, nearer depths show less and
+farther ones more. Cull to it to keep per-frame work to what is on screen.
 
 `character.phase` is `'alive'` or `'dying'`. `centre` is the drawn player centre: the live jar
 root or the corpse jar, with its angle. `jarBottom` is how far the jar's base lies below that centre
@@ -1082,7 +1089,7 @@ part poses. `outline` is the colliding head's borrowed head-local `HammerHead`: 
 handle away from the butt, +Y across it, including a selected library hammer's own outline.
 Unlike this active collider, phantom looks keep using the current rig settings' head.
 
-The Game owns one record and writes its nested character, hammer and cursor poses in place,
+The Game owns one record and writes its nested character, hammer, cursor and view in place,
 without allocation, only when an updating layer or an active effect needs it. All member
 references are borrowed; in particular, the enemies array and its poses are pooled until the
 next frame. Read during the call, never retain the frame or its members as a previous-frame

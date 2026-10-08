@@ -241,15 +241,16 @@ allocates nothing per frame on its behalf.
   `{ root, pass, update?, dispose? }`. It uses the same `SceneLayer` and `SceneFrame` contract
   as [runtime scene layers](runtime-plugins.md#scene-layers), re-exported by the Workshop SDK,
   not a Workshop-specific type. `course` draws with the terrain, `actors` over it with the
-  characters, and `marks` over the characters and their arms, under the tool. Collider
-  visuals stay centred on the obstacle line, z = 0, in actors; a marks overlay's materials
-  ignore depth (`depthTest: false`), leaving the arms/tool depth alone. Only overlays with
-  `update(frame: SceneFrame)` run each drawn frame. That frame is reused and read-only (time,
-  character, hammer, cursor and enemies **as drawn**, including presentation previews),
+  characters, `marks` over the characters and their arms, under the tool, and `top` over
+  everything, the tool included. Collider visuals stay centred on the obstacle line, z = 0, in
+  actors; a marks or top overlay's materials ignore depth (`depthTest: false`), leaving the
+  arms/tool depth alone. Only overlays with `update(frame: SceneFrame)` run each drawn frame.
+  That frame is reused and read-only (time, character, hammer, cursor, enemies and the course
+  rectangle in view **as drawn**, including presentation previews),
   without physics internals. Its record and nested poses are pooled; the head outline and
   pooled enemy poses are borrowed. Never retain them as a snapshot and allocate nothing.
-  `SceneCharacter`, `SceneHammer`, `ScenePose` and `ScenePoint` are also exported by the
-  Workshop SDK.
+  `SceneCharacter`, `SceneHammer`, `ScenePose`, `ScenePoint` and `SceneBounds` are also
+  exported by the Workshop SDK.
   `update` and optional `dispose` finish synchronously; a promise-like result is
   `invalid-contribution` and stops only the contributing plugin.
   Static overlays have no frame callback. The host checks the root, pass and methods when

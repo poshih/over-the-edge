@@ -56,7 +56,7 @@ export type { PluginData } from '../plugin-data';
 export type { JsonValue } from '../bounded-json';
 export type { WorkshopGameState } from './game-state';
 export type { SceneLayer } from '../scene-layer';
-export type { SceneCharacter, SceneFrame, SceneHammer, ScenePoint, ScenePose } from '../scene-frame';
+export type { SceneBounds, SceneCharacter, SceneFrame, SceneHammer, ScenePoint, ScenePose } from '../scene-frame';
 export type {
   AppearancePart, ArmIkSettings, ArtMode, AudioSettings, AvatarMotionEntry, AvatarMotionModel, CharacterArms, CharacterRiggingType,
   DirectionalPresentation, EnemyArtSettings, EnemyPose, GameSettings, GameTheme, Grips, HammerHead, HudSettings,

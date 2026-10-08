@@ -4,6 +4,7 @@ import type { HammerHead } from './hammer-head';
 // World metres on the course plane; angles are radians counterclockwise.
 export interface ScenePoint { readonly x: number; readonly y: number }
 export interface ScenePose extends ScenePoint { readonly angle: number }
+export interface SceneBounds { readonly left: number; readonly right: number; readonly bottom: number; readonly top: number }
 
 export interface SceneCharacter {
   readonly phase: 'alive' | 'dying';
@@ -34,6 +35,8 @@ export interface SceneFrame {
   readonly hammer: SceneHammer;
   readonly cursor: ScenePoint;
   readonly enemies: readonly EnemyPose[];
+  // The course plane's rectangle the camera shows; in perspective, nearer depths show less and farther ones more.
+  readonly view: SceneBounds;
 }
 
 // Internal writer mirrors; SDKs expose only the read-only contract.
@@ -52,6 +55,7 @@ export interface MutableSceneFrame extends Mutable<SceneFrame> {
   character: MutableSceneCharacter;
   hammer: MutableSceneHammer;
   cursor: Mutable<ScenePoint>;
+  view: Mutable<SceneBounds>;
 }
 
 function pose(): Mutable<ScenePose> { return { x: 0, y: 0, angle: 0 }; }
@@ -63,5 +67,6 @@ export function createSceneFrame(outline: HammerHead): MutableSceneFrame {
     hammer: { held: true, butt: pose(), head: pose(), outline },
     cursor: { x: 0, y: 0 },
     enemies: [],
+    view: { left: 0, right: 0, bottom: 0, top: 0 },
   };
 }

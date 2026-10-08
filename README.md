@@ -317,9 +317,9 @@ only what it needs.
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
 Runtime scene layers, moment effects and Workshop overlays receive a pooled, read-only
-[`SceneFrame`](docs/runtime-plugins.md#scene-layers): character, hammer, cursor and enemies
-as drawn, including Workshop presentation previews, without physics internals. Read it only
-during `update`; reuse geometry/materials and allocate nothing per frame. Workshop
+[`SceneFrame`](docs/runtime-plugins.md#scene-layers): character, hammer, cursor, enemies and the
+course rectangle in view as drawn, including Workshop presentation previews, without physics
+internals. Read it only during `update`; reuse geometry/materials and allocate nothing per frame. Workshop
 `game.state()` instead returns explicit typed gameplay/control readings through
 [`WorkshopGameState`](docs/workshop-plugins.md#the-running-game), built on request.
 
@@ -1266,7 +1266,8 @@ terrain object's [mesh](#course-meshes-from-your-own-pipeline) reaches half its 
 camera and half behind, and a GLB mesh's collision is its slice there, through the middle of its
 depth, unless it declares its projection, its outermost outline seen along the view; the pot, enemies and phantoms stand on the line. The engine places them there, so no level
 can put a collider anywhere else. The collision overlay (**D**)
-draws on the line too. The hammer and hands are drawn in front of the chest (see
+draws on the line too: everything that can collide, read from the physics world where its last step
+left it, and every joint's anchors. The hammer and hands are drawn in front of the chest (see
 [arm forward distance](#custom-visuals)), so in perspective the hammer model sits slightly off its
 outline while its contacts stay on the line.
 
@@ -1275,7 +1276,8 @@ Colliders reach toward the camera, so the view draws in passes, each over the la
 and enemies); then the decorations on or in front of the line, the half of each swinging axe swung
 toward the camera and the liquid in front of whatever is in a pool; then a 3D character's
 [arms with the hammer](#custom-visuals), sharing one depth so the hands hold it, with the aim cursor
-and line, course labels and the collision overlay drawn over the arms but under the hammer. A
+and line and course labels drawn over the arms but under the hammer; the collision overlay draws
+last, over everything, the hammer included. A
 character whose head or arms overlap a collider on screen, such as under a low roof, is never hidden
 by it. A decoration in front of the line draws over the body and the other actors but under a 3D
 character's arms and the hammer, so keep it clear of the jar, which reaches toward the camera as far as
