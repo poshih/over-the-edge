@@ -212,9 +212,9 @@ export function compileCollision(object: Pick<TerrainObject, 'mesh' | 'mirror'>,
     throw new CollisionQueryError('QUERY_CAPABILITY_UNSUPPORTED', 'Unsupported engine collision discriminator.', { collision });
   }
   const loops = collision.loops;
-  if (loops.length === 0 || loops.length > LEVEL_LIMITS.sliceLoops) throw new LevelError('Collision queries require loops within LEVEL_LIMITS.');
+  if (loops.length === 0 || loops.length > LEVEL_LIMITS.meshLoops) throw new LevelError('Collision queries require loops within LEVEL_LIMITS.');
   const vertices = loops.reduce((sum, loop) => sum + loop.length, 0);
-  if (vertices > LEVEL_LIMITS.sliceVertices ||
+  if (vertices > LEVEL_LIMITS.meshPoints ||
     loops.some((loop) => loop.length < 3 || loop.length > LEVEL_LIMITS.polygonVertices)) {
     throw new LevelError('Collision queries require loops within LEVEL_LIMITS.');
   }

@@ -90,7 +90,8 @@ export class ImportedAvatarPresenter implements CharacterPresenter {
     context.attachment = frame.phase === 'alive' ? 'gripped' : 'released';
     // Phase 2: the prepared rig composes its mapped-joint matrices from the turned plan and these solutions.
     this.rig.writePose(context, this.pose);
-    this.view.apply(frame.body, frame.pot, frame.headRotation, this.pose, frame.time, frame.phase === 'alive' ? null : frame.headDelta);
+    this.view.apply(frame.body, frame.pot, frame.jarBottom, frame.headRotation, this.pose, frame.time,
+      frame.phase === 'alive' ? null : frame.headDelta);
   }
 
   setDying(_dying: boolean): void {}

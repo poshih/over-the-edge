@@ -1,16 +1,18 @@
-// A mesh's collision, worked out from its GLB: the simple shape it declares, or else its slice, its cross-section on the
-// obstacle line. It needs no DOM and depends only on the GLB's bytes, so the Workshop, the project server and build
-// tools derive the same collision from the same mesh.
+// A mesh's collision, worked out from its GLB: the simple shape it declares, or else outlines generated from it, its
+// slice unless it declares its projection. It needs no DOM and depends only on the GLB's bytes, so the Workshop, the
+// project server and build tools derive the same collision from the same mesh.
 //
-// A GLB declares a shape with `"extras": { "collision": "box" }` on its scene or a root node (a custom property
-// `collision` in Blender), naming one of the built-in shapes, fitted to the mesh's bounds. Without one the mesh is
-// sliced where it meets the obstacle line: the plane through the middle of its depth, which a placed mesh centres on
-// the line. The cross-section is rasterized with the nonzero rule, so overlapping parts merge, traced into outlines
-// and simplified to the level's limits.
+// A GLB declares its collision with `"extras": { "collision": "box" }` on its scene or a root node (a custom property
+// `collision` in Blender): one of the built-in shapes, fitted to the mesh's bounds, `slice` or `projection`. Without
+// one the mesh is sliced where it meets the obstacle line: the plane through the middle of its depth, which a placed
+// mesh centres on the line. The cross-section is rasterized with the nonzero rule, so overlapping parts merge. A
+// projection is instead the mesh's silhouette seen along the view, its parallel projection onto the course plane, so
+// its outermost surface collides wherever it lies in the depth. Either is traced into outlines and simplified to the
+// level's limits.
 import { ArtError } from './art-types';
 import { validateCourseModel } from './course-art-model';
-import { LEVEL_LIMITS, LevelError, polygonArea, SHAPE_KINDS, validateMeshCollision } from './level';
-import type { MeshCollision, ShapeKind, TerrainMesh } from './level';
+import { LEVEL_LIMITS, LevelError, MESH_OUTLINES, polygonArea, SHAPE_KINDS, validateMeshCollision } from './level';
+import type { MeshCollision, MeshOutlines, ShapeKind, TerrainMesh } from './level';
 
 /** A mesh ready to place: its terrain mesh, collision included, and its own size in metres. */
 export interface MeshTerrain {
@@ -251,8 +253,9 @@ function sceneTriangles(json: Gltf, buffers: readonly Uint8Array[]): Triangles {
   return { corners: Float64Array.from(corners), min, max };
 }
 
-// The simple shape the GLB declares on its scene or a root node, or null to slice it.
-function declaredCollision(json: Gltf): ShapeKind | null {
+// The collision the GLB declares on its scene or a root node: a simple shape, or how to generate its outlines, its
+// slice unless it declares its projection.
+function declaredCollision(json: Gltf): ShapeKind | MeshOutlines {
   const scenes = list(json.scenes, 'scene');
   const scene = record(scenes[json.scene === undefined ? 0 : index(json.scene, scenes.length, 'scene')], 'scene');
   const nodes = list(json.nodes, 'node');
@@ -262,13 +265,12 @@ function declaredCollision(json: Gltf): ShapeKind | null {
     const extras = holder.extras;
     if (typeof extras === 'object' && extras !== null && Object.hasOwn(extras, 'collision')) declared.add(Reflect.get(extras, 'collision'));
   }
-  if (declared.size === 0) return null;
+  if (declared.size === 0) return 'slice';
   if (declared.size > 1) fail('The GLB declares more than one collision type; declare one, on its scene or a root node.');
   const value = [...declared][0];
-  if (value === 'slice') return null;
-  const kind = SHAPE_KINDS.find((candidate) => candidate === value);
+  const kind = [...SHAPE_KINDS, ...MESH_OUTLINES].find((candidate) => candidate === value);
   if (kind === undefined) {
-    fail(`The GLB declares collision "${String(value)}". Use ${SHAPE_KINDS.join(', ')} or slice, or leave it out to slice the mesh.`);
+    fail(`The GLB declares collision "${String(value)}". Use ${[...SHAPE_KINDS, ...MESH_OUTLINES].join(', ')}, or leave it out to slice the mesh.`);
   }
   return kind;
 }
@@ -276,24 +278,28 @@ function declaredCollision(json: Gltf): ShapeKind | null {
 interface Grid {
   readonly columns: number;
   readonly rows: number;
-  // One byte per cell, row by row from the bottom: 1 where the cross-section is solid.
+  // One byte per cell, row by row from the bottom: 1 where the collision is solid.
   readonly solid: Uint8Array;
 }
 
-// The cross-section on the plane z = `plane`, rasterized over the box with the nonzero rule: a cell is solid where the
-// mesh's surface winds around its centre.
-function rasterize(triangles: Triangles, plane: number): Grid {
+// The grid over the mesh's box, and the model's x and y in grid units.
+function gridFrame(triangles: Triangles): { columns: number; rows: number; gx: (x: number) => number; gy: (y: number) => number } {
   const [minX, minY] = triangles.min;
   const width = triangles.max[0] - minX;
   const height = triangles.max[1] - minY;
   const longer = Math.max(width, height);
   const columns = Math.max(MIN_CELLS, Math.round(RESOLUTION * width / longer));
   const rows = Math.max(MIN_CELLS, Math.round(RESOLUTION * height / longer));
+  return { columns, rows, gx: (x) => (x - minX) / width * columns, gy: (y) => (y - minY) / height * rows };
+}
+
+// The cross-section on the plane z = `plane`, rasterized over the box with the nonzero rule: a cell is solid where the
+// mesh's surface winds around its centre.
+function sliceGrid(triangles: Triangles, plane: number): Grid {
+  const { columns, rows, gx, gy } = gridFrame(triangles);
   // Each crossing segment in grid units, oriented with the solid on its left: along ẑ × n for the face normal n.
   const segments: number[] = [];
   const { corners } = triangles;
-  const gx = (x: number): number => (x - minX) / width * columns;
-  const gy = (y: number): number => (y - minY) / height * rows;
   for (let at = 0; at < corners.length; at += 9) {
     const z = [corners[at + 2] - plane, corners[at + 5] - plane, corners[at + 8] - plane];
     const above = z.map((value) => value > 0);
@@ -318,7 +324,9 @@ function rasterize(triangles: Triangles, plane: number): Grid {
     const [x1, y1, x2, y2] = forward ? ends : [ends[2], ends[3], ends[0], ends[1]];
     segments.push(gx(x1), gy(y1), gx(x2), gy(y2));
   }
-  if (segments.length === 0) fail('The mesh has nothing where it meets the obstacle line, the middle of its depth. Declare a collision type, or reshape it.');
+  if (segments.length === 0) {
+    fail('The mesh has nothing where it meets the obstacle line, the middle of its depth. Declare a collision type, such as projection, or reshape it.');
+  }
   // Each row's crossings: a segment crosses row j when its centre j + 0.5 lies in [lower y, upper y).
   const crossings: number[][] = Array.from({ length: rows }, () => []);
   for (let at = 0; at < segments.length; at += 4) {
@@ -352,7 +360,7 @@ function rasterize(triangles: Triangles, plane: number): Grid {
     if (winding !== 0) open.push(row);
   }
   if (open.length > rows * OPEN_ROWS) {
-    fail('The mesh is not closed where it meets the obstacle line, so its slice has no inside. Close the mesh, or declare a collision type.');
+    fail('The mesh is not closed where it meets the obstacle line, so its slice has no inside. Close the mesh, or declare a collision type, such as projection.');
   }
   // A row crossing an opening in the surface takes the nearest closed row.
   const closed = (row: number): boolean => !open.includes(row);
@@ -362,9 +370,51 @@ function rasterize(triangles: Triangles, plane: number): Grid {
       if (row - distance >= 0 && closed(row - distance)) source = row - distance;
       else if (row + distance < rows && closed(row + distance)) source = row + distance;
     }
-    if (source < 0) fail('The mesh is not closed where it meets the obstacle line. Close the mesh, or declare a collision type.');
+    if (source < 0) fail('The mesh is not closed where it meets the obstacle line. Close the mesh, or declare a collision type, such as projection.');
     solid.copyWithin(row * columns, source * columns, source * columns + columns);
   }
+  return { columns, rows, solid };
+}
+
+// The mesh's silhouette seen along the view, its parallel projection along z onto the course plane, rasterized over the
+// box: a cell is solid where any face's shadow covers its centre, whichever way the face turns, so the outermost surface
+// collides wherever it lies in the depth. The mesh need not be closed.
+function projectionGrid(triangles: Triangles): Grid {
+  const { columns, rows, gx, gy } = gridFrame(triangles);
+  const solid = new Uint8Array(columns * rows);
+  const { corners } = triangles;
+  const xs = [0, 0, 0];
+  const ys = [0, 0, 0];
+  for (let at = 0; at < corners.length; at += 9) {
+    for (let corner = 0; corner < 3; corner++) {
+      xs[corner] = gx(corners[at + corner * 3]);
+      ys[corner] = gy(corners[at + corner * 3 + 1]);
+    }
+    // A face seen edge-on casts no shadow.
+    if ((xs[1] - xs[0]) * (ys[2] - ys[0]) === (ys[1] - ys[0]) * (xs[2] - xs[0])) continue;
+    const first = Math.max(0, Math.ceil(Math.min(ys[0], ys[1], ys[2]) - 0.5));
+    const last = Math.min(rows - 1, Math.floor(Math.max(ys[0], ys[1], ys[2]) - 0.5));
+    for (let row = first; row <= last; row++) {
+      const centre = row + 0.5;
+      let left = Infinity;
+      let right = -Infinity;
+      for (let a = 0; a < 3; a++) {
+        const b = (a + 1) % 3;
+        // Each edge is followed from its lower end, so the faces sharing it find the same crossings and leave no gap.
+        const low = ys[a] <= ys[b] ? a : b;
+        const high = low === a ? b : a;
+        if (centre < ys[low] || centre > ys[high]) continue;
+        const x = ys[low] === ys[high] ? xs[low] : xs[low] + (centre - ys[low]) * (xs[high] - xs[low]) / (ys[high] - ys[low]);
+        const other = ys[low] === ys[high] ? xs[high] : x;
+        left = Math.min(left, x, other);
+        right = Math.max(right, x, other);
+      }
+      const from = Math.max(0, Math.ceil(left - 0.5));
+      const to = Math.min(columns - 1, Math.floor(right - 0.5));
+      if (from <= to) solid.fill(1, row * columns + from, row * columns + to + 1);
+    }
+  }
+  if (!solid.includes(1)) fail('The mesh casts no shadow along the view: every face is seen edge-on. Declare another collision type, or reshape it.');
   return { columns, rows, solid };
 }
 
@@ -415,7 +465,7 @@ function traceOutlines(grid: Grid): GridPoint[][] {
       points.push([at % (columns + 1), Math.floor(at / (columns + 1))]);
       const following = next.get(at);
       next.delete(at);
-      if (following === undefined) fail('The mesh\'s slice could not be traced.');
+      if (following === undefined) fail('The mesh\'s outlines could not be traced.');
       at = following;
     } while (at !== start);
     loops.push(points.filter((point, position) => {
@@ -487,14 +537,16 @@ function gridArea(points: readonly GridPoint[]): number {
   return polygonArea(points.map(([x, y]) => ({ x, y })));
 }
 
-// The traced loops as a slice within the level's limits, in the unit box: specks dropped, then simplified as little as
-// fits.
-function sliceOutlines(grid: Grid, loops: readonly GridPoint[][]): MeshCollision {
+const GENERATED: Readonly<Record<MeshOutlines, string>> = { slice: 'slice on the obstacle line', projection: 'projection along the view' };
+
+// The traced loops as the mesh's `type` of outlines within the level's limits, in the unit box: specks dropped, then
+// simplified as little as fits.
+function meshOutlines(grid: Grid, loops: readonly GridPoint[][], type: MeshOutlines): MeshCollision {
   const speck = Math.max(SPECK_CELLS, SPECK_SHARE * grid.columns * grid.rows);
   // A loop nested in another is smaller than it, so keeping the largest never keeps a hole without its outline.
   const kept = loops.filter((loop) => Math.abs(gridArea(loop)) >= speck)
-    .sort((a, b) => Math.abs(gridArea(b)) - Math.abs(gridArea(a))).slice(0, LEVEL_LIMITS.sliceLoops).map(straighten);
-  if (kept.length === 0) fail('The mesh\'s slice on the obstacle line is too small to collide with. Declare a collision type, or reshape it.');
+    .sort((a, b) => Math.abs(gridArea(b)) - Math.abs(gridArea(a))).slice(0, LEVEL_LIMITS.meshLoops).map(straighten);
+  if (kept.length === 0) fail(`The mesh's ${GENERATED[type]} is too small to collide with. Declare a collision type, or reshape it.`);
   const unit = (point: GridPoint) => ({
     x: Math.round((point[0] / grid.columns - 0.5) * DIGITS) / DIGITS + 0,
     y: Math.round((point[1] / grid.rows - 0.5) * DIGITS) / DIGITS + 0,
@@ -503,27 +555,28 @@ function sliceOutlines(grid: Grid, loops: readonly GridPoint[][]): MeshCollision
   for (const tolerance of TOLERANCES) {
     const simplified = kept.map((loop) => simplifyLoop(loop, tolerance)).filter((loop) => loop.length >= 3);
     const points = simplified.reduce((sum, loop) => sum + loop.length, 0);
-    if (simplified.length === 0 || points > LEVEL_LIMITS.sliceVertices || simplified.some((loop) => loop.length > LEVEL_LIMITS.polygonVertices)) continue;
+    if (simplified.length === 0 || points > LEVEL_LIMITS.meshPoints || simplified.some((loop) => loop.length > LEVEL_LIMITS.polygonVertices)) continue;
     try {
-      return validateMeshCollision({ type: 'slice', loops: simplified.map((loop) => loop.map(unit)) });
+      return validateMeshCollision({ type, loops: simplified.map((loop) => loop.map(unit)) });
     } catch (error) {
       if (!(error instanceof LevelError)) throw error;
       problem = error.message;
     }
   }
-  fail(`The mesh's slice could not be simplified to the level's limits (${problem}). Declare a collision type, or simplify the mesh.`);
+  fail(`The mesh's ${GENERATED[type]} could not be simplified to the level's limits (${problem}). Declare a collision type, or simplify the mesh.`);
 }
 
-function slice(triangles: Triangles): MeshCollision {
-  const grid = rasterize(triangles, (triangles.min[2] + triangles.max[2]) / 2);
+// The mesh's `type` of outlines: its slice through the middle of its depth, or its projection along the view.
+function generated(triangles: Triangles, type: MeshOutlines): MeshCollision {
+  const grid = type === 'slice' ? sliceGrid(triangles, (triangles.min[2] + triangles.max[2]) / 2) : projectionGrid(triangles);
   joinCorners(grid);
-  return sliceOutlines(grid, traceOutlines(grid));
+  return meshOutlines(grid, traceOutlines(grid), type);
 }
 
 /**
- * The terrain mesh of a course GLB, `assetId` its asset ID, with its collision: the shape it declares, or its slice on
- * the obstacle line. Fails with an ArtError naming what to change when the GLB is not a course mesh or has no usable
- * slice.
+ * The terrain mesh of a course GLB, `assetId` its asset ID, with its collision: the shape it declares, or else its
+ * slice on the obstacle line or, when it declares it, its projection along the view. Fails with an ArtError naming what
+ * to change when the GLB is not a course mesh or has no usable outlines.
  */
 export function meshTerrain(assetId: string, data: ArrayBuffer): MeshTerrain {
   validateCourseModel(data);
@@ -532,7 +585,7 @@ export function meshTerrain(assetId: string, data: ArrayBuffer): MeshTerrain {
   const [width, height, depth] = [0, 1, 2].map((axis) => triangles.max[axis] - triangles.min[axis]);
   if (Math.min(width, height, depth) < 0.000001) fail('Course meshes need nonzero width, height, and depth.');
   const declared = declaredCollision(json);
-  const collision = declared === null ? slice(triangles) : validateMeshCollision({ type: declared });
+  const collision = declared === 'slice' || declared === 'projection' ? generated(triangles, declared) : validateMeshCollision({ type: declared });
   return Object.freeze({ mesh: Object.freeze({ type: 'asset', assetId, collision }), width, height, depth });
 }
 

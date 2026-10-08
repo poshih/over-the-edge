@@ -55,6 +55,7 @@ export interface GameUi {
   levelMount: HTMLElement;
   // Physics / Hammer head, which main.ts fills: it edits the game settings and the model library together.
   hammerHeadMount: HTMLElement;
+  jarMount: HTMLElement;
   // A Workshop plugin's tab after the built-in ones: its button and pane, and its removal.
   addTab: (options: { readonly id: PluginWorkshopTab; readonly label: string; readonly title?: string }) =>
     { readonly body: HTMLElement; remove(): void };

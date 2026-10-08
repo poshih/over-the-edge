@@ -92,27 +92,27 @@ export class PlayRecorder {
       this.placement = simulation.placement;
     }
     const target = this.enabled ? this.target() : null;
-    const handle = simulation.rigGeometry.handleLength;
+    const handle = simulation.rigGeometry.handleLength, potRadius = simulation.rigGeometry.jar.radius;
     const clip = this.clip;
     if (clip !== null && (target === null || target.project !== clip.target.project || target.version !== clip.target.version ||
       handle !== this.capture.handleLength)) this.end();
     if (target === null) return;
     simulation.rigPose(this.pose);
-    if (this.clip === null) this.begin(target, handle);
+    if (this.clip === null) this.begin(target, handle, potRadius);
     this.capture.add(this.pose);
     if (this.capture.ticks < PHANTOM_LIMITS.maxTicks) return;
     this.end();
-    this.begin(target, handle);
+    this.begin(target, handle, potRadius);
     this.capture.add(this.pose);
   }
 
-  private begin(target: PlayedVersion, handle: number): void {
+  private begin(target: PlayedVersion, handle: number, potRadius: number): void {
     if (this.session === null) {
       this.session = sessionId();
       this.clips = 0;
     }
     this.clip = { target, session: this.session, index: this.clips++ };
-    this.capture.begin(handle);
+    this.capture.begin(handle, potRadius);
   }
 
   private end(): void {

@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 15,
+  "schemaVersion": 17,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 16,
+    "schemaVersion": 18,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -44,7 +44,7 @@
       "handleFrequency": 0,
       "handleDamping": 0.9,
       "mouseSensitivity": 1,
-      "health": 5,
+      "health": 100,
       "hurtInvulnerability": 1,
       "respawnInvulnerability": 2,
       "hurtWidth": 1,
@@ -54,26 +54,31 @@
       "projectileLift": 1.5,
       "axePush": 9,
       "axeLift": 4,
-      "birdHealth": 1,
+      "hammerDamage": 100,
+      "hammerFullSpeed": 8,
+      "birdHealth": 100,
+      "birdArmor": 2.5,
       "birdMass": 0.55,
       "birdAcceleration": 22,
       "birdSight": 6,
       "birdDiveSpeed": 5,
-      "soldierHealth": 2,
+      "soldierHealth": 200,
+      "soldierArmor": 4,
       "soldierMass": 3,
       "soldierAcceleration": 28,
-      "archerHealth": 1,
+      "archerHealth": 100,
+      "archerArmor": 3,
       "archerMass": 2.5,
       "archerAcceleration": 24,
       "archerSight": 14,
       "arrowSpeed": 12,
-      "arrowDamage": 1,
-      "bumpDamage": 1,
+      "arrowDamage": 20,
+      "bumpDamage": 20,
       "bumpSpeed": 3,
       "bumpLift": 1.4,
       "lavaBuoyancy": 160,
       "lavaDrag": 3,
-      "lavaDamage": 1,
+      "lavaDamage": 20,
       "swampBuoyancy": 85,
       "swampDrag": 6
     },
@@ -84,6 +89,10 @@
       "head": [
         { "x": -0.1, "y": -0.23 }, { "x": -0.06, "y": -0.29 }, { "x": 0.06, "y": -0.29 }, { "x": 0.1, "y": -0.23 },
         { "x": 0.1, "y": 0.23 }, { "x": 0.06, "y": 0.29 }, { "x": -0.06, "y": 0.29 }, { "x": -0.1, "y": 0.23 }
+      ],
+      "pot": [
+        { "x": -0.2, "y": -0.48 }, { "x": 0.2, "y": -0.48 }, { "x": 0.44, "y": -0.29 }, { "x": 0.5, "y": 0.12 },
+        { "x": 0.43, "y": 0.32 }, { "x": -0.43, "y": 0.32 }, { "x": -0.5, "y": 0.12 }, { "x": -0.44, "y": -0.29 }
       ]
     },
     "cursor": {
@@ -126,7 +135,10 @@
     "exposure": 1.2,
     "camera": {
       "perspective": false,
-      "fieldOfView": 30
+      "fieldOfView": 30,
+      "blur": 0,
+      "blurNear": 5,
+      "blurFar": 40
     },
     "hemisphere": {
       "sky": "#8fb3c9",
@@ -140,6 +152,12 @@
     "sun": {
       "color": "#ffb86b",
       "intensity": 2.4
+    },
+    "characterLight": {
+      "angle": 70,
+      "tilt": 40,
+      "shadow": 70,
+      "softness": 1
     },
     "rim": {
       "color": "#58d1c9",

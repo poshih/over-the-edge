@@ -13,8 +13,10 @@ and the mesh brings its collision:
 - **Drawn shapes:** outlines drawn in **Workshop / Level / Draw shape**, extruded the same
   way. Each collides as its outline.
 - **GLB meshes:** any static GLB. It collides as the simple shape it
-  [declares](#declared-collision), or else as its [slice](#generated-collision-the-slice),
-  its cross-section on the [obstacle line](../README.md#obstacle-line).
+  [declares](#declared-collision), as its [projection](#generated-collision-the-projection),
+  its outermost outline seen along the view, when it declares that, or else as its
+  [slice](#generated-collision-the-slice), its cross-section on the
+  [obstacle line](../README.md#obstacle-line).
 
 The GLBs are the [game project's](projects.md) course artwork; your own project server
 stores them with the rest of the game. They can also draw [decoration models](#decoration-models).
@@ -64,14 +66,16 @@ A GLB declares its collision with a custom property `collision` on its scene or 
 its root nodes, which glTF exports as `"extras": { "collision": "box" }` (in Blender, a
 custom property exported with **Include / Custom Properties**). The value is one of the
 built-in shapes, `box`, `ramp`, `triangle`, `circle` or `hexagon`, filling the mesh's box,
-or `slice` to ask for the slice. A circle collides as a true circle and needs a square box,
+`slice` to ask for the slice, or `projection` for the [projection](#generated-collision-the-projection). A circle collides as a true circle and needs a square box,
 so it is placed with equal width and height. Declare a shape when the cross-section is not
 what should collide, such as a gnarled boulder that should roll like a ball or a crate with
-open slats, or for the cheapest, smoothest contact. Declaring two different values fails.
+open slats, or for the cheapest, smoothest contact. Declare `projection` when the mesh's
+outermost outline should collide wherever it lies in the depth, not its middle. Declaring two
+different values fails.
 
 ### Generated collision: the slice
 
-A GLB that declares no shape is sliced through the middle of its depth, the plane that
+A GLB that declares no collision, or declares `slice`, is sliced through the middle of its depth, the plane that
 lies on the obstacle line once it is placed. The cross-section is sampled on a grid of 384
 cells across the longer side of the mesh's box, with the nonzero rule, so overlapping
 parts merge into one solid. It is traced into outlines, and holes stay holes. Outlines
@@ -91,13 +95,36 @@ For a clean slice:
 - Model what should collide through the middle of the depth: a column that only exists
   near the back has no slice.
 
-A mesh that cannot be sliced is refused with what to change: declare a collision type,
-or fix the mesh.
+The default orthographic camera draws a mesh as its silhouette, so wherever the mesh bulges in
+front of the obstacle line or behind it, its slice collides inside what you see: the pot can rest
+below a visible top edge, overlap rock it seems to stand against, or find no hold on rock it can
+see. The perspective camera shows the same bulges, those in front of the line a little larger.
+Declare `projection` for meshes like that, or keep their widest outline at the middle of their
+depth.
 
-Slicing happens once, when a mesh is imported or its terrain is read. The collision is
-stored in the level with each placement, so the physics, phantoms, the project server and
-level-only builds never need the GLB. The Workshop and the project server slice alike, so
-the same GLB always gets the same collision.
+A mesh that cannot be sliced is refused with what to change: declare a collision type, such
+as `projection`, or fix the mesh.
+
+### Generated collision: the projection
+
+A GLB that declares `projection` collides as its silhouette seen along the view: every face
+projected straight along the depth onto the course plane, whichever way it faces, so the
+mesh's outermost outline collides wherever it lies in the depth, in front of the obstacle
+line, behind it or across it. A boulder that bulges toward the camera, or a cliff whose
+ledges stand out at the back, then collides at the edge you see rather than where its middle
+crosses the line. With the default orthographic camera the collision matches the drawn
+outline; a perspective camera draws the parts in front of the line a little larger, and
+those behind a little smaller, than where they collide.
+
+The projection is sampled on the same grid as a slice, then traced, cleaned and simplified
+the same way, within the same limits. Holes stay holes: a gap you can see through, such as an
+arch's opening, stays open. The mesh need not be closed, and its faces may turn either way,
+but a face seen edge-on casts no shadow, so a mesh needs some area facing the camera.
+
+Slices and projections are generated once, when a mesh is imported or its terrain is read.
+The collision is stored in the level with each placement, so the physics, phantoms, the
+project server and level-only builds never need the GLB. The Workshop and the project server
+generate them alike, so the same GLB always gets the same collision.
 
 ### In level JSON
 
@@ -115,9 +142,10 @@ the same GLB always gets the same collision.
 
 `mesh` is `{ "type": "shape", "shape": "box" }` for a built-in mesh, `{ "type": "outline",
 "vertices": [...] }` for a drawn shape, or `{ "type": "asset", "assetId", "collision" }`
-for a GLB, whose collision is `{ "type": "box" }` (or another built-in shape) or its slice.
-Outlines and slice loops lie in the unit box, -0.5 to 0.5 on both axes. A drawn outline is
-simple and counterclockwise. A slice's loops never cross or touch, and keep the solid on
+for a GLB, whose collision is `{ "type": "box" }` (or another built-in shape), or its
+generated outlines, `{ "type": "slice", "loops" }` or `{ "type": "projection", "loops" }`.
+Outlines and generated loops lie in the unit box, -0.5 to 0.5 on both axes. A drawn outline is
+simple and counterclockwise. Generated loops never cross or touch, and keep the solid on
 each edge's left: outer loops run counterclockwise and holes clockwise. `color` colours
 built-in meshes and drawn shapes, and a GLB drawn as its collision.
 
@@ -236,7 +264,7 @@ their content is served.
   "format": "over-the-edge-course",
   "schemaVersion": 2,
   "mode": "meshes",
-  "level": { "schemaVersion": 8, "labels": [], "objects": [] },
+  "level": { "schemaVersion": 10, "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "boulder.glb", "source": "data:model/gltf-binary;base64,..." }
   ],

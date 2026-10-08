@@ -158,13 +158,13 @@ export function buildCase(name: CaseName, job: CourseJob, decorations: Decoratio
     const slices = slicedArtwork(job, seed, artLimits);
     artwork = slices;
     route = slices.map((asset, index) => terrain(`slices-route-${index}`, asset.mesh, 0,
-      index * limits.sliceLoops * SLICE_RISE + asset.centerY, asset.width, asset.height));
+      index * limits.meshLoops * SLICE_RISE + asset.centerY, asset.width, asset.height));
     objects.push(...route);
     gridCells(limits.objects - route.length, limits.coordinate, seed).forEach((cell, index) => {
       const asset = slices[(index + route.length) % slices.length];
       objects.push(terrain(`slices-cell-${index}`, asset.mesh, cell.x, cell.y, asset.width, asset.height));
     });
-    routeRungs = route.length * limits.sliceLoops;
+    routeRungs = route.length * limits.meshLoops;
     decorationCount = 0;
     geometryCount = limits.geometryKinds;
     terrainCount = limits.objects;

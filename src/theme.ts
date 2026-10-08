@@ -1,3 +1,4 @@
+import { LEVEL_LIMITS } from './level';
 import { ProjectError, validateFields } from './project-fields';
 import type { FieldSpec } from './project-fields';
 
@@ -12,10 +13,17 @@ export interface GameTheme {
   // Depths behind the course plane (z = 0), so fog looks the same at any camera distance.
   readonly fog: { readonly color: string; readonly near: number; readonly far: number };
   readonly exposure: number;
-  readonly camera: { readonly perspective: boolean; readonly fieldOfView: number };
+  // The background's blur, a share of the view height, from sharp at blurNear to full at blurFar metres behind the course.
+  readonly camera: {
+    readonly perspective: boolean; readonly fieldOfView: number;
+    readonly blur: number; readonly blurNear: number; readonly blurFar: number;
+  };
   readonly hemisphere: { readonly sky: string; readonly ground: string; readonly intensity: number };
   readonly ambient: ThemeLight;
   readonly sun: ThemeLight;
+  // The sunlight on the characters: the angle it comes from around the view and its tilt toward the camera, in
+  // degrees, and the shadows the player's 3D character casts on itself, how dark (%) and how soft (cm).
+  readonly characterLight: { readonly angle: number; readonly tilt: number; readonly shadow: number; readonly softness: number };
   readonly rim: ThemeLight;
   readonly sunDisc: { readonly visible: boolean; readonly color: string };
   readonly backdrop: { readonly visible: boolean; readonly far: string; readonly middle: string; readonly near: string };
@@ -25,6 +33,10 @@ export interface GameTheme {
     readonly suit: string; readonly ceramic: string; readonly wood: string;
   };
 }
+
+// The nearest the background blur can start: behind everything on the course plane, which reaches half the deepest
+// terrain's depth behind it, so what is played on stays as the screen draws it.
+const BLUR_START = LEVEL_LIMITS.maximumDepth / 2 + 1;
 
 const intensity = (path: string, label: string): FieldSpec =>
   ({ kind: 'number', path, label, min: 0, max: 10, step: 0.05, unit: 'x' });
@@ -37,6 +49,9 @@ export const THEME_FIELDS: readonly FieldSpec[] = [
   { kind: 'number', path: 'exposure', label: 'Exposure', min: 0.2, max: 3, step: 0.05, unit: 'x', description: 'Tone-mapping exposure for the whole scene.' },
   { kind: 'boolean', path: 'camera.perspective', label: 'Perspective camera', description: 'Nearer objects look larger and pass faster than distant ones. Off keeps the flat orthographic view; the course looks the same size either way.' },
   { kind: 'number', path: 'camera.fieldOfView', label: 'Field of view', min: 10, max: 90, step: 1, unit: '°', description: 'Vertical view angle of the perspective camera; wider angles deepen the perspective.' },
+  { kind: 'number', path: 'camera.blur', label: 'Background blur', min: 0, max: 5, step: 0.05, unit: '%', description: 'How out of focus the background is, for an illusion of distance: the blur, in % of the view height, of what lies at the full-blur depth or farther behind the course, easing in from the blur start. The backdrop and sky blur too; whatever is nearer than the blur start, the characters and everything in front of the course stay sharp. 0 turns it off at no cost; on, what lies behind the blur start draws through an offscreen image.' },
+  { kind: 'number', path: 'camera.blurNear', label: 'Blur start', min: BLUR_START, max: 999, step: 1, unit: 'm', description: `Depth behind the course up to which the background stays sharp: at least ${BLUR_START} m, behind everything on the course plane.` },
+  { kind: 'number', path: 'camera.blurFar', label: 'Full blur', min: 1, max: 1000, step: 1, unit: 'm', description: 'Depth behind the course from which the background is fully blurred; must exceed the blur start. Decorations stand up to 1,000 m back.' },
   { kind: 'color', path: 'hemisphere.sky', label: 'Sky light colour' },
   { kind: 'color', path: 'hemisphere.ground', label: 'Ground bounce colour' },
   intensity('hemisphere.intensity', 'Sky light intensity'),
@@ -44,6 +59,10 @@ export const THEME_FIELDS: readonly FieldSpec[] = [
   intensity('ambient.intensity', 'Ambient light intensity'),
   { kind: 'color', path: 'sun.color', label: 'Sunlight colour' },
   intensity('sun.intensity', 'Sunlight intensity'),
+  { kind: 'number', path: 'characterLight.angle', label: 'Character light angle', min: 0, max: 360, step: 1, unit: '°', description: 'Where the sunlight on the characters comes from, around the view: 0° from the right, 90° from above, 180° from the left and 270° from below. It lights the player\'s character, enemies and phantoms with the sunlight\'s colour and intensity; the course keeps its own sunlight.' },
+  { kind: 'number', path: 'characterLight.tilt', label: 'Character light tilt', min: -90, max: 90, step: 1, unit: '°', description: 'How far the light on the characters leans toward the camera, lighting their fronts (positive), or comes from behind the course, lighting their backs (negative); 0 skims along the course.' },
+  { kind: 'number', path: 'characterLight.shadow', label: 'Character shadow', min: 0, max: 100, step: 1, unit: '%', description: 'How dark the shadows the player\'s 3D character casts on itself are, such as its hammer and arms on its body and jar or its head on its shoulders: 100% takes all of the light on the characters from what lies in shadow, leaving the sky, ambient and rim light. 0% turns them off at no cost; 2D characters never cast them.' },
+  { kind: 'number', path: 'characterLight.softness', label: 'Character shadow softness', min: 0, max: 5, step: 0.5, unit: 'cm', description: 'How far the edges of the character\'s shadows blur.' },
   { kind: 'color', path: 'rim.color', label: 'Rim light colour' },
   intensity('rim.intensity', 'Rim light intensity'),
   { kind: 'boolean', path: 'sunDisc.visible', label: 'Show the sun disc' },
@@ -65,6 +84,7 @@ export const THEME_FIELDS: readonly FieldSpec[] = [
 export function validateTheme(value: unknown): GameTheme {
   const theme = validateFields<GameTheme>(value, THEME_FIELDS, 'Theme');
   if (theme.fog.far <= theme.fog.near) throw new ProjectError('The fog end must be farther than the fog start.');
+  if (theme.camera.blurFar <= theme.camera.blurNear) throw new ProjectError('The full-blur depth must be farther than the blur start.');
   return theme;
 }
 
@@ -73,10 +93,11 @@ export const DEFAULT_THEME: GameTheme = validateTheme({
   sky: '#d8e3d6',
   fog: { color: '#d8e3d6', near: 15, far: 65 },
   exposure: 1.35,
-  camera: { perspective: false, fieldOfView: 30 },
+  camera: { perspective: false, fieldOfView: 30, blur: 0, blurNear: 5, blurFar: 40 },
   hemisphere: { sky: '#fff6db', ground: '#4b6866', intensity: 2.4 },
   ambient: { color: '#f4e4ca', intensity: 0.5 },
   sun: { color: '#fff0d4', intensity: 3 },
+  characterLight: { angle: 113, tilt: 38, shadow: 60, softness: 1 },
   rim: { color: '#9ce7d5', intensity: 1.5 },
   sunDisc: { visible: true, color: '#f6e5bd' },
   backdrop: { visible: true, far: '#b9cbbc', middle: '#9fb7aa', near: '#87a69a' },

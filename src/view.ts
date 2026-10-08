@@ -3,6 +3,7 @@ import {
   OrthographicCamera, PerspectiveCamera, Scene, Sprite, SpriteMaterial, Vector3, WebGLRenderer,
 } from 'three';
 import { ARM_LAYER } from './arm-layer';
+import { CASTER_LAYER, CharacterLight, CharacterShadowParts, TOOL_LAYER } from './character-light';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { CharacterModelLoader } from './character-model-types';
 import type { CharacterFigure } from './character-figure';
@@ -42,6 +43,7 @@ import type { EnemyEvent } from './enemy-types';
 import { DEFAULT_ENEMY_ART } from './enemy-art-data';
 import type { ContentLoader } from './content-ref';
 import { ViewMeasurements } from './view-measurements';
+import { BackgroundDefocus } from './background-defocus';
 
 const VISUAL = {
   // The orthographic camera's distance from the course plane (z = 0).
@@ -54,7 +56,7 @@ const VISUAL = {
   touchPixelsPerReach: 100,
 } as const;
 const ENGINE = Object.freeze({ plugin: null, point: null });
-// three.js's default render layer, which everything but a 3D character's arms is on.
+// three.js's default render layer, which everything but a 3D character's arms and the player's tool is on.
 const DEFAULT_LAYER = 0;
 
 export interface CameraFraming extends Point {
@@ -71,20 +73,26 @@ export class GameView {
   private readonly renderer: WebGLRenderer;
   // Passes, each drawn over the last. The course: terrain, its artwork and the scenery behind the obstacle line.
   // Then, with depth cleared, the actors: the characters, phantoms and enemies, which the course's colliders,
-  // reaching half their depth toward the camera, must never hide; a 3D character's arms (ARM_LAYER) are left out.
+  // reaching half their depth toward the camera, must never hide; a 3D character's arms (ARM_LAYER) and the player's
+  // tool (TOOL_LAYER) are left out, except while the character casts its shadows (CASTER_LAYER).
   // Then, with depth cleared, the front: decorations on or in front of the line and the looks' fronts, such as the
   // halves of swinging axes and liquid pools in front of it. Then, with depth cleared again,
   // a 3D character's arms, so they never clip into its body, jar or head; the marks, which ignore depth and write
-  // none (aim cursor and line, course labels, editor overlays); and last the foreground, the tool, which shares the
-  // arms' depth so the hands hold it.
+  // none (aim cursor and line, course labels, editor overlays); and last the actors' tool layer, the hammer, which
+  // shares the arms' depth so the hands hold it.
   // The first part of the course pass. A separate render, without a depth clear before the rest of the course,
   // guarantees that a backdrop draws first even when its root mixes opaque and transparent materials.
   private readonly backdropScene = new Scene();
+  private readonly defocus = new BackgroundDefocus();
+  // The backdrop, then the course, without clearing depth between them.
+  private readonly drawCourse = (): void => {
+    if (this.backdrop.value.root.visible) this.renderer.render(this.backdropScene, this.camera);
+    this.renderer.render(this.course, this.camera);
+  };
   private readonly course = new Scene();
   private readonly actors = new Scene();
   private readonly front = new Scene();
   private readonly marks = new Scene();
-  private readonly foreground = new Scene();
   private readonly orthographic = new OrthographicCamera();
   private readonly perspective = new PerspectiveCamera();
   // The theme's camera. Either looks along -z at the course plane, the obstacle line (z = 0), from `distance`, and
@@ -93,8 +101,8 @@ export class GameView {
   private distance: number = VISUAL.depth;
   private readonly director: Attributed<CameraDirector>;
   private readonly cameraView = {
-    focus: { x: 0, y: 0 }, reach: { x: 0, y: 0 }, reachRadius: 0, maxReach: 0, width: 1, height: 1, dt: 0,
-    death: null as DeathKind | null,
+    focus: { x: 0, y: 0 }, reach: { x: 0, y: 0 }, reachRadius: 0, maxReach: 0, jarHalfWidth: 0, jarBottom: 0,
+    width: 1, height: 1, dt: 0, death: null as DeathKind | null,
   };
   private readonly cameraAim: CameraAim = { x: 0, y: 0, worldHeight: 0 };
   private readonly backdrop: Attributed<Backdrop>;
@@ -122,6 +130,9 @@ export class GameView {
   private readonly projection = new Vector3();
   private theme: GameTheme;
   private readonly fog: Fog;
+  // The actors' sunlight, from the theme's character light, and the player's parts that its shadows take in.
+  private readonly characterLight: CharacterLight;
+  private readonly characterParts: CharacterShadowParts;
   // Each light exists in every lit pass: all but the marks.
   private readonly lights: {
     readonly hemisphere: HemisphereLight[]; readonly ambient: AmbientLight[];
@@ -200,11 +211,14 @@ export class GameView {
       // Swinging axes keep the side of the obstacle line their pass draws.
       this.renderer.localClippingEnabled = true;
       this.renderer.info.autoReset = false;
+      // Only the player's 3D character casts shadows, from the actors' sunlight.
+      this.renderer.shadowMap.enabled = true;
       this.renderer.setClearColor(theme.sky);
       this.fog = new Fog(theme.fog.color);
       // The marks are unlit; they only take the fog.
       this.marks.fog = this.fog;
-      for (const pass of [this.backdropScene, this.course, this.actors, this.front, this.foreground]) {
+      let characterSun: DirectionalLight | null = null;
+      for (const pass of [this.backdropScene, this.course, this.actors, this.front]) {
         pass.fog = this.fog;
         const hemisphere = new HemisphereLight(theme.hemisphere.sky, theme.hemisphere.ground, theme.hemisphere.intensity);
         const ambient = new AmbientLight(theme.ambient.color, theme.ambient.intensity);
@@ -212,8 +226,14 @@ export class GameView {
         sunlight.position.set(-5, 12, 10);
         const rimLight = new DirectionalLight(theme.rim.color, theme.rim.intensity);
         rimLight.position.set(8, 3, -4);
-        // The actors' lights also light their arms, which draw in a pass of their own.
-        if (pass === this.actors) for (const light of [hemisphere, ambient, sunlight, rimLight]) light.layers.enable(ARM_LAYER);
+        // The actors' lights also light the arms and the tool, which draw in passes of their own.
+        if (pass === this.actors) {
+          for (const light of [hemisphere, ambient, sunlight, rimLight]) {
+            light.layers.enable(ARM_LAYER);
+            light.layers.enable(TOOL_LAYER);
+          }
+          characterSun = sunlight;
+        }
         pass.add(hemisphere, ambient, sunlight, rimLight);
         this.lights.hemisphere.push(hemisphere);
         this.lights.ambient.push(ambient);
@@ -235,8 +255,9 @@ export class GameView {
         this.front.add(this.decorations.front);
       }
       this.setLabels(level.labels);
-      this.actors.add(this.character.actors);
-      this.foreground.add(this.character.foreground);
+      this.actors.add(this.character.actors, this.character.foreground);
+      this.characterLight = new CharacterLight(characterSun!, this.actors, theme);
+      this.characterParts = new CharacterShadowParts(this.character.actors, this.character.foreground);
       this.marks.add(this.aimMarks.value.root);
       for (const effect of this.effects.all) {
         const pass = effect.captured.pass === 'course' ? this.course : effect.captured.pass === 'actors' ? this.actors : this.marks;
@@ -260,6 +281,7 @@ export class GameView {
     this.themeWrites++;
     this.renderer.setClearColor(theme.sky);
     this.renderer.toneMappingExposure = theme.exposure;
+    if (theme.camera.blur === 0) this.defocus.release();
     this.fog.color.set(theme.fog.color);
     this.updateFrustum();
     this.placeFog();
@@ -276,6 +298,7 @@ export class GameView {
         light.intensity = setting.intensity;
       }
     }
+    this.characterLight.setTheme(theme);
     call1(this.backdrop, 'setTheme', theme);
     call1(this.aimMarks, 'setTheme', theme);
     this.character.setTheme(theme);
@@ -336,6 +359,8 @@ export class GameView {
     this.updateCamera(options.dt, false);
     call1(this.backdrop, 'follow', this.cameraAim);
     const frame = this.character.pose(physics, options), tip = physicsPart(frame, 'head');
+    this.characterParts.flush();
+    const casting = this.characterLight.place(frame.player.centre, this.character.stance.upperBody3d);
     call3(this.aimMarks, 'update', tip, frame.cursor, this.cameraView.death);
     this.terrain.update(frame.time);
     this.decorations?.update();
@@ -356,10 +381,13 @@ export class GameView {
     }
     this.renderer.info.reset();
     this.renderer.clear();
-    if (this.backdrop.value.root.visible) this.renderer.render(this.backdropScene, this.camera);
-    this.renderer.render(this.course, this.camera);
+    if (this.theme.camera.blur > 0) {
+      this.defocus.render(this.renderer, this.camera, this.fog, this.distance, this.theme.camera, this.drawCourse);
+    } else this.drawCourse();
     this.renderer.clearDepth();
-    this.renderer.render(this.actors, this.camera);
+    // While the character casts its shadows, its arms and tool draw here too, so the shadow map, drawn first, has them.
+    if (casting) this.camera.layers.enable(CASTER_LAYER);
+    try { this.renderer.render(this.actors, this.camera); } finally { this.camera.layers.set(DEFAULT_LAYER); }
     if (this.drawsFront()) {
       this.renderer.clearDepth();
       this.renderer.render(this.front, this.camera);
@@ -367,16 +395,19 @@ export class GameView {
     this.renderer.clearDepth();
     // Whether the actors' arms pass runs: the active character has 3D arms, which hold the tool. 2D characters keep
     // their authored depths.
-    if (this.character.stance.upperBody3d) {
-      this.camera.layers.set(ARM_LAYER);
-      this.actors.matrixWorldAutoUpdate = false;
-      try { this.renderer.render(this.actors, this.camera); } finally {
-        this.actors.matrixWorldAutoUpdate = true;
-        this.camera.layers.set(DEFAULT_LAYER);
-      }
-    }
+    if (this.character.stance.upperBody3d) this.drawActorsLayer(ARM_LAYER);
     this.renderer.render(this.marks, this.camera);
-    this.renderer.render(this.foreground, this.camera);
+    this.drawActorsLayer(TOOL_LAYER);
+  }
+
+  // Draws only the actors on `layer`, as the actors pass placed them.
+  private drawActorsLayer(layer: number): void {
+    this.camera.layers.set(layer);
+    this.actors.matrixWorldAutoUpdate = false;
+    try { this.renderer.render(this.actors, this.camera); } finally {
+      this.actors.matrixWorldAutoUpdate = true;
+      this.camera.layers.set(DEFAULT_LAYER);
+    }
   }
 
   recenter(frame: PhysicsFrame): void {
@@ -397,6 +428,8 @@ export class GameView {
     view.death = this.character.deathKind;
     view.reachRadius = this.hammerRadius;
     view.maxReach = this.rig.maxReach;
+    view.jarHalfWidth = this.rig.jar.halfWidth;
+    view.jarBottom = this.rig.jar.bottom;
     view.width = this.width;
     view.height = this.height;
     view.dt = dt;
@@ -531,6 +564,8 @@ export class GameView {
     this.disposed = true;
     const disposal = new Disposal();
     disposal.run(() => this.observer?.disconnect());
+    disposal.run(() => this.characterParts?.dispose());
+    disposal.run(() => this.characterLight?.dispose());
     disposal.run(() => this.character.dispose());
     disposal.run(() => this.terrain.root.removeFromParent());
     disposal.run(() => this.terrain.dispose());
@@ -547,7 +582,8 @@ export class GameView {
     }
     this.layers.clear();
     this.updatingLayers = [];
-    disposal.run(() => disposeResources(this.backdropScene, this.course, this.actors, this.front, this.marks, this.foreground));
+    disposal.run(() => disposeResources(this.backdropScene, this.course, this.actors, this.front, this.marks));
+    disposal.run(() => this.defocus.dispose());
     disposal.run(() => this.renderer?.dispose());
     disposal.finish();
   }

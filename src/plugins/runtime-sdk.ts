@@ -50,6 +50,7 @@ export { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from '../e
 export type { EnemyEvent, EnemyFacing, EnemyPhase, EnemyPose, EnemySpecies } from '../enemy-types';
 export type { PhantomPose, PhantomTool } from '../phantom-format';
 export type { HammerHead } from '../hammer-head';
+export type { PotOutline } from '../pot-outline';
 export type { PlatformPose } from '../platform-world';
 export type { ProjectilePose } from '../hazard-world';
 export { ARROW, AXE, axeAngle, BONFIRE, HURT_SOURCES, PROJECTILE_KINDS, SHOOTER } from '../hazards';

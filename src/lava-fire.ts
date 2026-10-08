@@ -17,13 +17,14 @@ const FIRE = {
   burn: 1.15, kindle: 0.15, fade: 0.5,
   // How much brighter a burn makes the fire for a moment, and how fast that flare fades, in seconds.
   flare: 0.35, flareFade: 0.18,
-  // The flames: each one's offset from the character's root, its width and height, all in metres.
+  // The flames: each one's offset from the base of the character's jar, below its root, its width and height, all in
+  // metres.
   flames: [
-    { x: 0, y: -0.48, width: 1.2, height: 1.95 },
-    { x: -0.3, y: -0.42, width: 0.85, height: 1.4 },
-    { x: 0.32, y: -0.44, width: 0.9, height: 1.5 },
-    { x: -0.16, y: -0.52, width: 0.62, height: 0.95 },
-    { x: 0.2, y: -0.52, width: 0.6, height: 0.9 },
+    { x: 0, y: 0, width: 1.2, height: 1.95 },
+    { x: -0.3, y: 0.06, width: 0.85, height: 1.4 },
+    { x: 0.32, y: 0.04, width: 0.9, height: 1.5 },
+    { x: -0.16, y: -0.04, width: 0.62, height: 0.95 },
+    { x: 0.2, y: -0.04, width: 0.6, height: 0.9 },
   ],
   // Embers and smoke: how many can show at once, how many are born a second at the fire's height, and each one's
   // life, rise and size, in seconds and metres, picked per particle.
@@ -396,7 +397,7 @@ export class LavaFire implements MomentEffect {
     this.flameUniforms.intensity.value = intensity;
     this.flameUniforms.lean.value = this.lean;
     this.glowUniforms.intensity.value = intensity;
-    this.placeFlames(root, time, intensity);
+    this.placeFlames(root, character.jarBottom, time, intensity);
     const embers = this.placeEmbers(time);
     const smoke = this.placeSmoke(time);
     this.glow.position.set(root.x, root.y + FIRE.anchorHeight, FIRE.depth.glow);
@@ -427,14 +428,14 @@ export class LavaFire implements MomentEffect {
     this.root.visible = false;
   }
 
-  // Each flame stands on its offset from the character and breathes, growing with the fire.
-  private placeFlames(root: Readonly<{ x: number; y: number }>, time: number, intensity: number): void {
+  // Each flame stands on its offset from the base of the character's jar and breathes, growing with the fire.
+  private placeFlames(root: Readonly<{ x: number; y: number }>, jarBottom: number, time: number, intensity: number): void {
     const grown = Math.sqrt(Math.min(1, intensity));
     for (let index = 0; index < FIRE.flames.length; index++) {
       const flame = FIRE.flames[index]!;
       const breath = grown * (0.9 + 0.1 * Math.sin(time * 5 + index * 2.1));
       this.flames.setMatrixAt(index, this.matrix.makeScale(flame.width * (0.8 + 0.2 * grown), flame.height * breath, 1)
-        .setPosition(root.x + flame.x, root.y + flame.y, FIRE.depth.flames));
+        .setPosition(root.x + flame.x, root.y + jarBottom + flame.y, FIRE.depth.flames));
     }
     this.flames.instanceMatrix.needsUpdate = true;
   }

@@ -1,5 +1,6 @@
 import type { Object3D } from 'three';
 import { Disposal } from './disposal';
+import { EnemyHealthBars } from './enemy-health-bars';
 import { HitBursts } from './hit-bursts';
 import { LavaFire } from './lava-fire';
 import { momentRoutes, validMomentFilter } from './moments';
@@ -35,12 +36,16 @@ function effectFactory(value: unknown): MomentEffectFactory {
 export const EFFECTS = Object.freeze({
   strikes: slotPoint('effects.strikes', 'runtime', effectFactory),
   lava: slotPoint('effects.lava', 'runtime', effectFactory),
+  enemyHealth: slotPoint('effects.enemy-health', 'runtime', effectFactory),
   extras: listPoint('effects.extras', 'runtime', EFFECT_LIMITS.extras, effectFactory),
 });
 
-export const DEFAULT_EFFECTS: Readonly<{ readonly strikes: MomentEffectFactory; readonly lava: MomentEffectFactory }> = Object.freeze({
+export const DEFAULT_EFFECTS: Readonly<{
+  readonly strikes: MomentEffectFactory; readonly lava: MomentEffectFactory; readonly enemyHealth: MomentEffectFactory;
+}> = Object.freeze({
   strikes: () => new HitBursts(),
   lava: () => new LavaFire(),
+  enemyHealth: () => new EnemyHealthBars(),
 });
 
 const EFFECT_CONTRACT = instanceContract({
@@ -71,6 +76,8 @@ export class SceneEffects {
       created.push(createInstance(EFFECT_CONTRACT, strikes, strikes.value));
       const lava = plugins.slot(EFFECTS.lava, DEFAULT_EFFECTS.lava);
       created.push(createInstance(EFFECT_CONTRACT, lava, lava.value));
+      const enemyHealth = plugins.slot(EFFECTS.enemyHealth, DEFAULT_EFFECTS.enemyHealth);
+      created.push(createInstance(EFFECT_CONTRACT, enemyHealth, enemyHealth.value));
       for (const factory of plugins.list(EFFECTS.extras)) {
         created.push(createInstance(EFFECT_CONTRACT, factory, factory.value));
       }

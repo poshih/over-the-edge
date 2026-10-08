@@ -45,7 +45,9 @@ interface FrameBase {
   readonly time: number;
   readonly dt: number;
   readonly body: Matrix4;
+  // The jar's frame, its origin at the jar's bottom-centre, and that bottom's height below the player root.
   readonly pot: Matrix4;
+  readonly jarBottom: number;
   readonly tool: Matrix4;
   readonly shaft: Readonly<ShaftFrame>;
   readonly headRotation: Quaternion;

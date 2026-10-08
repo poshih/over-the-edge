@@ -47,7 +47,7 @@ export interface Tuning {
   handleFrequency: number;
   handleDamping: number;
   mouseSensitivity: number;
-  // Hits the character takes before dying, in damage points.
+  // The character's hit points, which every hurt source's damage, also in hit points, takes from.
   health: number;
   hurtInvulnerability: number;
   respawnInvulnerability: number;
@@ -59,16 +59,23 @@ export interface Tuning {
   projectileLift: number;
   axePush: number;
   axeLift: number;
-  // Species health applies at reset or spawn; the other enemy rules apply live.
+  // A hammer-head strike hurts an enemy only when it closes faster than the species' armor (m/s). Then it takes
+  // `hammerDamage` hit points at `hammerFullSpeed` (m/s) or faster, and proportionally less at slower speeds. Species
+  // health, in hit points, applies at reset or spawn; the other enemy rules apply live.
+  hammerDamage: number;
+  hammerFullSpeed: number;
   birdHealth: number;
+  birdArmor: number;
   birdMass: number;
   birdAcceleration: number;
   birdSight: number;
   birdDiveSpeed: number;
   soldierHealth: number;
+  soldierArmor: number;
   soldierMass: number;
   soldierAcceleration: number;
   archerHealth: number;
+  archerArmor: number;
   archerMass: number;
   archerAcceleration: number;
   archerSight: number;
@@ -121,7 +128,7 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   handleFrequency: 0,
   handleDamping: 0.9,
   mouseSensitivity: 1,
-  health: 5,
+  health: 100,
   hurtInvulnerability: 1,
   respawnInvulnerability: 2,
   hurtWidth: 1,
@@ -131,26 +138,31 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   projectileLift: 1.5,
   axePush: 9,
   axeLift: 4,
-  birdHealth: 1,
+  hammerDamage: 100,
+  hammerFullSpeed: 8,
+  birdHealth: 100,
+  birdArmor: 2.5,
   birdMass: 0.55,
   birdAcceleration: 22,
   birdSight: 6,
   birdDiveSpeed: 5,
-  soldierHealth: 2,
+  soldierHealth: 200,
+  soldierArmor: 4,
   soldierMass: 3,
   soldierAcceleration: 28,
-  archerHealth: 1,
+  archerHealth: 100,
+  archerArmor: 3,
   archerMass: 2.5,
   archerAcceleration: 24,
   archerSight: 14,
   arrowSpeed: 12,
-  arrowDamage: 1,
-  bumpDamage: 1,
+  arrowDamage: 20,
+  bumpDamage: 20,
   bumpSpeed: 3,
   bumpLift: 1.4,
   lavaBuoyancy: 160,
   lavaDrag: 3,
-  lavaDamage: 1,
+  lavaDamage: 20,
   swampBuoyancy: 85,
   swampDrag: 6,
 });
@@ -170,21 +182,13 @@ export const PHYSICS = {
   aimEpsilon: 0.000001,
 } as const;
 
-const POT_BOTTOM = -0.48;
-
-// The fixed player geometry. The handle length and slide range are game settings (see rig.ts).
+// The fixed player geometry. The handle length and slide range, the hammer's head and the jar are game settings
+// (see rig.ts).
 export const RIG = {
   shoulder: { x: 0, y: 0.67 },
-  potBottom: POT_BOTTOM,
   potAngleLimit: 0.26,
   handleSegments: 3,
   handleHalfWidth: 0.045,
-  potVertices: [
-    { x: -0.2, y: POT_BOTTOM }, { x: 0.2, y: POT_BOTTOM },
-    { x: 0.44, y: -0.29 }, { x: 0.5, y: 0.12 },
-    { x: 0.43, y: 0.32 }, { x: -0.43, y: 0.32 },
-    { x: -0.5, y: 0.12 }, { x: -0.44, y: -0.29 },
-  ],
   headVertices: [
     { x: -0.1, y: -0.23 }, { x: -0.06, y: -0.29 },
     { x: 0.06, y: -0.29 }, { x: 0.1, y: -0.23 },

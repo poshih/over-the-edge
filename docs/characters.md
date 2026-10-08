@@ -101,8 +101,9 @@ With the `standard` driver, mapped joints receive the frames that drive the buil
   same smoothing and yaw/pitch limits as the built-in avatar.
 
 The pot hides the body behind its walls through the depth buffer, but does not
-clip it. The pot's bottom is 1.22 m below the fitted shoulders; anything lower,
-such as long legs, shows beneath it. A [pot model](#pot-model) can be shaped to
+clip it. The pot's bottom is 1.22 m below the fitted shoulders with the default jar, and
+as far below the player root as the game's [jar outline](../README.md#game-settings) reaches
+under it otherwise; anything lower, such as long legs, shows beneath it. A [pot model](#pot-model) can be shaped to
 suit the body.
 
 The arms draw over the rest of the avatar and the pot, so they never clip into the
@@ -199,8 +200,11 @@ each by its ID, `<plugin>/<name>`, with configuration only that kind interprets:
     was not drawn for longer than those 15 steps. Pauses and tab hiding settle interpolation; only
     explicit placements rewind presentation time, and placements also restart hair and motions,
     with elapsed time clamped at zero. No game code measures time;
-  - **placement**: `body`, where avatar space sits in the world, including the waist lean, and
-    `pot`, the jar's frame, its origin at the jar's bottom-centre;
+  - **placement**: `body`, where avatar space sits in the world, including the waist lean;
+    `pot`, the jar's frame, its origin at the jar's bottom-centre; and `jarBottom`, that bottom's
+    height about the player root, which the game's [jar outline](../README.md#game-settings) sets
+    (-0.48 m for the default jar), so a point (x, y) about the root on the jar is at
+    (x, y - jarBottom) in `pot`;
   - **the skeleton**: the mapped joints' frames at bind and now, in avatar space;
   - **rest frames**: each claimed joint's frame this frame if it followed its nearest mapped
     joint rigidly, as unmapped joints do.
@@ -337,8 +341,10 @@ the rim; neither is ever hidden by the course, and a 3D character's arms draw ov
 **Use default pot** restores the procedural pot.
 
 Model it in metres with +Y up, its origin at the bottom-centre of the pot, and its
-front facing +Z (toward the camera). The physical pot is 0.80 m tall. Measured
-from that origin, its collision outline is:
+front facing +Z (toward the camera). The physical pot is the game's jar, whose collision
+outline **Physics / Jar** shapes ([`rig.pot`](../README.md#game-settings)); the origin sits at
+its lowest point, below the player root. The default jar is 0.80 m tall. Measured from that
+origin, its collision outline is:
 
 | Height | Radius | Where |
 | --- | --- | --- |
@@ -347,9 +353,9 @@ from that origin, its collision outline is:
 | 0.60 m | 0.50 m | widest point |
 | 0.80 m | 0.43 m | rim |
 
-The outline is the polygon through (±radius, height). Collision is always this 2D
+The outline is the polygon through (±radius, height). Collision is always the jar's 2D
 outline, whatever the model's shape; toggle the collision overlay (**D**) to
-compare. The player root, which the pot pivots about, is 0.48 m above the base.
+compare. The player root, which the pot pivots about, is 0.48 m above the default jar's base.
 The body stands there, 0.05 m in front of the pot's centre (toward the camera).
 
 The pot must be a static mesh. Its lowest point must be within 0.05 m of the

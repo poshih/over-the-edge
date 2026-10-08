@@ -107,8 +107,8 @@ the player has left behind, one whose path stays more than 25 m away, is dropped
 [`LOOKS.phantoms`](runtime-plugins.md#phantom-looks), in the Workshop's replay viewer, studio
 previews and releases alike. Engine-owned `PhantomPlayback` chooses the figures, advances
 recordings, samples poses, fades them and provides the replay viewer's held pose; a
-`PhantomLook` only draws the reused `PhantomFigureFrame` slots and the game's current rig/default
-hammer head. `DEFAULT_PHANTOM_LOOK` creates the pooled translucent white `PhantomView`, with
+`PhantomLook` only draws the reused `PhantomFigureFrame` slots and the game's current rig, default
+hammer head and jar. `DEFAULT_PHANTOM_LOOK` creates the pooled translucent white `PhantomView`, with
 shared geometry, sliding grips and allocation-free arm IK. A game replaces or wraps its drawing without
 changing recording, timing or its backend. It draws only while at least one figure shows,
 in the actors pass over the course.
@@ -219,9 +219,10 @@ and in a fixed order, uses **course format 8**:
 
 The physics: every physics setting but control sensitivity, so the masses, motors, downswing
 boosts, response, friction, damping, bounciness, handle compliance, health, hurt/respawn
-invulnerability, trap hurt-box dimensions and knockback, enemy health, masses,
+invulnerability, trap hurt-box dimensions and knockback, hammer damage and its full-damage
+speed, enemy health, armor, masses,
 acceleration, sight, dive speed, arrow speed and damage, and bumps, and liquids, and the hammer rig's
-handle length, maximum extension, minimum reach and default head. A model-library hammer's
+handle length, maximum extension, minimum reach, default head and jar outline. A model-library hammer's
 own head is a cosmetic's and is left out: recordings made with any hammer share the course,
 and phantom looks receive the game's current default head rather than the recorded player's.
 

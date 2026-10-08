@@ -46,10 +46,11 @@ decides what stands in front of what, so scale distant decorations down yourself
 The course itself is a slab around the [obstacle line](../README.md#obstacle-line): each terrain
 object reaches half its depth behind the line and half in front, and nothing lies beyond that unless
 you put something there. A prop standing on a collider must stand within that collider's depth, and
-one behind the path must also keep clear of the pot, which reaches 0.5 m behind the line. A
+one behind the path must also keep clear of the pot, which reaches half its width behind the line
+(0.5 m for the default jar). A
 decoration behind the line draws with the course; one on or in front of it draws after the
 characters, always covering the body but never a 3D character's arms or the hammer, so
-keep it clear of the jar, which reaches 0.5 m toward the camera. Seen
+keep it clear of the jar, which reaches as far toward the camera. Seen
 through a perspective camera from above, a tree standing on empty ground behind the course
 seems to float as the player climbs past it. Give background scenery ground to stand on with
 **Rock shelf** models, whose tops reach 30 m back, or stand it on hills and crags of its own.

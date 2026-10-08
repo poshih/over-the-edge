@@ -31,6 +31,7 @@ interface MutableFrame {
   readonly stepSeconds: number;
   body: Readonly<Matrix4>;
   pot: Readonly<Matrix4>;
+  jarBottom: number;
   readonly mapped: AvatarMotionSkeleton;
   readonly rest: readonly Matrix4[];
   readonly out: readonly Matrix4[];
@@ -112,7 +113,8 @@ export class AvatarMotionRunner {
         // A motion that never ran under the runner it comes from still starts from rest.
         fresh: before?.fresh ?? true, writes: before?.writes ?? 0,
         frame: {
-          reset: true, steps: 0, stepSeconds: MOTION_STEP_SECONDS, body: new Matrix4(), pot: new Matrix4(), mapped: mapped.frames,
+          reset: true, steps: 0, stepSeconds: MOTION_STEP_SECONDS, body: new Matrix4(), pot: new Matrix4(), jarBottom: 0,
+          mapped: mapped.frames,
           rest: Object.freeze(rest), out: Object.freeze(out),
         },
       };
@@ -124,8 +126,8 @@ export class AvatarMotionRunner {
   }
 
   // Runs every motion for the frame at `time` (simulation seconds), once the mapped joints are posed. `body` places
-  // avatar space in the world; `pot` places the jar, its origin at the jar's bottom-centre.
-  apply(body: Readonly<Matrix4>, pot: Readonly<Matrix4>, time: number): void {
+  // avatar space in the world; `pot` places the jar, its origin at the jar's bottom-centre, `jarBottom` below the root.
+  apply(body: Readonly<Matrix4>, pot: Readonly<Matrix4>, jarBottom: number, time: number): void {
     if (this.runs.length === 0) return;
     this.clock.advance(time);
     for (const run of this.runs) {
@@ -135,6 +137,7 @@ export class AvatarMotionRunner {
       run.fresh = false;
       frame.body = body;
       frame.pot = pot;
+      frame.jarBottom = jarBottom;
       for (let index = 0; index < claims.length; index += 1) {
         const claim = claims[index]!;
         if (claim.follow !== null) frame.rest[index]!.multiplyMatrices(claim.follow, claim.restOffset);

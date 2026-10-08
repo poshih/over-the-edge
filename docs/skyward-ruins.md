@@ -107,8 +107,9 @@ course. Most lead two rungs higher; Wind Galleries shafts lead four rungs higher
 Move toward the adjacent landing before falling back down the shaft. Height and
 strength remain independently editable on each `launch-player` event.
 
-Birds patrol, warn, and dive; one solid hammer-head strike defeats them.
-Hollow soldiers patrol broad platforms and require two separated strikes.
+Birds patrol, warn, and dive; one full-speed hammer-head strike defeats them.
+Hollow soldiers patrol broad platforms and take two full-speed strikes; slower
+strikes deal less.
 Body contact causes knockback, not health damage. Kills persist until reset;
 editing and exporting retain the authored enemy homes.
 

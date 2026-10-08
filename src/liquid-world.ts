@@ -1,8 +1,8 @@
 import { DynamicTree, PolygonShape } from 'planck';
 import type { AABBValue, Body, Fixture } from 'planck';
-import { PHYSICS, RIG } from './config';
+import { PHYSICS } from './config';
 import type { Tuning } from './config';
-import { isPoolObject, polygonArea } from './level';
+import { isPoolObject } from './level';
 import type { LevelChange, PoolObject } from './level';
 import { LIQUID_SETTINGS } from './liquids';
 import type { PlayerRig } from './player';
@@ -18,8 +18,6 @@ interface Pool {
   readonly maxY: number;
 }
 
-// The pot's area: the player's volume, which each liquid's buoyancy and drag are set against.
-const POT_AREA = Math.abs(polygonArea(RIG.potVertices));
 // A fixture's outline clipped to a pool: at most planck's 12 points, and one more for each side of the box.
 const MAX_POINTS = 16;
 // Less than this, in square metres, under the surface is touching it, not in the liquid.
@@ -97,19 +95,21 @@ export class LiquidWorld {
   push(rig: PlayerRig, tuning: Readonly<Tuning>): PoolObject | null {
     this.ensureLive();
     if (this.pools.size === 0) return null;
+    // The jar's area is the player's volume, which each liquid's buoyancy and drag are set against.
+    const area = rig.geometry.jar.area;
     if (rig.phase === 'dying') {
-      const bath = this.pushSubject(rig.characterBodies, rig.potFixture, rig.characterMass, tuning);
-      this.pushSubject(rig.tool.bodies, null, rig.toolMass, tuning);
+      const bath = this.pushSubject(rig.characterBodies, rig.potFixture, rig.characterMass, area, tuning);
+      this.pushSubject(rig.tool.bodies, null, rig.toolMass, area, tuning);
       return bath;
     }
     let mass = 0;
     for (let index = 0; index < rig.bodies.length; index++) mass += rig.bodies[index]!.body.getMass();
-    return this.pushSubject(rig.bodies, rig.potFixture, mass, tuning);
+    return this.pushSubject(rig.bodies, rig.potFixture, mass, area, tuning);
   }
 
   // A detached tool has its own indexed region and drag reference mass; only the corpse's pot
   // supplies buoyancy. Never span the empty distance between the two subjects with one query.
-  private pushSubject(bodies: readonly PlayerBody[], potFixture: Fixture | null, mass: number,
+  private pushSubject(bodies: readonly PlayerBody[], potFixture: Fixture | null, mass: number, area: number,
     tuning: Readonly<Tuning>): PoolObject | null {
     const { lowerBound, upperBound } = this.query;
     lowerBound.x = lowerBound.y = Infinity;
@@ -135,8 +135,8 @@ export class LiquidWorld {
       const settings = LIQUID_SETTINGS[liquid];
       // A square metre of the pot under the surface: its share of the player's buoyancy, and of its drag, which slows
       // the hammer alike.
-      const lift = tuning[settings.buoyancy] / 100 * mass * PHYSICS.gravity / POT_AREA;
-      const thickness = tuning[settings.drag] * mass / POT_AREA;
+      const lift = tuning[settings.buoyancy] / 100 * mass * PHYSICS.gravity / area;
+      const thickness = tuning[settings.drag] * mass / area;
       for (let part = 0; part < bodies.length; part++) {
         const body = bodies[part]!.body;
         for (let fixture = body.getFixtureList(); fixture !== null; fixture = fixture.getNext()) {

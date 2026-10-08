@@ -33,7 +33,8 @@ export const ENEMY_SPECS = {
 
 export const ENEMY_BEHAVIOR = {
   wakeDistance: 18, sleepDistance: 26, queryMovement: 0.75, decisionSeconds: 0.12,
-  hitSpeed: 0.8, hitSeconds: 0.25, hurtSeconds: 0.18, deathSeconds: 0.45,
+  // The lowest armor a species can have, in m/s of strike closing speed: gentler contacts are brushing, never strikes.
+  minimumArmor: 0.8, hitSeconds: 0.25, hurtSeconds: 0.18, deathSeconds: 0.45,
   bumpSeconds: 0.7,
   patrolTolerance: 0.15, ledgeAhead: 0.3, ledgeDepth: 0.55, probeRise: 0.2, minimumWallNormal: 0.5,
   birdWindupSeconds: 0.5, birdDiveSeconds: 1,
@@ -54,6 +55,9 @@ export interface EnemyPose extends Readonly<Point> {
   readonly phase: EnemyPhase;
   readonly changedAt: number;
   readonly moving: boolean;
+  // Hit points left, and the species' health when the enemy last reset or spawned.
+  readonly health: number;
+  readonly maxHealth: number;
 }
 
 export type EnemyEvent =

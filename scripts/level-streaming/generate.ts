@@ -119,8 +119,8 @@ function checkWorkload(snapshot: CourseSnapshot, benchmark: BenchmarkCase, decor
     for (const { object } of snapshot.solids) {
       const mesh = object.mesh;
       ensure(mesh.type === 'asset' && mesh.collision.type === 'slice' && !object.mirror, 'unmirrored mesh slice', object.id);
-      ensure(mesh.collision.loops.length === limits.sliceLoops &&
-        mesh.collision.loops.every((loop) => loop.length === limits.sliceVertices / limits.sliceLoops),
+      ensure(mesh.collision.loops.length === limits.meshLoops &&
+        mesh.collision.loops.every((loop) => loop.length === limits.meshPoints / limits.meshLoops),
       'maximum slice loops and vertices', object.id);
     }
   }

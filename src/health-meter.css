@@ -1,27 +1,36 @@
 .health-meter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  max-width: 132px;
-}
-
-.health-pip {
-  width: 9px;
-  height: 13px;
-  border: 1px solid #8f2a22;
+  position: relative;
+  width: 132px;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid #5c1913;
   border-radius: 2px;
-  background: #d2463a;
-  transition: background-color 160ms ease, opacity 160ms ease;
+  background: rgb(26 20 18 / 55%);
 }
 
-.health-pip.is-lost {
-  border-color: currentColor;
-  background: transparent;
-  opacity: 0.35;
+.health-meter-chunk,
+.health-meter-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+}
+
+/* What a loss took holds for a moment, then drains to the hit points left. */
+.health-meter-chunk {
+  background: #e8c879;
+  transition: transform 400ms ease-in 500ms;
+}
+
+.health-meter-fill {
+  background: #d2463a;
+}
+
+.health-meter.is-gaining .health-meter-chunk {
+  transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .health-pip {
-    transition: none;
+  .health-meter-chunk {
+    transition-duration: 0s;
   }
 }

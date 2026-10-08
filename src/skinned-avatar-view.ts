@@ -184,7 +184,9 @@ export class SkinnedAvatarView {
   // Applies the prepared rig's avatar-space pose, which the engine wrote this frame from the plan
   // and the arm solutions, then runs the motions for the frame at `time` (simulation seconds). `body` places
   // avatar space, leaning with the upper body; `pot` places the jar, its origin at the jar's bottom-centre.
-  apply(body: Matrix4, pot: Matrix4, headRotation: Quaternion, pose: AvatarRigPose, time: number, headDelta: Matrix4 | null = null): void {
+  // `pot` is the jar's frame, its origin at the jar's bottom-centre, `jarBottom` below the player root.
+  apply(body: Matrix4, pot: Matrix4, jarBottom: number, headRotation: Quaternion, pose: AvatarRigPose, time: number,
+    headDelta: Matrix4 | null = null): void {
     this.root.matrix.copy(body);
     this.root.matrixWorldNeedsUpdate = true;
 
@@ -213,7 +215,7 @@ export class SkinnedAvatarView {
       joint.bone.matrixWorldNeedsUpdate = true;
     }
     this.writes += this.driven.length;
-    this.motions.apply(body, pot, time);
+    this.motions.apply(body, pot, jarBottom, time);
   }
 
   // Skin joint `index`'s current world frame, brought up to date for this frame's pose.

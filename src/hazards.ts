@@ -47,8 +47,8 @@ export interface ProjectileBlock {
 export const BONFIRE = {
   // The player's foot lights a bonfire this near its base.
   reach: 1.5,
-  // A fallen player comes back with the pot's centre this high above the bonfire's base, as a start stands.
-  spawnHeight: 0.65,
+  // A fallen player comes back with the jar's base this high above the bonfire's base, clear of the ground it stands on.
+  spawnClearance: 0.17,
   // The drawn fire, standing on its base.
   width: 1.2, height: 1.3,
 } as const;
@@ -76,7 +76,7 @@ export const SHOOTER_FIELDS = {
   interval: { label: 'Shot interval', min: 0.5, max: 20, step: 0.1, unit: 's' },
   delay: { label: 'First shot', min: 0, max: 20, step: 0.1, unit: 's' },
   speed: { label: 'Projectile speed', min: 2, max: 30, step: 0.5, unit: 'm/s' },
-  damage: { label: 'Damage', min: 1, max: 20, step: 1, unit: '' },
+  damage: { label: 'Damage', min: 1, max: 1000, step: 1, unit: 'HP' },
 } as const;
 
 export const AXE = {
@@ -92,7 +92,7 @@ export const AXE_FIELDS = {
   length: { label: 'Length', min: 1.5, max: 12, step: 0.1, unit: 'm' },
   period: { label: 'Swing period', min: 1, max: 12, step: 0.1, unit: 's' },
   offset: { label: 'Swing offset', min: 0, max: 12, step: 0.1, unit: 's' },
-  damage: { label: 'Damage', min: 1, max: 20, step: 1, unit: '' },
+  damage: { label: 'Damage', min: 1, max: 1000, step: 1, unit: 'HP' },
 } as const;
 
 export interface Bounds {
@@ -167,7 +167,8 @@ export function axeReach(axe: AxeObject, halfDepth: number): Bounds {
   };
 }
 
-// Where a fallen player comes back at a bonfire, holding the hammer as at the level's start.
-export function bonfireSpawn(bonfire: Readonly<Point>, start: Pick<StartObject, 'angle' | 'reach'>): PlayerSpawn {
-  return { position: { x: bonfire.x, y: bonfire.y + BONFIRE.spawnHeight }, angle: start.angle, reach: start.reach };
+// Where a fallen player comes back at a bonfire, holding the hammer as at the level's start. `jarBottom` is the jar's base
+// below the player's root (negative).
+export function bonfireSpawn(bonfire: Readonly<Point>, start: Pick<StartObject, 'angle' | 'reach'>, jarBottom: number): PlayerSpawn {
+  return { position: { x: bonfire.x, y: bonfire.y + BONFIRE.spawnClearance - jarBottom }, angle: start.angle, reach: start.reach };
 }

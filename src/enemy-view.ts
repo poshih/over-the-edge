@@ -230,6 +230,8 @@ export class EnemyView implements EnemyLook {
       owned.phase = pose.phase;
       owned.changedAt = pose.changedAt;
       owned.moving = pose.moving;
+      owned.health = pose.health;
+      owned.maxHealth = pose.maxHealth;
     }
     const count = this.instances.size;
     const slot = this.instances.upsert(owned);

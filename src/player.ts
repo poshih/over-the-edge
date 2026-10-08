@@ -52,7 +52,7 @@ export function playerAnchor(rig: PlayerRig): Body {
 const corpseEntry = createDeathPose();
 const corpseRoot: Point = { x: 0, y: 0 }, corpseButt: Point = { x: 0, y: 0 }, corpseHead: Point = { x: 0, y: 0 };
 const corpseReading: { -readonly [K in keyof CorpseReading]: CorpseReading[K] } = {
-  root: corpseRoot, butt: corpseButt, head: corpseHead, headMargin: 0,
+  root: corpseRoot, butt: corpseButt, head: corpseHead, headMargin: 0, waist: 0,
 };
 
 export function beginPlayerDeath(world: World, rig: AlivePlayerRig, figure: Readonly<CharacterFigure>,
@@ -62,8 +62,9 @@ export function beginPlayerDeath(world: World, rig: AlivePlayerRig, figure: Read
   corpseRoot.x = root.x; corpseRoot.y = root.y;
   partPoint(rig.tool.butt, corpseButt); partPoint(rig.tool.head, corpseHead);
   corpseReading.headMargin = headGripMargin(rig.tool.head.vertices);
+  corpseReading.waist = rig.geometry.jar.top;
   writeCorpseEntry(figure, corpseReading, corpseEntry);
-  const ragdoll = createRagdoll(world, rig.pot, rig.root, corpseEntry, figure, tuning, death);
+  const ragdoll = createRagdoll(world, rig.pot, rig.root, corpseEntry, figure, tuning, death, rig.geometry.jar.top);
   world.destroyJoint(rig.drive);
   world.destroyJoint(rig.potJoint);
   if (!world.destroyBody(rig.root)) throw new PlayerDeathError('construction-failed', 'Could not remove the live character root.');
@@ -165,7 +166,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
   const rootOwned = playerBody(world, { id: 'root', position: spawn.position, angle: 0, fixedRotation: true });
   const potOwned = playerBody(world, { id: 'pot', position: spawn.position, angle: 0, fixedRotation: false });
   const root = rootOwned.body, pot = potOwned.body;
-  const potFixture = pot.createFixture(new Polygon(RIG.potVertices.map((point) => new Vec2(point.x, point.y))), {
+  const potFixture = pot.createFixture(new Polygon(geometry.pot.map((point) => new Vec2(point.x, point.y))), {
     density: 1, friction: tuning.potFriction, restitution: tuning.potBounciness / 100,
     filterCategoryBits: PHYSICS.playerCategory,
     filterMaskBits: PHYSICS.terrainCategory | PHYSICS.enemyCategory,
@@ -183,7 +184,7 @@ export function createPlayer(world: World, spawn: PlayerSpawn, tuning: Readonly<
   const rig: AlivePlayerRig = { phase: 'alive', geometry, root, pot, potFixture, potJoint, tool, drive,
     bodies: [rootOwned, potOwned, ...tool.bodies], parts: [
       { id: 'root', kind: 'root', body: root, localPoint: ORIGIN, vertices: [] },
-      { id: 'pot', kind: 'pot', body: pot, localPoint: ORIGIN, vertices: RIG.potVertices, fixture: potFixture },
+      { id: 'pot', kind: 'pot', body: pot, localPoint: ORIGIN, vertices: geometry.pot, fixture: potFixture },
       { id: 'shoulder', kind: 'shoulder', body: root, localPoint: RIG.shoulder, vertices: [] },
       ...tool.parts,
     ] };

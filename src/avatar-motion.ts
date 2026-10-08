@@ -96,6 +96,9 @@ export interface AvatarMotionFrame {
   readonly body: Readonly<Matrix4>;
   // The pot's frame in the world: its origin at the jar's bottom-centre, +Y up.
   readonly pot: Readonly<Matrix4>;
+  // That bottom's height below the player root, in metres (negative): the jar's collision outline sets it. A point
+  // at (x, y) about the root on the jar is at (x, y - jarBottom) in `pot`.
+  readonly jarBottom: number;
   readonly mapped: AvatarMotionSkeleton;
   // Each claimed joint's frame this frame, in avatar space, if it followed its nearest mapped joint rigidly, as
   // unmapped joints do; in claim order.

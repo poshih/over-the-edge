@@ -2,7 +2,6 @@ import { Polygon, RevoluteJoint, Vec2 } from 'planck';
 import type { Body, World } from 'planck';
 import { ARM_SIDES } from './character';
 import type { ArmSide } from './character';
-import { CORPSE_WAIST } from './character-figure';
 import type { CharacterFigure } from './character-figure';
 import { PHYSICS } from './config';
 import type { Point, Tuning } from './config';
@@ -57,8 +56,9 @@ function worldPoint(frame: Readonly<Transform2>, local: Readonly<Point>): Point 
 
 // Construction is once, between world steps. Provisional bodies own their joints and are rolled
 // back together if construction fails; the live assembly is untouched until this returns.
+// `waist` is the jar's top above the root, where the torso joins it.
 export function createRagdoll(world: World, pot: Body, root: Body, entry: ReadonlyDeathPose,
-  figure: Readonly<CharacterFigure>, tuning: Readonly<Tuning>, settings: Readonly<DeathSettings>): PhysicalRagdoll {
+  figure: Readonly<CharacterFigure>, tuning: Readonly<Tuning>, settings: Readonly<DeathSettings>, waist: number): PhysicalRagdoll {
   const bodies: PlayerBody[] = [], parts: PlayerPart[] = [];
   const mass = root.getMass(), velocity = root.getLinearVelocity();
   const create = (id: string, kind: PlayerPart['kind'], transform: Readonly<Transform2>,
@@ -106,7 +106,7 @@ export function createRagdoll(world: World, pot: Body, root: Body, entry: Readon
       ellipse(0, chest.y, chest.radius * chest.scale[0], chest.radius * chest.scale[1]), MASS_SHARES.torso);
     const head = create('character-head', 'character-head', entry.head,
       ellipse(0, 0, helmet.radius, helmet.radius * helmet.scaleY), MASS_SHARES.head);
-    join(pot, torso, worldPoint(entry.torso, CORPSE_WAIST), LIMITS.waist);
+    join(pot, torso, worldPoint(entry.torso, { x: 0, y: waist }), LIMITS.waist);
     join(torso, head, worldPoint(entry.torso, figure.neck), LIMITS.neck);
     const arms = {} as Record<ArmSide, PhysicalArm>;
     for (const side of ARM_SIDES) {

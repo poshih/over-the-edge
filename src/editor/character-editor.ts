@@ -41,14 +41,6 @@ const HEAD_HALF_LENGTH = Math.max(...RIG.headVertices.map(point => point.x));
 const HEAD_HALF_HEIGHT = Math.max(...RIG.headVertices.map(point => point.y));
 const metres = (value: number): string => `${Number(value.toFixed(2))} m`;
 
-// The physical pot outline, measured from its bottom-centre (the pot model's origin).
-const POT_OUTLINE = (() => {
-  const points = RIG.potVertices.map(point => ({ radius: Math.abs(point.x), height: point.y - RIG.potBottom }));
-  const top = Math.max(...points.map(point => point.height));
-  const radius = (height: number) => Math.max(...points.filter(point => point.height === height).map(point => point.radius));
-  const widest = points.reduce((best, point) => point.radius > best.radius ? point : best);
-  return { base: radius(0), widest, rim: { radius: radius(top), height: top } };
-})();
 
 const CHARACTER_TYPES: Readonly<Record<CharacterRiggingType, { label: string; description: string }>> = {
   'model-3d': {
@@ -271,10 +263,9 @@ export function createCharacterEditor(options: {
         <div class="character-pot">
           <p class="appearance-format">Replace the pot with one rigid model, in every character type. It follows the
             physical pot body at the pot's own depth, so its walls hide a body inside it. Model it in metres with
-            +Y up, its origin at the bottom-centre of the pot and its front facing +Z. The physical pot is
-            ${metres(POT_OUTLINE.rim.height)} tall: base radius ${metres(POT_OUTLINE.base)}, widest radius
-            ${metres(POT_OUTLINE.widest.radius)} at ${metres(POT_OUTLINE.widest.height)}, rim radius
-            ${metres(POT_OUTLINE.rim.radius)}. Collision stays physical.</p>
+            +Y up, its origin at the bottom-centre of the pot and its front facing +Z. The physical pot is the jar's
+            collision outline, shaped in Physics / Jar, which gives its size; match the model to it. Collision stays
+            physical.</p>
           <label class="appearance-label" for="character-pot-file">Pot GLB</label>
           <input id="character-pot-file" type="file" accept=".glb,model/gltf-binary" />
           <div class="character-pot-server"></div>

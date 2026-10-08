@@ -12,6 +12,8 @@ import { RIG } from './config';
 import { DEFAULT_GRIPS, GripHold, headGripMargin } from './grips';
 import { DEFAULT_HAMMER_HEAD } from './hammer-head';
 import type { HammerHead } from './hammer-head';
+import { DEFAULT_POT_OUTLINE } from './pot-outline';
+import type { PotOutline } from './pot-outline';
 import type { GripDistances, GripShoulder } from './grips';
 import type { PhantomFigureFrame, PhantomLook, PhantomLookFactory } from './object-looks';
 import { createHammerHeadGeometry, createPotGeometry, placeLimb, PLAYER_FIGURE } from './player-figure';
@@ -30,15 +32,15 @@ const HINT_OFFSETS: Readonly<Record<ArmSide, readonly [number, number, number]>>
 };
 
 interface FigureGeometry {
-  readonly pot: BufferGeometry;
   readonly body: BufferGeometry;
   readonly upperArm: BufferGeometry;
   readonly forearm: BufferGeometry;
   readonly elbow: BufferGeometry;
   readonly hand: BufferGeometry;
   readonly shaft: BufferGeometry;
-  // The game's default hammer head, replaced when the game settings change it.
+  // The game's default hammer head and its jar, replaced when the game settings change them.
   head: BufferGeometry;
+  pot: BufferGeometry;
 }
 
 interface Limbs {
@@ -72,7 +74,7 @@ function createFigureGeometry(): FigureGeometry {
   for (const part of parts) part.dispose();
   if (body === null) throw new Error('The phantom figure\'s body could not be merged.');
   return {
-    pot: createPotGeometry(),
+    pot: createPotGeometry(DEFAULT_POT_OUTLINE),
     body,
     upperArm: new CylinderGeometry(upperArm.top, upperArm.bottom, 1, 10),
     forearm: new CylinderGeometry(forearm.top, forearm.bottom, 1, 10),
@@ -115,6 +117,7 @@ export class PhantomView implements PhantomLook {
   private readonly figures: readonly Figure[];
   // The game's current default hammer head, whatever hammer a recorded player held.
   private head: HammerHead = DEFAULT_HAMMER_HEAD;
+  private pot: PotOutline = DEFAULT_POT_OUTLINE;
   private headMargin = headGripMargin(DEFAULT_HAMMER_HEAD);
   private readonly toolDepth = getToolDepth(DEFAULT_ARM_FORWARD_DISTANCE);
   private readonly shoulders: Record<ArmSide, GripShoulder> = {
@@ -131,8 +134,9 @@ export class PhantomView implements PhantomLook {
     for (const figure of this.figures) this.root.add(figure.root);
   }
 
-  draw(frames: readonly PhantomFigureFrame[], head: HammerHead): void {
+  draw(frames: readonly PhantomFigureFrame[], head: HammerHead, pot: PotOutline): void {
     if (head !== this.head) this.setHead(head);
+    if (pot !== this.pot) this.setPot(pot);
     for (let index = 0; index < this.figures.length; index++) {
       const figure = this.figures[index]!;
       const frame = frames[index]!;
@@ -158,6 +162,14 @@ export class PhantomView implements PhantomLook {
     previous.dispose();
     this.head = head;
     this.headMargin = headGripMargin(head);
+  }
+
+  private setPot(pot: PotOutline): void {
+    const previous = this.geometry.pot;
+    this.geometry.pot = createPotGeometry(pot);
+    for (const figure of this.figures) figure.pot.geometry = this.geometry.pot;
+    previous.dispose();
+    this.pot = pot;
   }
 
   private place(figure: Figure, frame: PhantomFigureFrame): void {

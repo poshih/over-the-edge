@@ -142,11 +142,13 @@ export class CharacterView {
     }, { characterModels: options.characterModels, content: options.content, avatarRigs: options.kinds.avatarRigs });
     this.liveFrame = {
       phase: 'alive', time: initial.time, dt: 0, body: this.figure.torso.matrixWorld, pot: this.figure.potFrame,
+      jarBottom: initial.rig.jar.bottom,
       tool: this.figure.toolFrame, shaft: this.figure.shaft, headRotation: this.figure.headRotation,
       arms: this.figure.posedArms, cursor: this.presentedCursor, aim: this.figure.aim, turn: 0, grips: this.arms.distances,
     };
     this.deathFrame = {
       phase: 'dying', time: initial.time, dt: 0, body: this.figure.torso.matrixWorld, pot: this.figure.potFrame,
+      jarBottom: initial.rig.jar.bottom,
       tool: this.figure.toolFrame, shaft: this.figure.shaft, headRotation: this.figure.headRotation,
       arms: this.figure.posedArms, cursor: this.presentedCursor, aim: this.figure.aim, turn: 0,
       headDelta: this.figure.headDelta, appearance: this.appearance,
@@ -180,6 +182,7 @@ export class CharacterView {
   syncRig(frame: PhysicsFrame): void {
     this.figure.syncRig(frame.rig);
     this.profiles.syncRig(frame.rig);
+    this.liveFrame.jarBottom = this.deathFrame.jarBottom = frame.rig.jar.bottom;
   }
 
   syncHead(outline: HammerHead): void { this.figure.syncHead(outline); this.arms.syncHead(outline); }
@@ -300,6 +303,7 @@ export class CharacterView {
     const character = out.character, hammer = out.hammer, figure = this.figure, torso = figure.torso;
     character.phase = frame.player.phase;
     copyTransform(character.centre, frame.player.centre);
+    character.jarBottom = frame.rig.jar.bottom;
     character.torso.x = torso.position.x; character.torso.y = torso.position.y; character.torso.angle = torso.rotation.z;
     hammer.held = character.phase === 'alive';
     copyTransform(hammer.butt, figure.shaft.base);

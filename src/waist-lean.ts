@@ -24,8 +24,8 @@ const JOLT = { amplitude: 18 * RADIANS_PER_DEGREE, rise: 0.05, duration: 0.6 } a
  */
 export class WaistLean {
   angle = 0;
-  // The waist's height above the torso's origin (the player root).
-  private readonly pivotY: number;
+  // The waist's height above the torso's origin (the player root): the jar's top.
+  private pivotY: number;
   private eased = 0;
   private previousTime: number | null = null;
   private previewing: LeanPreview | null = null;
@@ -33,6 +33,11 @@ export class WaistLean {
   private previewStart: number | null = null;
 
   constructor(pivotY: number) {
+    this.pivotY = pivotY;
+  }
+
+  // A new jar moves the waist to its top.
+  setPivot(pivotY: number): void {
     this.pivotY = pivotY;
   }
 

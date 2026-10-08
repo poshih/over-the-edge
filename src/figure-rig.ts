@@ -2,7 +2,7 @@ import {
   Box3, BoxGeometry, CylinderGeometry, Group, Matrix4, Mesh, MeshStandardMaterial,
   Quaternion, SphereGeometry, TorusGeometry, Vector3,
 } from 'three';
-import type { LatheGeometry, Object3D } from 'three';
+import type { BufferGeometry, Object3D } from 'three';
 import { ARM_SIDES, SHAFT_ARTWORK_LENGTH } from './character';
 import type { ArmSide, VisualBinding, VisualPartId } from './character';
 import { ArmPoseSolver } from './arm-ik';
@@ -20,6 +20,8 @@ import type { HammerHead } from './hammer-head';
 import { HeadAim } from './head-aim';
 import { OBSTACLE_LINE } from './obstacle-line';
 import { createHammerHeadGeometry, createPotGeometry, placeLimb, PLAYER_FIGURE } from './player-figure';
+import { DEFAULT_POT_OUTLINE, potMeasures, potSpan, samePotOutline } from './pot-outline';
+import type { PotOutline } from './pot-outline';
 import { copyRotation } from './player-pose';
 import type { DeathPose, LivePlayerFrame, Rotation3, Transform2 } from './player-pose';
 import type { RigGeometry } from './rig';
@@ -35,7 +37,7 @@ const SLEEVE_INSET = 0.07;
 const ARM_PARTS: ReadonlySet<VisualPartId> = new Set(ARM_SIDES.flatMap((side) =>
   [`${side}-upper-arm`, `${side}-forearm`, `${side}-elbow`, `${side}-hand`] as const));
 
-function solid(geometry: BoxGeometry | SphereGeometry | CylinderGeometry | LatheGeometry | TorusGeometry,
+function solid(geometry: BoxGeometry | SphereGeometry | CylinderGeometry | BufferGeometry | TorusGeometry,
   material: MeshStandardMaterial, position: [number, number, number] = [0, 0, 0]): Mesh {
   const mesh = new Mesh(geometry, material);
   mesh.position.set(...position);
@@ -64,8 +66,8 @@ export class FigureRig {
   readonly posedArms: ArmPose[] = [];
   readonly torso = new Group();
   readonly headAim = new HeadAim();
-  // The upper body turns about the waist, at the jar's rim, toward the hammer, up to the character's waistLean.
-  readonly waistLean = new WaistLean(Math.max(...RIG.potVertices.map((point) => point.y)));
+  // The upper body turns about the waist, at the jar's top, toward the hammer, up to the character's waistLean.
+  readonly waistLean = new WaistLean(0);
   readonly headRotation = new Quaternion();
   readonly headDelta = new Matrix4();
   readonly potFrame = new Matrix4();
@@ -97,6 +99,9 @@ export class FigureRig {
   // The physical head's outline, which the built-in head mesh follows.
   private headOutline: HammerHead = DEFAULT_HAMMER_HEAD;
   private headMesh!: Mesh;
+  // The default jar's drawing, which follows the jar's collision outline.
+  private readonly jar = new Group();
+  private jarOutline: PotOutline | null = null;
   private rig: RigGeometry;
   private disposed = false;
 
@@ -111,16 +116,12 @@ export class FigureRig {
     const wood = new MeshStandardMaterial({ color: colors.wood, roughness: 0.7 });
     this.palette = { pot: brass, trim, dark, suit, ceramic, wood };
 
-    const pot = new Group();
-    pot.add(solid(createPotGeometry(), brass));
-    const rim = solid(new TorusGeometry(0.433, 0.035, 10, 40), trim, [0, 0.31, 0]);
-    rim.rotation.x = Math.PI / 2;
-    pot.add(rim);
-    pot.add(solid(new CylinderGeometry(0.425, 0.425, 0.018, 32), dark, [0, 0.285, 0]));
-    const badge = solid(new SphereGeometry(0.11, 12, 8), ceramic, [0, -0.03, 0.472]);
-    badge.scale.set(1, 0.9, 0.16);
-    pot.add(badge);
-    const potAnchor = this.visualSlot('pot', pot);
+    // The pot slot fits Appearance imports and sprite anchors to the default jar, whatever jar the game has, as the
+    // hammer head's fits the default head: the Workshop, which starts on the default settings, and releases agree.
+    this.buildJar(DEFAULT_POT_OUTLINE);
+    const potAnchor = this.visualSlot('pot', this.jar);
+    this.buildJar(rig.pot);
+    this.waistLean.setPivot(rig.jar.top);
     this.playerMeshes.set('pot', potAnchor);
     this.actors.add(potAnchor);
 
@@ -212,8 +213,9 @@ export class FigureRig {
         // The jar's frame: origin at the physical pot's bottom-centre, at the pot's own depth. The pot model and
         // hair colliders held by the jar follow it.
         const cos = Math.cos(part.angle), sin = Math.sin(part.angle);
+        const bottom = this.rig.jar.bottom;
         this.potFrame.makeRotationZ(part.angle)
-          .setPosition(part.x - RIG.potBottom * sin, part.y + RIG.potBottom * cos, PLAYER_DEPTH.pot);
+          .setPosition(part.x - bottom * sin, part.y + bottom * cos, PLAYER_DEPTH.pot);
         pot?.update(this.potFrame);
       }
     }
@@ -337,6 +339,36 @@ export class FigureRig {
     if (rig === this.rig) return;
     this.rig = rig;
     this.layoutShaft();
+    this.buildJar(rig.pot);
+    this.waistLean.setPivot(rig.jar.top);
+  }
+
+  // The default jar from its outline: the body, a rim round its mouth with the dark inside under it, and a badge on its
+  // front, half way up and a little higher. A pointed top has no mouth.
+  private buildJar(outline: PotOutline): void {
+    if (this.jarOutline !== null && samePotOutline(outline, this.jarOutline)) return;
+    this.jarOutline = outline;
+    for (const child of this.jar.children) (child as Mesh).geometry.dispose();
+    this.jar.clear();
+    const { pot: brass, trim, dark, ceramic } = this.palette;
+    const { bottom, top } = potMeasures(outline);
+    const span = { left: 0, right: 0 };
+    this.jar.add(solid(createPotGeometry(outline), brass));
+    potSpan(outline, top, span);
+    const mouth = (span.right - span.left) / 2, middle = (span.left + span.right) / 2;
+    if (mouth >= 0.05) {
+      const rim = solid(new TorusGeometry(mouth + 0.003, 0.035, 10, 40), trim, [middle, top - 0.01, 0]);
+      rim.rotation.x = Math.PI / 2;
+      this.jar.add(rim);
+      this.jar.add(solid(new CylinderGeometry(mouth - 0.005, mouth - 0.005, 0.018, 32), dark, [middle, top - 0.035, 0]));
+    }
+    const badgeY = (bottom + top) / 2 + 0.05;
+    potSpan(outline, badgeY, span);
+    const front = (span.right - span.left) / 2;
+    const badge = solid(new SphereGeometry(0.11 * Math.min(1, front / 0.48), 12, 8), ceramic,
+      [(span.left + span.right) / 2, badgeY, front - 0.006]);
+    badge.scale.set(1, 0.9, 0.16);
+    this.jar.add(badge);
   }
 
   dispose(): void {

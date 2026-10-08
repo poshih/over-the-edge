@@ -2,7 +2,7 @@
 
 [`scripts/course-kit/`](../scripts/course-kit) is a plain Node authoring kit for generated
 courses. It places engine terrain meshes, checks their **authored collision**, and maps
-that same collision. Built-in shapes, drawn outlines and GLB slices all use the engine's
+that same collision. Built-in shapes, drawn outlines and GLB slices and projections all use the engine's
 geometry authority; concavity, disconnected islands and holes need no special placement
 API. [Ashen Ascent](ashen-ascent.md) is an in-repository consumer.
 
@@ -130,8 +130,8 @@ builder.terrain('arch', native.mesh, 6, 12,
 receive the engine's typed error. The caller packages the GLB and its artwork manifest;
 the kit does not upload, register or infer assets from model IDs.
 
-The GLB either declares simple collision or brings its derived middle-depth slice.
-The mesh is passed explicitly, including every slice loop. Dimensions must fit the
+The GLB either declares simple collision or brings its derived outlines: its middle-depth
+slice or, when it declares it, its projection. The mesh is passed explicitly, including every loop. Dimensions must fit the
 engine's level limits; they are not clamped. A declared circle must have equal placed
 width and height: non-uniform scaling into an ellipse is invalid.
 
@@ -427,7 +427,7 @@ Exceeding a limit raises `CourseQueryError` with `code: 'QUERY_WORK_LIMIT'` and 
 precision, automatic geometry coarsening or partial reach result.
 
 Level limits still apply: 1,000 terrain objects, 64 distinct collision geometries,
-16 slice loops, 64 points per loop and 256 total slice points. They cannot be raised
+16 loops per slice or projection, 64 points per loop and 256 points in all. They cannot be raised
 by job budgets. The job's normalized-template LRU holds at most 64 entries;
 eviction only changes cache residency. Transformed placements and their refitted
 edge bounds are snapshot-owned, never cached by world position.

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 10,
   "labels": [
     {
       "x": 0,
@@ -332,7 +332,7 @@
       "interval": 3,
       "delay": 1,
       "speed": 7,
-      "damage": 1
+      "damage": 20
     },
     {
       "kind": "terrain",
@@ -419,7 +419,7 @@
       "interval": 0.7,
       "delay": 0.75,
       "speed": 6,
-      "damage": 1
+      "damage": 20
     },
     {
       "kind": "axe",
@@ -429,7 +429,7 @@
       "length": 2.6,
       "period": 4,
       "offset": 0.5,
-      "damage": 1
+      "damage": 20
     },
     {
       "kind": "terrain",

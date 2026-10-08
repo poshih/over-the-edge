@@ -213,7 +213,7 @@ export function startPhantoms(options: {
     step() {
       const { simulation } = game;
       simulation.rigPose(pose);
-      recorder?.step(simulation.placement, pose, simulation.rigGeometry.handleLength);
+      recorder?.step(simulation.placement, pose, simulation.rigGeometry);
       for (const ask of sources) ask();
       untilStart--;
       if (untilStart <= 0 && waiting.length > 0 && playback.playing < PHANTOM_TIMING.figures) startNext();

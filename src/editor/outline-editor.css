@@ -1,14 +1,14 @@
-.hammer-head-editor {
+.outline-editor {
   display: grid;
   gap: 10px;
 }
 
-.hammer-head-label {
+.outline-editor-label {
   font-size: 11px;
   font-weight: 600;
 }
 
-.hammer-head-editor select {
+.outline-editor select {
   width: 100%;
   min-height: var(--control-height);
   padding: 8px 10px;
@@ -19,7 +19,7 @@
   font-size: 11px;
 }
 
-.hammer-head-canvas {
+.outline-editor-canvas {
   display: block;
   width: 100%;
   max-width: 320px;
@@ -31,20 +31,20 @@
   touch-action: none;
 }
 
-.hammer-head-grid line {
+.outline-editor-grid line {
   stroke: #dfe3d6;
   stroke-width: 1px;
   vector-effect: non-scaling-stroke;
 }
 
 /* The snap grid between the 10 cm lines, fainter than them. */
-.hammer-head-snap-grid line {
+.outline-editor-snap-grid line {
   stroke: #eaece2;
   stroke-width: 1px;
   vector-effect: non-scaling-stroke;
 }
 
-.hammer-head-reach {
+.outline-editor-reach {
   fill: none;
   stroke: #b9c2b0;
   stroke-width: 1px;
@@ -52,11 +52,11 @@
   vector-effect: non-scaling-stroke;
 }
 
-.hammer-head-handle {
+.outline-editor-handle {
   fill: #c9b48c;
 }
 
-.hammer-head-outline {
+.outline-editor-outline {
   fill: rgb(55 109 80 / 22%);
   stroke: #376d50;
   stroke-width: 2px;
@@ -65,20 +65,20 @@
 }
 
 /* A wide, invisible stroke along each edge, pressed to add a point there. */
-.hammer-head-edge {
+.outline-editor-edge {
   stroke: transparent;
   stroke-width: 14px;
   vector-effect: non-scaling-stroke;
   cursor: copy;
 }
 
-.hammer-head-centre {
+.outline-editor-centre {
   fill: #6b4f2a;
 }
 
 /* A point shows focus by its stroke: an outline, the browser's own focus ring included, would be drawn in the
    canvas's units, metres, and cover it. */
-.hammer-head-point {
+.outline-editor-point {
   fill: #f0f3e8;
   stroke: #376d50;
   stroke-width: 2px;
@@ -87,51 +87,66 @@
   cursor: grab;
 }
 
-.hammer-head-point[aria-pressed="true"] {
+.outline-editor-point[aria-pressed="true"] {
   fill: var(--teal);
 }
 
-.hammer-head-point:focus-visible {
+.outline-editor-point:focus-visible {
   stroke: #94662b;
   stroke-width: 3px;
 }
 
-.hammer-head-actions,
-.hammer-head-presets {
+.outline-editor-actions,
+.outline-editor-presets {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.hammer-head-readout,
-.hammer-head-help,
-.hammer-head-problem {
+.outline-editor-readout,
+.outline-editor-help,
+.outline-editor-problem {
   margin: 0;
   font-size: 10px;
   line-height: 1.5;
 }
 
-.hammer-head-problem {
+.outline-editor-problem {
   color: #9b3b2b;
 }
 
-.hammer-head-problem:empty {
+.outline-editor-problem:empty {
   display: none;
 }
 
 @media (forced-colors: active) {
-  .hammer-head-outline,
-  .hammer-head-point {
+  .outline-editor-outline,
+  .outline-editor-point {
     stroke: CanvasText;
   }
 
-  .hammer-head-point[aria-pressed="true"] {
+  .outline-editor-point[aria-pressed="true"] {
     fill: Highlight;
   }
 }
 
-.hammer-head-mirror[aria-pressed="true"] {
+.outline-editor-mirror[aria-pressed="true"] {
   border-color: var(--teal);
   color: var(--paper);
   background: var(--teal);
+}
+
+/* Marks around a jar: the shoulder hinge above it, a ring unlike the filled centre, and the highest its top may reach. */
+.outline-editor-mark {
+  fill: none;
+  stroke: #6b4f2a;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+.outline-editor-limit {
+  stroke: #c08a4a;
+  stroke-width: 1px;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
 }

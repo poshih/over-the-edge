@@ -271,9 +271,14 @@ export function createUI(options: UiOptions): GameUi {
   }
   const hammerHead = createSection({ id: 'physics-head', title: 'Hammer head', hint: 'Each hammer\'s collision outline' });
   const hammerHeadMount = document.createElement('div');
-  hammerHeadMount.className = 'hammer-head-editor';
+  hammerHeadMount.className = 'outline-editor';
   hammerHead.body.append(hammerHeadMount);
   tuningGroups.append(hammerHead.root);
+  const jar = createSection({ id: 'physics-jar', title: 'Jar', hint: 'The jar\'s collision outline' });
+  const jarMount = document.createElement('div');
+  jarMount.className = 'outline-editor';
+  jar.body.append(jarMount);
+  tuningGroups.append(jar.root);
   const cursorGroup = tuningSection({
     id: 'physics-cursor', title: 'Cursor target', hint: 'Aim radius, dead zone and return',
   }, 'Cursor target', 'tuning-group cursor-settings');
@@ -442,7 +447,7 @@ export function createUI(options: UiOptions): GameUi {
   }, listen);
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
-    projectMount, characterMount, appearanceMount, spriteMount, levelMount, hammerHeadMount, addTab, pluginSections, workshopState,
+    projectMount, characterMount, appearanceMount, spriteMount, levelMount, hammerHeadMount, jarMount, addTab, pluginSections, workshopState,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
     applySettings: commitSettings,

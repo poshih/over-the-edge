@@ -158,10 +158,10 @@ function meshPlacement(mesh: TerrainMesh, size: Pick<MeshTerrain, 'width' | 'hei
 function collisionNote(mesh: TerrainMesh): string {
   if (mesh.type === 'shape') return 'Collides as its shape.';
   if (mesh.type === 'outline') return 'Collides as its drawn outline.';
-  if (mesh.collision.type !== 'slice') return `Collides as the ${mesh.collision.type} its GLB declares, fitted to its box.`;
-  const { loops } = mesh.collision;
-  return `Collides as its slice on the obstacle line: ${loops.length} outline${loops.length === 1 ? '' : 's'}, ` +
-    `${loops.reduce((sum, loop) => sum + loop.length, 0)} points.`;
+  if (!('loops' in mesh.collision)) return `Collides as the ${mesh.collision.type} its GLB declares, fitted to its box.`;
+  const { type, loops } = mesh.collision;
+  return `Collides as its ${type === 'slice' ? 'slice on the obstacle line' : 'projection along the view, its outermost outline'}: ` +
+    `${loops.length} outline${loops.length === 1 ? '' : 's'}, ${loops.reduce((sum, loop) => sum + loop.length, 0)} points.`;
 }
 
 function asTerrain(object: LevelObject | null): TerrainObject | null {
@@ -231,13 +231,13 @@ const HAZARD_PRESETS: readonly HazardPreset[] = [
     icon: '<rect x="-0.56" y="-0.26" width="0.44" height="0.52" fill="none" stroke="currentColor" stroke-width="0.08" />' +
       '<path d="M-0.04 0 L0.52 0 M0.33 -0.16 L0.52 0 L0.33 0.16" fill="none" stroke="currentColor" stroke-width="0.08" ' +
       'stroke-linecap="round" stroke-linejoin="round" />',
-    create: (at) => ({ kind: 'shooter', id: PREVIEW_ID, firing: 'timer', x: at.x, y: at.y, angle: 0, interval: 2, delay: 0, speed: 12, damage: 1 }),
+    create: (at) => ({ kind: 'shooter', id: PREVIEW_ID, firing: 'timer', x: at.x, y: at.y, angle: 0, interval: 2, delay: 0, speed: 12, damage: 20 }),
   },
   {
     id: 'axe', label: 'Swinging axe', tally: 'traps', limit: HAZARD_LIMITS.traps,
     icon: '<circle cy="-0.48" r="0.08" fill="currentColor" /><path d="M0 -0.44 L0 0.2" stroke="currentColor" stroke-width="0.08" />' +
       '<path d="M-0.44 0.14 Q0 0.32 0.44 0.14 Q0.3 0.52 0 0.56 Q-0.3 0.52 -0.44 0.14 Z" fill="currentColor" />',
-    create: (at) => ({ kind: 'axe', id: PREVIEW_ID, x: at.x, y: at.y, length: 4, period: 3, offset: 0, damage: 2 }),
+    create: (at) => ({ kind: 'axe', id: PREVIEW_ID, x: at.x, y: at.y, length: 4, period: 3, offset: 0, damage: 40 }),
   },
   ...LIQUIDS.map((liquid): HazardPreset => ({
     id: liquid, label: `${LIQUID_LABELS[liquid]} pool`, tally: 'pools', limit: LIQUID_LIMITS.pools, icon: POOL_ICONS[liquid],
@@ -438,8 +438,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
         </div>
         <input class="level-mesh-file" type="file" accept=".glb,model/gltf-binary" aria-label="Import a GLB mesh" hidden />
         <p class="level-help">Any GLB places as terrain at its own size. It collides as the shape it declares
-          (extras.collision on its scene or a root node: box, ramp, triangle, circle or hexagon), or else as its slice
-          where it meets the obstacle line, the middle of its depth. Imported meshes join Project / Course artwork.</p>
+          (extras.collision on its scene or a root node: box, ramp, triangle, circle or hexagon), as its outermost
+          outline seen along the view when it declares projection, or else as its slice where it meets the obstacle
+          line, the middle of its depth. Imported meshes join Project / Course artwork.</p>
         <p class="level-help level-palette-label">Start, triggers &amp; enemies</p>
         <div class="level-entity-palette" aria-label="Start and trigger palette">
           <button type="button" class="button level-preset" data-level-tool="start" aria-pressed="false">
@@ -1008,9 +1009,10 @@ Export the level first if you want to keep them. Continue without saving?`);
         input(`enemy-${name}`).value = String(Number(enemy[name].toFixed(4)));
       }
       element(root, '.level-enemy-help').textContent =
-        `${ENEMY_HELP[enemy.species]} Physics / Enemies sets how many separate hammer-head strikes defeat each species; health applies at reset or spawn. ` +
-        `Strikes need at least ${ENEMY_BEHAVIOR.hitSpeed} m/s closing speed, with a ${ENEMY_BEHAVIOR.hitSeconds}s anti-jitter cooldown. ` +
-        'Brushing or holding the head against an enemy does not repeatedly deal damage.';
+        `${ENEMY_HELP[enemy.species]} Physics / Enemies sets each species' health in hit points, applied at reset or spawn, ` +
+        'its armor, the closing speed a strike must beat to hurt it at all, and the hammer damage a full-force strike ' +
+        `deals; slower strikes deal proportionally less. Hits have a ${ENEMY_BEHAVIOR.hitSeconds}s anti-jitter cooldown. ` +
+        'Brushing or holding the head against an enemy never deals damage.';
     } else if (trigger !== null) {
       input('trigger-name').value = trigger.name;
       select('trigger-region').value = trigger.region.type;

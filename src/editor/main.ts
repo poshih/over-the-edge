@@ -37,6 +37,8 @@ import { ProjectSession } from './project-session';
 import { createProjectEditor } from './project-editor';
 import { createHammerHeadEditor } from './hammer-head-editor';
 import type { HammerHeadEditor } from './hammer-head-editor';
+import { createJarEditor } from './jar-editor';
+import type { OutlineEditor } from './outline-editor';
 import { PlayRecorder } from './play-recorder';
 import { ServerCopies } from './server-copies';
 import { publishedLevel } from './server-levels';
@@ -229,6 +231,7 @@ const ui: GameUi = boot(() => createUI({
     game.setSettings(settings);
     spriteEditor.setHammerRig(game.simulation.rigGeometry);
     hammerHeads?.refresh();
+    jarEditor?.refresh();
     plugins?.settingsChanged();
   },
   projectSave: project, serverCopies,
@@ -365,6 +368,16 @@ hammerHeads = createHammerHeadEditor({
   },
 });
 const unsubscribeHammerHeads = project.subscribe((event) => { if (event.kind === 'content') hammerHeads?.refresh(); });
+// Physics / Jar shapes the jar's collision outline, a game setting.
+let jarEditor: OutlineEditor | null = null;
+jarEditor = createJarEditor({
+  mount: ui.jarMount,
+  pot: () => game.settings().rig.pot,
+  setPot: (pot) => applySettings(() => {
+    const settings = game.settings();
+    return withRig(settings, { ...settings.rig, pot });
+  }) === null,
+});
 const projectEditor = createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,
   onTestCue: (cue) => audio.preview(cue),
@@ -521,6 +534,7 @@ if (import.meta.hot) {
     disposal.run(() => recorder.dispose());
     disposal.run(() => unsubscribeHammerHeads());
     disposal.run(() => hammerHeads.dispose());
+    disposal.run(() => jarEditor.dispose());
     disposal.run(() => projectEditor.dispose());
     disposal.run(() => serverCopies.dispose());
     disposal.run(() => project.dispose());

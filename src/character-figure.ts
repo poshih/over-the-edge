@@ -1,6 +1,5 @@
 import { ARM_SIDES, DEFAULT_ARM_IK } from './character';
 import type { ArmIkSettings, ArmSide } from './character';
-import { RIG } from './config';
 import type { Point } from './config';
 import type { ArmLengths } from './character-arms';
 import { DEFAULT_GRIPS, GRIP_LIMITS } from './grips';
@@ -31,7 +30,6 @@ export interface CharacterFigureSource {
   readonly armIk: Readonly<ArmIkSettings>;
 }
 
-export const CORPSE_WAIST: Readonly<Point> = Object.freeze({ x: 0, y: Math.max(...RIG.potVertices.map(point => point.y)) });
 export const HEAD_RISE = PLAYER_FIGURE.helmet.y - PLAYER_FIGURE.neck.y;
 
 export class CharacterFigureError extends Error {
@@ -129,6 +127,8 @@ export interface CorpseReading {
   readonly butt: Readonly<Point>;
   readonly head: Readonly<Point>;
   readonly headMargin: number;
+  // The waist's height above the root, where the body rises from the jar: the jar's top.
+  readonly waist: number;
 }
 
 function solvePlanarArm(shoulder: Readonly<Point>, target: Readonly<Point>, upper: number, forearm: number,
@@ -156,9 +156,9 @@ export function writeCorpseEntry(figure: Readonly<CharacterFigure>, reading: Rea
   const dx = reading.head.x - reading.butt.x, dy = reading.head.y - reading.butt.y;
   const shaftAngle = Math.atan2(dy, dx), length = Math.hypot(dx, dy);
   const lean = waistLeanTarget(shaftAngle, figure.waistLean), cos = Math.cos(lean), sin = Math.sin(lean);
-  const waist = CORPSE_WAIST, torso = out.torso;
-  torso.x = reading.root.x + waist.x - cos * waist.x + sin * waist.y;
-  torso.y = reading.root.y + waist.y - sin * waist.x - cos * waist.y;
+  const waist = reading.waist, torso = out.torso;
+  torso.x = reading.root.x + sin * waist;
+  torso.y = reading.root.y + waist - cos * waist;
   torso.angle = lean;
   out.head.x = torso.x + cos * figure.neck.x - sin * (figure.neck.y + HEAD_RISE);
   out.head.y = torso.y + sin * figure.neck.x + cos * (figure.neck.y + HEAD_RISE);

@@ -13,6 +13,7 @@ import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { beginPlayerDeath, changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, playerAnchor, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { partPoint, partVelocity } from './player-bodies';
+import { potMeasures } from './pot-outline';
 import { rigGeometry, sameRig } from './rig';
 import type { RigGeometry } from './rig';
 import { surfaceMaterials } from './surfaces';
@@ -121,7 +122,7 @@ export class Simulation {
   private readonly command: MotorCommand = { ...IDLE_COMMAND };
   private elapsed = 0;
   private bestHeight = 0;
-  // Damage points left, and until when in run time a hit cannot hurt.
+  // Hit points left, and until when in run time a hit cannot hurt.
   private health: number;
   private safeUntil = 0;
   // Whether the authored level has hurt sources, so HUD health shows; removed shooters can still have shots in flight.
@@ -171,18 +172,25 @@ export class Simulation {
       canBump: () => !this.dying,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
-      onHit: (id, x, y) => {
+      onHit: (id, species, x, y, damage, health, max) => {
         const moment = this.moments.append('enemy-hit', this.placements, this.elapsed);
         moment.id = id;
+        moment.species = species;
         moment.x = x;
         moment.y = y;
+        moment.damage = damage;
+        moment.health = health;
+        moment.max = max;
       },
-      onDefeat: (id, x, y, by) => {
+      onDefeat: (id, species, x, y, by, damage, max) => {
         const moment = this.moments.append('enemy-defeat', this.placements, this.elapsed);
         moment.id = id;
+        moment.species = species;
         moment.x = x;
         moment.y = y;
         moment.by = by;
+        moment.damage = damage;
+        moment.max = max;
       },
       onBump: (delta, enemy, atX, atY) => {
         changePlayerVelocity(this.rig, delta);
@@ -345,7 +353,7 @@ export class Simulation {
 
   playerPosition(out: Point): Point {
     const root = playerAnchor(this.rig).getPosition();
-    out.x = root.x; out.y = root.y + RIG.potBottom;
+    out.x = root.x; out.y = root.y + this.rig.geometry.jar.bottom;
     return out;
   }
 
@@ -365,7 +373,7 @@ export class Simulation {
   }
 
   private fellOutOfLevel(): boolean {
-    return this.supported && this.voidY !== null && playerAnchor(this.rig).getPosition().y + RIG.potBottom < this.voidY;
+    return this.supported && this.voidY !== null && playerAnchor(this.rig).getPosition().y + this.rig.geometry.jar.bottom < this.voidY;
   }
 
   private dead(): boolean {
@@ -413,7 +421,8 @@ export class Simulation {
     this.ensureLive();
     const bonfire = this.bonfires.currentBonfire();
     if (bonfire === null) return false;
-    this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level)), bonfire.id);
+    // The player comes back with the settings' jar, which placing it builds.
+    this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level), potMeasures(this.settings.rig.pot).bottom), bonfire.id);
     this.safeUntil = this.elapsed + this.settings.physics.respawnInvulnerability;
     return true;
   }
@@ -482,7 +491,7 @@ export class Simulation {
       const target = this.worldPoint(origin, this.aim.target, this.targetScratch);
       drivePlayer(rig, target, this.settings.physics, swinging, this.command);
     }
-    this.enemies.beforeStep(this.worldAnchor(), this.elapsed);
+    this.enemies.beforeStep(this.worldAnchor(), this.elapsed, this.rig.geometry.jar.bottom);
     const bath = this.liquids.push(this.rig, this.settings.physics);
     const velocity = this.impactTracking && !this.dying ? partVelocity(this.rig.tool.head, this.velocityScratch) : null;
     const approachX = velocity?.x ?? 0;
@@ -528,7 +537,7 @@ export class Simulation {
     }
     this.terrain.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
-    this.hazards.afterStep(this.elapsed, this.worldAnchor());
+    this.hazards.afterStep(this.elapsed, this.worldAnchor(), this.rig.geometry.jar.bottom);
     // Lava burns the character while the pot is in it; each burn, like any hit, leaves it unharmed for a second.
     if (bath?.liquid === 'lava') {
       const root = playerAnchor(this.rig).getPosition();
@@ -618,7 +627,7 @@ export class Simulation {
   // HUD-only data: no allocations, contact walk, motor queries or plugin callbacks.
   writeHudFrame(out: { height: number; bestHeight: number; health: HealthReading | null }): void {
     const health = this.readHealth();
-    out.height = Math.max(0, playerAnchor(this.rig).getPosition().y + RIG.potBottom);
+    out.height = Math.max(0, playerAnchor(this.rig).getPosition().y + this.rig.geometry.jar.bottom);
     out.bestHeight = this.bestHeight;
     out.health = this.hurts ? health : null;
   }
@@ -636,7 +645,7 @@ export class Simulation {
     // Loads are shares of the strength each motor had in the last step, downswing boost included.
     return {
       time: this.elapsed,
-      height: Math.max(0, root.y + RIG.potBottom),
+      height: Math.max(0, root.y + this.rig.geometry.jar.bottom),
       bestHeight: this.bestHeight,
       contacts,
       phase: this.rig.phase,
@@ -757,7 +766,7 @@ export class Simulation {
     this.elapsed = 0;
     this.safeUntil = 0;
     this.placePlayer(this.spawn, null);
-    this.bestHeight = Math.max(0, playerAnchor(this.rig).getPosition().y + RIG.potBottom);
+    this.bestHeight = Math.max(0, playerAnchor(this.rig).getPosition().y + this.rig.geometry.jar.bottom);
   }
 
   // A new player at `spawn`, at full health.

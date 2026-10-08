@@ -2,7 +2,6 @@ import { Matrix4, Quaternion, Vector3 } from 'three';
 import { HairSolver } from './hair-solver';
 import type { HairChainState } from './hair-solver';
 import type { AvatarJointId } from './character-profile';
-import { RIG } from './config';
 import type { ResolvedAvatarHair } from './character-model-inspect';
 import type { AvatarMotion, AvatarMotionFrame, AvatarMotionModel, AvatarMotionSkeleton } from './avatar-motion';
 
@@ -33,7 +32,7 @@ interface SkinnedChain {
 // frame (origin at its bottom-centre), which stays with the physical pot as the body leans.
 type SkinnedCollider =
   | { readonly frame: 'joint'; readonly joint: AvatarJointId; readonly centre: Vector3 }
-  | { readonly frame: 'pot'; readonly centre: Vector3 };
+  | { readonly frame: 'pot'; readonly x: number; readonly y: number };
 
 const DIRECTION_EPSILON = 1e-9;
 
@@ -87,8 +86,8 @@ export class HairMotion implements AvatarMotion {
     this.claims = Object.freeze(joints.flat());
     const mappedBind = (id: AvatarJointId): Readonly<Matrix4> => model.joints[model.mapped[id]]!.bind;
     this.colliders = Object.freeze(hair.colliders.map((collider): SkinnedCollider => collider.joint === 'pot'
-      // The jar's bottom-centre is at the player root's pot bottom at bind.
-      ? { frame: 'pot', centre: new Vector3(collider.x, collider.y - RIG.potBottom, 0) }
+      // About the player root, which the jar turns about.
+      ? { frame: 'pot', x: collider.x, y: collider.y }
       // In the plane of the joint it rides on.
       : {
         frame: 'joint', joint: collider.joint,
@@ -103,7 +102,7 @@ export class HairMotion implements AvatarMotion {
     for (const chain of this.chains) this.target(chain, frame.body, frame.mapped, frame.rest);
     for (let index = 0; index < this.colliders.length; index += 1) {
       const collider = this.colliders[index]!;
-      if (collider.frame === 'pot') this.point.copy(collider.centre).applyMatrix4(frame.pot);
+      if (collider.frame === 'pot') this.point.set(collider.x, collider.y - frame.jarBottom, 0).applyMatrix4(frame.pot);
       else {
         this.follow.multiplyMatrices(frame.mapped.current[collider.joint], this.bindInverse[collider.joint]);
         this.point.copy(collider.centre).applyMatrix4(this.follow).applyMatrix4(frame.body);

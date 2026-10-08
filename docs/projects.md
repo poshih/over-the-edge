@@ -6,9 +6,10 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 15**; their release content uses **schema 14**.
-Both embed the audio record's `block` cue, game settings' death wait and archer rules, the
-HUD's death text/fade and the hollow archer's enemy art. Other versions are rejected, not converted.
+Project manifests and bundles use **schema 17**; their release content uses **schema 16**.
+Both embed the audio record's `block` cue, game settings' death wait, archer rules and jar
+outline, the theme's background blur and character light, the HUD's death text/fade and the
+hollow archer's enemy art. Other versions are rejected, not converted.
 
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
 - `GAME_PROJECT=<project> npm run build:game` builds any project into a
@@ -36,14 +37,14 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | Section | Stored in | Contents |
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
-| `level` | `level.json` | Level JSON, schema 8, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 16: physics (including health, invulnerability, hurt box, knockback, enemy rules and archers' arrows, downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach and the default hammer's head outline), cursor target and death wait/materials |
+| `level` | `level.json` | Level JSON, schema 10, as exported from Workshop / Level |
+| `settings` | `project.json` | Game-settings profile, schema 18: physics (including health, invulnerability, hurt box, knockback, hammer damage, enemy rules and archers' arrows, downswing boost and each material's friction and bounciness), hammer rig (handle length, maximum extension, minimum reach, the default hammer's head outline and the jar's collision outline), cursor target and death wait/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
 | `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
-| `theme` | `project.json` | Sky, fog, exposure, camera, lights, sun disc, backdrop, aim marker, procedural character colours |
+| `theme` | `project.json` | Sky, fog, exposure, camera, lights, the character light and its shadows, sun disc, backdrop, aim marker, procedural character colours |
 | `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, in Workshop play-tests and releases; how trigger messages appear, and death text/fade |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
@@ -77,13 +78,14 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 15,
+  "schemaVersion": 17,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 16, "physics": { "...": "..." },
-    "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."] },
+    "schemaVersion": 18, "physics": { "...": "..." },
+    "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."],
+             "pot": [{ "x": -0.2, "y": -0.48 }, "..."] },
     "cursor": {
       "maxTargetRadius": 2.65, "deadZone": 0.1, "followCharacter": 100,
       "returnToHammer": false, "returnDelay": 0.15, "returnRate": 8, "returnOffsetX": 0, "returnOffsetY": 0
@@ -94,7 +96,7 @@ The paths are fixed, so a manifest only says which files exist:
   "armIk": { "leftHintX": -0.55, "leftHintY": 0.15, "leftHintZ": -0.35, "rightHintX": 0.55, "rightHintY": 0.15, "rightHintZ": 0.45 },
   "appearance": [],
   "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club", "head": [{ "x": -0.1, "y": -0.2 }, "..."] }], "pot": [] },
-  "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30 }, "...": "..." },
+  "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30, "blur": 0, "blurNear": 5, "blurFar": 40 }, "...": "..." },
   "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
            "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" },
            "death": { "text": "You are dead...", "fadeIn": 1.5 } },
@@ -115,10 +117,10 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 15,
+  "schemaVersion": 17,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 8, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 10, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }
@@ -459,7 +461,7 @@ Conventions:
 | GET, POST | `/api/projects/{id}/level/versions/{version}/phantoms?session=&clip=` | List or store recordings played on a version |
 | GET, DELETE | `/api/projects/{id}/level/versions/{version}/phantoms/{name}` | One recording |
 | POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB; returns its asset ID |
-| GET | `/api/projects/{id}/art/assets/{assetId}/terrain` | The GLB as terrain to place: its natural size and its `mesh` entry, with the collision it declares or its slice |
+| GET | `/api/projects/{id}/art/assets/{assetId}/terrain` | The GLB as terrain to place: its natural size and its `mesh` entry, with the collision it declares, or its slice or projection |
 | GET, PUT, DELETE | `/api/projects/{id}/appearance/{part}/model?name=` | A part's GLB |
 | GET, PATCH, DELETE | `/api/projects/{id}/appearance/{part}` | A part's name and alignment |
 | GET, PUT, DELETE | `/api/projects/{id}/models/{part}/{model}/model?name=&settings=` | A library GLB for `avatar`, `hammer` or `pot`, adding or replacing its entry |
@@ -503,9 +505,9 @@ An open Workshop page shows each change within two seconds.
 
 ## Section reference
 
-**Game settings.** The nested settings schema is **15**, exported in code as
-`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **14**, release content
-**13**, and browser game-settings snapshots **7**. All settings are required and
+**Game settings.** The nested settings schema is **18**, exported in code as
+`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **17**, release content
+**16**, and browser game-settings snapshots **10**. All settings are required and
 unknown fields or other versions are rejected, with no legacy reader or conversion.
 `death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
 returning at a bonfire, or restarting when none was reached. A death captures this
@@ -529,16 +531,19 @@ The separate HUD fields below own only death text and visual fade.
 
 Alive-play rules belong to `physics`, with the same fields in Workshop / Physics and
 release builds. They all count toward the [phantom course](phantoms.md#courses).
-Defaults reproduce the engine's original rules.
+Defaults keep the engine's original hit counts: five hits defeat the player, and a full-speed
+hammer strike defeats a bird or an archer outright and a soldier in two; slower strikes deal less,
+and those no faster than the enemy's armor nothing.
 
 **Physics / Health**
 
 | Field | Values | Default |
 | --- | --- | --- |
-| `health` | 1–20 whole damage points | 5 |
+| `health` | 1–1000 whole hit points | 100 |
 | `hurtInvulnerability` | 0–5 s, step 0.05 | 1 |
 | `respawnInvulnerability` | 0–10 s, step 0.1 | 2 |
 
+Every damage, from enemies, arrows, traps and lava, counts in these hit points.
 Invulnerability durations apply at the next damaging hit or bonfire respawn; an active
 protection keeps its deadline. Zero turns off that protection. A reset before any
 bonfire starts a new attempt, not a protected bonfire return.
@@ -567,21 +572,26 @@ including to projectiles already in flight. No setting change mutates the author
 
 | Field | Values | Default |
 | --- | --- | --- |
-| `birdHealth` | 1–20 whole hammer-head strikes | 1 |
+| `hammerDamage` | 1–1000 whole hit points | 100 |
+| `hammerFullSpeed` | 1–20 m/s, step 0.5 | 8 |
+| `birdHealth` | 1–2000 whole hit points | 100 |
+| `birdArmor` | 0.8–20 m/s, step 0.1 | 2.5 |
 | `birdMass` | 0.1–10 kg, step 0.05 | 0.55 |
 | `birdAcceleration` | 1–80 m/s², step 1 | 22 |
 | `birdSight` | 0–30 m, step 0.5 | 6 |
 | `birdDiveSpeed` | 0.5–20 m/s, step 0.1 | 5 |
-| `soldierHealth` | 1–20 whole hammer-head strikes | 2 |
+| `soldierHealth` | 1–2000 whole hit points | 200 |
+| `soldierArmor` | 0.8–20 m/s, step 0.1 | 4 |
 | `soldierMass` | 0.5–30 kg, step 0.1 | 3 |
 | `soldierAcceleration` | 1–80 m/s², step 1 | 28 |
-| `archerHealth` | 1–20 whole hammer-head strikes | 1 |
+| `archerHealth` | 1–2000 whole hit points | 100 |
+| `archerArmor` | 0.8–20 m/s, step 0.1 | 3 |
 | `archerMass` | 0.5–30 kg, step 0.1 | 2.5 |
 | `archerAcceleration` | 1–80 m/s², step 1 | 24 |
 | `archerSight` | 0–30 m, step 0.5 | 14 |
 | `arrowSpeed` | 2–30 m/s, step 0.5 | 12 |
-| `arrowDamage` | 0–20 whole damage points | 1 |
-| `bumpDamage` | 0–20 whole damage points | 1 |
+| `arrowDamage` | 0–1000 whole hit points | 20 |
+| `bumpDamage` | 0–1000 whole hit points | 20 |
 | `bumpSpeed` | 0–20 m/s, step 0.1 | 3 |
 | `bumpLift` | 0–20 m/s, step 0.1 | 1.4 |
 
@@ -600,6 +610,13 @@ that knockback without hurting. Bump damage, horizontal speed away from the enem
 lift apply at the next bump. Zero bump damage retains knockback, but causes no damage,
 hurt effects or invulnerability.
 
+A hammer-head strike hurts an enemy only when it closes faster than the species' armor:
+`birdArmor`, `soldierArmor` or `archerArmor`. Slower strikes glance off, dealing no damage,
+and armor is never below 0.8 m/s, so brushing never hurts. A strike that beats the armor and
+closes at `hammerFullSpeed` or faster takes `hammerDamage` hit points from the enemy; a slower
+one takes proportionally less, rounded, and at least 1. Repeats on an enemy within 0.25 s deal
+none. Armor, hammer damage and its full-damage speed apply at the next strike.
+
 A species' health applies only at its next reset or new spawn. Existing enemies keep
 their current and maximum health, including when sleeping/waking; a tuning edit does not
 heal, damage or revive them. Collider/drawn sizes, per-object patrol settings and
@@ -611,11 +628,41 @@ decoration; `far` must exceed `near`; a negative `near`, down to -20, hazes the 
 itself), so fog looks the same with either camera and at any zoom. `camera`
 chooses the projection: the default orthographic camera (`perspective: false`) shows
 depth flat, while `perspective: true` makes nearer objects look larger and pass faster
-than distant ones, with `fieldOfView` (10-90°) the vertical view angle. Both show the
+than distant ones, with `fieldOfView` (10-90°) the vertical view angle. `camera.blur` puts the
+background out of focus for an illusion of distance: the blur, 0-5% of the view height, of
+what lies at `camera.blurFar` metres (1-1,000, default 40) or farther behind the course,
+easing in from sharp at `camera.blurNear` (5-999, default 5; `blurFar` must exceed it). The
+backdrop, the sky and the course's scenery blur by their depth. The blur starts behind everything
+on the course plane, whose deepest terrain reaches 4 m back, so the terrain, pools, bonfires and
+traps draw as ever, as do the characters, enemies and everything in front of the course; only
+the back of a long axe's swing reaches past it. The default 0 turns it off and costs nothing. On,
+what lies behind the blur start draws first into a multisampled offscreen image the size of the
+view, which is tone-mapped and encoded over the sky as the screen does and blurred on a copy of
+about 360 lines, so the blur looks the same at any size. The sharp part reaches a
+little past the blur start, as deep as 16 pixels are tall there, so no seam shows where scenery
+crosses it; translucent scenery in that sliver draws in both. Behind the blur start, colours match the screen's, unfogged or fully fogged, but
+partly fogged scenery comes out a little lighter or darker, translucent layers blend before tone
+mapping, and additive glows over the bare sky blend with it rather than add to it. A material that
+opts out of tone mapping, such as a glow, is tone-mapped there like the rest; translucent scenery
+that writes no depth takes the blur of what lies behind it; and glass nearer than the blur start
+refracts only what is nearer too. Both cameras show the
 course plane, the [obstacle line](../README.md#obstacle-line) where the physics happens, exactly
 the same: the perspective camera stands
 back until the plane fills the same view height, so aiming, editing and picking are
-unchanged. `exposure` is 0.2-3; light intensities are 0-10. `sunDisc` and `backdrop` can be hidden. `character` recolours the
+unchanged. `exposure` is 0.2-3; light intensities are 0-10. `characterLight` is the sunlight on the
+characters, the player's, enemies and phantoms, with the sunlight's colour and intensity, while the
+course keeps its own sunlight from the upper left and in front: `angle` (0-360°) is where it comes
+from around the view, 0° from the right, 90° from above and 180° from the left, and `tilt` (-90 to 90°)
+how far it leans toward the camera, lighting their fronts, or comes from behind the course (negative).
+`characterLight.shadow` (0-100%, default 60) is how dark the shadows the player's 3D character casts
+on itself are: its jar, body, head, arms and hammer shadow one another, such as the hammer and arms
+on the jar and body or the head on the shoulders; 100% takes all of the character light from what lies
+in shadow, leaving the sky, ambient and rim light. `softness` (0-5 cm, default 1) blurs their edges.
+Glass and translucent parts cast none. The shadow map is a 1,024-texel square 5 m across, centred on
+the shoulder hinge and drawn once a frame from the character alone, so it costs the same anywhere in
+a level; while it draws, the character's arms and hammer also draw in the actors pass, where they
+cast, under the passes that draw them over the body. Enemies, phantoms, 2D characters and the course
+neither cast nor receive these shadows, and 0% turns them off at no cost. `sunDisc` and `backdrop` can be hidden. `character` recolours the
 procedural Mesh parts character (pot, trim, dark details, suit, skin, handle);
 imported models keep their own materials. Theme changes restyle existing lights
 and materials in place.

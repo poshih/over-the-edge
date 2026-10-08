@@ -13,11 +13,13 @@ export const THEME = {
   fog: { color: '#2d2b34', near: 8, far: 1500 },
   exposure: 1.25,
   // Depth reads as distance: the course's stone shows its sides, and far dressing drifts slowly by.
-  camera: { perspective: true, fieldOfView: 35 },
+  camera: { perspective: true, fieldOfView: 35, blur: 0, blurNear: 5, blurFar: 40 },
   // Cold ashen daylight, so stone reads grey; the dying sun only warms what faces it.
   hemisphere: { sky: '#9aa8c0', ground: '#3a2e28', intensity: 2.2 },
   ambient: { color: '#6a6470', intensity: 0.7 },
   sun: { color: '#ffb070', intensity: 1.15 },
+  // The low sun rakes the climber from the left, so its hammer and arms throw long shadows across the jar.
+  characterLight: { angle: 150, tilt: 30, shadow: 80, softness: 1.5 },
   rim: { color: '#8fb8d0', intensity: 1.2 },
   sunDisc: { visible: true, color: '#e8773a' },
   // The scenery is the landscape, so the stock backdrop hills stay hidden.

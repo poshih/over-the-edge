@@ -1,10 +1,12 @@
 import { DEFAULT_TUNING } from './config';
 import type { Tuning } from './config';
+import { ENEMY_BEHAVIOR } from './enemy-types';
 import { HammerHeadError, validateHammerHead } from './hammer-head';
+import { PotOutlineError, validatePotOutline } from './pot-outline';
 import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, MIN_SLIDER_TRAVEL, minReachLimit, RIG_LIMITS, rigGeometry } from './rig';
 import type { RigLength, RigSettings } from './rig';
 
-export const GAME_SETTINGS_SCHEMA_VERSION = 16;
+export const GAME_SETTINGS_SCHEMA_VERSION = 18;
 
 export interface CursorSettings {
   // The farthest from the shoulder hinge the hammer aims; at most the rig's reach.
@@ -138,7 +140,7 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'handleFrequency', label: 'Handle compliance', group: 'Materials', min: 0, max: 30, step: 1, unit: 'Hz', description: 'Zero uses one rigid tool body. Positive values enable rotational spring compliance. Crossing zero rebuilds the rig and restarts the run.' },
   { key: 'handleDamping', label: 'Handle damping', group: 'Materials', min: 0.1, max: 1, step: 0.05, unit: '', description: 'Damping ratio of compliant handle welds; only active above zero Hz.' },
   { key: 'mouseSensitivity', label: 'Control sensitivity', group: 'Input', min: 0.3, max: 2.5, step: 0.05, unit: 'x', description: 'Relative pointer movement. Touch uses the same CSS-pixel gain in either orientation; mouse follows the scene scale.' },
-  { key: 'health', label: 'Health', group: 'Health', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Damage the character takes before dying. Enemies deal the Enemies group\'s bump damage and archers its arrow damage, traps their own damage and lava its damage each second. A death, like a fall out of the level, brings the player back at the bonfire reached last, or restarts the run when none was. Shown only in levels with enemies, traps or lava.' },
+  { key: 'health', label: 'Health', group: 'Health', min: 1, max: 1000, step: 1, unit: 'HP', whole: true, description: 'Hit points the character has, shown as a bar. Every hurt source deals its damage in hit points: enemies the Enemies group\'s bump damage and archers its arrow damage, traps their own damage and lava its damage each second. A death, like a fall out of the level, brings the player back at the bonfire reached last, or restarts the run when none was. Shown only in levels with enemies, traps or lava.' },
   { key: 'hurtInvulnerability', label: 'Hurt invulnerability', group: 'Health', min: 0, max: 5, step: 0.05, unit: 's', description: 'How long an accepted damaging hit leaves the character unharmed. Zero turns this protection off. Applies to the next hit; an active protection keeps its deadline.' },
   { key: 'respawnInvulnerability', label: 'Respawn invulnerability', group: 'Health', min: 0, max: 10, step: 0.1, unit: 's', description: 'How long returning at a bonfire leaves the character unharmed. Zero turns this protection off. Applies at the next respawn.' },
   { key: 'hurtWidth', label: 'Hurt box width', group: 'Hazards', min: 0.2, max: 4, step: 0.05, unit: 'm', description: 'Width of the character box traps and arrows can hit, centred on the player\'s root. Changes apply live without changing the player collider.' },
@@ -148,26 +150,31 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'projectileLift', label: 'Projectile lift', group: 'Hazards', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Upward velocity a projectile hit adds on top of its push along the shot. Changes apply to the next hit.' },
   { key: 'axePush', label: 'Axe push', group: 'Hazards', min: 0, max: 30, step: 0.1, unit: 'm/s', description: 'Horizontal velocity an axe hit adds away from where its blade struck. Changes apply to the next hit.' },
   { key: 'axeLift', label: 'Axe lift', group: 'Hazards', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Upward velocity an axe hit adds. Changes apply to the next hit.' },
-  { key: 'birdHealth', label: 'Bird health', group: 'Enemies', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Separate hammer-head strikes needed to defeat a bird. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'hammerDamage', label: 'Hammer damage', group: 'Enemies', min: 1, max: 1000, step: 1, unit: 'HP', whole: true, description: `Hit points a hammer-head strike takes from an enemy when it closes at the full-damage speed or faster; slower strikes take proportionally less, at least 1. Strikes no faster than the enemy's armor, and repeats on an enemy within ${ENEMY_BEHAVIOR.hitSeconds} s, deal none. Applies to the next strike.` },
+  { key: 'hammerFullSpeed', label: 'Full-damage strike speed', group: 'Enemies', min: 1, max: 20, step: 0.5, unit: 'm/s', description: 'Closing speed along the contact at which a hammer-head strike deals the full hammer damage; a strike at half this speed deals half. Applies to the next strike.' },
+  { key: 'birdHealth', label: 'Bird health', group: 'Enemies', min: 1, max: 2000, step: 1, unit: 'HP', whole: true, description: 'Hit points of a bird; each hammer-head strike takes the hammer damage its speed earns. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'birdArmor', label: 'Bird armor', group: 'Enemies', min: ENEMY_BEHAVIOR.minimumArmor, max: 20, step: 0.1, unit: 'm/s', description: `How fast a hammer-head strike must close on a bird to hurt it: slower strikes glance off, dealing no damage, and faster ones deal the hammer damage their speed earns. At least ${ENEMY_BEHAVIOR.minimumArmor} m/s, so brushing or holding the head against one never hurts. Applies to the next strike.` },
   { key: 'birdMass', label: 'Bird mass', group: 'Enemies', min: 0.1, max: 10, step: 0.05, unit: 'kg', description: 'Mass of a bird\'s collider. Changes update live bodies immediately; inactive birds take it when they wake.' },
   { key: 'birdAcceleration', label: 'Bird acceleration', group: 'Enemies', min: 1, max: 80, step: 1, unit: 'm/s²', description: 'Maximum acceleration as a bird steers toward its patrol, dive or recovery velocity. Applies live.' },
   { key: 'birdSight', label: 'Bird sight', group: 'Enemies', min: 0, max: 30, step: 0.5, unit: 'm', description: 'How far an active bird sees a player before warning and diving, also limited to this distance beyond its authored patrol radius. Applies live.' },
   { key: 'birdDiveSpeed', label: 'Bird dive speed', group: 'Enemies', min: 0.5, max: 20, step: 0.1, unit: 'm/s', description: 'Speed toward a bird\'s telegraphed target during its dive. Changes apply immediately, including during a dive.' },
-  { key: 'soldierHealth', label: 'Soldier health', group: 'Enemies', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Separate hammer-head strikes needed to defeat a hollow soldier. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'soldierHealth', label: 'Soldier health', group: 'Enemies', min: 1, max: 2000, step: 1, unit: 'HP', whole: true, description: 'Hit points of a hollow soldier; each hammer-head strike takes the hammer damage its speed earns. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'soldierArmor', label: 'Soldier armor', group: 'Enemies', min: ENEMY_BEHAVIOR.minimumArmor, max: 20, step: 0.1, unit: 'm/s', description: `How fast a hammer-head strike must close on a hollow soldier to hurt it: slower strikes glance off, dealing no damage, and faster ones deal the hammer damage their speed earns. At least ${ENEMY_BEHAVIOR.minimumArmor} m/s, so brushing or holding the head against one never hurts. Applies to the next strike.` },
   { key: 'soldierMass', label: 'Soldier mass', group: 'Enemies', min: 0.5, max: 30, step: 0.1, unit: 'kg', description: 'Mass of a hollow soldier\'s collider. Changes update live bodies immediately; inactive soldiers take it when they wake.' },
   { key: 'soldierAcceleration', label: 'Soldier acceleration', group: 'Enemies', min: 1, max: 80, step: 1, unit: 'm/s²', description: 'Maximum acceleration toward a hollow soldier\'s patrol velocity. Applies live.' },
-  { key: 'archerHealth', label: 'Archer health', group: 'Enemies', min: 1, max: 20, step: 1, unit: '', whole: true, description: 'Separate hammer-head strikes needed to defeat a hollow archer. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'archerHealth', label: 'Archer health', group: 'Enemies', min: 1, max: 2000, step: 1, unit: 'HP', whole: true, description: 'Hit points of a hollow archer; each hammer-head strike takes the hammer damage its speed earns. Applies at its next reset or spawn; existing enemies keep their current and maximum health.' },
+  { key: 'archerArmor', label: 'Archer armor', group: 'Enemies', min: ENEMY_BEHAVIOR.minimumArmor, max: 20, step: 0.1, unit: 'm/s', description: `How fast a hammer-head strike must close on a hollow archer to hurt it: slower strikes glance off, dealing no damage, and faster ones deal the hammer damage their speed earns. At least ${ENEMY_BEHAVIOR.minimumArmor} m/s, so brushing or holding the head against one never hurts. Applies to the next strike.` },
   { key: 'archerMass', label: 'Archer mass', group: 'Enemies', min: 0.5, max: 30, step: 0.1, unit: 'kg', description: 'Mass of a hollow archer\'s collider. Changes update live bodies immediately; inactive archers take it when they wake.' },
   { key: 'archerAcceleration', label: 'Archer acceleration', group: 'Enemies', min: 1, max: 80, step: 1, unit: 'm/s²', description: 'Maximum acceleration toward a hollow archer\'s patrol velocity. Applies live.' },
   { key: 'archerSight', label: 'Archer sight', group: 'Enemies', min: 0, max: 30, step: 0.5, unit: 'm', description: 'How far an active archer sees a player. It draws, warning, only when an arrow can reach the player within the 40 m projectiles fly, along an arc clear of terrain, the low one or else the high one, and looses at the end of the draw if it still can. Applies live.' },
   { key: 'arrowSpeed', label: 'Arrow speed', group: 'Enemies', min: 2, max: 30, step: 0.5, unit: 'm/s', description: 'Speed an archer\'s arrows leave the bow at; they then fall under gravity, so this sets their reach: speed squared over gravity on level ground, 14.7 m at 12 m/s, and less uphill. Applies to the next shot.' },
-  { key: 'arrowDamage', label: 'Arrow damage', group: 'Enemies', min: 0, max: 20, step: 1, unit: '', whole: true, description: 'Damage an arrow deals the player. It knocks the player with the Hazards group\'s projectile push and lift; zero leaves that knockback but deals no damage and grants no invulnerability. Applies to arrows loosed after the change.' },
-  { key: 'bumpDamage', label: 'Enemy bump damage', group: 'Enemies', min: 0, max: 20, step: 1, unit: '', whole: true, description: 'Damage an enemy\'s scripted bump deals the player, in addition to knockback. Zero turns off bump damage. Applies to the next bump.' },
+  { key: 'arrowDamage', label: 'Arrow damage', group: 'Enemies', min: 0, max: 1000, step: 1, unit: 'HP', whole: true, description: 'Hit points an arrow takes from the player. It knocks the player with the Hazards group\'s projectile push and lift; zero leaves that knockback but deals no damage and grants no invulnerability. Applies to arrows loosed after the change.' },
+  { key: 'bumpDamage', label: 'Enemy bump damage', group: 'Enemies', min: 0, max: 1000, step: 1, unit: 'HP', whole: true, description: 'Hit points an enemy\'s scripted bump takes from the player, in addition to knockback. Zero turns off bump damage. Applies to the next bump.' },
   { key: 'bumpSpeed', label: 'Enemy bump speed', group: 'Enemies', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Horizontal velocity an enemy\'s scripted bump adds away from the enemy. Applies to the next bump.' },
   { key: 'bumpLift', label: 'Enemy bump lift', group: 'Enemies', min: 0, max: 20, step: 0.1, unit: 'm/s', description: 'Upward velocity an enemy\'s scripted bump adds. Applies to the next bump.' },
   { key: 'lavaBuoyancy', label: 'Lava buoyancy', group: 'Liquids', min: 0, max: 300, step: 5, unit: '%', description: 'How much of the player\'s weight lava holds up with the pot all under its surface: above 100% the player floats with part of the pot out, below it sinks. Only the pot floats: lava slows the hammer but does not hold it up.' },
   { key: 'lavaDrag', label: 'Lava drag', group: 'Liquids', min: 0, max: 20, step: 0.1, unit: '/s', description: 'How thick lava is: with the pot all under its surface the player slows at this rate, losing 63% of its speed in 1/rate seconds. The hammer meets it too, so swinging it through lava rows the player along.' },
-  { key: 'lavaDamage', label: 'Lava damage', group: 'Liquids', min: 1, max: 20, step: 1, unit: '/s', whole: true, description: 'Damage lava deals the character while the pot is in it: on touching it, then each second it stays. The hammer does not burn.' },
+  { key: 'lavaDamage', label: 'Lava damage', group: 'Liquids', min: 1, max: 1000, step: 1, unit: 'HP/s', whole: true, description: 'Hit points lava takes from the character while the pot is in it: on touching it, then each second it stays. The hammer does not burn.' },
   { key: 'swampBuoyancy', label: 'Swamp buoyancy', group: 'Liquids', min: 0, max: 300, step: 5, unit: '%', description: 'How much of the player\'s weight swamp holds up with the pot all under its surface: below 100% the player sinks through it, as slowly as its drag allows. Only the pot floats.' },
   { key: 'swampDrag', label: 'Swamp drag', group: 'Liquids', min: 0, max: 20, step: 0.1, unit: '/s', description: 'How thick swamp is: with the pot all under its surface the player slows at this rate, and the hammer drags through it too. Swamp does no damage; a thick one holds the player back.' },
 ];
@@ -199,7 +206,7 @@ function validateTuning(value: unknown): Tuning {
 }
 
 function validateRig(value: unknown): RigSettings {
-  settingsFields(value, [...RIG_FIELDS.map((field) => field.key), 'head'], 'Hammer rig');
+  settingsFields(value, [...RIG_FIELDS.map((field) => field.key), 'head', 'pot'], 'Hammer rig');
   const result = { ...DEFAULT_RIG_SETTINGS };
   for (const field of RIG_FIELDS) {
     result[field.key] = settingNumber(value[field.key], field);
@@ -209,6 +216,12 @@ function validateRig(value: unknown): RigSettings {
   } catch (error) {
     if (!(error instanceof HammerHeadError)) throw error;
     throw new GameSettingsError(`The hammer head: ${error.message}`);
+  }
+  try {
+    result.pot = validatePotOutline(value.pot);
+  } catch (error) {
+    if (!(error instanceof PotOutlineError)) throw error;
+    throw new GameSettingsError(`The jar: ${error.message}`);
   }
   const limit = minReachLimit(result);
   if (result.minReach > limit) {

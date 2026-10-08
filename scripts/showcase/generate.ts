@@ -90,7 +90,7 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
     block('timer-trap-wall', 42, 43.8, 0, 1.8, { color: 0x686f75 }),
     {
       kind: 'shooter', id: 'timer-trap', firing: 'timer',
-      x: 43.78, y: 1.15, angle: 0, interval: 3, delay: 1, speed: 7, damage: 1,
+      x: 43.78, y: 1.15, angle: 0, interval: 3, delay: 1, speed: 7, damage: 20,
     },
     block('timer-trap-stop', 47.8, 49.6, 0, 1.8, { color: 0x686f75 }),
 
@@ -101,10 +101,10 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
     block('burst-trap-wall', 57.8, 59.6, 0, 1.8, { color: 0x686f75 }),
     {
       kind: 'shooter', id: 'burst-trap', firing: 'trigger',
-      x: 57.82, y: 1.15, angle: Math.PI, interval: 0.7, delay: 0.75, speed: 6, damage: 1,
+      x: 57.82, y: 1.15, angle: Math.PI, interval: 0.7, delay: 0.75, speed: 6, damage: 20,
     },
 
-    { kind: 'axe', id: 'walkway-axe', x: 64, y: 3.75, length: 2.6, period: 4, offset: 0.5, damage: 1 },
+    { kind: 'axe', id: 'walkway-axe', x: 64, y: 3.75, length: 2.6, period: 4, offset: 0.5, damage: 20 },
 
     // Banks and lower floors contain both pools; only the 1.8 m lava crossing needs a vault.
     block('swamp-basin-floor', 69, 73, -2, -0.8),

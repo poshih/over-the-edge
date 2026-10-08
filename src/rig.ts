@@ -1,6 +1,8 @@
 import { RIG } from './config.ts';
 import { DEFAULT_HAMMER_HEAD } from './hammer-head.ts';
 import type { HammerHead } from './hammer-head.ts';
+import { DEFAULT_POT_OUTLINE, potMeasures, samePotOutline } from './pot-outline.ts';
+import type { PotMeasures, PotOutline } from './pot-outline.ts';
 
 // The configurable part of the hammer rig, set per game in its settings.
 export interface RigSettings {
@@ -13,12 +15,16 @@ export interface RigSettings {
   readonly minReach: number;
   // The default hammer's head outline; a model-library hammer brings its own.
   readonly head: HammerHead;
+  // The jar's collision outline, about the player's root.
+  readonly pot: PotOutline;
 }
 
 // The rig settings set by sliders.
-export type RigLength = Exclude<keyof RigSettings, 'head'>;
+export type RigLength = Exclude<keyof RigSettings, 'head' | 'pot'>;
 
-export const DEFAULT_RIG_SETTINGS: Readonly<RigSettings> = Object.freeze({ handleLength: 1.5, maxExtension: 1.15, minReach: 0, head: DEFAULT_HAMMER_HEAD });
+export const DEFAULT_RIG_SETTINGS: Readonly<RigSettings> = Object.freeze({
+  handleLength: 1.5, maxExtension: 1.15, minReach: 0, head: DEFAULT_HAMMER_HEAD, pot: DEFAULT_POT_OUTLINE,
+});
 
 // The least usable slider travel. Keep a nonzero workspace between the polar drive's two stops.
 export const MIN_SLIDER_TRAVEL = 0.05;
@@ -40,6 +46,8 @@ export interface RigGeometry extends RigSettings {
   readonly minExtension: number;
   readonly maxReach: number;
   readonly segmentLength: number;
+  // The jar's measures, from its outline.
+  readonly jar: PotMeasures;
 }
 
 export function rigGeometry(settings: Readonly<RigSettings>): RigGeometry {
@@ -48,6 +56,8 @@ export function rigGeometry(settings: Readonly<RigSettings>): RigGeometry {
     maxExtension: settings.maxExtension,
     minReach: settings.minReach,
     head: settings.head,
+    pot: settings.pot,
+    jar: potMeasures(settings.pot),
     minExtension: settings.minReach - settings.handleLength,
     // Float sums such as 2.05 + 0.55 land just off their decimal; nanometres keep the reach equal to it.
     maxReach: Math.round((settings.handleLength + settings.maxExtension) * 1e9) / 1e9,
@@ -62,5 +72,6 @@ export function minReachLimit(settings: Readonly<Pick<RigSettings, 'handleLength
 
 // Whether two rigs build the same player. The head is not compared: it changes in place, mid-run.
 export function sameRig(left: Readonly<RigSettings>, right: Readonly<RigSettings>): boolean {
-  return left.handleLength === right.handleLength && left.maxExtension === right.maxExtension && left.minReach === right.minReach;
+  return left.handleLength === right.handleLength && left.maxExtension === right.maxExtension && left.minReach === right.minReach &&
+    samePotOutline(left.pot, right.pot);
 }

@@ -1,7 +1,7 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, strike, lava and extra effects, death pose and screen, object,
+camera following, backdrop, aim marks, strike, lava, enemy health and extra effects, death pose and screen, object,
 enemy and phantom looks, scene layers, audio, event messages, gameplay observers, key bindings
 and additional input devices; character choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
@@ -79,7 +79,7 @@ is `invalid-contribution`. Extra readouts obey the same rule.
 | `height`, `bestHeight` | The player's height now, and the best this run, in metres |
 | `elapsed` | The run's timer, in seconds |
 | `timerRunning` | Whether the timer still runs; a Stop timer event stops it |
-| `health` | The player's health, `{ current, max }` (`HealthReading`), or `null` when the authored level has no hurt sources; shots already in flight can still hurt after their shooter is removed |
+| `health` | The player's health in hit points, `{ current, max }` (`HealthReading`), or `null` when the authored level has no hurt sources; shots already in flight can still hurt after their shooter is removed |
 | `death` | `'health'` or `'fall'` during the death sequence, otherwise `null`; a fall can leave positive health |
 | `paused` | Whether the game is paused |
 | `pointerLocked` | Whether the mouse is captured for play |
@@ -94,11 +94,14 @@ The frame and its health reading are one object, reused every frame: read what y
 - A change to the HUD settings, such as the Workshop previewing a project's labels, rebuilds the
   readouts: each is disposed and created again with the new settings. Nothing else rebuilds them.
 - The engine's timer shows **TIME STOPPED** in place of its label once the timer stops.
+- The engine's health readout is a bar of the share of hit points left: `health-meter`, with
+  `health-meter-fill` over `health-meter-chunk`. A loss leaves a pale chunk for what it took,
+  which holds for half a second and then drains; a gain, as at a placement, fills at once.
 - A facet may import its own stylesheet; the build bundles it.
 - To add to one of the engine's readouts rather than draw it anew, [wrap](#wrapping-a-default)
   its point.
 
-The [complete example](#complete-example) draws the health readout as a bar.
+The [complete example](#complete-example) replaces the health readout with its own bar.
 
 ### Extra readouts
 
@@ -264,12 +267,16 @@ The engine keeps the renderer and the pass sequence. Each pass draws over the la
 
 1. **Course:** backdrop first, then terrain, its artwork, decorations behind the obstacle line
    and looks' course roots.
-2. **Actors**, with depth cleared: characters, enemies and phantoms, never hidden by colliders.
+2. **Actors**, with depth cleared: characters, enemies and phantoms, never hidden by colliders,
+   lit by the theme's [character light](projects.md#section-reference). While a 3D player casts its
+   own shadows, its opaque arm and tool meshes draw here too, so they cast them; passes 4 and 6
+   draw them over again.
 3. **Front**, with depth cleared, only while something shows there: decorations on or in front
    of the obstacle line, axes swung toward the camera and the front of liquid pools.
 4. A 3D player's **arms** (`ARM_LAYER`), with depth cleared, over its body, jar and head.
 5. **Marks**, ignoring depth, over the arms.
-6. The **tool**, sharing the arms' depth, over the marks so the hands hold it.
+6. The player's **tool**, the actors' tool layer, sharing the arms' depth, over the marks so the
+   hands hold it.
 
 Everything that collides is centred on `OBSTACLE_LINE`, z = 0: terrain reaches half its depth
 each side, and the pot and enemies stand there. Do not move collider visuals away from it.
@@ -299,6 +306,8 @@ interface CameraAim { x: number; y: number; worldHeight: number }
 | `reach` | The hammer head's centre on that same plane |
 | `reachRadius` | The head's collision radius in metres |
 | `maxReach` | The rig's maximum reach in metres |
+| `jarHalfWidth` | How far the jar's collision outline reaches either side of `focus`, in metres |
+| `jarBottom` | The jar's base below `focus`, in metres (negative) |
 | `width`, `height` | Canvas size in CSS pixels |
 | `dt` | The drawn frame's elapsed real seconds |
 | `death` | `'health'` or `'fall'` during the death sequence, otherwise `null` |
@@ -372,6 +381,13 @@ does this when both the mountains and sun disc are hidden, in its constructor an
 Build geometry and materials once, never retain the camera as a snapshot and allocate nothing
 in `follow`. A backdrop is scenery, never a collider, and stays behind the actors; the engine
 keeps the sky clear colour, lighting, fog and [pass rules](#pass-rules-for-presentation-points).
+With the theme camera's [background blur](projects.md#section-reference) on, whatever part of the
+backdrop lies behind the blur start draws offscreen with the course's scenery and blurs by its depth
+behind the course plane: place scenery at the depth it should look. It shows as on the screen, except
+that partly fogged scenery comes out a little lighter or darker, translucent layers blend before tone
+mapping, additive glows over the bare sky blend with it rather than add to it, a material that opts out
+of tone mapping is tone-mapped there, and translucent scenery that writes no depth takes the blur of
+what lies behind it.
 
 This wrapper slows horizontal parallax while keeping the current backdrop and its theming:
 
@@ -456,7 +472,8 @@ piece. Each point holds a `MomentEffectFactory`, `() => MomentEffect`:
 | --- | --- | --- |
 | `EFFECTS.strikes` (`effects.strikes`) | Slot | `DEFAULT_EFFECTS.strikes`: one shared burst pool for character strikes and hammer blocks |
 | `EFFECTS.lava` (`effects.lava`) | Slot | `DEFAULT_EFFECTS.lava`: fire while lava burns the character |
-| `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes and lava in manifest order |
+| `EFFECTS.enemyHealth` (`effects.enemy-health`) | Slot | `DEFAULT_EFFECTS.enemyHealth`: a health bar over each hurt enemy |
+| `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes, lava and enemy health in manifest order |
 
 ```ts
 interface MomentEffect {
@@ -521,6 +538,18 @@ rising from where they were born. A fatal lava burn keeps the corpse alight unti
 `placed` puts it out. Live fire follows `character.centre`; dying fire follows
 `character.torso`. Replacing lava does not change strikes, and replacing strikes does
 not change lava.
+
+**Default enemy health.** `DEFAULT_EFFECTS.enemyHealth` draws in marks and takes `enemy-hit`,
+`enemy-defeat` and `placed`. Over a hurt enemy's drawing, on the obstacle line, a bar shows the
+share of its hit points left, with a pale chunk for what its latest hits took: the chunk holds
+for half a second, then drains, and hits landing before it drains add to it. The bar follows the
+enemy as drawn, reading `health` and `maxHealth` from the frame's enemy poses, shows for **5 s**
+after each hit and fades over the last 0.6 s, and hides while the enemy sleeps. It goes at once
+when the enemy falls to its death or heals, as when the level's objects are restored, and at a
+new run's `placed { bonfire: null }`; a checkpoint return keeps it, as enemies keep their damage.
+A hammer's killing blow empties the bar where the enemy fell, fading with it. Every bar shares
+one instanced draw with no textures or frame allocations, updated only while a bar shows.
+Replacing it changes neither strikes nor lava.
 
 To add a ring to the default strikes, wrap the factory and forward every method, keeping its
 pass and filter (the default includes `block` and `placed`):
@@ -615,7 +644,7 @@ export default defineRuntime({ start: () => [add(EFFECTS.extras, enemySpark)] })
 ```
 
 Replace a slot to draw it entirely your own way; wrap to keep selected default moments, and
-add extras to leave both slots alone. Their filters also determine whether visual consumers
+add extras to leave the slots alone. Their filters also determine whether visual consumers
 need impact tracking.
 
 ## Death sequence
@@ -641,7 +670,7 @@ reach the ordered effects/audio/observer drain. Blocks can continue while dying,
 placement appends `placed`; effects filter by the current placement while audio and
 observers receive the complete journal batch.
 
-The game settings (schema **15**) own `death: { wait, angularDamping, friction }`.
+The game settings (schema **18**) own `death: { wait, angularDamping, friction }`.
 Workshop / Physics / Death exposes the same fields:
 
 | Field | Values | Default |
@@ -889,6 +918,8 @@ moment, not a diff of look phases. Hit cooldown and contact deduplication still 
 These notifications are staged and applied in order after the frame's step loop, before audio,
 gameplay observers and rendering; the look never runs inside physics. Event envelopes are reused
 and read-only: consume them during `apply`, never retain them.
+Each pose gives the enemy's `id`, `species`, centre `x`, `y`, `facing`, `phase`, when that phase
+began (`changedAt`), whether it is `moving`, and its `health` and `maxHealth` in hit points.
 `update` receives only the active poses and simulation seconds, **only while the level has
 enemies**; sleeping sprites remain from `apply`. **The array and every drawn pose are pooled,
 borrowed until the next frame**: copy individual fields into your own state if needed later,
@@ -923,7 +954,7 @@ export default defineRuntime({ start: () => [replace(LOOKS.enemies, enemies)] })
 ```ts
 interface PhantomLook {
   readonly root: Object3D;
-  draw(figures: readonly PhantomFigureFrame[], head: HammerHead): void;
+  draw(figures: readonly PhantomFigureFrame[], head: HammerHead, pot: PotOutline): void;
   dispose(): void;
 }
 ```
@@ -951,6 +982,9 @@ values:
 
 `head` is the current rig settings' `HammerHead`, as in the engine's
 original phantoms: not the recorded player's or a selected library hammer's own outline.
+`pot` is the current rig settings' jar outline, the `PotOutline` about the player root that
+`pose.x`, `pose.y` and `pose.pot` place; a recording only plays for the jar it was recorded
+with, since the jar is part of its [phantom course](phantoms.md).
 It is independent of `SceneFrame.hammer.outline`, which describes the drawn hammer's actual
 collider, including a library hammer's own.
 Playback calls `draw` **only while at least one slot shows** and controls the root's visibility, hiding it when the
@@ -1003,6 +1037,7 @@ interface ScenePose extends ScenePoint { readonly angle: number }
 interface SceneCharacter {
   readonly phase: 'alive' | 'dying';
   readonly centre: ScenePose;
+  readonly jarBottom: number;
   readonly torso: ScenePose;
   readonly head: ScenePose;
   readonly hands: Readonly<Record<'left' | 'right', ScenePose>>;
@@ -1034,7 +1069,9 @@ angles radians counterclockwise. `time` is the drawn frame's simulation seconds 
 on a restart; `cursor` is the drawn cursor and `enemies` are the drawn enemy poses.
 
 `character.phase` is `'alive'` or `'dying'`. `centre` is the drawn player centre: the live jar
-root or the corpse jar, with its angle. `torso` is the drawn torso frame. While alive, `head`
+root or the corpse jar, with its angle. `jarBottom` is how far the jar's base lies below that centre
+in the jar's frame, in metres (negative): the game's [jar outline](../README.md#game-settings) sets it,
+so an effect at the base, such as the default lava fire, follows any jar. `torso` is the drawn torso frame. While alive, `head`
 is the shown head centre and roll, using the same capture rule as death entry; `hands` are
 the left/right grip points on the drawn tool frame, with its shaft angle, not an imported
 avatar's offset wrist targets. While dying, `head` and `hands` come from the death writer's
@@ -1270,15 +1307,15 @@ type; otherwise a non-empty array of known types without repeats, fixed for the 
 
 | `type` | Additional fields and meaning |
 | --- | --- |
-| `hurt` | `health`, `max`: health remaining after **each** accepted hurt, including 0 for the killing hit, independent of HUD visibility; `cause`: the `HurtCause` below |
+| `hurt` | `health`, `max`: the player's hit points remaining after **each** accepted hurt, and its maximum, including 0 for the killing hit, independent of HUD visibility; `cause`: the `HurtCause` below |
 | `block` | `id`: the trap or hollow archer that fired the projectile; `x`, `y`: strike on the head; `directionX`, `directionY`: projectile's unit flight direction; `normalX`, `normalY`: head's outward unit normal there. Held or released, also while dying; a projectile that hurt the character is not also a block |
 | `impact` | `x`, `y`: mean contact point; `normalX`, `normalY`: struck surface's unit normal toward the head; `speed`: head approach speed (m/s); `strength`: 0–1. The live head began touching, limited per `IMPACTS` in run time; raised only while a consumer takes impacts |
 | `death` | The health death sequence started; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
 | `placed` | `bonfire`: the checkpoint returned to, continuing the run; `null` starts a new run from its spawn, including Reset, rig rebuild, level replacement, Workshop placement or death before any bonfire |
 | `bonfire` | `id`, `x`, `y`: checkpoint ID and base; another bonfire became current, including a previously lit one |
-| `enemy-hit` | `id`, `x`, `y`: enemy ID and centre, on **every accepted surviving hit**, not just phase transitions |
-| `enemy-defeat` | `id`, `x`, `y`: enemy ID and centre; `by`: `'hammer'` or `'fall'` |
+| `enemy-hit` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `damage`: hit points the strike took; `health`, `max`: hit points left and the enemy's maximum. On **every accepted surviving hit**, not just phase transitions |
+| `enemy-defeat` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `by`: `'hammer'` or `'fall'`; `damage`: the hit points it had left; `max`: its maximum |
 | `launch` | An authored Launch player action executed |
 | `finish` | An authored Stop timer action executed |
 | `sound` | `source`, `volume`: an authored play-sound action executed |

@@ -6,6 +6,7 @@ import {
   encodePhantom, PHANTOM_CHANNELS, PHANTOM_LIMITS, PHANTOM_TICK_RATE, PhantomError, phantomTool, phantomTrack, quantizePhantomValue,
 } from './phantom-format';
 import type { PhantomPose, PhantomTool, PhantomTrack } from './phantom-format';
+import type { RigGeometry } from './rig';
 import type { RigPose } from './simulation';
 
 // Seconds, except where noted.
@@ -35,8 +36,6 @@ if (STEP_TICKS < 1 || Math.abs(STEP_TICKS - PHYSICS.dt * PHANTOM_TICK_RATE) > 1e
 }
 const RECORDING_TICKS = PHANTOM_RECORDING.seconds * PHANTOM_TICK_RATE;
 if (RECORDING_TICKS > PHANTOM_LIMITS.maxTicks) throw new Error('A phantom recording is longer than the format allows.');
-// Tilting the pot moves its farthest corner by this much per radian.
-const POT_RADIUS = Math.max(...RIG.potVertices.map((point) => Math.hypot(point.x, point.y)));
 
 /**
  * Reduces one pose per physics step to keyframes, as they arrive. A stretch of steps becomes a
@@ -47,6 +46,8 @@ const POT_RADIUS = Math.max(...RIG.potVertices.map((point) => Math.hypot(point.x
  */
 export class PhantomCapture {
   private handle = 0;
+  // Tilting the jar moves its farthest corner by this much per radian.
+  private potRadius = 0;
   private readonly keyTicks = new Int32Array(RECORDING_TICKS / STEP_TICKS + 1);
   private readonly keyValues = new Float64Array(this.keyTicks.length * CHANNELS);
   private keyframes = 0;
@@ -70,8 +71,9 @@ export class PhantomCapture {
     return this.tick;
   }
 
-  begin(handleLength: number): void {
+  begin(handleLength: number, potRadius: number): void {
     this.handle = handleLength;
+    this.potRadius = potRadius;
     this.keyframes = 0;
     this.stretch = 0;
     this.tick = 0;
@@ -164,7 +166,7 @@ export class PhantomCapture {
       pose.across = (units[5]! + (units[end + 5]! - units[5]!) * blend) / SCALES[5]!;
       const at = index * TRUTH;
       if (Math.hypot(pose.x - truth[at]!, pose.y - truth[at + 1]!) > tolerance) return false;
-      if (POT_RADIUS * Math.abs(pose.pot - truth[at + 2]!) > tolerance) return false;
+      if (this.potRadius * Math.abs(pose.pot - truth[at + 2]!) > tolerance) return false;
       phantomTool(pose, this.handle, tool);
       if (Math.hypot(tool.tipX - truth[at + 3]!, tool.tipY - truth[at + 4]!) > tolerance) return false;
       // The handle keeps its length, so the butt strays by the shaft's turn; the handle's own stretch under
@@ -208,17 +210,18 @@ export class PhantomRecorder {
     this.wait = this.delay(PHANTOM_RECORDING.retryDelay);
   }
 
-  // After every eligible live physics step: the simulation's placement and the rig.
-  step(placement: number, rig: Readonly<RigPose>, handleLength: number): void {
+  // After every eligible live physics step: the simulation's placement, the rig and the rig's geometry. A new rig is
+  // always a new placement.
+  step(placement: number, rig: Readonly<RigPose>, geometry: Readonly<Pick<RigGeometry, 'handleLength' | 'jar'>>): void {
     const placed = placement !== this.placement;
     this.placement = placement;
-    if (this.remaining > 0 && (placed || handleLength !== this.capture.handleLength)) {
+    if (this.remaining > 0 && (placed || geometry.handleLength !== this.capture.handleLength)) {
       this.interrupt();
     }
     if (this.remaining === 0) {
       this.wait--;
       if (this.wait > 0) return;
-      this.capture.begin(handleLength);
+      this.capture.begin(geometry.handleLength, geometry.jar.radius);
       this.remaining = RECORDING_TICKS / STEP_TICKS + 1;
     }
     this.capture.add(rig);

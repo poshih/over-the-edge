@@ -1,6 +1,6 @@
 import { DynamicTree, Vec2 } from 'planck';
 import type { AABBValue, Body, Fixture, World } from 'planck';
-import { PHYSICS, RIG } from './config';
+import { PHYSICS } from './config';
 import type { Point, Tuning } from './config';
 import { ARROW, axeAngle, axeBlade, axeReach, SHOOTER } from './hazards';
 import type { Bounds, ProjectileBlock, ProjectileKind } from './hazards';
@@ -184,14 +184,14 @@ export class HazardWorld {
     this.reschedule();
   }
 
-  // After the physics step that ended at `time`, with the player's root at `root`.
-  afterStep(time: number, root: Readonly<Point>): void {
+  // After the physics step that ended at `time`, with the player's root at `root` and its jar's bottom `bottom` below it.
+  afterStep(time: number, root: Readonly<Point>, bottom: number): void {
     this.ensureLive();
     if (this.count === 0 && this.projectileCount === 0) return;
     const vulnerable = this.hooks.vulnerable();
     this.box.minX = root.x - this.tuning.hurtWidth / 2;
     this.box.maxX = root.x + this.tuning.hurtWidth / 2;
-    this.box.minY = root.y + RIG.potBottom;
+    this.box.minY = root.y + bottom;
     this.box.maxY = this.box.minY + this.tuning.hurtHeight;
     this.fly(vulnerable);
     this.fire(time, root);

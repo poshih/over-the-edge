@@ -228,8 +228,8 @@ function roundedBar(centerX: number, top: number, width: number, radiusX: number
 
 export function slicedArtwork(job: CourseJob, seed: number, artLimits: ArtLimits): SliceAsset[] {
   const limits = job.engine.level.LEVEL_LIMITS, count = limits.geometryKinds;
-  const vertices = limits.sliceVertices / limits.sliceLoops;
-  const height = (limits.sliceLoops - 1) * SLICE_RISE + SLICE_THICKNESS;
+  const vertices = limits.meshPoints / limits.meshLoops;
+  const height = (limits.meshLoops - 1) * SLICE_RISE + SLICE_THICKNESS;
   if (count > artLimits.assets || !Number.isInteger(vertices) || vertices < 8 || vertices % 4 !== 0 ||
     vertices > limits.polygonVertices || height > limits.maximumSize) {
     throw new CourseLevelError({ field: 'maximum-complexity slice construction within engine limits', value: limits });
@@ -237,7 +237,7 @@ export function slicedArtwork(job: CourseJob, seed: number, artLimits: ArtLimits
   return Array.from({ length: count }, (_, index): SliceAsset => {
     const width = index === 0 ? 12 : 6, centerY = (height - SLICE_THICKNESS * 2) / 2;
     const radius = 0.12 + 0.12 * index / count;
-    const loops = Array.from({ length: limits.sliceLoops }, (_, rung) =>
+    const loops = Array.from({ length: limits.meshLoops }, (_, rung) =>
       roundedBar(rung === 0 && index === 0 ? 0 : rung % 2 === 0 ? -1 : 1, rung * SLICE_RISE,
         rung === 0 && index === 0 ? 12 : 4, radius, vertices)
         .map((point) => ({ x: tidy(point.x / width), y: tidy((point.y - centerY) / height) })));

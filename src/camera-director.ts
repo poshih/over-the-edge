@@ -15,6 +15,9 @@ export interface CameraView {
   readonly reach: Readonly<Point>;
   readonly reachRadius: number;
   readonly maxReach: number;
+  // How far the jar's collision reaches either side of the focus, and its bottom below it (negative), in metres.
+  readonly jarHalfWidth: number;
+  readonly jarBottom: number;
   readonly width: number;
   readonly height: number;
   readonly dt: number;
@@ -56,7 +59,6 @@ const FRAMING = {
   visibleGroundDepth: 1.3,
   characterTop: 1.35,
 } as const;
-const POT_HALF_WIDTH = Math.max(...RIG.potVertices.map((point) => Math.abs(point.x)));
 
 class FollowCamera implements CameraDirector {
   private compact = false;
@@ -74,13 +76,13 @@ class FollowCamera implements CameraDirector {
 
   private place(view: CameraView, out: CameraAim, snap: boolean): void {
     if (view.death !== null) return;
-    const { focus, reach, reachRadius, width, height } = view;
+    const { focus, reach, reachRadius, jarHalfWidth, jarBottom, width, height } = view;
     const aspect = width / height;
     this.compact = width < FRAMING.compactWidth || height < FRAMING.compactHeight || aspect < 1;
     const bounds = this.bounds;
-    bounds.minX = Math.min(focus.x - POT_HALF_WIDTH, reach.x - reachRadius);
-    bounds.maxX = Math.max(focus.x + POT_HALF_WIDTH, reach.x + reachRadius);
-    bounds.minY = Math.min(focus.y + RIG.potBottom, reach.y - reachRadius);
+    bounds.minX = Math.min(focus.x - jarHalfWidth, reach.x - reachRadius);
+    bounds.maxX = Math.max(focus.x + jarHalfWidth, reach.x + reachRadius);
+    bounds.minY = Math.min(focus.y + jarBottom, reach.y - reachRadius);
     bounds.maxY = Math.max(focus.y + FRAMING.characterTop, reach.y + reachRadius);
     const span = 2 * (view.maxReach + FRAMING.reachMargin);
     const padding = 2 * FRAMING.framingMargin;

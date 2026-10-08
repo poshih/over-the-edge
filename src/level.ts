@@ -16,16 +16,16 @@ import type { Surface } from './surfaces';
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
-export const LEVEL_SCHEMA_VERSION = 8;
+export const LEVEL_SCHEMA_VERSION = 10;
 export const LEVEL_LIMITS = {
   objects: 1000,
   // Distinct collision geometry across a level's terrain: one physics shape and one extruded template each.
   geometryKinds: 64,
-  // Points of a drawn outline, and of each loop of a mesh's slice.
+  // Points of a drawn outline, and of each loop of a mesh's slice or projection.
   polygonVertices: 64,
-  // A mesh's slice: its loops, and their points together.
-  sliceLoops: 16,
-  sliceVertices: 256,
+  // A mesh's slice or projection: its loops, and their points together.
+  meshLoops: 16,
+  meshPoints: 256,
   labels: 16,
   text: 80,
   coordinate: 2048,
@@ -83,13 +83,18 @@ export type ShapeKind = (typeof SHAPE_KINDS)[number];
 export type Outline = readonly Readonly<Point>[];
 
 /**
- * How a mesh collides: the simple shape it declares, fitted to its box, or else its slice: its cross-section on the
- * obstacle line, generated from the mesh (src/mesh-collision.ts). A slice's loops keep the solid on each edge's left, so
- * outer loops run counterclockwise and holes clockwise.
+ * How a mesh collides: the simple shape it declares, fitted to its box, or outlines generated from the mesh
+ * (src/mesh-collision.ts): its slice, its cross-section on the obstacle line, unless it declares its projection, its
+ * silhouette seen along the view. Their loops keep the solid on each edge's left, so outer loops run counterclockwise
+ * and holes clockwise.
  */
 export type MeshCollision =
   | { readonly type: ShapeKind }
-  | { readonly type: 'slice'; readonly loops: readonly Outline[] };
+  | { readonly type: MeshOutlines; readonly loops: readonly Outline[] };
+
+// How a mesh's collision outlines are generated: its slice or its projection.
+export const MESH_OUTLINES = ['slice', 'projection'] as const;
+export type MeshOutlines = (typeof MESH_OUTLINES)[number];
 
 /** What a terrain object is: a mesh, which draws it and brings its collision. */
 export type TerrainMesh =
@@ -387,38 +392,39 @@ function outlinesTouch(first: Outline, second: Outline): boolean {
   return false;
 }
 
-// Slices validated already, by their JSON: every placement of a mesh shares its slice, which is checked once.
-const SLICES = new Map<string, MeshCollision>();
-const SLICE_MEMORY = 256;
+// Generated outlines validated already, by their JSON: every placement of a mesh shares them, checked once.
+const OUTLINES = new Map<string, MeshCollision>();
+const OUTLINE_MEMORY = 256;
 
-function validateSlice(value: unknown): MeshCollision {
-  fields(value, ['type', 'loops'], 'A mesh slice');
-  const key = JSON.stringify(value.loops);
-  const known = SLICES.get(key);
+function validateMeshOutlines(value: unknown, type: MeshOutlines): MeshCollision {
+  const label = `A mesh ${type}`;
+  fields(value, ['type', 'loops'], label);
+  const key = `${type}:${JSON.stringify(value.loops)}`;
+  const known = OUTLINES.get(key);
   if (known !== undefined) return known;
-  if (!Array.isArray(value.loops) || value.loops.length === 0 || value.loops.length > LEVEL_LIMITS.sliceLoops) {
-    throw new LevelError(`A mesh slice has 1 to ${LEVEL_LIMITS.sliceLoops} loops.`);
+  if (!Array.isArray(value.loops) || value.loops.length === 0 || value.loops.length > LEVEL_LIMITS.meshLoops) {
+    throw new LevelError(`${label} has 1 to ${LEVEL_LIMITS.meshLoops} loops.`);
   }
-  const loops = value.loops.map((entry, index) => outlinePoints(entry, `Slice loop ${index + 1}`));
-  if (loops.reduce((sum, loop) => sum + loop.length, 0) > LEVEL_LIMITS.sliceVertices) {
-    throw new LevelError(`A mesh slice has at most ${LEVEL_LIMITS.sliceVertices} points.`);
+  const loops = value.loops.map((entry, index) => outlinePoints(entry, `${label} loop ${index + 1}`));
+  if (loops.reduce((sum, loop) => sum + loop.length, 0) > LEVEL_LIMITS.meshPoints) {
+    throw new LevelError(`${label} has at most ${LEVEL_LIMITS.meshPoints} points.`);
   }
   for (let a = 0; a < loops.length; a++) {
     for (let b = a + 1; b < loops.length; b++) {
-      if (outlinesTouch(loops[a], loops[b])) throw new LevelError('A mesh slice\'s loops cannot cross or touch.');
+      if (outlinesTouch(loops[a], loops[b])) throw new LevelError(`${label}'s loops cannot cross or touch.`);
     }
   }
   // Loops never touch, so a loop nests as deep as any of its points: inside an even number of others it bounds solid.
   loops.forEach((loop, index) => {
     const depth = loops.filter((other, at) => at !== index && insideOutline(other, loop[0])).length;
     if ((polygonArea(loop) > 0) !== (depth % 2 === 0)) {
-      throw new LevelError('A mesh slice keeps the solid on each edge\'s left: outer loops run counterclockwise and holes clockwise.');
+      throw new LevelError(`${label} keeps the solid on each edge's left: outer loops run counterclockwise and holes clockwise.`);
     }
   });
-  const slice: MeshCollision = Object.freeze({ type: 'slice', loops: Object.freeze(loops) });
-  if (SLICES.size >= SLICE_MEMORY) SLICES.clear();
-  SLICES.set(key, slice);
-  return slice;
+  const collision: MeshCollision = Object.freeze({ type, loops: Object.freeze(loops) });
+  if (OUTLINES.size >= OUTLINE_MEMORY) OUTLINES.clear();
+  OUTLINES.set(key, collision);
+  return collision;
 }
 
 function shapeKind(value: unknown, label: string): ShapeKind {
@@ -429,10 +435,11 @@ function shapeKind(value: unknown, label: string): ShapeKind {
 
 export function validateMeshCollision(value: unknown): MeshCollision {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new LevelError('A mesh needs its collision: a simple shape or its slice.');
+    throw new LevelError('A mesh needs its collision: a simple shape, its slice or its projection.');
   }
   const type: unknown = Reflect.get(value, 'type');
-  if (type === 'slice') return validateSlice(value);
+  const outlines = MESH_OUTLINES.find((candidate) => candidate === type);
+  if (outlines !== undefined) return validateMeshOutlines(value, outlines);
   fields(value, ['type'], 'A mesh collision');
   return SHAPE_COLLISIONS[shapeKind(type, 'A mesh collision type')];
 }
@@ -468,7 +475,7 @@ export function validateTerrainMesh(value: unknown): TerrainMesh {
 function meshSource(mesh: TerrainMesh): ShapeKind | readonly Outline[] {
   if (mesh.type === 'shape') return mesh.shape;
   if (mesh.type === 'outline') return [mesh.vertices];
-  return mesh.collision.type === 'slice' ? mesh.collision.loops : mesh.collision.type;
+  return 'loops' in mesh.collision ? mesh.collision.loops : mesh.collision.type;
 }
 
 const CIRCLE: TerrainCollision = Object.freeze({ type: 'circle' });

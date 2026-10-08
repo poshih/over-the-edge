@@ -7,6 +7,7 @@ import type { EnemyEvent, EnemyPose } from './enemy-types';
 import { EnemyView } from './enemy-view';
 import { FlagView } from './flag-view';
 import type { HammerHead } from './hammer-head';
+import type { PotOutline } from './pot-outline';
 import type { ProjectilePose } from './hazard-world';
 import { isPlatformObject } from './level';
 import type { AxeObject, BonfireObject, LevelObject, PlatformObject, PoolObject, ShooterObject, TriggerObject } from './level';
@@ -103,9 +104,9 @@ export interface PhantomFigureFrame {
 export interface PhantomLook {
   // Characters draw in actors, never hidden by the course. Playback owns this root's visibility.
   readonly root: Object3D;
-  // Every slot, including hidden ones, while at least one shows. Head is the current rig settings' outline,
-  // not the recorded player's or a library hammer's own.
-  draw(figures: readonly PhantomFigureFrame[], head: HammerHead): void;
+  // Every slot, including hidden ones, while at least one shows. Head and pot are the current rig settings' hammer
+  // head and jar outlines, not the recorded player's or a library hammer's own.
+  draw(figures: readonly PhantomFigureFrame[], head: HammerHead, pot: PotOutline): void;
   dispose(): void;
 }
 // The total number of stable slots, including the playback's held figure, is fixed for the look's lifetime.
@@ -262,7 +263,7 @@ const LOOK_CONTRACTS = Object.freeze({
     methods: ['apply', 'update', 'setArt', 'dispose'],
   }),
   phantoms: instanceContract({
-    returns: 'a three.js root, draw(figures, head) and dispose()',
+    returns: 'a three.js root, draw(figures, head, pot) and dispose()',
     methods: ['draw', 'dispose'],
     root: true,
   }),

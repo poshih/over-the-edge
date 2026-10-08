@@ -508,7 +508,7 @@ re-enter the rig. Replacements snapshot validated metadata before awaiting
 image loading, so later caller edits cannot change an in-flight import.
 An optional anchor `renderRoot` sends its bone-bound and weighted sprites to
 a different render mount. This game's hammer anchors use the foreground
-scene; unbound layers already follow those foreground anchors directly.
+mount, which draws in the tool pass; unbound layers already follow those foreground anchors directly.
 The secondary mounts share the same evaluated skeleton and world origin,
 so changing render pass does not change pose, skin weights or authored offsets.
 
@@ -713,8 +713,8 @@ a frame change only points the existing mesh at an already loaded material.
 Additional layer rotation touches only explicitly controlled rigid layers; bone rotation uses
 compiled affected subtrees. Rotation reuses existing meshes, textures,
 materials, and geometry, and does not add draw calls.
-The hammer pass visits only its tool objects and foreground sprite mounts,
-not the full level. Lighting is configured once for both passes, renderer
+The hammer pass draws only its tool objects and foreground sprite mounts, on
+the actors' tool layer, never the course. It shares the actors' lights, renderer
 statistics accumulate both passes, and shared disposal avoids duplicating
 material or texture ownership.
 

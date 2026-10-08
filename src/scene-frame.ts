@@ -9,6 +9,8 @@ export interface SceneCharacter {
   readonly phase: 'alive' | 'dying';
   // The drawn player centre: the live jar root, or the corpse jar.
   readonly centre: ScenePose;
+  // The jar's base below that centre, in the jar's frame, in metres (negative): the game's jar outline sets it.
+  readonly jarBottom: number;
   readonly torso: ScenePose;
   readonly head: ScenePose;
   // Live grip points on the drawn tool frame, or the death appearance's hands.
@@ -57,7 +59,7 @@ function pose(): Mutable<ScenePose> { return { x: 0, y: 0, angle: 0 }; }
 export function createSceneFrame(outline: HammerHead): MutableSceneFrame {
   return {
     time: 0,
-    character: { phase: 'alive', centre: pose(), torso: pose(), head: pose(), hands: { left: pose(), right: pose() } },
+    character: { phase: 'alive', centre: pose(), jarBottom: 0, torso: pose(), head: pose(), hands: { left: pose(), right: pose() } },
     hammer: { held: true, butt: pose(), head: pose(), outline },
     cursor: { x: 0, y: 0 },
     enemies: [],

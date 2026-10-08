@@ -107,9 +107,9 @@ const LABELS: readonly LevelLabel[] = [
 // - a lava lake filling the basin past the summit's far edge, between the cliff and the right crag.
 const HAZARDS: readonly LevelObject[] = [
   { kind: 'bonfire', id: 'ledge-bonfire', x: 3.75, y: 2.1 },
-  { kind: 'shooter', id: 'crag-shooter', firing: 'timer', x: -17.95, y: 4.2, angle: 0, interval: 3, delay: 1, speed: 10, damage: 1 },
+  { kind: 'shooter', id: 'crag-shooter', firing: 'timer', x: -17.95, y: 4.2, angle: 0, interval: 3, delay: 1, speed: 10, damage: 20 },
   { kind: 'pool', id: 'bog', liquid: 'swamp', x: 12.34, y: 9.25, width: 1.28, height: 0.5, depth: 1.2 },
-  { kind: 'axe', id: 'top-axe', x: 14, y: 13.9, length: 2.6, period: 4, offset: 0, damage: 1 },
+  { kind: 'axe', id: 'top-axe', x: 14, y: 13.9, length: 2.6, period: 4, offset: 0, damage: 20 },
   { kind: 'pool', id: 'lava-lake', liquid: 'lava', x: 24.175, y: 0.6, width: 11.65, height: 1.2, depth: 2 },
 ];
 
@@ -412,8 +412,8 @@ try {
     const terrain = meshTerrain(id, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     built.set(spec.id, { spec, model, bytes, id, terrain });
     const collision = terrain.mesh.collision;
-    console.log(`${spec.file}: ${model.indices.length / 3} triangles, ${bytes.byteLength} bytes, collides as ${collision.type === 'slice'
-      ? `a slice of ${collision.loops.map((loop) => loop.length).join(' + ')} points` : `its declared ${collision.type}`}.`);
+    console.log(`${spec.file}: ${model.indices.length / 3} triangles, ${bytes.byteLength} bytes, collides as ${'loops' in collision
+      ? `a ${collision.type} of ${collision.loops.map((loop) => loop.length).join(' + ')} points` : `its declared ${collision.type}`}.`);
   }
   const terrain = PLACEMENTS.map(({ id, rock: name, x, mirror }): TerrainObject => {
     const { spec, model, terrain: placed } = built.get(name)!;

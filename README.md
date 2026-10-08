@@ -104,7 +104,7 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
 - **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
-  aim marks, strike, lava and extra effects, death pose and screen, object, enemy and phantom looks,
+  aim marks, strike, lava, enemy health and extra effects, death pose and screen, object, enemy and phantom looks,
   scene layers, audio, message presentation,
   gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
   studio previews and releases; character choice in releases and studio previews;
@@ -249,9 +249,10 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 15**, and release content **schema 14**,
-including the audio record's `block` cue, game settings' death wait and archer rules, the
-HUD's death text/fade and the hollow archer's enemy art; other versions are rejected.
+Project manifests and bundles use **schema 17**, and release content **schema 16**,
+including the audio record's `block` cue, game settings' death wait, archer, hit-point and
+armor rules and jar outline, the theme camera's background blur and character light, the HUD's
+death text/fade and the hollow archer's enemy art; other versions are rejected.
 
 ### Included full-length course
 
@@ -311,7 +312,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava, enemy health and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -573,6 +574,21 @@ mass turns. A head changes in place, without restarting the run, and the built-i
 hammer mesh, the debug overlay, framing and how near the hands come follow it; imported
 hammer models and sprites keep their own artwork. Phantoms draw the default head.
 
+The **Jar** section shapes the jar's collision outline, a game setting (`rig.pot`) that
+every character's jar collides as. Its canvas works like the hammer head's, around the
+player's root, with the shoulder hinge above it: **Mirror** keeps the jar's left and
+right alike, and **Jar**, **Round** and **Bucket** start from a preset. The outline is
+always convex: 3-12 points within 1 m of the root, which stays at least 5 cm inside,
+with edges of at least 2 cm and at least 0.05 m² of area, all at or below the dashed
+line 10 cm under the hinge. Its base is where heights, the
+[hurt box](#traps) and the camera's framing are measured from, and its area is the volume
+[liquids](#liquid-pools) hold up; the player weighs **Player mass** whatever its size. The
+procedural jar is drawn from the outline, round seen from above, so at every height it
+reaches as far toward the camera and away as half the outline's width there, and phantoms
+show it; imported [pot models](docs/characters.md#pot-model) and sprites keep their own
+artwork, and Appearance pot imports and sprite pot anchors fit the default jar's size, while all
+collide as the outline. Like the rig's lengths, a new jar rebuilds the player and restarts the run.
+
 The **Cursor target** section has a **Maximum target radius** slider, from
 **0.25 m** up to the hammer's reach, default the full reach. A saved radius beyond
 the reach is rejected. When the rig changes in the Workshop, a full-reach radius
@@ -624,9 +640,9 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 16**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
+**schema version 18**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
 in any other version are rejected, not converted. Browser snapshots use storage format
-**8**; earlier storage keys are not read. Unreadable current-format saves are marked and
+**10**; earlier storage keys are not read. Unreadable current-format saves are marked and
 retained, while other valid snapshots remain available.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,
@@ -646,7 +662,8 @@ Open **Workshop / Level** to edit the course. Editing pauses gameplay and
 separates placement gestures from hammer input. Terrain is made of meshes, and each brings
 its collision: choose a block, thin platform, ramp, triangle, circle, or hexagon, draw a
 shape, or import a GLB under **Meshes**, then click/tap the game preview to place it. A GLB
-collides as the simple shape it declares or as its slice on the [obstacle line](#obstacle-line);
+collides as the simple shape it declares, as its slice on the [obstacle line](#obstacle-line), or
+as its projection, its outermost outline seen along the view, when it declares that;
 see [course meshes](docs/course-artwork.md). Select an object to move it or adjust its
 position, dimensions, rotation, mirroring, surface and illusion property. Dragging previews
 the change; releasing commits it. Drag empty
@@ -813,7 +830,7 @@ requested through a user-operated fullscreen control. The Workshop skips every v
 you test (see [Finding Workshop controls](#finding-workshop-controls)); videos play in the
 game-only release.
 
-Level JSON uses **schema version 8**, with typed terrain, start, trigger, enemy,
+Level JSON uses **schema version 10**, with typed terrain, start, trigger, enemy,
 decoration, bonfire, projectile trap (`shooter`), swinging axe (`axe`), liquid pool
 (`pool`) and platform objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`,
 `ice` and `rubber`.
@@ -874,26 +891,35 @@ blocks it, and it draws only when one of them is clear and within the **40 m** e
 projectile flies. The draw flashes the bird's warning for **0.8 s**; then the archer aims
 again at where the player is now and looses, or walks on if the shot is gone, and stands
 **1.6 s** to reload, as it does after a bump. Like any recovering enemy it does not bump the
-player meanwhile. The hammer head shields arrows as it does trap bolts, and a strike
-interrupts the draw.
+player meanwhile. The hammer head shields arrows as it does trap bolts, and a strike that
+beats the archer's armor interrupts the draw.
 
-A **hammer-head strike** with a closing speed of **at least 0.8 m/s** defeats a
-bird or a hollow archer in one hit by default; a hollow soldier defaults to **two separated strikes**. Damage has a
-**0.25 s anti-jitter cooldown**: brushing or holding the head against an enemy
-does not repeatedly deal damage. The shaft does not deal damage.
-Body collisions knock the player back and default to costing **1** [health](#health-and-bonfires).
-**Physics / Enemies** owns `birdHealth`, `soldierHealth` and `archerHealth` (1–20 whole
-strikes), `birdMass`, `soldierMass` and `archerMass` (default **0.55 kg**, **3 kg** and
+Enemies have health in hit points and **armor**: a **hammer-head strike** hurts an enemy only
+when it closes faster than the species' armor, so slow touches glance off. Armor defaults to
+**2.5 m/s** for a bird, **3 m/s** for a hollow archer and **4 m/s** for a hollow soldier, and is
+never below **0.8 m/s**, so brushing or holding the head against an enemy never deals damage.
+A strike that beats the armor takes `hammerDamage` (**100** by default) at `hammerFullSpeed`
+(**8 m/s**) or faster, and proportionally less below it, at least 1. A full-speed strike
+defeats a bird or a hollow archer (**100** hit points by default) and takes half a hollow
+soldier's **200**. Damage has a **0.25 s anti-jitter cooldown**. The shaft does not deal damage. A hurt enemy shows a
+health bar over it for **5 s** after each hit, with a pale chunk for what the hit took that
+drains away soon after; a killing blow empties it as the enemy fades. A game can draw it its
+own way with the [enemy health effect](docs/runtime-plugins.md#effects).
+Body collisions knock the player back and default to costing **20** [hit points](#health-and-bonfires).
+**Physics / Enemies** owns `hammerDamage` (1–1000 whole hit points), `hammerFullSpeed`
+(1–20 m/s), `birdHealth`, `soldierHealth` and `archerHealth` (1–2000 whole
+hit points), `birdArmor`, `soldierArmor` and `archerArmor` (0.8–20 m/s), `birdMass`, `soldierMass` and `archerMass` (default **0.55 kg**, **3 kg** and
 **2.5 kg**), and their `birdAcceleration`, `soldierAcceleration` and `archerAcceleration`
 (default **22**, **28** and **24 m/s²**). `birdSight` defaults to **6 m**, and `birdDiveSpeed`
 to **5 m/s**. `archerSight` defaults to **14 m**; `arrowSpeed`, **12 m/s**, sets the arrows'
-reach, **14.7 m** on level ground and less uphill; and `arrowDamage` defaults to **1**, with
+reach, **14.7 m** on level ground and less uphill; and `arrowDamage` defaults to **20**, with
 the [projectile](#traps) push and lift as knockback.
-`bumpDamage`, `bumpSpeed` and `bumpLift` default to **1**, **3 m/s** horizontally
+`bumpDamage`, `bumpSpeed` and `bumpLift` default to **20**, **3 m/s** horizontally
 and **1.4 m/s** upward. Zero bump damage leaves knockback but deals no damage and
 grants no invulnerability.
 Mass updates existing bodies immediately; acceleration, sight, dive speed and bumps
-read the live settings, and arrow speed and damage apply from the next shot. Species health applies only at an enemy's next reset or new
+read the live settings, arrow speed and damage apply from the next shot, and armor, hammer damage
+and its full-damage speed from the next strike. Species health applies only at an enemy's next reset or new
 spawn: it does not heal or resize the health of an existing enemy, and waking is not
 a new spawn. Collider/drawn sizes and AI scheduling remain engine constants.
 Dead enemies stay dead until Reset or an editor rebuild. Patrol positions,
@@ -915,9 +941,10 @@ added to the built-in course.
 ### Health and bonfires
 
 In levels with enemies, [traps](#traps) or [lava](#liquid-pools) the player has **health**,
-set in **Physics / Health**: 1-20 damage points, 5 by default, shown as a row of pips beside
-the readouts. An enemy's bump costs its configured damage (default 1), an archer's arrow
-its arrow damage (default 1), a trap its own damage and lava its damage each second.
+set in **Physics / Health**: 1–1000 hit points, 100 by default, shown as a bar beside the
+readouts. A loss leaves a pale chunk on the bar for what it took, which drains away soon after.
+Every damage is in hit points: an enemy's bump costs its configured damage (default 20), an
+archer's arrow its arrow damage (default 20), a trap its own damage and lava its damage each second.
 **Hurt invulnerability** (`hurtInvulnerability`, 0–5 s, step 0.05) leaves the character
 unharmed for **1 s** by default after a damaging hit. **Respawn invulnerability**
 (`respawnInvulnerability`, 0–10 s, step 0.1) protects a bonfire return for **2 s** by default.
@@ -960,8 +987,8 @@ physical pose immediately. Sprites re-hold their base after each committed edit.
 The corpse's pot remains buoyant; limbs and the separately queried dropped hammer
 take liquid drag only.
 
-After the wait the player returns at that bonfire, healed and protected for the configured
-respawn invulnerability (**2 s** by default),
+After the wait the player returns at that bonfire, its jar's base 17 cm above the bonfire's, healed and
+protected for the configured respawn invulnerability (**2 s** by default),
 holding the hammer as at the level's start. The run goes on: its clock, best height,
 consumed once-triggers and level state carry on. Before any
 bonfire is reached, a death restarts the attempt exactly like Reset; Reset always
@@ -1011,7 +1038,8 @@ glancing off and glowing chips dropping: a game's
 [strike effects](docs/runtime-plugins.md#effects) can draw that strike its own way, and the
 authored `block` cue can sound it. Character blows and hammer blocks share one default burst pool.
 Terrain stops them only from outside, so a muzzle set into a wall's face shoots out of it.
-A hit on the character costs the trap's **Damage** and knocks the player along the shot,
+A hit on the character costs the trap's **Damage**, 1–1000 hit points (20 for a new trap), and
+knocks the player along the shot,
 by `projectilePush` (**4 m/s** by default) plus `projectileLift` (**1.5 m/s** upward),
 and where it strikes the burning bolt bursts in a hot flash, sparks and glowing chips.
 
@@ -1021,7 +1049,7 @@ and out of the view, toward the camera and away, up to 63° either side, once ev
 swing, its curved edge below, so it swings edge first and is edge-on to the camera: 1.3 m
 toward the camera and away, 0.7 m tall and 6 cm thick along the climb. It cuts through the
 play line at **Swing offset** seconds and every half period after. There a blade that meets
-the player costs its **Damage** and knocks the player hard away from where it struck,
+the player costs its **Damage** (40 hit points for a new axe) and knocks the player hard away from where it struck,
 by `axePush` (**9 m/s** along the climb by default) and `axeLift` (**4 m/s** up),
 with a steel flash, a slash and a spray of sparks. The half of the swing in
 front of the obstacle line draws over the player, the half behind it under the player.
@@ -1104,7 +1132,7 @@ surface, and its **drag**, the rate it then slows the player at:
 
 - **Lava** holds up more than the player weighs (160% by default), so the pot floats with part
   of it out, and is fairly thick (3/s). It burns the character while the pot is in it: its
-  **Lava damage** (1 by default) on touching it, then each second the pot stays, and sets the
+  **Lava damage** (20 hit points by default) on touching it, then each second the pot stays, and sets the
   character alight while it does. The hammer does not burn.
 - **Swamp** holds up less than the player weighs (85%), so the player sinks through it, and is
   thick (6/s), so it sinks slowly and every move is slow. It does no damage.
@@ -1201,7 +1229,7 @@ decoration depths are measured from it. Everything that collides is drawn centre
 the perspective camera each collision outline runs through the middle of what it looks like. Each
 terrain object's [mesh](#course-meshes-from-your-own-pipeline) reaches half its depth toward the
 camera and half behind, and a GLB mesh's collision is its slice there, through the middle of its
-depth; the pot, enemies and phantoms stand on the line. The engine places them there, so no level
+depth, unless it declares its projection, its outermost outline seen along the view; the pot, enemies and phantoms stand on the line. The engine places them there, so no level
 can put a collider anywhere else. The collision overlay (**D**)
 draws on the line too. The hammer and hands are drawn in front of the chest (see
 [arm forward distance](#custom-visuals)), so in perspective the hammer model sits slightly off its
@@ -1215,13 +1243,14 @@ toward the camera and the liquid in front of whatever is in a pool; then a 3D ch
 and line, course labels and the collision overlay drawn over the arms but under the hammer. A
 character whose head or arms overlap a collider on screen, such as under a low roof, is never hidden
 by it. A decoration in front of the line draws over the body and the other actors but under a 3D
-character's arms and the hammer, so keep it clear of the jar, which reaches 0.5 m toward the camera.
+character's arms and the hammer, so keep it clear of the jar, which reaches toward the camera as far as
+half its width (0.5 m for the default jar).
 Glass (`KHR_materials_transmission`) in a model drawn after the course, such as a pot, an avatar or a
 decoration in front of the line, refracts only its own pass and the sky colour, not the course.
 
 Decorations never collide and may sit at any depth. A prop standing on a collider must stand within
-that collider's depth, and one behind the path must also keep clear of the pot, which reaches 0.5 m
-behind the line. A 1.5 m-deep block leaves only 0.25 m there, so give terrain that carries props
+that collider's depth, and one behind the path must also keep clear of the pot, which reaches half
+its width behind the line (0.5 m for the default jar). A 1.5 m-deep block leaves only 0.25 m there, so give terrain that carries props
 behind the path more depth. Deep terrain also reaches further toward the camera: an 8 m-deep block
 comes 4 m in front of the line, which a wide field of view exaggerates.
 
@@ -1234,7 +1263,10 @@ pipeline you like and import them under **Workshop / Level / Meshes**: each plac
 to its object's width, height and depth, rotates and mirrors with it, and collides as the
 simple shape its GLB declares (`extras.collision`: `box`, `ramp`, `triangle`, `circle` or
 `hexagon`) or, without one, as its slice: its cross-section through the middle of its depth,
-where it meets the obstacle line, traced into outlines that may have holes. The collision is
+where it meets the obstacle line, traced into outlines that may have holes. A GLB that declares
+`projection` instead collides as its silhouette seen along the view, all of it projected
+straight onto the course plane, so its outermost outline collides wherever it lies in the
+depth. The collision is
 stored in the level, so physics never loads a GLB, and illusion fades, disappearance and
 resets remain per object. A course package can also map decoration model IDs to GLBs,
 replacing those placeholders.
@@ -1242,14 +1274,14 @@ replacing those placeholders.
 The editor never generates meshes. The GLBs are the [project's](docs/projects.md) course
 artwork, and **Workshop / Project / Course artwork** chooses whether the Workshop and releases
 draw them or every terrain object as its extruded collision. See the
-[course meshes guide](docs/course-artwork.md) for the fitting and slicing rules, the level
+[course meshes guide](docs/course-artwork.md) for the fitting, slicing and projection rules, the level
 format, packing, and limits.
 
 ### Performance boundaries
 
 The level format supports **1,000 terrain objects**, **128 triggers**, **64 enemies**,
 **1,000 decorations**, **32 bonfires**, **128 traps**, **64 liquid pools**, one start, **64 distinct terrain collision shapes**, up to
-**64 points per drawn outline**, slices of up to **16 outlines and 256 points**, and **16 course labels**. Each trigger supports up to **8 ordered events**. Dimensions,
+**64 points per drawn outline**, slices and projections of up to **16 outlines and 256 points**, and **16 course labels**. Each trigger supports up to **8 ordered events**. Dimensions,
 coordinates, winding, intersections, IDs, and import size are validated.
 Preset objects reuse normalized geometry rather than allocating a new mesh and
 material for every placement.
@@ -1363,6 +1395,13 @@ built-in avatar's arms, and an imported avatar's arm surfaces: its triangles ski
 joints or to joints that follow them, such as fingers and twist bones, and any rigid mesh attached
 below an arm joint (see [avatar motion](docs/characters.md#motion)). 2D characters keep their authored
 layer depths, and their hammer draws over them as before.
+
+The theme's **character light** shades the characters from a direction of its own, set by its angle
+around the view and its tilt toward the camera, and a 3D character casts shadows on itself in it: its
+hammer and arms on its jar and body, its head on its shoulders. Their darkness and softness are theme
+settings too, and 0% darkness turns them off; see the theme in the
+[section reference](docs/projects.md#section-reference). Only the player's character takes part, from a
+small shadow map that follows it, so the cost never grows with the level.
 
 For a complete starting point, choose **Load complete 2D example** in Character.
 **Paper Climber** supplies custom PNG artwork for the body, pot, arms, hands,
