@@ -428,41 +428,54 @@ body[data-input-mode="touch"] .workshop-search-key {
   content: "";
 }
 
+.workshop-navigation {
+  --navigation-focus-color: #94662b;
+  min-height: 0;
+  flex: 0 1 auto;
+  max-height: 30%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #bdc8b6 transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
 .workshop-tabs {
   display: grid;
-  /* One column per tab: the built-in ones, then any Workshop plugin's. */
-  grid-auto-columns: minmax(max-content, 1fr);
-  grid-auto-flow: column;
-  flex: 0 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr));
+  grid-auto-flow: row;
   gap: 4px;
-  overflow-x: auto;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
-  overscroll-behavior-x: contain;
 }
 
 .workshop-tabs [role="tab"] {
+  min-width: 0;
+  min-height: var(--control-height);
   padding: 9px 4px;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: transparent;
   font-size: 11px;
-  min-height: var(--control-height);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .workshop-tabs [aria-selected="true"] {
+  --navigation-focus-color: var(--paper);
   border-color: var(--teal);
   background: var(--teal);
   color: var(--paper);
 }
 
-/* Section bar: a chip for each section of the selected tab, then Back to top and Fold all. */
+/* All/top/fold stay in one row; the summary shrinks, or its toolbar occupies the row below. */
 .workshop-section-bar {
-  display: flex;
-  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: max-content var(--control-height) var(--control-height) minmax(0, 1fr);
   align-items: center;
   gap: 4px;
-  padding: 6px 14px 6px 0;
+  padding: 6px 14px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -471,45 +484,58 @@ body[data-input-mode="touch"] .workshop-search-key {
 }
 
 .workshop-section-chips {
-  /* Chips measure their place from the strip. */
-  position: relative;
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
   gap: 4px;
-  overflow-x: auto;
-  padding: 0 4px 0 14px;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
 }
 
-.workshop-section-chips::-webkit-scrollbar {
-  display: none;
-}
-
-.workshop-section-chips[data-more="start"] {
-  mask-image: linear-gradient(to right, transparent, #000 28px);
-}
-
-.workshop-section-chips[data-more="end"] {
-  mask-image: linear-gradient(to left, transparent, #000 28px);
-}
-
-.workshop-section-chips[data-more="both"] {
-  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+.workshop-section-chips[data-expanded="true"] {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
 }
 
 .workshop-section-chip {
-  min-height: 28px;
-  flex: 0 0 auto;
-  padding: 0 11px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--control-height);
+  flex: 0 1 auto;
+  padding: 6px 11px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: calc(var(--control-height) / 2);
   color: var(--muted);
   background: transparent;
   font-size: 11px;
   line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.workshop-section-chips:not([data-expanded="true"]) .workshop-section-chip {
+  flex: 1 1 auto;
+  overflow: hidden;
+  /* Let the summary's padding shrink too, rather than overflow a narrow touch layout. */
+  padding-inline: min(11px, 10%);
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workshop-section-all {
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--control-height);
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workshop-section-all[aria-expanded="true"] {
+  border-color: #9aa88e;
+  color: var(--ink);
+  background: #e7eadb;
 }
 
 .workshop-section-chip[data-open="true"] {
@@ -517,38 +543,44 @@ body[data-input-mode="touch"] .workshop-search-key {
   color: var(--ink);
 }
 
-.workshop-section-chip:hover {
+.workshop-section-chip:hover,
+.workshop-section-all:hover {
   border-color: #9aaa92;
   color: var(--teal-dark);
   background: #eaefdf;
 }
 
 .workshop-section-chip[aria-current="location"] {
+  --navigation-focus-color: var(--paper);
   border-color: var(--teal);
   color: var(--paper);
   background: var(--teal);
 }
 
-/* Inside, since the strip clips what reaches past it. */
-.workshop-section-chip:focus-visible {
-  outline: 3px solid #94662b;
+/* Keep focus inside controls when the navigation viewport clips a row. */
+.workshop-tabs [role="tab"]:focus-visible,
+.workshop-section-bar button:focus-visible {
+  outline: 3px solid var(--navigation-focus-color);
   outline-offset: -3px;
 }
 
 .workshop-section-bar .icon-button {
-  width: 28px;
-  height: 28px;
+  width: var(--control-height);
+  max-width: 100%;
+  height: var(--control-height);
+  min-height: var(--control-height);
 }
 
 body.touch-controls .workshop-section-chip {
-  min-height: 40px;
-  padding: 0 14px;
-  border-radius: 20px;
+  padding: 8px 14px;
 }
 
-body.touch-controls .workshop-section-bar .icon-button {
-  width: 40px;
-  height: 40px;
+body.touch-controls .workshop-section-chips:not([data-expanded="true"]) .workshop-section-chip {
+  padding-inline: min(14px, 10%);
+}
+
+body.touch-controls .workshop-section-all {
+  padding: 8px 12px;
 }
 
 .section-top-icon {
@@ -1374,11 +1406,8 @@ body.workshop-open .message-toasts {
   }
 
   .workshop-section-bar {
-    padding-right: 16px;
-  }
-
-  .workshop-section-chips {
     padding-left: 16px;
+    padding-right: 16px;
   }
 
   .workshop-scroll {
@@ -1501,12 +1530,22 @@ body.workshop-open .message-toasts {
 .workshop-toggle[aria-expanded="true"],
 .quick-toggle[aria-pressed="true"],
 .workshop-search-option[aria-selected="true"],
+.workshop-tabs [aria-selected="true"],
+.workshop-section-all[aria-expanded="true"],
 .workshop-section-chip[aria-current="location"] {
     outline: 2px solid Highlight;
   }
 
   .workshop-search-option[aria-selected="true"],
+.workshop-tabs [aria-selected="true"],
+.workshop-section-all[aria-expanded="true"],
 .workshop-section-chip[aria-current="location"] {
     outline-offset: -2px;
+  }
+
+  .workshop-tabs [role="tab"]:focus-visible,
+.workshop-section-bar button:focus-visible {
+    outline: 3px solid CanvasText;
+    outline-offset: -3px;
   }
 }

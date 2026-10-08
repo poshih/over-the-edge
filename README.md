@@ -389,13 +389,23 @@ stays at the top of the tab while you scroll through the section, so you can clo
 from anywhere in it. Each browser remembers which sections you opened or closed, only
 as a layout preference. Chromium's find-in-page also opens a closed section that contains a match.
 
-The **section bar** under the tabs lists every section of the selected tab, Workshop
-plugins' included, so none is more than a click away: a section's chip opens it and
-brings it to the top of the tab, and the chip of the section at the top is highlighted
-as you scroll. When a tab has more sections than fit, scroll the bar sideways, also with
-the mouse wheel over it. It is a single Tab stop; the arrow keys, Home and End move along
-it. **Back to the top** returns to the top of the tab, and **Fold all sections** closes
-every section, leaving just their headings.
+The Workshop's **tabs wrap in equal-width rows**, including plugins' tabs. The
+**section bar** below starts with **All sections (N)**, **Back to the top** and
+**Fold all sections**, followed by the current section's summary chip (the first if
+none is current), retaining a focused chip as you scroll. All sections opens every
+chip with full, wrapped labels on rows below the controls; the list starts collapsed
+on tab changes and reopening the Workshop.
+A chip opens its section, brings it to the top of the tab and focuses its heading;
+the section at the top is highlighted as you scroll. Tabs and chips each have one
+roving Tab stop: **Left/Right**, **Home** and **End** follow their order across rows.
+Tabs select as you move; chips activate with **Enter** or **Space**, and moving to a
+hidden chip first expands the list. **Escape** in the expanded section bar collapses
+it and focuses **All sections**, without closing the Workshop. All sections,
+**Back to the top** and **Fold all sections** have separate Tab stops. Back to the top
+returns to the top of the tab; Fold all closes every section and returns to the top,
+leaving just their headings.
+Tabs and the bar share a bounded vertical scroller: reach every row with the mouse
+wheel, its scrollbar, keyboard focus or touch swipes, never sideways scrolling.
 
 In **Level**, the build tools are the **Build** section. Choosing an object on the canvas
 brings **Object properties** into view, opening it if needed, unless it already fills
@@ -692,6 +702,8 @@ space, or drag with the middle button from anywhere, to pan; the wheel and + / -
 On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
 selecting when you click it again or press Escape.
+The level editor's keys work while the **Level** tab is shown, except while a text field
+or the Workshop's tabs and section bar have focus.
 
 The start location and trigger zones are map objects, not special summit
 settings. Place or drag **Start location** to choose the spawn and adjust its

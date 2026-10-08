@@ -74,11 +74,14 @@ plugin's ID comes from the manifest, as `host.plugin`.
 
 ## Places in the Workshop
 
-- `host.addTab({ id, label, title? })` adds a tab after the built-in ones.
+- `host.addTab({ id, label, title? })` adds a tab after the built-in ones, in the same
+  equal-width wrapping rows; long labels wrap too.
 - `host.addSection(tab, { id, title, hint?, open? })` adds a collapsible section at the end of
   `character`, `level`, `physics` or `project`. The Workshop remembers whether it is open, as it
-  does for its own sections, and lists it in the tab's section bar, so a chip opens it and
-  brings it to the top.
+  does for its own sections, and gives it a chip in the same section bar's current-section
+  summary and **All sections (N)** list. Removing a focused plugin tab or chip returns focus
+  to a surviving chip or the selected tab. See [Finding Workshop controls](../README.md#finding-workshop-controls)
+  for the keyboard model.
 - Each returns a mount: its `element`, whether it is `shown` (its tab is selected in the open
   Workshop, and a section is expanded), `onVisibility(listener)` and `remove()`. IDs are unique
   among a plugin's tabs and sections.

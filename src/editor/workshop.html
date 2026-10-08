@@ -35,28 +35,33 @@
         </div>
       </header>
 
-      <div class="workshop-tabs" role="tablist" aria-label="Workshop section">
-        <button id="project-tab" type="button" role="tab" aria-selected="false" aria-controls="project-pane" tabindex="-1"
-          title="The whole game: title, look, HUD, audio, enemies, media, saving, opening and publishing">Project</button>
-        <button id="physics-tab" type="button" role="tab" aria-selected="true" aria-controls="physics-pane"
-          title="Practice positions and live physics tuning">Physics</button>
-        <button id="character-tab" type="button" role="tab" aria-selected="false" aria-controls="character-pane" tabindex="-1"
-          title="Character type, character models and the character profile">Character</button>
-        <button id="appearance-tab" type="button" role="tab" aria-selected="false" aria-controls="appearance-pane" tabindex="-1"
-          title="Per-part GLB models and arm IK elbow hints">Appearance</button>
-        <button id="sprites-tab" type="button" role="tab" aria-selected="false" aria-controls="sprites-pane" tabindex="-1"
-          title="2D sprite layers, directional presentation and skeleton rigging">Sprites</button>
-        <button id="level-tab" type="button" role="tab" aria-selected="false" aria-controls="level-pane" tabindex="-1"
-          title="Build, save and playtest courses">Level</button>
-      </div>
+      <div class="workshop-navigation">
+        <div class="workshop-tabs" role="tablist" aria-label="Workshop section" aria-orientation="horizontal">
+          <button id="project-tab" type="button" role="tab" aria-selected="false" aria-controls="project-pane" tabindex="-1"
+            title="The whole game: title, look, HUD, audio, enemies, media, saving, opening and publishing">Project</button>
+          <button id="physics-tab" type="button" role="tab" aria-selected="true" aria-controls="physics-pane"
+            title="Practice positions and live physics tuning">Physics</button>
+          <button id="character-tab" type="button" role="tab" aria-selected="false" aria-controls="character-pane" tabindex="-1"
+            title="Character type, character models and the character profile">Character</button>
+          <button id="appearance-tab" type="button" role="tab" aria-selected="false" aria-controls="appearance-pane" tabindex="-1"
+            title="Per-part GLB models and arm IK elbow hints">Appearance</button>
+          <button id="sprites-tab" type="button" role="tab" aria-selected="false" aria-controls="sprites-pane" tabindex="-1"
+            title="2D sprite layers, directional presentation and skeleton rigging">Sprites</button>
+          <button id="level-tab" type="button" role="tab" aria-selected="false" aria-controls="level-pane" tabindex="-1"
+            title="Build, save and playtest courses">Level</button>
+        </div>
 
-      <nav class="workshop-section-bar" aria-label="Sections" hidden>
-        <div class="workshop-section-chips" role="toolbar" aria-label="Jump to a section"></div>
-        <button type="button" class="icon-button workshop-section-top" aria-label="Back to the top"
-          title="Back to the top of this tab"><span class="section-top-icon" aria-hidden="true"></span></button>
-        <button type="button" class="icon-button workshop-section-fold" aria-label="Fold all sections"
-          title="Fold every section in this tab"><span class="section-fold-icon" aria-hidden="true"></span></button>
-      </nav>
+        <nav class="workshop-section-bar" aria-label="Sections" hidden>
+          <button type="button" class="workshop-section-all" aria-expanded="false"
+            aria-controls="workshop-section-chips">All sections (0)</button>
+          <button type="button" class="icon-button workshop-section-top" aria-label="Back to the top"
+            title="Back to the top of this tab"><span class="section-top-icon" aria-hidden="true"></span></button>
+          <button type="button" class="icon-button workshop-section-fold" aria-label="Fold all sections"
+            title="Fold every section in this tab"><span class="section-fold-icon" aria-hidden="true"></span></button>
+          <div id="workshop-section-chips" class="workshop-section-chips" role="toolbar"
+            aria-label="Jump to a section" aria-orientation="horizontal"></div>
+        </nav>
+      </div>
 
       <div id="physics-pane" class="workshop-pane physics-pane" role="tabpanel" aria-labelledby="physics-tab">
         <div class="workshop-scroll physics-scroll">

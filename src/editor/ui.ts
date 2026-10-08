@@ -18,7 +18,7 @@ import type { PracticeId } from './practices';
 import type { GameUi, HudState, PluginSectionTab, PluginWorkshopTab, UiOptions, WorkshopState, WorkshopTab } from './ui-types';
 import { createSection, keepClosingHeadingsInView, rememberSections } from './workshop-section';
 import type { WorkshopSection } from './workshop-section';
-import { createSectionBar } from './workshop-section-bar';
+import { createSectionBar, revealNavigation } from './workshop-section-bar';
 import { createWorkshopSearch } from './workshop-search';
 import workshopMarkup from './workshop.html?raw';
 
@@ -69,8 +69,23 @@ export function createUI(options: UiOptions): GameUi {
   const tabs: { readonly id: WorkshopTab; readonly button: HTMLButtonElement; readonly pane: HTMLElement }[] = TABS.map((id) => ({
     id, button: element<HTMLButtonElement>(root, `#${id}-tab`), pane: element<HTMLElement>(root, `#${id}-pane`),
   }));
+  const navigation = element<HTMLElement>(root, '.workshop-navigation');
   const tabList = element<HTMLElement>(root, '.workshop-tabs');
-  const sectionBar = createSectionBar({ root: element<HTMLElement>(root, '.workshop-section-bar'), signal: events.signal });
+  navigation.addEventListener('focusin', (event) => {
+    if (event.target instanceof HTMLElement) revealNavigation(navigation, event.target);
+  }, listen);
+  const focusTab = (tab: (typeof tabs)[number]): void => {
+    if (document.activeElement === tab.button) revealNavigation(navigation, tab.button);
+    else tab.button.focus({ preventScroll: true });
+  };
+  const focusSelectedTab = (): void => {
+    const tab = tabs.find((candidate) => candidate.id === selectedTab);
+    if (tab === undefined) throw new Error(`Missing Workshop tab: ${selectedTab}.`);
+    focusTab(tab);
+  };
+  const sectionBar = createSectionBar({
+    root: element<HTMLElement>(root, '.workshop-section-bar'), navigation, focusSelectedTab, signal: events.signal,
+  });
   const workshopState = (): WorkshopState => ({ open: !panel.hidden, compact: !desktop.matches, tab: selectedTab });
   // The section bar lists the selected tab's sections while the Workshop is open.
   const showSections = (): void => {
@@ -98,7 +113,7 @@ export function createUI(options: UiOptions): GameUi {
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 :
         (index + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
       selectTab(tabs[next]!.id);
-      tabs[next]!.button.focus();
+      focusSelectedTab();
     }, { signal });
   };
   for (const tab of tabs) wireTab(tab, events.signal);
@@ -127,17 +142,23 @@ export function createUI(options: UiOptions): GameUi {
     tabList.append(button);
     panel.append(pane);
     tabs.push(tab);
-    wireTab(tab, tabEvents.signal);
+    wireTab(tab, AbortSignal.any([events.signal, tabEvents.signal]));
     return {
       body,
       remove: (): void => {
         const index = tabs.indexOf(tab);
         if (index < 0) return;
+        const recoverFocus = button === document.activeElement || pane.contains(document.activeElement);
         tabs.splice(index, 1);
         tabEvents.abort();
         button.remove();
         pane.remove();
         if (selectedTab === tab.id) selectTab('physics');
+        if (recoverFocus) focusSelectedTab();
+        else {
+          const active = document.activeElement;
+          if (active instanceof HTMLElement && navigation.contains(active)) revealNavigation(navigation, active);
+        }
       },
     };
   }

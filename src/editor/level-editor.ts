@@ -2776,6 +2776,8 @@ Export the level first if you want to keep them. Continue without saving?`);
   window.addEventListener('keydown', (event) => {
     if (!active || event.altKey) return;
     const target = event.target;
+    // Workshop navigation owns its keys.
+    if (target instanceof Element && target.closest('.workshop-navigation')) return;
     if (target instanceof Element && target.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
     if (event.ctrlKey || event.metaKey) {
       if (event.key.toLowerCase() !== 'z' || event.shiftKey || (drawing.vertices.length === 0 && gesture?.kind !== 'draw')) return;
