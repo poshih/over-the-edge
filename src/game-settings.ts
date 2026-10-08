@@ -2,6 +2,7 @@ import { DEFAULT_TUNING } from './config';
 import type { Tuning } from './config';
 import { ENEMY_BEHAVIOR } from './enemy-types';
 import { HammerHeadError, validateHammerHead } from './hammer-head';
+import { ARROW } from './hazards';
 import { PotOutlineError, validatePotOutline } from './pot-outline';
 import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, MIN_SLIDER_TRAVEL, minReachLimit, RIG_LIMITS, rigGeometry } from './rig';
 import type { RigLength, RigSettings } from './rig';
@@ -166,7 +167,7 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'archerArmor', label: 'Archer armor', group: 'Enemies', min: ENEMY_BEHAVIOR.minimumArmor, max: 20, step: 0.1, unit: 'm/s', description: `How fast a hammer-head strike must close on a hollow archer to hurt it: slower strikes glance off, dealing no damage, and faster ones deal the hammer damage their speed earns. At least ${ENEMY_BEHAVIOR.minimumArmor} m/s, so brushing or holding the head against one never hurts. Applies to the next strike.` },
   { key: 'archerMass', label: 'Archer mass', group: 'Enemies', min: 0.5, max: 30, step: 0.1, unit: 'kg', description: 'Mass of a hollow archer\'s collider. Changes update live bodies immediately; inactive archers take it when they wake.' },
   { key: 'archerAcceleration', label: 'Archer acceleration', group: 'Enemies', min: 1, max: 80, step: 1, unit: 'm/s²', description: 'Maximum acceleration toward a hollow archer\'s patrol velocity. Applies live.' },
-  { key: 'archerSight', label: 'Archer sight', group: 'Enemies', min: 0, max: 30, step: 0.5, unit: 'm', description: 'How far an active archer sees a player. It draws, warning, only when an arrow can reach the player within the 40 m projectiles fly, along an arc clear of terrain, the low one or else the high one, and looses at the end of the draw if it still can. Applies live.' },
+  { key: 'archerSight', label: 'Archer sight', group: 'Enemies', min: 0, max: 30, step: 0.5, unit: 'm', description: `How far an active archer sees a player. It draws, warning, only when an arrow can reach the player within the ${ARROW.range} m it flies, along an arc clear of terrain, the low one or else the high one, and looses at the end of the draw if it still can. Applies live.` },
   { key: 'arrowSpeed', label: 'Arrow speed', group: 'Enemies', min: 2, max: 30, step: 0.5, unit: 'm/s', description: 'Speed an archer\'s arrows leave the bow at; they then fall under gravity, so this sets their reach: speed squared over gravity on level ground, 14.7 m at 12 m/s, and less uphill. Applies to the next shot.' },
   { key: 'arrowDamage', label: 'Arrow damage', group: 'Enemies', min: 0, max: 1000, step: 1, unit: 'HP', whole: true, description: 'Hit points an arrow takes from the player. It knocks the player with the Hazards group\'s projectile push and lift; zero leaves that knockback but deals no damage and grants no invulnerability. Applies to arrows loosed after the change.' },
   { key: 'bumpDamage', label: 'Enemy bump damage', group: 'Enemies', min: 0, max: 1000, step: 1, unit: 'HP', whole: true, description: 'Hit points an enemy\'s scripted bump takes from the player, in addition to knockback. Zero turns off bump damage. Applies to the next bump.' },

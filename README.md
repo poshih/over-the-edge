@@ -887,8 +887,8 @@ Hollow archers hold their post, facing as placed, unless given a patrol radius, 
 walk it as soldiers do. An archer that sees the player within `archerSight` aims at the
 middle of the player's hurt box: it works out the arc an arrow leaving at `arrowSpeed` takes
 under gravity, the low, flat arc first and the high, lobbed one when terrain or a platform
-blocks it, and it draws only when one of them is clear and within the **40 m** every
-projectile flies. The draw flashes the bird's warning for **0.8 s**; then the archer aims
+blocks it, and it draws only when one of them is clear and within the **80 m** an arrow
+flies. The draw flashes the bird's warning for **0.8 s**; then the archer aims
 again at where the player is now and looses, or walks on if the shot is gone, and stands
 **1.6 s** to reload, as it does after a bump. Like any recovering enemy it does not bump the
 player meanwhile. The hammer head shields arrows as it does trap bolts, and a strike that

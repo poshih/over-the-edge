@@ -54,7 +54,7 @@ export const BONFIRE = {
 } as const;
 
 export const SHOOTER = {
-  // Every projectile flies at most this far, and a trap fires only while the player's root is this near it.
+  // A trap's bolt flies at most this far, and a trap fires only while the player's root is this near it.
   range: 40,
   // Projectiles in flight at once across the level, traps' bolts and archers' arrows alike; a shot is skipped while
   // they all fly.
@@ -66,6 +66,8 @@ export const SHOOTER = {
 } as const;
 
 export const ARROW = {
+  // An arrow flies at most this far along its falling arc, in m.
+  range: 80,
   // How fast an arrow falls, as everything else does, in m/s².
   gravity: PHYSICS.gravity,
   // The drawn arrow, its tip on its position: its length and its shaft's radius.

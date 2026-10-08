@@ -59,11 +59,15 @@ interface Projectile {
   damage: number;
   // The level object that fired it: a trap or an archer.
   owner: string;
+  // How far it flies at most, and has flown, in m.
+  range: number;
   travelled: number;
 }
 
 // How fast each kind of projectile falls, in m/s².
 const GRAVITY: Readonly<Record<ProjectileKind, number>> = { bolt: 0, arrow: ARROW.gravity };
+// How far each kind of projectile flies at most, in m.
+const RANGE: Readonly<Record<ProjectileKind, number>> = { bolt: SHOOTER.range, arrow: ARROW.range };
 // A path is checked for terrain as this many straight chords along its arc.
 const CLEARANCE_CHORDS = 12;
 
@@ -105,7 +109,8 @@ export class HazardWorld {
   private schedule: Shooter[] = [];
   // Live shots occupy the prefix; removal swaps the last live shot in and recycles the vacated slot.
   private readonly projectiles: Projectile[] = Array.from({ length: SHOOTER.projectiles }, (): Projectile => ({
-    kind: 'bolt', x: 0, y: 0, fromX: 0, fromY: 0, velocityX: 0, velocityY: 0, gravity: 0, angle: 0, damage: 0, owner: '', travelled: 0,
+    kind: 'bolt', x: 0, y: 0, fromX: 0, fromY: 0, velocityX: 0, velocityY: 0, gravity: 0, angle: 0, damage: 0, owner: '', range: 0,
+    travelled: 0,
   }));
   private projectileCount = 0;
   private readonly posePool: { -readonly [K in keyof ProjectilePose]: ProjectilePose[K] }[] = [];
@@ -258,6 +263,7 @@ export class HazardWorld {
     shot.angle = Math.atan2(velocityY, velocityX);
     shot.damage = damage;
     shot.owner = owner;
+    shot.range = RANGE[kind];
     shot.travelled = 0;
   }
 
@@ -267,6 +273,7 @@ export class HazardWorld {
   reaches(kind: ProjectileKind, x: number, y: number, velocityX: number, velocityY: number, seconds: number): boolean {
     this.ensureLive();
     const gravity = GRAVITY[kind];
+    const range = RANGE[kind];
     this.pathClear = true;
     let fromX = x;
     let fromY = y;
@@ -276,7 +283,7 @@ export class HazardWorld {
       const toX = x + velocityX * time;
       const toY = y + (velocityY - gravity * time / 2) * time;
       travelled += Math.hypot(toX - fromX, toY - fromY);
-      if (travelled > SHOOTER.range) return false;
+      if (travelled > range) return false;
       if (toX !== fromX || toY !== fromY) {
         this.rayFrom.set(fromX, fromY);
         this.rayTo.set(toX, toY);
@@ -333,7 +340,7 @@ export class HazardWorld {
       let stepX = shot.velocityX * PHYSICS.dt;
       let stepY = (shot.velocityY - shot.gravity * PHYSICS.dt / 2) * PHYSICS.dt;
       let distance = Math.hypot(stepX, stepY);
-      const left = SHOOTER.range - shot.travelled;
+      const left = shot.range - shot.travelled;
       if (distance > left) {
         stepX *= left / distance;
         stepY *= left / distance;
@@ -359,7 +366,7 @@ export class HazardWorld {
         this.discard(index);
         continue;
       }
-      if (this.rayStop < 1 || shot.travelled + distance >= SHOOTER.range) {
+      if (this.rayStop < 1 || shot.travelled + distance >= shot.range) {
         if (this.rayStop < 1 && this.rayShield) {
           this.rayBlock.id = shot.owner;
           this.rayBlock.directionX = across;

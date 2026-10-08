@@ -1,5 +1,5 @@
 import { AUDIO_CUE_DESCRIPTIONS, AUDIO_CUES, AUDIO_VOLUME } from '../src/audio-settings';
-import { AXE_FIELDS, BONFIRE, HAZARD_LIMITS, SHOOTER, SHOOTER_FIELDS } from '../src/hazards';
+import { ARROW, AXE_FIELDS, BONFIRE, HAZARD_LIMITS, SHOOTER, SHOOTER_FIELDS } from '../src/hazards';
 import { LIQUID_LIMITS, LIQUIDS } from '../src/liquids';
 import { ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS } from '../src/appearance-profile';
 import { ART_LIMITS } from '../src/art-types';
@@ -146,7 +146,7 @@ export function apiManual(auth: 'token' | 'loopback') {
           + `${BONFIRE.reach} m; a death, from health running out or a fall out of the level, builds a passive corpse from the simulation\'s rig and character figure and releases the hammer. Corpse and tool collide only with terrain and platforms, never enemies or each other; the dying jar triggers no illusions. Enemies and traps read the frozen entry point, while the released head still blocks projectile rays. It waits the game settings\' snapshotted death.wait seconds of physics time before placement; hud.death.text fades over hud.death.fadeIn independently, ending unfinished if its fade is longer than the wait. The world and timer (unless stopped) carry on but the player has no input, takes no damage, hits no enemies and lights no bonfires; Reset stays available, and Pause and a hidden tab hold the sequence. It then brings the player back at the one reached last, healed and protected for physics.respawnInvulnerability seconds, the run going on, or restarts the run before any. `
           + 'A shooter fires a projectile from its muzzle (x, y) along angle (radians, 0 = +x). Firing "timer" shoots at delay and every interval seconds of run time after; '
           + 'firing "trigger" shoots only bursts from trigger events, using delay after the trigger and interval between burst shots. '
-          + `Shots require the player within ${SHOOTER.range} m; projectiles fly up to that far, traps' bolts straight and hollow archers' arrows along their falling arcs, and stop on terrain, platforms or the hammer head. `
+          + `Shots require the player within ${SHOOTER.range} m, and traps' bolts fly straight up to that far; hollow archers' arrows fly up to ${ARROW.range} m along their falling arcs. Projectiles stop on terrain, platforms or the hammer head. `
           + 'An axe hangs its blade length below its pivot (x, y) and swings in and out of the view, through the play line at offset and every half period after. '
           + 'Traps never collide; a hit costs its damage, in whole hit points, from the player\'s health, settings physics.health hit points, then protects it for physics.hurtInvulnerability seconds. Physics hurtWidth, hurtHeight (from the pot\'s bottom up) and hurtDepth shape their hurt box; projectilePush/projectileLift and axePush/axeLift set knockback in m/s. '
           + 'Bonfires, traps, platforms and the trigger actions that fire traps or move platforms count toward the course.',

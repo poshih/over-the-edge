@@ -601,7 +601,7 @@ apply immediately, including mid-dive. Sight is for active birds, also limited t
 distance beyond their authored patrol radius; wake/sleep distances and AI scheduling
 remain engine internals. An active hollow archer that sees the player within `archerSight`
 draws only when an arrow leaving at `arrowSpeed` can reach the middle of the player's hurt
-box, within the 40 m projectiles fly, along an arc clear of terrain and platforms, the low arc or else the high one; at the end
+box, within the 80 m an arrow flies, along an arc clear of terrain and platforms, the low arc or else the high one; at the end
 of its draw it aims again and looses, or walks on. Arrows fall under gravity, so `arrowSpeed`
 sets their reach, its square over gravity on level ground (14.7 m at 12 m/s). An arrow deals
 `arrowDamage`, fixed as it is loosed, and knocks the player like any projectile, by the
