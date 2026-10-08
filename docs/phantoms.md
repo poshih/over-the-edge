@@ -202,7 +202,7 @@ length and its bytes. A **pack**, a release's bundled recordings, is laid out th
 Recordings belong to a **course**, which the build and the project server compute: the SHA-256,
 in lowercase hex, of the level's **play layout** and the game's **physics**
 (`src/phantom-course.ts`). They hold only what moves the player. The layout, without object IDs
-and in a fixed order, uses **course format 8**:
+and in a fixed order, uses **course format 9**:
 
 - each terrain object's collision as mirrored, position, size, angle, illusion and surface;
 - each enemy's species, position, facing, patrol distance and speed;

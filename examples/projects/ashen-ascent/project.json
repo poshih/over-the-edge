@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 17,
+  "schemaVersion": 18,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 18,
+    "schemaVersion": 19,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -29,6 +29,7 @@
       "bodyDamping": 0.12,
       "gripFriction": 2.5,
       "potFriction": 0.45,
+      "potSideFriction": 0,
       "rockFriction": 3,
       "woodFriction": 2,
       "metalFriction": 1,

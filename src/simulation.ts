@@ -1,4 +1,5 @@
 import { Vec2, World, WorldManifold } from 'planck';
+import type { Contact } from 'planck';
 import { PHYSICS, RIG } from './config';
 import type { PlayerSpawn, Point } from './config';
 import { TUNING_FIELDS, validateGameSettings } from './game-settings';
@@ -149,6 +150,23 @@ export class Simulation {
   private terminalRaised = false;
   // The hammer's own head when it is a library hammer, which overrides the settings' default head; null for the default.
   private hammerHead: HammerHead | null = null;
+  // The jar keeps its own friction only against what it stands on, a contact pushing it at least as steeply upward as
+  // standing does. Its sides and top take the side friction instead, so it glides up an edge rather than catching on it.
+  private readonly jarFriction = (contact: Contact): void => {
+    const pot = this.rig.potFixture, a = contact.getFixtureA();
+    if (a !== pot && contact.getFixtureB() !== pot) return;
+    const manifold = contact.getWorldManifold(this.manifold);
+    if (!manifold || manifold.pointCount === 0) return;
+    // The manifold normal points from fixture A to fixture B; support pushes the jar upward.
+    const up = a === pot ? -manifold.normal.y : manifold.normal.y;
+    if (up >= SUPPORT_NORMAL) {
+      contact.resetFriction();
+      return;
+    }
+    const other = a === pot ? contact.getFixtureB() : a;
+    // Mixed as Planck mixes two fixtures' friction: their geometric mean.
+    contact.setFriction(Math.sqrt(this.settings.physics.potSideFriction * other.getFriction()));
+  };
 
   constructor(settings: Readonly<GameSettings>, level: LevelDefinition, figure: Readonly<CharacterFigure>, moments: MomentWriter) {
     this.settings = validateGameSettings(settings);
@@ -161,6 +179,7 @@ export class Simulation {
     this.hurts = levelHurts(level);
     this.world = new World(new Vec2(0, -PHYSICS.gravity));
     this.world.setContinuousPhysics(true);
+    this.world.on('pre-solve', this.jarFriction);
     this.terrain = new TerrainWorld(this.world, level.objects.filter(isTerrainObject), () => this.dying ? null : this.rig.pot,
       surfaceMaterials(this.settings.physics));
     this.platforms = new PlatformWorld(this.world, level.objects.filter(isPlatformObject), surfaceMaterials(this.settings.physics));
@@ -708,6 +727,7 @@ export class Simulation {
 
   dispose(): void {
     if (this.disposed) return;
+    this.world.off('pre-solve', this.jarFriction);
     this.liquids.dispose();
     this.bonfires.dispose();
     this.hazards.dispose();

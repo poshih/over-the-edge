@@ -7,7 +7,7 @@ import { PotOutlineError, validatePotOutline } from './pot-outline';
 import { DEFAULT_RIG_SETTINGS, MAX_RIG_REACH, MIN_SLIDER_TRAVEL, minReachLimit, RIG_LIMITS, rigGeometry } from './rig';
 import type { RigLength, RigSettings } from './rig';
 
-export const GAME_SETTINGS_SCHEMA_VERSION = 18;
+export const GAME_SETTINGS_SCHEMA_VERSION = 19;
 
 export interface CursorSettings {
   // The farthest from the shoulder hinge the hammer aims; at most the rig's reach.
@@ -125,7 +125,8 @@ export const TUNING_FIELDS: readonly TuningField[] = [
   { key: 'extensionDamping', label: 'Extension damping', group: 'Response', min: 0, max: 0.8, step: 0.02, unit: '', description: 'Measured slider speed opposes the extension command.' },
   { key: 'bodyDamping', label: 'Body damping', group: 'Materials', min: 0, max: 1, step: 0.02, unit: '/s', description: 'Passive linear and angular drag on moving bodies.' },
   { key: 'gripFriction', label: 'Hammer friction', group: 'Materials', min: 0.2, max: 10, step: 0.05, unit: '', description: 'Contact friction on the hammer head, not an artificial grip. The shaft does not collide during live play; a released shaft takes the Death group\'s friction.' },
-  { key: 'potFriction', label: 'Jar friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction on the pot, the jar: how well it rests on slopes and how much it scrapes as it slides. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
+  { key: 'potFriction', label: 'Jar friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction on the pot, the jar, against what it stands on: any contact pushing it up at least as steeply as standing does, within 60° of straight up. It sets how well the jar rests on slopes and how much it scrapes as it slides. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
+  { key: 'potSideFriction', label: 'Jar side friction', group: 'Materials', min: 0, max: 10, step: 0.05, unit: '', description: 'Contact friction on the jar\'s sides and top: every contact pushing it less steeply upward than standing does. 0 leaves them smooth, so the jar glides up an edge or a wall instead of catching on it. A contact\'s friction is the geometric mean of its two sides\', so 0 is smooth against any surface.' },
   { key: 'rockFriction', label: 'Rock friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Rock surface, the default. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
   { key: 'woodFriction', label: 'Wood friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Wood surface. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },
   { key: 'metalFriction', label: 'Metal friction', group: 'Materials', ...FRICTION_LIMITS, description: 'Contact friction of terrain with the Metal surface. A contact\'s friction is the geometric mean of its two sides\', so 3 against 0.45 grips like 1.16.' },

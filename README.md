@@ -249,9 +249,9 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 17**, and release content **schema 16**,
+Project manifests and bundles use **schema 18**, and release content **schema 17**,
 including the audio record's `block` cue, game settings' death wait, archer, hit-point and
-armor rules and jar outline, the theme camera's background blur and character light, the HUD's
+armor rules, jar outline and jar side friction, the theme camera's background blur and character light, the HUD's
 death text/fade and the hollow archer's enemy art; other versions are rejected.
 
 ### Included full-length course
@@ -544,6 +544,9 @@ terrain surface: **Rock** (**3**, every obstacle's default), **Wood** (**2**), *
 geometric mean, so the hammer on rock grips with `sqrt(2.5 * 3)`, about **2.74**, and the
 jar with about **1.16**, resting on rock slopes up to about 49°. This is ordinary contact
 friction, not a sticky constraint: the head must still press against a surface to hold.
+Jar friction holds only against what the jar stands on, a contact pushing it up within 60° of
+straight up; its sides and top take **Jar side friction** (0-10, default **0**), mixed the same
+way, so at 0 they are smooth and the jar glides up an edge or a wall instead of catching on it.
 
 **Physics › Materials** also sets bounciness, from 0% (stops dead) to 100% (bounces
 back as fast as it came): **Jar bounciness** (default **10%**), **Hammer bounciness**
@@ -653,9 +656,9 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 18**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
+**schema version 19**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
 in any other version are rejected, not converted. Browser snapshots use storage format
-**10**; earlier storage keys are not read. Unreadable current-format saves are marked and
+**11**; earlier storage keys are not read. Unreadable current-format saves are marked and
 retained, while other valid snapshots remain available.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,

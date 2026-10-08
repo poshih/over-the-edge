@@ -673,7 +673,7 @@ reach the ordered effects/audio/observer drain. Blocks can continue while dying,
 placement appends `placed`; effects filter by the current placement while audio and
 observers receive the complete journal batch.
 
-The game settings (schema **18**) own `death: { wait, angularDamping, friction }`.
+The game settings (schema **19**) own `death: { wait, angularDamping, friction }`.
 Workshop / Physics / Death exposes the same fields:
 
 | Field | Values | Default |

@@ -28,9 +28,11 @@ export interface Tuning {
   hingeCarrierMass: number;
   sliderCarriageMass: number;
   bodyDamping: number;
-  // Contact friction coefficients: the hammer head's, the pot's and each terrain surface's (src/surfaces.ts).
+  // Contact friction coefficients: the hammer head's, the pot's against what it stands on and on its sides, and each
+  // terrain surface's (src/surfaces.ts).
   gripFriction: number;
   potFriction: number;
+  potSideFriction: number;
   rockFriction: number;
   woodFriction: number;
   metalFriction: number;
@@ -113,6 +115,7 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   bodyDamping: 0.12,
   gripFriction: 2.5,
   potFriction: 0.45,
+  potSideFriction: 0,
   rockFriction: 3,
   woodFriction: 2,
   metalFriction: 1,
