@@ -29,11 +29,29 @@
 }
 
 .workshop-plugin .quick-toggle {
-  margin: 4px 0;
+  margin: var(--workshop-plugin-toggle-margin, 4px 0);
+}
+
+.workshop-plugin .tuning-group {
+  --workshop-field-margin-bottom: var(--workshop-paired-field-margin, 12px);
+  --workshop-plugin-toggle-margin: var(--workshop-paired-field-margin, 4px 0);
+  display: var(--workshop-fields-display, block);
+  grid-template-columns: var(--workshop-fields-columns, none);
+  align-items: var(--workshop-fields-align, normal);
+  gap: var(--workshop-fields-gap, normal);
+  max-width: var(--workshop-fields-max-width, none);
+}
+
+.workshop-plugin .tuning-group > :not(.tuning-field, .workshop-plugin-field, .quick-toggle) {
+  grid-column: var(--workshop-fields-full-row, auto);
+}
+
+.workshop-plugin .tuning-group > .quick-toggle {
+  justify-self: start;
 }
 
 .workshop-plugin-field {
-  margin-bottom: 12px;
+  margin-bottom: var(--workshop-field-margin-bottom, 12px);
 }
 
 .workshop-plugin-field > .appearance-label {

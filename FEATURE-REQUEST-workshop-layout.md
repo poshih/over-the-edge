@@ -162,34 +162,47 @@ Portrait keeps stacked navigation and no width controls. All navigation overflow
 ## Stage D: paired fields
 
 **Outcome:** fields pair when pane content is at least 560px wide. This stage is independent of A, B and C and may land
-at any point; its effect appears with Wide panels from B and with the full-width portrait sheet on tablets.
+at any point; its effect appears with the full-width Workshop sheet on tablets in portrait.
+
+**Compact decision:** layouts below 560px content width stay exactly as they are today. Grids that already show two or
+more columns at compact widths are internal clusters of short related values, not candidates for pairing: retain their
+markup, modifier classes, columns and viewport rules. This includes Level's `.level-field-grid` / `.level-action-row`
+and their landscape restatement, Sprite's flipbook values, Directional's pivot values, and Skeleton's inline coordinate
+and direction clusters, including their 700px viewport rules. The bone form is the exception: wrap its label/control
+pairs as units, preserving its aligned label/control columns above a 700px viewport and stacking at or below 700px
+when content is under 560px. At 560px content width or more, the bone form shows two units per row.
 
 **Requirements**
 - Use `.workshop-scroll` as the named `workshop-fields` container; one 560px query enables at most two atomic fields per row.
   Share an inherited/intrinsic policy with a 260px minimum cell and 720px maximum grid width; smaller/nested groups stay one-up.
   Cap single fields at 360px and help at 65ch. These are initial usability budgets, not measured comfort claims.
-- Keep each label and control together as one field unit; help, status and actions span the grid. Do not turn range-step,
-  bone-map, label/value or palette grids into field grids. Preserve `.workshop-scroll`, its spacer, native details and sticky headings
-  so search, `headingInset`, jumps and scroll-spy keep the same owners and coordinate system.
+- Apply pairing only to field lists that are one-up today, plus the bone-form units above. Keep each label and control
+  together as one field unit; help, status and actions span the grid. Do not turn range-step, bone-map, label/value,
+  palette, action or other existing multi-column clusters into field grids. Preserve `.workshop-scroll`, its spacer,
+  native details and sticky headings so search, `headingInset`, jumps and scroll-spy keep the same owners and coordinate system.
 - Plugin tabs and sections share the field query. UI-kit `group` pairs range/select/toggle units; notes, buttons and unknown children span the group.
   Arbitrary plugin DOM remains plugin-owned; document fluid sizing, not a new SDK or hard-coded 354px assumption (`src/editor/workshop-ui-kit.ts:27-104`).
 
-**Layouts:** Wide side panels and full-width tablet portrait sheets pair fields at 560px content width; smaller/nested groups stay one-up.
+**Layouts:** when a tab's content is at least 560px wide, such as the full-width Workshop sheet on a tablet in portrait,
+one-up field lists pair. Groups too narrow for two 260px cells stay one-up; compact desktop and side-panel layouts are unchanged.
 
 **Files**
 - `src/editor/style.css`: scroller query, shared column policy and caps; pair Physics range groups and Appearance alignment/arm-IK groups.
-- `src/editor/level-editor.css`: adapt `.level-field-grid`; remove its landscape viewport override, keep action/palette layouts separate.
+- `src/editor/level-editor.css`: preserve `.level-field-grid`, its landscape restatement and action/palette layouts; no column changes.
 - `src/editor/character-editor.css`: pair arm-length, grip, grip-range and grip-rotation control containers.
-- `src/editor/sprite-editor.css`: pair layer-transform ranges and flipbook field units, not the flat label/input layer form.
-- `src/editor/directional-editor.css`: adapt pivot field units; preserve label/input internals, readouts and the direction table.
-- `src/editor/skeleton-editor.ts`: wrap bone-form label/input pairs as units; remove inline-grid column-count modifier classes, retaining control IDs.
-- `src/editor/skeleton-editor.css`: adapt form/inline/direction field grids; remove their fixed/700px viewport column rules, preserve action/internal grids.
+- `src/editor/sprite-editor.css`: pair layer-transform ranges; preserve flipbook columns and the flat label/input layer form.
+- `src/editor/directional-editor.css`: share single-field caps; preserve pivot columns, label/input internals, readouts and the direction table.
+- `src/editor/skeleton-editor.ts`: wrap bone-form label/input pairs as units, retaining every control ID, label association and inline-grid modifier class.
+- `src/editor/skeleton-editor.css`: pair bone-form units, using shared compact tracks (for example, subgrid); preserve inline/direction,
+  action and other internal grids and their 700px viewport rules.
 - `src/editor/project-editor.css`: adapt `.project-fields` as units, not clip/media records or their internal columns.
 - `src/editor/workshop-plugins.css`: adaptive UI-kit groups, full-row non-fields and spacing; SDK/host contracts stay unchanged.
 - `README.md`, `docs/workshop-plugins.md`: field pairing and existing `host.ui.group` usage.
 
 **Acceptance by reading**
-- The 560px field policy acts on atomic pairs in the named grids, not viewport width or internal grids; trace search/spy through unchanged scrollers.
+- The 560px field policy acts on atomic pairs in the one-up lists and bone form, not viewport width or internal grids;
+  trace search/spy through unchanged scrollers. Below 560px content width, layouts are unchanged, including aligned compact
+  bone-form tracks, stacked bone fields at or below a 700px viewport, and existing multi-column clusters and viewport rules.
 - Trace shared column policy/caps and one-up smaller/nested groups; UI-kit pairs range/select/toggle units, with non-fields spanning.
 
 ## Not planned

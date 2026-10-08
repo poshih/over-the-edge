@@ -84,7 +84,12 @@ plugin's ID comes from the manifest, as `host.plugin`.
   among a plugin's tabs and sections.
 - `host.ui` builds the Workshop's own controls: `range` (a slider with step buttons, as in
   Physics), `button`, `select`, `toggle`, `group` (a titled group of controls), `note` and
-  `notice`. Their callbacks are guarded like the plugin's other callbacks.
+  `notice`. Their callbacks are guarded like the plugin's other callbacks. Create
+  `const group = host.ui.group('Title');`, append each range/select/toggle's `.element`
+  to it, and mount it with `mount.element.append(group)`. When the tab's content is at
+  least 560px wide, these label-and-control units pair; groups too narrow for two fields
+  stay one-up. Notes, buttons and unknown children span the group. Custom DOM remains
+  plugin-owned: size it fluidly within the mount rather than assuming a fixed 354px panel.
 
 ## The project
 

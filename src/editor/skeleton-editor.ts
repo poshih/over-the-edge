@@ -335,18 +335,30 @@ export function createSkeletonEditor(options: {
         <code class="skeleton-token skeleton-bone-id">—</code>
       </div>
       <div class="skeleton-form-grid">
-        <label class="appearance-label" for="skeleton-bone-name">Name</label>
-        <input id="skeleton-bone-name" type="text" maxlength="${SKELETON_LIMITS.name}" />
-        <label class="appearance-label" for="skeleton-bone-parent">Parent</label>
-        <select id="skeleton-bone-parent"></select>
-        <label class="appearance-label" for="skeleton-bone-x">Local X</label>
-        <input id="skeleton-bone-x" type="number" min="${-SKELETON_LIMITS.position}" max="${SKELETON_LIMITS.position}" step="${POSITION_STEP}" />
-        <label class="appearance-label" for="skeleton-bone-y">Local Y</label>
-        <input id="skeleton-bone-y" type="number" min="${-SKELETON_LIMITS.position}" max="${SKELETON_LIMITS.position}" step="${POSITION_STEP}" />
-        <label class="appearance-label" for="skeleton-bone-length">Length</label>
-        <input id="skeleton-bone-length" type="number" min="0.01" max="${SKELETON_LIMITS.length}" step="${LENGTH_STEP}" />
-        <label class="appearance-label" for="skeleton-bone-rotation">Rotation</label>
-        <input id="skeleton-bone-rotation" type="number" min="${-SKELETON_LIMITS.rotation}" max="${SKELETON_LIMITS.rotation}" step="1" />
+        <div class="skeleton-form-field">
+          <label class="appearance-label" for="skeleton-bone-name">Name</label>
+          <input id="skeleton-bone-name" type="text" maxlength="${SKELETON_LIMITS.name}" />
+        </div>
+        <div class="skeleton-form-field">
+          <label class="appearance-label" for="skeleton-bone-parent">Parent</label>
+          <select id="skeleton-bone-parent"></select>
+        </div>
+        <div class="skeleton-form-field">
+          <label class="appearance-label" for="skeleton-bone-x">Local X</label>
+          <input id="skeleton-bone-x" type="number" min="${-SKELETON_LIMITS.position}" max="${SKELETON_LIMITS.position}" step="${POSITION_STEP}" />
+        </div>
+        <div class="skeleton-form-field">
+          <label class="appearance-label" for="skeleton-bone-y">Local Y</label>
+          <input id="skeleton-bone-y" type="number" min="${-SKELETON_LIMITS.position}" max="${SKELETON_LIMITS.position}" step="${POSITION_STEP}" />
+        </div>
+        <div class="skeleton-form-field">
+          <label class="appearance-label" for="skeleton-bone-length">Length</label>
+          <input id="skeleton-bone-length" type="number" min="0.01" max="${SKELETON_LIMITS.length}" step="${LENGTH_STEP}" />
+        </div>
+        <div class="skeleton-form-field">
+          <label class="appearance-label" for="skeleton-bone-rotation">Rotation</label>
+          <input id="skeleton-bone-rotation" type="number" min="${-SKELETON_LIMITS.rotation}" max="${SKELETON_LIMITS.rotation}" step="1" />
+        </div>
       </div>
       <div class="skeleton-action-row">
         <button type="button" class="button skeleton-apply-bone">Apply bone edits</button>

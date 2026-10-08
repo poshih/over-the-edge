@@ -408,6 +408,8 @@ body[data-input-mode="touch"] .workshop-search-key {
 }
 
 .workshop-scroll {
+  container-name: workshop-fields;
+  container-type: inline-size;
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -1000,14 +1002,61 @@ body.touch-controls .workshop-section-bar .icon-button {
   text-transform: uppercase;
 }
 
+.physics-scroll .tuning-groups > .workshop-section > .workshop-section-body > .tuning-group,
+.visual-alignment,
+.arm-ik-controls {
+  --workshop-field-margin-bottom: var(--workshop-paired-field-margin, 12px);
+  display: var(--workshop-fields-display, block);
+  grid-template-columns: var(--workshop-fields-columns, none);
+  align-items: var(--workshop-fields-align, normal);
+  gap: var(--workshop-fields-gap, normal);
+  max-width: var(--workshop-fields-max-width, none);
+}
+
+.physics-scroll .tuning-groups > .workshop-section > .workshop-section-body > .tuning-group > :not(.tuning-field, .cursor-return-toggle) {
+  grid-column: var(--workshop-fields-full-row, auto);
+}
+
 .tuning-field {
   /* Keep absolute screen-reader hints inside their scrolling field. */
   position: relative;
-  margin-bottom: 12px;
+  margin-bottom: var(--workshop-field-margin-bottom, 12px);
 }
 
 .tuning-field:last-child {
   margin-bottom: 0;
+}
+
+/* Inherit the pane's policy; auto-fit also keeps a narrower group one-up. */
+@container workshop-fields (min-width: 560px) {
+  .workshop-scroll > * {
+    --workshop-fields-display: grid;
+    --workshop-fields-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+    --workshop-fields-align: start;
+    --workshop-fields-gap: 12px 16px;
+    --workshop-fields-max-width: 720px;
+    --workshop-fields-full-row: 1 / -1;
+    --workshop-field-max-width: 360px;
+    --workshop-help-max-width: 65ch;
+    --workshop-paired-field-margin: 0;
+    --workshop-paired-field-column: auto;
+    --workshop-paired-label-margin-top: 0;
+  }
+
+  .workshop-scroll :where(.tuning-field, .workshop-plugin-field, .project-field, .skeleton-form-field, .cursor-return-toggle, .quick-toggle) {
+    min-width: 0;
+    max-width: var(--workshop-field-max-width);
+  }
+
+  .workshop-scroll .appearance-label + :is(input, select, textarea) {
+    max-width: var(--workshop-field-max-width);
+  }
+
+  .workshop-scroll :where(.appearance-format, .appearance-hint, .cursor-target-help, .rig-settings-help, .level-help,
+    .inactive-reason, .practice-description, .skeleton-selection-note, .snapshot-history-help, .snapshot-history-error,
+    .appearance-intro p, .character-intro p, .sprite-intro p, .tuning-heading p) {
+    max-width: var(--workshop-help-max-width);
+  }
 }
 
 .tuning-label-row {

@@ -53,8 +53,12 @@
 }
 
 .project-fields {
+  --workshop-field-margin-bottom: var(--workshop-paired-field-margin, 12px);
   display: grid;
-  gap: 4px;
+  grid-template-columns: var(--workshop-fields-columns, none);
+  align-items: var(--workshop-fields-align, normal);
+  gap: var(--workshop-fields-gap, 4px);
+  max-width: var(--workshop-fields-max-width, none);
   margin-bottom: 12px;
 }
 

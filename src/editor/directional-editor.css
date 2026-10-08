@@ -9,6 +9,7 @@
 
 .directional-check {
   display: flex;
+  max-width: var(--workshop-field-max-width, none);
   align-items: start;
   gap: 8px;
   margin: 10px 0;
@@ -195,6 +196,10 @@
 }
 
 .directional-settings > label:not(.directional-check) { display: block; margin: 12px 0 7px; }
+
+.directional-settings > select {
+  max-width: var(--workshop-field-max-width, none);
+}
 
 .directional-pivot-fields {
   display: grid;

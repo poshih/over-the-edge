@@ -134,3 +134,15 @@
   gap: 6px;
   cursor: pointer;
 }
+
+.character-arm-length-controls,
+.character-grip-controls,
+.character-grip-range-controls,
+.character-grip-rotation-controls {
+  --workshop-field-margin-bottom: var(--workshop-paired-field-margin, 12px);
+  display: var(--workshop-fields-display, block);
+  grid-template-columns: var(--workshop-fields-columns, none);
+  align-items: var(--workshop-fields-align, normal);
+  gap: var(--workshop-fields-gap, normal);
+  max-width: var(--workshop-fields-max-width, none);
+}

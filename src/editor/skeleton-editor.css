@@ -107,8 +107,20 @@
 
 .skeleton-form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 10px;
+  grid-template-columns: var(--workshop-fields-columns, repeat(2, minmax(0, 1fr)));
+  align-items: var(--workshop-fields-align, normal);
+  gap: var(--workshop-fields-gap, 0 10px);
+  max-width: var(--workshop-fields-max-width, none);
+}
+
+.skeleton-form-field {
+  display: grid;
+  grid-column: var(--workshop-paired-field-column, 1 / -1);
+  grid-template-columns: subgrid;
+}
+
+.skeleton-form-field > .appearance-label {
+  margin-top: var(--workshop-paired-label-margin-top, 20px);
 }
 
 .skeleton-inline-grid {
@@ -203,7 +215,10 @@
 }
 
 @media (max-width: 700px) {
-  .skeleton-form-grid,
+  .skeleton-form-grid {
+    grid-template-columns: var(--workshop-fields-columns, 1fr);
+  }
+
   .skeleton-inline-grid-2,
   .skeleton-inline-grid-3,
   .skeleton-action-row,

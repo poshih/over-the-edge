@@ -401,6 +401,11 @@ In **Level**, the build tools are the **Build** section. Choosing an object on t
 brings **Object properties** into view, opening it if needed, unless it already fills
 half the view; placing a new object leaves the panel where it is.
 
+Related fields sit two per row when a tab's content is at least 560px wide, such as
+the full-width Workshop sheet on a tablet in portrait. Each label stays with its
+control; groups too narrow for two fields stay one per row. Compact panels and
+short coordinate or action clusters keep their existing layouts.
+
 **Find a control** at the top of the Workshop searches every labeled control and
 section in all six tabs. Press **/** anywhere outside a text field (while the mouse
 is not captured), type part of a name, then choose a result with Enter or a click: the Workshop switches to
