@@ -95,7 +95,7 @@
 }
 
 .level-editor .level-tools {
-  margin: 0 0 16px;
+  margin: 0;
   padding: 0;
   border-top: 0;
 }
@@ -265,12 +265,14 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-.level-save-dock {
-  margin-top: 8px;
+/* Playtest, Save to project and New level share one row, keeping the tab's fixed top short. */
+.level-top .level-top-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .level-save-dock .project-save {
   width: 100%;
+  height: 100%;
 }
 
 .level-editor .snapshot-history select:focus-visible,

@@ -16,8 +16,9 @@ import type { HudFrame } from '../hud-readouts';
 import { createGameSettingsUI } from './game-settings-ui';
 import type { PracticeId } from './practices';
 import type { GameUi, HudState, PluginSectionTab, PluginWorkshopTab, UiOptions, WorkshopState, WorkshopTab } from './ui-types';
-import { createSection, rememberSections } from './workshop-section';
+import { createSection, keepClosingHeadingsInView, rememberSections } from './workshop-section';
 import type { WorkshopSection } from './workshop-section';
+import { createSectionBar } from './workshop-section-bar';
 import { createWorkshopSearch } from './workshop-search';
 import workshopMarkup from './workshop.html?raw';
 
@@ -69,7 +70,13 @@ export function createUI(options: UiOptions): GameUi {
     id, button: element<HTMLButtonElement>(root, `#${id}-tab`), pane: element<HTMLElement>(root, `#${id}-pane`),
   }));
   const tabList = element<HTMLElement>(root, '.workshop-tabs');
+  const sectionBar = createSectionBar({ root: element<HTMLElement>(root, '.workshop-section-bar'), signal: events.signal });
   const workshopState = (): WorkshopState => ({ open: !panel.hidden, compact: !desktop.matches, tab: selectedTab });
+  // The section bar lists the selected tab's sections while the Workshop is open.
+  const showSections = (): void => {
+    const tab = tabs.find((candidate) => candidate.id === selectedTab);
+    sectionBar.show(panel.hidden || tab === undefined ? null : tab.pane, tab?.button.textContent?.trim() ?? '');
+  };
   const selectTab = (id: WorkshopTab): void => {
     selectedTab = id;
     for (const tab of tabs) {
@@ -79,6 +86,8 @@ export function createUI(options: UiOptions): GameUi {
       tab.pane.hidden = !selected;
     }
     options.onWorkshopChange(workshopState());
+    // After the change, so the editors have shown the tab they lay out.
+    showSections();
   };
   const wireTab = (tab: (typeof tabs)[number], signal: AbortSignal): void => {
     tab.button.addEventListener('click', () => selectTab(tab.id), { signal });
@@ -361,6 +370,7 @@ export function createUI(options: UiOptions): GameUi {
     workshopToggle.setAttribute('aria-expanded', String(open));
     document.body.classList.toggle(WORKSHOP_CLASS, open);
     if (!open && focusInPanel) workshopToggle.focus({ preventScroll: true });
+    showSections();
   }
   function setWorkshop(mode: 'open' | 'closed'): void {
     renderWorkshop(mode);
@@ -427,6 +437,7 @@ export function createUI(options: UiOptions): GameUi {
     getSettings: () => settings, onLoad: commitSettings, onNotice: notice,
   });
   rememberSections(panel, events.signal);
+  keepClosingHeadingsInView(panel, events.signal);
   const quick = element<HTMLElement>(root, '.workshop-quick');
   const search = createWorkshopSearch({
     root: element(root, '.workshop-search'), signal: events.signal, selectTab, selectedTab: () => selectedTab,

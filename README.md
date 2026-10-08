@@ -384,9 +384,22 @@ actions in **Project**, practice positions and the
 mass and motor sliders in **Physics**, the character type and quick-start buttons in
 **Character**, the body part and GLB model in **Appearance**, the layer list in
 **Sprites**, and the build tools in **Level**. Everything else sits in named,
-collapsible sections; select a heading to open or close it. Each browser
-remembers which sections you opened or closed, only as a layout preference.
-Chromium's find-in-page also opens a closed section that contains a match.
+collapsible sections; select a heading to open or close it. An open section's heading
+stays at the top of the tab while you scroll through the section, so you can close it
+from anywhere in it. Each browser remembers which sections you opened or closed, only
+as a layout preference. Chromium's find-in-page also opens a closed section that contains a match.
+
+The **section bar** under the tabs lists every section of the selected tab, Workshop
+plugins' included, so none is more than a click away: a section's chip opens it and
+brings it to the top of the tab, and the chip of the section at the top is highlighted
+as you scroll. When a tab has more sections than fit, scroll the bar sideways, also with
+the mouse wheel over it. It is a single Tab stop; the arrow keys, Home and End move along
+it. **Back to the top** returns to the top of the tab, and **Fold all sections** closes
+every section, leaving just their headings.
+
+In **Level**, the build tools are the **Build** section. Choosing an object on the canvas
+brings **Object properties** into view, opening it if needed, unless it already fills
+half the view; placing a new object leaves the panel where it is.
 
 **Find a control** at the top of the Workshop searches every labeled control and
 section in all six tabs. Press **/** anywhere outside a text field (while the mouse

@@ -41,7 +41,7 @@ import { createReplayViewer } from './replay-viewer';
 import { downloadServerLevel } from './server-levels';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
 import { DRAWING, PolygonDraft } from './polygon-draft';
-import { sectionMarkup } from './workshop-section';
+import { sectionMarkup, showSection } from './workshop-section';
 import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
@@ -384,19 +384,20 @@ export function createLevelEditor(options: LevelEditorOptions) {
   root.setAttribute('aria-label', 'Level editor');
   root.innerHTML = `
     <div class="level-top">
-      <div class="level-action-row">
+      <div class="level-action-row level-top-actions">
         <button type="button" class="button button-primary level-play">Playtest</button>
+        <div class="level-save-dock"></div>
         <button type="button" class="button level-new">New level</button>
       </div>
       <p class="level-help level-player-note" hidden>Playtests start where you placed the player.
         <button type="button" class="button level-player-clear">Use the level start</button></p>
-      <div class="level-save-dock"></div>
       <p class="level-save-status" role="status" aria-live="polite"></p>
       <p class="level-board-readout"></p>
     </div>
     <div class="workshop-scroll level-scroll">
+      ${sectionMarkup({ id: 'level-build', title: 'Build', hint: 'Tools, view and object palettes', open: true }, `
       <fieldset class="tuning-group level-tools">
-        <legend class="visually-hidden">Build the course</legend>
+        <legend class="visually-hidden">Build</legend>
         <div class="level-action-row">
           <button type="button" class="button" data-level-tool="decorate" aria-pressed="false">Select decorations</button>
           <button type="button" class="button" data-level-tool="player" aria-pressed="false">Place player</button>
@@ -454,6 +455,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <div class="level-hazard-palette" aria-label="Bonfire, trap and liquid palette"></div>
         <p class="level-help level-tool-help"></p>
       </fieldset>
+      `)}
       ${sectionMarkup({ id: 'level-inspector', title: 'Object properties', hint: 'The selected or new object', open: true }, `
       <fieldset class="tuning-group level-inspector">
         <legend class="visually-hidden">Object properties</legend>
@@ -739,6 +741,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   svg.insertBefore(board.root, cameraGroup);
   const entityGizmos = new EntityGizmos(cameraGroup);
   const inspector = element<HTMLFieldSetElement>(root, '.level-inspector');
+  const levelScroll = element<HTMLElement>(root, '.level-scroll');
+  const propertiesSection = element<HTMLDetailsElement>(root, '[data-section="level-inspector"]');
   const input = (name: string) => element<HTMLInputElement>(root, `#level-${name}`);
   const select = (name: string) => element<HTMLSelectElement>(root, `#level-${name}`);
   const saveStatus = element<HTMLParagraphElement>(root, '.level-save-status');
@@ -2280,6 +2284,16 @@ Export the level first if you want to keep them. Continue without saving?`);
     return project === null ? 'Export it to keep it.' : `It saves to project "${project}" as its next version.`;
   }
 
+  // Choosing an object on the canvas brings its properties into view, unless they already fill half of it.
+  function revealProperties(): void {
+    if (propertiesSection.open) {
+      const view = levelScroll.getBoundingClientRect();
+      const box = propertiesSection.getBoundingClientRect();
+      const seen = Math.min(view.bottom, box.bottom) - Math.max(view.top, box.top);
+      if (seen >= Math.min(box.height, view.height) / 2) return;
+    }
+    showSection(propertiesSection);
+  }
 
   function hitTest(world: Point): LevelObject | null {
     hitTestCount++;
@@ -2492,6 +2506,7 @@ Export the level first if you want to keep them. Continue without saving?`);
             if (grab !== null) gesture = { kind: 'move', pointerId: event.pointerId, start: client, world: grab, original: object, preview: object, selected };
           }
           renderControls(); draw();
+          if (object.id !== selected) revealProperties();
         }
       }
     } else if (tool === 'draw') {

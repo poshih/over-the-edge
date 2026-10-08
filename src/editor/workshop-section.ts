@@ -1,7 +1,8 @@
 /**
  * Collapsible Workshop sections: native <details> elements with a stable `data-section` id, so
- * browser find-in-page, the Workshop search and tests can reveal them. Whether a section is open
- * is a browser-local layout preference; only choices that differ from its default are remembered.
+ * browser find-in-page, the Workshop search, the section bar and tests can reveal them. Whether a
+ * section is open is a browser-local layout preference; only choices that differ from its default
+ * are remembered.
  */
 const STORAGE_KEY = 'over-the-edge:workshop:sections:v1';
 
@@ -42,7 +43,9 @@ function remembered(): Record<string, boolean> {
 /** Markup for a section; `body` is trusted template markup. */
 export function sectionMarkup(section: WorkshopSection, body: string): string {
   const open = remembered()[section.id] ?? section.open === true;
-  const hint = section.hint === undefined ? '' : `<span class="workshop-section-hint">${escapeHtml(section.hint)}</span>`;
+  // The heading stays on one line, so a long hint is cut short; its title shows all of it.
+  const hint = section.hint === undefined ? '' :
+    `<span class="workshop-section-hint" title="${escapeHtml(section.hint)}">${escapeHtml(section.hint)}</span>`;
   return `<details class="workshop-section" data-section="${escapeHtml(section.id)}" data-section-default="${
     section.open === true ? 'open' : 'closed'}"${open ? ' open' : ''}>
     <summary class="workshop-section-summary"><span class="workshop-section-title">${escapeHtml(section.title)}</span>${hint}</summary>
@@ -59,6 +62,52 @@ export function createSection(section: WorkshopSection): { root: HTMLDetailsElem
     throw new Error(`Could not create Workshop section: ${section.id}`);
   }
   return { root, body };
+}
+
+/**
+ * The height of the heading of the open top-level section around `node`, which stays at the top of the tab's scrolling
+ * body while the section scrolls by: the part of the view it covers. 0 when `node` is not inside such a section's body.
+ */
+export function headingInset(node: Element): number {
+  let outermost: HTMLDetailsElement | null = null;
+  for (let parent = node.parentElement; parent !== null && !parent.classList.contains('workshop-scroll'); parent = parent.parentElement) {
+    if (parent instanceof HTMLDetailsElement && parent.dataset.section !== undefined) outermost = parent;
+  }
+  if (outermost === null || !outermost.open) return 0;
+  const summary = outermost.querySelector<HTMLElement>(':scope > summary');
+  return summary === null || summary.contains(node) ? 0 : summary.offsetHeight;
+}
+
+/** Opens `section` and the sections around it, then scrolls the tab so it starts at the top, below any stuck heading. */
+export function showSection(section: HTMLDetailsElement): void {
+  for (let node: Element | null = section; node !== null && !node.classList.contains('workshop-scroll'); node = node.parentElement) {
+    if (node instanceof HTMLDetailsElement) node.open = true;
+  }
+  const scroller = section.closest<HTMLElement>('.workshop-scroll');
+  if (scroller === null) return;
+  scroller.scrollTop += section.getBoundingClientRect().top - scroller.getBoundingClientRect().top - headingInset(section);
+}
+
+/**
+ * Closing a section from its heading stuck at the top of the tab, its start scrolled past, scrolls back to that start, so
+ * the heading, and the focus on it, stay in view instead of ending up above the shortened tab.
+ */
+export function keepClosingHeadingsInView(root: HTMLElement, signal: AbortSignal): void {
+  root.addEventListener('click', (event) => {
+    const summary = event.target instanceof Element ? event.target.closest('summary') : null;
+    const section = summary?.parentElement;
+    if (!(section instanceof HTMLDetailsElement) || section.dataset.section === undefined || !section.open) return;
+    if (section.querySelector(':scope > summary') !== summary) return;
+    const scroller = section.closest<HTMLElement>('.workshop-scroll');
+    if (scroller === null) return;
+    const past = section.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    if (past >= 0) return;
+    // Read before closing: the shorter tab may clamp its scroll position, and the setter clamps the target alike.
+    const target = scroller.scrollTop + past;
+    event.preventDefault();
+    section.open = false;
+    scroller.scrollTop = target;
+  }, { signal });
 }
 
 /** Remembers the open state the user chooses for any section inside `root`. */

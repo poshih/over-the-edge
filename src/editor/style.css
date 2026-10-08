@@ -267,7 +267,6 @@ body[data-input-mode="touch"] .workshop-search-key {
   position: relative;
   display: flex;
   min-height: var(--control-height);
-  flex-wrap: wrap;
   align-items: center;
   gap: 1px 10px;
   padding: 9px 4px 9px 21px;
@@ -299,7 +298,8 @@ body[data-input-mode="touch"] .workshop-search-key {
 
 .workshop-section-summary:hover {
   color: var(--teal-dark);
-  background: rgb(223 231 214 / 45%);
+  /* Opaque, so a heading stuck at the top still hides what scrolls beneath it. */
+  background: #eaede0;
 }
 
 .workshop-section-summary:focus-visible {
@@ -307,16 +307,40 @@ body[data-input-mode="touch"] .workshop-search-key {
   outline-offset: -3px;
 }
 
+/* A heading keeps to one line, so it stays short where it sticks; a long hint is cut short. */
 .workshop-section-title {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
   font-size: 12px;
   font-weight: 650;
   line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workshop-section-hint {
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The heading of an open top-level section stays at the top of the tab while the section scrolls by. :where() keeps the
+   rule as weak as the heading's own, so hover still shows. */
+:where(.workshop-section:not(.workshop-section .workshop-section)) > .workshop-section-summary {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background-color: var(--paper);
+}
+
+:where(.workshop-section:not(.workshop-section .workshop-section)[open]) > .workshop-section-summary {
+  box-shadow: 0 1px 0 var(--line);
 }
 
 .workshop-section-body {
@@ -387,10 +411,19 @@ body[data-input-mode="touch"] .workshop-search-key {
   min-height: 0;
   flex: 1;
   overflow: auto;
-  padding: 16px 18px 20px;
+  /* Sticky headings stick below a scroller's top padding, so the space above the content is a spacer that scrolls away. */
+  padding: 0 18px 20px;
   overscroll-behavior: contain;
+  /* Focus scrolls controls clear of a section heading stuck at the top. */
+  scroll-padding-top: var(--control-height);
   scrollbar-color: #bdc8b6 transparent;
   scrollbar-width: thin;
+}
+
+.workshop-scroll::before {
+  display: block;
+  height: 16px;
+  content: "";
 }
 
 .workshop-tabs {
@@ -419,6 +452,148 @@ body[data-input-mode="touch"] .workshop-search-key {
   border-color: var(--teal);
   background: var(--teal);
   color: var(--paper);
+}
+
+/* Section bar: a chip for each section of the selected tab, then Back to top and Fold all. */
+.workshop-section-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.workshop-section-bar[hidden] {
+  display: none;
+}
+
+.workshop-section-chips {
+  /* Chips measure their place from the strip. */
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 4px 0 14px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.workshop-section-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.workshop-section-chips[data-more="start"] {
+  mask-image: linear-gradient(to right, transparent, #000 28px);
+}
+
+.workshop-section-chips[data-more="end"] {
+  mask-image: linear-gradient(to left, transparent, #000 28px);
+}
+
+.workshop-section-chips[data-more="both"] {
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+
+.workshop-section-chip {
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.workshop-section-chip[data-open="true"] {
+  border-color: #9aa88e;
+  color: var(--ink);
+}
+
+.workshop-section-chip:hover {
+  border-color: #9aaa92;
+  color: var(--teal-dark);
+  background: #eaefdf;
+}
+
+.workshop-section-chip[aria-current="location"] {
+  border-color: var(--teal);
+  color: var(--paper);
+  background: var(--teal);
+}
+
+/* Inside, since the strip clips what reaches past it. */
+.workshop-section-chip:focus-visible {
+  outline: 3px solid #94662b;
+  outline-offset: -3px;
+}
+
+.workshop-section-bar .icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+body.touch-controls .workshop-section-chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 20px;
+}
+
+body.touch-controls .workshop-section-bar .icon-button {
+  width: 40px;
+  height: 40px;
+}
+
+.section-top-icon {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  border-top: 1.5px solid currentColor;
+}
+
+.section-top-icon::after {
+  position: absolute;
+  top: 2.5px;
+  left: 1.5px;
+  width: 7px;
+  height: 7px;
+  border-top: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  content: "";
+}
+
+/* Two chevrons closing on each other. */
+.section-fold-icon {
+  position: relative;
+  width: 10px;
+  height: 12px;
+}
+
+.section-fold-icon::before,
+.section-fold-icon::after {
+  position: absolute;
+  left: 1.5px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: "";
+}
+
+.section-fold-icon::before {
+  top: -3px;
+  transform: rotate(45deg);
+}
+
+.section-fold-icon::after {
+  bottom: -3px;
+  transform: rotate(-135deg);
 }
 
 .workshop-pane,
@@ -1149,8 +1324,20 @@ body.workshop-open .message-toasts {
     padding: 6px 16px;
   }
 
+  .workshop-section-bar {
+    padding-right: 16px;
+  }
+
+  .workshop-section-chips {
+    padding-left: 16px;
+  }
+
   .workshop-scroll {
-    padding: 12px 16px;
+    padding: 0 16px 12px;
+  }
+
+  .workshop-scroll::before {
+    height: 12px;
   }
 
   .workshop-footer {
@@ -1264,11 +1451,13 @@ body.workshop-open .message-toasts {
   .practice-button[aria-pressed="true"],
 .workshop-toggle[aria-expanded="true"],
 .quick-toggle[aria-pressed="true"],
-.workshop-search-option[aria-selected="true"] {
+.workshop-search-option[aria-selected="true"],
+.workshop-section-chip[aria-current="location"] {
     outline: 2px solid Highlight;
   }
 
-  .workshop-search-option[aria-selected="true"] {
+  .workshop-search-option[aria-selected="true"],
+.workshop-section-chip[aria-current="location"] {
     outline-offset: -2px;
   }
 }

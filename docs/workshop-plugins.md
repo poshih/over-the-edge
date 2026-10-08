@@ -77,7 +77,8 @@ as `host.plugin`.
 - `host.addTab({ id, label, title? })` adds a tab after the built-in ones.
 - `host.addSection(tab, { id, title, hint?, open? })` adds a collapsible section at the end of
   `character`, `level`, `physics` or `project`. The Workshop remembers whether it is open, as it
-  does for its own sections.
+  does for its own sections, and lists it in the tab's section bar, so a chip opens it and
+  brings it to the top.
 - Each returns a mount: its `element`, whether it is `shown` (its tab is selected in the open
   Workshop, and a section is expanded), `onVisibility(listener)` and `remove()`. IDs are unique
   among a plugin's tabs and sections.

@@ -1,5 +1,6 @@
 import { element } from '../dom';
 import type { WorkshopTab } from './ui-types';
+import { headingInset } from './workshop-section';
 
 /** A place the search can reveal a control in: a tab pane, or an always-visible toolbar. */
 export interface SearchScope {
@@ -262,8 +263,10 @@ export function createWorkshopSearch(options: {
     if (scroller !== null) {
       const view = scroller.getBoundingClientRect();
       const box = row.getBoundingClientRect();
-      if (box.top < view.top || box.bottom > view.bottom) {
-        scroller.scrollTop += box.top - view.top - Math.max(0, (view.height - box.height) / 3);
+      // The heading of the row's section stays at the top, so the row has to show below it.
+      const inset = headingInset(row);
+      if (box.top < view.top + inset || box.bottom > view.bottom) {
+        scroller.scrollTop += box.top - view.top - Math.max(inset, (view.height - box.height) / 3);
       }
     }
     control.focus({ preventScroll: true });
