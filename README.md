@@ -407,14 +407,28 @@ leaving just their headings.
 Tabs and the bar share a bounded vertical scroller: reach every row with the mouse
 wheel, its scrollbar, keyboard focus or touch swipes, never sideways scrolling.
 
+The **Wide** tab on the side panel's left edge restores your last expanded width
+(800px initially, clamped to the available space); turn it off for **Compact**.
+Its chevron points left to widen and right to narrow. Drag the inner-edge resize
+handle, or focus it: **Left** widens and **Right** narrows by 10px (**Shift** for 50px),
+**Home** selects Compact and **End** requests the 960px maximum, clamped to the
+available space. **Escape** cancels a drag.
+Desktop bounds are 354px (374px in viewports at least 1600px wide) to the smaller of
+960px or the viewport minus 480px. Small landscapes range from the smaller of 380px
+or 45% of the viewport to 45%, leaving at least 55% for play. Each browser remembers
+the choice locally, never in the project. Both Wide and the handle are hidden when
+the window has no room to grow, and in the full-width portrait sheet, which keeps
+its size. When the Workshop leaves the game little room, the game's header and help
+compact as on small screens.
+
 In **Level**, the build tools are the **Build** section. Choosing an object on the canvas
 brings **Object properties** into view, opening it if needed, unless it already fills
 half the view; placing a new object leaves the panel where it is.
 
 Related fields sit two per row when a tab's content is at least 560px wide, such as
-the full-width Workshop sheet on a tablet in portrait. Each label stays with its
-control; groups too narrow for two fields stay one per row. Compact panels and
-short coordinate or action clusters keep their existing layouts.
+Wide side panels or the full-width Workshop sheet on a tablet in portrait. Each label
+stays with its control; groups too narrow for two fields stay one per row. Compact
+panels and short coordinate or action clusters keep their existing layouts.
 
 **Find a control** at the top of the Workshop searches every labeled control and
 section in all six tabs. Press **/** anywhere outside a text field (while the mouse
@@ -703,7 +717,7 @@ On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
 selecting when you click it again or press Escape.
 The level editor's keys work while the **Level** tab is shown, except while a text field
-or the Workshop's tabs and section bar have focus.
+or the Workshop's tabs, section bar or width handle have focus.
 
 The start location and trigger zones are map objects, not special summit
 settings. Place or drag **Start location** to choose the spawn and adjust its

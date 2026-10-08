@@ -1,6 +1,6 @@
 # Feature request: Workshop layout roadmap
 
-**Date:** 2026-10-08 · **Baseline:** `3dfd83d` · **Status:** Planned; no stage implemented.
+**Date:** 2026-10-08 · **Baseline:** `3dfd83d` · **Status:** Stages A, B and D implemented; C planned.
 
 **In short:** remove sideways navigation, let the Workshop grow, then use the width for navigation. Independently, pair fields rather than stretch sliders.
 Compact remains complete. Wide is a browser-local layout preference, not project content; a narrow viewport may cap Wide below the navigation threshold.
@@ -80,21 +80,34 @@ Plugins share its grid/chips/observer; keep the fewer-than-two-sections bar poli
 
 ## Stage B: resize the side panel and remember it
 
-**Outcome:** a **Wide** toggle and inner-edge resize handle grow the panel and shrink the game; Stage A navigation remains complete.
+**Outcome:** a **Wide** edge tab and inner-edge resize handle grow the panel and shrink the game; Stage A navigation remains complete.
 
 **Requirements**
 - Use a focusable vertical `role="separator"` on the panel's left edge, named “Workshop width”, controlling the panel.
   Use primary-pointer capture; the visible line has a 12px pointer hit area straddling the edge, widened to `var(--control-height)` under `body.touch-controls`.
   Set `touch-action: none` on the handle only. The Wide button and separator's keys provide equivalent non-drag alternatives.
-- Left grows the right-hand panel, Right shrinks it: 10px steps, Shift for 50px, Home for Compact, End for maximum.
-  Maintain pixel `aria-valuenow/min/max`, orientation and readable value text. Wide is a labelled `aria-pressed` button,
-  not a double-click-only gesture: on restores the last expanded width (800px initially), off returns Compact.
+  Keep the separator's help paragraph hidden and referenced by `aria-describedby`.
+- Wide is a labelled `aria-pressed` button immediately after the separator, outside the header, centred vertically on the panel's
+  left edge and protruding over the game rather than covering panel content. Stack it above the separator; it is at least 24px wide
+  and `var(--control-height)` tall, with a >=3:1 focus ring and forced-colors support. Its aria-hidden chevron points left to widen,
+  right to narrow. On restores the last expanded width (800px initially), off returns Compact; no double-click-only gesture.
+  Keep the original desktop two-row header and below-1040px one-row header, including portrait, unchanged.
+- Left grows the right-hand panel, Right shrinks it: 10px steps, Shift for 50px, Home for Compact, End requests the absolute
+  960px maximum rather than remembering a viewport-limited value. A key whose resulting effective width and mode are unchanged
+  changes and saves nothing. Maintain pixel `aria-valuenow/min/max`, orientation and readable value text.
+  Wide is pressed and value text says Wide only while the effective width is above minimum; the remembered request is independent.
 - Let V be the available CSS viewport width. Minimum is Compact: 354px desktop, 374px at >=1600px, or
-  `min(380px, 0.45 * V)` for the small landscape panel. Maximum is `min(960px, V - min(480px, 0.55 * V))`.
-  Clamp the 800px preset and every requested width to these bounds. Reserve at least 480px for desktop play;
-  small landscapes retain at least 55% of V. At equal bounds, disable Wide and mark the separator `aria-disabled="true"`/tabindex=-1.
+  `min(380px, 0.45 * V)` for the small landscape panel. On desktop (V >=1040px), maximum is `min(960px, V - 480px)`;
+  on small landscapes (V <1040px), maximum is `0.45 * V`. Clamp the 800px preset and every requested width to these bounds.
+  Reserve at least 480px for desktop play; small landscapes retain at least 55% of V. Whenever maximum is not above minimum,
+  hide Wide and the separator, moving focus to Close first if either had focus. Hide both in the portrait sheet as well.
 - Set one effective root `--workshop-width` before opening. Move Compact's breakpoint policy into the width module;
   delete competing 1600px/mobile width rules. Side panel/game/chrome/toasts/notices share it; portrait's overrides stay.
+- While open, width owns `body.dataset.gameChrome`: `compact` in the portrait sheet or below 686px of remaining game width,
+  `plain` below 926px, absent otherwise. Those thresholds are the narrowest areas served by today's desktop chrome:
+  1040px and 1280px viewports beside the 354px Compact panel. Write only changed values, including during drags;
+  remove the attribute on close/disposal. Compact uses today's small-screen header/toolbar/help rules; both compact and plain
+  hide the brand mark and signature and use a 12px header gap. Keep viewport-based `game-ui.css` and notice rules unchanged.
 - Store only `{ mode: 'compact' | 'wide', wideWidth: number }` at `over-the-edge:workshop:width:v1`.
   Validate the exact shape and finite width in 354–960px; no migrations. Save on button/key actions and successful drag end,
   never per move. Dragging back to minimum chooses Compact, retaining the last expanded width for the next Wide action.
@@ -105,12 +118,19 @@ Plugins share its grid/chips/observer; keep the fewer-than-two-sections bar poli
   `src/editor/layout-preference.ts`; both sections and width use it. Keep width-shape validation in `src/editor/workshop-width.ts`.
 - Resize live, not on release; cache drag geometry/bounds and coalesce to one changed width write per animation frame.
   Dragging triggers CSS layout, selected-pane scroll-spy, a canvas rect read, a camera snap and renderer `setSize`, which may reallocate
-  its buffer (`src/view.ts:267-269,591-598`). Add no renderer, scene rebuild or idle loop; this source-reviewed cost path is unmeasured.
-- Restore committed state and release capture on drag Escape, cancellation, lost capture, close, a side-panel/sheet switch or disposal.
-  Consume Escape during a drag; cancel frames, bind to UI abort and clear root styles on HMR/disposal (`src/editor/ui.ts:468-472`, `src/editor/main.ts:547-575`).
+  its buffer (`src/view.ts`). ResizeObserver validates the canvas size as before, throwing on zero size, and queues only a changed size;
+  `render()` applies the latest pending size, snaps the camera and resizes the buffer before drawing, then clears the pending state.
+  Initial constructor sizing stays immediate. Do not clear the buffer after a frame's render, add draws, or do resize work at unchanged sizes.
+  Add no renderer, scene rebuild or idle loop; this source-reviewed cost path is unmeasured.
+- Restore committed state and release capture on drag Escape, cancellation, lost capture, window blur, a move without the primary
+  button, close, a side-panel/sheet switch or disposal. Consume drag Escape on window capture with `stopImmediatePropagation`,
+  before game input and the level editor; the level editor leaves navigation and width-handle keys alone.
+  Cancel frames, bind to UI abort and clear root styles and the body chrome attribute on HMR/disposal (`src/editor/ui.ts`, `src/editor/main.ts`).
 
 **Layouts:** enable on desktop and landscape side panels; re-clamp on viewport changes, deferring work while closed.
 Portrait remains full-width/56dvh: hide the handle and Wide button, retain the side-panel preference for rotation back.
+Compact keeps today's header/chrome presentation: plain desktop chrome at 1040–1279px, full desktop chrome from 1280px,
+and compact chrome for every small landscape and portrait sheet. Use `(width < 1040px)` to complement the desktop query at fractional widths.
 Keep `WorkshopState.compact` unchanged. Plugins inherit the same mount width and Stage A navigation; no new plugin event or API.
 
 **Files**
@@ -118,16 +138,24 @@ Keep `WorkshopState.compact` unchanged. Plugins inherit the same mount width and
 - `src/editor/workshop-section.ts`: use the shared helper with remembered-sections behaviour unchanged.
 - `src/editor/workshop-width.ts` (new): width policy and shape validation, pointer/key transactions, shared-helper persistence and cleanup.
 - `src/editor/ui.ts`: initialise before first open, wire open/close/abort; do not reinterpret `compact` or change pause/play.
-- `src/editor/workshop.html`: separator, its help and Wide toggle outside the View tools group.
-- `src/editor/style.css`: handle/focus/touch styling, one side-width variable, responsive header; landscape search gets its own row, portrait stays unchanged.
-- `README.md`, `docs/workshop-plugins.md`: bounds, toggle/drag/keys, browser-local remembering, portrait exclusion and fluid plugin mounts.
+- `src/editor/workshop.html`: separator, its hidden help and Wide edge tab before the unchanged header.
+- `src/editor/style.css`: handle/tab/focus/touch styling, one side-width variable, room-based chrome and complementary media queries;
+  restore the original desktop and small-screen header layouts.
+- `src/editor/level-editor.ts`: leave the width handle's keys to the width module, as for Workshop navigation.
+- `src/view.ts`: validate/queue observed sizes and apply pending size before the next draw, keeping initial sizing immediate.
+- `README.md`, `docs/workshop-plugins.md`: bounds, edge tab/drag/keys, browser-local remembering, no-room/portrait exclusion,
+  compact game chrome and fluid plugin mounts.
 
 **Acceptance by reading**
 - Bounds always leave positive game width; every side-panel width/notice consumer shares the variable, and portrait overrides do not depend on it.
 - Preference writes occur only at commit boundaries; resize/rotation does not save a clamped width; invalid/unavailable storage follows the stated failure path.
+  No-op keys do not save, End remembers 960px, and pressed/value text reflects the effective width rather than the request.
 - One shared helper owns the read/write policy; `src/editor/workshop-section.ts` keeps its remembered-sections behaviour.
   The width record's shape validation stays in `src/editor/workshop-width.ts`; no notice is added for disposable failures.
-- Trace capture, cancellation, ARIA values, disabled/no-room controls and HMR cleanup; no idle RAF, runtime imports or pause-policy change.
+- Trace capture, cancellation, ARIA values, hidden/no-room focus recovery and HMR cleanup, including the body attribute;
+  no idle RAF, runtime imports or pause-policy change. The edge tab cannot start a drag or cover panel content; original headers remain.
+- Trace chrome thresholds against Compact's current layouts; resizing the drawing buffer happens before drawing, never in ResizeObserver,
+  and unchanged canvas sizes trigger no resize work or extra draws. These are source-reviewed invariants, not measured runtime behaviour.
 
 ## Stage C: navigation column
 

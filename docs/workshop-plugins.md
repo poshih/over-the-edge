@@ -92,7 +92,8 @@ plugin's ID comes from the manifest, as `host.plugin`.
   to it, and mount it with `mount.element.append(group)`. When the tab's content is at
   least 560px wide, these label-and-control units pair; groups too narrow for two fields
   stay one-up. Notes, buttons and unknown children span the group. Custom DOM remains
-  plugin-owned: size it fluidly within the mount rather than assuming a fixed 354px panel.
+  plugin-owned: the side panel's width is user-adjustable, so size custom DOM fluidly
+  within the mount rather than assuming a fixed 354px panel.
 
 ## The project
 

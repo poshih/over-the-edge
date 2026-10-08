@@ -20,6 +20,7 @@ import { createSection, keepClosingHeadingsInView, rememberSections } from './wo
 import type { WorkshopSection } from './workshop-section';
 import { createSectionBar, revealNavigation } from './workshop-section-bar';
 import { createWorkshopSearch } from './workshop-search';
+import { createWorkshopWidth } from './workshop-width';
 import workshopMarkup from './workshop.html?raw';
 
 const WORKSHOP_CLASS = 'workshop-open';
@@ -60,6 +61,7 @@ export function createUI(options: UiOptions): GameUi {
   hud.actions.append(workshopToggle);
   const panel = element<HTMLElement>(root, '.workshop');
   const workshopClose = element<HTMLButtonElement>(root, '.workshop-close');
+  const workshopWidth = createWorkshopWidth({ panel, desktop, signal: events.signal });
   const projectMount = element<HTMLElement>(root, '#project-pane');
   const characterMount = element<HTMLElement>(root, '#character-pane');
   const appearanceMount = element<HTMLElement>(root, '#appearance-pane');
@@ -387,6 +389,7 @@ export function createUI(options: UiOptions): GameUi {
   function renderWorkshop(mode: 'open' | 'closed'): void {
     const open = mode === 'open';
     const focusInPanel = panel.contains(document.activeElement);
+    workshopWidth.setOpen(open);
     panel.hidden = !open;
     workshopToggle.setAttribute('aria-expanded', String(open));
     document.body.classList.toggle(WORKSHOP_CLASS, open);

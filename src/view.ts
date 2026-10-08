@@ -124,6 +124,7 @@ export class GameView {
   private readonly observer: ResizeObserver;
   private width = 1;
   private height = 1;
+  private pendingSize: DOMRect | null = null;
   // Zero until the first frustum update, which always runs.
   private worldHeight = 0;
   private framing: CameraFraming | null = null;
@@ -262,9 +263,12 @@ export class GameView {
       this.marks.add(this.aimMarks.value.root);
       for (const effect of this.effects.all) this.passScene(effect.captured.pass).add(effect.value.root);
       for (const layer of layers) this.addLayer(layer.value, layer);
-      this.observer = new ResizeObserver(() => this.resize());
+      this.observer = new ResizeObserver(() => {
+        const size = this.readSize();
+        this.pendingSize = size.width === this.width && size.height === this.height ? null : size;
+      });
       this.observer.observe(canvas);
-      this.resize();
+      this.resize(this.readSize());
       this.recenter(initial);
     } catch (error) {
       this.dispose();
@@ -330,6 +334,12 @@ export class GameView {
   get rigGeometry(): RigGeometry { return this.rig; }
 
   render(physics: PhysicsFrame, options: { dt: number; death: DeathFrame | null }): void {
+    // ResizeObserver runs after drawing; resize the buffer only when this call can draw it again.
+    const size = this.pendingSize;
+    if (size !== null) {
+      this.resize(size);
+      this.pendingSize = null;
+    }
     if (this.measurements.capturing) {
       const startedAt = performance.now();
       this.renderFrame(physics, options);
@@ -584,11 +594,15 @@ export class GameView {
     disposal.finish();
   }
 
-  private resize(): void {
+  private readSize(): DOMRect {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) throw new Error('The game canvas must have a visible size.');
-    this.width = rect.width;
-    this.height = rect.height;
+    return rect;
+  }
+
+  private resize(size: DOMRect): void {
+    this.width = size.width;
+    this.height = size.height;
     this.snapCamera();
     this.renderer.setSize(this.width, this.height, false);
   }

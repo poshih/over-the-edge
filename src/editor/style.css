@@ -1,11 +1,9 @@
 :root {
-  --workshop-width: 354px;
   --range-height: 24px;
   --thumb-size: 12px;
   --range-columns: minmax(0, 1fr);
   --step-display: none;
   --mobile-sheet-height: 56dvh;
-  --mobile-panel-width: min(380px, 45vw);
 }
 
 body.touch-controls {
@@ -75,6 +73,80 @@ body.touch-controls {
   border-left: 1px solid #c9d1c1;
   background: var(--paper);
   box-shadow: -8px 0 35px rgb(27 48 39 / 4%);
+}
+
+.workshop-width-handle {
+  --width-hit-area: 12px;
+  position: absolute;
+  z-index: 4;
+  inset: 0 auto 0 calc(var(--width-hit-area) / -2);
+  width: var(--width-hit-area);
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.workshop-width-handle::before {
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 2px;
+  background: #c9d1c1;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.workshop-width-handle:hover::before,
+.workshop-width-handle:focus-visible::before {
+  background: var(--brass);
+}
+
+.workshop-width-handle:focus-visible {
+  outline: 3px solid #94662b;
+  outline-offset: -3px;
+}
+
+body.touch-controls .workshop-width-handle {
+  --width-hit-area: var(--control-height);
+}
+
+.workshop-wide {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  right: 100%;
+  display: inline-flex;
+  width: 24px;
+  height: var(--control-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #c9d1c1;
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  background: var(--paper);
+  transform: translateY(-50%);
+}
+
+.workshop-wide:hover,
+.workshop-wide[aria-pressed="true"] {
+  background: #e7eadb;
+}
+
+.workshop-wide:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: -3px;
+}
+
+.workshop-wide-icon {
+  width: 8px;
+  height: 8px;
+  border-bottom: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.workshop-wide[aria-pressed="true"] .workshop-wide-icon {
+  transform: rotate(225deg);
 }
 
 .workshop-header {
@@ -1332,34 +1404,58 @@ body.touch-controls .workshop-section-all {
   text-align: center;
 }
 
-@media (min-width: 1040px) {
-  body.workshop-open #game,
+body.workshop-open #game,
 body.workshop-open .game-chrome,
 body.workshop-open .message-toasts {
-    width: calc(100% - var(--workshop-width));
-  }
+  width: calc(100% - var(--workshop-width));
+}
 
+body.workshop-open:is([data-game-chrome="compact"], [data-game-chrome="plain"]) .brand-mark,
+body.workshop-open:is([data-game-chrome="compact"], [data-game-chrome="plain"]) .game-signature {
+  display: none;
+}
+
+body.workshop-open:is([data-game-chrome="compact"], [data-game-chrome="plain"]) .game-header {
+  gap: 12px;
+}
+
+body.workshop-open[data-game-chrome="compact"] .game-header {
+  top: 8px;
+  right: 12px;
+  left: 12px;
+  flex-direction: row;
+}
+
+body.workshop-open[data-game-chrome="compact"] .game-toolbar {
+  width: 100%;
+}
+
+body.workshop-open[data-game-chrome="compact"] .game-actions {
+  flex-wrap: nowrap;
+  justify-content: space-between;
+}
+
+body.workshop-open[data-game-chrome="compact"] .workshop-toggle {
+  margin-left: auto;
+}
+
+body.workshop-open[data-game-chrome="compact"] .brand,
+body.workshop-open[data-game-chrome="compact"] .climb-hud,
+body.workshop-open[data-game-chrome="compact"] .game-help,
+body.workshop-open[data-game-chrome="compact"] [data-action="pause"],
+body.workshop-open[data-game-chrome="compact"] [data-action="reset"] {
+  display: none;
+}
+
+@media (min-width: 1040px) {
   body.workshop-open .ui-notice {
     max-width: calc(100% - var(--workshop-width) - 2 * var(--game-gutter));
   }
 }
 
-@media (min-width: 1600px) {
-  :root {
-    --workshop-width: 374px;
-  }
-}
-
-@media (max-width: 1039px) {
+@media (width < 1040px) {
   .workshop {
-    width: var(--mobile-panel-width);
     box-shadow: -8px 0 24px rgb(24 47 38 / 14%);
-  }
-
-  body.workshop-open #game,
-body.workshop-open .game-chrome,
-body.workshop-open .message-toasts {
-    width: calc(100% - var(--mobile-panel-width));
   }
 
   /* One row keeps the panel content tall: search, view tools, close. */
@@ -1426,36 +1522,8 @@ body.workshop-open .message-toasts {
     margin-top: 6px;
   }
 
-  body.workshop-open .game-header {
-    top: 8px;
-    right: 12px;
-    left: 12px;
-    flex-direction: row;
-  }
-
-  body.workshop-open .game-toolbar {
-    width: 100%;
-  }
-
-  body.workshop-open .game-actions {
-    flex-wrap: nowrap;
-    justify-content: space-between;
-  }
-
-  body.workshop-open .workshop-toggle {
-    margin-left: auto;
-  }
-
-  body.workshop-open .brand,
-body.workshop-open .climb-hud,
-body.workshop-open .game-help,
-body.workshop-open [data-action="pause"],
-body.workshop-open [data-action="reset"] {
-    display: none;
-  }
-
   body.workshop-open .ui-notice {
-    right: calc(var(--mobile-panel-width) + 12px);
+    right: calc(var(--workshop-width) + 12px);
     bottom: 90px;
     left: 12px;
     width: auto;
@@ -1464,7 +1532,7 @@ body.workshop-open [data-action="reset"] {
   }
 }
 
-@media (max-width: 1039px) and (orientation: portrait) {
+@media (width < 1040px) and (orientation: portrait) {
   .workshop {
     inset: auto 0 0;
     width: 100%;
@@ -1473,6 +1541,11 @@ body.workshop-open [data-action="reset"] {
     border-left: none;
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -8px 24px rgb(24 47 38 / 14%);
+  }
+
+  .workshop-width-handle,
+.workshop-wide {
+    display: none;
   }
 
   body.workshop-open #game,
@@ -1521,6 +1594,18 @@ body.workshop-open .message-toasts {
 }
 
 @media (forced-colors: active) {
+  .workshop-width-handle::before {
+    background: CanvasText;
+  }
+
+  .workshop-wide,
+.workshop-wide:hover,
+.workshop-wide[aria-pressed="true"] {
+    border-color: CanvasText;
+    color: CanvasText;
+    background: Canvas;
+  }
+
   .tuning-field input[type="range"],
 .telemetry meter {
     appearance: auto;
@@ -1544,7 +1629,9 @@ body.workshop-open .message-toasts {
   }
 
   .workshop-tabs [role="tab"]:focus-visible,
-.workshop-section-bar button:focus-visible {
+.workshop-section-bar button:focus-visible,
+.workshop-width-handle:focus-visible,
+.workshop-wide:focus-visible {
     outline: 3px solid CanvasText;
     outline-offset: -3px;
   }

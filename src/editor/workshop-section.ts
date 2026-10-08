@@ -1,3 +1,5 @@
+import { readLayoutPreference, writeLayoutPreference } from './layout-preference';
+
 /**
  * Collapsible Workshop sections: native <details> elements with a stable `data-section` id, so
  * browser find-in-page, the Workshop search, the section bar and tests can reveal them. Whether a
@@ -21,23 +23,10 @@ function escapeHtml(text: string): string {
 }
 
 function remembered(): Record<string, boolean> {
-  let text: string | null;
-  try {
-    text = localStorage.getItem(STORAGE_KEY);
-  } catch (error) {
-    if (error instanceof DOMException) return {};
-    throw error;
-  }
-  if (text === null) return {};
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch (error) {
-    if (error instanceof SyntaxError) return {};
-    throw error;
-  }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
-  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'));
+  return readLayoutPreference(STORAGE_KEY, (value) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'));
+  }) ?? {};
 }
 
 /** Markup for a section; `body` is trusted template markup. */
@@ -122,11 +111,6 @@ export function rememberSections(root: HTMLElement, signal: AbortSignal): void {
     if ((states[id] ?? fallback) === section.open) return;
     if (section.open === fallback) delete states[id];
     else states[id] = section.open;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
-    } catch (error) {
-      // Layout is a disposable preference: unavailable or full storage only forgets it.
-      if (!(error instanceof DOMException)) throw error;
-    }
+    writeLayoutPreference(STORAGE_KEY, states);
   }, { capture: true, signal });
 }
