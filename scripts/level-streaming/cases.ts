@@ -2,7 +2,6 @@ import type { Point } from '../../src/config.ts';
 import type { Bounds } from '../../src/collision-queries.ts';
 import type { LevelDefinition, LevelObject, TerrainMesh, TerrainObject } from '../../src/level.ts';
 import type { ProjectManifest } from '../../src/project.ts';
-import { ENGINE_DEFAULT_REACH } from '../course-kit/checks.ts';
 import { random } from '../course-kit/course.ts';
 import { CourseLevelError } from '../course-kit/errors.ts';
 import type { CourseJob } from '../course-kit/job.ts';
@@ -177,7 +176,7 @@ export function buildCase(name: CaseName, job: CourseJob, decorations: Decoratio
   const summit = { x: route[route.length - 1].x + (name === 'slices' ? 1 : 0), y: top(job, route[route.length - 1]) };
   const checkpoint = route[Math.floor(route.length / 2)];
   objects.push(
-    { kind: 'start', id: 'player-start', x: ground.x, y: ground.y + ENGINE_DEFAULT_REACH.startFootOffset, angle: -0.42, reach: 1.7 },
+    { kind: 'start', id: 'player-start', x: ground.x, y: ground.y + job.engine.checks.ENGINE_DEFAULT_REACH.startFootOffset, angle: -0.42, reach: 1.7 },
     { kind: 'bonfire', id: 'benchmark-bonfire', x: checkpoint.x + (name === 'slices' ? 1 : 0), y: top(job, checkpoint) },
     {
       kind: 'trigger', id: 'benchmark-summit', name: 'Benchmark summit', x: summit.x, y: summit.y + 0.95,

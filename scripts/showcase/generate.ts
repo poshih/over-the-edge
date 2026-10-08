@@ -9,7 +9,6 @@ import { loadCourseEngine } from '../course-kit/engine.ts';
 import type { CourseEngine } from '../course-kit/engine.ts';
 import { createCourseJob } from '../course-kit/job.ts';
 import type { CourseSnapshot } from '../course-kit/job.ts';
-import { crampedColliders, overlaps, ventShafts } from '../course-kit/checks.ts';
 import type { DecorationObject, LevelDefinition, LevelLabel, LevelObject, TerrainObject, TriggerObject } from '../../src/level.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -177,14 +176,14 @@ function liftClearance(snapshot: CourseSnapshot) {
 const server = await createEngineServer(root);
 try {
   const engine = await loadCourseEngine(server);
+  const { crampedColliders, overlaps, ventShafts } = engine.checks;
   const snapshot = createCourseJob(engine).prepare(showcase(engine.level));
   const groups = new Map(snapshot.level.objects.map((object) => [
     object.id, { group: object.id, zone: 'showcase' },
   ]));
   const problems = [
-    ...crampedColliders(snapshot, groups, []),
-    ...ventShafts(snapshot, groups),
-    ...overlaps(snapshot, groups),
+    ...[...crampedColliders(snapshot, groups, []), ...ventShafts(snapshot, groups), ...overlaps(snapshot, groups)]
+      .map((finding) => finding.message),
     ...liftClearance(snapshot),
   ];
   if (problems.length > 0) {

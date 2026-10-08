@@ -718,6 +718,28 @@ an import, asking first when there are unsaved changes.
 on each saved version: pick a version and a run, then **Play**, change the speed, move through
 the run with **Position**, and let **Follow** keep the camera on the phantom.
 
+### Level checks
+
+**Checks** in the Level tab looks over the level a moment after your edits settle, unsaved
+changes included, and lists what it finds. A ring marks each finding on the course: red for a
+**problem**, amber for a **suggestion**. Pick one to centre the view on it and select its first
+object. Checks only report: they never change the level or hold up a save.
+
+- Problems break a placement rule: an enemy starting inside terrain, an updraft whose shaft rises
+  into terrain, and small colliders, 1.5 m or less across, 1.2 m or less apart, except the parts
+  of one placement from **Set piece library**, which were designed and tested together.
+- Suggestions come from the [reach model](docs/course-kit.md#the-reach-model), a conservative
+  sketch of where the pot can get to from the start, made for the hammer rig and grip in
+  **Physics**: whether the ending trigger, or without one the highest bonfire, can be reached, set
+  pieces never reached, and reachable places from which the ending cannot be. It follows geometry
+  alone, trusts no set piece, and cannot prove or disprove play.
+
+The checks run in a background worker, so editing stays smooth on the largest levels, and are
+the same functions the [course kit](docs/course-kit.md) runs on generated courses. A run that
+exceeds their [work budget](docs/course-kit.md#work-budgets-and-failure) says so and keeps the
+findings before it. A game's Workshop plugins can add rules of their own and supply the reach
+model: see [level checks](docs/workshop-plugins.md#level-checks).
+
 ### Level board
 
 **Board**, on until you turn it off, lays a chessboard over the course so you can name an

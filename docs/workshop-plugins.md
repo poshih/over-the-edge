@@ -2,9 +2,9 @@
 
 A game can add its own tools to the Workshop without editing the engine: tabs and sections
 built from the Workshop's own controls, edits made through the engine's own operations,
-data of its own kept in the project, controls for its motion kinds, and overlays, canvas drags
-and previews in the running game. A plugin's **workshop facet** holds them, named in the game's
-[plugin manifest](plugins.md#the-manifest):
+data of its own kept in the project, controls for its motion kinds, rules for the Level tab's
+checks, and overlays, canvas drags and previews in the running game. A plugin's
+**workshop facet** holds them, named in the game's [plugin manifest](plugins.md#the-manifest):
 
 ```json
 {
@@ -26,8 +26,8 @@ Without workshop facets the Workshop has only its own tools.
 
 The facet module default-exports a `WorkshopFacet`, made with `defineWorkshop`: `start(host)`,
 which starts the plugin's tools, an optional `validate(data)` for its own data, and an optional
-`contributes`, its [motion controls](#motion-controls). The plugin's ID comes from the manifest,
-as `host.plugin`.
+`contributes`, its [motion controls](#motion-controls) and [level checks](#level-checks). The
+plugin's ID comes from the manifest, as `host.plugin`.
 
 - **One SDK.** A plugin imports nothing from `src/editor` except
   [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts), which defines the facet, the
@@ -163,6 +163,72 @@ export default defineWorkshop({
 - Each motion shows its controls and a reset to their defaults. A change goes to the draft
   profile, where the kind checks it again, and through Save and Revert. Releases contain none
   of it.
+
+## Level checks
+
+Workshop / Level / **Checks** runs the engine's course checks on the open level once edits
+settle ([level checks](../README.md#level-checks)). A workshop facet adds rules of its own at
+`LEVEL_CHECKS`, and can change where the reach model comes from at `LEVEL_REACH`.
+
+```ts
+import { add, defineWorkshop, LEVEL_CHECKS } from '../../src/editor/workshop-sdk';
+
+export default defineWorkshop({
+  contributes: [add(LEVEL_CHECKS, {
+    id: 'my-game/readable-labels',
+    check: ({ level, course }) => level.labels.filter((label) => course.inside(label) !== null).map((label) => ({
+      severity: 'problem' as const, message: `The label "${label.text}" is painted inside terrain.`, at: label,
+    })),
+  })],
+  start() {},
+});
+```
+
+- A rule is `{ id, check }`, its ID `<plugin>/<name>`; the point holds 32 (`LEVEL_CHECK_LIMITS`).
+  The Workshop calls `check(input)` after the engine's checks of the same level, while the Level
+  tab is edited and the project is open, and only on results for the level as it is now.
+- `input.level` is the checked level, unsaved changes included. `input.project` is the open project
+  as `host.project.snapshot()` gives it, with its settings and art. `input.findings` holds the
+  engine's findings.
+- `input.course` is the level's placed collision: `loops(id)` gives a terrain object's world-space
+  loops (solid on each edge's left, holes clockwise, a circle as its polygon) or null,
+  `inside(point)` the non-illusion terrain object holding a point or null, and `blocks(from, to)`
+  whether a segment passes through the inside of non-illusion terrain. The collision is prepared
+  on the first query, and queries count work against the engine's
+  [work budget](course-kit.md#work-budgets-and-failure).
+- `input.reach` is null when the reach model measured nothing; otherwise its `model` and `goal`,
+  its `target` (`'ending'` or `'goal'`), whether it is `reachable`, the places `reached` of `total`,
+  the `highest` reached, and `stands`: every sampled place to stand, with its `object`, and whether
+  it is `reached` from the start and `finishing`, with the target reachable from it.
+- `check` returns at most 64 findings, synchronously, each
+  `{ severity: 'problem' | 'suggestion', message, at?, objects? }`: plain text of 1-300 characters,
+  a finite point to mark on the course and to centre the view on, and at most 16 object IDs, the
+  first of which picking the finding selects. Checks lists them after the engine's, under the
+  rule's ID. Findings only report: a rule never changes the level.
+- A rule that throws, returns a promise or breaks that contract stops its plugin, as any plugin
+  error does. Checks then lists `plugin-failed` under each of its rules until the plugin changes,
+  and the engine's checks and the other plugins' rules go on.
+
+The reach model comes from a source that turns `{ level, settings }` into `{ model, goal }`: a
+complete [reach model](course-kit.md#the-reach-model), and the goal a level without an ending
+trigger measures reach to, or null for none. The engine's uses `reachForSettings(settings)` and
+`levelGoal(level)`, the level's highest bonfire; the SDK exports both, and
+`ENGINE_DEFAULT_REACH`. `replace(LEVEL_REACH, source)` swaps it, and `wrap` builds on it:
+
+```ts
+import { defineWorkshop, LEVEL_REACH, wrap } from '../../src/editor/workshop-sdk';
+
+export default defineWorkshop({
+  contributes: [wrap(LEVEL_REACH, (engine) => (input) => {
+    const plan = engine(input);
+    return { model: { ...plan.model, clearanceHalfWidth: 0.45 }, goal: plan.goal };
+  })],
+  start() {},
+});
+```
+
+The Workshop checks each plan as the course kit checks a model. A source that throws or returns
+an invalid plan stops its plugin, and the checks go on with the engine's.
 
 ## The running game
 

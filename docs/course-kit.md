@@ -6,15 +6,20 @@ that same collision. Built-in shapes, drawn outlines and GLB slices and projecti
 geometry authority; concavity, disconnected islands and holes need no special placement
 API. [Ashen Ascent](ashen-ascent.md) is an in-repository consumer.
 
+The checks themselves are the engine's: the course job in
+[`src/course-snapshot.ts`](../src/course-snapshot.ts) and the checks in
+[`src/course-checks.ts`](../src/course-checks.ts), which the kit loads as `engine.checks`. The
+Workshop's [level checks](../README.md#level-checks) run the same functions in the page, so a level
+and reach model give the same findings in Node and in the Workshop.
+
 | Module | Contents |
 | --- | --- |
-| `engine.ts` | `loadCourseEngine(server)`, loading the engine through a caller-owned Vite server |
-| `job.ts` | `createCourseJob(engine, options)`, template caches, work accounting and prepared snapshots |
+| `engine.ts` | `loadCourseEngine(server)`, loading the engine, its checks included, through a caller-owned Vite server |
+| `job.ts` | `createCourseJob(engine, options)`: the engine's course job with the kit's typed errors, the engine attached and `readMesh` |
 | `errors.ts` | Typed errors with a stable `code`, original `cause` and actionable `repair` |
 | `course.ts` | `CourseBuilder(library, job)`, terrain, triggers, enemies, scenery, set pieces and group metadata; seeded `random` |
 | `trail.ts` | `Trail`, a route cursor for floors, steps, stairs and set pieces |
 | `pieces.ts` | `PIECE_PATHS`, designed entry, exit and ground for library pieces |
-| `checks.ts` | Blocking overlap, reservation, vent and component-clearance checks; advisory reach modelling and suggestions; `budget` |
 | `scenery.ts` | Perspective-camera depth placement for non-colliding decorations |
 | `map.ts` | Collision SVG maps and optional Playwright PNG crops |
 
@@ -34,10 +39,6 @@ import { loadCourseEngine } from '../course-kit/engine.ts';
 import { createCourseJob } from '../course-kit/job.ts';
 import { CourseBuilder, random } from '../course-kit/course.ts';
 import { Trail } from '../course-kit/trail.ts';
-import {
-  overlaps, keepOut, ventShafts, crampedColliders, reachGraph, reachSuggestions,
-  ENGINE_DEFAULT_REACH,
-} from '../course-kit/checks.ts';
 import { courseMap } from '../course-kit/map.ts';
 
 const server = await createServer({
@@ -46,6 +47,10 @@ const server = await createServer({
 });
 try {
   const engine = await loadCourseEngine(server);
+  const {
+    overlaps, keepOut, ventShafts, crampedColliders, reachGraph, reachSuggestions,
+    ENGINE_DEFAULT_REACH,
+  } = engine.checks;
   const library = await server.ssrLoadModule('/src/editor/set-pieces.ts');
   const job = createCourseJob(engine);
   const builder = new CourseBuilder(library, job);
@@ -69,10 +74,10 @@ try {
   if (suggestions.length > 0) {
     console.warn('Reach suggestions (non-blocking): ' +
       'the model cannot prove or disprove physics-based play.');
-    console.warn(suggestions.join('\n'));
+    console.warn(suggestions.map((finding) => finding.message).join('\n'));
   }
   if (problems.length > 0) {
-    console.error(problems.join('\n'));
+    console.error(problems.map((finding) => finding.message).join('\n'));
     process.exitCode = 1;
   } else {
     const map = courseMap(snapshot, {
@@ -85,10 +90,12 @@ try {
 }
 ```
 
-`loadCourseEngine` returns `{ level, queries, mesh, art }`, from four modules loaded
+`loadCourseEngine` returns `{ level, queries, mesh, art, checks }`, from five modules loaded
 through that same server. A caller may inject that complete contract directly instead;
 `createCourseJob` checks required capabilities and fails explicitly if an export is
-missing. There is no bounding-box collision fallback.
+missing. There is no bounding-box collision fallback. The job is the engine's
+(`engine.checks.createCourseJob`), throwing the kit's [typed errors](#typed-errors), with
+`engine` on the job and every snapshot it prepares, and `readMesh`.
 
 `prepare(rawLevel)` validates with the engine, returns the immutable validated `level`,
 and builds terrain and component spatial indexes **once**. Every check and map takes
@@ -290,22 +297,45 @@ described above.
 
 ## Checks
 
-`overlaps`, `keepOut`, `ventShafts` and `crampedColliders` are blocking geometry
-gates: they must report no problems before exporting, and engine validation must
-pass. Run them against the same prepared snapshot. `standPoints` and `reachGraph`
-are advisory authoring tools, not export gates; report their reach findings with
-`reachSuggestions` without blocking export. `budget` reports counts and work usage.
+The checks are `engine.checks`. `overlaps`, `keepOut`, `ventShafts` and `crampedColliders` are
+blocking geometry gates: they must report no problems before exporting, and engine validation
+must pass. Run them against the same prepared snapshot. `standPoints` and `reachGraph` are
+advisory authoring tools, not export gates; report their reach findings with `reachSuggestions`
+without blocking export. `budget` reports counts and work usage.
+
+Each check returns **findings**, plain data: `{ check, severity, message, at, objects }`. `check`
+names the check, such as `'cramped'`; `severity` is `'problem'` for a gate and `'suggestion'` for
+the reach model; `message` says what is wrong, `at` is the point to look at, in world metres, or
+null, and `objects` lists the level objects concerned. Print `message`, or mark `at` on a map.
 
 | Check | Finds |
 | --- | --- |
-| `overlaps(snapshot, groups, supports)` | Separately built terrain merging into a piece's parts; enemies starting inside terrain |
-| `keepOut(snapshot, groups, pieces, allowed)` | External terrain entering a piece's deliberately reserved bounds |
-| `ventShafts(snapshot, groups)` | Non-illusion terrain above an external draft's trigger region, below its first launch event's apex |
-| `crampedColliders(snapshot, groups, pieces)` | Two small connected components at or within 1.2 m, except actual parts of one recorded set-piece placement |
+| `overlaps(snapshot, groups, supports)` | Separately built terrain merging into a piece's parts (`overlap`); also `enemyStarts` |
+| `enemyStarts(snapshot)` | Enemies starting inside terrain (`enemy-start`) |
+| `keepOut(snapshot, groups, pieces, allowed)` | External terrain entering a piece's deliberately reserved bounds (`keep-out`) |
+| `ventShafts(snapshot, groups)` | Non-illusion terrain above an external draft's trigger region, below its first launch event's apex (`vent-shaft`) |
+| `crampedColliders(snapshot, groups, pieces)` | Two small connected components at or within 1.2 m, except actual parts of one recorded set-piece placement (`cramped`) |
 | `standPoints(snapshot, groups, reach)` | Advisory sampled eligible resting surfaces with modelled clearance |
 | `reachGraph(snapshot, groups, pieces, links, reach, goal)` | Advisory modelled start-to-ending reach, unreached pieces and reachable points with no modelled route to the ending |
-| `reachSuggestions(result)` | Non-blocking suggestions for an unreachable ending, pieces never reached and traps in a `reachGraph` result |
+| `reachSuggestions(result)` | Suggestions for an unreachable ending or goal (`ending-unreachable`), each piece never reached (`unreached-piece`) and each trap (`reach-trap`) in a `reachGraph` result, or for a level with no ending and no goal (`no-reach-target`) |
+| `piecesNeverReached(result, pieces)` | The pieces with places to stand of their own, none of them reached |
 | `budget(snapshot)` | Object counts, collision extent (nullable), mesh kinds and work usage |
+
+### Checking a level without builder records
+
+`checkLevel(level, { reach, goal, setPieces, workLimits?, stands? })` checks a level as the
+Workshop does, without the builder's groups, pieces and links: `enemyStarts`, `ventShafts`,
+`crampedColliders` and the reach model to the level's ending trigger, or without one to `goal`.
+`levelGroups(level, setPieces)` gives its groups and pieces: each placement of a library set piece
+whose ID is in `setPieces`, known by the IDs `placeSetPiece` gives its parts
+(`<piece>-<stamp>-<part>`), is one piece and its own group, which the cramped check exempts; every
+other object is a group of its own. The reach model trusts no piece and follows no designed link;
+it reports pieces never reached. The report is plain data, as a worker posts it:
+`{ findings, reach, work, stopped }`. `reach` summarises the reach model, with every sampled place
+to stand when `stands` is set, or is null when it measured nothing; a level with neither an ending
+nor a goal gets a `no-reach-target` suggestion, and a start with nowhere to stand within
+`anchorRadius` a `no-stand-point` one. When the job's work runs out, `stopped` says where, and the
+findings of the checks before it stand.
 
 `CRAMPED.small` is 1.5 m on a component's longest world-bounds side;
 `CRAMPED.clearance` is 1.2 m, **inclusive**. Small islands in the same ordinary object
@@ -328,9 +358,12 @@ simulation or playability proof.
 Its findings are advisory suggestions only: a conservative geometric model cannot
 prove or disprove physics-based play. Report them with `reachSuggestions(result)` and
 never gate export on ending reachability, unreached pieces or traps. The helper
-requires a `reachGraph` result with the matching `model` label and throws
-`ReachModelError` for a different or missing label. It returns an empty array when
-there are no suggestions.
+requires a `reachGraph` result with the matching `model` label and throws a reach-model
+error for a different or missing label: through the result's own snapshot, `ReachModelError`
+for a kit snapshot, or through its optional second argument, such as the kit's
+`KIT_FAILURES`, when what it was given has no snapshot. It returns an empty array when
+there are no suggestions. Without an ending trigger, reach is measured to `goal`, and the
+result's `target` is `'ending'`, `'goal'` or null.
 
 `reachGraph` and `standPoints` require the **complete caller-supplied** model.
 They do not fill missing fields or merge defaults. `ENGINE_DEFAULT_REACH` explicitly
@@ -384,6 +417,15 @@ Default rock 3 and pot 0.45 give about 49°; rock 0.8 and pot 0.45 give about 31
 so choose a lower modeled slope. Rig length changes `shoulder`, `pull` and `rise`;
 body dimensions also require revising the clearance and transit fields.
 
+`reachForSettings(settings)` makes the model for a game's settings, as the Workshop's level
+checks do: `ENGINE_DEFAULT_REACH`, made for the default rig and grip, with `pull` and `rise`
+changed by as much as the hammer's full reach (`handleLength + maxExtension`) differs from the
+default rig's, keeping their margin below it, `hop` changed in proportion to it, and
+`maxStandSlope` changed by as much as the angle the pot slides at on Rock differs from the
+default grip's. Its body fields, the shoulder among them, stay the default's. `checkReachModel(model)`
+checks a complete model and returns it frozen, and `levelGoal(level)` gives a level's highest
+bonfire, the goal the Workshop measures reach to without an ending trigger.
+
 Eligible edges and circle arcs use the job's nominal sample spacing, with
 `max(1, floor(length / spacing))` divisions, inset endpoints and exact duplicate
 removal. Clearance includes the supporting object: its own cave ceiling blocks a
@@ -404,8 +446,8 @@ but the hut and house roofs, friction slab, tilted slab and scree slope expect m
 
 ## Work budgets and failure
 
-`createCourseJob(engine, { workLimits, standingSampleSpacing })` can override exported
-defaults. `workLimits` may override individual named counters; it is not a reach
+`createCourseJob(engine, { workLimits, standingSampleSpacing })` can override the defaults
+`engine.checks` exports. `workLimits` may override individual named counters; it is not a reach
 model. Limits must be positive safe integers and spacing finite and positive.
 Accounting is **cumulative per job**, including builder bounds, preparation and
 every subsequent check. Use a fresh job for an independent authoring run.
@@ -424,7 +466,9 @@ every subsequent check. Use a fresh job for an independent authoring run.
 changes collision geometry. Inspect `job.work.usage` or `budget(snapshot).work`.
 Exceeding a limit raises `CourseQueryError` with `code: 'QUERY_WORK_LIMIT'` and cause
 `{ counter, requested, limit }`; there is no silent candidate truncation, reduced
-precision, automatic geometry coarsening or partial reach result.
+precision, automatic geometry coarsening or partial reach result. `checkLevel` alone stops
+there and reports it, keeping the findings of the checks before it; the Workshop's level
+checks run it with these default limits.
 
 Level limits still apply: 1,000 terrain objects, 64 distinct collision geometries,
 16 loops per slice or projection, 64 points per loop and 256 points in all. They cannot be raised
@@ -451,7 +495,9 @@ The kit is TypeScript, checked by `tsconfig.scripts.json`. All kit error classes
 extend `CourseError<Code, Cause>`, with `code`, `cause` and `repair`. Capability causes
 name `capability` and optionally retain `detail` or the original loader `failure`.
 Engine art/level/query errors remain their typed causes; classification never parses
-error messages.
+error messages. The engine's job and checks throw through the `CourseFailures` their job was
+created with: the kit's job passes `KIT_FAILURES`, these classes, and the engine's own default
+throws its `CourseCheckError`, with the same codes.
 
 | Error | Code | Cause / repair |
 | --- | --- | --- |

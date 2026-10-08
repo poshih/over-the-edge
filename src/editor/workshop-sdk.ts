@@ -45,6 +45,12 @@ export { AVATAR_MOTION_CONTROLS, AVATAR_MOTION_CONTROL_LIMITS } from './avatar-m
 export type {
   AvatarMotionControl, AvatarMotionControls, AvatarMotionControlSet, AvatarMotionListControl, AvatarMotionNumberControl, AvatarMotionPath,
 } from './avatar-motion-controls';
+export { LEVEL_CHECK_LIMITS, LEVEL_CHECKS, LEVEL_REACH } from './level-check-points';
+export type {
+  LevelCheck, LevelCheckCourse, LevelCheckFinding, LevelCheckInput, LevelCheckReach, LevelReachInput, LevelReachPlan, LevelReachSource,
+} from './level-check-points';
+export { ENGINE_DEFAULT_REACH, levelGoal, reachForSettings } from '../course-checks';
+export type { FindingSeverity, LevelFinding, LevelReachSummary, LevelStand, ReachModel } from '../course-checks';
 export { PLUGIN_DATA_LIMITS } from '../plugin-data';
 export type { PluginData } from '../plugin-data';
 export type { JsonValue } from '../bounded-json';

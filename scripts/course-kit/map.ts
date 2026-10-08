@@ -1,7 +1,7 @@
 // A map of exactly the prepared authored collision, with world coordinates under one SVG transform.
 import { CourseMapError } from './errors.ts';
 import type { CourseSnapshot } from './job.ts';
-import type { reachGraph } from './checks.ts';
+import type { ReachResult } from '../../src/course-checks.ts';
 import type { Bounds } from '../../src/collision-queries.ts';
 export { CourseMapError } from './errors.ts';
 
@@ -10,7 +10,7 @@ export interface MapOptions {
   scale?: number;
   viewport?: Bounds;
   zones?: readonly { name: string; from: number }[];
-  reach?: ReturnType<typeof reachGraph>;
+  reach?: ReachResult;
 }
 export interface MapCrop extends Bounds { name: string; zoom?: number }
 

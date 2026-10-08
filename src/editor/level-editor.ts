@@ -40,6 +40,7 @@ import { createProjectSaveButton } from './project-save';
 import { createReplayViewer } from './replay-viewer';
 import { downloadServerLevel } from './server-levels';
 import { createTriggerEventEditor, describeEvents } from './trigger-inspector';
+import type { LevelChecksState, ShownFinding } from './level-checks';
 import { DRAWING, PolygonDraft } from './polygon-draft';
 import { sectionMarkup, showSection } from './workshop-section';
 import './level-editor.css';
@@ -84,6 +85,11 @@ const DEFAULT_OBJECT_DEPTH = 1.5;
 const WHEEL_LINE_PIXELS = 16;
 /** Vertical pointer distance within which a set piece rests on the terrain top below or above it. */
 const SNAP_PIXELS = 28;
+// The Checks list shows this many findings, and marks the course for as many.
+const CHECK_FINDINGS_SHOWN = 200;
+// A finding's ring on the course, in screen pixels, and how far in picking one zooms at least, in metres of view height.
+const CHECK_MARKER_PIXELS = 9;
+const FOCUS_VIEW_HEIGHT = 24;
 const SET_PIECE_HISTORY = 64;
 /** Decorations nearer the course than this rest on terrain tops while being placed. */
 const DECORATION_SNAP_DEPTH = 20;
@@ -634,6 +640,15 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <button type="button" class="button level-delete">Delete selected object</button>
       </fieldset>
       `)}
+      ${sectionMarkup({ id: 'level-checks', title: 'Checks', hint: 'Placement rules and reach', open: true }, `
+      <div class="level-checks">
+        <p class="level-help level-checks-status" role="status" aria-live="polite"></p>
+        <ol class="level-checks-list" aria-label="Findings"></ol>
+        <p class="level-help">The level is checked once your edits settle, unsaved changes included. Checks never change
+          the level or hold up a save. A problem breaks a placement rule; a suggestion comes from a reach model of the
+          hammer rig and grip in Physics, which cannot prove or disprove play. Pick a finding to show it on the course.</p>
+      </div>
+      `)}
       ${sectionMarkup({ id: 'level-set-pieces', title: 'Set piece library', hint: `${SET_PIECES.length} ready-made obstacles` }, `
       <fieldset class="tuning-group level-set-pieces">
         <legend class="visually-hidden">Set piece library</legend>
@@ -718,6 +733,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <path class="level-drawing-nodes" vector-effect="non-scaling-stroke" />
         <circle class="level-drawing-first" vector-effect="non-scaling-stroke" />
       </g>
+      <g class="level-check-markers"></g>
     </g>
   </svg>`;
   // A canvas sibling stays below the host's interface stacking context, including its toolbar.
@@ -740,6 +756,15 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const board = new LevelBoardView();
   svg.insertBefore(board.root, cameraGroup);
   const entityGizmos = new EntityGizmos(cameraGroup);
+  // Findings mark the course above the gizmos.
+  const checkMarkers = graphic<SVGGElement>('.level-check-markers');
+  cameraGroup.append(checkMarkers);
+  const checksStatus = element<HTMLParagraphElement>(root, '.level-checks-status');
+  const checksList = element<HTMLOListElement>(root, '.level-checks-list');
+  const checksHint = element<HTMLElement>(root, '[data-section="level-checks"] .workshop-section-hint');
+  // The finding picked last, and what the markers were last drawn for, so a draw redraws them only when that changes.
+  let pickedFinding: ShownFinding | null = null;
+  let markedChecks: { readonly state: LevelChecksState; readonly picked: ShownFinding | null; readonly unitsPerPixel: number } | null = null;
   const inspector = element<HTMLFieldSetElement>(root, '.level-inspector');
   const levelScroll = element<HTMLElement>(root, '.level-scroll');
   const propertiesSection = element<HTMLDetailsElement>(root, '[data-section="level-inspector"]');
@@ -1332,6 +1357,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     drawConnections(selected);
     drawSetPieceGhost();
     drawOutline();
+    drawCheckMarkers();
   }
 
   function objectConnections(id: string | null): readonly ConnectionLink[] {
@@ -2295,6 +2321,118 @@ Export the level first if you want to keep them. Continue without saving?`);
     showSection(propertiesSection);
   }
 
+  // Checks: their status, counts in the section's heading, and one entry per finding.
+  function renderChecks(): void {
+    const state = options.checks.state();
+    if (pickedFinding !== null && !state.findings.includes(pickedFinding)) pickedFinding = null;
+    const problems = state.findings.filter((finding) => finding.severity === 'problem').length;
+    const suggestions = state.findings.length - problems;
+    const counts = state.findings.length === 0 ? 'No findings' : [
+      problems === 0 ? '' : `${problems} problem${problems === 1 ? '' : 's'}`,
+      suggestions === 0 ? '' : `${suggestions} suggestion${suggestions === 1 ? '' : 's'}`,
+    ].filter((part) => part !== '').join(', ');
+    const status: string[] = [];
+    if (state.checking) status.push('Checking…');
+    if (state.failure !== null) status.push(state.failure);
+    else if (state.current || state.findings.length > 0) status.push(state.current ? `${counts}.` : `${counts}, before your latest edits.`);
+    if (state.stopped !== null) status.push(`They stopped at their work budget, so the checks after it did not run: ${state.stopped.message}`);
+    checksStatus.textContent = status.join(' ');
+    const hint = state.findings.length === 0 ? 'Placement rules and reach' : counts;
+    if (checksHint.textContent !== hint) {
+      checksHint.textContent = hint;
+      checksHint.title = hint;
+    }
+    checksList.dataset.stale = String(!state.current);
+    const items = state.findings.slice(0, CHECK_FINDINGS_SHOWN).map((finding, index) => {
+      const item = document.createElement('li');
+      item.className = 'level-check';
+      item.dataset.severity = finding.severity;
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'level-check-pick';
+      pick.dataset.finding = String(index);
+      if (finding === pickedFinding) pick.setAttribute('aria-current', 'true');
+      const kind = document.createElement('span');
+      kind.className = 'level-check-kind';
+      kind.textContent = finding.severity === 'problem' ? 'Problem' : 'Suggestion';
+      const message = document.createElement('span');
+      message.className = 'level-check-message';
+      message.textContent = finding.message;
+      pick.append(kind, message);
+      if (finding.source !== null) {
+        const source = document.createElement('span');
+        source.className = 'level-check-source';
+        source.textContent = finding.source;
+        pick.append(source);
+      }
+      item.append(pick);
+      return item;
+    });
+    if (state.findings.length > CHECK_FINDINGS_SHOWN) {
+      const more = document.createElement('li');
+      more.className = 'level-help';
+      more.textContent = `And ${state.findings.length - CHECK_FINDINGS_SHOWN} more, shown once those above are fixed.`;
+      items.push(more);
+    }
+    // Rebuilding the list keeps keyboard focus on the entry in the same place.
+    const focused = document.activeElement instanceof HTMLElement && checksList.contains(document.activeElement)
+      ? document.activeElement.dataset.finding : undefined;
+    checksList.replaceChildren(...items);
+    if (focused !== undefined) {
+      const entries = checksList.querySelectorAll<HTMLButtonElement>('.level-check-pick');
+      (checksList.querySelector<HTMLButtonElement>(`.level-check-pick[data-finding="${focused}"]`) ?? entries[entries.length - 1])
+        ?.focus({ preventScroll: true });
+    }
+  }
+
+  // Shows a finding on the course: centres the view on it, zoomed in at least as far as FOCUS_VIEW_HEIGHT, and selects
+  // the first of its objects the level still has.
+  function pickFinding(finding: ShownFinding): void {
+    pickedFinding = finding;
+    const id = finding.objects.find((candidate) => bounds.has(candidate)) ?? null;
+    const box = id === null ? undefined : bounds.get(id);
+    const at = finding.at ?? (box === undefined ? null : { x: (box.left + box.right) / 2, y: (box.bottom + box.top) / 2 });
+    if (id !== null && level.object(id).kind !== 'decoration') {
+      if (tool !== 'select') chooseTool('select');
+      selectedId = id;
+    }
+    if (at !== null) {
+      replays.stopFollowing();
+      setCamera({ x: at.x, y: at.y, worldHeight: Math.min(camera.state().worldHeight, FOCUS_VIEW_HEIGHT) });
+    }
+    // Marked in place, so the entry keeps its focus.
+    const index = String(options.checks.state().findings.indexOf(finding));
+    for (const pick of checksList.querySelectorAll<HTMLButtonElement>('.level-check-pick')) {
+      if (pick.dataset.finding === index) pick.setAttribute('aria-current', 'true');
+      else pick.removeAttribute('aria-current');
+    }
+    renderControls();
+    draw();
+  }
+
+  // A ring on the course for each placed finding, a constant size on screen; the picked one is larger.
+  function drawCheckMarkers(): void {
+    const state = options.checks.state();
+    const unitsPerPixel = camera.state().worldHeight / Math.max(1, rect.height);
+    const marked = markedChecks;
+    if (marked !== null && marked.state === state && marked.picked === pickedFinding && marked.unitsPerPixel === unitsPerPixel) return;
+    markedChecks = { state, picked: pickedFinding, unitsPerPixel };
+    checkMarkers.dataset.stale = String(!state.current);
+    const rings: SVGCircleElement[] = [];
+    for (const finding of state.findings.slice(0, CHECK_FINDINGS_SHOWN)) {
+      if (finding.at === null) continue;
+      const picked = finding === pickedFinding;
+      const ring = document.createElementNS(SVG_NS, 'circle');
+      ring.setAttribute('class', `level-check-marker${finding.severity === 'problem' ? ' is-problem' : ''}${picked ? ' is-picked' : ''}`);
+      ring.setAttribute('cx', String(finding.at.x));
+      ring.setAttribute('cy', String(finding.at.y));
+      ring.setAttribute('r', String(CHECK_MARKER_PIXELS * (picked ? 1.6 : 1) * unitsPerPixel));
+      ring.setAttribute('vector-effect', 'non-scaling-stroke');
+      rings.push(ring);
+    }
+    checkMarkers.replaceChildren(...rings);
+  }
+
   function hitTest(world: Point): LevelObject | null {
     hitTestCount++;
     const objects = level.definition().objects;
@@ -2719,6 +2857,19 @@ Export the level first if you want to keep them. Continue without saving?`);
   });
   renderMeshes();
   root.inert = true;
+  // One listener for the list, which every check rebuilds.
+  checksList.addEventListener('click', (event) => {
+    const pick = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.level-check-pick') : null;
+    const finding = pick === null ? undefined : options.checks.state().findings[Number(pick.dataset.finding)];
+    if (finding !== undefined) pickFinding(finding);
+  }, listen);
+  const unsubscribeChecks = options.checks.subscribe(() => {
+    renderChecks();
+    // Only the list and the rings, never a full draw: the checks can change while the level tells its listeners of an
+    // edit this editor has yet to hear of, so nothing here may read the selection or the level.
+    if (active && !disposed && rect.width > 0 && rect.height > 0) drawCheckMarkers();
+  });
+  renderChecks();
 
   return {
     preparePlay: prepareLevel,
@@ -2748,6 +2899,7 @@ Export the level first if you want to keep them. Continue without saving?`);
           renderLoadControls();
           renderControls();
           replays.setActive(true);
+          options.checks.setActive(true);
         }
         alignOverlay();
       } else {
@@ -2757,6 +2909,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         }
         active = false;
         replays.setActive(false);
+        options.checks.setActive(false);
         importGeneration++;
         // The hidden canvas never hears these fingers lift.
         touches.clear();
@@ -2806,6 +2959,8 @@ Export the level first if you want to keep them. Continue without saving?`);
       active = false; disposed = true; importGeneration++;
       options.decorations.preview(null);
       replays.dispose();
+      options.checks.setActive(false);
+      unsubscribeChecks();
       events.abort(); resize.disconnect(); unsubscribe(); unsubscribeMeshes();
       camera.set(null);
       bounds.clear();

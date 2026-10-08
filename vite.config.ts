@@ -43,5 +43,7 @@ export default defineConfig(async ({ mode, isPreview }) => {
     // The Workshop's only page. Scanning every HTML file would reach the game-only entry (play/), whose release
     // facets the Workshop refuses.
     optimizeDeps: { entries: ['index.html'] },
+    // Level checks run in a module worker (src/editor/level-checks.ts), bundled as an ES module like the page.
+    worker: { format: 'es' },
   };
 });

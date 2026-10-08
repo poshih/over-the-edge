@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import type { Point } from '../../src/config.ts';
 import { createEngineServer, loadEngineModule } from '../engine-loader.ts';
 import type { EngineModules } from '../engine-loader.ts';
-import { CRAMPED, crampedColliders, ENGINE_DEFAULT_REACH, overlaps, reachGraph, reachSuggestions, ventShafts } from '../course-kit/checks.ts';
 import { loadCourseEngine } from '../course-kit/engine.ts';
 import { CourseError, CourseLevelError } from '../course-kit/errors.ts';
 import { createCourseJob } from '../course-kit/job.ts';
@@ -43,6 +42,7 @@ function selectedCases(args: readonly string[]): readonly CaseName[] {
 }
 
 function checkConstruction(snapshot: CourseSnapshot, benchmark: BenchmarkCase): void {
+  const { ENGINE_DEFAULT_REACH } = snapshot.engine.checks;
   const start = snapshot.level.objects.find((object) => object.kind === 'start');
   ensure(start !== undefined && Math.hypot(start.x - benchmark.ground.x,
     start.y - ENGINE_DEFAULT_REACH.startFootOffset - benchmark.ground.y) <= TOLERANCE,
@@ -73,6 +73,7 @@ function checkConstruction(snapshot: CourseSnapshot, benchmark: BenchmarkCase): 
 }
 
 function checkWorkload(snapshot: CourseSnapshot, benchmark: BenchmarkCase, decorations: DecorationLimits, artLimits: ArtLimits): void {
+  const { CRAMPED } = snapshot.engine.checks;
   const level = snapshot.level, limits = snapshot.engine.level.LEVEL_LIMITS, expected = benchmark.expected;
   const scenery = level.objects.filter((object) => object.kind === 'decoration');
   const keys = new Set(snapshot.solids.map((record) => snapshot.engine.level.geometryKey(record.object)));
@@ -137,8 +138,10 @@ function parseJson(bytes: Uint8Array<ArrayBuffer>): unknown {
 
 function prepareProject(snapshot: CourseSnapshot, benchmark: BenchmarkCase, project: ProjectModule, art: ArtModule, validateModel: ModelValidator): PreparedProject {
   const { ART_LIMITS, artRecord } = art;
+  const { crampedColliders, ENGINE_DEFAULT_REACH, overlaps, reachGraph, reachSuggestions, ventShafts } = snapshot.engine.checks;
   const groups = new Map(snapshot.level.objects.map((object) => [object.id, { group: `${benchmark.name}:${object.id}`, zone: benchmark.name }]));
-  const problems = [...crampedColliders(snapshot, groups, []), ...ventShafts(snapshot, groups), ...overlaps(snapshot, groups)];
+  const problems = [...crampedColliders(snapshot, groups, []), ...ventShafts(snapshot, groups), ...overlaps(snapshot, groups)]
+    .map((finding) => finding.message);
   ensure(problems.length === 0, `${benchmark.name} course-kit geometry checks`, problems.join('\n'));
   checkConstruction(snapshot, benchmark);
   const reach = benchmark.name === 'slices' ? null : reachGraph(snapshot, groups, [], [], ENGINE_DEFAULT_REACH, benchmark.summit);
@@ -146,7 +149,7 @@ function prepareProject(snapshot: CourseSnapshot, benchmark: BenchmarkCase, proj
     const suggestions = reachSuggestions(reach);
     if (suggestions.length > 0) {
       console.warn(`${benchmark.name} reach suggestions (non-blocking): the model cannot prove or disprove physics-based play.`);
-      console.warn(suggestions.join('\n'));
+      console.warn(suggestions.map((finding) => finding.message).join('\n'));
     }
   }
   let pixels = 0;

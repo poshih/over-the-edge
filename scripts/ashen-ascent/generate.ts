@@ -12,7 +12,6 @@ import { CourseBuilder } from '../course-kit/course.ts';
 import { loadCourseEngine } from '../course-kit/engine.ts';
 import { createCourseJob } from '../course-kit/job.ts';
 import { CourseError } from '../course-kit/errors.ts';
-import { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, reachSuggestions, ventShafts } from '../course-kit/checks.ts';
 import { courseMap, renderCrops } from '../course-kit/map.ts';
 import { buildCourse } from './zones.ts';
 import type { AscentZone } from './zones.ts';
@@ -28,26 +27,27 @@ try {
   const library = await loadEngineModule(server, '/src/editor/set-pieces.ts');
   const engine = await loadCourseEngine(server);
   const job = createCourseJob(engine);
+  const { budget, crampedColliders, ENGINE_DEFAULT_REACH, keepOut, overlaps, reachGraph, reachSuggestions, ventShafts } = engine.checks;
   const project = await loadEngineModule(server, '/src/project.ts');
   const builder = new CourseBuilder<AscentZone>(library, job);
   const trail = buildCourse(builder);
   const snapshot = job.prepare(builder.level(engine.level.LEVEL_SCHEMA_VERSION));
   const level = snapshot.level;
-  const problems = [];
+  const problems: string[] = [];
   const used = new Set(builder.pieces.map((piece) => piece.id));
   const missing = library.SET_PIECES.filter((piece) => !used.has(piece.id)).map((piece) => piece.id);
   const repeated = builder.pieces.map((piece) => piece.id).filter((id, index, all) => all.indexOf(id) !== index);
   if (missing.length > 0) problems.push(`Set pieces not placed: ${missing.join(', ')}`);
   if (repeated.length > 0) problems.push(`Set pieces placed twice: ${repeated.join(', ')}`);
-  problems.push(...overlaps(snapshot, builder.groups, builder.supports), ...keepOut(snapshot, builder.groups, builder.pieces, builder.allowed),
-    ...ventShafts(snapshot, builder.groups), ...crampedColliders(snapshot, builder.groups, builder.pieces));
+  problems.push(...[...overlaps(snapshot, builder.groups, builder.supports), ...keepOut(snapshot, builder.groups, builder.pieces, builder.allowed),
+    ...ventShafts(snapshot, builder.groups), ...crampedColliders(snapshot, builder.groups, builder.pieces)].map((finding) => finding.message));
   const reach = reachGraph(snapshot, builder.groups, builder.pieces, builder.links, ENGINE_DEFAULT_REACH, { x: trail.x, y: trail.y });
   const totals = budget(snapshot);
   console.log(JSON.stringify({ budget: totals, pieces: builder.pieces.length, reach: { reached: reach.reached, total: reach.total, ending: reach.ending } }));
   const suggestions = reachSuggestions(reach);
   if (suggestions.length > 0) {
     console.warn('Reach suggestions (non-blocking): the model cannot prove or disprove physics-based play.');
-    console.warn(suggestions.join('\n'));
+    console.warn(suggestions.map((finding) => finding.message).join('\n'));
   }
   const zones = builder.zones.map((zone) => ({ name: zone.name, from: zone.from }));
   if (flags.has('--preview')) {

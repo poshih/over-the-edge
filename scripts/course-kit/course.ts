@@ -3,7 +3,7 @@
 // ordinary terrain, triggers, enemies and labels, grouped so the checks can tell them apart.
 import { CourseLevelError, CourseQueryError } from './errors.ts';
 import type { CourseJob } from './job.ts';
-import type { DesignedLink, Groups, PieceRecord } from './checks.ts';
+import type { DesignedLink, PieceRecord } from '../../src/course-checks.ts';
 import type { Bounds } from '../../src/collision-queries.ts';
 import type { Point } from '../../src/config.ts';
 import type { EnemyFacing, EnemySpecies } from '../../src/enemy-types.ts';
@@ -87,7 +87,7 @@ export class CourseBuilder<Zone extends CourseZone = CourseZone> {
   declare readonly job: CourseJob;
   declare readonly objects: LevelObject[];
   declare readonly labels: LevelLabel[];
-  declare readonly groups: Groups;
+  declare readonly groups: Map<string, { group: string; zone: string }>;
   declare readonly pieces: PlacedPiece[];
   declare readonly counters: Map<string, number>;
   declare zone: Zone | null;

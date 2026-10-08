@@ -50,7 +50,7 @@ const say = (text: LoreMessage) => (object: LevelObject): LevelObject => object.
   : object;
 
 // Props are decorations, never terrain: small colliders close together trap the pot and the hammer head
-// (see crampedColliders in scripts/course-kit/checks.ts), and the course passes straight through its props.
+// (see crampedColliders in src/course-checks.ts), and the course passes straight through its props.
 
 // A bonfire landing: a bonfire a fallen player comes back to, whose audio cue sounds as it is reached, and the zone's
 // title the first time the player arrives.

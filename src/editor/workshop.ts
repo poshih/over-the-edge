@@ -1,9 +1,10 @@
 import type { Kinds } from '../plugins/kinds';
 import { checkFacetEntries, Composition, namespaceOf, PluginError } from '../plugins/kernel';
 import { AVATAR_MOTION_CONTROLS } from './avatar-motion-controls';
+import { ENGINE_LEVEL_REACH, LEVEL_CHECKS, LEVEL_REACH } from './level-check-points';
 import type { WorkshopFacet } from './workshop-sdk';
 
-export const WORKSHOP = Object.freeze([AVATAR_MOTION_CONTROLS]);
+export const WORKSHOP = Object.freeze([AVATAR_MOTION_CONTROLS, LEVEL_CHECKS, LEVEL_REACH]);
 
 function checkWorkshop(value: unknown, plugin: string): WorkshopFacet {
   if (typeof value !== 'object' || value === null || Array.isArray(value) || typeof Reflect.get(value, 'start') !== 'function' ||
@@ -26,5 +27,5 @@ export function composeWorkshop(value: unknown, kinds: Kinds) {
         namespaceOf(id), AVATAR_MOTION_CONTROLS.id);
     }
   }
-  return { entries, controls };
+  return { entries, controls, checks: composition.keyed(LEVEL_CHECKS, []), reach: composition.slot(LEVEL_REACH, ENGINE_LEVEL_REACH) };
 }

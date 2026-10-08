@@ -196,11 +196,12 @@ prove or disprove physics-based play.
 | `lore.ts` | Every message title and text |
 | `project.ts` | Theme, HUD, audio cues and enemy art |
 
-The builder, the trail, the pieces' travel paths, the checks, the depth helpers and the map
-come from the [course kit](course-kit.md) in `scripts/course-kit/`. The generator calls
-`loadCourseEngine(server)`, injects it into `createCourseJob(engine)`, builds with
-`CourseBuilder(library, job)`, and calls `job.prepare(level)` once for all checks and
-maps. It passes the complete `ENGINE_DEFAULT_REACH` explicitly, including body
+The builder, the trail, the pieces' travel paths, the depth helpers and the map come from the
+[course kit](course-kit.md) in `scripts/course-kit/`, and the checks from the engine's
+`src/course-checks.ts`, which the kit loads. The generator calls `loadCourseEngine(server)`,
+injects it into `createCourseJob(engine)`, builds with `CourseBuilder(library, job)`, and calls
+`job.prepare(level)` once for all `engine.checks` and maps. It passes the complete
+`ENGINE_DEFAULT_REACH` explicitly, including body
 clearance, transit, start-foot and fall-probe fields; no reach fields default inside
 the check.
 

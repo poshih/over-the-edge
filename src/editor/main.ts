@@ -19,6 +19,7 @@ import { createAppearanceUI } from './appearance-ui';
 import { VISUAL_PARTS } from './appearance-types';
 import { CollisionOverlay } from './collision-overlay';
 import { createLevelEditor } from './level-editor';
+import { createLevelChecks } from './level-checks';
 import { LevelState } from './level-state';
 import { PRACTICES, practiceById } from './practices';
 import type { PracticeId } from './practices';
@@ -98,6 +99,20 @@ let origin: PracticeId | PlayerSpawn = 'start';
 let editing = false;
 // The game's Workshop plugins, which start once the project is open.
 let plugins: WorkshopPluginHost | null = null;
+// The Level tab's checks, which read the game settings and the project only while it is edited.
+const levelChecks = createLevelChecks({
+  level,
+  settings: () => game.settings(),
+  plugins: {
+    checks: () => workshopPlugins.levelChecks(),
+    reach: () => workshopPlugins.levelReach(),
+    failed: (id) => workshopPlugins.failed(id),
+    lastError: (id) => workshopPlugins.lastError(id),
+    fail: (id, error, action) => workshopPlugins.fail(id, error, action),
+    subscribe: (listener) => workshopPlugins.subscribe(() => listener()),
+    project: () => plugins?.projectSnapshot() ?? null,
+  },
+});
 // Media resolve through the open project once it starts.
 let resolveMedia = (source: string): string => source;
 let mediaVersion = 0;
@@ -233,6 +248,8 @@ const ui: GameUi = boot(() => createUI({
     hammerHeads?.refresh();
     jarEditor?.refresh();
     plugins?.settingsChanged();
+    // The reach model comes from the rig and grip.
+    levelChecks.invalidate();
   },
   projectSave: project, serverCopies,
 }), () => {
@@ -337,6 +354,7 @@ const levelEditor = createLevelEditor({
   warnBeforeUnload: !opensProject,
   serverLevels: published === null ? folderLevels : [published, ...folderLevels],
   projectSave: project,
+  checks: levelChecks,
   replays: {
     figure: replayFigure,
     source: {
@@ -545,6 +563,7 @@ if (import.meta.hot) {
     disposal.run(() => unsubscribeOverlay());
     disposal.run(() => unsubscribeCourseLook());
     disposal.run(() => levelEditor.dispose());
+    disposal.run(() => levelChecks.dispose());
     disposal.run(() => spriteEditor.dispose());
     disposal.run(() => appearanceUi.dispose());
     disposal.run(() => appearance.dispose());

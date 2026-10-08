@@ -1,6 +1,7 @@
 import type { Point } from '../config';
 import type { DecorationObject } from '../level';
 import type { MeshTerrain } from '../mesh-collision';
+import type { LevelChecks } from './level-checks';
 import type { LevelState } from './level-state';
 import type { ProjectSaveTarget } from './project-save';
 import type { PlayedVersion } from './project-session';
@@ -59,6 +60,8 @@ export interface LevelEditorOptions {
   projectSave: ProjectSaveTarget & { playedVersion(): PlayedVersion | null };
   // The recordings Replays lists, and the phantom figure it poses over the level.
   replays: { readonly source: ReplaySource; readonly figure: ReplayFigure };
+  // The level's checks, which Checks lists and the course marks while the Level tab is edited.
+  checks: LevelChecks;
   // False when the project warns about leaving instead (a Workshop built with GAME_PROJECT, which
   // keeps its project, level included, in the browser).
   warnBeforeUnload?: boolean;

@@ -95,7 +95,7 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
 | `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, strike, lava, enemy health and extra effects, death pose and screen, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
 | `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
-| `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews and motion controls. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
+| `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews, motion controls and level checks. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
 - A facet imports the engine only through an SDK: its own environment's, or that of an
   environment that runs wherever it does, as a workshop facet may use the kinds and runtime SDKs.
@@ -479,5 +479,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`release.model-failed`](release-plugins.md#library-models) | `MODEL_FAILED` | `release` | List, 32 `(error: Error) => void` | None |
 | [`release.ready`](release-plugins.md#ready-and-the-release-api) | `READY` | `release` | List, 32 `(api: ReleaseApi) => void` | None |
 | [`avatar.motion-controls`](workshop-plugins.md#motion-controls) | `AVATAR_MOTION_CONTROLS` | `workshop` | Keyed, 64 `AvatarMotionControlSet` | None |
+| [`level.checks`](workshop-plugins.md#level-checks) | `LEVEL_CHECKS` | `workshop` | Keyed, 32 `LevelCheck` | None |
+| [`level.reach`](workshop-plugins.md#level-checks) | `LEVEL_REACH` | `workshop` | Slot, `LevelReachSource` | `reachForSettings(settings)`, with the highest bonfire as goal |
 
 The limit of a keyed or list point counts every item, built-ins included.

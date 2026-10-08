@@ -21,10 +21,12 @@ import type { ProjectPlugins, ProjectSession } from './project-session';
 import type { SpriteEditorHandle } from './sprite-editor';
 import type { GameUi, PluginSectionTab, PluginWorkshopTab, WorkshopState } from './ui-types';
 import { apply1, attributed, call0, call1, call2, checkInstance, PluginError, pluginFailure, pluginRefusal } from '../plugins/kernel';
-import type { PluginEntry } from '../plugins/kernel';
+import type { Attributed, PluginEntry } from '../plugins/kernel';
 import type { Kinds } from '../plugins/kinds';
 import { composeWorkshop } from './workshop';
 import type { AvatarMotionControls } from './avatar-motion-controls';
+import { ENGINE_LEVEL_REACH, LEVEL_REACH } from './level-check-points';
+import type { LevelCheck, LevelReachSource } from './level-check-points';
 import { WORKSHOP_PREVIEW_LIMITS } from './workshop-sdk';
 import type {
   WorkshopCharacterEdits, WorkshopEdits, WorkshopGame, WorkshopHost, WorkshopLevelEdits, WorkshopMount,
@@ -50,6 +52,8 @@ type RegistryEvent = { readonly kind: 'replaced' } | { readonly kind: 'failed'; 
 export class WorkshopPluginRegistry implements ProjectPlugins {
   private definitions: ReadonlyMap<string, WorkshopFacet> = new Map();
   private controls: AvatarMotionControls = new Map();
+  private checks: ReadonlyMap<string, LevelCheck> = new Map();
+  private reach: Attributed<LevelReachSource> = attributed(null, LEVEL_REACH.id, ENGINE_LEVEL_REACH);
   private readonly kinds: Kinds;
   private problem: PluginError | null = null;
   private readonly failures = new Set<string>();
@@ -69,6 +73,16 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
 
   motionControls(): AvatarMotionControls {
     return this.controls;
+  }
+
+  // The plugins' rules for the Level tab's checks, by ID.
+  levelChecks(): ReadonlyMap<string, LevelCheck> {
+    return this.checks;
+  }
+
+  // Where the Level tab's reach model comes from: the engine's, or a plugin's that replaced or wrapped it.
+  levelReach(): Attributed<LevelReachSource> {
+    return this.reach;
   }
 
   // Why the facets cannot run at load or after a hot update.
@@ -125,11 +139,15 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
       const composed = composeWorkshop(value, this.kinds);
       this.definitions = new Map(composed.entries.map(({ id, facet }) => [id, facet]));
       this.controls = composed.controls;
+      this.checks = composed.checks;
+      this.reach = composed.reach;
       this.problem = null;
     } catch (error) {
       if (!(error instanceof PluginError)) throw error;
       this.definitions = new Map();
       this.controls = new Map();
+      this.checks = new Map();
+      this.reach = attributed(null, LEVEL_REACH.id, ENGINE_LEVEL_REACH);
       this.problem = error;
       if (error.plugin !== null) this.errors.set(error.plugin, error);
     }
@@ -397,6 +415,11 @@ export class WorkshopPluginHost {
     if (this.told !== null && sameProject(this.told, fingerprints)) return;
     this.told = fingerprints;
     for (const plugin of this.running.values()) for (const listener of plugin.projectListeners) listener();
+  }
+
+  // The open project as plugins read it: host.project.snapshot(), which the Level tab's checks also give plugins' rules.
+  projectSnapshot(): WorkshopProjectSnapshot {
+    return this.snapshot();
   }
 
   private snapshot(): WorkshopProjectSnapshot {

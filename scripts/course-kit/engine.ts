@@ -7,6 +7,8 @@ export interface CourseEngine {
   queries: EngineModules['/src/collision-queries.ts'];
   mesh: EngineModules['/src/mesh-collision.ts'];
   art: EngineModules['/src/art-types.ts'];
+  // The engine's course job and checks (src/course-checks.ts), which the Workshop runs too.
+  checks: EngineModules['/src/course-checks.ts'];
 }
 
 /**
@@ -18,7 +20,7 @@ export async function loadCourseEngine(server: EngineServer): Promise<CourseEngi
     throw new CourseQueryError('QUERY_CAPABILITY_UNSUPPORTED', { capability: 'server.ssrLoadModule' },
       'loadCourseEngine needs the caller\'s Vite module loader.');
   }
-  const paths = ['/src/level.ts', '/src/collision-queries.ts', '/src/mesh-collision.ts', '/src/art-types.ts'] as const;
+  const paths = ['/src/level.ts', '/src/collision-queries.ts', '/src/mesh-collision.ts', '/src/art-types.ts', '/src/course-checks.ts'] as const;
   const load = async <Path extends typeof paths[number]>(path: Path): Promise<EngineModules[Path]> => {
     try {
       return await loadEngineModule(server, path);
@@ -26,6 +28,6 @@ export async function loadCourseEngine(server: EngineServer): Promise<CourseEngi
       throw new CourseQueryError('QUERY_CAPABILITY_UNSUPPORTED', { capability: path, failure: cause }, `Cannot load course engine module ${path}.`);
     }
   };
-  const [level, queries, mesh, art] = await Promise.all([load(paths[0]), load(paths[1]), load(paths[2]), load(paths[3])]);
-  return Object.freeze({ level, queries, mesh, art });
+  const [level, queries, mesh, art, checks] = await Promise.all([load(paths[0]), load(paths[1]), load(paths[2]), load(paths[3]), load(paths[4])]);
+  return Object.freeze({ level, queries, mesh, art, checks });
 }

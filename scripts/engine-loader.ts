@@ -18,6 +18,11 @@ export interface EngineModules {
     'validateProjectManifest' | 'defaultProjectManifest' | 'checkProjectReferences' | 'loadProjectContent' | 'PROJECT_LIMITS'>;
   '/src/trigger-events.ts': Pick<typeof import('../src/trigger-events.ts'), 'ENDING_EVENTS'>;
   '/src/surfaces.ts': Pick<typeof import('../src/surfaces.ts'), 'DEFAULT_SURFACE'>;
+  '/src/course-checks.ts': Pick<typeof import('../src/course-checks.ts'),
+    'createCourseJob' | 'DEFAULT_WORK_LIMITS' | 'DEFAULT_STANDING_SAMPLE_SPACING' | 'CourseCheckError' |
+    'ENGINE_DEFAULT_REACH' | 'POLICY_ALLOWANCES' | 'CRAMPED' | 'overlaps' | 'enemyStarts' | 'keepOut' | 'ventShafts' |
+    'crampedColliders' | 'standPoints' | 'reachGraph' | 'reachSuggestions' | 'piecesNeverReached' | 'budget' |
+    'checkReachModel' | 'reachForSettings' | 'levelGoal' | 'levelGroups' | 'checkLevel'>;
 }
 
 export interface EngineServer {
@@ -55,6 +60,13 @@ const EXPORTS = {
   },
   '/src/trigger-events.ts': { ENDING_EVENTS: 'array' },
   '/src/surfaces.ts': { DEFAULT_SURFACE: 'string' },
+  '/src/course-checks.ts': {
+    createCourseJob: 'function', DEFAULT_WORK_LIMITS: 'object', DEFAULT_STANDING_SAMPLE_SPACING: 'number', CourseCheckError: 'function',
+    ENGINE_DEFAULT_REACH: 'object', POLICY_ALLOWANCES: 'object', CRAMPED: 'object', overlaps: 'function', enemyStarts: 'function',
+    keepOut: 'function', ventShafts: 'function', crampedColliders: 'function', standPoints: 'function', reachGraph: 'function',
+    reachSuggestions: 'function', piecesNeverReached: 'function', budget: 'function', checkReachModel: 'function',
+    reachForSettings: 'function', levelGoal: 'function', levelGroups: 'function', checkLevel: 'function',
+  },
 } as const satisfies { [Path in keyof EngineModules]: { [Name in keyof EngineModules[Path]]: ExportKind<EngineModules[Path][Name]> } };
 
 function moduleExports<Path extends keyof EngineModules>(path: Path, value: unknown): value is EngineModules[Path] {
