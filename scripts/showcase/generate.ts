@@ -15,7 +15,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = new URL('../../levels/showcase.json', import.meta.url);
 const tidy = (value: number) => Number(value.toFixed(4)) + 0;
 
-// The surfaces heading shares Rock's label to fit the engine's 16-label limit.
+// The surfaces heading shares Rock's label, and the two traps share one, to fit the engine's 16-label limit.
 const LABELS = [
   { x: 0, y: 2.2, text: '01 / SHOWCASE - HEAD RIGHT' },
   { x: 6, y: 1.9, text: '02 / SURFACES: ROCK' },
@@ -25,14 +25,14 @@ const LABELS = [
   { x: 20.4, y: 1.9, text: 'RUBBER' },
   { x: 30, y: 2.2, text: '03 / ILLUSION: WAIT; THEN DROP' },
   { x: 37, y: 2.2, text: '04 / BONFIRE: CHECKPOINT' },
-  { x: 45.8, y: 3, text: '05 / TIMER TRAP: SHIELD' },
-  { x: 55.8, y: 3, text: '06 / SWITCH: SHIELD THE BURST' },
-  { x: 64, y: 4.2, text: '07 / AXE: TIME YOUR CROSSING' },
-  { x: 73.5, y: 2.2, text: '08 / SWAMP; LAVA AHEAD - DANGER' },
-  { x: 92, y: 3.5, text: '09 / BIRD, SOLDIER & ARCHER' },
-  { x: 101.5, y: 2.5, text: '10 / UPDRAFT: REACH THE LEDGE' },
-  { x: 109.3, y: 2.8, text: '11 / LIFT: STEP ON; SWITCHES CALL' },
-  { x: 122, y: 8.3, text: '12 / FINISH: TIMER STOPPED' },
+  { x: 50.8, y: 3, text: '05 / TRAPS: TIMER; SWITCH BURST' },
+  { x: 64, y: 4.2, text: '06 / AXE: TIME YOUR CROSSING' },
+  { x: 73.5, y: 2.2, text: '07 / SWAMP; LAVA AHEAD - DANGER' },
+  { x: 92, y: 3.5, text: '08 / BIRD, SOLDIER & ARCHER' },
+  { x: 101.5, y: 2.5, text: '09 / UPDRAFT: REACH THE LEDGE' },
+  { x: 109.3, y: 2.8, text: '10 / LIFT: STEP ON; SWITCHES CALL' },
+  { x: 124.5, y: 8.3, text: '11 / SWITCH BRIDGE; FERRY' },
+  { x: 140, y: 8.3, text: '12 / FINISH: TIMER STOPPED' },
 ] satisfies readonly LevelLabel[];
 
 const SURFACES = [
@@ -68,7 +68,7 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
     { kind: 'start', id: 'player-start', x: 0, y: 0.65, angle: -0.42, reach: 1.7 },
     trigger('welcome', 'Welcome to the showcase', 0.5, 0, 3, 1.8, 'none', [{
       type: 'message', title: 'Special-object showcase',
-      message: 'Head right through twelve labelled stations. Try each surface, let the illusion give way, and light the bonfire. The hammer head can shield trap bolts and arrows. Wait for the axe, keep the pot out of lava, then take the updraft and lift to the finish.',
+      message: 'Head right through twelve labelled stations. Try each surface, let the illusion give way, and light the bonfire. The hammer head can shield trap bolts and arrows. Wait for the axe, keep the pot out of lava, take the updraft and the lift, then raise the bridge and ride the ferry to the finish.',
     }], 'once'),
     decoration('start-lantern', 'lantern-post', 2, 0, 2.6),
 
@@ -139,7 +139,7 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
       x: 112, y: 0, travelX: 0, travelY: 6,
       width: 2.4, height: 0.4, depth: 2.4, speed: 1.2, surface: 'metal',
     },
-    block('lift-top-landing', 113.6, 126, -2, 6.2, { color: 0x71817a }),
+    block('lift-top-landing', 113.6, 120, -2, 6.2, { color: 0x71817a }),
     trigger('lift-bottom-call', 'Call lift to bottom', 109.5, 0, 1.2, 0.5, 'switch', [
       { type: 'move-platform', platform: 'showcase-lift', to: 'start' },
     ]),
@@ -151,26 +151,59 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
       message: 'Step on the lift to ride; landing switches call it. The bottom switch calls it down and the top switch calls it up. Step off briefly before boarding again to return.',
     }], 'once'),
 
-    trigger('finish-flag', 'Showcase complete', 122, 6.2, 2.6, 3, 'flag', [
+    // A switch on either bank raises the bridge flush with the banks, 0.4 m clear of each pit wall, or lowers it again
+    // to 0.6 m above the pit floor; standing on it never moves it. Each switch sits clear of the edge, so the pot is
+    // off the bridge before it can lower it, and the pit is 2 m deep, so a fall can climb back out.
+    trigger('platform-instructions', 'How the bridge and ferry work', 116.9, 6.2, 1.4, 1.8, 'none', [{
+      type: 'message', title: 'Switch bridge and ferry',
+      message: 'Either switch raises the bridge or lowers it again; standing on the bridge never moves it. Step on the ferry to ride across, and step off briefly before boarding again to ride back.',
+    }], 'once'),
+    trigger('bridge-near-switch', 'Raise or lower the bridge', 118.6, 6.2, 1.2, 0.5, 'switch', [
+      { type: 'move-platform', platform: 'switch-bridge', to: 'toggle' },
+    ]),
+    block('bridge-pit-floor', 120, 123, -2, 4.2),
+    {
+      kind: 'platform', id: 'switch-bridge', ride: false,
+      x: 121.5, y: 5, travelX: 0, travelY: 1,
+      width: 2.2, height: 0.4, depth: 2.4, speed: 1, surface: 'wood',
+    },
+    block('bridge-far-bank', 123, 126, -2, 6.2, { color: 0x71817a }),
+    trigger('bridge-far-switch', 'Raise or lower the bridge', 124.8, 6.2, 1.2, 0.5, 'switch', [
+      { type: 'move-platform', platform: 'switch-bridge', to: 'toggle' },
+    ]),
+
+    // The ferry's deck runs flush with both banks, 0.4 m clear of each, 1.6 m above a chasm floor 2 m down.
+    block('ferry-chasm-floor', 126, 134, -2, 4.2),
+    {
+      kind: 'platform', id: 'showcase-ferry', ride: true,
+      x: 127.6, y: 6, travelX: 4.8, travelY: 0,
+      width: 2.4, height: 0.4, depth: 2.4, speed: 1.5, surface: 'wood',
+    },
+    block('finish-ground', 134, 146, -2, 6.2, { color: 0x71817a }),
+
+    trigger('finish-flag', 'Showcase complete', 140, 6.2, 2.6, 3, 'flag', [
       { type: 'stop-timer' },
       { type: 'message', title: 'Showcase complete', message: 'You have tried every special-object station. The timer is stopped; explore back along the route or restart to try them again.' },
     ], 'once'),
-    decoration('finish-banner', 'banner', 124.5, 6.2, 2.4),
+    decoration('finish-banner', 'banner', 142.5, 6.2, 2.4),
   ];
   return { schemaVersion: LEVEL_SCHEMA_VERSION, labels: LABELS, objects };
 }
 
-// The kit indexes terrain, not platforms. Check the lift's entire vertical sweep explicitly.
-function liftClearance(snapshot: CourseSnapshot) {
-  const lift = snapshot.level.objects.find((object) => object.kind === 'platform')!;
-  const bounds = {
-    left: lift.x - lift.width / 2, right: lift.x + lift.width / 2,
-    bottom: lift.y - lift.height / 2, top: lift.y + lift.travelY + lift.height / 2,
-  };
-  const shaft = snapshot.queries.rectangle(bounds);
-  return snapshot.candidates(bounds)
-    .filter((record) => snapshot.queries.intersection(shaft, record.solid) === 'overlapping')
-    .map((record) => `${lift.id} travels through ${record.object.id}`);
+// The kit indexes terrain, not platforms. Check every platform's whole sweep explicitly.
+function platformClearance(snapshot: CourseSnapshot) {
+  return snapshot.level.objects.filter((object) => object.kind === 'platform').flatMap((platform) => {
+    const bounds = {
+      left: Math.min(platform.x, platform.x + platform.travelX) - platform.width / 2,
+      right: Math.max(platform.x, platform.x + platform.travelX) + platform.width / 2,
+      bottom: Math.min(platform.y, platform.y + platform.travelY) - platform.height / 2,
+      top: Math.max(platform.y, platform.y + platform.travelY) + platform.height / 2,
+    };
+    const sweep = snapshot.queries.rectangle(bounds);
+    return snapshot.candidates(bounds)
+      .filter((record) => snapshot.queries.intersection(sweep, record.solid) === 'overlapping')
+      .map((record) => `${platform.id} travels through ${record.object.id}`);
+  });
 }
 
 const server = await createEngineServer(root);
@@ -184,7 +217,7 @@ try {
   const problems = [
     ...[...crampedColliders(snapshot, groups, []), ...ventShafts(snapshot, groups), ...overlaps(snapshot, groups)]
       .map((finding) => finding.message),
-    ...liftClearance(snapshot),
+    ...platformClearance(snapshot),
   ];
   if (problems.length > 0) {
     console.error(`Showcase geometry failed; no level written:\n${problems.join('\n')}`);
@@ -195,7 +228,7 @@ try {
     for (const object of snapshot.level.objects) counts[object.kind] = (counts[object.kind] ?? 0) + 1;
     console.log(`Wrote levels/showcase.json: schema ${snapshot.level.schemaVersion}, ${snapshot.level.objects.length} objects, ${snapshot.level.labels.length} labels.`);
     console.log(Object.entries(counts).map(([kind, count]) => `${kind}: ${count}`).join(', '));
-    console.log('Passed engine validation, cramped colliders, vent shafts, overlaps and lift clearance.');
+    console.log('Passed engine validation, cramped colliders, vent shafts, overlaps and platform clearance.');
   }
 } catch (error) {
   console.error(error);

@@ -277,8 +277,9 @@ open the [full-height map](docs/skyward-ruins-map.svg).
 
 **Showcase** is a short, labelled left-to-right tour of all five terrain surfaces,
 illusion terrain, a bonfire, timer and switch-fired projectile traps, a swinging
-axe, swamp and lava pools, both enemy species, an updraft and a rideable lift with
-landing call switches, ending at a timer-stopping flag. Open **showcase** in
+axe, swamp and lava pools, all three enemy species, an updraft, a rideable lift with
+landing call switches, a bridge that switches raise and lower, and a rideable
+sideways ferry, ending at a timer-stopping flag. Open **showcase** in
 **Workshop / Level / Server levels**, or select `GAME_LEVEL=levels/showcase.json`
 for a game-only build. Regenerate it with `npm run generate:showcase`;
 change the generator, not the generated JSON.
