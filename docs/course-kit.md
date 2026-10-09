@@ -124,15 +124,19 @@ const glb = await readFile('content/terrain/arch.glb');
 const assetId = `asset-${createHash('sha256').update(glb).digest('hex')}`;
 const bytes = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
 const { meshTerrain } = engine.mesh;
-const native = meshTerrain(assetId, bytes);
-// Native dimensions are the GLB's width/height/depth, not its placed world bounds.
+// Turned 0.6 radians about its vertical axis, to show another side.
+const native = meshTerrain(assetId, bytes, 0.6);
+// Native dimensions are the turned GLB's width/height/depth, not its placed world bounds.
 builder.terrain('arch', native.mesh, 6, 12,
   native.width * 1.2, native.height * 0.8, {
     depth: native.depth * 0.9, angle: 0.35, mirror: true, tone: 'rock',
   });
 ```
 
-`job.readMesh(assetId, bytes)` calls the same `meshTerrain` and wraps its `ArtError` as
+`meshTerrain(assetId, bytes, turn)` turns the GLB `turn` radians (-π to π, 0 by default) about
+its vertical axis, +Z swinging toward +X, before measuring it and generating its collision, and
+the mesh entry carries the turn. Built-in shapes and drawn outlines do not turn.
+`job.readMesh(assetId, bytes, turn)` calls the same `meshTerrain` and wraps its `ArtError` as
 `CourseArtError`, preserving the cause and repair advice. Direct `meshTerrain` callers
 receive the engine's typed error. The caller packages the GLB and its artwork manifest;
 the kit does not upload, register or infer assets from model IDs.
@@ -559,6 +563,10 @@ none proves or disproves physics-based play or blocks regeneration.
 
 ## Scenery
 
+`builder.decoration(name, model, x, y, z, height, options)` stands one decoration on (x, y)
+at depth z; its options are `angle` (tilt) and `turn` (about its own vertical axis), both
+radians from -π to π, `mirror` and `tint`. `far` and `landmark` below take the same options,
+and `row` its `turn` and `tint`, alternating mirroring and leaning by itself.
 `sceneryHelpers(theme.camera)` places decorations through a perspective camera,
 framing the engine's course view height from `src/view-frame.json` on the obstacle
 line, z = 0. Orthographic or invalid perspective cameras throw `SceneryCameraError`.

@@ -5,7 +5,7 @@ import type { EnemySpecies } from '../enemy-types';
 import {
   DECORATION_LIMITS, ILLUSION, isDecorationObject, isTerrainObject, isTriggerObject, LEVEL_LIMITS, LevelError,
   meshIsCircle, PLATFORM_LIMITS, ROCK_COLOR, SHAPE_KINDS, objectContains, objectLoops, shapeMesh, shapeOutline, terrainFromOutline, TRIGGER_LIMITS,
-  TRIGGER_MARKERS, validateLevel, validateLevelObject,
+  TRIGGER_MARKERS, turnedTerrainBox, validateLevel, validateLevelObject,
 } from '../level';
 import type {
   AxeObject, BonfireObject, DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, PlatformObject, PoolObject, ShapeKind,
@@ -71,9 +71,14 @@ type Gesture =
   | { kind: 'draw'; pointerId: number; start: Point; samples: Point[]; unitsPerPixel: number }
   // Drags a selected object's tilt handle round its pivot.
   | { kind: 'tilt'; pointerId: number; original: TiltedObject; preview: TiltedObject }
+  // Drags a selected object's turn dial left or right from the turn `from`. A decoration previews its turn; terrain's
+  // draws on the course, its collision baked once the drag ends.
+  | { kind: 'turn'; pointerId: number; start: Point; original: TurnedObject; from: number; turn: number; preview: DecorationObject | null }
   | { kind: PlacementTool; pointerId: number };
 // What tilts in the view plane: terrain and decorations, the start's hammer and a projectile trap's aim.
 type TiltedObject = TerrainObject | DecorationObject | StartObject | ShooterObject;
+// What turns about its own vertical axis: decorations, and terrain a GLB draws (see asTurned).
+type TurnedObject = DecorationObject | TerrainObject;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEGREES = 180 / Math.PI;
@@ -84,6 +89,13 @@ const TILT_STEP = Math.PI / 12;
 // The tilt handle's arm beyond the object, and its knob's radius, in pixels.
 const TILT_ARM_PIXELS = 36;
 const TILT_KNOB_PIXELS = 7;
+// [ and ] turn by this, and Shift snaps a turn drag to it.
+const TURN_STEP = Math.PI / 12;
+// The turn dial's half width and half height, and its gap below the object, in pixels. Dragging its knob a half width
+// turns the object a radian.
+const TURN_DIAL_WIDTH_PIXELS = 28;
+const TURN_DIAL_HEIGHT_PIXELS = 8;
+const TURN_DIAL_GAP_PIXELS = 14;
 const MIN_VIEW_HEIGHT = 3;
 const MAX_VIEW_HEIGHT = LEVEL_LIMITS.coordinate * 4;
 const VIEW_PADDING = 1.2;
@@ -207,6 +219,12 @@ function asTilted(object: LevelObject | null): TiltedObject | null {
 // A start's hammer and a trap aim along their angle; terrain and decorations stand up from theirs.
 function aimsAlongAngle(object: TiltedObject): boolean {
   return object.kind === 'start' || object.kind === 'shooter';
+}
+function asTurned(object: LevelObject | null): TurnedObject | null {
+  return object !== null && (object.kind === 'decoration' || (object.kind === 'terrain' && object.mesh.type === 'asset')) ? object : null;
+}
+function turnOf(object: TurnedObject): number {
+  return object.kind === 'decoration' ? object.turn : object.mesh.type === 'asset' ? object.mesh.turn : 0;
 }
 // `angle` turned into -π to π, where every level angle lies.
 function wrapAngle(angle: number): number {
@@ -472,7 +490,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <p class="level-help">Any GLB places as terrain at its own size. It collides as the shape it declares
           (extras.collision on its scene or a root node: box, ramp, triangle, circle or hexagon), as its outermost
           outline seen along the view when it declares projection, or else as its slice where it meets the obstacle
-          line, the middle of its depth. Imported meshes join Project / Course artwork.</p>
+          line, the middle of its depth. Turning a placed GLB, with [ / ] or the dial under it, bakes its collision again
+          for the turn. Imported meshes join Project / Course artwork.</p>
         <p class="level-help level-palette-label">Start, triggers &amp; enemies</p>
         <div class="level-entity-palette" aria-label="Start and trigger palette">
           <button type="button" class="button level-preset" data-level-tool="start" aria-pressed="false">
@@ -498,6 +517,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <div class="level-field-grid level-fields-angle">
           <label class="level-field" for="level-angle"><span class="level-angle-label">Tilt (°)</span>
             <input id="level-angle" type="number" min="-180" max="180" step="1" inputmode="decimal" />
+          </label>
+          <label class="level-field level-turn-field" for="level-turn">Turn (°)
+            <input id="level-turn" type="number" min="-180" max="180" step="1" inputmode="decimal" />
           </label>
         </div>
         <div class="level-fields-terrain">
@@ -637,7 +659,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <p class="level-help level-decoration-help">Scenery only: decorations never collide. Position is the centre of the
             model's base. Negative depth sets it behind the course, out to ${DECORATION_LIMITS.back} m; positive depth brings it
             up to ${DECORATION_LIMITS.front} m toward the camera, in front of the climb. With a perspective camera distant
-            decorations look smaller and drift slowly by. White tint keeps the model's own colours.</p>
+            decorations look smaller and drift slowly by. Turn spins the model about its own vertical axis to show another
+            side: drag the dial under it left or right, or press [ / ]. White tint keeps the model's own colours.</p>
         </div>
         <div class="level-fields-trigger">
           <div class="level-field-grid">
@@ -754,7 +777,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
   overlay.className = 'level-overlay';
   overlay.hidden = true;
   overlay.tabIndex = 0;
-  overlay.setAttribute('aria-label', 'Level canvas. Drag a shape to move it, or empty space to pan; the middle button pans from anywhere. Plus and minus zoom. V returns to selecting. Enter finishes a drawing; Backspace undoes a stroke. Escape cancels; Delete removes selection.');
+  overlay.setAttribute('aria-label', 'Level canvas. Drag a shape to move it, or empty space to pan; the middle button pans from anywhere. Plus and minus zoom. V returns to selecting. Q and E tilt the selection; [ and ] turn it. Enter finishes a drawing; Backspace undoes a stroke. Escape cancels; Delete removes selection.');
   overlay.innerHTML = `<svg class="level-guides" aria-hidden="true">
     <g class="level-camera-group">
       <path class="level-selection" fill-rule="evenodd" vector-effect="non-scaling-stroke" hidden />
@@ -766,6 +789,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <circle class="level-drawing-first" vector-effect="non-scaling-stroke" />
       </g>
       <g class="level-check-markers"></g>
+      <g class="level-turn-dial" hidden>
+        <ellipse class="level-turn-track" vector-effect="non-scaling-stroke" />
+        <circle class="level-turn-knob" vector-effect="non-scaling-stroke" />
+      </g>
       <g class="level-tilt-handle" hidden>
         <line class="level-tilt-arm" vector-effect="non-scaling-stroke" />
         <circle class="level-tilt-knob" vector-effect="non-scaling-stroke" />
@@ -791,6 +818,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const tiltHandleGroup = graphic<SVGGElement>('.level-tilt-handle');
   const tiltArm = graphic<SVGLineElement>('.level-tilt-arm');
   const tiltKnob = graphic<SVGCircleElement>('.level-tilt-knob');
+  const turnDialGroup = graphic<SVGGElement>('.level-turn-dial');
+  const turnTrack = graphic<SVGEllipseElement>('.level-turn-track');
+  const turnKnob = graphic<SVGCircleElement>('.level-turn-knob');
   const drawing = new PolygonDraft();
   const board = new LevelBoardView();
   svg.insertBefore(board.root, cameraGroup);
@@ -854,6 +884,14 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let meshRequest = 0;
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
+  // GLB terrain turned while its collision bakes for the turn, by object ID, shown on the course meanwhile. A newer turn of
+  // the same object supersedes one still baking; `request` tells them apart.
+  const turning = new Map<string, { readonly turn: number; readonly request: number; readonly assetId: string }>();
+  let turnRequest = 0;
+  // Turns baked while a drag held objects, committed once it ends.
+  const bakedTurns: (() => void)[] = [];
+  // The terrain turns the course was last told to show.
+  let terrainPreview: ReadonlyMap<string, number> = new Map();
   let connections = deriveConnectionLinks(level.definition().objects);
   let connectionDrawing: {
     readonly model: ConnectionLinks; readonly selectedId: string | null; readonly shown: boolean;
@@ -888,6 +926,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let decorationCategory: DecorationCategory = DECORATION_CATEGORIES[0].id;
   let decorationGridCategory: DecorationCategory | null = null;
   let decorationMirror = false;
+  // A decoration about to be placed keeps the turn of the last one placed, as it keeps its mirroring.
+  let decorationTurn = 0;
   let decorationPreview: DecorationObject | null = null;
   const decorationButtons = new Map<string, HTMLButtonElement>();
   const decorationList = select('decoration-model');
@@ -908,11 +948,15 @@ export function createLevelEditor(options: LevelEditorOptions) {
     return { x: client.x - rect.left, y: client.y - rect.top };
   };
   const ghostObject = (): LevelObject | null => {
-    if (gesture?.kind === 'move' || gesture?.kind === 'platform-end' || gesture?.kind === 'tilt') return gesture.preview;
+    if (gesture?.kind === 'move' || gesture?.kind === 'platform-end' || gesture?.kind === 'tilt' || gesture?.kind === 'turn') {
+      return gesture.preview;
+    }
     if (isPlacementTool(tool)) return placement;
     return null;
   };
   const handleRadius = (): number => HANDLE_PIXELS * camera.state().worldHeight / Math.max(1, rect.height);
+  // Whether a drag in progress holds objects, which an edit would end; dragging the view holds none.
+  const holdsObjects = (): boolean => gesture !== null && gesture.kind !== 'pan' && gesture.kind !== 'pinch';
 
   function report(error: unknown): void {
     if (error instanceof LevelError) {
@@ -988,6 +1032,9 @@ Export the level first if you want to keep them. Continue without saving?`);
     element(root, '.level-fields-common').hidden = object === null;
     element(root, '.level-fields-angle').hidden = terrain === null && start === null && decoration === null && shooter === null;
     setText(element(root, '.level-angle-label'), start !== null ? 'Hammer angle (°)' : shooter !== null ? 'Aim (°)' : 'Tilt (°)');
+    const turned = asTurned(object);
+    element(root, '.level-turn-field').hidden = turned === null;
+    if (turned !== null) input('turn').value = String(Number((shownTurn(turned) * DEGREES).toFixed(4)));
     element(root, '.level-fields-decoration').hidden = decoration === null;
     element(root, '.level-fields-terrain').hidden = terrain === null;
     element(root, '.level-fields-start').hidden = start === null;
@@ -1138,16 +1185,19 @@ Export the level first if you want to keep them. Continue without saving?`);
     }
     const help: Record<Tool, string> = {
       select: 'Click / tap to select; drag to move. Drag a selected object\'s round handle to tilt it, or to aim a start or a trap, ' +
-        'Shift snapping to 15°; Q / E tilt or aim it 15° either way. Drag empty space, or drag with the middle button from anywhere, to pan; the ' +
+        'Shift snapping to 15°; Q / E tilt or aim it 15° either way. Turn GLB terrain with the dial under it, dragging left or ' +
+        'right, or with [ / ]; its collision is baked again for the turn. Drag empty space, or drag with the middle button from anywhere, to pan; the ' +
         'wheel and + / − zoom. On a touch screen, drag with two fingers to pan and pinch to zoom. Pick enemies on their bodies, ' +
         'starts and triggers near their centre handle, and liquid pools in their box where no terrain is. Select a trigger to see ' +
         'outgoing links, or a projectile trap or platform for incoming links. Links shows all; drag a trigger\'s link handle onto ' +
         'a trap or platform to connect. Escape cancels a drag without changing the level. Decorations are picked with Select decorations.',
       decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth, or drag empty space to ' +
-        'pan. Drag its round handle to tilt it, Shift snapping to 15°, or press Q / E. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
+        'pan. Drag its round handle to tilt it, or the dial under it left or right to turn it, Shift snapping to 15°; Q / E tilt it ' +
+        'and [ / ] turn it 15°. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
         'Escape cancels. Pan with the middle button or two fingers and zoom as usual; your unfinished outline is kept.',
-      place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it; Q / E tilt it 15°. Escape cancels placement.',
+      place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it; Q / E tilt it 15°, and [ / ] turn a GLB ' +
+        '15°. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger or pressure switch. Select it after placing, then drag its link handle ' +
         'onto a projectile trap or platform to connect; edit or remove links in Trigger events. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
@@ -1157,7 +1207,8 @@ Export the level first if you want to keep them. Continue without saving?`);
       'place-set-piece': 'Click / tap to drop the set piece. Its base rests on the terrain top nearest the pointer; move ' +
         'away from surfaces to place it freely. M mirrors it. Escape cancels.',
       'place-decoration': 'Click / tap to place the decoration. Its base follows the pointer at its depth and rests on nearby ' +
-        'terrain tops when it is close to the course. Set depth, height and tint first if you like. M mirrors it; Q / E tilt it 15°. Escape cancels.',
+        'terrain tops when it is close to the course. Set depth, height and tint first if you like. M mirrors it; Q / E tilt it and ' +
+        '[ / ] turn it 15°. Escape cancels.',
       start: 'Click / tap the new pot-center position. Q / E aim its hammer 15° either way. Escape cancels.',
       player: 'Click / tap where the pot should stand. The player moves there, in the start\'s pose, to test that part of ' +
         'the course; the level\'s start stays where it is. Playtests and resets start there until you use the level start. Escape cancels.',
@@ -1219,16 +1270,19 @@ Export the level first if you want to keep them. Continue without saving?`);
     tool = 'place-decoration'; decorationId = model.id; presetId = null; selectedId = null; drawingCursor = null;
     placement = validateLevelObject({
       kind: 'decoration', id: 'placement-preview', model: model.id, x: view.x, y: view.y - model.height / 2, z: model.z,
-      height: model.height, angle: 0, mirror: decorationMirror, tint: 0xffffff,
+      height: model.height, angle: 0, turn: decorationTurn, mirror: decorationMirror, tint: 0xffffff,
     });
     renderControls();
     draw();
   }
 
-  // The size of a decoration as placed; a model the view does not know yet counts as half as wide as tall.
+  // The size of a decoration as placed, as wide as its turned model looks; a model the view does not know yet counts as
+  // half as wide as tall.
   function decorationSize(object: DecorationObject): { width: number; height: number } {
     const model = options.decorations.size(object.model);
-    return { width: model === null ? object.height / 2 : model.width * object.height / model.height, height: object.height };
+    if (model === null) return { width: object.height / 2, height: object.height };
+    const across = Math.abs(model.width * Math.cos(object.turn)) + Math.abs(model.depth * Math.sin(object.turn));
+    return { width: across * object.height / model.height, height: object.height };
   }
 
   // The decoration's box as it appears on the course plane, or null when it is behind the camera.
@@ -1289,6 +1343,158 @@ Export the level first if you want to keep them. Continue without saving?`);
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, angle: wrapAngle(object.angle + step) }));
     return true;
+  }
+
+  // The object whose turn dial shows: a selected decoration or GLB terrain, in the selecting mode that picks it, as a move,
+  // a tilt or a turn drags it.
+  function turnTarget(): TurnedObject | null {
+    if (gesture?.kind === 'turn') return gesture.original;
+    if (tool !== 'select' && tool !== 'decorate') return null;
+    const dragged = gesture?.kind === 'move' || gesture?.kind === 'tilt' ? gesture.preview : null;
+    const selected = asTurned(dragged !== null && dragged.id === selectedId ? dragged : selectedObject());
+    return selected !== null && (selected.kind === 'decoration') === (tool === 'decorate') ? selected : null;
+  }
+
+  // The turn an object shows: the one its dial is dragged to, the one its collision is baking for, or its own.
+  function shownTurn(object: TurnedObject): number {
+    if (gesture?.kind === 'turn' && gesture.original.id === object.id) return gesture.turn;
+    const pending = turning.get(object.id);
+    // Every placement has the same ID, so a turn baking for one mesh shows only on that mesh.
+    return pending !== undefined && object.kind === 'terrain' && object.mesh.type === 'asset' && object.mesh.assetId === pending.assetId
+      ? pending.turn : turnOf(object);
+  }
+
+  // Where an object's turn dial stands on the course plane: a turntable under it, seen from a little above, its knob where
+  // the object's front faces. Null for a decoration behind the camera.
+  function turnDial(object: TurnedObject): { readonly center: Point; readonly rx: number; readonly ry: number; readonly knob: Point } | null {
+    let anchor: Point;
+    let bottom: number;
+    if (object.kind === 'decoration') {
+      // A decoration stands in its own depth plane, which the course plane shows larger or smaller.
+      const outline = decorationOutline(object);
+      const pivot = camera.projectDepth({ x: object.x, y: object.y }, object.z);
+      if (outline === null || pivot === null) return null;
+      anchor = camera.unproject(pivot);
+      bottom = Math.min(...outline.map((point) => point.y));
+    } else {
+      anchor = object;
+      bottom = objectBounds(object).bottom;
+    }
+    const unitsPerPixel = camera.state().worldHeight / Math.max(1, rect.height);
+    const rx = TURN_DIAL_WIDTH_PIXELS * unitsPerPixel;
+    const ry = TURN_DIAL_HEIGHT_PIXELS * unitsPerPixel;
+    const center = { x: anchor.x, y: bottom - TURN_DIAL_GAP_PIXELS * unitsPerPixel - ry };
+    const turn = shownTurn(object);
+    // A mirrored object is reflected after it turns, so its front swings the other way.
+    const side = object.mirror ? -1 : 1;
+    return { center, rx, ry, knob: { x: center.x + side * rx * Math.sin(turn), y: center.y - ry * Math.cos(turn) } };
+  }
+
+  function drawTurnDial(): void {
+    const target = turnTarget();
+    const dial = target === null ? null : turnDial(target);
+    turnDialGroup.toggleAttribute('hidden', dial === null);
+    if (dial === null) return;
+    turnTrack.setAttribute('cx', String(dial.center.x));
+    turnTrack.setAttribute('cy', String(dial.center.y));
+    turnTrack.setAttribute('rx', String(dial.rx));
+    turnTrack.setAttribute('ry', String(dial.ry));
+    turnKnob.setAttribute('cx', String(dial.knob.x));
+    turnKnob.setAttribute('cy', String(dial.knob.y));
+    turnKnob.setAttribute('r', String(TILT_KNOB_PIXELS * camera.state().worldHeight / Math.max(1, rect.height)));
+    // On the far side of the turntable, the object faces away.
+    turnKnob.classList.toggle('level-turn-behind', dial.knob.y > dial.center.y);
+  }
+
+  // Turns the selection, or the object about to be placed, so its front swings right for a positive `direction` and left
+  // for a negative one, 15° a press, from the turn it shows; false when it does not turn.
+  function turnBy(direction: number): boolean {
+    const object = asTurned(inspectorObject());
+    if (object === null) return false;
+    cancelGesture();
+    const step = direction * TURN_STEP * (object.mirror ? -1 : 1);
+    applyEdit(() => turnObject(object, wrapAngle(shownTurn(object) + step)));
+    return true;
+  }
+
+  // Turns the selection, or the object about to be placed: a decoration at once, GLB terrain once its collision is baked
+  // for the turn.
+  function turnObject(object: TurnedObject, turn: number): void {
+    if (object.kind === 'decoration') {
+      if (tool === 'place-decoration') decorationTurn = turn;
+      commitOrPreview({ ...object, turn });
+    } else {
+      turnTerrain(object, turn);
+    }
+  }
+
+  // Turns GLB terrain to `turn` once the project has baked its collision for it, each axis keeping its scale within the
+  // level's limits, and shows the turn on the course meanwhile. A newer turn of the same object supersedes it.
+  function turnTerrain(object: TerrainObject, turn: number): void {
+    const { mesh } = object;
+    if (mesh.type !== 'asset') return;
+    // The level's own check of the turn, before anything bakes for it.
+    validateLevelObject({ ...object, mesh: { ...mesh, turn } });
+    const request = ++turnRequest;
+    turning.set(object.id, { turn, request, assetId: mesh.assetId });
+    renderControls();
+    draw();
+    void bakeTurn(object, mesh.assetId, mesh.turn, turn, request);
+  }
+
+  // Commits terrain turned from `from` to `to` with the collision baked for it, unless a newer turn of it superseded this
+  // one, once no drag holds objects. When the project refuses the bake, which it reports, or the object has gone or
+  // changed mesh or turn meanwhile, the object stays as it is.
+  async function bakeTurn(object: TerrainObject, assetId: string, from: number, to: number, request: number): Promise<void> {
+    const pending = (): boolean => !disposed && turning.get(object.id)?.request === request;
+    const drop = (): void => {
+      turning.delete(object.id);
+      renderControls();
+      draw();
+    };
+    let baked: [MeshTerrain | Error, MeshTerrain | Error];
+    try {
+      baked = await Promise.all([options.meshes.terrain(assetId, from), options.meshes.terrain(assetId, to)]);
+    } catch (error) {
+      if (pending()) drop();
+      throw error;
+    }
+    const [before, after] = baked;
+    if (before instanceof Error || after instanceof Error) {
+      if (pending()) drop();
+      return;
+    }
+    const commit = (): void => {
+      if (!pending()) return;
+      turning.delete(object.id);
+      // The object as it is now, keeping whatever else changed meanwhile.
+      const held = placement !== null && object.id === placement.id ? placement : bounds.has(object.id) ? level.object(object.id) : null;
+      const terrain = asTerrain(held);
+      if (terrain === null || terrain.mesh.type !== 'asset' || terrain.mesh.assetId !== assetId || terrain.mesh.turn !== from) {
+        renderControls();
+        draw();
+        return;
+      }
+      const next = { ...terrain, mesh: after.mesh, ...turnedTerrainBox(terrain, before, after) };
+      applyEdit(() => {
+        if (held !== placement) {
+          level.upsert(next);
+          return;
+        }
+        placement = validateLevelObject(next);
+        renderControls();
+        draw();
+      });
+    };
+    // An edit would end a drag holding objects, so a turn of a level object waits for it to end; a placement is no edit.
+    if (holdsObjects() && object.id !== PREVIEW_ID) bakedTurns.push(commit);
+    else commit();
+  }
+
+  // Commits the turns baked while a drag held objects, once none does.
+  function settleTurns(): void {
+    if (holdsObjects()) return;
+    for (const commit of bakedTurns.splice(0)) commit();
   }
 
   // The nearest decoration drawn under a client position.
@@ -1447,7 +1653,18 @@ Export the level first if you want to keep them. Continue without saving?`);
     drawSetPieceGhost();
     drawOutline();
     drawCheckMarkers();
+    drawTurnDial();
     drawTiltHandle();
+    // The course shows each terrain turn still baking, and the one a dial drags.
+    const dragged = gesture?.kind === 'turn' && gesture.original.kind === 'terrain' ? gesture : null;
+    if (dragged !== null || turning.size > 0 || terrainPreview.size > 0) {
+      const turns = new Map<string, number>([...turning].map(([id, { turn }]) => [id, turn]));
+      if (dragged !== null) turns.set(dragged.original.id, dragged.turn);
+      if (turns.size !== terrainPreview.size || [...turns].some(([id, turn]) => terrainPreview.get(id) !== turn)) {
+        terrainPreview = turns;
+        options.meshes.preview(turns);
+      }
+    }
   }
 
   function objectConnections(id: string | null): readonly ConnectionLink[] {
@@ -1629,6 +1846,8 @@ Export the level first if you want to keep them. Continue without saving?`);
   function cancelGesture(): void {
     const previous = gesture;
     gesture = null;
+    // After whatever ended the drag, which may be a level edit still being told to its listeners.
+    if (bakedTurns.length > 0) queueMicrotask(settleTurns);
     if (previous === null) {
       draw();
       return;
@@ -1656,6 +1875,8 @@ Export the level first if you want to keep them. Continue without saving?`);
   function chooseTool(next: 'select' | 'decorate' | 'start' | 'player' | 'draw'): void {
     cancelGesture();
     meshRequest++;
+    // A turn baking for the placement this ends is dropped.
+    turning.delete(PREVIEW_ID);
     tool = next;
     drawingCursor = null;
     if (next === 'draw') selectedId = null;
@@ -1700,6 +1921,9 @@ Export the level first if you want to keep them. Continue without saving?`);
   }
 
   function resetSelection(): void {
+    // Turns baking for the level being replaced are dropped.
+    turning.clear();
+    bakedTurns.length = 0;
     cancelGesture();
     drawing.clear();
     drawingCursor = null;
@@ -1878,6 +2102,8 @@ Export the level first if you want to keep them. Continue without saving?`);
 
   function armMesh(id: string, terrain: MeshTerrain): void {
     cancelGesture();
+    // A turn baking for the placement this replaces is dropped.
+    turning.delete(PREVIEW_ID);
     tool = 'place'; presetId = `${MESH_PRESET}${id}`; selectedId = null; drawingCursor = null;
     placement = meshPlacement(terrain.mesh, terrain, camera.state());
     renderControls();
@@ -1907,7 +2133,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       button.append(document.createTextNode(mesh.name));
       button.addEventListener('click', () => {
         if (!active || released(button)) return;
-        void armWhenRead(options.meshes.terrain(mesh.id).then((terrain) => terrain instanceof Error ? terrain : { id: mesh.id, terrain }));
+        void armWhenRead(options.meshes.terrain(mesh.id, 0).then((terrain) => terrain instanceof Error ? terrain : { id: mesh.id, terrain }));
       }, listen);
       return button;
     }));
@@ -2028,6 +2254,13 @@ Export the level first if you want to keep them. Continue without saving?`);
     if (object === null || (object.kind !== 'terrain' && object.kind !== 'start' && object.kind !== 'decoration' && object.kind !== 'shooter')) return;
     cancelGesture();
     applyEdit(() => commitOrPreview({ ...object, angle: input('angle').valueAsNumber / DEGREES }));
+  }, listen);
+  input('turn').addEventListener('change', () => {
+    if (!active) return;
+    const object = asTurned(inspectorObject());
+    if (object === null) return;
+    cancelGesture();
+    applyEdit(() => turnObject(object, input('turn').valueAsNumber / DEGREES));
   }, listen);
   for (const name of ['width', 'height', 'depth'] as const) {
     input(name).addEventListener('change', () => {
@@ -2630,6 +2863,12 @@ Export the level first if you want to keep them. Continue without saving?`);
         const angle = Math.atan2(at.y - original.y, at.x - original.x) - (aimsAlongAngle(original) ? 0 : Math.PI / 2);
         gesture.preview = { ...original, angle: wrapAngle(event.shiftKey ? Math.round(angle / TILT_STEP) * TILT_STEP : angle) };
       }
+    } else if (gesture?.kind === 'turn') {
+      // The object's front follows the pointer left and right, a mirrored object's too.
+      const original = gesture.original;
+      const turn = gesture.from + (original.mirror ? -1 : 1) * (client.x - gesture.start.x) / TURN_DIAL_WIDTH_PIXELS;
+      gesture.turn = wrapAngle(event.shiftKey ? Math.round(turn / TURN_STEP) * TURN_STEP : turn);
+      if (original.kind === 'decoration') gesture.preview = { ...original, turn: gesture.turn };
     } else if (gesture?.kind === 'platform-end') {
       const moved = Math.hypot(client.x - gesture.start.x, client.y - gesture.start.y) >= DRAG_DISTANCE;
       gesture.preview = moved ? {
@@ -2729,10 +2968,19 @@ Export the level first if you want to keep them. Continue without saving?`);
       overlay.focus({ preventScroll: true });
       const tilted = tiltTarget();
       const tilt = tilted === null ? null : tiltHandle(tilted);
+      const turned = turnTarget();
+      const dial = turned === null ? null : turnDial(turned);
       const trigger = tool === 'select' ? asTrigger(selectedObject()) : null;
       const handle = trigger === null ? null : triggerLinkHandle(trigger, camera.state().worldHeight / Math.max(1, rect.height));
       if (tilted !== null && tilt !== null && Math.hypot(world.x - tilt.knob.x, world.y - tilt.knob.y) <= handleRadius()) {
         gesture = { kind: 'tilt', pointerId: event.pointerId, original: tilted, preview: tilted };
+        draw();
+      } else if (turned !== null && dial !== null && Math.hypot(world.x - dial.knob.x, world.y - dial.knob.y) <= handleRadius()) {
+        const from = shownTurn(turned);
+        gesture = {
+          kind: 'turn', pointerId: event.pointerId, start: client, original: turned, from, turn: from,
+          preview: turned.kind === 'decoration' ? turned : null,
+        };
         draw();
       } else if (trigger !== null && handle !== null && Math.hypot(world.x - handle.x, world.y - handle.y) <= handleRadius()) {
         gesture = { kind: 'connect', pointerId: event.pointerId, trigger, world, target: hitConnectionTarget(world) };
@@ -2792,6 +3040,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       if (event.pointerId !== gesture.pointerId && event.pointerId !== gesture.other) return;
       gesture = null;
       if (overlay.hasPointerCapture(event.pointerId)) overlay.releasePointerCapture(event.pointerId);
+      settleTurns();
       return;
     }
     if (gesture.pointerId !== event.pointerId) return;
@@ -2806,6 +3055,8 @@ Export the level first if you want to keep them. Continue without saving?`);
         if (finished.preview !== finished.original) level.upsert(finished.preview);
       } else if (finished.kind === 'platform-end' || finished.kind === 'tilt') {
         if (finished.preview !== finished.original) level.upsert(finished.preview);
+      } else if (finished.kind === 'turn') {
+        if (finished.turn !== finished.from) turnObject(finished.original, finished.turn);
       } else if (finished.kind === 'connect' && inside && finished.target !== null) {
         triggerEvents.appendEvent(finished.trigger.id, finished.target.kind === 'shooter'
           ? { type: 'fire-trap', trap: finished.target.id, shots: 3 }
@@ -2825,7 +3076,13 @@ Export the level first if you want to keep them. Continue without saving?`);
         const object = { ...placement, id: `shape-${crypto.randomUUID()}` };
         level.upsert(object);
         selectedId = object.id;
+        // A turn still baking for the mesh goes on for what it placed.
+        const pending = turning.get(placement.id);
         chooseTool('select');
+        const placed = asTerrain(object);
+        if (pending !== undefined && placed !== null && placed.mesh.type === 'asset' && placed.mesh.assetId === pending.assetId) {
+          turnTerrain(placed, pending.turn);
+        }
       } else if (finished.kind === 'place-trigger' && inside && placement !== null) {
         const object = { ...placement, id: `trigger-${crypto.randomUUID()}` };
         level.upsert(object);
@@ -2858,6 +3115,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       }
     });
     renderControls(); draw();
+    settleTurns();
   }, listen);
   const cancelPointer = (event: PointerEvent): void => {
     if (gesture === null) return;
@@ -2917,6 +3175,10 @@ Export the level first if you want to keep them. Continue without saving?`);
       case 'e':
         if (!tiltBy(event.key.toLowerCase() === 'q' ? TILT_STEP : -TILT_STEP)) return;
         break;
+      case '[':
+      case ']':
+        if (!turnBy(event.key === ']' ? 1 : -1)) return;
+        break;
       case 'enter':
         if (target instanceof Element && target.closest('button, a[href], summary, [role="button"], [role="tab"]')) return;
         if (tool !== 'draw' && drawing.vertices.length === 0) return;
@@ -2967,7 +3229,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     }
     if (selectedId !== null && !bounds.has(selectedId)) selectedId = null;
     // An edit ends gestures on objects; dragging the view goes on.
-    if (gesture !== null && gesture.kind !== 'pan' && gesture.kind !== 'pinch') cancelGesture();
+    if (holdsObjects()) cancelGesture();
     renderControls();
     draw();
   });
@@ -3033,6 +3295,8 @@ Export the level first if you want to keep them. Continue without saving?`);
         setLoading(null);
         decorationPreview = null;
         options.decorations.preview(null);
+        terrainPreview = new Map();
+        options.meshes.preview(terrainPreview);
         camera.set(null);
       }
     },
@@ -3064,6 +3328,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         }),
         decorations: Object.freeze({
           armed: tool === 'place-decoration' ? decorationId : null, category: decorationCategory, mirror: decorationMirror,
+          turn: decorationTurn,
           preview: decorationPreview === null ? null : Object.freeze({ ...decorationPreview }),
         }),
       });
@@ -3074,6 +3339,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       drawing.clear();
       active = false; disposed = true; importGeneration++;
       options.decorations.preview(null);
+      options.meshes.preview(new Map());
       replays.dispose();
       options.checks.setActive(false);
       unsubscribeChecks();

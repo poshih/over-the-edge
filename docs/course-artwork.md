@@ -26,9 +26,10 @@ stores them with the rest of the game. They can also draw [decoration models](#d
 In **Workshop / Level / Meshes**, **Import GLB mesh** adds a GLB to the project and arms
 it: click or tap the canvas to place it. Every mesh the project has gets a button. A mesh
 is placed at its own size in metres, scaled as a whole into the level's size limits when
-it is too large or too small. Then move, rotate, resize and mirror it like any terrain:
-**M** mirrors it while placing, and **Mirror left / right** under **Object properties**
-mirrors it afterwards. **Object properties** also say how it collides. **Project / Course
+it is too large or too small. Then move, tilt, resize and mirror it like any terrain, and
+[turn](#turning-a-mesh) it to show another side: **M** mirrors it while placing, and **Mirror
+left / right** under **Object properties** mirrors it afterwards. **Object properties** also say
+how it collides. **Project / Course
 artwork** lists the meshes; **Remove** takes out one the level no longer places.
 
 The Workshop draws the course as the project's **Course look** says, as its releases do
@@ -37,16 +38,17 @@ and keeps doing so if it cannot load.
 
 Over the [project API](projects.md#api-for-scripts-and-language-models), upload the GLB with
 `POST /api/projects/{id}/art/assets`, then `GET /api/projects/{id}/art/assets/{assetId}/terrain`
-answers with its natural size and the `mesh` entry to place, collision included.
+answers with its natural size and the `mesh` entry to place, collision included; add `?turn=`
+with radians for the mesh [turned](#turning-a-mesh).
 
 ## How a mesh sits on the course
 
 The 2D physics plays out on the obstacle line, z = 0. A terrain object places its mesh
-in a box: `width` × `height` metres, centred on `x`, `y` (Y is up) and turned by `angle`
+in a box: `width` × `height` metres, centred on `x`, `y` (Y is up) and tilted by `angle`
 (radians, counterclockwise), and `depth` metres deep, centred on the obstacle line. The
-game measures the GLB's bounds and maps them onto that box:
+game measures the GLB's bounds, as [turned](#turning-a-mesh), and maps them onto that box:
 
-| GLB bounds | Placed at, before turning |
+| GLB bounds | Placed at, before tilting |
 | --- | --- |
 | minimum/maximum X | `x - width / 2` to `x + width / 2` |
 | minimum/maximum Y | `y - height / 2` to `y + height / 2` |
@@ -55,10 +57,29 @@ game measures the GLB's bounds and maps them onto that box:
 
 glTF's axes are used as-is: +X is right, +Y is up, and +Z faces the camera. The middle
 of a mesh's depth always lies on the obstacle line, which is where its collision comes
-from. `mirror` reflects the mesh, and its collision with it, left to right before it
-turns. One GLB can be placed any number of times, each placement stretched to its own box;
+from. `mirror` reflects the mesh, and its collision with it, left to right after it turns and
+before it tilts. One GLB can be placed any number of times, each placement stretched to its own box;
 its collision is fitted to the same box, so what you see stays what the hammer and pot
 touch.
+
+### Turning a mesh
+
+A placed GLB can turn about its own vertical axis to show another side: the mesh entry's
+`turn`, -π to π radians, swings +Z toward +X. The box then fits the turned mesh's bounds, and
+the collision is the turned mesh's: the shape it declares, fitted to those bounds, or its
+slice or projection, generated again for the turn. Built-in shapes and drawn outlines only
+tilt: they are extrusions, whose slice a turn would stretch.
+
+In the Workshop, select the mesh and drag the dial under it left or right, its knob marking
+where the front faces and Shift snapping to 15°, press **[** / **]** to turn it 15°, or type
+its **Turn** under **Object properties**. The course shows the turn at once while a worker
+generates the turned collision off the page's thread; the turn and its collision then
+change together as one edit, each axis keeping its scale within the level's size limits, so
+the level never holds collision for another turn. A turn baked while you drag something waits
+for the drag to end. A newer turn replaces one still generating, and a turn whose collision
+cannot be generated leaves the mesh as it was and says why. Over the API, read the mesh
+entry at the new turn and multiply `width`, `height` and `depth` by its natural size over the
+one at the old turn, keeping them within the level's size limits and a circle's box square.
 
 ### Declared collision
 
@@ -121,7 +142,8 @@ the same way, within the same limits. Holes stay holes: a gap you can see throug
 arch's opening, stays open. The mesh need not be closed, and its faces may turn either way,
 but a face seen edge-on casts no shadow, so a mesh needs some area facing the camera.
 
-Slices and projections are generated once, when a mesh is imported or its terrain is read.
+Slices and projections are generated once for each turn, when a mesh is imported, its
+terrain is read or a placement turns.
 The collision is stored in the level with each placement, so the physics, phantoms, the
 project server and level-only builds never need the GLB. The Workshop and the project server
 generate them alike, so the same GLB always gets the same collision.
@@ -132,7 +154,7 @@ generate them alike, so the same GLB always gets the same collision.
 {
   "kind": "terrain", "id": "boulder-1",
   "mesh": {
-    "type": "asset", "assetId": "asset-<SHA-256 of the GLB>",
+    "type": "asset", "assetId": "asset-<SHA-256 of the GLB>", "turn": 0,
     "collision": { "type": "slice", "loops": [[{ "x": -0.5, "y": -0.5 }, { "x": 0.5, "y": -0.5 }, { "x": 0, "y": 0.5 }]] }
   },
   "x": 4, "y": 2, "width": 3, "height": 1.6, "angle": 0, "depth": 2, "mirror": false,
@@ -141,8 +163,8 @@ generate them alike, so the same GLB always gets the same collision.
 ```
 
 `mesh` is `{ "type": "shape", "shape": "box" }` for a built-in mesh, `{ "type": "outline",
-"vertices": [...] }` for a drawn shape, or `{ "type": "asset", "assetId", "collision" }`
-for a GLB, whose collision is `{ "type": "box" }` (or another built-in shape), or its
+"vertices": [...] }` for a drawn shape, or `{ "type": "asset", "assetId", "turn", "collision" }`
+for a GLB turned `turn` radians, whose collision, generated for that turn, is `{ "type": "box" }` (or another built-in shape), or its
 generated outlines, `{ "type": "slice", "loops" }` or `{ "type": "projection", "loops" }`.
 Outlines and generated loops lie in the unit box, -0.5 to 0.5 on both axes. A drawn outline is
 simple and counterclockwise. Generated loops never cross or touch, and keep the solid on
@@ -198,8 +220,9 @@ A decoration model keeps its own proportions, unlike terrain meshes, which stret
 their box. The game measures the GLB's bounding box and scales it uniformly so its
 height equals the decoration's height. It stands the centre of the bottom of that box
 on the decoration's position, at the decoration's depth. glTF's axes are used as-is:
-+X is right, +Y is up, and +Z faces the camera. A decoration's rotation turns the
-model in the course plane. Mirror reflects it left to right, and its tint multiplies
++X is right, +Y is up, and +Z faces the camera. A decoration's `turn` turns the model about
+its vertical axis, and its tilt then turns it in the course plane. Mirror reflects it left to
+right after the turn, and its tint multiplies
 the model's material colours, so white leaves them unchanged. The GLB's own materials
 and PBR textures are used, and every copy shares them.
 
@@ -264,7 +287,7 @@ their content is served.
   "format": "over-the-edge-course",
   "schemaVersion": 2,
   "mode": "meshes",
-  "level": { "schemaVersion": 11, "name": "Boulder Run", "labels": [], "objects": [] },
+  "level": { "schemaVersion": 12, "name": "Boulder Run", "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "boulder.glb", "source": "data:model/gltf-binary;base64,..." }
   ],
@@ -289,7 +312,9 @@ distinct GLBs, 64 MiB of GLBs, and 32 million decoded texture pixels. A course p
 can be at most 96 MiB.
 
 Opaque placements share geometry and materials, and are instanced in 32 m spatial
-chunks. Only edited transforms and dirty chunk bounds are uploaded, and fades
+chunks, turned or not: a turn is part of each placement's transform, worked out once per
+mesh and turn, and its normals follow it exactly however the placement is stretched. Only
+edited transforms and dirty chunk bounds are uploaded, and fades
 update only active fading batches. Reusing a GLB never duplicates its textures, and the
 Workshop lets go of a GLB once the level no longer places it. Decoration GLBs are
 instanced like the placeholders they replace (see

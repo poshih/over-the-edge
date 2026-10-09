@@ -26,7 +26,7 @@
     }
   ],
   "level": {
-    "schemaVersion": 11,
+    "schemaVersion": 12,
     "name": "Over the Edge",
     "labels": [
       {
@@ -67,6 +67,7 @@
         "mesh": {
           "type": "asset",
           "assetId": "asset-27683fe7850bd9e1cd84d5bc90cce1371505bb2b41074e997fdbee6d1452ba7e",
+          "turn": 0,
           "collision": {
             "type": "box"
           }
@@ -88,6 +89,7 @@
         "mesh": {
           "type": "asset",
           "assetId": "asset-a600368636f120de3d7c4577150b01646311fa1b6d85d0577d2c81b2a8a191c5",
+          "turn": 0,
           "collision": {
             "type": "slice",
             "loops": [
@@ -189,6 +191,7 @@
         "mesh": {
           "type": "asset",
           "assetId": "asset-f3e6392312b648b966e4bf0a8e750d1e99d4fa16829242a1af2393dcd2ac1534",
+          "turn": 0,
           "collision": {
             "type": "slice",
             "loops": [
@@ -274,6 +277,7 @@
         "mesh": {
           "type": "asset",
           "assetId": "asset-ba49a21aaac97a5cf3874b013b3d9d8044973151684b57ff750bb76ab1339ae3",
+          "turn": 0,
           "collision": {
             "type": "slice",
             "loops": [
@@ -379,6 +383,7 @@
         "mesh": {
           "type": "asset",
           "assetId": "asset-ba49a21aaac97a5cf3874b013b3d9d8044973151684b57ff750bb76ab1339ae3",
+          "turn": 0,
           "collision": {
             "type": "slice",
             "loops": [

@@ -8,13 +8,23 @@
 // mesh centres on the line. The cross-section is rasterized with the nonzero rule, so overlapping parts merge. A
 // projection is instead the mesh's silhouette seen along the view, its parallel projection onto the course plane, so
 // its outermost surface collides wherever it lies in the depth. Either is traced into outlines and simplified to the
-// level's limits.
+// level's limits. A mesh turned about its vertical axis shows another slice and silhouette, so its outlines are baked
+// for its turn: a GLB is read once and baked for each turn asked of it.
 import { ArtError } from './art-types';
 import { validateCourseModel } from './course-art-model';
 import { LEVEL_LIMITS, LevelError, MESH_OUTLINES, polygonArea, SHAPE_KINDS, validateMeshCollision } from './level';
 import type { MeshCollision, MeshOutlines, ShapeKind, TerrainMesh } from './level';
 
-/** A mesh ready to place: its terrain mesh, collision included, and its own size in metres. */
+/** A course GLB read once: its triangles and every vertex in its own space, and the collision it declares. */
+export interface CourseMesh {
+  // x, y, z of each triangle's corners, nine numbers per triangle, wound so their normals face out.
+  readonly corners: Float64Array;
+  // x, y, z of every vertex, used by a triangle or not, which together bound the mesh as three.js measures it.
+  readonly points: Float64Array;
+  readonly declared: ShapeKind | MeshOutlines;
+}
+
+/** A mesh ready to place: its terrain mesh, turned and with its collision, and its own size in metres as turned. */
 export interface MeshTerrain {
   readonly mesh: Extract<TerrainMesh, { type: 'asset' }>;
   readonly width: number;
@@ -192,7 +202,8 @@ function determinant3(m: Matrix): number {
   return m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);
 }
 
-// Every triangle of the default scene in the model's space, as flat coordinates, wound so their normals face out.
+// Every triangle of the default scene in the model's space, as turned, as flat coordinates, wound so their normals face
+// out, and the bounds of every vertex.
 interface Triangles {
   // x, y, z of each corner, nine numbers per triangle.
   readonly corners: Float64Array;
@@ -200,15 +211,14 @@ interface Triangles {
   readonly max: readonly [number, number, number];
 }
 
-function sceneTriangles(json: Gltf, buffers: readonly Uint8Array[]): Triangles {
+function sceneGeometry(json: Gltf, buffers: readonly Uint8Array[]): Pick<CourseMesh, 'corners' | 'points'> {
   const scenes = list(json.scenes, 'scene');
   if (scenes.length === 0) fail('The GLB has no scene.');
   const scene = record(scenes[json.scene === undefined ? 0 : index(json.scene, scenes.length, 'scene')], 'scene');
   const nodes = list(json.nodes, 'node');
   const meshes = list(json.meshes, 'mesh');
   const corners: number[] = [];
-  const min: [number, number, number] = [Infinity, Infinity, Infinity];
-  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  const vertices: number[] = [];
   const visited = new Set<number>();
   const visit = (at: number, parent: Matrix): void => {
     if (visited.has(at)) fail('The GLB\'s node hierarchy repeats a node.');
@@ -229,8 +239,7 @@ function sceneTriangles(json: Gltf, buffers: readonly Uint8Array[]): Triangles {
             const value = world[axis] * px + world[4 + axis] * py + world[8 + axis] * pz + world[12 + axis];
             points[vertex * 3 + axis] = value;
             // Every vertex counts toward the bounds, as three.js measures a mesh, used or not.
-            if (value < min[axis]) min[axis] = value;
-            if (value > max[axis]) max[axis] = value;
+            vertices.push(value);
           }
         }
         const indices = primitive.indices === undefined ? null
@@ -249,8 +258,37 @@ function sceneTriangles(json: Gltf, buffers: readonly Uint8Array[]): Triangles {
     for (const child of list(node.children, 'child')) visit(index(child, nodes.length, 'child node'), world);
   };
   for (const root of list(scene.nodes, 'scene node')) visit(index(root, nodes.length, 'scene node'), identity());
-  if (corners.length === 0 || !min.every(Number.isFinite) || !max.every(Number.isFinite)) fail('The mesh has no triangles in its scene.');
-  return { corners: Float64Array.from(corners), min, max };
+  if (corners.length === 0 || !vertices.every(Number.isFinite)) fail('The mesh has no triangles in its scene.');
+  return { corners: Float64Array.from(corners), points: Float64Array.from(vertices) };
+}
+
+// The mesh turned `turn` radians about its vertical axis, as three.js turns a model (about +y, so +z swings toward +x),
+// with the bounds of every vertex as turned.
+function turnedTriangles(mesh: CourseMesh, turn: number): Triangles {
+  const cos = Math.cos(turn);
+  const sin = Math.sin(turn);
+  const turned = (source: Float64Array): Float64Array => {
+    if (turn === 0) return source;
+    const out = new Float64Array(source.length);
+    for (let at = 0; at < source.length; at += 3) {
+      const x = source[at], z = source[at + 2];
+      out[at] = x * cos + z * sin;
+      out[at + 1] = source[at + 1];
+      out[at + 2] = z * cos - x * sin;
+    }
+    return out;
+  };
+  const points = turned(mesh.points);
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let at = 0; at < points.length; at += 3) {
+    for (let axis = 0; axis < 3; axis++) {
+      const value = points[at + axis];
+      if (value < min[axis]) min[axis] = value;
+      if (value > max[axis]) max[axis] = value;
+    }
+  }
+  return { corners: turned(mesh.corners), min, max };
 }
 
 // The collision the GLB declares on its scene or a root node: a simple shape, or how to generate its outlines, its
@@ -573,19 +611,31 @@ function generated(triangles: Triangles, type: MeshOutlines): MeshCollision {
   return meshOutlines(grid, traceOutlines(grid), type);
 }
 
-/**
- * The terrain mesh of a course GLB, `assetId` its asset ID, with its collision: the shape it declares, or else its
- * slice on the obstacle line or, when it declares it, its projection along the view. Fails with an ArtError naming what
- * to change when the GLB is not a course mesh or has no usable outlines.
- */
-export function meshTerrain(assetId: string, data: ArrayBuffer): MeshTerrain {
+/** Reads a course GLB once, to bake at any turn. Fails with an ArtError naming what to change when it is not a course mesh. */
+export function readCourseMesh(data: ArrayBuffer): CourseMesh {
   validateCourseModel(data);
   const { json, buffers } = readContainer(data);
-  const triangles = sceneTriangles(json, buffers);
+  return Object.freeze({ ...sceneGeometry(json, buffers), declared: declaredCollision(json) });
+}
+
+/**
+ * The terrain mesh of a read course GLB, `assetId` its asset ID, turned `turn` radians about its vertical axis, with its
+ * collision: the shape it declares, whatever the turn, or else the turned mesh's slice on the obstacle line or, when it
+ * declares it, its projection along the view. Fails with an ArtError naming what to change when the turned mesh has no
+ * usable outlines.
+ */
+export function bakeMeshTerrain(assetId: string, mesh: CourseMesh, turn: number): MeshTerrain {
+  if (!Number.isFinite(turn) || Math.abs(turn) > Math.PI) fail('A mesh turns between -π and π radians.');
+  const triangles = turnedTriangles(mesh, turn);
   const [width, height, depth] = [0, 1, 2].map((axis) => triangles.max[axis] - triangles.min[axis]);
   if (Math.min(width, height, depth) < 0.000001) fail('Course meshes need nonzero width, height, and depth.');
-  const declared = declaredCollision(json);
+  const { declared } = mesh;
   const collision = declared === 'slice' || declared === 'projection' ? generated(triangles, declared) : validateMeshCollision({ type: declared });
-  return Object.freeze({ mesh: Object.freeze({ type: 'asset', assetId, collision }), width, height, depth });
+  return Object.freeze({ mesh: Object.freeze({ type: 'asset', assetId, turn, collision }), width, height, depth });
+}
+
+/** The terrain mesh of a course GLB, `assetId` its asset ID, turned `turn` radians: readCourseMesh, then bakeMeshTerrain. */
+export function meshTerrain(assetId: string, data: ArrayBuffer, turn = 0): MeshTerrain {
+  return bakeMeshTerrain(assetId, readCourseMesh(data), turn);
 }
 

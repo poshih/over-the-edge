@@ -22,6 +22,7 @@ import type { LevelDefinition } from '../level';
 import { checkMediaBytes, MEDIA_LIMITS, mediaFile, mediaKind, mediaPathForFile, mediaType } from '../media';
 import { meshTerrain } from '../mesh-collision';
 import type { MeshTerrain } from '../mesh-collision';
+import { MeshBaker } from './mesh-baker';
 import {
   appearanceFile, artFile, checkBundleSize, checkFileBudget, checkProjectReferences, defaultProjectManifest, inSection, isProjectDataError,
   loadProjectContent, packProjectBundle, parseProjectCharacter, PROJECT_FILES, PROJECT_FORMAT, PROJECT_LIMITS,
@@ -328,8 +329,11 @@ export class ProjectSession {
   private readonly lifecycle = new AbortController();
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
   private readonly blobIds = new WeakMap<Blob, number>();
-  // Each course mesh's collision, worked out once: an asset ID names its GLB's bytes, so it never goes stale.
+  // Each course mesh's collision by turn, `${id}:${turn}`, each baked once: an asset ID names its GLB's bytes, so it never
+  // goes stale.
   private readonly meshTerrains = new Map<string, Promise<MeshTerrain>>();
+  // Bakes them off the page's thread.
+  private readonly baker = new MeshBaker();
   private nextBlobId = 1;
   private title = 'Untitled game';
   private theme: GameTheme = DEFAULT_THEME;
@@ -604,16 +608,18 @@ export class ProjectSession {
     return this.artBlob(asset);
   }
 
-  // A course mesh ready to place, with the collision its GLB declares or its slice on the obstacle line; or the refusal,
-  // reported, when its GLB cannot be read or sliced.
-  async courseMeshTerrain(id: string): Promise<MeshTerrain | Error> {
-    let terrain = this.meshTerrains.get(id);
+  // A course mesh turned `turn` radians about its vertical axis, ready to place: its collision is the shape its GLB
+  // declares, or else the turned mesh's slice on the obstacle line or its projection along the view, baked off the page's
+  // thread. Or the refusal, reported, when its GLB cannot be read or those outlines cannot be traced.
+  async courseMeshTerrain(id: string, turn: number): Promise<MeshTerrain | Error> {
+    const key = `${id}:${turn}`;
+    let terrain = this.meshTerrains.get(key);
     if (terrain === undefined) {
-      const reading = this.courseMeshBlob(id).then(async (blob) => meshTerrain(id, await blob.arrayBuffer()));
-      // A GLB that could not be read is read again next time.
-      reading.catch(() => { if (this.meshTerrains.get(id) === reading) this.meshTerrains.delete(id); });
-      this.meshTerrains.set(id, reading);
-      terrain = reading;
+      const baking = this.baker.bake(id, async () => (await this.courseMeshBlob(id)).arrayBuffer(), turn);
+      // A bake that failed is tried again next time.
+      baking.catch(() => { if (this.meshTerrains.get(key) === baking) this.meshTerrains.delete(key); });
+      this.meshTerrains.set(key, baking);
+      terrain = baking;
     }
     try {
       return await terrain;
@@ -632,7 +638,7 @@ export class ProjectSession {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const id = `asset-${await sha256Hex(bytes)}`;
       const terrain = meshTerrain(id, bytes.buffer);
-      this.meshTerrains.set(id, Promise.resolve(terrain));
+      this.meshTerrains.set(`${id}:0`, Promise.resolve(terrain));
       const existing = this.art.assets.find((asset) => asset.id === id);
       if (existing !== undefined) return { id, name: existing.name, terrain };
       const name = artName(file.name.replace(/\.glb$/i, '').slice(0, 80) || 'Mesh');
@@ -1145,6 +1151,7 @@ export class ProjectSession {
     if (this.saver !== null) clearInterval(this.saver);
     if (this.copyTimer !== null) clearInterval(this.copyTimer);
     this.copy?.dispose();
+    this.baker.dispose();
     for (const item of this.media.values()) if (item.blob !== null) URL.revokeObjectURL(item.url);
     this.media.clear();
     this.listeners.clear();

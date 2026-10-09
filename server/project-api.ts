@@ -564,15 +564,16 @@ export function createStudioHandler(config: StudioConfig) {
     if (asset === undefined) throw new HttpError(404, 'not-found', 'Unknown course artwork.', { section: 'art' });
     sendFile(context.request, context.response, store.filePath(context.params.id!, artFile(asset.id)), 'model/gltf-binary');
   });
-  // A course mesh as terrain to place: its mesh entry, with the collision its GLB declares or its slice on the obstacle
-  // line, and its own size in metres.
+  // A course mesh as terrain to place, turned ?turn= radians about its vertical axis: its mesh entry, with the collision
+  // its GLB declares or the turned mesh's slice on the obstacle line, and its own size in metres as turned.
   route('GET', '/api/projects/:id/art/assets/:assetId/terrain', async (context) => {
     const { manifest } = await project(context);
     const asset = manifest.art.assets.find((candidate) => candidate.id === context.params.assetId);
     if (asset === undefined) throw new HttpError(404, 'not-found', 'Unknown course artwork.', { section: 'art' });
+    const turn = Number(context.url.searchParams.get('turn') ?? 0);
     const bytes = await store.readBytes(context.params.id!, { path: artFile(asset.id), maxBytes: ART_LIMITS.bytes });
     sendJson(context.response, 200, inSection('art', () =>
-      meshTerrain(asset.id, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)));
+      meshTerrain(asset.id, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, turn)));
   });
   route('DELETE', '/api/projects/:id/art/assets/:assetId', async (context) => {
     await change(context, ['art'], async (manifest) => {

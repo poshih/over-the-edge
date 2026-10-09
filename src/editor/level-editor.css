@@ -365,6 +365,24 @@
   stroke-width: 2;
 }
 
+/* The selection's turn dial: a turntable under it, its knob where the object's front faces, faded when it faces away. */
+.level-turn-track {
+  fill: none;
+  stroke: #075a50;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.level-turn-knob {
+  fill: #075a50;
+  stroke: #f6f4ec;
+  stroke-width: 2;
+}
+
+.level-turn-knob.level-turn-behind {
+  opacity: 0.5;
+}
+
 /* Checks: a ring on the course per finding, red for problems and amber for suggestions. */
 .level-check-marker {
   fill: rgb(196 140 32 / 22%);

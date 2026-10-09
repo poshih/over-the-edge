@@ -342,7 +342,8 @@ const levelEditor = createLevelEditor({
   },
   meshes: {
     list: () => project.courseMeshes(),
-    terrain: (id) => project.courseMeshTerrain(id),
+    terrain: (id, turn) => project.courseMeshTerrain(id, turn),
+    preview: (turns) => courseMeshes.previewTurns(turns),
     add: (file) => project.addCourseMesh(file),
     subscribe: (listener) => project.subscribe((event) => { if (event.kind === 'content') listener(); }),
   },

@@ -104,7 +104,7 @@ export function buildCase(name: CaseName, job: CourseJob, decorations: Decoratio
       objects.push({
         kind: 'decoration', id: `spread-decoration-${index}`, model: repeated[index % repeated.length].model,
         x: cell.x, y: cell.y, z: tidy(-4 - rng() * 4), height: tidy(2 + rng() * 8),
-        angle: 0, mirror: false, tint: 0xffffff,
+        angle: 0, turn: 0, mirror: false, tint: 0xffffff,
       });
     });
     routeRungs = route.length;
@@ -144,7 +144,7 @@ export function buildCase(name: CaseName, job: CourseJob, decorations: Decoratio
         kind: 'decoration', id: `perspective-decoration-${index}`, model: repeated[index % repeated.length].model,
         x: tidy(((index % 24 - 11.5) * 0.5 + (rng() - 0.5) * 0.2) * scale),
         y: tidy(CLIMB_RISE - height / 4 + (rng() - 0.5) * 2 * scale), z, height,
-        angle: 0, mirror: false, tint: 0xffffff,
+        angle: 0, turn: 0, mirror: false, tint: 0xffffff,
       });
     }
     routeRungs = route.length;

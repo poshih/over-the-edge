@@ -17,7 +17,7 @@ import type { Surface } from './surfaces';
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
-export const LEVEL_SCHEMA_VERSION = 11;
+export const LEVEL_SCHEMA_VERSION = 12;
 export const LEVEL_LIMITS = {
   objects: 1000,
   // Distinct collision geometry across a level's terrain: one physics shape and one extruded template each.
@@ -103,8 +103,9 @@ export type TerrainMesh =
   | { readonly type: 'shape'; readonly shape: ShapeKind }
   // A drawn outline extruded, colliding as the outline: counterclockwise, normalized to the unit box.
   | { readonly type: 'outline'; readonly vertices: Outline }
-  // A GLB from the course's meshes, its artwork assets, with the collision it declares or its slice.
-  | { readonly type: 'asset'; readonly assetId: string; readonly collision: MeshCollision };
+  // A GLB from the course's meshes, its artwork assets, turned `turn` radians about its vertical axis, with the collision
+  // it declares or the slice or projection of the turned mesh, baked for that turn (src/mesh-collision.ts).
+  | { readonly type: 'asset'; readonly assetId: string; readonly turn: number; readonly collision: MeshCollision };
 
 export interface TerrainObject {
   readonly kind: 'terrain';
@@ -112,12 +113,12 @@ export interface TerrainObject {
   readonly mesh: TerrainMesh;
   readonly x: number;
   readonly y: number;
-  // The mesh's box: its bounds fill `width` and `height`, and `depth` centred on the obstacle line.
+  // The mesh's box: its bounds, a GLB's as turned, fill `width` and `height`, and `depth` centred on the obstacle line.
   readonly width: number;
   readonly height: number;
   readonly angle: number;
   readonly depth: number;
-  // Reflects the mesh, and with it its collision, left to right before it turns.
+  // Reflects the mesh, and with it its collision, left to right before it tilts by `angle`.
   readonly mirror: boolean;
   // The colour of a built-in mesh or a drawn outline, and of a mesh drawn as its collision in a shapes release.
   readonly color: number;
@@ -165,8 +166,9 @@ export interface EnemyObject extends Readonly<Point> {
   readonly speed: number;
 }
 
-// A model placed for its look alone, by the centre of its base. It is scaled uniformly to `height`,
-// then turned by `angle` and flipped left to right when mirrored; `tint` multiplies its colours.
+// A model placed for its look alone, by the centre of its base. It is turned `turn` radians about its vertical axis,
+// flipped left to right when mirrored, scaled uniformly to `height` and tilted by `angle` in the view plane; `tint`
+// multiplies its colours.
 export interface DecorationObject extends Readonly<Point> {
   readonly kind: 'decoration';
   readonly id: string;
@@ -174,6 +176,7 @@ export interface DecorationObject extends Readonly<Point> {
   readonly z: number;
   readonly height: number;
   readonly angle: number;
+  readonly turn: number;
   readonly mirror: boolean;
   readonly tint: number;
 }
@@ -462,7 +465,7 @@ export function validateTerrainMesh(value: unknown): TerrainMesh {
     return Object.freeze({ type, vertices: polygon(value.vertices) });
   }
   if (type === 'asset') {
-    fields(value, ['type', 'assetId', 'collision'], 'A mesh asset');
+    fields(value, ['type', 'assetId', 'turn', 'collision'], 'A mesh asset');
     let assetId: string;
     try {
       assetId = artId(value.assetId);
@@ -470,7 +473,9 @@ export function validateTerrainMesh(value: unknown): TerrainMesh {
       if (!(error instanceof ArtError)) throw error;
       throw new LevelError('A mesh asset names its GLB as asset-<SHA-256 of the GLB>.');
     }
-    return Object.freeze({ type, assetId, collision: validateMeshCollision(value.collision) });
+    return Object.freeze({
+      type, assetId, turn: number(value.turn, -Math.PI, Math.PI, 'Mesh turn'), collision: validateMeshCollision(value.collision),
+    });
   }
   throw new LevelError('Terrain needs a mesh: a built-in shape, a drawn outline or a mesh asset.');
 }
@@ -515,6 +520,27 @@ export function terrainCollision(object: Pick<TerrainObject, 'mesh' | 'mirror'>)
 // Whether a mesh collides as a true circle, which needs equal width and height.
 export function meshIsCircle(mesh: TerrainMesh): boolean {
   return meshSource(mesh) === 'circle';
+}
+
+/** A mesh's size in metres along each axis. */
+export interface MeshSize {
+  readonly width: number;
+  readonly height: number;
+  readonly depth: number;
+}
+
+/**
+ * The box of terrain whose GLB turns from its own size `from` to its own size `to`, each as turned: each axis keeps its
+ * scale, within the level's size limits, and a circle's box stays square.
+ */
+export function turnedTerrainBox(object: TerrainObject, from: MeshSize, to: MeshSize): MeshSize {
+  const { minimumSize, maximumSize, minimumDepth, maximumDepth } = LEVEL_LIMITS;
+  const fit = (value: number, minimum: number, maximum: number): number =>
+    Math.min(maximum, Math.max(minimum, Number(value.toFixed(4))));
+  let width = fit(object.width * to.width / from.width, minimumSize, maximumSize);
+  let height = fit(object.height * to.height / from.height, minimumSize, maximumSize);
+  if (meshIsCircle(object.mesh)) width = height = Math.max(width, height);
+  return { width, height, depth: fit(object.depth * to.depth / from.depth, minimumDepth, maximumDepth) };
 }
 
 /**
@@ -728,7 +754,7 @@ export function decorationModelId(value: unknown): string {
 }
 
 function validateDecoration(value: unknown): DecorationObject {
-  fields(value, ['kind', 'id', 'model', 'x', 'y', 'z', 'height', 'angle', 'mirror', 'tint'], 'Decoration object');
+  fields(value, ['kind', 'id', 'model', 'x', 'y', 'z', 'height', 'angle', 'turn', 'mirror', 'tint'], 'Decoration object');
   if (typeof value.mirror !== 'boolean') throw new LevelError('Mirror must be enabled or disabled.');
   const tint = number(value.tint, 0, 0xffffff, 'Decoration tint');
   if (!Number.isInteger(tint)) throw new LevelError('Decoration tint must be a whole RGB value.');
@@ -738,7 +764,8 @@ function validateDecoration(value: unknown): DecorationObject {
     y: number(value.y, -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate, 'Decoration Y'),
     z: number(value.z, -DECORATION_LIMITS.back, DECORATION_LIMITS.front, 'Decoration depth'),
     height: number(value.height, DECORATION_LIMITS.minimumHeight, DECORATION_LIMITS.maximumHeight, 'Decoration height'),
-    angle: number(value.angle, -Math.PI, Math.PI, 'Decoration rotation'),
+    angle: number(value.angle, -Math.PI, Math.PI, 'Decoration tilt'),
+    turn: number(value.turn, -Math.PI, Math.PI, 'Decoration turn'),
     mirror: value.mirror, tint,
   });
 }

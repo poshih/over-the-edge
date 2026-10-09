@@ -29,15 +29,19 @@ export interface LevelEditorOptions {
   };
   decorations: {
     // A model's natural size, or null while it is unknown or loading.
-    size: (model: string) => { readonly width: number; readonly height: number } | null;
+    size: (model: string) => { readonly width: number; readonly height: number; readonly depth: number } | null;
     // Shows a placement or drag as a translucent model in the scene, or nothing.
     preview: (object: DecorationObject | null) => void;
   };
   // The project's course meshes, which Level places as terrain.
   meshes: {
     list: () => readonly { readonly id: string; readonly name: string }[];
-    // A mesh ready to place, with its collision; or the refusal, which the project reports.
-    terrain: (id: string) => Promise<MeshTerrain | Error>;
+    // A mesh turned `turn` radians about its vertical axis, ready to place with its collision baked for that turn; or the
+    // refusal, which the project reports.
+    terrain: (id: string, turn: number) => Promise<MeshTerrain | Error>;
+    // Draws each placed terrain object `turns` lists, by ID, at its listed turn before the level holds it, each axis
+    // keeping its scale, until the next call; the rest as the level turns them.
+    preview: (turns: ReadonlyMap<string, number>) => void;
     // Adds a GLB to the project's meshes: it, ready to place, or the refusal, which the project reports.
     add: (file: File) => Promise<{ readonly id: string; readonly terrain: MeshTerrain } | Error>;
     // Calls `listener` whenever the meshes may have changed.

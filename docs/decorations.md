@@ -15,15 +15,18 @@ leave slots that trap the pot and the hammer head.
 
 Open **Workshop / Level / Decoration library**, choose a category and a model, then click or
 tap where its base should stand. Before clicking, **Object properties** shows the model
-about to be placed: set its depth, height, tilt, tint and mirror there, press **M** to
-mirror it, or press **Q** / **E** to tilt it 15° either way. A translucent preview follows the pointer at the chosen depth. Near the course
+about to be placed: set its depth, height, tilt, turn, tint and mirror there, press **M** to
+mirror it, **Q** / **E** to tilt it or **[** / **]** to turn it 15° either way. The next decoration you
+place keeps the turn, as it keeps the mirroring. A translucent preview follows the pointer at the chosen depth. Near the course
 (within 20 m of it) the base rests on the terrain top under the pointer, so graves and
 braziers sit on the ground.
 
 After placing, the Workshop switches to **Select decorations**, with the new decoration
 selected. This tool picks the nearest decoration under the pointer and drags it in its own
 depth plane, so it stays under the pointer however deep it is. Its round handle tilts it about
-its base, Shift snapping to 15°, as **Q** / **E** do; **Delete selected object** or
+its base, Shift snapping to 15°, as **Q** / **E** do. The dial under it, a turntable whose knob
+marks where the model's front faces, turns it as you drag left or right, Shift snapping to 15°,
+as **[** / **]** do; **Delete selected object** or
 the Delete key removes it. Ordinary selecting never picks decorations, so scenery never gets in
 the way of editing the course; click **Select decorations** again to go back to it.
 
@@ -33,7 +36,8 @@ the way of editing the course; click **Select decorations** again to go back to 
 | Depth | Distance behind the [obstacle line](../README.md#obstacle-line) (negative, down to -1000 m) or toward the camera (positive, up to 15 m) |
 | Height | The model is scaled uniformly to this height, 0.1-1000 m |
 | Tilt | Turns the model in the view plane, about its base |
-| Mirror | Flips the model left to right |
+| Turn | Turns the model about its own vertical axis, -180° to 180°, to show another side; 0 is as modelled |
+| Mirror | Flips the model left to right, after it turns |
 | Tint | Multiplies the model's colours; white keeps them |
 
 ## Depth, camera and fog
@@ -124,9 +128,11 @@ A decoration is a level object like terrain or an enemy:
 ```json
 {
   "kind": "decoration", "id": "keep-banner-1", "model": "banner",
-  "x": -12.5, "y": 360, "z": -1.5, "height": 6, "angle": 0, "mirror": false, "tint": 16777215
+  "x": -12.5, "y": 360, "z": -1.5, "height": 6, "angle": 0, "turn": 0, "mirror": false, "tint": 16777215
 }
 ```
+
+`angle` (tilt) and `turn` are radians, -π to π.
 
 `model` is a lowercase ID of letters, numbers and single hyphens, up to 40 characters. A
 level may name a model that is neither in the library nor in its course artwork: the

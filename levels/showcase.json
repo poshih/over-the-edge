@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "name": "Showcase",
   "labels": [
     {
@@ -140,6 +140,7 @@
       "z": -0.8,
       "height": 2.6,
       "angle": 0,
+      "turn": 0,
       "mirror": false,
       "tint": 16777215
     },
@@ -302,6 +303,7 @@
       "z": -0.8,
       "height": 1.4,
       "angle": 0,
+      "turn": 0,
       "mirror": false,
       "tint": 16777215
     },
@@ -487,6 +489,7 @@
       "z": -0.8,
       "height": 1.4,
       "angle": 0,
+      "turn": 0,
       "mirror": false,
       "tint": 16777215
     },
@@ -971,6 +974,7 @@
       "z": -0.8,
       "height": 2.4,
       "angle": 0,
+      "turn": 0,
       "mirror": false,
       "tint": 16777215
     }

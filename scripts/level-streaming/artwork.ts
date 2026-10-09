@@ -254,7 +254,7 @@ export function slicedArtwork(job: CourseJob, seed: number, artLimits: ArtLimits
     try {
       const name = `Compound slice ${index + 1}`;
       const built = asset(name, modelGlb(name, geometry, [{ color: color(random(seed ^ index)) }]), null);
-      return { ...built, width, height, centerY, mesh: { type: 'asset', assetId: built.id, collision: { type: 'slice', loops } } };
+      return { ...built, width, height, centerY, mesh: { type: 'asset', assetId: built.id, turn: 0, collision: { type: 'slice', loops } } };
     } finally {
       geometry.dispose();
     }

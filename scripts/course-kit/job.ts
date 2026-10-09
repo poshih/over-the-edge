@@ -54,9 +54,9 @@ export function createCourseJob(engine: CourseEngine, options: JobOptions = {}) 
   const job = engine.checks.createCourseJob(options, KIT_FAILURES);
   return Object.freeze({
     ...job, engine,
-    readMesh(assetId: string, bytes: ArrayBuffer): MeshTerrain {
+    readMesh(assetId: string, bytes: ArrayBuffer, turn = 0): MeshTerrain {
       try {
-        return engine.mesh.meshTerrain(assetId, bytes);
+        return engine.mesh.meshTerrain(assetId, bytes, turn);
       } catch (cause) {
         if (cause instanceof engine.art.ArtError) throw new CourseArtError(assetId, cause);
         if (cause instanceof engine.level.LevelError) throw new CourseLevelError(cause);

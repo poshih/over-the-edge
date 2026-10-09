@@ -733,7 +733,13 @@ the change; releasing commits it. A selected terrain object, decoration, start o
 trap shows a round handle on an arm: drag it to tilt the object in the view plane, or to aim
 the start's hammer or the trap, holding Shift to snap to 15°. **Q** and **E** tilt the
 selection, or the object about to be placed, 15° either way; Object properties calls the angle
-**Tilt**, **Hammer angle** or **Aim**. Drag empty
+**Tilt**, **Hammer angle** or **Aim**. Decorations and GLB terrain also **turn** about their own
+vertical axis to show another side: drag the dial under the selection left or right, its knob
+marking where the front faces and Shift snapping to 15°, press **[** or **]** to turn the
+selection, or the object about to be placed, 15°, or type its **Turn**. A turned GLB's
+collision is generated again for the turn off the page's thread: the course shows the turn at
+once, and the turn and its collision change together a moment later. Built-in shapes and drawn
+outlines only tilt. Drag empty
 space, or drag with the middle button from anywhere, to pan; the wheel and + / - zoom.
 On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
@@ -930,12 +936,13 @@ requested through a user-operated fullscreen control. The Workshop skips every v
 you test (see [Finding Workshop controls](#finding-workshop-controls)); videos play in the
 game-only release.
 
-Level JSON uses **schema version 11**: `{ "schemaVersion", "name", "labels", "objects" }`.
+Level JSON uses **schema version 12**: `{ "schemaVersion", "name", "labels", "objects" }`.
 `name` is the level's name, plain text on one line of 1-80 characters with no control
 characters or spaces around it, or `null` for a level without one; it changes no play.
 Objects are typed terrain, start, trigger, enemy, decoration, bonfire, projectile trap
 (`shooter`), swinging axe (`axe`), liquid pool (`pool`) and platform objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`,
-`ice` and `rubber`.
+`ice` and `rubber`. Decorations and GLB terrain meshes have a `turn`, -π to π radians about their
+own vertical axis; a mesh's collision is generated for its turn.
 A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
 Files in any other version are rejected, not converted.
 

@@ -37,7 +37,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | Section | Stored in | Contents |
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
-| `level` | `level.json` | Level JSON, schema 11, as exported from Workshop / Level, with the level's name or `null` |
+| `level` | `level.json` | Level JSON, schema 12, as exported from Workshop / Level, with the level's name or `null` |
 | `settings` | `project.json` | Game-settings profile, schema 20: physics (including health, invulnerability, bonfire lighting and burn time, hurt box, knockback, hammer damage, enemy rules and archers' arrows, downswing boost, each material's friction and bounciness, and the jar's side friction), hammer rig (handle length, maximum extension, minimum reach, the default hammer's head outline and the jar's collision outline), cursor target and death wait/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
@@ -121,7 +121,7 @@ files as base64 data URLs:
   "schemaVersion": 20,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 11, "name": null, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 12, "name": null, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }
@@ -463,7 +463,7 @@ Conventions:
 | GET, POST | `/api/projects/{id}/level/versions/{version}/phantoms?session=&clip=` | List or store recordings played on a version |
 | GET, DELETE | `/api/projects/{id}/level/versions/{version}/phantoms/{name}` | One recording |
 | POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB; returns its asset ID |
-| GET | `/api/projects/{id}/art/assets/{assetId}/terrain` | The GLB as terrain to place: its natural size and its `mesh` entry, with the collision it declares, or its slice or projection |
+| GET | `/api/projects/{id}/art/assets/{assetId}/terrain?turn=` | The GLB as terrain to place, turned `turn` radians about its vertical axis (0 by default): its natural size as turned and its `mesh` entry, with the collision it declares, or its turned slice or projection |
 | GET, PUT, DELETE | `/api/projects/{id}/appearance/{part}/model?name=` | A part's GLB |
 | GET, PATCH, DELETE | `/api/projects/{id}/appearance/{part}` | A part's name and alignment |
 | GET, PUT, DELETE | `/api/projects/{id}/models/{part}/{model}/model?name=&settings=` | A library GLB for `avatar`, `hammer` or `pot`, adding or replacing its entry |
@@ -502,6 +502,9 @@ curl -s -X POST localhost:5181/api/projects/night-climb/level/objects $H -d "{
   \"kind\":\"terrain\",\"id\":\"boulder-1\",\"mesh\":$MESH,\"x\":6,\"y\":1,\"width\":3,\"height\":2,
   \"angle\":0,\"depth\":2,\"mirror\":false,\"color\":7438714,\"illusion\":false,\"surface\":\"rock\"}"
 ```
+
+Read the terrain with `?turn=0.6` for the mesh turned 0.6 radians about its vertical axis, to
+show another side (see [turning a mesh](course-artwork.md#turning-a-mesh)).
 
 An open Workshop page shows each change within two seconds.
 

@@ -60,7 +60,7 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
   });
   const decoration = (id: string, model: string, x: number, y: number, height: number): DecorationObject => ({
     kind: 'decoration', id, model, x, y, z: -0.8,
-    height, angle: 0, mirror: false, tint: 0xffffff,
+    height, angle: 0, turn: 0, mirror: false, tint: 0xffffff,
   });
 
   const objects: LevelObject[] = [

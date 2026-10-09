@@ -4,7 +4,7 @@ import {
 import type { BufferGeometry, Material } from 'three';
 import { ART_LIMITS, ArtError } from './art-types';
 import type { ArtMode } from './art-types';
-import { ILLUSION, LEVEL_LIMITS } from './level';
+import { ILLUSION, LEVEL_LIMITS, turnedTerrainBox } from './level';
 import type { TerrainEvent, TerrainObject } from './level';
 import { markInstanceSlot } from './instancing';
 import { OBSTACLE_LINE } from './obstacle-line';
@@ -17,10 +17,22 @@ import { validateCourseModel } from './course-art-model';
 import type { DecorationMesh } from './decoration-view';
 
 interface Primitive { geometry: BufferGeometry; material: Material | Material[] }
+// A mesh turned about its vertical axis and fitted to the bounds of every turned vertex, as its collision is baked
+// (src/mesh-collision.ts).
+interface Turned {
+  // Its own size as turned.
+  readonly size: Vector3;
+  // What takes the unit box, as the templates fit the mesh to it, to the unit box of the turned mesh, plain and for
+  // mirrored templates, which are reflected, so their fit is reflected on both sides; null for no turn.
+  readonly plain: Matrix4 | null;
+  readonly mirrored: Matrix4 | null;
+}
 interface Asset {
   model: LoadedVisual;
   // Its geometry fitted to the unit box, plain and mirrored.
   templates: Map<boolean, Primitive[]>;
+  // The mesh by turn, each worked out once.
+  turns: Map<number, Turned>;
   // The asset as a decoration model, built when a decoration first draws it.
   decoration: DecorationMesh | null;
   readonly decorationMirrors: Set<BufferGeometry>;
@@ -71,6 +83,28 @@ function bake(node: Mesh, transform: Matrix4): BufferGeometry {
   return geometry;
 }
 
+// three.js turns an instance's normals as though its matrix never shears, but a turned mesh stretched along the course's
+// axes does, so course meshes turn their normals by the inverse transpose of the instance's matrix instead.
+const EXACT_INSTANCE_NORMALS = `#include <defaultnormal_vertex>
+#ifdef USE_INSTANCING
+  transformedNormal = normalMatrix * ( transpose( inverse( mat3( instanceMatrix ) ) ) * objectNormal );
+  #ifdef FLIP_SIDED
+    transformedNormal = - transformedNormal;
+  #endif
+#endif`;
+const exactlyNormal = new WeakSet<Material>();
+
+function exactNormals(material: Material): Material {
+  if (exactlyNormal.has(material)) return material;
+  exactlyNormal.add(material);
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace('#include <defaultnormal_vertex>', EXACT_INSTANCE_NORMALS);
+  };
+  // A decoration drawing the same GLB may have compiled it already.
+  material.needsUpdate = true;
+  return material;
+}
+
 function disposeAsset(asset: Asset): void {
   for (const primitives of asset.templates.values()) for (const primitive of primitives) primitive.geometry.dispose();
   for (const part of asset.decoration?.parts ?? []) part.geometry.dispose();
@@ -78,8 +112,8 @@ function disposeAsset(asset: Asset): void {
 }
 
 /**
- * Draws the course's meshes: each terrain object whose mesh is a GLB draws that GLB, fitted to its box and mirrored as
- * placed, in place of its collision's extrusion, and decorations may draw GLBs in place of their placeholders. In the
+ * Draws the course's meshes: each terrain object whose mesh is a GLB draws that GLB, turned, fitted to its box and
+ * mirrored as placed, in place of its collision's extrusion, and decorations may draw GLBs in place of their placeholders. In the
  * meshes look it loads each GLB the terrain uses as it first appears, and lets go of one nothing uses any more; terrain
  * keeps drawing as its collision until its GLB loads, or if it cannot, and every terrain object does in the shapes look.
  */
@@ -106,6 +140,8 @@ export class CourseArtView implements SceneLayer {
   private readonly dirty = new Set<Batch>();
   private readonly fading = new Set<Batch>();
   private readonly matrix = new Matrix4();
+  // Terrain objects drawn at turns the level does not hold yet, by ID, while the Workshop bakes their collision.
+  private turnPreviews: ReadonlyMap<string, number> = new Map();
   private readonly unsubscribe: () => void;
   private readonly lifecycle = new AbortController();
   private mode: ArtMode = 'shapes';
@@ -190,7 +226,9 @@ export class CourseArtView implements SceneLayer {
       model.dispose();
       return;
     }
-    this.assets.set(id, { model, pixels, bytes: blob.size, loadMs, templates: new Map(), decoration: null, decorationMirrors: new Set() });
+    this.assets.set(id, {
+      model, pixels, bytes: blob.size, loadMs, templates: new Map(), turns: new Map(), decoration: null, decorationMirrors: new Set(),
+    });
     if (this.mode === 'meshes') for (const state of this.states.values()) if (meshAsset(state.object) === id) this.sync(state);
   }
 
@@ -215,6 +253,20 @@ export class CourseArtView implements SceneLayer {
       });
     }
     return asset.decoration;
+  }
+
+  /**
+   * Draws each GLB terrain object `turns` lists turned about its vertical axis as it lists, instead of as the level turns
+   * it, each axis keeping its scale, until the next call; the rest as the level turns them. The Workshop shows turns this
+   * way while it bakes their collision.
+   */
+  previewTurns(turns: ReadonlyMap<string, number>): void {
+    const previous = this.turnPreviews;
+    this.turnPreviews = new Map(turns);
+    for (const id of new Set([...previous.keys(), ...turns.keys()])) {
+      const entry = previous.get(id) === turns.get(id) ? undefined : this.entries.get(id);
+      if (entry) this.write(entry);
+    }
   }
 
   setMode(mode: ArtMode): void {
@@ -370,7 +422,7 @@ export class CourseArtView implements SceneLayer {
     if (entry?.batch.key === key) {
       const previous = entry.object;
       entry.object = object;
-      if (previous.x !== object.x || previous.y !== object.y || previous.angle !== object.angle ||
+      if (previous.x !== object.x || previous.y !== object.y || previous.angle !== object.angle || previous.mesh !== object.mesh ||
         previous.width !== object.width || previous.height !== object.height || previous.depth !== object.depth) this.write(entry);
       return;
     }
@@ -381,10 +433,10 @@ export class CourseArtView implements SceneLayer {
       const materials = new Map<Material, number>();
       const clones = new Map<Material, Material>();
       const material = (source: Material): Material => {
-        if (fade === null) return source;
+        if (fade === null) return exactNormals(source);
         let clone = clones.get(source);
         if (!clone) {
-          clone = source.clone(); clone.transparent = true; clone.depthWrite = false;
+          clone = exactNormals(source.clone()); clone.transparent = true; clone.depthWrite = false;
           clones.set(source, clone); materials.set(clone, source.opacity);
         }
         return clone;
@@ -442,10 +494,56 @@ export class CourseArtView implements SceneLayer {
     return mesh;
   }
 
+  // The mesh turned `turn` about its vertical axis, worked out once per mesh and turn.
+  private turned(asset: Asset, turn: number): Turned {
+    let turned = asset.turns.get(turn);
+    if (turned !== undefined) return turned;
+    const unturnedSize = asset.model.bounds.getSize(new Vector3());
+    if (turn === 0) {
+      turned = { size: unturnedSize, plain: null, mirrored: null };
+    } else {
+      const rotation = new Matrix4().makeRotationY(turn);
+      const bounds = new Box3();
+      const point = new Vector3();
+      const transform = new Matrix4();
+      asset.model.scene.traverse((node) => {
+        if (!(node instanceof Mesh)) return;
+        const positions = node.geometry.getAttribute('position');
+        transform.multiplyMatrices(rotation, node.matrixWorld);
+        for (let index = 0; index < positions.count; index++) bounds.expandByPoint(point.fromBufferAttribute(positions, index).applyMatrix4(transform));
+      });
+      const size = bounds.getSize(new Vector3());
+      const center = bounds.getCenter(new Vector3());
+      const unturnedCenter = asset.model.bounds.getCenter(new Vector3());
+      const plain = new Matrix4().makeScale(1 / size.x, 1 / size.y, 1 / size.z)
+        .multiply(new Matrix4().makeTranslation(-center.x, -center.y, -center.z))
+        .multiply(rotation)
+        .multiply(new Matrix4().makeTranslation(unturnedCenter.x, unturnedCenter.y, unturnedCenter.z))
+        .multiply(new Matrix4().makeScale(unturnedSize.x, unturnedSize.y, unturnedSize.z));
+      const reflect = new Matrix4().makeScale(-1, 1, 1);
+      turned = { size, plain, mirrored: reflect.clone().multiply(plain).multiply(reflect) };
+    }
+    asset.turns.set(turn, turned);
+    return turned;
+  }
+
   private write(entry: Entry): void {
     const o = entry.object;
+    const asset = o.mesh.type === 'asset' ? this.assets.get(o.mesh.assetId) : undefined;
+    let turn = o.mesh.type === 'asset' ? o.mesh.turn : 0;
+    let { width, height, depth } = o;
+    const shown = this.turnPreviews.get(o.id);
+    if (asset !== undefined && shown !== undefined && shown !== turn) {
+      // The box the turn will have once its collision is baked.
+      const size = (vector: Vector3) => ({ width: vector.x, height: vector.y, depth: vector.z });
+      ({ width, height, depth } = turnedTerrainBox(o, size(this.turned(asset, turn).size), size(this.turned(asset, shown).size)));
+      turn = shown;
+    }
     const c = Math.cos(o.angle), s = Math.sin(o.angle);
-    this.matrix.set(c * o.width, -s * o.height, 0, o.x, s * o.width, c * o.height, 0, o.y, 0, 0, o.depth, OBSTACLE_LINE, 0, 0, 0, 1);
+    this.matrix.set(c * width, -s * height, 0, o.x, s * width, c * height, 0, o.y, 0, 0, depth, OBSTACLE_LINE, 0, 0, 0, 1);
+    const turned = asset === undefined ? null : this.turned(asset, turn);
+    const fit = turned === null ? null : o.mirror ? turned.mirrored : turned.plain;
+    if (fit !== null) this.matrix.multiply(fit);
     for (const mesh of entry.batch.meshes) { mesh.setMatrixAt(entry.slot, this.matrix); markInstanceSlot(mesh.instanceMatrix, entry.slot); }
     this.matrixWrites++;
     this.dirty.add(entry.batch);

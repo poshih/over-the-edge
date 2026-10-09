@@ -77,16 +77,23 @@ function mirroredGeometryFor(object: DecorationObject, model: DecorationMesh): b
   return object.mirror && !model.flatShaded;
 }
 
-/** The transform that stands a model on a decoration's base: moved, turned, and scaled to its height. */
+/**
+ * The transform that stands a model on a decoration's base: turned about its vertical axis, mirrored left to right,
+ * scaled to its height, tilted in the view plane and moved. Mirrored geometry is already reflected, and reflecting
+ * reverses a turn, so it turns the other way.
+ */
 export function decorationMatrix(object: DecorationObject, model: DecorationMesh, target: Matrix4): Matrix4 {
   const scale = object.height / model.height;
   const cosine = Math.cos(object.angle) * scale;
   const sine = Math.sin(object.angle) * scale;
   const flip = object.mirror && model.flatShaded ? -1 : 1;
+  const turn = mirroredGeometryFor(object, model) ? -object.turn : object.turn;
+  const turnCosine = Math.cos(turn);
+  const turnSine = Math.sin(turn);
   return target.set(
-    cosine * flip, -sine, 0, object.x,
-    sine * flip, cosine, 0, object.y,
-    0, 0, scale, object.z,
+    cosine * flip * turnCosine, -sine, cosine * flip * turnSine, object.x,
+    sine * flip * turnCosine, cosine, sine * flip * turnSine, object.y,
+    -scale * turnSine, 0, scale * turnCosine, object.z,
     0, 0, 0, 1,
   );
 }
@@ -167,7 +174,7 @@ export class DecorationView {
   }
 
   /** A model's natural size, or null while it is unknown or loading. */
-  size(model: string): { readonly width: number; readonly height: number } | null {
+  size(model: string): { readonly width: number; readonly height: number; readonly depth: number } | null {
     return this.look(model).mesh;
   }
 
@@ -258,7 +265,8 @@ export class DecorationView {
       const previous = instance.object;
       instance.object = object;
       if (previous.x !== object.x || previous.y !== object.y || previous.z !== object.z ||
-        previous.height !== object.height || previous.angle !== object.angle || previous.mirror !== object.mirror) this.writeMatrix(instance);
+        previous.height !== object.height || previous.angle !== object.angle || previous.turn !== object.turn ||
+        previous.mirror !== object.mirror) this.writeMatrix(instance);
       if (previous.tint !== object.tint) this.writeColor(instance);
       return;
     }

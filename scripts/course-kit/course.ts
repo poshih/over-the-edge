@@ -45,7 +45,7 @@ export interface VentOptions {
   title?: string;
   group?: string;
 }
-export type DecorationOptions = Partial<Pick<DecorationObject, 'angle' | 'mirror' | 'tint'>>;
+export type DecorationOptions = Partial<Pick<DecorationObject, 'angle' | 'turn' | 'mirror' | 'tint'>>;
 export interface PieceOptions {
   mirror?: boolean;
   recolor?: Readonly<Record<number, string>>;
@@ -233,7 +233,8 @@ export class CourseBuilder<Zone extends CourseZone = CourseZone> {
   decoration(name: string, model: string, x: number, y: number, z: number, height: number, options: DecorationOptions = {}) {
     return this.add({
       kind: 'decoration', id: this.id(name), model, x: tidy(x), y: tidy(y), z: tidy(z), height: tidy(height),
-      angle: Math.max(-Math.PI, Math.min(Math.PI, tidy(options.angle ?? 0, 6))), mirror: options.mirror ?? false, tint: options.tint ?? 0xffffff,
+      angle: Math.max(-Math.PI, Math.min(Math.PI, tidy(options.angle ?? 0, 6))),
+      turn: Math.max(-Math.PI, Math.min(Math.PI, tidy(options.turn ?? 0, 6))), mirror: options.mirror ?? false, tint: options.tint ?? 0xffffff,
     }, `${this.zone!.code}:scenery`);
   }
 
