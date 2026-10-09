@@ -102,12 +102,15 @@ export function gameRelease(options: {
   };
   const code = (name: ModuleName): string => {
     const { course, content } = current();
-    if (name === 'content') return `export default ${JSON.stringify({ contentUrl: options.contentUrl, ...content.pins })};`;
+    if (name === 'content') {
+      return `export default ${JSON.stringify({ contentUrl: options.contentUrl, ...content.pins })};\n` +
+        `export const course = ${JSON.stringify(course)};`;
+    }
     if (name === 'phantoms') {
       // Phantoms run with a backend, bundled recordings, or both.
       if (options.phantomsUrl === null && !content.uses.phantoms) return 'export default null;';
       return `import { startPhantoms } from ${JSON.stringify(runtime('phantoms.ts'))};\n` +
-        `export default { url: ${JSON.stringify(options.phantomsUrl)}, course: ${JSON.stringify(course)}, start: startPhantoms };`;
+        `export default { url: ${JSON.stringify(options.phantomsUrl)}, start: startPhantoms };`;
     }
     return content.uses[name] ? LOADERS[name] : 'export default null;';
   };

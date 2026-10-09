@@ -11,33 +11,15 @@ import { attributed, call0, call1, call2, invalidResult } from './plugins/kernel
 import type { Attributed } from './plugins/kernel';
 import { Disposal } from './disposal';
 
-const CHARACTER_KEY = 'over-the-edge:play:character';
 const CHARACTER_LABELS: Readonly<Record<CharacterRiggingType, string>> = {
   'sprite-2d': '2D', 'model-3d': '3D', 'avatar-3d': '3D',
 };
 
 export interface PlayCharacterChoice {
   readonly types: readonly CharacterRiggingType[];
+  // The player's choice, which the release keeps with their other settings.
+  readonly selected: number;
   readonly onSelect: (index: number) => void;
-}
-
-// The player's last choice, when this release still has it; storage may be unavailable.
-function storedCharacter(count: number): number {
-  try {
-    const value = Number(localStorage.getItem(CHARACTER_KEY));
-    return Number.isInteger(value) && value >= 0 && value < count ? value : 0;
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-    return 0;
-  }
-}
-
-function storeCharacter(index: number): void {
-  try {
-    localStorage.setItem(CHARACTER_KEY, String(index));
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-  }
 }
 
 export function characterLabels(types: readonly CharacterRiggingType[]): string[] {
@@ -58,17 +40,21 @@ export function createPlayUI(options: { mount: HTMLElement }) {
   let selected = 0;
   let characterView: Attributed<CharacterChoiceView> | null = null;
   let characterMount: HTMLElement | null = null;
+  let menuMount: HTMLElement | null = null;
   const clear = (): void => {
     const disposal = new Disposal();
     const previousBar = bar;
     const previousView = characterView;
     const previousMount = characterMount;
+    const previousMenu = menuMount;
     bar = null;
     characterView = null;
     characterMount = null;
+    menuMount = null;
     disposal.run(() => previousBar?.dispose());
     if (previousView !== null) disposal.run(() => call0(previousView, 'dispose'));
     disposal.run(() => previousMount?.remove());
+    disposal.run(() => previousMenu?.remove());
     disposal.finish();
   };
   return {
@@ -89,17 +75,16 @@ export function createPlayUI(options: { mount: HTMLElement }) {
       const factory = settings.plugins.slot(CHARACTER_CHOICE, DEFAULT_CHARACTER_CHOICE);
       // A single-profile release shows no settings, exactly as before.
       if (characters !== null && characters.types.length === 2) {
-        selected = storedCharacter(characters.types.length);
+        selected = characters.selected;
         const labels = Object.freeze(characterLabels(characters.types));
         const choice: CharacterChoiceModel = Object.freeze({
           labels,
           get selected() { return selected; },
+          // The release keeps the choice with the player's settings and shows it back through setCharacter().
           select(index: number): void {
             if (!Number.isInteger(index) || index < 0 || index >= labels.length) {
               throw invalidResult(factory, `must select an index from 0 to ${labels.length - 1}`);
             }
-            selected = index;
-            storeCharacter(index);
             characters.onSelect(index);
           },
         });
@@ -117,10 +102,25 @@ export function createPlayUI(options: { mount: HTMLElement }) {
       call2(notice, 'show', text, kind);
     },
     clear,
-    // Enables the character choice once every profile has loaded; returns the restored choice.
-    enableCharacters(): number {
+    // Enables the character choice once every profile has loaded.
+    enableCharacters(): void {
       if (characterView !== null) call1(characterView, 'setEnabled', true);
-      return selected;
+    },
+    // Shows the character the release selected, from the choice itself or from elsewhere, such as the game's menu.
+    setCharacter(index: number): void {
+      selected = index;
+      const view = characterView;
+      if (view !== null && view.value.setSelected !== undefined) call1(view, 'setSelected', index);
+    },
+    // An empty layer for the game's main menu: over the readouts and the character choice, under notices.
+    addMenu(): HTMLElement {
+      const shown = bar;
+      if (shown === null) throw new Error('The play UI shows no game to put a menu over.');
+      const mount = document.createElement('div');
+      mount.className = 'play-menu';
+      (characterMount ?? shown.root).after(mount);
+      menuMount = mount;
+      return mount;
     },
     dispose(): void {
       const disposal = new Disposal();

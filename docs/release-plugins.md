@@ -2,7 +2,8 @@
 
 A plugin's **release facet** supplies the services only a release needs: signing players in and
 granting access to the game's content, the game's own phantom backend, the library models each
-player has, callbacks through the load, and shell notices and fatal errors. It runs only in
+player has, callbacks through the load, the game's [main menu](#main-menu), and shell notices and
+fatal errors. It runs only in
 releases built with it, never in the Workshop or a [studio preview](#studio-previews). Its SDK is
 [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts). [Plugins](plugins.md) describes the
 manifest, points and verbs.
@@ -32,8 +33,8 @@ which returns the plugin's contributions, or a promise of them.
 
 The release starts its release facets first, one at a time in manifest order, awaiting each
 `start`, before it fetches anything: a plugin can sign the player in before the first grant is
-asked for. It then composes their contributions, resolves `FATAL`, `NOTICES`, `ACCESS` and `FAILED`
-once, and loads the game. In a build without phantoms it also resolves `PHANTOMS` against `null`, refusing only
+asked for. It then composes their contributions, resolves `FATAL`, `NOTICES`, `ACCESS`, `FAILED`
+and `MENU` once, and loads the game. In a build without phantoms it also resolves `PHANTOMS` against `null`, refusing only
 a non-null result. Runtime facets start after that, once for each load attempt. In a build with
 phantoms the optional consumer resolves `PHANTOMS` when it starts after the game loads; the
 release session caches that slot for its whole life. Release notices and the fatal display live
@@ -231,6 +232,143 @@ export default defineRelease({
 });
 ```
 
+## Main menu
+
+`MENU`, the release slot `release.menu`, holds the game's own main menu: a `MenuFactory`,
+`(mount: HTMLElement, game: MenuApi) => Menu`, or `null`. Its base is `null`: without a menu, a
+release plays at once, a new run each time it loads, and saves nothing. With one, the release holds
+play behind the menu until the player starts a new game or continues their [saved run](#saved-runs),
+keeps that run saved as it goes, and lets the menu pause it, resume it and change the
+[player's settings](#player-settings). The contract is exported from the release SDK; the point and
+its instance check live in [`src/game-menu.ts`](../src/game-menu.ts), and the release's side in
+[`src/menu-session.ts`](../src/menu-session.ts).
+
+A title screen that plays, or continues the saved run, in one click:
+
+```ts
+import { defineRelease, MENU, replace } from '../../src/plugins/release-sdk';
+import type { MenuFactory } from '../../src/plugins/release-sdk';
+
+const titleScreen: MenuFactory = (mount, game) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'title-screen';
+  button.textContent = game.saved === null ? 'Play' : 'Continue';
+  button.addEventListener('click', () => {
+    if (game.saved === null) game.newGame();
+    else game.continueGame();
+    button.hidden = true;
+  });
+  mount.append(button);
+  return { dispose: () => button.remove() };
+};
+
+export default defineRelease({
+  start() {
+    return [replace(MENU, titleScreen)];
+  },
+});
+```
+
+[`examples/main-menu`](../examples/main-menu) is a complete menu: a title screen with **Continue**,
+**New game** and **Settings**, and a pause menu that Escape or its **Menu** button opens over play.
+
+```sh
+GAME_PLUGINS=examples/main-menu/plugins.json npm run dev:game
+GAME_PLUGINS=examples/main-menu/plugins.json GAME_PROJECT=examples/projects/ashen-ascent npm run dev:game
+```
+
+The release calls the factory once the game has loaded, after the [`READY`](#ready-and-the-release-api)
+callbacks and before the game's first frame. `mount` is an empty layer over the whole game: over the
+HUD and the character choice, under notices. Like the rest of the release's interface it takes no
+pointer events, so give the menu's own elements `pointer-events: auto`. To show something while the
+game loads, such as a splash or a loading bar, draw it from `start` and update it with
+[`PROGRESS`](#load-failures-and-progress).
+
+**`MenuApi`** (what the factory receives as `game`):
+
+| Member | Meaning |
+| --- | --- |
+| `state` | `'title'` while the game waits for the player, `'playing'` while a run is in play, `'paused'` while the menu is open over one |
+| `saved` | The [saved run](#saved-runs) `continueGame()` takes up, as a `SavedRun`, or `null` |
+| `newGame()` | Starts a new run from the level's start, in place of the saved run, and plays |
+| `continueGame()` | Takes up the saved run and plays. Requires `saved` |
+| `pause()` | Opens the run in play to the menu: pauses it, blocks its input, releases the mouse and saves the run. Requires `playing` |
+| `resume()` | Plays on. Requires `paused` |
+| `settings` | The [player's settings](#player-settings), a `PlayerSettings` |
+| `changeSettings(changes)` | Changes any of the player's settings, keeps them and applies them at once; returns all of them |
+| `characters` | The characters' labels, one for each character the release has, such as `['2D', '3D']` |
+| `hud` | The project's HUD settings, to show heights as the HUD does: `formatHeight(game.hud, metres)`, then `game.hud.height.unit` |
+| `halted` | Whether the game has stopped on an error; the verbs then change nothing |
+
+- `newGame()`, `continueGame()` and `resume()` release the hold and play as a click on the game
+  does: they end the player's own pause and capture the mouse. Browsers capture the mouse only
+  during the player's own gesture, a click or any key but Escape, so call them from one; called
+  otherwise, from Escape say, they play without capturing it until the player's next click on the
+  game. On a touchscreen they just play. `newGame()` and `continueGame()` also work while playing,
+  to start over or go back to the saved run.
+- The hold is a pause and an input block of the release's own, apart from the player's pause, a
+  message's and another plugin's. While it holds, the bound keys, such as Reset, and input devices
+  do nothing, so the menu has the keyboard.
+- Only the menu opens itself over play: listen for a key or show a button, and call `pause()`.
+  While the mouse is captured, Escape releases it before the page sees the key, so the
+  [example](../examples/main-menu) opens on the next Escape or its button, and resumes from its
+  focused **Resume** button rather than on Escape.
+- **`Menu`** has one method, `dispose()`, which runs when the release closes: remove what the menu
+  added to the page and its listeners. There is no per-frame method; a menu works on the player's
+  events alone.
+- The SDK also exports `formatHeight`, `formatElapsedTime`, `PLAYER_SETTINGS_LIMITS` and
+  `DEFAULT_PLAYER_SETTINGS`, and the types `MenuApi`, `MenuFactory`, `Menu`, `MenuState`,
+  `SavedRun`, `PlayerSettings` and `HudSettings`.
+
+### Saved runs
+
+While a game has a menu, the release keeps the run in play saved: every 5 seconds while playing, as
+`pause()` opens the menu and as the page hides. A saved run holds where the player stands and how
+they hold the hammer, the run timer and whether a Stop timer event stopped it, the run's best
+height, the bonfire a death returns to and the once-triggers the run has spent. Two kinds of spent
+once-trigger are armed again: one still running, whose remaining events would never run, and one
+that moves a platform, since the platform starts afresh.
+
+`continueGame()` places the player there anew, protected for the respawn invulnerability as after
+a bonfire return, and every level object starts as the level places it, while the run's clock, best
+height, bonfire and spent once-triggers carry on. A fall out of the level counts at once, so a run
+saved in mid-drop ends in a death rather than an endless fall. Motion and health are not kept, nor
+are enemies, traps, platforms, illusions or burning bonfires. During a death the saved run is where
+the player comes back, at the bonfire lit last; a death with no bonfire lit restarts the run, so the
+release forgets the saved run. `newGame()` forgets it at once, and Reset starts the run again from
+the level's start, which the next save keeps.
+
+`SavedRun`, what `saved` shows a menu:
+
+| Field | Meaning |
+| --- | --- |
+| `height`, `bestHeight` | Where the player stood and the run's best, in metres, as the HUD reads height |
+| `elapsed` | The run timer, in seconds; `formatElapsedTime(seconds)` writes it as the HUD's timer does |
+| `finished` | Whether a Stop timer event had stopped the timer, as at a summit |
+| `savedAt` | When the run was saved, in milliseconds since the epoch |
+
+The browser keeps one saved run for the site, in `localStorage` under `over-the-edge:play:run`,
+with the [course](phantoms.md#courses) it was played on: a release whose level layout or physics
+changed has none to continue. Where the browser keeps nothing, the menu still continues the run
+until the page closes, and the release tells the player once. A saved run never leaves the browser,
+and a release without a menu neither reads nor writes one.
+
+### Player settings
+
+| Setting | Range | Default | Effect |
+| --- | --- | --- | --- |
+| `volume` | 0–1 | 1 | Scales the project's master volume, for music and sound effects; videos keep their own controls |
+| `sensitivity` | 0.25–4 | 1 | Scales the project's control sensitivity, for the mouse and touch alike |
+| `character` | 0, or 0–1 with two characters | 0 | The character that plays, as the [character choice](runtime-plugins.md#character-choice) selects it |
+
+`PLAYER_SETTINGS_LIMITS` holds the ranges and `DEFAULT_PLAYER_SETTINGS` the defaults. The settings
+apply in every release, with a menu or without: the browser keeps them in `localStorage` under
+`over-the-edge:play:settings`. Kept settings that no longer fit fall back to the defaults, and a
+kept character the release does not have to its first. The character choice in the corner changes
+`character` too, so a menu that shows it reads `settings` when it opens. A change outside its range,
+or to another field, fails with `invalid-contribution`.
+
 ## Library models
 
 A release shows [library models](characters.md#model-library-and-runtime-swaps) in place of the
@@ -354,7 +492,8 @@ cannot contribute to `FATAL`.
 A [studio preview](plugins.md#studio-previews), which the project server's **Publish** builds,
 drops every release facet: `virtual:game-plugins/release` lists none. The preview therefore uses
 public access to its own content and the engine's notices and fatal display, has no phantom
-backend and packages no library models, while the game's kinds and runtime facets still run.
+backend, packages no library models and has no main menu, so play starts at once, while the game's
+kinds and runtime facets still run.
 Try a release facet with `npm run dev:game` or a release build instead.
 
 ## Errors
@@ -376,6 +515,12 @@ Try a release facet with `npm run dev:game` or a release build instead.
 - `start` may return a promise. `ACCESS`, `FAILED` and `PHANTOMS` retain their asynchronous
   content and phantom error semantics; in particular, `FAILED` may reject with the original
   `ContentError` to stop a load.
+- A `MENU` that is neither `null` nor a function fails with `invalid-contribution`. A menu factory
+  that throws fails with `plugin-failed`, and one whose result lacks `dispose()` with
+  `invalid-contribution`, naming the plugin and `release.menu`; either stops the release with a
+  fatal error. `continueGame()` without a saved run, `pause()` outside `playing`, `resume()` outside
+  `paused` and a `changeSettings` change it refuses fail with `invalid-contribution`, and any verb
+  after the release has closed with `plugin-stopped`.
 
 The release shows a fatal error as it stops: "The game could not load", and why. Once every
 release facet has started, the session keeps running until the release closes, so the plugins'

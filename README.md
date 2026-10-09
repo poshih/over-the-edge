@@ -84,6 +84,13 @@ Workshop play-tests and releases. Game settings own the separate respawn wait.
 On-screen Play/Pause/Reset, peak height, branding, and help remain in the editor build,
 not the release.
 
+A release plays at once, a new climb each time it loads. A game's release plugin can put
+its own **main menu** in front of play instead: the release then waits behind it until the
+player starts a new game or continues their saved climb, keeps that climb saved in the
+browser as they play, and lets the menu pause play and change the player's volume, control
+sensitivity and character. See [the main menu](docs/release-plugins.md#main-menu) and the
+complete example in [`examples/main-menu`](examples/main-menu).
+
 ```sh
 npm run build:game
 npm run preview:game
@@ -112,18 +119,20 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **release**, notices, fatal errors and release-only services: a game whose content only some players may load signs
   players in there with its own identity management and grants the release access to its
   content, typically short-lived signed CDN URLs from the game's backend, so the engine never
-  sees accounts or credentials;
+  sees accounts or credentials; and a game's own main menu, which starts a new game, continues
+  the player's saved climb and changes their volume, control sensitivity and character;
 - **workshop**, the game's own Workshop tools: tabs and sections built from the Workshop's
   controls, edits through the engine's own operations, data of its own kept in the project, and
   overlays, canvas drags and previews in the running game. Releases contain none of it.
 
 ```sh
 GAME_PLUGINS=examples/plugins/plugins.json npm run dev     # the example plugin, in the Workshop
+GAME_PLUGINS=examples/main-menu/plugins.json npm run dev:game  # the example main menu, in a release
 GAME_PLUGINS=games/my-game/plugins.json npm run build:game
 ```
 
-See [plugins](docs/plugins.md), [content delivery](docs/content-delivery.md) and
-[Workshop plugins](docs/workshop-plugins.md).
+See [plugins](docs/plugins.md), [content delivery](docs/content-delivery.md),
+[the main menu](docs/release-plugins.md#main-menu) and [Workshop plugins](docs/workshop-plugins.md).
 
 Releases replay recordings of players near the player as translucent white phantoms. While
 **Record** is on, the Workshop records your play on each saved version of a server project's
@@ -219,7 +228,8 @@ GAME_SPRITES=skins/paper.json GAME_ALTERNATE_SPRITES=skins/hero.json npm run bui
 ```
 
 Players choose **2D** or **3D** in the release's corner control, including
-mid-level; the choice persists in the browser. Both profiles and their GLBs are
+mid-level; the choice persists in the browser with the player's volume and control
+sensitivity, which a game's [main menu](docs/release-plugins.md#main-menu) changes. Both profiles and their GLBs are
 validated at build time and load once. Switching changes only the presentation,
 including each profile's grips and arm lengths; live physics and the level continue unchanged,
 and its figure is stored for the next death. Without `GAME_ALTERNATE_SPRITES`,
@@ -316,7 +326,7 @@ only what it needs.
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
 | How the HUD's readouts (level, height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava, enemy health and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
-| Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
+| Notices and fatal errors, sign-in and content access, the main menu with the player's saved run and settings, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
 Runtime scene layers, moment effects and Workshop overlays receive a pooled, read-only

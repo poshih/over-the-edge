@@ -88,3 +88,10 @@
   outline: 3px solid #94662b;
   outline-offset: 2px;
 }
+
+/* A game's main menu draws in its own layer, over the readouts and the character choice and under notices. Like the
+   rest of the interface it takes no pointer events: the menu's own elements opt in. */
+.play-menu {
+  position: absolute;
+  inset: 0;
+}

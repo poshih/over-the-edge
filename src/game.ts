@@ -10,6 +10,7 @@ import { isTriggerObject } from './level';
 import type { LevelChange, LevelDefinition } from './level';
 import { clamp } from './math';
 import { Simulation } from './simulation';
+import type { RunPlace } from './simulation';
 import { GameView } from './view';
 import { TriggerRuntime } from './triggers';
 import { DEFAULT_VIDEO_PLAYBACK } from './trigger-events';
@@ -47,6 +48,15 @@ import { DEFAULT_CHARACTER_FIGURE } from './character-figure';
 export interface StepObserver {
   step(): void;
   interrupt(): void;
+}
+
+// A run as a saved run keeps it: where it goes on from, with its clock and the once-triggers it has spent.
+export interface RunRecord extends RunPlace {
+  // The run timer, in seconds, and whether it still runs; a Stop timer event stops it.
+  readonly elapsed: number;
+  readonly timerRunning: boolean;
+  // The once-triggers the run has spent, by ID.
+  readonly consumed: readonly string[];
 }
 
 interface Dying {
@@ -104,6 +114,8 @@ export class Game {
   private previousTime = 0;
   private timerElapsed = 0;
   private timerRunning = true;
+  // The player's control sensitivity, scaling the project's; set by a release from the player's settings.
+  private sensitivity = 1;
   private readonly hudFrame: { -readonly [K in keyof HudFrame]: HudFrame[K] } = {
     level: null, height: 0, bestHeight: 0, elapsed: 0, timerRunning: true, health: null, death: null, paused: false,
     pointerLocked: false, inputMode: 'mouse',
@@ -243,7 +255,8 @@ export class Game {
         if (steps > 0) {
           const perStep = this.stepMovement;
           if (this.death === null) {
-            this.view.pointerDelta(this.input.takeMovement(), this.settings().physics.mouseSensitivity, this.input.mode, perStep);
+            this.view.pointerDelta(this.input.takeMovement(), this.settings().physics.mouseSensitivity * this.sensitivity,
+              this.input.mode, perStep);
             if (hasDevices && this.inputBlocks.size === 0) {
               perStep.x += this.deviceMovement.x;
               perStep.y += this.deviceMovement.y;
@@ -391,6 +404,11 @@ export class Game {
 
   settings(): GameSettings { return this.simulation.gameSettings(); }
 
+  // The player's own control sensitivity: it scales the settings' for the mouse and touch alike.
+  setSensitivity(scale: number): void {
+    this.sensitivity = scale;
+  }
+
   // New rig settings rebuild the player, so they restart the run like Reset.
   setSettings(settings: Readonly<GameSettings>): void {
     if (this.stopped) return;
@@ -467,6 +485,27 @@ export class Game {
     if (this.stopped) return;
     this.simulation.reset(spawn);
     this.restartRun();
+  }
+
+  // The run as a saved run keeps it, or null when there is none to keep: once the game has stopped, or during a death
+  // that restarts the run.
+  runRecord(): RunRecord | null {
+    if (this.stopped) return null;
+    const place = this.simulation.runPlace();
+    if (place === null) return null;
+    return { ...place, elapsed: this.timerElapsed, timerRunning: this.timerRunning, consumed: this.triggers.consumed() };
+  }
+
+  // Takes up a saved run: the player stands where it left off, protected as after a bonfire return, and the level's
+  // objects start as the level places them, while the run's clock, best height, the bonfire a death returns to and the
+  // once-triggers it spent carry on.
+  resumeRun(run: RunRecord): void {
+    if (this.stopped) return;
+    this.simulation.resumeRun(run);
+    this.restartRun();
+    this.triggers.consume(run.consumed);
+    this.timerElapsed = run.elapsed;
+    this.timerRunning = run.timerRunning;
   }
 
   // What follows the player back to a bonfire, the run going on: triggers forget the jump, and the character, input and

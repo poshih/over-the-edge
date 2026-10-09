@@ -102,6 +102,14 @@ export class Bonfires {
     this.emit();
   }
 
+  // A resumed run's bonfire, out: where a fallen player comes back. An ID the level does not have restores none.
+  restore(id: string | null): void {
+    const current = id !== null && this.records.has(id) ? id : null;
+    if (current === this.current) return;
+    this.current = current;
+    this.emit();
+  }
+
   apply(change: LevelChange): void {
     if (change.kind === 'replace') {
       for (const id of [...this.records.keys()]) this.remove(id);

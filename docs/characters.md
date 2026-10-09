@@ -653,9 +653,10 @@ failing on any error. Each distinct GLB and PNG becomes one content file, named 
 SHA-256, outside the release's shell; see [content delivery](content-delivery.md). A
 release that uses models includes the GLB loader; one without models omits it.
 
-Players choose **CHARACTER: 2D / 3D** in the release's corner control. The
-labels follow each profile's type, numbered if they match. The choice is stored
-in `localStorage` under `over-the-edge:play:character` and restored on the next
+Players choose **CHARACTER: 2D / 3D** in the release's corner control, or in the game's own
+[main menu](release-plugins.md#main-menu). The labels follow each profile's type, numbered if
+they match. The choice is kept with the player's other [settings](release-plugins.md#player-settings)
+in `localStorage` under `over-the-edge:play:settings` and restored on the next
 visit; a stale or unavailable value falls back to the first profile. Both profiles
 load completely before play. Switching, including mid-level, only swaps what is
 attached and visible: nothing reloads, and live physics, the timer and the level

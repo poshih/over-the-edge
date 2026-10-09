@@ -1,0 +1,6 @@
+{
+  "apiVersion": 2,
+  "plugins": [
+    { "id": "main-menu", "release": "./release.ts" }
+  ]
+}

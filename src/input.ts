@@ -183,6 +183,9 @@ export class PointerInput {
       this.callbacks.onNotice('Mouse capture is unavailable in this browser. Hold and drag on the game canvas to play.');
       return;
     }
+    // Browsers capture the mouse only during the player's own gesture, a click or any key but Escape. Without one,
+    // such as a menu resuming on Escape, play goes on uncaptured until the player's next click on the game.
+    if (navigator.userActivation?.isActive === false) return;
     void Promise.resolve(this.canvas.requestPointerLock()).catch((error: unknown) => {
       if (!(error instanceof DOMException)) throw error;
       this.callbacks.onNotice(`Mouse capture was denied (${error.name}). Hold and drag on the game canvas to play.`);

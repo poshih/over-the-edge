@@ -155,16 +155,20 @@ interface CharacterChoiceModel {
 }
 interface CharacterChoiceView {
   setEnabled(enabled: boolean): void;
+  setSelected?(index: number): void;
   dispose(): void;
 }
 ```
 
 The factory receives an empty mount and a read-only model. Its `labels` are the two profiles'
 display labels; `selected` reads the current index. Request a selection through `select(index)`,
-never by writing to the model. The play UI owns the index and its existing local-storage
-persistence, restores the player's last valid choice, and selects that profile once loading
-finishes. `select` requires an integer index within `labels`; an invalid index fails with
-`invalid-contribution`, naming the plugin and point.
+never by writing to the model. The release owns the index and keeps it with the player's other
+[settings](release-plugins.md#player-settings) in local storage, restores the player's last valid
+choice, and selects that profile once loading finishes. `select` requires an integer index within
+`labels`; an invalid index fails with `invalid-contribution`, naming the plugin and point. A game's
+[main menu](release-plugins.md#main-menu) can select the character too; the engine then calls the
+view's optional `setSelected(index)`, so a view that shows the selection implements it, and one
+without it keeps showing its own last choice.
 
 The play UI resolves the factory once per runtime session with `DEFAULT_CHARACTER_CHOICE` as
 its base. It creates a view only in releases and studio previews with **two profiles**; a
@@ -177,8 +181,9 @@ anything the view keeps elsewhere; the engine removes the mount when the play UI
 or disposed. There is no per-frame method.
 
 `DEFAULT_CHARACTER_CHOICE` draws the engine's existing **CHARACTER** radio group, with the
-same 2D/3D labels, numbered when they repeat, and the restored selection. Creating a view
-checks both required methods; a malformed result fails with `invalid-contribution`, and a
+same 2D/3D labels, numbered when they repeat, and the restored selection; its `setSelected`
+checks the chosen option. Creating a view checks both required methods and that `setSelected`,
+when given, is a method; a malformed result fails with `invalid-contribution`, and a
 throwing factory fails with `plugin-failed`, each naming the plugin and `ui.character-choice`.
 
 ## Object looks
@@ -1172,10 +1177,11 @@ interface GameAudio {
 ```
 
 - `settings` are the project's [audio settings](projects.md#section-reference): master volume,
-  looping music and a clip or `null` for each cue. `sounds` lists the initial level's authored
-  play-sound sources to preload. `media` loads authored sound bytes and streams music; a release
-  resolves these sources through its packaged content and access grants. `notice(message)`
-  reports an audio failure without stopping play.
+  looping music and a clip or `null` for each cue. In a release, the master volume is the
+  project's scaled by the player's [volume setting](release-plugins.md#player-settings). `sounds`
+  lists the initial level's authored play-sound sources to preload. `media` loads authored sound
+  bytes and streams music; a release resolves these sources through its packaged content and
+  access grants. `notice(message)` reports an audio failure without stopping play.
 - `moment` receives every [gameplay moment](#gameplay-moments), in journal order, after that
   moment's effects and before its observers. It runs after the step loop and look updates,
   outside physics. Moments and nested causes are reused, read-only and borrowed for the call:
@@ -1198,9 +1204,10 @@ interface GameAudio {
   gameplay stops. Every output method no-ops after disposal; Game receives that output
   directly and never owns its disposal.
 - `setPaused` receives the initial state when play starts, then only pause-state changes.
-  `setSettings` previews new project audio settings in the Workshop, and `setMedia` tells the
-  output to drop media cached for files that changed. Forward all three in a wrap so the
-  previous output's music, settings and caches stay correct.
+  `setSettings` previews new project audio settings in the Workshop and carries the player's
+  volume changes in a release, and `setMedia` tells the output to drop media cached for files
+  that changed. Forward all three in a wrap so the previous output's music, settings and caches
+  stay correct.
 - `dispose` releases the output's sources, media elements and subscriptions. The host disposes
   the shared device after the output, and the runtime session after its consumers.
   `inspect`, optional, supplies `window.gettingOver.gameProject().playback` in the Workshop.
@@ -1212,7 +1219,7 @@ The host provides **one shared `AudioDevice` for its audio output**:
 | `context` | The shared `AudioContext`, or `null` until the first gesture or when Web Audio is unavailable |
 | `output` | The master `GainNode`, or `null` with the context; connect effect nodes here, never straight to `context.destination` |
 | `onUnlock(listener)` | Calls the listener after the first pointer, key or touch gesture, including when Web Audio is unavailable; a late subscriber runs immediately. Returns an unsubscribe function |
-| `setVolume(volume)`, `dispose()` | Host-owned: the engine keeps project volume in sync independently of the chosen output, then closes the device. Plugins must not call these |
+| `setVolume(volume)`, `dispose()` | Host-owned: the engine keeps the master volume, the project's scaled in a release by the player's, in sync independently of the chosen output, then closes the device. Plugins must not call these |
 
 Never create another `AudioContext`, close the shared one or bypass its output. Allocate and
 connect effect nodes only when a cue plays, preload and decode sources once, and keep no
@@ -1837,5 +1844,5 @@ export default defineRuntime({
 - Each readout and look keeps its state in its own factory call, so a HUD rebuilt for new
   settings, or a new session, starts afresh.
 
-Try it as [the example](plugins.md#the-example) describes:
+Try it as [the examples](plugins.md#the-examples) describe:
 `GAME_PLUGINS=examples/plugins/plugins.json npm run dev`.

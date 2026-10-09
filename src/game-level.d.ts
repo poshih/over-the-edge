@@ -3,9 +3,11 @@ declare module 'virtual:game-title' {
   export default title;
 }
 
-// What the shell pins: the content URL, the manifest and every path of the game group.
+// What the shell pins: the content URL, the manifest and every path of the game group. Beside them, the course the
+// content's level and physics make: the SHA-256 that phantom recordings and saved runs belong to.
 declare module 'virtual:game-content' {
   const pins: import('./content').ContentPins;
+  export const course: string;
   export default pins;
 }
 

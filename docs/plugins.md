@@ -94,7 +94,7 @@ data in the project and is the namespace of the items it adds, so renaming a plu
 | --- | --- | --- | --- | --- |
 | `kinds` | Node, as the dev server, the project server and builds start; and every page: the Workshop, studio previews and releases | [`src/plugins/kinds-sdk.ts`](../src/plugins/kinds-sdk.ts) | Code that content selects by ID: avatar rig strategies and motion kinds. See [kinds plugins](kinds-plugins.md) | `virtual:game-plugins/kinds` |
 | `runtime` | Workshop play-tests, studio previews and releases | [`src/plugins/runtime-sdk.ts`](../src/plugins/runtime-sdk.ts) | What play shows, sounds and does: HUD readouts and extras, camera following, backdrop, aim marks, strike, lava, enemy health and extra effects, death pose and screen, object, enemy and phantom looks, scene layers, audio, messages, gameplay observers, key bindings and additional input devices; character choice in releases and studio previews. See [runtime plugins](runtime-plugins.md) | `virtual:game-plugins/runtime` |
-| `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
+| `release` | Releases alone, never the Workshop or a studio preview | [`src/plugins/release-sdk.ts`](../src/plugins/release-sdk.ts) | Release-only services and shell chrome: sign-in and content access, notices and fatal errors, the main menu with the player's saved run and settings, the phantom backend, library models and the load's callbacks. See [release plugins](release-plugins.md) | `virtual:game-plugins/release` |
 | `workshop` | The Workshop alone | [`src/editor/workshop-sdk.ts`](../src/editor/workshop-sdk.ts) | Authoring tools: tabs, sections, the plugin's data, overlays, previews, motion controls and level checks. See [Workshop plugins](workshop-plugins.md) | `virtual:game-plugins/workshop` |
 
 - A facet imports the engine only through an SDK: its own environment's, or that of an
@@ -353,8 +353,8 @@ The project server's **Publish** builds a studio preview of the open project, wi
 own `GAME_PLUGINS` and `GAME_STUDIO_PREVIEW=1`. It runs the game's kinds and runtime facets, so it
 shows the game's own HUD readouts and looks, and drops every release facet:
 `virtual:game-plugins/release` lists none. A preview therefore uses public access to its own
-content, has no phantom backend, replaying only the project's bundled recordings, and packages no
-library models.
+content, has no phantom backend, replaying only the project's bundled recordings, packages no
+library models and has no main menu, so play starts at once.
 
 ## Performance
 
@@ -393,7 +393,8 @@ proportional to what is active, including allocation-free checks around active p
 ## Type-checking plugin code
 
 Vite strips TypeScript without checking it, and the engine's own check, which `npm run build`
-runs, covers the engine and [`examples/plugins`](../examples/plugins) alone. Check a game's
+runs, covers the engine and the examples in [`examples/plugins`](../examples/plugins) and
+[`examples/main-menu`](../examples/main-menu) alone. Check a game's
 plugin code with a `tsconfig.json` of its own, beside the manifest, which extends the engine's and
 includes the game's folder:
 
@@ -411,7 +412,7 @@ npx tsc -p games/my-game/tsconfig.json
 It applies the engine's strict settings, such as `noUnusedLocals` and `erasableSyntaxOnly`, to
 the game's code and to the SDKs it imports.
 
-## The example
+## The examples
 
 [`examples/plugins`](../examples/plugins) holds one plugin, `example`, with a runtime facet that
 draws the health readout as a bar and projectiles as glowing orbs:
@@ -429,6 +430,17 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 ```
 
 [Runtime plugins](runtime-plugins.md#complete-example) walks through its code.
+
+[`examples/main-menu`](../examples/main-menu) holds a second plugin, `main-menu`, with a release
+facet that puts a main menu in front of play: a title screen that starts a new game or continues the
+player's saved climb, a pause menu, and settings for the volume, the control sensitivity and the
+character. Release facets run only in releases, so try it with `npm run dev:game`:
+
+```sh
+GAME_PLUGINS=examples/main-menu/plugins.json npm run dev:game
+```
+
+[Release plugins](release-plugins.md#main-menu) describes the menu's API.
 
 ## Point catalogue
 
@@ -479,6 +491,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`release.progress`](release-plugins.md#load-failures-and-progress) | `PROGRESS` | `release` | List, 32 `(progress: ContentProgress) => void` | None |
 | [`release.model-failed`](release-plugins.md#library-models) | `MODEL_FAILED` | `release` | List, 32 `(error: Error) => void` | None |
 | [`release.ready`](release-plugins.md#ready-and-the-release-api) | `READY` | `release` | List, 32 `(api: ReleaseApi) => void` | None |
+| [`release.menu`](release-plugins.md#main-menu) | `MENU` | `release` | Slot, `MenuFactory \| null` | `null`: play starts at once and no run is saved |
 | [`avatar.motion-controls`](workshop-plugins.md#motion-controls) | `AVATAR_MOTION_CONTROLS` | `workshop` | Keyed, 64 `AvatarMotionControlSet` | None |
 | [`level.checks`](workshop-plugins.md#level-checks) | `LEVEL_CHECKS` | `workshop` | Keyed, 32 `LevelCheck` | None |
 | [`level.reach`](workshop-plugins.md#level-checks) | `LEVEL_REACH` | `workshop` | Slot, `LevelReachSource` | `reachForSettings(settings)`, with the highest bonfire as goal |

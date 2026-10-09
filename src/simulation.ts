@@ -19,7 +19,7 @@ import { rigGeometry, sameRig } from './rig';
 import type { RigGeometry } from './rig';
 import { surfaceMaterials } from './surfaces';
 import type { LaunchSettings, PlatformDestination } from './trigger-events';
-import { angleDifference } from './math';
+import { angleDifference, clamp } from './math';
 import { aimAt, limitAim, moveAim, returnAim, shiftAim } from './aim';
 import type { Aim } from './aim';
 import { TerrainWorld } from './terrain-world';
@@ -72,6 +72,17 @@ export function physicsPart(frame: PhysicsFrame, id: string): PartPose {
 
 // Settings apply to the running player, except a new rig, which rebuilds it and restarts the run.
 export type SettingsEffect = 'applied' | 'restarted';
+
+// Where a run goes on from, as a saved run keeps it.
+export interface RunPlace {
+  // Where the player stands and how they hold the hammer.
+  readonly spawn: Readonly<PlayerSpawn>;
+  // The jar's base there, as the HUD reads height, and the run's best, in metres.
+  readonly height: number;
+  readonly bestHeight: number;
+  // The bonfire a death returns to, or null before one is lit.
+  readonly bonfire: string | null;
+}
 
 // Where the rig is: the character's centre, the pot's angle, the hammer head's centre and the handle's butt.
 export interface RigPose {
@@ -454,6 +465,45 @@ export class Simulation {
     this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level), potMeasures(this.settings.rig.pot).bottom), bonfire.id);
     this.safeUntil = this.elapsed + this.settings.physics.respawnInvulnerability;
     return true;
+  }
+
+  // Where the run goes on from, as a saved run keeps it: the live player's stance or, during a death, the bonfire it
+  // comes back at. Null during a death with no bonfire lit, which restarts the run.
+  runPlace(): RunPlace | null {
+    this.ensureLive();
+    const rig = this.rig;
+    const bonfire = this.bonfires.currentBonfire();
+    let spawn: PlayerSpawn;
+    let jarBottom: number;
+    if (rig.phase === 'alive') {
+      const root = rig.root.getPosition(), angle = rig.drive.getAngle();
+      spawn = {
+        position: { x: root.x, y: root.y },
+        angle: Math.atan2(Math.sin(angle), Math.cos(angle)),
+        reach: clamp(rig.drive.getTranslation() + rig.geometry.handleLength, rig.geometry.minReach, rig.geometry.maxReach),
+      };
+      jarBottom = rig.geometry.jar.bottom;
+    } else if (bonfire !== null) {
+      // As respawn() places it, with the settings' jar.
+      jarBottom = potMeasures(this.settings.rig.pot).bottom;
+      spawn = bonfireSpawn(bonfire, levelStart(this.level), jarBottom);
+    } else {
+      return null;
+    }
+    return {
+      spawn, height: Math.max(0, spawn.position.y + jarBottom), bestHeight: this.bestHeight, bonfire: bonfire?.id ?? null,
+    };
+  }
+
+  // Takes up a saved run at `place`: a new placement there, protected as after a bonfire return, with the run's best
+  // height and the bonfire a death returns to, while every level object starts as the level places it. A fall out of
+  // the level counts at once, so a run saved in mid-drop ends in a death, never an endless fall.
+  resumeRun(place: RunPlace): void {
+    this.reset(place.spawn);
+    this.bestHeight = Math.max(this.bestHeight, place.bestHeight);
+    this.bonfires.restore(place.bonfire);
+    this.safeUntil = this.elapsed + this.settings.physics.respawnInvulnerability;
+    this.supported = true;
   }
 
   // Track head contacts only while audio, effects or observers take impact moments.

@@ -261,6 +261,30 @@ export class TriggerRuntime {
     this.drain();
   }
 
+  // The once-triggers this run has spent, by ID, as a saved run keeps them, but for two kinds a resumed run arms again:
+  // those still running, whose remaining events would never run, and those that move a platform, since a resumed run's
+  // platforms start as the level places them.
+  consumed(): string[] {
+    this.ensureLive();
+    const ids: string[] = [];
+    for (const record of this.records.values()) {
+      const status = record.run?.status;
+      if (!record.consumed || status === 'queued' || status === 'running' ||
+        record.object.events.some((event) => event.type === 'move-platform')) continue;
+      ids.push(record.object.id);
+    }
+    return ids;
+  }
+
+  // Spends the once-triggers a resumed run had spent, without firing them. IDs of no once-trigger here are skipped.
+  consume(ids: readonly string[]): void {
+    this.ensureLive();
+    for (const id of ids) {
+      const record = this.records.get(id);
+      if (record !== undefined && record.object.activation === 'once') record.consumed = true;
+    }
+  }
+
   reset(): void {
     this.ensureLive();
     for (const record of this.records.values()) {

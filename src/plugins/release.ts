@@ -3,6 +3,7 @@ import type { PhantomService } from '../phantom-service-types';
 import type { ModelLibraryApi } from '../release-library';
 import { NOTICES } from '../notice';
 import { FATAL } from '../fatal-display';
+import { MENU } from '../game-menu';
 import { apply1, checkFacetEntries, Composition, listPoint, PLUGIN_LIMITS, PluginError, pluginFailure, slotPoint } from './kernel';
 import type { Attributed, Contribution, KeyedPoint, ListPoint, SlotPoint } from './kernel';
 
@@ -52,7 +53,7 @@ export const FAILED = slotPoint('release.failed', 'release', callback<(error: Co
 export const PROGRESS = listPoint('release.progress', 'release', PLUGIN_LIMITS.plugins, callback<(progress: ContentProgress) => void>);
 export const MODEL_FAILED = listPoint('release.model-failed', 'release', PLUGIN_LIMITS.plugins, callback<(error: Error) => void>);
 export const READY = listPoint('release.ready', 'release', PLUGIN_LIMITS.plugins, callback<(api: ReleaseApi) => void>);
-export const RELEASE = Object.freeze([NOTICES, FATAL, ACCESS, PHANTOMS, FAILED, PROGRESS, MODEL_FAILED, READY]);
+export const RELEASE = Object.freeze([NOTICES, FATAL, ACCESS, PHANTOMS, FAILED, PROGRESS, MODEL_FAILED, READY, MENU]);
 
 function checkRelease(value: unknown, plugin: string): ReleaseFacet {
   if (typeof value !== 'object' || value === null || Array.isArray(value) || typeof Reflect.get(value, 'start') !== 'function') {

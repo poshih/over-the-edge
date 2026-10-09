@@ -10,6 +10,8 @@ export interface CharacterChoiceModel {
 
 export interface CharacterChoiceView {
   setEnabled(enabled: boolean): void;
+  // Shows a choice made elsewhere, such as in the game's main menu.
+  setSelected?(index: number): void;
   dispose(): void;
 }
 
@@ -54,6 +56,10 @@ export const DEFAULT_CHARACTER_CHOICE: CharacterChoiceFactory = (mount, choice) 
     setEnabled(enabled): void {
       for (const input of inputs) input.disabled = !enabled;
     },
+    setSelected(index): void {
+      const input = inputs[index];
+      if (input !== undefined) input.checked = true;
+    },
     dispose(): void {
       events.abort();
     },
@@ -61,8 +67,9 @@ export const DEFAULT_CHARACTER_CHOICE: CharacterChoiceFactory = (mount, choice) 
 };
 
 const CHARACTER_CHOICE_CONTRACT = instanceContract({
-  returns: 'setEnabled(enabled) and dispose()',
+  returns: 'setEnabled(enabled), dispose() and, when given, setSelected(index)',
   methods: ['setEnabled', 'dispose'],
+  optional: ['setSelected'],
 });
 
 export function createCharacterChoice(factory: Attributed<CharacterChoiceFactory>, mount: HTMLElement,

@@ -15,7 +15,7 @@ import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
 import type { MediaHost } from './media-host';
 import { Disposal } from './disposal';
-import { createPlayUI } from './play-ui';
+import { characterLabels, createPlayUI } from './play-ui';
 import { DEFAULT_NOTICES, NOTICES } from './notice';
 import { createFatalDisplay, DEFAULT_FATAL, FATAL } from './fatal-display';
 import type { FatalDisplay } from './fatal-display';
@@ -32,10 +32,17 @@ import { EMPTY_SELECTION } from './model-library';
 import type { ModelSelection } from './model-library';
 import type { HudFrame } from './hud-readouts';
 import { ReleaseMeasurements } from './release-measurements';
+import { MENU } from './game-menu';
+import type { MenuFactory } from './game-menu';
+import { MenuSession } from './menu-session';
+import { changePlayerSettings, playerAudio, readPlayerSettings, writePlayerSettings } from './player-settings';
+import type { PlayerSettings } from './player-settings';
 
 // Code the shell includes only when its content needs it, chosen at build time.
 export interface ReleaseCode {
   readonly pins: ContentPins;
+  // The SHA-256 of the level's play layout and physics, which phantom recordings and saved runs belong to.
+  readonly course: string;
   readonly createCharacterModels: ((options: { content: ContentLoader }) => CharacterModelLoader) | null;
   readonly loadCourseArt: ((game: Game, art: ContentArt, content: ContentLoader, signal: AbortSignal) => Promise<void>) | null;
   readonly loadAppearance: ((visuals: ReadonlyMap<VisualPartId, VisualBinding>, parts: readonly AppearanceSource[],
@@ -87,9 +94,13 @@ export class Release {
   private readonly measurements = new ReleaseMeasurements();
   private readonly ui: ReturnType<typeof createPlayUI>;
   private plugins: ReleasePlugins | null = null;
+  private menuFactory: Attributed<MenuFactory> | null = null;
   private loading: Attempt | null = null;
   private loaded: Loaded | null = null;
   private phantoms: Phantoms | null = null;
+  private menu: MenuSession | null = null;
+  // The player's own settings, read once and kept as they change.
+  private playerSettings: PlayerSettings = readPlayerSettings();
 
   constructor(elements: { canvas: HTMLCanvasElement; mount: HTMLElement; fatal: HTMLElement }, code: ReleaseCode) {
     this.canvas = elements.canvas;
@@ -128,6 +139,8 @@ export class Release {
       }
       const access = plugins.slot(ACCESS, publicAccess(contentUrl)).value;
       const failed = plugins.slot(FAILED, async (error: ContentError) => { throw error; }).value;
+      const menu = plugins.slot(MENU, null);
+      this.menuFactory = menu.value === null ? null : attributed(menu.plugin, menu.point, menu.value);
       for (;;) {
         try {
           this.loaded = await this.load(access);
@@ -174,10 +187,14 @@ export class Release {
   private discardLoaded(): void {
     const disposal = new Disposal();
     const phantoms = this.phantoms;
+    const menu = this.menu;
     const loaded = this.loaded;
     this.phantoms = null;
+    this.menu = null;
     this.loaded = null;
     disposal.run(() => phantoms?.dispose());
+    // The menu lets go of the game before it is disposed.
+    disposal.run(() => menu?.dispose());
     if (loaded !== null) {
       disposal.run(() => loaded.lifecycle.abort(new DOMException('The game closed.', 'AbortError')));
       disposal.run(() => loaded.audio.dispose());
@@ -240,10 +257,11 @@ export class Release {
     const notice = (text: string): void => this.ui.notice(text, 'error');
     const audioFactory = plugins.slot(AUDIO, this.code.audioOutput === null ? SILENT_AUDIO_OUTPUT : this.code.audioOutput);
     const receivesAudio = audioFactory.value !== SILENT_AUDIO_OUTPUT;
-    const audioDevice = new AudioDevice(manifest.audio.volume, receivesAudio);
+    const heard = playerAudio(manifest.audio, this.playerSettings);
+    const audioDevice = new AudioDevice(heard.volume, receivesAudio);
     attempt.audioDevice = audioDevice;
     const audio = createAudioOutput(audioFactory, {
-      settings: manifest.audio, sounds: levelSoundSources(manifest.level), media, device: audioDevice, notice,
+      settings: heard, sounds: levelSoundSources(manifest.level), media, device: audioDevice, notice,
     });
     attempt.audio = audio;
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
@@ -257,6 +275,7 @@ export class Release {
       onNotice: notice,
     });
     attempt.game = game;
+    game.setSensitivity(this.playerSettings.sensitivity);
     const library = new ReleaseModelLibrary({
       library: manifest.library, access, loader: characterModels, parts: game, signal,
       onFailure: (error) => this.modelFailed(error),
@@ -301,16 +320,22 @@ export class Release {
   private play(loaded: Loaded): void {
     const { game, manifest, library, plugins } = loaded;
     const { primary, alternate } = manifest.characters;
+    const types = alternate === null ? [primary.characterRiggingType]
+      : [primary.characterRiggingType, alternate.characterRiggingType];
+    // A kept choice this release does not have falls back to its first character.
+    if (this.playerSettings.character >= types.length) this.playerSettings = Object.freeze({ ...this.playerSettings, character: 0 });
     this.ui.show({
       hud: manifest.hud,
       plugins,
       characters: alternate === null ? null : {
-        types: [primary.characterRiggingType, alternate.characterRiggingType],
-        onSelect: (index) => { if (!game.halted) game.selectCharacter(index); },
+        types,
+        selected: this.playerSettings.character,
+        onSelect: (index) => this.applyPlayerSettings(loaded, this.checkPlayerSettings(loaded, { character: index })),
       },
     });
     if (game.halted) return;
-    game.selectCharacter(this.ui.enableCharacters());
+    this.ui.enableCharacters();
+    game.selectCharacter(this.playerSettings.character);
     game.setInputBlock({ reason: 'loading', blocked: false });
     this.measurements.mark('loading-unblocked', loaded.session);
     this.plugins!.notify(READY, (plugin): ReleaseApi => {
@@ -322,11 +347,22 @@ export class Release {
       });
       return api;
     });
+    // A game's menu holds play behind it from the first frame, until it starts a run.
+    const menu = this.menuFactory;
+    if (menu !== null) {
+      this.menu = new MenuSession(menu, this.ui.addMenu(), {
+        game, course: this.code.course, hud: manifest.hud, characters: Object.freeze(characterLabels(types)),
+        settings: () => this.playerSettings,
+        checkSettings: (changes) => this.checkPlayerSettings(loaded, changes),
+        applySettings: (settings) => this.applyPlayerSettings(loaded, settings),
+        notice: (text) => this.ui.notice(text, 'error'),
+      });
+    }
     const phantoms = this.code.phantoms;
     if (phantoms !== null) {
       const releasePlugins = this.plugins!;
       this.phantoms = phantoms.start({
-        game, plugins: loaded.plugins, course: phantoms.course, url: this.phantomsUrl(),
+        game, plugins: loaded.plugins, course: this.code.course, url: this.phantomsUrl(),
         phantomService: (base) => releasePlugins.slot(PHANTOMS, base).value,
         packs: manifest.phantoms, content: (source, request) => loaded.session.bytes(source, request),
       });
@@ -340,5 +376,28 @@ export class Release {
       this.ui.update(state);
     };
     game.start((state) => onFrame(state));
+  }
+
+  // The player's settings with `changes`, for this release's characters. Throws a RangeError stating a broken rule.
+  private checkPlayerSettings(loaded: Loaded, changes: unknown): PlayerSettings {
+    return changePlayerSettings(this.playerSettings, changes, loaded.manifest.characters.alternate === null ? 1 : 2);
+  }
+
+  // Keeps the player's settings and applies what changed: the volume to the game's audio, the sensitivity to its
+  // controls and the character to the game and the character choice.
+  private applyPlayerSettings(loaded: Loaded, settings: PlayerSettings): void {
+    const previous = this.playerSettings;
+    this.playerSettings = settings;
+    writePlayerSettings(settings);
+    if (settings.volume !== previous.volume) {
+      const heard = playerAudio(loaded.manifest.audio, settings);
+      loaded.audioDevice.setVolume(heard.volume);
+      loaded.audio.setSettings(heard);
+    }
+    if (settings.sensitivity !== previous.sensitivity) loaded.game.setSensitivity(settings.sensitivity);
+    if (settings.character !== previous.character) {
+      loaded.game.selectCharacter(settings.character);
+      this.ui.setCharacter(settings.character);
+    }
   }
 }
