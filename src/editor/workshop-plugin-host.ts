@@ -729,6 +729,7 @@ export class WorkshopPluginHost {
       remove: (id) => level(() => options.level.remove(id)),
       edit: (batch) => level(() => { options.level.edit(batch); }),
       labels: (labels) => level(() => options.level.metadata({ labels })),
+      name: (name) => level(() => options.level.metadata({ name })),
       replace: (definition) => level(() => options.level.merge(definition)),
     };
     const characterEdits: WorkshopCharacterEdits = {

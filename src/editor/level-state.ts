@@ -1,6 +1,6 @@
 import {
   DECORATION_LIMITS, geometryKey, LEVEL_LIMITS, LevelError, levelStart, PLATFORM_LIMITS, TRIGGER_LIMITS,
-  validateLevel, validateLevelMetadata, validateLevelObject, validateTriggerTargets,
+  validateLevel, validateLevelLabels, validateLevelMetadata, validateLevelObject, validateTriggerTargets,
 } from '../level';
 import type { LevelChange, LevelDefinition, LevelObject, StartObject, TriggerObject } from '../level';
 import { ENEMY_LIMITS } from '../enemy-types';
@@ -151,7 +151,7 @@ export class LevelState {
    */
   edit(batch: LevelBatchEdit): readonly LevelObject[] {
     const added = (batch.add ?? []).map(validateLevelObject);
-    const metadata = batch.labels === undefined ? null : validateLevelMetadata({ labels: batch.labels });
+    const replacedLabels = batch.labels === undefined ? null : validateLevelLabels(batch.labels);
     const removed = new Map<string, LevelObject>();
     for (const id of batch.remove ?? []) {
       const object = this.object(id);
@@ -184,8 +184,8 @@ export class LevelState {
     if (geometry.size > LEVEL_LIMITS.geometryKinds) {
       throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
     }
-    const labels = metadata !== null && JSON.stringify(metadata.labels) !== JSON.stringify(this.current.labels)
-      ? metadata.labels : this.current.labels;
+    const labels = replacedLabels !== null && JSON.stringify(replacedLabels) !== JSON.stringify(this.current.labels)
+      ? replacedLabels : this.current.labels;
     if (added.length === 0 && removed.size === 0 && labels === this.current.labels) return [];
     for (const id of removed.keys()) this.objects.delete(id);
     for (const trigger of cleaned) this.objects.set(trigger.id, trigger);
@@ -197,9 +197,10 @@ export class LevelState {
     return added;
   }
 
-  metadata(value: Pick<LevelDefinition, 'labels'>): void {
-    const metadata = validateLevelMetadata(value);
-    if (JSON.stringify(metadata.labels) === JSON.stringify(this.current.labels)) return;
+  // Renames the level or replaces its labels, as one edit; what `value` leaves out stays as it is.
+  metadata(value: Partial<Pick<LevelDefinition, 'name' | 'labels'>>): void {
+    const metadata = validateLevelMetadata({ name: this.current.name, labels: this.current.labels, ...value });
+    if (metadata.name === this.current.name && JSON.stringify(metadata.labels) === JSON.stringify(this.current.labels)) return;
     this.publish({ ...this.current, ...metadata }, [], []);
   }
 
@@ -224,7 +225,8 @@ export class LevelState {
     const next = new Map(level.objects.map((object) => [object.id, object]));
     const remove = [...this.objects.keys()].filter((id) => !next.has(id));
     const upsert = level.objects.filter((object) => JSON.stringify(this.objects.get(object.id)) !== JSON.stringify(object));
-    if (remove.length === 0 && upsert.length === 0 && JSON.stringify(level.labels) === JSON.stringify(this.current.labels)) return;
+    if (remove.length === 0 && upsert.length === 0 && level.name === this.current.name &&
+      JSON.stringify(level.labels) === JSON.stringify(this.current.labels)) return;
     this.objects = next;
     this.current = level;
     this.startObject = levelStart(level);

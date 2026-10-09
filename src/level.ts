@@ -1,4 +1,5 @@
 import type { PlayerSpawn, Point } from './config';
+import { DISPLAY_NAME_LIMIT, displayName } from './display-name';
 import { transformPoint } from './math';
 import { fields, LevelError, number, point, text } from './level-validation';
 import { MAX_RIG_REACH } from './rig';
@@ -16,7 +17,7 @@ import type { Surface } from './surfaces';
 export { LevelError } from './level-validation';
 export type { TriggerAction } from './trigger-events';
 
-export const LEVEL_SCHEMA_VERSION = 10;
+export const LEVEL_SCHEMA_VERSION = 11;
 export const LEVEL_LIMITS = {
   objects: 1000,
   // Distinct collision geometry across a level's terrain: one physics shape and one extruded template each.
@@ -244,6 +245,9 @@ export interface LevelLabel extends Readonly<Point> {
 
 export interface LevelDefinition {
   readonly schemaVersion: typeof LEVEL_SCHEMA_VERSION;
+  // What the level is called, a display name (src/display-name.ts) stored trimmed; null for a level with none. It
+  // changes no play.
+  readonly name: string | null;
   readonly labels: readonly LevelLabel[];
   readonly objects: readonly LevelObject[];
 }
@@ -777,10 +781,18 @@ function validateTerrain(value: unknown): TerrainObject {
   });
 }
 
-export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'labels'> {
-  fields(value, ['labels'], 'Level settings');
-  if (!Array.isArray(value.labels) || value.labels.length > LEVEL_LIMITS.labels) throw new LevelError('Too many course labels.');
-  const labels = value.labels.map((label): LevelLabel => {
+export function validateLevelName(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || displayName(value) !== value) {
+    throw new LevelError(`Level name must be 1-${DISPLAY_NAME_LIMIT} characters on one line, without control characters or ` +
+      'spaces around it.');
+  }
+  return value;
+}
+
+export function validateLevelLabels(value: unknown): readonly LevelLabel[] {
+  if (!Array.isArray(value) || value.length > LEVEL_LIMITS.labels) throw new LevelError('Too many course labels.');
+  const labels = value.map((label): LevelLabel => {
     fields(label, ['x', 'y', 'text'], 'Course label');
     if (typeof label.text !== 'string' || !label.text.trim() || label.text.length > LEVEL_LIMITS.text) {
       throw new LevelError(`Course labels need 1 to ${LEVEL_LIMITS.text} characters.`);
@@ -791,7 +803,13 @@ export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'la
       text: label.text,
     });
   });
-  return { labels: Object.freeze(labels) };
+  return Object.freeze(labels);
+}
+
+// What a level holds besides its objects, edited beside them.
+export function validateLevelMetadata(value: unknown): Pick<LevelDefinition, 'name' | 'labels'> {
+  fields(value, ['name', 'labels'], 'Level settings');
+  return { name: validateLevelName(value.name), labels: validateLevelLabels(value.labels) };
 }
 
 export function validateTriggerTargets(trigger: TriggerObject, lookup: (id: string) => LevelObject | undefined): void {
@@ -806,11 +824,11 @@ export function validateTriggerTargets(trigger: TriggerObject, lookup: (id: stri
 }
 
 export function validateLevel(value: unknown): LevelDefinition {
-  fields(value, ['schemaVersion', 'labels', 'objects'], 'Level');
+  fields(value, ['schemaVersion', 'name', 'labels', 'objects'], 'Level');
   if (value.schemaVersion !== LEVEL_SCHEMA_VERSION) {
     throw new LevelError(`Levels require schema version ${LEVEL_SCHEMA_VERSION}.`);
   }
-  const metadata = validateLevelMetadata({ labels: value.labels });
+  const metadata = validateLevelMetadata({ name: value.name, labels: value.labels });
   if (!Array.isArray(value.objects) || value.objects.length > LEVEL_OBJECT_LIMIT) {
     throw new LevelError(`A level supports ${LEVEL_LIMITS.objects} terrain objects, ${TRIGGER_LIMITS.objects} triggers, ${ENEMY_LIMITS.objects} enemies, ` +
       `${DECORATION_LIMITS.objects} decorations, ${HAZARD_LIMITS.bonfires} bonfires, ${HAZARD_LIMITS.traps} traps, ${LIQUID_LIMITS.pools} liquid pools, ` +

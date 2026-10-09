@@ -32,16 +32,19 @@ export function createHudBar(plugins: RuntimePlugins, settings: HudSettings) {
     // Resolve the complete catalogue even when project settings hide a slot. A bad wrapper must not wait until a
     // later visibility edit to be refused, and wrapping still runs only once for this runtime session.
     const factories = {
+      level: plugins.slot(HUD.level, DEFAULT_HUD_READOUTS.level),
       height: plugins.slot(HUD.height, DEFAULT_HUD_READOUTS.height),
       health: plugins.slot(HUD.health, DEFAULT_HUD_READOUTS.health),
       timer: plugins.slot(HUD.timer, DEFAULT_HUD_READOUTS.timer),
     };
     for (const name of HUD_READOUTS) {
-      if (name === 'height' && !settings.height.visible || name === 'timer' && !settings.timer.visible) continue;
+      if (name === 'level' && !settings.level.visible || name === 'height' && !settings.height.visible ||
+        name === 'timer' && !settings.timer.visible) continue;
       const factory = factories[name];
       const slot = document.createElement('div');
       slot.className = `hud-slot hud-${name}`;
-      slot.hidden = name === 'health';
+      // Health shows only in levels that can hurt, and the level only when it has a name.
+      slot.hidden = name === 'health' || name === 'level';
       root.append(slot);
       const readout = createHudReadout(factory, slot, settings);
       shown.push({ name, slot, readout });
@@ -62,6 +65,7 @@ export function createHudBar(plugins: RuntimePlugins, settings: HudSettings) {
     update(frame: HudFrame): void {
       for (const { name, slot, readout } of shown) {
         if (name === 'health' && slot.hidden !== (frame.health === null)) slot.hidden = frame.health === null;
+        else if (name === 'level' && slot.hidden !== (frame.level === null)) slot.hidden = frame.level === null;
         call1(readout, 'update', frame);
       }
     },

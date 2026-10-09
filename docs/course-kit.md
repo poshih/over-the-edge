@@ -61,7 +61,7 @@ try {
   trail.piece('first-boulder', { tone: 'rock' });
   trail.stairs(8, 6, { shapes: ['shelf', 'slab'], tones: ['rock', 'stone'] });
 
-  const snapshot = job.prepare(builder.level(engine.level.LEVEL_SCHEMA_VERSION));
+  const snapshot = job.prepare(builder.level(engine.level.LEVEL_SCHEMA_VERSION, 'First Climb'));
   const problems = [
     ...overlaps(snapshot, builder.groups, builder.supports),
     ...keepOut(snapshot, builder.groups, builder.pieces, builder.allowed),

@@ -73,11 +73,12 @@ WORKSHOP_CONTENT_URL=https://cdn.example.com/workshop/ npm run build
 The playable release has a separate HTML/TypeScript entry and stylesheet. It
 does not load the Workshop, level editor, model importer, saved editor profiles,
 practice shortcuts, collision overlay, or editor diagnostic globals.
-Its HUD shows the height, health and timer readouts, plus a character choice when
-the release bundles two character profiles. The project's
-[HUD settings](docs/projects.md#section-reference) choose whether the height and timer
-show, health shows in levels where something can hurt the player, and a game's runtime
-plugin can replace any readout; see [HUD readouts](docs/runtime-plugins.md#hud-readouts).
+Its HUD shows the height, health and timer readouts, and the level's name when the project
+asks for it, plus a character choice when the release bundles two character profiles. The
+project's [HUD settings](docs/projects.md#section-reference) choose whether the level's name,
+the height and the timer show, health shows in levels where something can hurt the player,
+and a game's runtime plugin can replace any readout; see
+[HUD readouts](docs/runtime-plugins.md#hud-readouts).
 The HUD settings also author the death message and its visual fade, shared by
 Workshop play-tests and releases. Game settings own the separate respawn wait.
 On-screen Play/Pause/Reset, peak height, branding, and help remain in the editor build,
@@ -142,8 +143,9 @@ GAME_TITLE="My Climbing Game" npm run dev:game
 ```
 
 The same setting works with `npm run dev` and `npm run build` for the Workshop.
-It controls the browser tab title and Workshop heading; the game-only HUD shows
-no title, only the readouts and character choice described under
+It controls the browser tab title and the Workshop's heading, under the open level's
+[name](#level-editing); the game-only HUD shows no title, only the readouts, one of which can
+name the level, and the character choice described under
 [Game-only release](#game-only-release). Omit it to keep **Over the Edge**.
 Titles are plain text, support Unicode, and must contain 1-80 characters on
 one line after trimming surrounding spaces. Empty or invalid titles fail
@@ -249,10 +251,10 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 19**, and release content **schema 18**,
+Project manifests and bundles use **schema 20**, and release content **schema 19**,
 including the audio record's `block` cue, game settings' death wait, archer, hit-point,
 armor and bonfire rules, jar outline and jar side friction, the theme camera's background blur and character light, the HUD's
-death text/fade and the hollow archer's enemy art; other versions are rejected.
+level readout and death text/fade and the hollow archer's enemy art; other versions are rejected.
 
 ### Included full-length course
 
@@ -261,7 +263,7 @@ death text/fade and the hollow archer's enemy art; other versions are rejected.
 soldiers, an opening video, chapter events, and a timer-stopping summit.
 The 600 m height is a design target, not a verified measurement of another game.
 
-Choose **skyward-ruins** in **Workshop / Level / Server levels** (it is
+Choose **Skyward Ruins** in **Workshop / Level / Server levels** (it is
 [`levels/skyward-ruins.json`](levels/skyward-ruins.json)), or select it for an
 editor-free release:
 
@@ -279,7 +281,7 @@ open the [full-height map](docs/skyward-ruins-map.svg).
 illusion terrain, a bonfire, timer and switch-fired projectile traps, a swinging
 axe, swamp and lava pools, all three enemy species, an updraft, a rideable lift with
 landing call switches, a bridge that switches raise and lower, and a rideable
-sideways ferry, ending at a timer-stopping flag. Open **showcase** in
+sideways ferry, ending at a timer-stopping flag. Open **Showcase** in
 **Workshop / Level / Server levels**, or select `GAME_LEVEL=levels/showcase.json`
 for a game-only build. Regenerate it with `npm run generate:showcase`;
 change the generator, not the generated JSON.
@@ -313,7 +315,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava, enemy health and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (level, height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava, enemy health and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -384,7 +386,7 @@ Each Workshop tab opens on the controls used most: the game title and project
 actions in **Project**, practice positions and the
 mass and motor sliders in **Physics**, the character type and quick-start buttons in
 **Character**, the body part and GLB model in **Appearance**, the layer list in
-**Sprites**, and the build tools in **Level**. Everything else sits in named,
+**Sprites**, and the level's name and build tools in **Level**. Everything else sits in named,
 collapsible sections; select a heading to open or close it. An open section's heading
 stays at the top of the tab while you scroll through the section, so you can close it
 from anywhere in it. Each browser remembers which sections you opened or closed, only
@@ -750,6 +752,14 @@ pose, and the level is not edited. Playtests, Reset and deaths before any bonfir
 start from the placed player until you choose **Use the level start** in the Level
 tab, pick a starting point in **Physics**, or load another level.
 
+**Level name**, at the top of the Level tab, names the open level: plain text on one line,
+1-80 characters. Leaving the field commits it as a level edit, saved, versioned and exported
+with the rest; an empty field leaves the level unnamed, and a refused name puts the field back
+and says why. The game header shows the open level's name above the game's title, as typed, or
+a muted **Untitled level**; a long name ends in an ellipsis and shows in full as its tooltip.
+A release shows it to players when the project's HUD settings ask for it. A name changes no
+play: renaming keeps the level's [phantom course](docs/phantoms.md#courses) and its recordings.
+
 Levels are saved in the open [server project](docs/projects.md#working-in-the-workshop):
 it saves the level a moment after you stop editing, and **Save to project**, at the top of
 the Level tab, saves it at once. Every save becomes the project's next numbered
@@ -759,7 +769,8 @@ browsers or feed the game-only build. Imports are validated before replacing the
 level; malformed files produce visible errors.
 
 **Server levels** loads the levels served with the Workshop: every level JSON file in this
-repository's `levels/` folder, named by its file name, and first, in a Workshop built with
+repository's `levels/` folder, listed by the level's name with its file name, or by its file
+name alone when it has none, and first, in a Workshop built with
 `GAME_PROJECT`, that project's level. Builds validate each file and fail, naming it, when one
 is not a valid level. A level downloads when you load it, and replaces the current level like
 an import, asking first when there are unsaved changes.
@@ -915,9 +926,11 @@ requested through a user-operated fullscreen control. The Workshop skips every v
 you test (see [Finding Workshop controls](#finding-workshop-controls)); videos play in the
 game-only release.
 
-Level JSON uses **schema version 10**, with typed terrain, start, trigger, enemy,
-decoration, bonfire, projectile trap (`shooter`), swinging axe (`axe`), liquid pool
-(`pool`) and platform objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`,
+Level JSON uses **schema version 11**: `{ "schemaVersion", "name", "labels", "objects" }`.
+`name` is the level's name, plain text on one line of 1-80 characters with no control
+characters or spaces around it, or `null` for a level without one; it changes no play.
+Objects are typed terrain, start, trigger, enemy, decoration, bonfire, projectile trap
+(`shooter`), swinging axe (`axe`), liquid pool (`pool`) and platform objects. Terrain has a `surface`, one of `rock`, `wood`, `metal`,
 `ice` and `rubber`.
 A start is `{ "kind": "start", "id", "x", "y", "angle", "reach" }`.
 Files in any other version are rejected, not converted.

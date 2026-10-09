@@ -429,7 +429,9 @@ try {
     region: { type: 'box', width: tidy(SUMMIT.right - SUMMIT.left), height: TRIGGER_LIMITS.endingHeight },
     activation: 'once', marker: 'flag', events: ENDING_EVENTS,
   };
-  const level = validateLevel({ schemaVersion: LEVEL_SCHEMA_VERSION, labels: LABELS, objects: [...terrain, START, ending, ...HAZARDS] });
+  const level = validateLevel({
+    schemaVersion: LEVEL_SCHEMA_VERSION, name: 'Over the Edge', labels: LABELS, objects: [...terrain, START, ending, ...HAZARDS],
+  });
   const meshes = ROCKS.map(({ id: name, file }) => {
     const { spec, bytes, id } = built.get(name)!;
     return { id, name: spec.name, file, bytes: bytes.byteLength };

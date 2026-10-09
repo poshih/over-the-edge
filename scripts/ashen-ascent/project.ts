@@ -29,6 +29,8 @@ export const THEME = {
 } satisfies GameTheme;
 
 export const HUD = {
+  // The course is one level, named as the game is, so the HUD leaves its name out.
+  level: { visible: false, label: 'LEVEL' },
   height: { visible: true, label: 'ASCENT', unit: 'm', scale: 1, decimals: 0 },
   timer: { visible: true, label: 'HOLLOWING' },
   // Lore rises as embers and drifts away while the climb goes on.

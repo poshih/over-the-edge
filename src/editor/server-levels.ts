@@ -6,6 +6,8 @@ import type { PublishedProject } from './published-project';
 /** A level served with this Workshop, the same for everyone who opens it. */
 export interface ServerLevel {
   readonly name: string;
+  // The level's own name, when the build knows it; null for an unnamed level or one known only by its file.
+  readonly levelName: string | null;
   readonly url: string;
   // Known from the build: a file of any other size belongs to another deployment.
   readonly bytes: number;
@@ -14,7 +16,8 @@ export interface ServerLevel {
 /** The published project's level, served with a Workshop built with GAME_PROJECT; null without one. */
 export function publishedLevel(project: PublishedProject | null): ServerLevel | null {
   const file = project?.files.find((candidate) => candidate.path === PROJECT_FILES.level);
-  return project === null || file === undefined ? null : { name: `${project.title} (published project)`, url: file.url, bytes: file.bytes };
+  return project === null || file === undefined ? null
+    : { name: `${project.title} (published project)`, levelName: null, url: file.url, bytes: file.bytes };
 }
 
 /** Downloads a server level and validates it like an imported level file. */

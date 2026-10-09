@@ -537,6 +537,11 @@ export function createStudioHandler(config: StudioConfig) {
     const labels = await readJson(context.request, JSON_LIMIT);
     await writeLevel(context, (current) => ({ level: { ...current, labels } }));
   });
+  route('GET', '/api/projects/:id/level/name', async (context) => sendJson(context.response, 200, (await level(context.params.id!)).name));
+  route('PUT', '/api/projects/:id/level/name', async (context) => {
+    const name = await readJson(context.request, JSON_LIMIT);
+    await writeLevel(context, (current) => ({ level: { ...current, name } }));
+  });
 
   // Binary files ------------------------------------------------------------------------------
   route('POST', '/api/projects/:id/art/assets', async (context) => {

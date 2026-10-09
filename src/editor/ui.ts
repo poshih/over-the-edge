@@ -509,6 +509,7 @@ export function createUI(options: UiOptions): GameUi {
     applySettings: commitSettings,
     settings: () => settings,
     setHud: hud.setHud,
+    setLevelName: hud.setLevelName,
     setSceneTone: hud.setSceneTone,
     dispose: () => {
       events.abort();

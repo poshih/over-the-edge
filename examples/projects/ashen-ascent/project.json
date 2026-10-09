@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 19,
+  "schemaVersion": 20,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -254,6 +254,10 @@
     }
   },
   "hud": {
+    "level": {
+      "visible": false,
+      "label": "LEVEL"
+    },
     "height": {
       "visible": true,
       "label": "ASCENT",

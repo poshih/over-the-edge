@@ -10,12 +10,14 @@ import type { Attributed } from './plugins/kernel';
 
 // Shared play readouts: runtime facets replace or wrap the built-ins and add extras (docs/runtime-plugins.md).
 
-export const HUD_READOUTS = ['height', 'health', 'timer'] as const;
+export const HUD_READOUTS = ['level', 'height', 'health', 'timer'] as const;
 export type HudReadoutName = (typeof HUD_READOUTS)[number];
 
 // What the readouts show, every frame. Both this object and its health reading are reused; never retain a snapshot
 // by keeping their references. Updates draw only changed values and must not allocate frame objects.
 export interface HudFrame {
+  // The open level's name, or null for a level with none. It changes only when the level is renamed or replaced.
+  readonly level: string | null;
   // The player's height now and the best this run, in metres.
   readonly height: number;
   readonly bestHeight: number;
@@ -47,10 +49,11 @@ function readoutFactory(value: unknown): HudReadoutFactory {
 }
 
 export const HUD = Object.freeze({
+  level: slotPoint('hud.level', 'runtime', readoutFactory),
   height: slotPoint('hud.height', 'runtime', readoutFactory),
   health: slotPoint('hud.health', 'runtime', readoutFactory),
   timer: slotPoint('hud.timer', 'runtime', readoutFactory),
-  // The engine adds no extras. Each plugin's factories follow the three built-in slots, in manifest order.
+  // The engine adds no extras. Each plugin's factories follow the four built-in slots, in manifest order.
   extras: listPoint('hud.extras', 'runtime', 32, readoutFactory),
 });
 
@@ -68,6 +71,15 @@ function labelled(mount: HTMLElement, name: HudReadoutName, label: string): { la
 
 // The engine's readouts. A game may wrap one to add to it rather than draw it anew.
 export const DEFAULT_HUD_READOUTS: Readonly<Record<HudReadoutName, HudReadoutFactory>> = Object.freeze({
+  // The level's name as plain text on one line; a long one ends in an ellipsis and shows in full as its tooltip.
+  level: (mount, settings) => {
+    const { value } = labelled(mount, 'level', settings.level.label);
+    return { update: (frame) => {
+      if (frame.level === null || value.textContent === frame.level) return;
+      value.textContent = frame.level;
+      value.title = frame.level;
+    } };
+  },
   height: (mount, settings) => {
     const { value } = labelled(mount, 'height', settings.height.label);
     const number = document.createElement('span');

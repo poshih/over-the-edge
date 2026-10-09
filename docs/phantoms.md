@@ -236,9 +236,9 @@ anchors are frozen at entry, and the dying jar cannot trigger illusions. The
 figure and corpse therefore do not steer persistent level state in a continuing
 run. The released head can still block transient projectile rays.
 
-Decorations, labels, colours, depth, which mesh draws a collision, trigger events other than
-launches, trap bursts and platform moves, control sensitivity and the cursor settings are
-left out. A recording replays only where its course holds, so editing those details, or
+The level's name, decorations, labels, colours, depth, which mesh draws a collision, trigger
+events other than launches, trap bursts and platform moves, control sensitivity and the cursor
+settings are left out. A recording replays only where its course holds, so editing those details, or
 swapping a mesh for one that collides alike, keeps a level's recordings. Changing the play
 layout above—terrain, enemies, bonfires, traps, pools, platforms, those triggers or the
 start—or a physics setting that counts starts a new course with none. Recordings made under

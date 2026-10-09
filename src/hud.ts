@@ -5,6 +5,8 @@ import type { MessageStyle } from './trigger-events';
 
 // Readouts, trigger messages and death presentation, shared by the Workshop and releases.
 export interface HudSettings {
+  // Whether the HUD names the level, under this label; a level with no name shows none.
+  readonly level: { readonly visible: boolean; readonly label: string };
   readonly height: {
     readonly visible: boolean; readonly label: string; readonly unit: string;
     readonly scale: number; readonly decimals: number;
@@ -20,6 +22,8 @@ const MESSAGE_STYLE_LABELS: Readonly<Record<MessageStyle, string>> = {
 };
 
 export const HUD_FIELDS: readonly FieldSpec[] = [
+  { kind: 'boolean', path: 'level.visible', label: 'Show the level name', description: 'Names the level, when it has a name, before the other readouts.' },
+  { kind: 'text', path: 'level.label', label: 'Level label', minLength: 1, maxLength: 32 },
   { kind: 'boolean', path: 'height.visible', label: 'Show the height readout' },
   { kind: 'text', path: 'height.label', label: 'Height label', minLength: 1, maxLength: 32 },
   { kind: 'text', path: 'height.unit', label: 'Height unit', minLength: 0, maxLength: 8, description: 'Shown after the number; may be empty.' },
@@ -42,6 +46,7 @@ export function validateHud(value: unknown): HudSettings {
 }
 
 export const DEFAULT_HUD: HudSettings = validateHud({
+  level: { visible: false, label: 'LEVEL' },
   height: { visible: true, label: 'CURRENT HEIGHT', unit: 'm', scale: 1, decimals: 1 },
   timer: { visible: true, label: 'ELAPSED' },
   messages: { style: DEFAULT_MESSAGE_STYLE },

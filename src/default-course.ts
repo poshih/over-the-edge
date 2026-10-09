@@ -49,6 +49,6 @@ if (ground === undefined) throw new Error('The built-in course needs its ground.
  * built-in course's start.
  */
 export const STARTER_LEVEL: LevelDefinition = validateLevel({
-  schemaVersion: LEVEL_SCHEMA_VERSION, labels: [],
+  schemaVersion: LEVEL_SCHEMA_VERSION, name: null, labels: [],
   objects: [{ ...ground, mesh: shapeMesh('box'), mirror: false }, levelStart(DEFAULT_LEVEL)],
 });

@@ -305,8 +305,9 @@ export class CourseBuilder<Zone extends CourseZone = CourseZone> {
     return record;
   }
 
-  // The level in the engine's current format, `schemaVersion` (src/level.ts LEVEL_SCHEMA_VERSION).
-  level(schemaVersion: LevelDefinition['schemaVersion']): LevelDefinition {
-    return { schemaVersion, labels: this.labels, objects: this.objects };
+  // The level in the engine's current format, `schemaVersion` (src/level.ts LEVEL_SCHEMA_VERSION), called `name`, or null
+  // for none.
+  level(schemaVersion: LevelDefinition['schemaVersion'], name: string | null): LevelDefinition {
+    return { schemaVersion, name, labels: this.labels, objects: this.objects };
   }
 }

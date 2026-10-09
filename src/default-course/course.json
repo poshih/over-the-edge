@@ -26,7 +26,8 @@
     }
   ],
   "level": {
-    "schemaVersion": 10,
+    "schemaVersion": 11,
+    "name": "Over the Edge",
     "labels": [
       {
         "x": 4.2,

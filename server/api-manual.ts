@@ -15,6 +15,7 @@ import {
 } from '../src/game-settings';
 import { DEFAULT_HUD, HUD_FIELDS } from '../src/hud';
 import { CONTENT_SCHEMA_VERSION } from '../src/content';
+import { DISPLAY_NAME_LIMIT } from '../src/display-name';
 import { LEVEL_LIMITS, LEVEL_SCHEMA_VERSION, PLATFORM_LIMITS, SHAPE_KINDS, TRIGGER_LIMITS, TRIGGER_MARKERS } from '../src/level';
 import { BOARD_CELL } from '../src/level-board';
 import { PHANTOM_COURSE_FORMAT } from '../src/phantom-course';
@@ -77,6 +78,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET|POST', '/api/projects/{id}/level/objects', 'List objects (?kind=terrain|trigger|enemy|start) or add one object, an array, or { "objects": [...] }.'),
       endpoint('GET|PUT|PATCH|DELETE', '/api/projects/{id}/level/objects/{objectId}', 'Read, replace, merge-patch or delete one level object.'),
       endpoint('GET|PUT', '/api/projects/{id}/level/labels', 'Course labels: [{ "text", "x", "y" }].'),
+      endpoint('GET|PUT', '/api/projects/{id}/level/name', 'The level\'s name, a JSON string, or null for none; see the level section.'),
       endpoint('GET', '/api/projects/{id}/level/versions', 'Every saved version of the level and game settings, oldest first: { "versions": [{ "version", "levelHash", "settingsHash", "course", "savedAt", "recordings" }] }; see "levelVersions".'),
       endpoint('GET', '/api/projects/{id}/level/versions/{version}', 'One version: { "version", "course", "savedAt", "level", "settings" }, with its level JSON and game settings.'),
       endpoint('GET|POST', '/api/projects/{id}/level/versions/{version}/phantoms?session={session}&clip={clip}', 'List the phantom recordings played on a version ({ "phantoms": [{ "name", "bytes", "savedAt" }] }), or store one: POST the recording\'s bytes as application/octet-stream with its play session (32 lowercase hex digits) and clip number; the same session and clip replace the earlier upload.', 'phantom recording bytes'),
@@ -116,10 +118,12 @@ export function apiManual(auth: 'token' | 'loopback') {
       phantoms: 'Recordings in the phantom format (docs/phantoms.md): 1-10 s, at most 32 KiB each. The Workshop records alive play on the version it plays, one session per run, in consecutive clips. Death ends the clip and session before the terminal step; dying movement, teleport and placement poses are never sampled.',
     },
     sections: {
-      title: { value: 'string, 1-80 characters', description: 'Game title: browser tab and release name.' },
+      title: { value: `string, 1-${DISPLAY_NAME_LIMIT} characters`, description: 'Game title: browser tab and release name.' },
       level: {
-        value: `level JSON, schemaVersion ${LEVEL_SCHEMA_VERSION}: { schemaVersion, labels, objects }`,
-        description: 'The course. Prefer the level/objects endpoints for small edits.',
+        value: `level JSON, schemaVersion ${LEVEL_SCHEMA_VERSION}: { schemaVersion, name, labels, objects }`,
+        description: `The course. Prefer the level/objects endpoints for small edits. name is the level's name, plain text on one line of 1-${DISPLAY_NAME_LIMIT} `
+          + 'characters with no control characters or spaces around it, or null for none; the Workshop header and, when hud.level.visible is on, '
+          + 'the release HUD show it, and it changes no play or course.',
         limits: {
           ...LEVEL_LIMITS, triggers: TRIGGER_LIMITS.objects, eventsPerTrigger: TRIGGER_LIMITS.events, enemies: ENEMY_LIMITS.objects,
           bonfires: HAZARD_LIMITS.bonfires, traps: HAZARD_LIMITS.traps, pools: LIQUID_LIMITS.pools, platforms: PLATFORM_LIMITS.objects,
@@ -219,7 +223,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       },
       theme: { value: 'scene look', patch: true, fields: THEME_FIELDS },
       hud: {
-        value: 'game readouts, trigger-message style and death text/fade', patch: true, fields: HUD_FIELDS,
+        value: 'game readouts, the level name among them, trigger-message style and death text/fade', patch: true, fields: HUD_FIELDS,
         deathDefault: DEFAULT_HUD.death,
         description: 'death is { text, fadeIn }; these are presentation only. The game settings death.wait controls the dying physics steps before placement, independently of fadeIn. A fade longer than the wait ends unfinished, without an error. An active sequence keeps its entry wait, text and fade. Runtime points messages.death and scene.death-pose replace its presentation, not its clock.',
       },

@@ -264,7 +264,7 @@ their content is served.
   "format": "over-the-edge-course",
   "schemaVersion": 2,
   "mode": "meshes",
-  "level": { "schemaVersion": 10, "labels": [], "objects": [] },
+  "level": { "schemaVersion": 11, "name": "Boulder Run", "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "boulder.glb", "source": "data:model/gltf-binary;base64,..." }
   ],

@@ -1,7 +1,8 @@
 // What shapes play on a level: its colliders and surfaces, enemies, traps, bonfires, pools and platforms, its triggers'
 // launches, trap bursts and platform moves, its start, and the physics the game runs with. Phantom recordings belong
-// to a course, the SHA-256 of this text. Decorations, labels, colours, depth, swapping a mesh for one that collides
-// alike, message text, control sensitivity or the cursor leave it alone, keeping recordings. See docs/phantoms.md.
+// to a course, the SHA-256 of this text. The level's name, decorations, labels, colours, depth, swapping a mesh for one
+// that collides alike, message text, control sensitivity or the cursor leave it alone, keeping recordings. See
+// docs/phantoms.md.
 //
 // It uses no DOM or three.js.
 import { RIG_FIELDS, TUNING_FIELDS } from './game-settings';

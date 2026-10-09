@@ -263,6 +263,9 @@ const ui: GameUi = boot(() => createUI({
 });
 runtimeNotice = (message, kind = 'info') => ui.notice(message, kind);
 for (const { message, kind } of startupNotices.splice(0)) ui.notice(message, kind);
+// The game header names the open level, following each rename and each level opened.
+ui.setLevelName(level.definition().name);
+const unsubscribeLevelName = level.subscribe((change) => ui.setLevelName(change.level.name));
 const rig = new AppearanceRig(game.view.character.visuals);
 const appearance = new Appearance(rig, ui.notice, { browserStore: !opensProject });
 const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice, projectSave: project, serverCopies });
@@ -558,6 +561,7 @@ if (import.meta.hot) {
     disposal.run(() => audio.dispose());
     disposal.run(() => audioDevice.dispose());
     disposal.run(() => unsubscribeLevel());
+    disposal.run(() => unsubscribeLevelName());
     disposal.run(() => unsubscribeAppearance());
     disposal.run(() => unsubscribeCourseLook());
     disposal.run(() => levelEditor.dispose());

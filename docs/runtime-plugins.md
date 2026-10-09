@@ -52,9 +52,9 @@ which must return promises. See [Errors](#errors) for attribution and result che
 
 ## HUD readouts
 
-The HUD's first three readouts, from left to right, are `height`, `health` and `timer`, the points
-`HUD.height`, `HUD.health` and `HUD.timer`. Plugins can add their own [extra readouts](#extra-readouts)
-after them. The Workshop's play-test and releases, studio previews included, build them from
+The HUD's first four readouts, from left to right, are `level`, `height`, `health` and `timer`, the
+points `HUD.level`, `HUD.height`, `HUD.health` and `HUD.timer`. Plugins can add their own
+[extra readouts](#extra-readouts) after them. The Workshop's play-test and releases, studio previews included, build them from
 the same readout slots, so a game's readouts show in all of them;
 beside them the Workshop keeps its own chrome: PEAK, the input state and its buttons. A plugin
 draws any readout its own way, and the others stay the engine's. Each is a factory,
@@ -76,6 +76,7 @@ is `invalid-contribution`. Extra readouts obey the same rule.
 
 | `HudFrame` field | Meaning |
 | --- | --- |
+| `level` | The open level's name, plain text on one line, or `null` for a level without one; it changes only when the level is renamed or replaced |
 | `height`, `bestHeight` | The player's height now, and the best this run, in metres |
 | `elapsed` | The run's timer, in seconds |
 | `timerRunning` | Whether the timer still runs; a Stop timer event stops it |
@@ -88,9 +89,14 @@ is `invalid-contribution`. Extra readouts obey the same rule.
 The frame and its health reading are one object, reused every frame: read what you need during
 `update`, and never keep either to compare later.
 
-- The project's HUD settings still say which readouts show: a hidden height or timer readout is
-  never created, whoever draws it. The health slot is hidden while `frame.health` is `null`; its
-  readout still updates.
+- The project's HUD settings still say which readouts show: a hidden level, height or timer readout
+  is never created, whoever draws it, and the level readout is hidden unless `level.visible` is on.
+  The health slot is hidden while `frame.health` is `null`, and the level slot while `frame.level`
+  is `null`; their readouts still update.
+- The engine's level readout shows `level.label` over the name, as plain text on one line: a long
+  name ends in an ellipsis and shows in full as its tooltip. It writes only when the name changes.
+  A readout that names the level its own way, in `hud.extras` or by wrapping `HUD.level`, reads
+  `frame.level` and should treat it as plain text, never markup.
 - A change to the HUD settings, such as the Workshop previewing a project's labels, rebuilds the
   readouts: each is disposed and created again with the new settings. Nothing else rebuilds them.
 - The engine's timer shows **TIME STOPPED** in place of its label once the timer stops.
@@ -121,13 +127,13 @@ export default defineRuntime({
 ```
 
 Each factory receives its own empty slot, with classes `hud-slot` and `hud-extra`, and the
-project's `HudSettings`. Slots follow height, health and timer in manifest order, and in the
+project's `HudSettings`. Slots follow level, height, health and timer in manifest order, and in the
 order of factories within each plugin's `add`. Extras use the same `update(frame)` and optional
 `dispose()` contract as the other readouts: their returned objects are checked where created,
 and a refusal names the contributing plugin and `hud.extras`.
 
 Extras decide their own visibility, for example by setting `mount.hidden`; the engine never
-hides them using the height/timer settings or `frame.health`. They still update every frame, including
+hides them using the level/height/timer settings, `frame.level` or `frame.health`. They still update every frame, including
 when hidden, and are disposed and rebuilt with the bar when HUD settings change. Keep a game's
 own counters in its session or factory closures; `HudFrame` remains the engine's read-only,
 reused frame, not a container for extra game state. No point resolution or factory invocation

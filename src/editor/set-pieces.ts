@@ -6,7 +6,7 @@ import type { Point } from '../config';
 import { ENEMY_SPECS, enemyBounds } from '../enemy-types';
 import type { EnemyFacing, EnemySpecies } from '../enemy-types';
 import {
-  objectLoops, ROCK_COLOR, shapeMesh, TRIGGER_LIMITS, triggerBounds, validateLevelMetadata, validateLevelObject,
+  objectLoops, ROCK_COLOR, shapeMesh, TRIGGER_LIMITS, triggerBounds, validateLevelLabels, validateLevelObject,
 } from '../level';
 import type { EnemyObject, LevelLabel, LevelObject, ShapeKind, TerrainObject, TriggerObject } from '../level';
 import { DEFAULT_SURFACE } from '../surfaces';
@@ -696,7 +696,7 @@ function finishPiece(draft: Draft): SetPiece {
       throw new Error(`Set piece "${draft.id}" has a part below its base.`);
     }
   }
-  validateLevelMetadata({ labels });
+  validateLevelLabels(labels);
   const count = (kind: SetPiecePart['kind']) => parts.filter((part) => part.kind === kind).length;
   return Object.freeze({
     id: draft.id, category: draft.category, name: draft.name, skill: draft.skill,

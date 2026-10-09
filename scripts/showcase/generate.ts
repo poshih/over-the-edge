@@ -187,7 +187,7 @@ function showcase({ shapeMesh, LEVEL_SCHEMA_VERSION }: Pick<CourseEngine['level'
     ], 'once'),
     decoration('finish-banner', 'banner', 142.5, 6.2, 2.4),
   ];
-  return { schemaVersion: LEVEL_SCHEMA_VERSION, labels: LABELS, objects };
+  return { schemaVersion: LEVEL_SCHEMA_VERSION, name: 'Showcase', labels: LABELS, objects };
 }
 
 // The kit indexes terrain, not platforms. Check every platform's whole sweep explicitly.

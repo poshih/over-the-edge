@@ -6,10 +6,10 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 19**; their release content uses **schema 18**.
+Project manifests and bundles use **schema 20**; their release content uses **schema 19**.
 Both embed the audio record's `block` cue, game settings' death wait, archer and bonfire rules, jar
-outline and jar side friction, the theme's background blur and character light, the HUD's death text/fade and the
-hollow archer's enemy art. Other versions are rejected, not converted.
+outline and jar side friction, the theme's background blur and character light, the HUD's level readout and death
+text/fade, and the hollow archer's enemy art. Other versions are rejected, not converted.
 
 - In the Workshop, **Project** opens, saves, exports and publishes projects.
 - `GAME_PROJECT=<project> npm run build:game` builds any project into a
@@ -37,7 +37,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | Section | Stored in | Contents |
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
-| `level` | `level.json` | Level JSON, schema 10, as exported from Workshop / Level |
+| `level` | `level.json` | Level JSON, schema 11, as exported from Workshop / Level, with the level's name or `null` |
 | `settings` | `project.json` | Game-settings profile, schema 20: physics (including health, invulnerability, bonfire lighting and burn time, hurt box, knockback, hammer damage, enemy rules and archers' arrows, downswing boost, each material's friction and bounciness, and the jar's side friction), hammer rig (handle length, maximum extension, minimum reach, the default hammer's head outline and the jar's collision outline), cursor target and death wait/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
@@ -45,7 +45,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `appearance` | `project.json` + `appearance/<part>.glb` | Per-part GLB replacements and their alignment |
 | `models` | `project.json` + `models/<part>/<id>.glb` | Model library: avatars, hammers and pots a release can swap to, each part on its own |
 | `theme` | `project.json` | Sky, fog, exposure, camera, lights, the character light and its shadows, sun disc, backdrop, aim marker, procedural character colours |
-| `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, in Workshop play-tests and releases; how trigger messages appear, and death text/fade |
+| `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, the level's name among them, in Workshop play-tests and releases; how trigger messages appear, and death text/fade |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the course look, the GLB meshes terrain places and the GLBs replacing decoration models |
@@ -78,7 +78,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 19,
+  "schemaVersion": 20,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
@@ -97,7 +97,8 @@ The paths are fixed, so a manifest only says which files exist:
   "appearance": [],
   "models": { "avatar": [], "hammer": [{ "id": "club", "name": "Club", "head": [{ "x": -0.1, "y": -0.2 }, "..."] }], "pot": [] },
   "theme": { "sky": "#0e1418", "fog": { "color": "#0e1418", "near": -2, "far": 35 }, "camera": { "perspective": false, "fieldOfView": 30, "blur": 0, "blurNear": 5, "blurFar": 40 }, "...": "..." },
-  "hud": { "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
+  "hud": { "level": { "visible": false, "label": "LEVEL" },
+           "height": { "visible": true, "label": "DEPTH CLIMBED", "unit": "ft", "scale": 3.28084, "decimals": 0 },
            "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" },
            "death": { "text": "You are dead...", "fadeIn": 1.5 } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
@@ -117,10 +118,10 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 19,
+  "schemaVersion": 20,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
-    "level.json": { "schemaVersion": 10, "labels": [], "objects": [] },
+    "level.json": { "schemaVersion": 11, "name": null, "labels": [], "objects": [] },
     "media/clink.wav": "data:audio/wav;base64,UklGR..."
   }
 }
@@ -263,8 +264,8 @@ its level like any imported level, including intro events.
 The project server is where levels are saved, and a level is played with the project's game
 settings, so a **version** holds both: whenever the stored level or game settings change, they
 become the project's next numbered version, unless they are the same as the latest. That covers
-the Workshop's saves of the level or of Physics, the level, `level/objects`, `level/labels` and
-`settings` API changes, bundles, and a `level.json` or `project.json` a tool rewrote on disk,
+the Workshop's saves of the level or of Physics, the level, `level/objects`, `level/labels`,
+`level/name` and `settings` API changes, bundles, and a `level.json` or `project.json` a tool rewrote on disk,
 numbered when the project is next read. The Level tab's status shows the version the page
 holds, for example *Saved as version 14*; a change shows as unsaved until the project saves it
 a moment later.
@@ -283,7 +284,7 @@ project folder holds them beside its files, and replacing the project keeps them
 While **Record** is on, the Workshop [records your play](phantoms.md#recording-in-the-workshop)
 on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phantom`, and
 **Level / Replays** plays each run back over the level. Versions
-that play the same share a course, so edits to decorations, labels, colours, which mesh draws a
+that play the same share a course, so edits to the level's name, decorations, labels, colours, which mesh draws a
 collision, control sensitivity or the cursor keep a level's recordings, while any physics setting starts a new
 course; a release bundles the recordings of its level and settings' course. `phantoms/` grows
 with use: commit it to keep the recordings, and delete those you no longer need.
@@ -456,6 +457,7 @@ Conventions:
 | GET, POST | `/api/projects/{id}/level/objects` | List or add level objects |
 | GET, PUT, PATCH, DELETE | `/api/projects/{id}/level/objects/{objectId}` | One object |
 | GET, PUT | `/api/projects/{id}/level/labels` | Course labels |
+| GET, PUT | `/api/projects/{id}/level/name` | The level's name, a JSON string, or `null` for none |
 | GET | `/api/projects/{id}/level/versions` | Every [level version](#level-versions), with its recording count |
 | GET | `/api/projects/{id}/level/versions/{version}` | One version: `{ "version", "course", "savedAt", "level", "settings" }` |
 | GET, POST | `/api/projects/{id}/level/versions/{version}/phantoms?session=&clip=` | List or store recordings played on a version |
@@ -506,8 +508,8 @@ An open Workshop page shows each change within two seconds.
 ## Section reference
 
 **Game settings.** The nested settings schema is **20**, exported in code as
-`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **19**, release content
-**18**, and browser game-settings snapshots **12**. All settings are required and
+`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **20**, release content
+**19**, and browser game-settings snapshots **12**. All settings are required and
 unknown fields or other versions are rejected, with no legacy reader or conversion.
 `death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
 returning at a bonfire, or restarting when none was lit. A death captures this
@@ -685,6 +687,9 @@ and materials in place.
 **HUD.** A game's [runtime plugin](runtime-plugins.md#hud-readouts) can draw any of the
 readouts its own way, in the Workshop, studio previews and releases; these settings still say
 which show, and with what labels and formats.
+`level.visible` (off by default) shows the level's name before the other readouts, under
+`level.label` (1-32 characters, default `LEVEL`); a level without a name shows none, and a
+project that leaves it off shows players no name.
 `height.label`, `height.unit` (may be empty), `height.scale` (metres are
 multiplied by it; `3.28084` shows feet), `height.decimals` (0-3) and
 `timer.label`; either readout can be hidden. `messages.style` is how message events

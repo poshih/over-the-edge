@@ -200,7 +200,7 @@ export function buildCase(name: CaseName, job: CourseJob, decorations: Decoratio
     fallLane: { left: 4, right: 5, bottom: ground.y + 0.05, top: summit.y + 0.9 },
     expected: { terrain: terrainCount, decorations: decorationCount, assets: assetCount, geometries: geometryCount },
     level: {
-      schemaVersion: job.engine.level.LEVEL_SCHEMA_VERSION, objects,
+      schemaVersion: job.engine.level.LEVEL_SCHEMA_VERSION, name: `Streaming benchmark: ${name}`, objects,
       labels: [
         { x: -4, y: ground.y + 1.5, text: `${name.toUpperCase()} / ${name === 'slices' ? 'NO REACH CLAIM' : 'CLIMB'}; FALL RIGHT` },
         { x: summit.x, y: summit.y + 0.7, text: 'RESET TO START; RESPAWN AT BONFIRE' },

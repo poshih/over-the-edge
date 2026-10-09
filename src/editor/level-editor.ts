@@ -390,6 +390,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
   root.setAttribute('aria-label', 'Level editor');
   root.innerHTML = `
     <div class="level-top">
+      <label class="level-field level-name-field" for="level-name">Level name
+        <input id="level-name" type="text" autocomplete="off" spellcheck="false" placeholder="Untitled level"
+          title="Shown over the game's title, and to players when the project's HUD shows the level" />
+      </label>
       <div class="level-action-row level-top-actions">
         <button type="button" class="button button-primary level-play">Playtest</button>
         <div class="level-save-dock"></div>
@@ -705,7 +709,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <button type="button" class="button level-import">Import level JSON</button>
         </div>
         <input class="level-file" type="file" accept=".json,application/json" aria-label="Import level JSON" hidden />
-        <p class="level-help">Exports level.json: terrain, start, triggers, enemies, decorations, bonfires, traps, liquid pools and labels only.
+        <p class="level-help">Exports level.json: its name, terrain, start, triggers, enemies, decorations, bonfires, traps, liquid pools and labels only.
           Models, appearance, tuning and browser settings are never included. Import limit:
           ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Enemy motion/deaths are not saved.
           New enemy kinds and trigger actions need an updated game runtime.</p>
@@ -721,6 +725,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
     </div>
   `;
   options.mount.append(root);
+  const levelName = element<HTMLInputElement>(root, '#level-name');
+  levelName.value = level.definition().name ?? '';
   const overlay = document.createElement('div');
   overlay.className = 'level-overlay';
   overlay.hidden = true;
@@ -1127,7 +1133,9 @@ Export the level first if you want to keep them. Continue without saving?`);
     element(root, '.level-tool-help').textContent = help[tool];
     element(root, '.level-player-note').hidden = !options.player.placed();
     overlay.dataset.tool = tool;
-    const { labels } = level.definition();
+    const { labels, name } = level.definition();
+    // Typing in the field is not overwritten; leaving it commits the name.
+    if (document.activeElement !== levelName) levelName.value = name ?? '';
     element(root, '.level-label-count').textContent = `${labels.length} course labels. Edits, saves and exports preserve them unless you remove them.`;
     element<HTMLButtonElement>(root, '.level-clear-labels').disabled = labels.length === 0;
     renderSetPieces();
@@ -1731,7 +1739,8 @@ Export the level first if you want to keep them. Continue without saving?`);
     },
   });
   serverList.replaceChildren(...(options.serverLevels.length === 0 ? [new Option('No server levels', '')]
-    : options.serverLevels.map((entry, index) => new Option(entry.name, String(index)))));
+    : options.serverLevels.map((entry, index) =>
+      new Option(entry.levelName === null ? entry.name : `${entry.levelName} (${entry.name})`, String(index)))));
 
   function renderLoadControls(): void {
     importButton.disabled = loading !== null;
@@ -2220,6 +2229,12 @@ Export the level first if you want to keep them. Continue without saving?`);
     setText(boardReadout, `${name} · x ${area.left} to ${area.right} m, y ${area.bottom} to ${area.top} m`);
     setCamera({ x: (area.left + area.right) / 2, y: (area.bottom + area.top) / 2, worldHeight: Math.min(camera.state().worldHeight, BOARD_CELL * 4) });
   }, listen);
+  // A rename is one level edit, saved and exported with the rest; an empty name leaves the level unnamed.
+  levelName.addEventListener('change', () => {
+    const typed = levelName.value.trim();
+    if (active) applyEdit(() => level.metadata({ name: typed === '' ? null : typed }));
+    levelName.value = level.definition().name ?? '';
+  }, listen);
   action('.level-clear-labels', () => {
     const { labels } = level.definition();
     if (labels.length === 0 || !window.confirm(`Remove all ${labels.length} course labels?`)) return;
@@ -2227,7 +2242,7 @@ Export the level first if you want to keep them. Continue without saving?`);
   });
   action('.level-new', () => {
     const project = options.projectSave.openProject();
-    if (!window.confirm(`Start a new level? This keeps flat ground and the start location, and removes all other objects and labels. ${
+    if (!window.confirm(`Start a new level? This keeps flat ground and the start location, and removes the level's name and all other objects and labels. ${
       project === null ? '' : `Project "${project}" keeps every saved version. `}${
       dirty() ? 'Your unsaved changes will be discarded; export first to keep them.' : ''}`)) return;
     resetSelection();

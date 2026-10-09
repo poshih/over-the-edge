@@ -105,7 +105,7 @@ export class Game {
   private timerElapsed = 0;
   private timerRunning = true;
   private readonly hudFrame: { -readonly [K in keyof HudFrame]: HudFrame[K] } = {
-    height: 0, bestHeight: 0, elapsed: 0, timerRunning: true, health: null, death: null, paused: false,
+    level: null, height: 0, bestHeight: 0, elapsed: 0, timerRunning: true, health: null, death: null, paused: false,
     pointerLocked: false, inputMode: 'mouse',
   };
 
@@ -144,6 +144,7 @@ export class Game {
     this.audio = options.audio ?? null;
     this.hud = options.hud ?? DEFAULT_HUD;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
+    this.hudFrame.level = options.level.name;
     const listen = { signal: this.lifecycle.signal };
     window.addEventListener('error', (event) => this.stop(event.message), listen);
     window.addEventListener('unhandledrejection', (event) =>
@@ -495,6 +496,7 @@ export class Game {
 
   applyLevel(change: LevelChange): void {
     if (this.stopped) return;
+    this.hudFrame.level = change.level.name;
     if (change.kind === 'replace') this.cancelDeath();
     this.triggers.apply(change);
     this.stageSwitches();

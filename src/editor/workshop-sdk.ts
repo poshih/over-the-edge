@@ -250,6 +250,8 @@ export interface WorkshopLevelEdits {
   edit(batch: { readonly add?: readonly LevelObject[]; readonly remove?: readonly string[]; readonly labels?: readonly LevelLabel[] }):
     WorkshopRefusal | null;
   labels(labels: readonly LevelLabel[]): WorkshopRefusal | null;
+  // Renames the level; null leaves it unnamed.
+  name(name: string | null): WorkshopRefusal | null;
   // Adopts a whole level as one edit: only the objects that differ change, so a playtest goes on.
   replace(level: LevelDefinition): WorkshopRefusal | null;
 }

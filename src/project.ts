@@ -2,6 +2,7 @@
 // with a project.json manifest plus JSON and binary files at fixed paths; a bundle is the same file
 // tree serialized into one JSON document for moving projects between machines and browsers.
 import { ART_LIMITS, ArtError, artId, artName } from './art-types';
+import { DISPLAY_NAME_LIMIT } from './display-name';
 import { NO_DECORATION_ART, validateDecorationArt } from './decoration-art';
 import type { DecorationArt } from './decoration-art';
 import { unknownDecorationModels } from './decoration-models';
@@ -40,7 +41,7 @@ export { ProjectError } from './project-fields';
 
 export const PROJECT_FORMAT = 'over-the-edge-project';
 export const PROJECT_BUNDLE_FORMAT = 'over-the-edge-project-bundle';
-export const PROJECT_SCHEMA_VERSION = 19;
+export const PROJECT_SCHEMA_VERSION = 20;
 export const PROJECT_FILES = {
   manifest: 'project.json',
   level: 'level.json',
@@ -48,7 +49,7 @@ export const PROJECT_FILES = {
   alternate: 'characters/alternate.json',
 } as const;
 export const PROJECT_LIMITS = {
-  title: 80,
+  title: DISPLAY_NAME_LIMIT,
   id: 64,
   manifestBytes: 2 * 1024 * 1024,
   appearanceBytes: 64 * 1024 * 1024,

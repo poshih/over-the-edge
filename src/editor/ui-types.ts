@@ -68,6 +68,8 @@ export interface GameUi {
   applySettings: (settings: GameSettings) => void;
   settings: () => GameSettings;
   setHud: (hud: HudSettings) => void;
+  // Names the open level in the game header; null for a level with no name.
+  setLevelName: (name: string | null) => void;
   setSceneTone: (dark: boolean) => void;
   notice: (message: string, kind: 'info' | 'error') => void;
   dispose: () => void;

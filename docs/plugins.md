@@ -436,6 +436,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | --- | --- | --- | --- | --- |
 | [`avatar.rigs`](kinds-plugins.md#rig-strategies) | `AVATAR_RIGS` | `kinds` | Keyed, 64 `AvatarRigStrategy` | The `standard` strategy |
 | [`avatar.motions`](kinds-plugins.md#motion-kinds) | `AVATAR_MOTIONS` | `kinds` | Keyed, 64 `AvatarMotionKind` | None; hair is built in, outside the point |
+| [`hud.level`](runtime-plugins.md#hud-readouts) | `HUD.level` | `runtime` | Slot, `HudReadoutFactory` | `DEFAULT_HUD_READOUTS.level` |
 | [`hud.height`](runtime-plugins.md#hud-readouts) | `HUD.height` | `runtime` | Slot, `HudReadoutFactory` | `DEFAULT_HUD_READOUTS.height` |
 | [`hud.health`](runtime-plugins.md#hud-readouts) | `HUD.health` | `runtime` | Slot, `HudReadoutFactory` | `DEFAULT_HUD_READOUTS.health` |
 | [`hud.timer`](runtime-plugins.md#hud-readouts) | `HUD.timer` | `runtime` | Slot, `HudReadoutFactory` | `DEFAULT_HUD_READOUTS.timer` |

@@ -31,7 +31,7 @@ try {
   const project = await loadEngineModule(server, '/src/project.ts');
   const builder = new CourseBuilder<AscentZone>(library, job);
   const trail = buildCourse(builder);
-  const snapshot = job.prepare(builder.level(engine.level.LEVEL_SCHEMA_VERSION));
+  const snapshot = job.prepare(builder.level(engine.level.LEVEL_SCHEMA_VERSION, TITLE));
   const level = snapshot.level;
   const problems: string[] = [];
   const used = new Set(builder.pieces.map((piece) => piece.id));

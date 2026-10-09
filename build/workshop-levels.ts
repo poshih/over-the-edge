@@ -38,11 +38,15 @@ export function loadServerLevels(root: string): WorkshopFile[] {
   });
 }
 
-/** Serves the server levels with the Workshop; `virtual:workshop-levels` lists them by file name. */
+/** Serves the server levels with the Workshop; `virtual:workshop-levels` lists them by file name, with their own names. */
 export function workshopLevels(files: readonly WorkshopFile[]): Plugin {
+  const decoder = new TextDecoder();
+  // Each file is a validated level, so it names itself or holds null.
+  const levelNames = files.map((file): string | null => (JSON.parse(decoder.decode(file.bytes)) as { name: string | null }).name);
   return workshopFiles({
     name: 'workshop-levels', files,
     code: (urls) => `export default [${files.map((file, index) =>
-      `{name:${JSON.stringify(file.path.slice(0, -EXTENSION.length))},url:${urls[index]},bytes:${file.bytes.byteLength}}`).join(',')}];`,
+      `{name:${JSON.stringify(file.path.slice(0, -EXTENSION.length))},levelName:${JSON.stringify(levelNames[index])},` +
+      `url:${urls[index]},bytes:${file.bytes.byteLength}}`).join(',')}];`,
   });
 }

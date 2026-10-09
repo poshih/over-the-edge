@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 10,
+  "schemaVersion": 11,
+  "name": "Showcase",
   "labels": [
     {
       "x": 0,

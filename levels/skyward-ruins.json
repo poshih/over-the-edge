@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 10,
+  "schemaVersion": 11,
+  "name": "Skyward Ruins",
   "labels": [
     {
       "x": 1.575,

@@ -78,6 +78,16 @@
   letter-spacing: 0.13em;
 }
 
+.brand .level-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand .level-title.is-untitled {
+  opacity: 0.6;
+}
+
 .brand h1 {
   margin-top: 5px;
   overflow: hidden;

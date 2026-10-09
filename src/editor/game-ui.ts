@@ -35,7 +35,7 @@ export function createGameUI(options: {
       <header class="game-header">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
-          <div><p class="eyebrow">PHYSICS PLAYGROUND / 01</p><h1></h1></div>
+          <div><p class="eyebrow level-title"></p><h1></h1></div>
         </div>
         <div class="game-toolbar">
           <div class="game-actions" role="group" aria-label="Game controls">
@@ -71,6 +71,14 @@ export function createGameUI(options: {
   const heading = element<HTMLHeadingElement>(root, '.brand h1');
   setText(heading, gameTitle);
   heading.title = gameTitle;
+  const levelTitle = element<HTMLElement>(root, '.level-title');
+  // Names the open level over the game's title, as plain text; a level with no name shows a muted placeholder.
+  const setLevelName = (name: string | null): void => {
+    setText(levelTitle, name ?? 'Untitled level');
+    levelTitle.classList.toggle('is-untitled', name === null);
+    levelTitle.title = name ?? 'This level has no name. Name it in the Level tab.';
+  };
+  setLevelName(null);
   const notice = createNotice({ mount: root });
   const actions = element<HTMLElement>(root, '.game-actions');
   const play = element<HTMLButtonElement>(root, '[data-action="play"]');
@@ -123,6 +131,7 @@ export function createGameUI(options: {
   return {
     root,
     actions,
+    setLevelName,
     // Keeps the title and readouts legible when a project's sky is dark.
     setSceneTone: (dark: boolean): void => {
       root.dataset.scene = dark ? 'dark' : 'light';
