@@ -53,6 +53,10 @@ export interface Tuning {
   health: number;
   hurtInvulnerability: number;
   respawnInvulnerability: number;
+  // The hammer head lights a bonfire by passing through its fire at `bonfireStrikeSpeed` m/s or faster. It then burns
+  // `bonfireBurnTime` seconds, and once it goes out the hammer can light it again.
+  bonfireStrikeSpeed: number;
+  bonfireBurnTime: number;
   // Traps' hurt box around the player's root; height rises from the pot's bottom, depth straddles the obstacle line.
   hurtWidth: number;
   hurtHeight: number;
@@ -134,6 +138,8 @@ export const DEFAULT_TUNING: Readonly<Tuning> = Object.freeze({
   health: 100,
   hurtInvulnerability: 1,
   respawnInvulnerability: 2,
+  bonfireStrikeSpeed: 3,
+  bonfireBurnTime: 10,
   hurtWidth: 1,
   hurtHeight: 1.58,
   hurtDepth: 0.9,

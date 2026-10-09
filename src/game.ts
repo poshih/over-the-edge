@@ -186,7 +186,7 @@ export class Game {
         if (!this.stopped) this.pendingLooks.enemy(event);
       });
       this.unsubscribeBonfires = this.simulation.subscribeBonfires((state) => {
-        if (!this.stopped) this.pendingLooks.lit = state.lit;
+        if (!this.stopped) this.pendingLooks.burning = state.burning;
       });
       for (const factory of options.plugins.list(INPUT_DEVICES)) {
         const create = factory.value;
@@ -737,7 +737,7 @@ export class Game {
         this.view.applyEnemy(looks.enemies[index]!);
       }
       if (this.lifecycle.signal.aborted) return;
-      if (looks.lit !== null) this.view.setLitBonfires(looks.lit);
+      if (looks.burning !== null) this.view.setBurningBonfires(looks.burning);
       if (this.lifecycle.signal.aborted) return;
       if (looks.switches !== null) this.view.setPressedSwitches(looks.switches);
       if (batch === null) return;

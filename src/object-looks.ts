@@ -1,6 +1,7 @@
 import type { Object3D } from 'three';
 import { AxeView } from './axe-view';
 import { BonfireView } from './bonfire-view';
+import type { BurningBonfire } from './bonfires';
 import { Disposal } from './disposal';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { EnemyEvent, EnemyPose } from './enemy-types';
@@ -47,8 +48,10 @@ export interface ObjectLook<T extends LevelObject> {
 }
 
 export interface BonfireLook extends ObjectLook<BonfireObject> {
-  // The bonfires the player has reached this run, which burn: called whenever they change.
-  setLit(ids: readonly string[]): void;
+  // The bonfires that burn, each from its `litAt` until its `outAt`, in the run seconds `update` gets; the rest are out.
+  // Called as the game starts and whenever they change: the hammer lights one, one goes out, or a new run or an edit
+  // puts them out.
+  setBurning(burning: readonly BurningBonfire[]): void;
 }
 
 export interface SwitchLook extends ObjectLook<TriggerObject> {
@@ -181,7 +184,7 @@ export const DEFAULT_LOOKS: Omit<Looks, 'phantoms'> = Object.freeze({
   },
   bonfire: (): BonfireLook => {
     const view = new BonfireView();
-    return { ...viewLook<BonfireObject>(view), setLit: (ids) => view.setLit(ids) };
+    return { ...viewLook<BonfireObject>(view), setBurning: (burning) => view.setBurning(burning) };
   },
   platform: () => new PlatformView(),
   shooter: () => viewLook<ShooterObject>(new ShooterView()),
@@ -241,8 +244,8 @@ const LOOK_CONTRACTS = Object.freeze({
   }),
   bonfire: instanceContract({
     ...OBJECT_LOOK_CONTRACT,
-    returns: 'three.js passes, set(objects), setLit(ids), update(time), dispose() and, when given, inspect()',
-    methods: ['set', 'setLit', 'update', 'dispose'],
+    returns: 'three.js passes, set(objects), setBurning(burning), update(time), dispose() and, when given, inspect()',
+    methods: ['set', 'setBurning', 'update', 'dispose'],
   }),
   platform: instanceContract({
     ...OBJECT_LOOK_CONTRACT,
@@ -373,8 +376,8 @@ export class LevelLooks {
     this.fronts = passes.flatMap(({ front }) => front === undefined ? [] : [front]);
   }
 
-  setLit(ids: readonly string[]): void {
-    call1(this.bonfire, 'setLit', ids);
+  setBurning(burning: readonly BurningBonfire[]): void {
+    call1(this.bonfire, 'setBurning', burning);
   }
 
   setPressedSwitches(ids: readonly string[]): void {

@@ -237,7 +237,7 @@ export class CourseBuilder<Zone extends CourseZone = CourseZone> {
     }, `${this.zone!.code}:scenery`);
   }
 
-  // A bonfire whose base stands on (x, y): reached, it is where a fallen player comes back. It never collides.
+  // A bonfire whose base stands on (x, y): lit by the hammer, it is where a fallen player comes back. It never collides.
   bonfire(name: string, x: number, y: number) {
     return this.add({ kind: 'bonfire', id: this.id(name), x: tidy(x), y: tidy(y) }, `${this.zone!.code}:bonfires`);
   }

@@ -52,8 +52,8 @@ const say = (text: LoreMessage) => (object: LevelObject): LevelObject => object.
 // Props are decorations, never terrain: small colliders close together trap the pot and the hammer head
 // (see crampedColliders in src/course-checks.ts), and the course passes straight through its props.
 
-// A bonfire landing: a bonfire a fallen player comes back to, whose audio cue sounds as it is reached, and the zone's
-// title the first time the player arrives.
+// A bonfire landing: a bonfire a fallen player comes back to once lit, whose audio cue sounds as the hammer lights it,
+// and the zone's title the first time the player arrives.
 function bonfire(b: CourseBuilder, x: number, y: number, key: keyof typeof TEXT) {
   b.bonfire('bonfire', x, y);
   b.message(`bonfire-${key}`, x, y + 1.3, TEXT[key].title, TEXT[key].message, { width: 4, height: 3 });

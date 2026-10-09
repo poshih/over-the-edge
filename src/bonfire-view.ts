@@ -1,4 +1,5 @@
 import { DynamicDrawUsage, InstancedBufferAttribute, InstancedMesh, MeshBasicMaterial, MeshStandardMaterial } from 'three';
+import type { BurningBonfire } from './bonfires';
 import { ModelKit } from './decoration-geometry';
 import { HAZARD_LIMITS } from './hazards';
 import { markInstanceSlot } from './instancing';
@@ -12,6 +13,9 @@ const WOOD = 0x4a3526;
 const CHARRED = 0x231b16;
 const EMBER = 0xff7a1f;
 const FLAME = 0xffc35a;
+// Seconds a fire takes to flare up once lit, and to die down before it goes out.
+const KINDLE = 0.4;
+const DIE_DOWN = 1.5;
 
 // A ring of stones round an ash bed and logs leaning together, its base centre at the origin; the flames glow.
 function bonfireModel() {
@@ -39,28 +43,33 @@ function bonfireModel() {
   return { logs: model.lit, flames: model.glow };
 }
 
-/** The level's bonfires, on the obstacle line in the course pass. Those the player has reached burn. */
+/**
+ * The level's bonfires, on the obstacle line in the course pass. One the hammer lights flares up, burns and dies down as
+ * it goes out, all in the flames' shader from its times, so a burning fire costs nothing per frame.
+ */
 export class BonfireView extends ObjectView<BonfireObject> {
-  private readonly lit = new Set<string>();
-  // 1 for each slot whose bonfire burns, 0 for one that is out.
-  private readonly burning: InstancedBufferAttribute;
+  private readonly burning = new Map<string, BurningBonfire>();
+  // Per slot, the run seconds its bonfire was lit at and goes out at; both 0 for one that is out.
+  private readonly fires: InstancedBufferAttribute;
   private readonly clock: { value: number };
 
   constructor() {
     const { logs, flames } = bonfireModel();
-    const burning = new InstancedBufferAttribute(new Float32Array(HAZARD_LIMITS.bonfires), 1);
-    burning.setUsage(DynamicDrawUsage);
-    burning.onUpload(() => burning.clearUpdateRanges());
-    flames.setAttribute('burning', burning);
+    const fires = new InstancedBufferAttribute(new Float32Array(HAZARD_LIMITS.bonfires * 2), 2);
+    fires.setUsage(DynamicDrawUsage);
+    fires.onUpload(() => fires.clearUpdateRanges());
+    flames.setAttribute('fire', fires);
     const clock = { value: 0 };
     const fire = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });
     fire.onBeforeCompile = (shader) => {
       shader.uniforms.flameTime = clock;
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float burning;\nuniform float flameTime;')
+        .replace('#include <common>', '#include <common>\nattribute vec2 fire;\nuniform float flameTime;')
         .replace('#include <begin_vertex>', `#include <begin_vertex>
-          // A fire that is out shrinks to nothing; one that burns flickers, each at its own pace.
-          transformed *= burning;
+          // A fire grows from nothing as it is lit and shrinks back as it goes out; while it burns, each flickers at its
+          // own pace.
+          transformed *= clamp((flameTime - fire.x) / ${KINDLE.toFixed(2)}, 0.0, 1.0)
+            * clamp((fire.y - flameTime) / ${DIE_DOWN.toFixed(2)}, 0.0, 1.0);
           transformed.y *= 0.85 + 0.15 * sin(flameTime * 9.0 + position.x * 13.0 + instanceMatrix[3].x * 1.7);`);
     };
     super({
@@ -73,17 +82,16 @@ export class BonfireView extends ObjectView<BonfireObject> {
       ],
       transform: (object, matrix) => matrix.makeTranslation(object.x, object.y, 0),
     });
-    this.burning = burning;
+    this.fires = fires;
     this.clock = clock;
   }
 
-  // Burns the bonfires with these IDs and puts the rest out.
-  setLit(ids: readonly string[]): void {
-    const next = new Set(ids);
-    for (const id of [...this.lit, ...next]) {
-      if (this.lit.has(id) === next.has(id)) continue;
-      if (next.has(id)) this.lit.add(id);
-      else this.lit.delete(id);
+  // Burns these bonfires, each from when it was lit until it goes out, and puts the rest out.
+  setBurning(burning: readonly BurningBonfire[]): void {
+    const previous = [...this.burning.keys()];
+    this.burning.clear();
+    for (const fire of burning) this.burning.set(fire.id, fire);
+    for (const id of [...previous, ...this.burning.keys()]) {
       const drawn = this.drawn(id);
       if (drawn !== undefined) this.written(drawn.slot, drawn.object);
     }
@@ -95,9 +103,10 @@ export class BonfireView extends ObjectView<BonfireObject> {
   }
 
   protected override written(slot: number, object: BonfireObject): void {
-    const value = this.lit.has(object.id) ? 1 : 0;
-    if (this.burning.getX(slot) === value) return;
-    this.burning.setX(slot, value);
-    markInstanceSlot(this.burning, slot);
+    const fire = this.burning.get(object.id);
+    const litAt = Math.fround(fire?.litAt ?? 0), outAt = Math.fround(fire?.outAt ?? 0);
+    if (this.fires.getX(slot) === litAt && this.fires.getY(slot) === outAt) return;
+    this.fires.setXY(slot, litAt, outAt);
+    markInstanceSlot(this.fires, slot);
   }
 }

@@ -3,6 +3,7 @@ import {
   OrthographicCamera, PerspectiveCamera, Scene, Sprite, SpriteMaterial, Vector3, WebGLRenderer,
 } from 'three';
 import { ARM_LAYER } from './arm-layer';
+import type { BurningBonfire } from './bonfires';
 import { CASTER_LAYER, CharacterLight, CharacterShadowParts, TOOL_LAYER } from './character-light';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { CharacterModelLoader } from './character-model-types';
@@ -675,8 +676,8 @@ export class GameView {
     return false;
   }
 
-  // Burns the bonfires the player has reached this run, and puts the rest out.
-  setLitBonfires(ids: readonly string[]): void { this.looks.setLit(ids); }
+  // Burns these bonfires, each until it goes out, and puts the rest out.
+  setBurningBonfires(burning: readonly BurningBonfire[]): void { this.looks.setBurning(burning); }
   setPressedSwitches(ids: readonly string[]): void { this.looks.setPressedSwitches(ids); }
 
   applyLevel(change: LevelChange): void {

@@ -204,9 +204,14 @@ of its kind:
   and borrowed read-only until the next frame sample. Never retain or mutate either; copy
   scalar values into your own state if you need history. Do not use array or pose identity
   to detect changes, and a slot does not identify a particular shot.
-- `setLit(ids)`, the bonfire look's alone, receives the bonfires the player has reached this
-  run, which burn, whenever they change. Changes during physics are staged: after the step loop,
-  it runs at most once per notification flush, with the latest lit set.
+- `setBurning(burning)`, the bonfire look's alone, receives the bonfires that burn, each a
+  `BurningBonfire`, `{ id, litAt, outAt }`: the hammer lit it at `litAt` and it goes out at
+  `outAt`, in the run seconds `update(time)` receives. The rest are out. It runs as the game
+  starts and whenever that changes: the hammer lights one, one goes out, or a new run or an edit
+  puts them out. Changes during physics are staged: after the step loop, it runs at most once per
+  notification flush, with the latest set. The array and its entries are frozen, so a look may
+  keep them and draw each fire's whole life from its times; the engine's flames flare up over
+  0.4 s once lit and die down over the last 1.5 s before going out, all in their shader.
 - `setPressed(ids)`, the switch look's alone, receives the switch triggers the player's foot is
   inside. Reset, restart and respawn release switches through the same staged looks phase.
 - The platform look's `set(objects)` receives the authored platforms, and its
@@ -550,13 +555,13 @@ rising from where they were born. A fatal lava burn keeps the corpse alight unti
 not change lava.
 
 **Default enemy health.** `DEFAULT_EFFECTS.enemyHealth` draws in marks and takes `enemy-hit`,
-`enemy-defeat` and `placed`. Over a hurt enemy's drawing, on the obstacle line, a bar shows the
+`enemy-defeat`, `placed` and `bonfire`. Over a hurt enemy's drawing, on the obstacle line, a bar shows the
 share of its hit points left, with a pale chunk for what its latest hits took: the chunk holds
 for half a second, then drains, and hits landing before it drains add to it. The bar follows the
 enemy as drawn, reading `health` and `maxHealth` from the frame's enemy poses, shows for **5 s**
 after each hit and fades over the last 0.6 s, and hides while the enemy sleeps. It goes at once
-when the enemy falls to its death or heals, as when the level's objects are restored, and at a
-new run's `placed { bonfire: null }`; a checkpoint return keeps it, as enemies keep their damage.
+when the enemy falls to its death or heals, and every bar goes at each `bonfire` and `placed`,
+which bring every enemy back home at full health.
 A hammer's killing blow empties the bar where the enemy fell, fading with it. Every bar shares
 one instanced draw with no textures or frame allocations, updated only while a bar shows.
 Replacing it changes neither strikes nor lava.
@@ -681,7 +686,7 @@ reach the ordered effects/audio/observer drain. Blocks can continue while dying,
 placement appends `placed`; effects filter by the current placement while audio and
 observers receive the complete journal batch.
 
-The game settings (schema **19**) own `death: { wait, angularDamping, friction }`.
+The game settings (schema **20**) own `death: { wait, angularDamping, friction }`.
 Workshop / Physics / Death exposes the same fields:
 
 | Field | Values | Default |
@@ -712,8 +717,8 @@ once, but the released collider keeps its entry outline until placement.
 immediately. After a reset, alignment refuses until a model is installed.
 
 Game settings' `death.wait` owns the gameplay delay, not a runtime timing slot. The
-engine waits its snapshotted **4 s** default before returning to the last bonfire, or
-requesting the ordinary Reset when none was reached. The project's HUD owns only
+engine waits its snapshotted **4 s** default before returning to the bonfire lit last, or
+requesting the ordinary Reset when none was lit. The project's HUD owns only
 `death: { text, fadeIn }`: **“You are dead...”** and a **1.5 s** visual fade by default.
 Each death snapshots its wait, text and fade; edits affect the next death.
 A fade longer than the wait ends unfinished without an error, never extending the wait.
@@ -1327,8 +1332,8 @@ type; otherwise a non-empty array of known types without repeats, fixed for the 
 | `impact` | `x`, `y`: mean contact point; `normalX`, `normalY`: struck surface's unit normal toward the head; `speed`: head approach speed (m/s); `strength`: 0–1. The live head began touching, limited per `IMPACTS` in run time; raised only while a consumer takes impacts |
 | `death` | The health death sequence started; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
-| `placed` | `bonfire`: the checkpoint returned to, continuing the run; `null` starts a new run from its spawn, including Reset, rig rebuild, level replacement, Workshop placement or death before any bonfire |
-| `bonfire` | `id`, `x`, `y`: checkpoint ID and base; another bonfire became current, including a previously lit one |
+| `placed` | `bonfire`: the checkpoint returned to, continuing the run; `null` starts a new run from its spawn, including Reset, rig rebuild, level replacement, Workshop placement or death before any bonfire is lit. Either way every enemy is back home at full health |
+| `bonfire` | `id`, `x`, `y`: the bonfire's ID and base. The hammer lit it: the player is healed to full, every enemy is back home at full health, and it is the checkpoint a death returns to, even if it was already |
 | `enemy-hit` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `strikeX`, `strikeY`: where the head struck; `normalX`, `normalY`: the contact's unit normal there, toward the head; `damage`: hit points the strike took; `health`, `max`: hit points left and the enemy's maximum. On **every accepted surviving hit**, not just phase transitions |
 | `enemy-defeat` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `by`: `'hammer'` or `'fall'`; `strikeX`, `strikeY`, `normalX`, `normalY`: the killing strike, as for `enemy-hit`, or for a fall the centre with a zero normal; `damage`: the hit points it had left; `max`: its maximum |
 | `launch` | An authored Launch player action executed |
@@ -1376,7 +1381,7 @@ happens, including a death return inside the frame or a Reset between frames.
 plain data at the source and calls no consumer. There is one drain after stepping, before
 rendering (and one initial look-only flush):
 
-1. Looks: enemy state changes in order, then the latest lit set, then the latest switch set.
+1. Looks: enemy state changes in order, then the latest burning bonfires, then the latest switch set.
 2. **For each moment**, in journal order: its effects, then audio, then its routed observers
    in manifest order. Lifecycle abort is checked before each group and observer.
 
@@ -1400,7 +1405,7 @@ returned observers with `PluginError`, naming the plugin and point; a throwing o
 the game with the same attribution, never silently removing it. `dispose`, when supplied,
 runs with Game cleanup; every part is attempted before the first cleanup error is rethrown.
 
-For example, report reached checkpoints without changing the gameplay rules:
+For example, report each bonfire the player rests at without changing the gameplay rules:
 
 ```ts
 import { add, defineRuntime, OBSERVERS } from '../../src/plugins/runtime-sdk';
@@ -1411,7 +1416,7 @@ export default defineRuntime({
     const checkpoints: GameObserverFactory = () => ({
       moments: ['bonfire'],
       moment(moment) {
-        if (moment.type === 'bonfire') host.notice(`Reached checkpoint ${moment.id}.`);
+        if (moment.type === 'bonfire') host.notice(`Rested at ${moment.id}.`);
       },
     });
     return [add(OBSERVERS, checkpoints)];

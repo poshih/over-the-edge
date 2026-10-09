@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 18,
+  "schemaVersion": 19,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -9,7 +9,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 19,
+    "schemaVersion": 20,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -48,6 +48,8 @@
       "health": 100,
       "hurtInvulnerability": 1,
       "respawnInvulnerability": 2,
+      "bonfireStrikeSpeed": 3,
+      "bonfireBurnTime": 10,
       "hurtWidth": 1,
       "hurtHeight": 1.58,
       "hurtDepth": 0.9,

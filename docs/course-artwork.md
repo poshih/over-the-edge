@@ -161,8 +161,8 @@ collides as its slice, the climb's ledges and its overhang, a **Boulder**, the v
 lists the GLBs with their asset IDs and holds the level, its collision included.
 
 The level also has one of each hazard, none of which collides, on those rocks: a
-[bonfire](../README.md#health-and-bonfires) on the first ledge, the one a fallen player comes
-back to; a [projectile trap](../README.md#traps) set into the left crag, firing over the start
+[bonfire](../README.md#health-and-bonfires) on the first ledge, which a fallen player comes
+back to once the hammer has lit it; a [projectile trap](../README.md#traps) set into the left crag, firing over the start
 across the second ledge; a shallow swamp [pool](../README.md#liquid-pools) against the fourth
 ledge's riser; a swinging axe over the last step below the summit; and a lava lake filling the
 basin past the summit's far edge, **over the edge**. So it shows health, and a new game starts

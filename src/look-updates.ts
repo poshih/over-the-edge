@@ -1,13 +1,14 @@
+import type { BurningBonfire } from './bonfires';
 import type { EnemyEvent } from './enemy-types';
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-// State changes are separate from the moment journal: enemy envelopes are pooled, and lit/switch state coalesces.
-// The simulation supplies immutable enemy snapshots and lit sets.
+// State changes are separate from the moment journal: enemy envelopes are pooled, and bonfire/switch state coalesces.
+// The simulation supplies immutable enemy snapshots and burning bonfires.
 export class LookUpdates {
   readonly enemies: EnemyEvent[] = [];
   enemyCount = 0;
-  lit: readonly string[] | null = null;
+  burning: readonly BurningBonfire[] | null = null;
   switches: readonly string[] | null = null;
   private readonly resets: Mutable<Extract<EnemyEvent, { readonly type: 'reset' }>>[] = [];
   private readonly upserts: Mutable<Extract<EnemyEvent, { readonly type: 'upsert' }>>[] = [];
@@ -17,7 +18,7 @@ export class LookUpdates {
   private removeCount = 0;
 
   get pending(): boolean {
-    return this.enemyCount > 0 || this.lit !== null || this.switches !== null;
+    return this.enemyCount > 0 || this.burning !== null || this.switches !== null;
   }
 
   enemy(event: EnemyEvent): void {
@@ -44,7 +45,7 @@ export class LookUpdates {
 
   clear(): void {
     this.enemyCount = 0;
-    this.lit = this.switches = null;
+    this.burning = this.switches = null;
     this.resetCount = this.upsertCount = this.removeCount = 0;
   }
 }

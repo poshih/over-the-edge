@@ -45,11 +45,9 @@ export interface ProjectileBlock {
 }
 
 export const BONFIRE = {
-  // The player's foot lights a bonfire this near its base.
-  reach: 1.5,
   // A fallen player comes back with the jar's base this high above the bonfire's base, clear of the ground it stands on.
   spawnClearance: 0.17,
-  // The drawn fire, standing on its base.
+  // The fire, standing on its base: drawn this size, and the hammer head lights the bonfire anywhere within it.
   width: 1.2, height: 1.3,
 } as const;
 

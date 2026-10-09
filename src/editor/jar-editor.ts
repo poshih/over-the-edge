@@ -53,7 +53,7 @@ export function createJarEditor(options: {
     },
     help: () => 'The jar\'s collision outline, a game setting: every character\'s jar collides as it, and the default jar ' +
       'and phantoms are drawn from it. It holds the player\'s root, at the centre, and stays below the dashed line, under ' +
-      'the shoulder hinge where the hammer turns. Its base is where heights, the hurt box and bonfire reach are measured ' +
+      'the shoulder hinge where the hammer turns. Its base is where heights and the hurt box are measured ' +
       'from, and its area is the volume liquids hold up. A change rebuilds the player and restarts the run.',
     fallback: DEFAULT_POT_OUTLINE,
   }, {

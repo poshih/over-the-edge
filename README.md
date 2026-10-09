@@ -249,9 +249,9 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 18**, and release content **schema 17**,
-including the audio record's `block` cue, game settings' death wait, archer, hit-point and
-armor rules, jar outline and jar side friction, the theme camera's background blur and character light, the HUD's
+Project manifests and bundles use **schema 19**, and release content **schema 18**,
+including the audio record's `block` cue, game settings' death wait, archer, hit-point,
+armor and bonfire rules, jar outline and jar side friction, the theme camera's background blur and character light, the HUD's
 death text/fade and the hollow archer's enemy art; other versions are rejected.
 
 ### Included full-length course
@@ -372,7 +372,7 @@ explicitly reposition the mechanism and restart the attempt, rather than
 introducing hidden checkpoints into the climb.
 
 Falling **20 m** below everything in a level (its lowest terrain or launch zone)
-is a death: it brings the player back at the [bonfire](#health-and-bonfires) reached
+is a death: it brings the player back at the [bonfire](#health-and-bonfires) lit
 last, or, before any, restarts the attempt exactly like Reset. It only arms once the
 pot or hammer head has stood on terrain since the player was placed, so a start with
 nothing beneath it keeps falling instead of restarting in a loop.
@@ -558,7 +558,8 @@ terrain collider.
 The workshop applies parameters without restarting, except rig dimensions and
 crossing between zero and positive handle compliance, which rebuild the player
 and restart the run. Enemy health applies at reset or spawn, death settings at the
-next death, and invulnerability durations at the next hit or respawn. Its first
+next death, invulnerability durations at the next hit or respawn, and a bonfire's burn
+time at the next one lit. Its first
 section, **Mass & recoil**, groups head mass, player
 mass and rotation speed with total shaft mass, hinge component mass and carriage
 mass. Shaft mass is uniform along the handle, in one body when rigid and divided
@@ -568,7 +569,7 @@ component. All masses stay positive.
 
 The other sections include motor strength and speed limits, the downswing boost,
 response gains, damping, contact friction, handle compliance, control
-sensitivity, the player's [health and invulnerability](#health-and-bonfires),
+sensitivity, the player's [health, invulnerability and bonfires](#health-and-bonfires),
 [hazard hurt box and knockback](#traps), [enemy rules](#enemies) and [liquids](#liquid-pools).
 These alive-play rules are typed, validated fields in `physics`; their ranges, defaults
 and live-application rules are in the [project settings reference](docs/projects.md#section-reference).
@@ -699,9 +700,9 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 19**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
+**schema version 20**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
 in any other version are rejected, not converted. Browser snapshots use storage format
-**11**; earlier storage keys are not read. Unreadable current-format saves are marked and
+**12**; earlier storage keys are not read. Unreadable current-format saves are marked and
 retained, while other valid snapshots remain available.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,
@@ -744,7 +745,7 @@ the editor's authored definition.
 
 To test one part of a course without moving its start, choose **Place player** and
 click/tap where the pot should stand. The player moves there in the start's hammer
-pose, and the level is not edited. Playtests, Reset and deaths before any bonfire then
+pose, and the level is not edited. Playtests, Reset and deaths before any bonfire is lit then
 start from the placed player until you choose **Use the level start** in the Level
 tab, pick a starting point in **Physics**, or load another level.
 
@@ -1009,7 +1010,9 @@ read the live settings, arrow speed and damage apply from the next shot, and arm
 and its full-damage speed from the next strike. Species health applies only at an enemy's next reset or new
 spawn: it does not heal or resize the health of an existing enemy, and waking is not
 a new spawn. Collider/drawn sizes and AI scheduling remain engine constants.
-Dead enemies stay dead until Reset or an editor rebuild. Patrol positions,
+Dead enemies stay dead until every enemy comes back home at full health: when the player
+lights a [bonfire](#health-and-bonfires) or returns at one after a death, on Reset and on an
+editor rebuild. Patrol positions,
 damage and deaths are runtime state: editor gizmos, saves and exports retain
 authored homes. Entering Level mode restores both authored enemy poses and terrain
 state, including dead enemies and disappeared illusions.
@@ -1040,8 +1043,16 @@ keeps its deadline, so edits apply at the next hit or respawn. Levels without
 enemies, traps or lava show no health.
 
 Choose **Workshop / Level / Bonfire**, then click/tap: its base rests on the terrain top
-under the pointer. A bonfire lights when the player's foot comes within **1.5 m** of its
-base, and the one reached last is where a death returns the player. Health running out
+under the pointer. A bonfire stays out as the player arrives: the hammer lights it, swung
+through its fire, a **1.2 m** wide, **1.3 m** tall box standing on its base, at **Bonfire
+strike speed** or faster (`bonfireStrikeSpeed`, 0–20 m/s, step 0.1, default **3 m/s**), so
+resting or brushing the head against it leaves it out; 0 lights it at a touch. Lighting it
+rests the player there: health refills, every enemy, dead or alive, comes back home at full
+health, and it becomes the bonfire a death returns to. It burns for
+**Bonfire burn time** (`bonfireBurnTime`, 1–120 s, step 0.5, default **10 s**), its flames
+dying down as it goes out, and only then can the hammer light it again. Both are in
+**Physics / Bonfires**; a strike speed applies to the next strike and a burn time to the next
+bonfire lit, while a burning one keeps its time. Health running out
 or a fall out of the level starts a physical death: the character collapses as a passive
 ragdoll, lets go of the hammer and drops it. The jar and hammer keep their motion; the corpse
 and released hammer collide only with the course and platforms, never enemies or each other.
@@ -1074,18 +1085,18 @@ physical pose immediately. Sprites re-hold their base after each committed edit.
 The corpse's pot remains buoyant; limbs and the separately queried dropped hammer
 take liquid drag only.
 
-After the wait the player returns at that bonfire, its jar's base 17 cm above the bonfire's, healed and
-protected for the configured respawn invulnerability (**2 s** by default),
-holding the hammer as at the level's start. The run goes on: its clock, best height,
-consumed once-triggers and level state carry on. Before any
-bonfire is reached, a death restarts the attempt exactly like Reset; Reset always
-restarts from the start and puts every bonfire out. Bonfires never collide; they stand on
-the obstacle line, behind the player.
+After the wait the player returns at the bonfire lit last, burning or not, its jar's base 17 cm
+above the bonfire's, healed and protected for the configured respawn invulnerability (**2 s** by
+default), holding the hammer as at the level's start, and every enemy comes back home at full
+health. The run goes on: its clock, best height, consumed once-triggers and the rest of the
+level's state carry on. Before any bonfire is lit, a death restarts the attempt exactly like
+Reset; Reset always restarts from the start and puts every bonfire out. Bonfires never collide;
+they stand on the obstacle line, behind the player.
 
-Health, lit bonfires and deaths are runtime state: saves and exports keep only the
+Health, burning bonfires and deaths are runtime state: saves and exports keep only the
 authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/projects.md)
-sound them; the `block` cue sounds a trap's projectile striking the hammer head.
-`death`/`fall` moments arrive at entry and `placed`
+sound them, the last as the hammer lights a bonfire; the `block` cue sounds a trap's
+projectile striking the hammer head. `death`/`fall` moments arrive at entry and `placed`
 after placement. The fatal hurt still reaches effects and observers, but has no hurt cue. Both
 [phantom recorders](docs/phantoms.md) stop before the fatal sample: no corpse movement,
 teleport or placement pose becomes a phantom. Reset, replacement, Workshop placement and
@@ -1395,7 +1406,8 @@ vertex shader, so frames write nothing for them; projectile instances are writte
 for those in flight. Their borrowed pose array and pose slots are pooled up to the
 high-water count, at most 256 shots, rather than rebuilt each frame. Length-indexed
 arrays retain their backing storage through count changes and empty frames.
-Bonfires find the player through a spatial index too. Liquid
+Bonfires find the hammer head through a spatial index too, and their flames flare up and die
+down in their shader, so a burning fire writes nothing each frame. Liquid
 pools do as well: a step clips only the player's parts in the pools it is near, and the
 liquid moves in its shaders, so frames write nothing for pools.
 Platforms keep packed active sets: a boarding step visits the pot's contacts and

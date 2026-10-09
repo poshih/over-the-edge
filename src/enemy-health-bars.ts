@@ -8,7 +8,8 @@ import type { SceneFrame } from './scene-frame';
 
 // Over a hurt enemy, a bar shows the share of its hit points left, with a pale chunk for what its latest hits took that
 // drains away soon after. The bar shows for a few seconds after each hit, and goes when the enemy heals or falls to its
-// death. A hammer's killing blow empties it where the enemy fell, fading with the enemy.
+// death, and every bar goes when the enemies come back, as lighting a bonfire and every placement bring them. A hammer's
+// killing blow empties it where the enemy fell, fading with the enemy.
 const BAR = {
   // Seconds a bar shows after the enemy's latest hit, fading over the last `fade`.
   show: 5, fade: 0.6,
@@ -61,7 +62,7 @@ function clamp01(value: number): number {
 export class EnemyHealthBars implements MomentEffect {
   readonly root = new Group();
   readonly pass = 'marks';
-  readonly moments = Object.freeze(['enemy-hit', 'enemy-defeat', 'placed'] as const);
+  readonly moments = Object.freeze(['enemy-hit', 'enemy-defeat', 'placed', 'bonfire'] as const);
   private readonly mesh: InstancedMesh<PlaneGeometry, ShaderMaterial>;
   private readonly bars: InstancedBufferAttribute;
   private readonly matrix = new Matrix4();
@@ -105,9 +106,9 @@ export class EnemyHealthBars implements MomentEffect {
   }
 
   moment(moment: Moment): void {
-    if (moment.type === 'placed') {
-      if (moment.bonfire === null) this.clear();
-    } else if (moment.type === 'enemy-hit') {
+    // Every enemy comes back home at full health.
+    if (moment.type === 'placed' || moment.type === 'bonfire') this.clear();
+    else if (moment.type === 'enemy-hit') {
       this.hit(moment.id, moment.species, moment.x, moment.y, moment.time,
         (moment.health + moment.damage) / moment.max, moment.health / moment.max, false);
     } else if (moment.type === 'enemy-defeat') {

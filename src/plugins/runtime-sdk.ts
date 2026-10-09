@@ -57,6 +57,7 @@ export { ARROW, AXE, axeAngle, BONFIRE, HURT_SOURCES, PROJECTILE_KINDS, SHOOTER 
 export type { HurtCause, HurtSource, ProjectileKind } from '../hazards';
 export { triggerBounds } from '../level';
 export type { AxeObject, BonfireObject, LevelObject, PlatformObject, PoolObject, ShooterObject, TriggerObject } from '../level';
+export type { BurningBonfire } from '../bonfires';
 export { AUDIO, momentCue, SILENT_AUDIO_OUTPUT } from '../game-audio';
 export type { GameAudio, GameAudioFactory, GameAudioSetup } from '../game-audio';
 export type { AudioDevice } from '../audio-device';

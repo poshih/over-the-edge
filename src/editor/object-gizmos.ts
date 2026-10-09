@@ -183,20 +183,14 @@ function enemyGizmo(object: EnemyObject, mode: GizmoMode): SVGElement[] {
   return children;
 }
 
-function bonfireGizmo(mode: GizmoMode): SVGElement[] {
+function bonfireGizmo(): SVGElement[] {
+  // Its fire, where the hammer head lights it.
   const region = rect(-BONFIRE.width / 2, 0, BONFIRE.width, BONFIRE.height);
   region.setAttribute('class', 'level-gizmo-region');
   const flame = svg('path');
   flame.setAttribute('class', 'level-gizmo-flame');
   flame.setAttribute('d', FLAME_GLYPH);
-  const children: SVGElement[] = [region, flame];
-  if (mode !== 'normal') {
-    // Where the player's foot lights it.
-    const reach = circle(BONFIRE.reach);
-    reach.setAttribute('class', 'level-gizmo-reach');
-    children.unshift(reach);
-  }
-  return children;
+  return [region, flame];
 }
 
 // The trap's body, as its corners turned by its angle about the muzzle.
@@ -295,7 +289,7 @@ function applyGizmo(node: SVGGElement, object: GizmoObject, mode: GizmoMode): vo
     case 'start': children = startGizmo(object); break;
     case 'trigger': children = triggerGizmo(object); break;
     case 'enemy': children = enemyGizmo(object, mode); break;
-    case 'bonfire': children = bonfireGizmo(mode); break;
+    case 'bonfire': children = bonfireGizmo(); break;
     case 'shooter': children = shooterGizmo(object, mode); break;
     case 'axe': children = axeGizmo(object); break;
     case 'pool': children = poolGizmo(object); break;

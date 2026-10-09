@@ -10,7 +10,7 @@ import {
   isBonfireObject, isEnemyObject, isPoolObject, isTerrainObject, isTrapObject, levelFloor, levelHurts, levelSpawn, levelStart,
   isPlatformObject,
 } from './level';
-import type { LevelChange, LevelDefinition, TerrainEvent } from './level';
+import type { BonfireObject, LevelChange, LevelDefinition, TerrainEvent } from './level';
 import { beginPlayerDeath, changePlayerVelocity, createPlayer, destroyPlayer, drivePlayer, launchPlayer, playerAnchor, tunePlayer } from './player';
 import type { MotorCommand, PartKind, PlayerRig } from './player';
 import { partPoint, partVelocity } from './player-bodies';
@@ -442,13 +442,14 @@ export class Simulation {
     return this.healthReading;
   }
 
-  // Brings a fallen player back at the bonfire reached last, healed and unharmed for a moment, holding the hammer as
-  // at the start. The run goes on: its clock, best height and level objects carry on. False, changing nothing, when
-  // no bonfire has been reached.
+  // Brings a fallen player back at the bonfire lit last, healed and unharmed for a moment, holding the hammer as at the
+  // start, with every enemy back home at full health, as lighting it brings them. The run goes on: its clock, best
+  // height and other level objects carry on. False, changing nothing, when no bonfire has been lit.
   respawn(): boolean {
     this.ensureLive();
     const bonfire = this.bonfires.currentBonfire();
     if (bonfire === null) return false;
+    this.enemies.reset(this.elapsed);
     // The player comes back with the settings' jar, which placing it builds.
     this.placePlayer(bonfireSpawn(bonfire, levelStart(this.level), potMeasures(this.settings.rig.pot).bottom), bonfire.id);
     this.safeUntil = this.elapsed + this.settings.physics.respawnInvulnerability;
@@ -564,6 +565,7 @@ export class Simulation {
       this.headTouching = touching;
     }
     this.terrain.advance(this.elapsed);
+    this.bonfires.advance(this.elapsed);
     this.enemies.afterStep(this.elapsed);
     this.hazards.afterStep(this.elapsed, this.worldAnchor(), this.rig.geometry.jar.bottom);
     // Lava burns the character while the pot is in it; each burn, like any hit, leaves it unharmed for a second.
@@ -573,16 +575,12 @@ export class Simulation {
     }
     if (!this.dying && this.terminal() === null) {
       this.platforms.board(this.rig.potFixture, this.manifold, SUPPORT_NORMAL);
-      const foot = this.playerPosition(this.footScratch);
-      const height = foot.y;
-      const bonfire = this.bonfires.update(foot);
-      if (bonfire !== null) {
-        const moment = this.moments.append('bonfire', this.placements, this.elapsed);
-        moment.id = bonfire.id;
-        moment.x = bonfire.x;
-        moment.y = bonfire.y;
-      }
-      this.bestHeight = Math.max(this.bestHeight, height);
+      this.bestHeight = Math.max(this.bestHeight, this.playerPosition(this.footScratch).y);
+      const head = this.rig.tool.head, velocity = partVelocity(head, this.velocityScratch);
+      const { bonfireStrikeSpeed, bonfireBurnTime } = this.settings.physics;
+      const bonfire = this.bonfires.strike(head.fixture, Math.hypot(velocity.x, velocity.y), bonfireStrikeSpeed, bonfireBurnTime,
+        this.elapsed);
+      if (bonfire !== null) this.rest(bonfire);
     }
     this.capture(this.current);
     if (this.dying || this.terminalRaised) return null;
@@ -826,6 +824,17 @@ export class Simulation {
 
   private vulnerable(): boolean {
     return !this.dying && this.health > 0 && this.elapsed >= this.safeUntil;
+  }
+
+  // The hammer lit `bonfire`, so the player rests there: healed, with every enemy back home at full health, and a death
+  // now returns there.
+  private rest(bonfire: BonfireObject): void {
+    this.health = this.settings.physics.health;
+    this.enemies.reset(this.elapsed);
+    const moment = this.moments.append('bonfire', this.placements, this.elapsed);
+    moment.id = bonfire.id;
+    moment.x = bonfire.x;
+    moment.y = bonfire.y;
   }
 
   private block(hit: Readonly<ProjectileBlock>): void {

@@ -7,7 +7,7 @@ export type AudioCue = (typeof AUDIO_CUES)[number];
 export const AUDIO_CUE_LABELS: Readonly<Record<AudioCue, string>> = {
   impact: 'Hammer impact', block: 'Hammer block', 'enemy-hit': 'Enemy hit', 'enemy-defeat': 'Enemy defeated',
   launch: 'Updraft launch', finish: 'Timer stops', hurt: 'Player hurt', death: 'Player death', fall: 'Fall out of the level',
-  bonfire: 'Bonfire reached',
+  bonfire: 'Bonfire lit',
 };
 export const AUDIO_CUE_DESCRIPTIONS: Readonly<Record<AudioCue, string>> = {
   impact: 'The hammer head strikes terrain or an enemy; louder for faster strikes.',
@@ -19,7 +19,7 @@ export const AUDIO_CUE_DESCRIPTIONS: Readonly<Record<AudioCue, string>> = {
   hurt: 'An enemy, a trap or lava hurts the player, who survives it.',
   death: 'The player\'s health runs out.',
   fall: 'The player falls out of the level.',
-  bonfire: 'The player reaches a bonfire other than the one a death returns to, which becomes that place.',
+  bonfire: 'The hammer lights a bonfire, which heals the player, brings every enemy back and becomes where a death returns.',
 };
 
 export interface AudioClip {

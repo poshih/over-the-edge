@@ -6,8 +6,8 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 18**; their release content uses **schema 17**.
-Both embed the audio record's `block` cue, game settings' death wait, archer rules, jar
+Project manifests and bundles use **schema 19**; their release content uses **schema 18**.
+Both embed the audio record's `block` cue, game settings' death wait, archer and bonfire rules, jar
 outline and jar side friction, the theme's background blur and character light, the HUD's death text/fade and the
 hollow archer's enemy art. Other versions are rejected, not converted.
 
@@ -38,7 +38,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | --- | --- | --- |
 | `title` | `project.json` | Game name: browser tab and release title (1-80 characters) |
 | `level` | `level.json` | Level JSON, schema 10, as exported from Workshop / Level |
-| `settings` | `project.json` | Game-settings profile, schema 19: physics (including health, invulnerability, hurt box, knockback, hammer damage, enemy rules and archers' arrows, downswing boost, each material's friction and bounciness, and the jar's side friction), hammer rig (handle length, maximum extension, minimum reach, the default hammer's head outline and the jar's collision outline), cursor target and death wait/materials |
+| `settings` | `project.json` | Game-settings profile, schema 20: physics (including health, invulnerability, bonfire lighting and burn time, hurt box, knockback, hammer damage, enemy rules and archers' arrows, downswing boost, each material's friction and bounciness, and the jar's side friction), hammer rig (handle length, maximum extension, minimum reach, the default hammer's head outline and the jar's collision outline), cursor target and death wait/materials |
 | `characters/primary` | `characters/primary.json` | Character profile, or `null` for the procedural character |
 | `characters/alternate` | `characters/alternate.json` | Optional second character players can switch to |
 | `arm-ik` | `project.json` | Body-relative elbow hints |
@@ -78,12 +78,12 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 18,
+  "schemaVersion": 19,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "mode": "meshes", "assets": [], "decorations": {} },
   "settings": {
-    "schemaVersion": 19, "physics": { "...": "..." },
+    "schemaVersion": 20, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."],
              "pot": [{ "x": -0.2, "y": -0.48 }, "..."] },
     "cursor": {
@@ -117,7 +117,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 18,
+  "schemaVersion": 19,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 10, "labels": [], "objects": [] },
@@ -505,12 +505,12 @@ An open Workshop page shows each change within two seconds.
 
 ## Section reference
 
-**Game settings.** The nested settings schema is **19**, exported in code as
-`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **18**, release content
-**17**, and browser game-settings snapshots **11**. All settings are required and
+**Game settings.** The nested settings schema is **20**, exported in code as
+`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **19**, release content
+**18**, and browser game-settings snapshots **12**. All settings are required and
 unknown fields or other versions are rejected, with no legacy reader or conversion.
 `death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
-returning at a bonfire, or restarting when none was reached. A death captures this
+returning at a bonfire, or restarting when none was lit. A death captures this
 wait at entry, independently of its HUD fade.
 Death always releases the hands and hammer and builds a passive corpse from physics
 and the [character figure](characters.md#the-character-figure-and-death).
@@ -546,7 +546,22 @@ and those no faster than the enemy's armor nothing.
 Every damage, from enemies, arrows, traps and lava, counts in these hit points.
 Invulnerability durations apply at the next damaging hit or bonfire respawn; an active
 protection keeps its deadline. Zero turns off that protection. A reset before any
-bonfire starts a new attempt, not a protected bonfire return.
+bonfire is lit starts a new attempt, not a protected bonfire return.
+
+**Physics / Bonfires**
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `bonfireStrikeSpeed` | 0–20 m/s, step 0.1 | 3 |
+| `bonfireBurnTime` | 1–120 s, step 0.5 | 10 |
+
+The hammer head lights a bonfire by passing through its fire, `BONFIRE.width` by
+`BONFIRE.height` (1.2 m by 1.3 m) standing on its base, at `bonfireStrikeSpeed` or faster;
+0 lights it at a touch. Lighting it heals the player to full, brings every enemy back home
+at full health and makes it the bonfire a death returns to, which brings the enemies back
+too. It burns `bonfireBurnTime` seconds, and the hammer can light it again only once it has
+gone out. The strike speed applies at the next strike; a burn time applies to the next
+bonfire lit, while a burning one keeps its time.
 
 **Physics / Hazards**
 
@@ -695,8 +710,8 @@ faster), `block` (a projectile strikes the hammer head, held or released),
 `enemy-hit`, `enemy-defeat`, `launch` (Launch player events), `finish`
 (Stop timer events), `hurt` (an enemy, trap or lava hurts the player, who survives),
 `death` (health runs out), `fall` (falling out of the level) and `bonfire` (the
-player reaches a bonfire that becomes the place a death returns to; see
-[health and bonfires](../README.md#health-and-bonfires)). Browsers start audio only
+hammer lights a bonfire, which heals the player, brings every enemy back and becomes the
+place a death returns to; see [health and bonfires](../README.md#health-and-bonfires)). Browsers start audio only
 after the player first clicks, taps or presses a key; sounds are fetched ahead of
 time and decoded then. Impact moments are limited at their source in Simulation to one
 per 70 ms of run time in a placement, before effects, audio or observers receive them.
