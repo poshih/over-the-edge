@@ -41,7 +41,9 @@ Decorations are laid out in real 3D depth. With the theme's
 [perspective camera](projects.md#section-reference), distant decorations look smaller and
 drift slowly as the player climbs, while those in front of the course are larger and pass
 quickly, which is what makes a far castle feel far. With the orthographic camera depth only
-decides what stands in front of what, so scale distant decorations down yourself.
+decides what stands in front of what, so scale distant decorations down yourself. See
+[depth and parallax](depth-and-parallax.md) for how fast each depth moves and how to layer,
+scale, fog, blur and tint scenery so it reads as distant.
 
 The course itself is a slab around the [obstacle line](../README.md#obstacle-line): each terrain
 object reaches half its depth behind the line and half in front, and nothing lies beyond that unless

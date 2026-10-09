@@ -1327,6 +1327,7 @@ trap the pot and the hammer head, so keep colliders for the course itself.
 
 Depth reads best with the theme's [perspective camera](docs/projects.md#section-reference):
 distant decorations look smaller and drift slowly by, and near ones pass quickly in front.
+See [depth and parallax](docs/depth-and-parallax.md) for layering scenery so it reads as distant.
 Fog still applies, so raise the theme's fog end to see the far horizon, and hide the
 theme's backdrop mountains if they stand in front of it. Decorations draw in instanced
 batches with no physics, and a game-only release includes their code only when its level
