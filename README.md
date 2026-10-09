@@ -389,23 +389,36 @@ stays at the top of the tab while you scroll through the section, so you can clo
 from anywhere in it. Each browser remembers which sections you opened or closed, only
 as a layout preference. Chromium's find-in-page also opens a closed section that contains a match.
 
-The Workshop's **tabs wrap in equal-width rows**, including plugins' tabs. The
-**section bar** below starts with **All sections (N)**, **Back to the top** and
-**Fold all sections**, followed by the current section's summary chip (the first if
-none is current), retaining a focused chip as you scroll. All sections opens every
-chip with full, wrapped labels on rows below the controls; the list starts collapsed
-on tab changes and reopening the Workshop.
+Below **720px of side-panel width**, and in the portrait sheet, the Workshop's
+**tabs wrap in equal-width rows**, including plugins' tabs. The **section bar** below
+starts with **All sections (N)**, **Back to the top** and **Fold all sections**, followed
+by the current section's summary chip (the first if none is current), retaining a
+focused chip as you scroll. All sections opens every chip with full, wrapped labels
+on rows below the controls; the list starts collapsed on tab changes and reopening
+the Workshop.
+
+Side panels at least **720px wide** put the same tabs and section bar in a **176px
+navigation column** on the left, with the selected pane and its footer on the right
+and the header across both. Each tab and chip has its own full-label, wrapped row.
+Every chip is shown and **All sections** is hidden; Back to the top and Fold all
+remain available. The column uses the height below the header instead of the stacked
+band's 30% cap. Narrowing keeps a focused chip visible and restores the band's previous
+expansion; widening while All sections has focus moves focus to the current chip,
+or the first if none is current. A Wide panel capped below 720px and the portrait
+sheet keep the stacked band.
+
 A chip opens its section, brings it to the top of the tab and focuses its heading;
 the section at the top is highlighted as you scroll. Tabs and chips each have one
-roving Tab stop: **Left/Right**, **Home** and **End** follow their order across rows.
-Tabs select as you move; chips activate with **Enter** or **Space**, and moving to a
-hidden chip first expands the list. **Escape** in the expanded section bar collapses
-it and focuses **All sections**, without closing the Workshop. All sections,
+roving Tab stop: **Left/Right** in the stacked band or **Up/Down** in the column,
+with **Home** and **End** following their order in either layout. Tabs select as you
+move; chips activate with **Enter** or **Space**, and moving to a hidden chip in the
+band first expands the list. **Escape** in the expanded stacked section bar collapses
+it and focuses **All sections**, without closing the Workshop. All sections (when shown),
 **Back to the top** and **Fold all sections** have separate Tab stops. Back to the top
 returns to the top of the tab; Fold all closes every section and returns to the top,
 leaving just their headings.
-Tabs and the bar share a bounded vertical scroller: reach every row with the mouse
-wheel, its scrollbar, keyboard focus or touch swipes, never sideways scrolling.
+Tabs and the bar share one vertical scroller in either layout: reach every row with
+the mouse wheel, its scrollbar, keyboard focus or touch swipes, never sideways scrolling.
 
 The **Wide** tab on the side panel's left edge restores your last expanded width
 (800px initially, clamped to the available space); turn it off for **Compact**.
@@ -426,9 +439,10 @@ brings **Object properties** into view, opening it if needed, unless it already 
 half the view; placing a new object leaves the panel where it is.
 
 Related fields sit two per row when a tab's content is at least 560px wide, such as
-Wide side panels or the full-width Workshop sheet on a tablet in portrait. Each label
-stays with its control; groups too narrow for two fields stay one per row. Compact
-panels and short coordinate or action clusters keep their existing layouts.
+Wide side panels or the full-width Workshop sheet on a tablet in portrait. This is
+the pane's content width, excluding any navigation column. Each label stays with its
+control; groups too narrow for two fields stay one per row. Compact panels and short
+coordinate or action clusters keep their existing layouts.
 
 **Find a control** at the top of the Workshop searches every labeled control and
 section in all six tabs. Press **/** anywhere outside a text field (while the mouse

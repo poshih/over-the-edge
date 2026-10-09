@@ -62,6 +62,8 @@ body.touch-controls {
 }
 
 .workshop {
+  container-name: workshop;
+  container-type: inline-size;
   position: absolute;
   z-index: 3;
   inset: 0 0 0 auto;
@@ -70,9 +72,16 @@ body.touch-controls {
   max-width: 100%;
   height: 100%;
   flex-direction: column;
-  border-left: 1px solid #c9d1c1;
   background: var(--paper);
   box-shadow: -8px 0 35px rgb(27 48 39 / 4%);
+}
+
+.workshop-layout {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  border-left: 1px solid #c9d1c1;
 }
 
 .workshop-width-handle {
@@ -106,7 +115,7 @@ body.touch-controls {
 }
 
 body.touch-controls .workshop-width-handle {
-  --width-hit-area: var(--control-height);
+  --width-hit-area: 24px;
 }
 
 .workshop-wide {
@@ -501,6 +510,7 @@ body[data-input-mode="touch"] .workshop-search-key {
 }
 
 .workshop-navigation {
+  --workshop-navigation-orientation: horizontal;
   --navigation-focus-color: #94662b;
   min-height: 0;
   flex: 0 1 auto;
@@ -708,6 +718,53 @@ body.touch-controls .workshop-section-all {
   min-height: 0;
   flex: 1;
   flex-direction: column;
+}
+
+@media (width >= 1040px) or (orientation: landscape) {
+  @container workshop (min-width: 720px) {
+    .workshop-layout {
+      display: grid;
+      grid-template-columns: 176px minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-areas:
+        "header header"
+        "navigation pane";
+    }
+
+    .workshop-header {
+      grid-area: header;
+    }
+
+    .workshop-navigation {
+      --workshop-navigation-orientation: vertical;
+      grid-area: navigation;
+      max-height: none;
+      border-right: 1px solid var(--line);
+    }
+
+    .workshop-tabs {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .workshop-section-bar {
+      grid-template-columns: var(--control-height) minmax(0, 1fr);
+    }
+
+    .workshop-section-chips {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      grid-column: 1 / -1;
+    }
+
+    .workshop-tabs [role="tab"],
+.workshop-section-chip {
+      text-align: left;
+    }
+
+    .workshop-pane {
+      grid-area: pane;
+    }
+  }
 }
 
 .appearance-scroll select,
@@ -1538,9 +1595,12 @@ body.workshop-open[data-game-chrome="compact"] [data-action="reset"] {
     width: 100%;
     height: var(--mobile-sheet-height);
     border-top: 1px solid #c9d1c1;
-    border-left: none;
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -8px 24px rgb(24 47 38 / 14%);
+  }
+
+  .workshop-layout {
+    border-left: none;
   }
 
   .workshop-width-handle,

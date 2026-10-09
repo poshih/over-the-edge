@@ -4,9 +4,13 @@ import { showSection } from './workshop-section';
 // The sections the bar lists: those with a stable ID that no other section holds.
 const SECTION = 'details.workshop-section[data-section]';
 
+export type NavigationOrientation = 'horizontal' | 'vertical';
+
 export interface SectionBar {
   /** Lists the sections of `pane`, the selected tab named `label`; null while the Workshop is closed. */
   show(pane: HTMLElement | null, label: string): void;
+  /** Changes the keyboard axis and full-list presentation without changing the band's expansion. */
+  setOrientation(orientation: NavigationOrientation): void;
 }
 
 interface Entry {
@@ -44,9 +48,9 @@ export function revealNavigation(navigation: HTMLElement, control: HTMLElement):
 }
 
 /**
- * The Workshop's section bar: a current-section summary and All sections opening every chip in DOM order. A chip opens
- * its section and brings it to the top of the tab; as the tab scrolls, that section's chip is marked current. The bar
- * follows only the selected tab of the open Workshop, including sections coming and going as plugins add theirs.
+ * The Workshop's section bar: a current-section summary and All sections in the band, or every chip in the column.
+ * A chip opens its section and brings it to the top of the tab; as the tab scrolls, that section's chip is marked current.
+ * The bar follows only the selected tab of the open Workshop, including sections coming and going as plugins add theirs.
  */
 export function createSectionBar(options: {
   readonly root: HTMLElement;
@@ -65,6 +69,8 @@ export function createSectionBar(options: {
   let scroller: HTMLElement | null = null;
   let scrolling: AbortController | null = null;
   let current: HTMLDetailsElement | null = null;
+  let orientation: NavigationOrientation = 'horizontal';
+  // The band's expansion is kept while the column presents every chip.
   let expanded = false;
   // The section a chip brought up stays current while the tab rests where the jump left it, even when the tab ends too
   // soon to bring that section all the way to the top.
@@ -213,17 +219,18 @@ export function createSectionBar(options: {
     if (changed && chip !== undefined && !navigation.contains(document.activeElement)) revealNavigation(navigation, chip);
   }
 
-  // A collapsed summary retains a focused chip even when scroll-spy moves the current section elsewhere.
+  // A collapsed band retains a focused chip even when scroll-spy moves the current section elsewhere.
   function updateChips(focused = entries.find((entry) => entry.chip === document.activeElement)?.chip): void {
     const summary = chipOf(current) ?? entries[0]?.chip;
     const stop = focused ?? summary;
+    const showAll = orientation === 'vertical' || expanded;
     for (const { chip } of entries) {
-      const hidden = !expanded && chip !== summary && chip !== focused;
+      const hidden = !showAll && chip !== summary && chip !== focused;
       if (chip.hidden !== hidden) chip.hidden = hidden;
       const index = chip === stop ? 0 : -1;
       if (chip.tabIndex !== index) chip.tabIndex = index;
     }
-    const state = String(expanded);
+    const state = String(showAll);
     if (all.getAttribute('aria-expanded') !== state) all.setAttribute('aria-expanded', state);
     if (strip.dataset.expanded !== state) strip.dataset.expanded = state;
   }
@@ -243,7 +250,7 @@ export function createSectionBar(options: {
 
   all.addEventListener('click', () => setExpanded(!expanded), listen);
   root.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || !expanded) return;
+    if (event.key !== 'Escape' || orientation === 'vertical' || !expanded) return;
     event.preventDefault();
     event.stopPropagation();
     setExpanded(false);
@@ -265,12 +272,14 @@ export function createSectionBar(options: {
     spy();
   }, listen);
   strip.addEventListener('keydown', (event) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const backward = orientation === 'vertical' ? 'ArrowUp' : 'ArrowLeft';
+    const forward = orientation === 'vertical' ? 'ArrowDown' : 'ArrowRight';
+    if (![backward, forward, 'Home', 'End'].includes(event.key)) return;
     const index = entries.findIndex((entry) => entry.chip === document.activeElement);
     if (index < 0) return;
     event.preventDefault();
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 :
-      (index + (event.key === 'ArrowLeft' ? -1 : 1) + entries.length) % entries.length;
+      (index + (event.key === backward ? -1 : 1) + entries.length) % entries.length;
     const chip = entries[next]!.chip;
     if (chip.hidden) setExpanded(true);
     updateChips(chip);
@@ -300,6 +309,17 @@ export function createSectionBar(options: {
   }, { once: true });
 
   return {
+    setOrientation(next) {
+      if (signal.aborted || next === orientation) return;
+      const chip = next === 'vertical' && document.activeElement === all ? chipOf(current) ?? entries[0]?.chip : undefined;
+      orientation = next;
+      strip.setAttribute('aria-orientation', next);
+      updateChips(chip);
+      // Move expander focus to a visible chip before hiding the expander.
+      if (chip !== undefined) chip.focus({ preventScroll: true });
+      all.hidden = next === 'vertical';
+      keepFocusInView();
+    },
     show(next, label) {
       if (signal.aborted) return;
       root.setAttribute('aria-label', `${label} sections`);

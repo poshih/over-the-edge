@@ -75,25 +75,32 @@ plugin's ID comes from the manifest, as `host.plugin`.
 ## Places in the Workshop
 
 - `host.addTab({ id, label, title? })` adds a tab after the built-in ones, in the same
-  equal-width wrapping rows; long labels wrap too.
+  equal-width wrapping rows, or one full-label row per tab in the navigation column
+  when the side panel is at least 720px wide; long labels wrap too. The portrait sheet
+  stays stacked, as does a Wide panel capped below 720px.
 - `host.addSection(tab, { id, title, hint?, open? })` adds a collapsible section at the end of
   `character`, `level`, `physics` or `project`. The Workshop remembers whether it is open, as it
   does for its own sections, and gives it a chip in the same section bar's current-section
-  summary and **All sections (N)** list. Removing a focused plugin tab or chip returns focus
-  to a surviving chip or the selected tab. See [Finding Workshop controls](../README.md#finding-workshop-controls)
+  summary and **All sections (N)** list in the stacked layout. The column shows every chip
+  in its own full-label row and hides All sections. Plugin tabs and chips use the same
+  **Left/Right** keys in the stacked band or **Up/Down** in the column, with **Home/End**
+  in either layout; tabs select as you move and chips activate with **Enter/Space**.
+  Removing a focused plugin tab or chip returns focus to a surviving chip or the
+  selected tab. See [Finding Workshop controls](../README.md#finding-workshop-controls)
   for the keyboard model.
 - Each returns a mount: its `element`, whether it is `shown` (its tab is selected in the open
-  Workshop, and a section is expanded), `onVisibility(listener)` and `remove()`. IDs are unique
-  among a plugin's tabs and sections.
+  Workshop and, for a section, it is expanded), `onVisibility(listener)` and `remove()`.
+  Width changes rearrange the same navigation and pane without replacing the mount or
+  changing `shown`. IDs are unique among a plugin's tabs and sections.
 - `host.ui` builds the Workshop's own controls: `range` (a slider with step buttons, as in
   Physics), `button`, `select`, `toggle`, `group` (a titled group of controls), `note` and
   `notice`. Their callbacks are guarded like the plugin's other callbacks. Create
   `const group = host.ui.group('Title');`, append each range/select/toggle's `.element`
   to it, and mount it with `mount.element.append(group)`. When the tab's content is at
-  least 560px wide, these label-and-control units pair; groups too narrow for two fields
-  stay one-up. Notes, buttons and unknown children span the group. Custom DOM remains
-  plugin-owned: the side panel's width is user-adjustable, so size custom DOM fluidly
-  within the mount rather than assuming a fixed 354px panel.
+  least 560px wide (excluding the navigation column), these label-and-control units
+  pair; groups too narrow for two fields stay one-up. Notes, buttons and unknown children
+  span the group. Custom DOM remains plugin-owned: the side panel's width is user-adjustable,
+  so size custom DOM fluidly within the mount rather than assuming a fixed 354px panel.
 
 ## The project
 

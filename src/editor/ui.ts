@@ -19,6 +19,7 @@ import type { GameUi, HudState, PluginSectionTab, PluginWorkshopTab, UiOptions, 
 import { createSection, keepClosingHeadingsInView, rememberSections } from './workshop-section';
 import type { WorkshopSection } from './workshop-section';
 import { createSectionBar, revealNavigation } from './workshop-section-bar';
+import type { NavigationOrientation } from './workshop-section-bar';
 import { createWorkshopSearch } from './workshop-search';
 import { createWorkshopWidth } from './workshop-width';
 import workshopMarkup from './workshop.html?raw';
@@ -60,6 +61,7 @@ export function createUI(options: UiOptions): GameUi {
   workshopToggle.innerHTML = '<span class="sliders-icon" aria-hidden="true"></span>Workshop';
   hud.actions.append(workshopToggle);
   const panel = element<HTMLElement>(root, '.workshop');
+  const layout = element<HTMLElement>(panel, '.workshop-layout');
   const workshopClose = element<HTMLButtonElement>(root, '.workshop-close');
   const workshopWidth = createWorkshopWidth({ panel, desktop, signal: events.signal });
   const projectMount = element<HTMLElement>(root, '#project-pane');
@@ -88,6 +90,18 @@ export function createUI(options: UiOptions): GameUi {
   const sectionBar = createSectionBar({
     root: element<HTMLElement>(root, '.workshop-section-bar'), navigation, focusSelectedTab, signal: events.signal,
   });
+  let navigationOrientation: NavigationOrientation = 'horizontal';
+  function readNavigationOrientation(): void {
+    if (panel.hidden || events.signal.aborted) return;
+    const next = getComputedStyle(navigation).getPropertyValue('--workshop-navigation-orientation').trim();
+    if (next !== 'horizontal' && next !== 'vertical') throw new Error(`Invalid Workshop navigation orientation: ${next}.`);
+    if (next === navigationOrientation) return;
+    navigationOrientation = next;
+    tabList.setAttribute('aria-orientation', next);
+    sectionBar.setOrientation(next);
+  }
+  const navigationResize = new ResizeObserver(readNavigationOrientation);
+  events.signal.addEventListener('abort', () => navigationResize.disconnect(), { once: true });
   const workshopState = (): WorkshopState => ({ open: !panel.hidden, compact: !desktop.matches, tab: selectedTab });
   // The section bar lists the selected tab's sections while the Workshop is open.
   const showSections = (): void => {
@@ -109,11 +123,13 @@ export function createUI(options: UiOptions): GameUi {
   const wireTab = (tab: (typeof tabs)[number], signal: AbortSignal): void => {
     tab.button.addEventListener('click', () => selectTab(tab.id), { signal });
     tab.button.addEventListener('keydown', (event) => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      const backward = navigationOrientation === 'vertical' ? 'ArrowUp' : 'ArrowLeft';
+      const forward = navigationOrientation === 'vertical' ? 'ArrowDown' : 'ArrowRight';
+      if (![backward, forward, 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const index = tabs.indexOf(tab);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 :
-        (index + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
+        (index + (event.key === backward ? -1 : 1) + tabs.length) % tabs.length;
       selectTab(tabs[next]!.id);
       focusSelectedTab();
     }, { signal });
@@ -142,7 +158,7 @@ export function createUI(options: UiOptions): GameUi {
     const tab = { id: tabOptions.id, button, pane };
     const tabEvents = new AbortController();
     tabList.append(button);
-    panel.append(pane);
+    layout.append(pane);
     tabs.push(tab);
     wireTab(tab, AbortSignal.any([events.signal, tabEvents.signal]));
     return {
@@ -393,6 +409,10 @@ export function createUI(options: UiOptions): GameUi {
     panel.hidden = !open;
     workshopToggle.setAttribute('aria-expanded', String(open));
     document.body.classList.toggle(WORKSHOP_CLASS, open);
+    if (open) {
+      readNavigationOrientation();
+      navigationResize.observe(panel);
+    } else navigationResize.disconnect();
     if (!open && focusInPanel) workshopToggle.focus({ preventScroll: true });
     showSections();
   }
