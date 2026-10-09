@@ -3,15 +3,18 @@ import {
   ShaderMaterial,
 } from 'three';
 import type { MomentEffect } from './effects';
+import type { HurtSource } from './hazards';
 import type { Moment } from './moments';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { SceneFrame } from './scene-frame';
 
-// Where a blade or a projectile strikes the character, a burst shows the blow: a flash with a glint, a ring rushing
-// outward and sparks thrown the way the hit knocks the character, cooling as they fly and falling. A blade also leaves
-// a bright slash across the character, and a burning bolt breaks into glowing chips. Bursts stay where the blow landed,
-// so one still plays out where the character fell when it comes back at a bonfire. A projectile blocked by the hammer
-// instead flashes steel-white and throws sparks along its reflected flight, with the bolt's chips dropping from it.
+// Where a blade, a projectile or an enemy's bump strikes the character, a burst shows the blow: a flash with a glint, a
+// ring rushing outward and sparks thrown the way the hit knocks the character, cooling as they fly and falling. A blade
+// also leaves a bright slash across the character, and a burning bolt breaks into glowing chips. Bursts stay where the
+// blow landed, so one still plays out where the character fell when it comes back at a bonfire. A projectile blocked by
+// the hammer instead flashes steel-white and throws sparks along its reflected flight, with the bolt's chips dropping
+// from it. A hammer strike that hurts an enemy flashes gold where the head struck, driving sparks on into the enemy and
+// splashing some back off it.
 const BURST = {
   // Bursts showing at once, replacing the oldest so several shots at the hammer show together.
   count: 4,
@@ -25,19 +28,42 @@ const BURST = {
   life: 0.8,
   // In front of the obstacle line, so in perspective it lies over the character.
   depth: 0.7,
-  // A block starts just off the struck face, in metres along its outward normal.
-  blockOffset: 0.06,
+  // A burst at the hammer head, a block or a strike on an enemy, starts just off the head's struck face, in metres along
+  // the head's outward normal.
+  headOffset: 0.06,
 } as const;
 
-// How each impact looks: cold steel for a blade or a block, hot for a bolt hitting the character. Colours in linear
-// light, sizes in metres, and the spark fan's spread in radians.
+// How each impact looks: cold steel for a blade or a block, hot for a bolt, red for an enemy's bump on the character and
+// gold for the hammer striking an enemy. Colours in linear light, sizes in metres and the spark fan's spread in radians.
+// `back` of every nine sparks spray back from where it struck; a blade leaves a `slash`, a bolt breaks into `chips`, and
+// bursts at the hammer head lie on the obstacle line (`line`), where it is drawn, the rest in front of it.
 const LOOK = {
-  axe: { flash: [0.75, 0.86, 1], ring: [0.45, 0.6, 0.9], flashSize: 1.5, ringSize: 1.7, spread: 0.85 },
-  projectile: { flash: [1, 0.72, 0.38], ring: [0.9, 0.5, 0.2], flashSize: 1.1, ringSize: 1.2, spread: 1.1 },
-  block: { flash: [0.82, 0.92, 1], ring: [0.6, 0.78, 1], flashSize: 1.1, ringSize: 1.2, spread: 0.65 },
+  axe: {
+    flash: [0.75, 0.86, 1], ring: [0.45, 0.6, 0.9], flashSize: 1.5, ringSize: 1.7, spread: 0.85,
+    back: 0, slash: true, chips: false, line: false,
+  },
+  projectile: {
+    flash: [1, 0.72, 0.38], ring: [0.9, 0.5, 0.2], flashSize: 1.1, ringSize: 1.2, spread: 1.1,
+    back: 5, slash: false, chips: true, line: false,
+  },
+  bump: {
+    flash: [1, 0.4, 0.28], ring: [0.88, 0.22, 0.14], flashSize: 1.3, ringSize: 1.5, spread: 1.2,
+    back: 0, slash: false, chips: false, line: false,
+  },
+  block: {
+    flash: [0.82, 0.92, 1], ring: [0.6, 0.78, 1], flashSize: 1.1, ringSize: 1.2, spread: 0.65,
+    back: 0, slash: false, chips: true, line: true,
+  },
+  hammer: {
+    flash: [1, 0.86, 0.58], ring: [1, 0.66, 0.3], flashSize: 1.5, ringSize: 1.8, spread: 1.3,
+    back: 3, slash: false, chips: false, line: true,
+  },
 } as const;
 type BurstKind = keyof typeof LOOK;
 const SLASH = [0.85, 0.94, 1] as const;
+
+// The burst each hurt source strikes the character with; lava burns instead, as the lava effect shows.
+const HURT_BURSTS: Readonly<Record<HurtSource, BurstKind | null>> = { enemy: 'bump', projectile: 'projectile', axe: 'axe', lava: null };
 
 // Quads lit by a colour each, from an instance attribute.
 const TINTED_VERTEX = /* glsl */ `
@@ -180,11 +206,11 @@ function setTint(tint: InstancedBufferAttribute, index: number, color: readonly 
   values[index * 3 + 2] = color[2]! * brightness;
 }
 
-/** One instanced pool serves blows on the character and projectile strikes on the hammer. */
+/** One instanced pool serves blows on the character, projectiles blocked by the hammer and its strikes on enemies. */
 export class HitBursts implements MomentEffect {
   readonly root = new Group();
   readonly pass = 'marks';
-  readonly moments = Object.freeze(['hurt', 'block', 'placed'] as const);
+  readonly moments = Object.freeze(['hurt', 'block', 'enemy-hit', 'enemy-defeat', 'placed'] as const);
   private readonly flashes = tintedQuads(FLASH_FRAGMENT, BURST.count, 12);
   private readonly rings = tintedQuads(RING_FRAGMENT, BURST.count, 11);
   private readonly sparks = tintedQuads(SPARK_FRAGMENT, BURST.count * BURST.sparks, 14);
@@ -247,15 +273,18 @@ export class HitBursts implements MomentEffect {
       if (moment.bonfire === null) this.reset();
     } else if (moment.type === 'hurt') {
       const cause = moment.cause;
-      if (cause.source === 'axe' || cause.source === 'projectile') {
-        this.queue(cause.source, cause.x, cause.y, cause.pushX, cause.pushY, 0, 0);
-      }
+      const kind = HURT_BURSTS[cause.source];
+      if (kind !== null) this.queue(kind, cause.x, cause.y, cause.pushX, cause.pushY, 0, 0);
     } else if (moment.type === 'block') {
       const dot = moment.directionX * moment.normalX + moment.directionY * moment.normalY;
       const reflectedX = moment.directionX - 2 * dot * moment.normalX;
       const reflectedY = moment.directionY - 2 * dot * moment.normalY;
-      this.queue('block', moment.x + moment.normalX * BURST.blockOffset, moment.y + moment.normalY * BURST.blockOffset,
+      this.queue('block', moment.x + moment.normalX * BURST.headOffset, moment.y + moment.normalY * BURST.headOffset,
         reflectedX, reflectedY, moment.normalX, moment.normalY);
+    } else if (moment.type === 'enemy-hit' || (moment.type === 'enemy-defeat' && moment.by === 'hammer')) {
+      // The contact normal points back at the head, so the blow drives the other way, into the enemy.
+      this.queue('hammer', moment.strikeX - moment.normalX * BURST.headOffset,
+        moment.strikeY - moment.normalY * BURST.headOffset, -moment.normalX, -moment.normalY, 0, 0);
     }
   }
 
@@ -321,7 +350,7 @@ export class HitBursts implements MomentEffect {
     if (this.born[burst]! >= 0) this.end(burst);
     this.active++;
     const kind = this.pendingKind[index]!;
-    const blade = kind === 'axe', blocked = kind === 'block';
+    const blocked = kind === 'block';
     const pushX = this.pendingDirX[index]!, pushY = this.pendingDirY[index]!;
     const push = Math.hypot(pushX, pushY);
     this.born[burst] = time;
@@ -350,9 +379,9 @@ export class HitBursts implements MomentEffect {
         this.sparkVX[at] = dx / length * speed;
         this.sparkVY[at] = dy / length * speed;
       } else {
-        // A blade throws its sparks the way it knocks the character; a bolt sprays most of them back from where it
-        // struck, the rest on along its flight.
-        const back = !blade && spark % 9 < 5;
+        // Sparks fly on the way the blow drives, knocking the character or into the enemy, but `back` of every nine
+        // spray back from where it struck: most of a bolt's, and a third of the hammer's off the enemy.
+        const back = spark % 9 < look.back;
         const angle = (back ? toward + Math.PI : toward) + (seeded(seed + spark, 1) - 0.5) * 2 * (back ? look.spread : look.spread * 0.5);
         this.sparkVX[at] = Math.cos(angle) * speed;
         this.sparkVY[at] = Math.sin(angle) * speed;
@@ -386,10 +415,8 @@ export class HitBursts implements MomentEffect {
   // Draws the burst in slot `burst`, `age` seconds after it started.
   private place(burst: number, age: number): void {
     const x = this.x[burst]!, y = this.y[burst]!;
-    const kind = this.kind[burst]!;
-    const blade = kind === 'axe';
-    const look = LOOK[kind];
-    const depth = kind === 'block' ? OBSTACLE_LINE : BURST.depth;
+    const look = LOOK[this.kind[burst]!];
+    const depth = look.line ? OBSTACLE_LINE : BURST.depth;
     const flash = age / BURST.flash;
     if (flash < 1) {
       const size = look.flashSize * (0.55 + 0.45 * Math.sqrt(flash));
@@ -406,7 +433,7 @@ export class HitBursts implements MomentEffect {
     } else {
       this.rings.mesh.setMatrixAt(burst, HIDDEN);
     }
-    if (blade && age < BURST.slash) {
+    if (look.slash && age < BURST.slash) {
       // A slash across the character, bowed the way the blow knocks it.
       const wipe = Math.min(1, age / BURST.slashDraw);
       const fade = age < BURST.slashDraw ? 1 : (1 - (age - BURST.slashDraw) / (BURST.slash - BURST.slashDraw)) ** 1.5;
@@ -427,7 +454,7 @@ export class HitBursts implements MomentEffect {
       this.slashes.setMatrixAt(burst, HIDDEN);
     }
     this.placeSparks(burst, age, x, y, depth);
-    if (!blade) this.placeChips(burst, age, x, y, depth);
+    if (look.chips) this.placeChips(burst, age, x, y, depth);
   }
 
   // Sparks fly from the strike, slowing and falling, each a streak along its flight. Character hits cool from white

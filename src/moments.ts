@@ -53,15 +53,18 @@ export interface PlacedMoment extends MomentStamp {
 export interface BonfireMoment extends MomentStamp {
   readonly type: 'bonfire'; readonly id: string; readonly x: number; readonly y: number;
 }
-// An enemy's hits and defeats name it, its species and its centre. `damage` is the hit points it lost, `health` what is
-// left and `max` its maximum.
+// An enemy's hits and defeats name it, its species and its centre. The hammer's strike gives where the head struck,
+// `strikeX` and `strikeY`, and the contact's unit normal there, `normalX` and `normalY`, toward the head; a fall's is
+// the centre, with a zero normal. `damage` is the hit points it lost, `health` what is left and `max` its maximum.
 export interface EnemyHitMoment extends MomentStamp {
   readonly type: 'enemy-hit'; readonly id: string; readonly species: EnemySpecies; readonly x: number; readonly y: number;
+  readonly strikeX: number; readonly strikeY: number; readonly normalX: number; readonly normalY: number;
   readonly damage: number; readonly health: number; readonly max: number;
 }
 export interface EnemyDefeatMoment extends MomentStamp {
   readonly type: 'enemy-defeat'; readonly id: string; readonly species: EnemySpecies; readonly x: number; readonly y: number;
-  readonly by: 'hammer' | 'fall'; readonly damage: number; readonly max: number;
+  readonly by: 'hammer' | 'fall'; readonly strikeX: number; readonly strikeY: number; readonly normalX: number;
+  readonly normalY: number; readonly damage: number; readonly max: number;
 }
 export interface LaunchMoment extends MomentStamp { readonly type: 'launch' }
 export interface FinishMoment extends MomentStamp { readonly type: 'finish' }
@@ -132,10 +135,12 @@ const MOMENT_SEEDS: { readonly [T in MomentType]: () => MomentSlot<T> } = {
   placed: () => ({ type: 'placed', placement: 0, time: 0, bonfire: null }),
   bonfire: () => ({ type: 'bonfire', placement: 0, time: 0, id: '', x: 0, y: 0 }),
   'enemy-hit': () => ({
-    type: 'enemy-hit', placement: 0, time: 0, id: '', species: 'bird', x: 0, y: 0, damage: 0, health: 0, max: 0,
+    type: 'enemy-hit', placement: 0, time: 0, id: '', species: 'bird', x: 0, y: 0, strikeX: 0, strikeY: 0, normalX: 0,
+    normalY: 0, damage: 0, health: 0, max: 0,
   }),
   'enemy-defeat': () => ({
-    type: 'enemy-defeat', placement: 0, time: 0, id: '', species: 'bird', x: 0, y: 0, by: 'hammer', damage: 0, max: 0,
+    type: 'enemy-defeat', placement: 0, time: 0, id: '', species: 'bird', x: 0, y: 0, by: 'hammer', strikeX: 0, strikeY: 0,
+    normalX: 0, normalY: 0, damage: 0, max: 0,
   }),
   launch: () => ({ type: 'launch', placement: 0, time: 0 }),
   finish: () => ({ type: 'finish', placement: 0, time: 0 }),

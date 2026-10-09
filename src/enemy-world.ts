@@ -11,6 +11,14 @@ import { isEnemyObject } from './level';
 import type { EnemyObject, LevelChange } from './level';
 import { clamp } from './math';
 
+// Where a hammer-head strike landed, in world metres, and the contact's unit normal there, toward the head.
+interface Strike {
+  x: number;
+  y: number;
+  normalX: number;
+  normalY: number;
+}
+
 interface EnemyRecord {
   object: EnemyObject;
   body: Body | null;
@@ -23,8 +31,9 @@ interface EnemyRecord {
   // Hit points left and the species' health at the last reset or spawn.
   health: number;
   maxHealth: number;
-  // The fastest hammer-head strike this step, as closing speed in m/s; 0 without one.
+  // The fastest hammer-head strike this step, as closing speed in m/s; 0 without one. `struck` is where it landed.
   strike: number;
+  readonly struck: Strike;
   lastHitAt: number;
   nextDecisionAt: number;
   desiredX: number;
@@ -42,10 +51,12 @@ interface EnemyCallbacks {
   readonly insideTerrain: (terrain: Body, point: Vec2Value) => boolean;
   // A bump: borrowed velocity change, the enemy that dealt it and where they met, in world metres.
   readonly onBump: (velocityChange: Readonly<Point>, enemy: string, atX: number, atY: number) => void;
-  // A hit the enemy survives: the hit points it lost and has left, and its maximum.
-  readonly onHit: (enemy: string, species: EnemySpecies, x: number, y: number, damage: number, health: number, max: number) => void;
-  // A defeat, with the hit points it took: all the enemy had left.
-  readonly onDefeat: (enemy: string, species: EnemySpecies, x: number, y: number, by: 'hammer' | 'fall', damage: number, max: number) => void;
+  // A hit the enemy survives: where the head struck, borrowed, the hit points it lost and has left, and its maximum.
+  readonly onHit: (enemy: string, species: EnemySpecies, x: number, y: number, strike: Readonly<Strike>, damage: number,
+    health: number, max: number) => void;
+  // A defeat: the hammer's killing strike, borrowed, or null for a fall, and the hit points it took, all the enemy had left.
+  readonly onDefeat: (enemy: string, species: EnemySpecies, x: number, y: number, by: 'hammer' | 'fall',
+    strike: Readonly<Strike> | null, damage: number, max: number) => void;
   // Whether an arrow loosed from (x, y) at (velocityX, velocityY), in m/s, flies on for `seconds`, within its range and
   // with no terrain in its way.
   readonly clearShot: (x: number, y: number, velocityX: number, velocityY: number, seconds: number) => boolean;
@@ -297,7 +308,7 @@ export class EnemyWorld {
     }
     record.health -= damage;
     this.transition(record, 'hurt');
-    this.callbacks.onHit(record.object.id, record.object.species, record.current.x, record.current.y,
+    this.callbacks.onHit(record.object.id, record.object.species, record.current.x, record.current.y, record.struck,
       damage, record.health, record.maxHealth);
   };
 
@@ -393,10 +404,19 @@ export class EnemyWorld {
       const enemy = pointVelocity(this.body(record), manifold.points[0], this.enemyVelocity);
       const orientation = a === record.body ? -1 : 1;
       const speed = ((head.x - enemy.x) * manifold.normal.x + (head.y - enemy.y) * manifold.normal.y) * orientation;
-      // A strike no faster than the species' armor glances off.
-      if (speed > this.tuning[SPECIES_TUNING[record.object.species].armor]) {
-        // Several contacts in one step count as the fastest of them.
-        record.strike = Math.max(record.strike, speed);
+      // A strike no faster than the species' armor glances off. Of several contacts in one step, the fastest counts.
+      if (speed > this.tuning[SPECIES_TUNING[record.object.species].armor] && speed > record.strike) {
+        record.strike = speed;
+        const struck = record.struck;
+        struck.x = struck.y = 0;
+        for (let index = 0; index < manifold.pointCount; index++) {
+          struck.x += manifold.points[index]!.x;
+          struck.y += manifold.points[index]!.y;
+        }
+        struck.x /= manifold.pointCount;
+        struck.y /= manifold.pointCount;
+        struck.normalX = -manifold.normal.x * orientation;
+        struck.normalY = -manifold.normal.y * orientation;
         this.hits.add(record);
       }
     } else if (other === this.callbacks.getPot()) this.bumps.add(record);
@@ -693,7 +713,7 @@ export class EnemyWorld {
     this.dying.add(record);
     this.emitPose(record);
     this.callbacks.onDefeat(record.object.id, record.object.species, record.current.x, record.current.y, reason,
-      damage, record.maxHealth);
+      reason === 'hammer' ? record.struck : null, damage, record.maxHealth);
   }
 
   private createRecord(object: EnemyObject): EnemyRecord {
@@ -702,6 +722,7 @@ export class EnemyWorld {
     const record: EnemyRecord = {
       object, body: null, proxy: null, previous: { x: object.x, y: object.y }, current: { x: object.x, y: object.y },
       facing: object.facing, phase: 'patrol', changedAt: this.time, health: 0, maxHealth: 0, strike: 0,
+      struck: { x: 0, y: 0, normalX: 0, normalY: 0 },
       lastHitAt: -Infinity, nextDecisionAt: this.time, desiredX: 0, target: { x: 0, y: 0 }, hasTarget: false, defeatedBy: null,
     };
     this.records.set(object.id, record);

@@ -191,23 +191,32 @@ export class Simulation {
       canBump: () => !this.dying,
       isTransientTerrain: (body) => this.terrain.isIllusion(body),
       insideTerrain: (terrain, point) => this.terrain.isInside(terrain, point),
-      onHit: (id, species, x, y, damage, health, max) => {
+      onHit: (id, species, x, y, strike, damage, health, max) => {
         const moment = this.moments.append('enemy-hit', this.placements, this.elapsed);
         moment.id = id;
         moment.species = species;
         moment.x = x;
         moment.y = y;
+        moment.strikeX = strike.x;
+        moment.strikeY = strike.y;
+        moment.normalX = strike.normalX;
+        moment.normalY = strike.normalY;
         moment.damage = damage;
         moment.health = health;
         moment.max = max;
       },
-      onDefeat: (id, species, x, y, by, damage, max) => {
+      onDefeat: (id, species, x, y, by, strike, damage, max) => {
         const moment = this.moments.append('enemy-defeat', this.placements, this.elapsed);
         moment.id = id;
         moment.species = species;
         moment.x = x;
         moment.y = y;
         moment.by = by;
+        // A fall strikes nothing: its strike is the enemy's centre, with a zero normal.
+        moment.strikeX = strike === null ? x : strike.x;
+        moment.strikeY = strike === null ? y : strike.y;
+        moment.normalX = strike === null ? 0 : strike.normalX;
+        moment.normalY = strike === null ? 0 : strike.normalY;
         moment.damage = damage;
         moment.max = max;
       },

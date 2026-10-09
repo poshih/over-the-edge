@@ -454,7 +454,7 @@ GAME_PLUGINS=examples/plugins/plugins.json GAME_PROJECT=examples/projects/ashen-
 | [`camera.director`](runtime-plugins.md#camera-director) | `CAMERA` | `runtime` | Slot, `CameraDirectorFactory` | `DEFAULT_CAMERA_DIRECTOR` |
 | [`scene.backdrop`](runtime-plugins.md#backdrop) | `BACKDROP` | `runtime` | Slot, `BackdropFactory` | `DEFAULT_BACKDROP` |
 | [`scene.aim-marks`](runtime-plugins.md#aim-marks) | `AIM_MARKS` | `runtime` | Slot, `AimMarksFactory` | `DEFAULT_AIM_MARKS`; hidden while dying |
-| [`effects.strikes`](runtime-plugins.md#effects) | `EFFECTS.strikes` | `runtime` | Slot, `MomentEffectFactory` | `DEFAULT_EFFECTS.strikes`: one shared pool for character strikes and hammer blocks |
+| [`effects.strikes`](runtime-plugins.md#effects) | `EFFECTS.strikes` | `runtime` | Slot, `MomentEffectFactory` | `DEFAULT_EFFECTS.strikes`: one shared pool for character strikes, hammer blocks and hammer strikes on enemies |
 | [`effects.lava`](runtime-plugins.md#effects) | `EFFECTS.lava` | `runtime` | Slot, `MomentEffectFactory` | `DEFAULT_EFFECTS.lava` |
 | [`effects.enemy-health`](runtime-plugins.md#effects) | `EFFECTS.enemyHealth` | `runtime` | Slot, `MomentEffectFactory` | `DEFAULT_EFFECTS.enemyHealth`: a health bar over each hurt enemy |
 | [`effects.extras`](runtime-plugins.md#effects) | `EFFECTS.extras` | `runtime` | List, 32 `MomentEffectFactory` | None |

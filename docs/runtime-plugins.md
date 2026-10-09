@@ -472,7 +472,7 @@ piece. Each point holds a `MomentEffectFactory`, `() => MomentEffect`:
 
 | Point | Type | Engine base |
 | --- | --- | --- |
-| `EFFECTS.strikes` (`effects.strikes`) | Slot | `DEFAULT_EFFECTS.strikes`: one shared burst pool for character strikes and hammer blocks |
+| `EFFECTS.strikes` (`effects.strikes`) | Slot | `DEFAULT_EFFECTS.strikes`: one shared burst pool for character strikes, hammer blocks and hammer strikes on enemies |
 | `EFFECTS.lava` (`effects.lava`) | Slot | `DEFAULT_EFFECTS.lava`: fire while lava burns the character |
 | `EFFECTS.enemyHealth` (`effects.enemy-health`) | Slot | `DEFAULT_EFFECTS.enemyHealth`: a health bar over each hurt enemy |
 | `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes, lava and enemy health in manifest order |
@@ -518,20 +518,27 @@ interface MomentEffect {
   over everything. Follow the
   [pass rules](#pass-rules-for-presentation-points); effects never mutate physics or authored data.
 
-**Default strikes.** `DEFAULT_EFFECTS.strikes` draws in marks and takes `hurt`, `block` and
-`placed`. An axe leaves a cold steel flash and glint, a ring rushing outward, a bright bowed
-slash and sparks thrown with the blow, cooling as they slow and fall. A projectile hitting
-the character leaves a hot flash and ring, back-spray and glowing chips that tumble away.
-Enemy bumps show nothing more.
+**Default strikes.** `DEFAULT_EFFECTS.strikes` draws in marks and takes `hurt`, `block`,
+`enemy-hit`, `enemy-defeat` and `placed`. An axe leaves a cold steel flash and glint, a ring
+rushing outward, a bright bowed slash and sparks thrown with the blow, cooling as they slow and
+fall. A projectile hitting the character leaves a hot flash and ring, back-spray and glowing
+chips that tumble away. An enemy's bump that takes health leaves a red flash and ring where it
+struck, with sparks thrown the way it knocks the player. Lava burns are the lava effect's.
 
 A projectile blocked by the head, held or released, instead leaves a cold white-steel flash,
 glint and ring six centimetres off the contact along its outward normal, on the obstacle line.
 Sparks glance off along the reflected flight `r = d - 2 * (d · n) * n`, fanned toward that
-normal and cooling to blue-grey; the bolt's chips drop from the strike. Both character hits
-and blocks share **one four-burst instanced pool**, geometry, materials and scratch, with no
-textures or frame allocations. The newest pending blow replaces the oldest when full, whatever
-its kind. Blows stay where they landed and can finish after a checkpoint return. A new run's
-`placed { bonfire: null }` ends active bursts and drops pending ones.
+normal and cooling to blue-grey; the bolt's chips drop from the strike. A hammer strike that
+damages an enemy, one it survives (`enemy-hit`) or the killing one (`enemy-defeat` by
+`'hammer'`), leaves a golden flash and a wide ring six centimetres into the enemy from
+`strikeX`, `strikeY`, on the obstacle line. Its sparks drive on along the blow, against the
+contact normal, and a third of them splash back off the enemy. Glancing strikes deal no damage
+and raise no moment, and falls show nothing. A wrapper that withholds `enemy-hit` and
+`enemy-defeat` from the default draws enemy strikes its own way and keeps the rest. Character
+hits, blocks and enemy strikes share **one four-burst instanced pool**, geometry, materials and
+scratch, with no textures or frame allocations. The newest pending blow replaces the oldest when
+full, whatever its kind. Blows stay where they landed and can finish after a checkpoint return.
+A new run's `placed { bonfire: null }` ends active bursts and drops pending ones.
 
 **Default lava.** `DEFAULT_EFFECTS.lava` draws in marks and takes `hurt` and `placed`.
 Lava burns kindle turbulent tongues of flame, deep red to white-hot, bending away from motion
@@ -605,27 +612,28 @@ const withRing = (previous: MomentEffectFactory): MomentEffectFactory => () => {
 export default defineRuntime({ start: () => [wrap(EFFECTS.strikes, withRing)] });
 ```
 
-An independent enemy-hit spark belongs in the extras list, not in a new channel:
+An independent spark where each enemy is defeated, by the hammer or a fall, belongs in the extras
+list, not in a new channel:
 
 ```ts
 import { CircleGeometry, Mesh, MeshBasicMaterial } from 'three';
 import { add, defineRuntime, EFFECTS, OBSTACLE_LINE } from '../../src/plugins/runtime-sdk';
 import type { MomentEffectFactory } from '../../src/plugins/runtime-sdk';
 
-const enemySpark: MomentEffectFactory = () => {
+const defeatSpark: MomentEffectFactory = () => {
   const spark = new Mesh(new CircleGeometry(0.2, 16),
     new MeshBasicMaterial({ color: 0xffdb8a, transparent: true, depthTest: false, depthWrite: false }));
   spark.visible = false;
   let start: number | null = null;
   let pending = false;
   return {
-    root: spark, pass: 'marks', moments: ['enemy-hit', 'placed'],
+    root: spark, pass: 'marks', moments: ['enemy-defeat', 'placed'],
     moment(moment) {
       if (moment.type === 'placed') {
         start = null;
         pending = false;
         spark.visible = false;
-      } else if (moment.type === 'enemy-hit') {
+      } else if (moment.type === 'enemy-defeat') {
         spark.position.set(moment.x, moment.y, OBSTACLE_LINE);
         pending = true;
       }
@@ -643,7 +651,7 @@ const enemySpark: MomentEffectFactory = () => {
   };
 };
 
-export default defineRuntime({ start: () => [add(EFFECTS.extras, enemySpark)] });
+export default defineRuntime({ start: () => [add(EFFECTS.extras, defeatSpark)] });
 ```
 
 Replace a slot to draw it entirely your own way; wrap to keep selected default moments, and
@@ -1321,8 +1329,8 @@ type; otherwise a non-empty array of known types without repeats, fixed for the 
 | `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
 | `placed` | `bonfire`: the checkpoint returned to, continuing the run; `null` starts a new run from its spawn, including Reset, rig rebuild, level replacement, Workshop placement or death before any bonfire |
 | `bonfire` | `id`, `x`, `y`: checkpoint ID and base; another bonfire became current, including a previously lit one |
-| `enemy-hit` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `damage`: hit points the strike took; `health`, `max`: hit points left and the enemy's maximum. On **every accepted surviving hit**, not just phase transitions |
-| `enemy-defeat` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `by`: `'hammer'` or `'fall'`; `damage`: the hit points it had left; `max`: its maximum |
+| `enemy-hit` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `strikeX`, `strikeY`: where the head struck; `normalX`, `normalY`: the contact's unit normal there, toward the head; `damage`: hit points the strike took; `health`, `max`: hit points left and the enemy's maximum. On **every accepted surviving hit**, not just phase transitions |
+| `enemy-defeat` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `by`: `'hammer'` or `'fall'`; `strikeX`, `strikeY`, `normalX`, `normalY`: the killing strike, as for `enemy-hit`, or for a fall the centre with a zero normal; `damage`: the hit points it had left; `max`: its maximum |
 | `launch` | An authored Launch player action executed |
 | `finish` | An authored Stop timer action executed |
 | `sound` | `source`, `volume`: an authored play-sound action executed |

@@ -984,11 +984,15 @@ never below **0.8 m/s**, so brushing or holding the head against an enemy never 
 A strike that beats the armor takes `hammerDamage` (**100** by default) at `hammerFullSpeed`
 (**8 m/s**) or faster, and proportionally less below it, at least 1. A full-speed strike
 defeats a bird or a hollow archer (**100** hit points by default) and takes half a hollow
-soldier's **200**. Damage has a **0.25 s anti-jitter cooldown**. The shaft does not deal damage. A hurt enemy shows a
+soldier's **200**. Damage has a **0.25 s anti-jitter cooldown**. The shaft does not deal damage.
+A strike that deals damage bursts in a golden flash and ring where the head struck, its sparks
+driving on into the enemy and some splashing back off it. A hurt enemy shows a
 health bar over it for **5 s** after each hit, with a pale chunk for what the hit took that
-drains away soon after; a killing blow empties it as the enemy fades. A game can draw it its
-own way with the [enemy health effect](docs/runtime-plugins.md#effects).
-Body collisions knock the player back and default to costing **20** [hit points](#health-and-bonfires).
+drains away soon after; a killing blow empties it as the enemy fades. A game can draw them its
+own way with the [strike and enemy health effects](docs/runtime-plugins.md#effects).
+Body collisions knock the player back and default to costing **20** [hit points](#health-and-bonfires);
+a bump that costs health bursts red midway between the two, its sparks thrown the way it knocks
+the player.
 **Physics / Enemies** owns `hammerDamage` (1–1000 whole hit points), `hammerFullSpeed`
 (1–20 m/s), `birdHealth`, `soldierHealth` and `archerHealth` (1–2000 whole
 hit points), `birdArmor`, `soldierArmor` and `archerArmor` (0.8–20 m/s), `birdMass`, `soldierMass` and `archerMass` (default **0.55 kg**, **3 kg** and
@@ -1119,7 +1123,8 @@ stop them, and so does the hammer head, which makes the hammer a shield. When th
 stops one, held or released, the bolt breaks against it in a steel flash with sparks
 glancing off and glowing chips dropping: a game's
 [strike effects](docs/runtime-plugins.md#effects) can draw that strike its own way, and the
-authored `block` cue can sound it. Character blows and hammer blocks share one default burst pool.
+authored `block` cue can sound it. Character blows, hammer blocks and hammer strikes on enemies
+share one default burst pool.
 Terrain stops them only from outside, so a muzzle set into a wall's face shoots out of it.
 A hit on the character costs the trap's **Damage**, 1–1000 hit points (20 for a new trap), and
 knocks the player along the shot,
