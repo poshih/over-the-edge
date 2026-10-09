@@ -352,6 +352,19 @@
   stroke-dasharray: 6 4;
 }
 
+/* The selection's tilt handle: a knob on an arm from its pivot. */
+.level-tilt-arm {
+  stroke: #075a50;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.level-tilt-knob {
+  fill: #f6f4ec;
+  stroke: #075a50;
+  stroke-width: 2;
+}
+
 /* Checks: a ring on the course per finding, red for problems and amber for suggestions. */
 .level-check-marker {
   fill: rgb(196 140 32 / 22%);

@@ -69,12 +69,21 @@ type Gesture =
   // Two fingers: their midpoint pans the view and their spread zooms it about where they first touched.
   | { kind: 'pinch'; pointerId: number; other: number; starts: readonly [Point, Point]; anchor: Point; camera: EditorCamera }
   | { kind: 'draw'; pointerId: number; start: Point; samples: Point[]; unitsPerPixel: number }
+  // Drags a selected object's tilt handle round its pivot.
+  | { kind: 'tilt'; pointerId: number; original: TiltedObject; preview: TiltedObject }
   | { kind: PlacementTool; pointerId: number };
+// What tilts in the view plane: terrain and decorations, the start's hammer and a projectile trap's aim.
+type TiltedObject = TerrainObject | DecorationObject | StartObject | ShooterObject;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEGREES = 180 / Math.PI;
 const DRAG_DISTANCE = 4;
 const HANDLE_PIXELS = 16;
+// Q and E tilt by this, and Shift snaps a tilt drag to it.
+const TILT_STEP = Math.PI / 12;
+// The tilt handle's arm beyond the object, and its knob's radius, in pixels.
+const TILT_ARM_PIXELS = 36;
+const TILT_KNOB_PIXELS = 7;
 const MIN_VIEW_HEIGHT = 3;
 const MAX_VIEW_HEIGHT = LEVEL_LIMITS.coordinate * 4;
 const VIEW_PADDING = 1.2;
@@ -190,6 +199,18 @@ function asBonfire(object: LevelObject | null): BonfireObject | null {
 }
 function asShooter(object: LevelObject | null): ShooterObject | null {
   return object !== null && object.kind === 'shooter' ? object : null;
+}
+function asTilted(object: LevelObject | null): TiltedObject | null {
+  return object !== null && (object.kind === 'terrain' || object.kind === 'decoration' || object.kind === 'start' ||
+    object.kind === 'shooter') ? object : null;
+}
+// A start's hammer and a trap aim along their angle; terrain and decorations stand up from theirs.
+function aimsAlongAngle(object: TiltedObject): boolean {
+  return object.kind === 'start' || object.kind === 'shooter';
+}
+// `angle` turned into -π to π, where every level angle lies.
+function wrapAngle(angle: number): number {
+  return angle - 2 * Math.PI * Math.round(angle / (2 * Math.PI));
 }
 function asAxe(object: LevelObject | null): AxeObject | null {
   return object !== null && object.kind === 'axe' ? object : null;
@@ -475,7 +496,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
           ${numericField('y', 'Position Y', -LEVEL_LIMITS.coordinate, LEVEL_LIMITS.coordinate)}
         </div>
         <div class="level-field-grid level-fields-angle">
-          ${numericField('angle', 'Rotation / hammer angle (°)', -180, 180, 1)}
+          <label class="level-field" for="level-angle"><span class="level-angle-label">Tilt (°)</span>
+            <input id="level-angle" type="number" min="-180" max="180" step="1" inputmode="decimal" />
+          </label>
         </div>
         <div class="level-fields-terrain">
           <div class="level-field-grid">
@@ -502,7 +525,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <div class="level-field-grid">
             ${numericField('reach', 'Hammer reach', 0, MAX_RIG_REACH, 0.01)}
           </div>
-          <p class="level-help">Position is the starting pot center. Rotation is the starting hammer angle.
+          <p class="level-help">Position is the starting pot center. Hammer angle is the hammer's starting direction: drag the round handle to aim it, or press Q / E.
             Reach is the head's distance from the shoulder hinge, so the start pose is the same whatever the
             game's handle length; a hammer that cannot reach that far starts fully extended.
             A level always has exactly one start; moving it here relocates it instead of creating another. Start
@@ -543,7 +566,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
             ${Object.entries(SHOOTER_FIELDS).map(([name, field]) =>
               numericField(`shooter-${name}`, fieldLabel(field), field.min, field.max, field.step)).join('')}
           </div>
-          <p class="level-help">Position is the muzzle; Rotation is the direction it fires. Timer traps fire at First shot
+          <p class="level-help">Position is the muzzle; Aim is the direction it fires: drag the round handle, or press Q / E. Timer traps fire at First shot
             and every Shot interval after, in run time, while the player is within ${SHOOTER.range} m; triggered traps
             fire only bursts that trigger events start, using First shot as the delay after the switch and Shot interval
             between shots. Projectiles fly straight up to ${SHOOTER.range} m; terrain, platforms and the hammer head stop them, so the hammer is a shield.
@@ -743,6 +766,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <circle class="level-drawing-first" vector-effect="non-scaling-stroke" />
       </g>
       <g class="level-check-markers"></g>
+      <g class="level-tilt-handle" hidden>
+        <line class="level-tilt-arm" vector-effect="non-scaling-stroke" />
+        <circle class="level-tilt-knob" vector-effect="non-scaling-stroke" />
+      </g>
     </g>
   </svg>`;
   // A canvas sibling stays below the host's interface stacking context, including its toolbar.
@@ -761,6 +788,9 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const drawingLinks = graphic<SVGPathElement>('.level-drawing-links');
   const drawingNodes = graphic<SVGPathElement>('.level-drawing-nodes');
   const drawingFirst = graphic<SVGCircleElement>('.level-drawing-first');
+  const tiltHandleGroup = graphic<SVGGElement>('.level-tilt-handle');
+  const tiltArm = graphic<SVGLineElement>('.level-tilt-arm');
+  const tiltKnob = graphic<SVGCircleElement>('.level-tilt-knob');
   const drawing = new PolygonDraft();
   const board = new LevelBoardView();
   svg.insertBefore(board.root, cameraGroup);
@@ -878,7 +908,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
     return { x: client.x - rect.left, y: client.y - rect.top };
   };
   const ghostObject = (): LevelObject | null => {
-    if (gesture?.kind === 'move' || gesture?.kind === 'platform-end') return gesture.preview;
+    if (gesture?.kind === 'move' || gesture?.kind === 'platform-end' || gesture?.kind === 'tilt') return gesture.preview;
     if (isPlacementTool(tool)) return placement;
     return null;
   };
@@ -957,6 +987,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     inspector.disabled = object === null;
     element(root, '.level-fields-common').hidden = object === null;
     element(root, '.level-fields-angle').hidden = terrain === null && start === null && decoration === null && shooter === null;
+    setText(element(root, '.level-angle-label'), start !== null ? 'Hammer angle (°)' : shooter !== null ? 'Aim (°)' : 'Tilt (°)');
     element(root, '.level-fields-decoration').hidden = decoration === null;
     element(root, '.level-fields-terrain').hidden = terrain === null;
     element(root, '.level-fields-start').hidden = start === null;
@@ -1106,27 +1137,28 @@ Export the level first if you want to keep them. Continue without saving?`);
       button.disabled = preset === undefined || counts[preset.tally] >= preset.limit;
     }
     const help: Record<Tool, string> = {
-      select: 'Click / tap to select; drag to move. Drag empty space, or drag with the middle button from anywhere, to pan; the ' +
+      select: 'Click / tap to select; drag to move. Drag a selected object\'s round handle to tilt it, or to aim a start or a trap, ' +
+        'Shift snapping to 15°; Q / E tilt or aim it 15° either way. Drag empty space, or drag with the middle button from anywhere, to pan; the ' +
         'wheel and + / − zoom. On a touch screen, drag with two fingers to pan and pinch to zoom. Pick enemies on their bodies, ' +
         'starts and triggers near their centre handle, and liquid pools in their box where no terrain is. Select a trigger to see ' +
         'outgoing links, or a projectile trap or platform for incoming links. Links shows all; drag a trigger\'s link handle onto ' +
         'a trap or platform to connect. Escape cancels a drag without changing the level. Decorations are picked with Select decorations.',
       decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth, or drag empty space to ' +
-        'pan. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
+        'pan. Drag its round handle to tilt it, Shift snapping to 15°, or press Q / E. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
         'Escape cancels. Pan with the middle button or two fingers and zoom as usual; your unfinished outline is kept.',
-      place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it. Escape cancels placement.',
+      place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it; Q / E tilt it 15°. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger or pressure switch. Select it after placing, then drag its link handle ' +
         'onto a projectile trap or platform to connect; edit or remove links in Trigger events. Escape cancels placement.',
       'place-enemy': 'Click / tap the desired base to place this enemy. Tune facing, patrol radius and speed before or after placing. Escape cancels.',
       'place-hazard': 'Click / tap to place it: a bonfire by its base, which rests on the terrain top under the pointer; a projectile ' +
         'trap by its muzzle; a swinging axe by its pivot; a liquid pool by the middle of its surface; a platform by its start centre. Tune it before or after ' +
-        'placing. Escape cancels.',
+        'placing; Q / E aim a trap 15° either way. Escape cancels.',
       'place-set-piece': 'Click / tap to drop the set piece. Its base rests on the terrain top nearest the pointer; move ' +
         'away from surfaces to place it freely. M mirrors it. Escape cancels.',
       'place-decoration': 'Click / tap to place the decoration. Its base follows the pointer at its depth and rests on nearby ' +
-        'terrain tops when it is close to the course. Set depth, height and tint first if you like. M mirrors it. Escape cancels.',
-      start: 'Click / tap the new pot-center position. Escape cancels.',
+        'terrain tops when it is close to the course. Set depth, height and tint first if you like. M mirrors it; Q / E tilt it 15°. Escape cancels.',
+      start: 'Click / tap the new pot-center position. Q / E aim its hammer 15° either way. Escape cancels.',
       player: 'Click / tap where the pot should stand. The player moves there, in the start\'s pose, to test that part of ' +
         'the course; the level\'s start stays where it is. Playtests and resets start there until you use the level start. Escape cancels.',
     };
@@ -1211,6 +1243,52 @@ Export the level first if you want to keep them. Continue without saving?`);
       outline.push(camera.unproject(screen));
     }
     return outline;
+  }
+
+  // The object whose tilt handle shows: the selection, in the selecting mode that picks it, as a move or a tilt drags it.
+  function tiltTarget(): TiltedObject | null {
+    if (gesture?.kind === 'tilt') return gesture.preview;
+    if (tool !== 'select' && tool !== 'decorate') return null;
+    const selected = asTilted(gesture?.kind === 'move' && gesture.preview.id === selectedId ? gesture.preview : selectedObject());
+    return selected !== null && (selected.kind === 'decoration') === (tool === 'decorate') ? selected : null;
+  }
+
+  // Where an object's tilt handle stands on the course plane: its knob at the end of an arm from its pivot, along its aim
+  // for a start or a trap, otherwise straight up from it as it is tilted. Null for a decoration behind the camera.
+  function tiltHandle(object: TiltedObject): { readonly pivot: Point; readonly knob: Point } | null {
+    const arm = TILT_ARM_PIXELS * camera.state().worldHeight / Math.max(1, rect.height);
+    const direction = object.angle + (aimsAlongAngle(object) ? 0 : Math.PI / 2);
+    const reach = object.kind === 'terrain' ? object.height / 2 + arm : object.kind === 'decoration' ? decorationSize(object).height + arm : arm;
+    const knob = { x: object.x + Math.cos(direction) * reach, y: object.y + Math.sin(direction) * reach };
+    if (object.kind !== 'decoration') return { pivot: { x: object.x, y: object.y }, knob };
+    // A decoration tilts in its own depth plane, which the course plane shows larger or smaller.
+    const pivot = camera.projectDepth({ x: object.x, y: object.y }, object.z);
+    const end = camera.projectDepth(knob, object.z);
+    return pivot === null || end === null ? null : { pivot: camera.unproject(pivot), knob: camera.unproject(end) };
+  }
+
+  function drawTiltHandle(): void {
+    const target = tiltTarget();
+    const handle = target === null ? null : tiltHandle(target);
+    tiltHandleGroup.toggleAttribute('hidden', handle === null);
+    if (handle === null) return;
+    tiltArm.setAttribute('x1', String(handle.pivot.x));
+    tiltArm.setAttribute('y1', String(handle.pivot.y));
+    tiltArm.setAttribute('x2', String(handle.knob.x));
+    tiltArm.setAttribute('y2', String(handle.knob.y));
+    tiltKnob.setAttribute('cx', String(handle.knob.x));
+    tiltKnob.setAttribute('cy', String(handle.knob.y));
+    tiltKnob.setAttribute('r', String(TILT_KNOB_PIXELS * camera.state().worldHeight / Math.max(1, rect.height)));
+  }
+
+  // Tilts the selection, or the object about to be placed, by `step` radians; false when it has no tilt.
+  function tiltBy(step: number): boolean {
+    // Placing the player takes only where it stands.
+    const object = tool === 'player' ? null : asTilted(inspectorObject());
+    if (object === null) return false;
+    cancelGesture();
+    applyEdit(() => commitOrPreview({ ...object, angle: wrapAngle(object.angle + step) }));
+    return true;
   }
 
   // The nearest decoration drawn under a client position.
@@ -1369,6 +1447,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     drawSetPieceGhost();
     drawOutline();
     drawCheckMarkers();
+    drawTiltHandle();
   }
 
   function objectConnections(id: string | null): readonly ConnectionLink[] {
@@ -2543,6 +2622,14 @@ Export the level first if you want to keep them. Continue without saving?`);
         ...gesture.original, x: gesture.original.x + at.x - gesture.world.x,
         y: gesture.original.y + at.y - gesture.world.y,
       } : gesture.original;
+    } else if (gesture?.kind === 'tilt') {
+      const original = gesture.original;
+      // A decoration tilts in its own depth plane, so its knob stays under the pointer at any depth.
+      const at = original.kind === 'decoration' ? camera.unprojectDepth(client, original.z) : world;
+      if (at !== null && (at.x !== original.x || at.y !== original.y)) {
+        const angle = Math.atan2(at.y - original.y, at.x - original.x) - (aimsAlongAngle(original) ? 0 : Math.PI / 2);
+        gesture.preview = { ...original, angle: wrapAngle(event.shiftKey ? Math.round(angle / TILT_STEP) * TILT_STEP : angle) };
+      }
     } else if (gesture?.kind === 'platform-end') {
       const moved = Math.hypot(client.x - gesture.start.x, client.y - gesture.start.y) >= DRAG_DISTANCE;
       gesture.preview = moved ? {
@@ -2640,9 +2727,14 @@ Export the level first if you want to keep them. Continue without saving?`);
       gesture = panFrom(event, false);
     } else if (tool === 'select' || tool === 'decorate') {
       overlay.focus({ preventScroll: true });
+      const tilted = tiltTarget();
+      const tilt = tilted === null ? null : tiltHandle(tilted);
       const trigger = tool === 'select' ? asTrigger(selectedObject()) : null;
       const handle = trigger === null ? null : triggerLinkHandle(trigger, camera.state().worldHeight / Math.max(1, rect.height));
-      if (trigger !== null && handle !== null && Math.hypot(world.x - handle.x, world.y - handle.y) <= handleRadius()) {
+      if (tilted !== null && tilt !== null && Math.hypot(world.x - tilt.knob.x, world.y - tilt.knob.y) <= handleRadius()) {
+        gesture = { kind: 'tilt', pointerId: event.pointerId, original: tilted, preview: tilted };
+        draw();
+      } else if (trigger !== null && handle !== null && Math.hypot(world.x - handle.x, world.y - handle.y) <= handleRadius()) {
         gesture = { kind: 'connect', pointerId: event.pointerId, trigger, world, target: hitConnectionTarget(world) };
         draw();
       } else {
@@ -2712,7 +2804,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     applyEdit(() => {
       if (finished.kind === 'move') {
         if (finished.preview !== finished.original) level.upsert(finished.preview);
-      } else if (finished.kind === 'platform-end') {
+      } else if (finished.kind === 'platform-end' || finished.kind === 'tilt') {
         if (finished.preview !== finished.original) level.upsert(finished.preview);
       } else if (finished.kind === 'connect' && inside && finished.target !== null) {
         triggerEvents.appendEvent(finished.trigger.id, finished.target.kind === 'shooter'
@@ -2820,6 +2912,10 @@ Export the level first if you want to keep them. Continue without saving?`);
           placement = { ...placement, mirror: decorationMirror };
           renderControls(); draw();
         } else return;
+        break;
+      case 'q':
+      case 'e':
+        if (!tiltBy(event.key.toLowerCase() === 'q' ? TILT_STEP : -TILT_STEP)) return;
         break;
       case 'enter':
         if (target instanceof Element && target.closest('button, a[href], summary, [role="button"], [role="tab"]')) return;

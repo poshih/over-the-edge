@@ -728,8 +728,12 @@ shape, or import a GLB under **Meshes**, then click/tap the game preview to plac
 collides as the simple shape it declares, as its slice on the [obstacle line](#obstacle-line), or
 as its projection, its outermost outline seen along the view, when it declares that;
 see [course meshes](docs/course-artwork.md). Select an object to move it or adjust its
-position, dimensions, rotation, mirroring, surface and illusion property. Dragging previews
-the change; releasing commits it. Drag empty
+position, dimensions, tilt, mirroring, surface and illusion property. Dragging previews
+the change; releasing commits it. A selected terrain object, decoration, start or projectile
+trap shows a round handle on an arm: drag it to tilt the object in the view plane, or to aim
+the start's hammer or the trap, holding Shift to snap to 15°. **Q** and **E** tilt the
+selection, or the object about to be placed, 15° either way; Object properties calls the angle
+**Tilt**, **Hammer angle** or **Aim**. Drag empty
 space, or drag with the middle button from anywhere, to pan; the wheel and + / - zoom.
 On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
