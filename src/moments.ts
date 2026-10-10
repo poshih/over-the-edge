@@ -50,8 +50,8 @@ export interface PlacedMoment extends MomentStamp {
   // A checkpoint return continues the run; null starts a new run from its spawn.
   readonly bonfire: string | null;
 }
-// The hammer lit the bonfire `id`, its base at (x, y): the player is healed to full, every enemy is back home at full
-// health, and a death returns there.
+// The player reached the bonfire `id`, its base at (x, y), and lit it: the player is healed to full, every enemy is back
+// home at full health, and a death returns there.
 export interface BonfireMoment extends MomentStamp {
   readonly type: 'bonfire'; readonly id: string; readonly x: number; readonly y: number;
 }

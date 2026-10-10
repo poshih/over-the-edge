@@ -38,7 +38,7 @@ const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title
   Materials: { id: 'physics-materials', hint: 'Friction, bounciness, damping and handle flex' },
   Input: { id: 'physics-input', hint: 'Control sensitivity' },
   Health: { id: 'physics-health', hint: 'Health and invulnerability' },
-  Bonfires: { id: 'physics-bonfires', hint: 'Lighting with the hammer and burn time' },
+  Bonfires: { id: 'physics-bonfires', hint: 'How long a lit bonfire burns' },
   Hazards: { id: 'physics-hazards', hint: 'Hurt box and trap knockback' },
   Enemies: { id: 'physics-enemies', hint: 'Health, mass, movement and bumps' },
   Liquids: { id: 'physics-liquids', hint: 'Lava and swamp: lift, drag and burn' },

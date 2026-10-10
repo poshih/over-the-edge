@@ -1,10 +1,11 @@
-import { Box, DynamicTree, testOverlap } from 'planck';
-import type { Fixture, TransformValue } from 'planck';
+import { DynamicTree } from 'planck';
+import type { AABBValue } from 'planck';
+import type { Point } from './config';
 import { BONFIRE } from './hazards';
 import { isBonfireObject } from './level';
 import type { BonfireObject, LevelChange } from './level';
 
-// A bonfire that burns: the run seconds the hammer lit it at, and those it goes out at, when the hammer can light it
+// A bonfire that burns: the run seconds the player lit it at, and those it goes out at, when reaching it lights it
 // again.
 export interface BurningBonfire {
   readonly id: string;
@@ -22,17 +23,12 @@ export interface BonfireState {
 interface Bonfire {
   readonly object: BonfireObject;
   readonly proxy: number;
-  // Where its fire stands, centred above its base.
-  readonly fire: TransformValue;
 }
 
-// A bonfire's fire about its centre: the hammer head lights the bonfire anywhere within.
-const FIRE = new Box(BONFIRE.width / 2, BONFIRE.height / 2);
-
 /**
- * The level's bonfires through a run. The hammer head lights one by passing through its fire fast enough; it burns a
- * while, then goes out, and only then can the hammer light it again. The one lit last is where a fallen player comes
- * back. An index of their fires finds those the head is in, if any.
+ * The level's bonfires through a run. The player's foot lights one as it comes within reach of its base; it burns a
+ * while, then goes out, and only then does coming within reach again light it. The one lit last is where a fallen
+ * player comes back. An index of their reach finds the one the foot is at, if any.
  */
 export class Bonfires {
   private readonly index = new DynamicTree<string>();
@@ -42,11 +38,14 @@ export class Bonfires {
   private current: string | null = null;
   // When the next burning bonfire goes out, in run seconds; Infinity while none burns.
   private nextOut = Infinity;
-  // While a strike query runs: the hammer head and its centre, and the unlit bonfire nearest it whose fire it is in.
-  private head: Fixture | null = null;
-  private readonly headCentre = { x: 0, y: 0 };
-  private struck: Bonfire | null = null;
-  private struckDistance = Infinity;
+  // The bonfire whose reach the foot was in at the last step, or null: one lights only as the foot comes into its reach,
+  // so standing at a bonfire lights it once, not again each time it goes out.
+  private reached: string | null = null;
+  // While a reach query runs: the foot, and the bonfire nearest it within reach.
+  private readonly query: AABBValue = { lowerBound: { x: 0, y: 0 }, upperBound: { x: 0, y: 0 } };
+  private readonly foot = { x: 0, y: 0 };
+  private nearest: Bonfire | null = null;
+  private nearestDistance = Infinity;
 
   constructor(objects: readonly BonfireObject[]) {
     for (const object of objects) this.add(object);
@@ -65,32 +64,29 @@ export class Bonfires {
     this.emit();
   }
 
-  // After each step while the player lives, with the hammer head's fixture and its speed in m/s: lights the bonfire
-  // nearest the head whose fire the head is in, unless it burns already or the head is slower than `strikeSpeed`, to
-  // burn `burnTime` seconds from run time `time`. Returns the bonfire lit, or null.
-  strike(head: Fixture, speed: number, strikeSpeed: number, burnTime: number, time: number): BonfireObject | null {
-    if (this.burning.size === this.records.size || speed < strikeSpeed) return null;
-    // Where the head swept through this step.
-    const bounds = head.getAABB(0);
-    this.headCentre.x = (bounds.lowerBound.x + bounds.upperBound.x) / 2;
-    this.headCentre.y = (bounds.lowerBound.y + bounds.upperBound.y) / 2;
-    this.head = head;
-    this.struck = null;
-    this.struckDistance = Infinity;
-    try {
-      this.index.query(bounds, this.visit);
-    } finally {
-      this.head = null;
-    }
-    const bonfire = this.struck;
-    this.struck = null;
-    if (bonfire === null) return null;
+  // After each step while the player lives, with their foot, the jar's base: lights the bonfire the foot has just come
+  // within reach of, unless it burns already, to burn `burnTime` seconds from run time `time`. Returns the bonfire lit,
+  // or null. While the foot stays within reach of the bonfire it was at, it reaches no other, even where their reaches
+  // overlap.
+  touch(foot: Readonly<Point>, burnTime: number, time: number): BonfireObject | null {
+    const at = this.reached === null ? undefined : this.records.get(this.reached);
+    if (at !== undefined && Math.hypot(foot.x - at.object.x, foot.y - at.object.y) <= BONFIRE.reach) return null;
+    const bonfire = this.nearestTo(foot);
+    this.reached = bonfire === null ? null : bonfire.object.id;
+    if (bonfire === null || this.burning.has(bonfire.object.id)) return null;
     const id = bonfire.object.id;
     this.burning.set(id, Object.freeze({ id, litAt: time, outAt: time + burnTime }));
     this.nextOut = Math.min(this.nextOut, time + burnTime);
     this.current = id;
     this.emit();
     return bonfire.object;
+  }
+
+  // A player placed anew with their foot at `foot` is already at any bonfire within reach there, so it lights only once
+  // they leave its reach and come back: returning at a bonfire after a death lights none.
+  place(foot: Readonly<Point>): void {
+    const bonfire = this.nearestTo(foot);
+    this.reached = bonfire === null ? null : bonfire.object.id;
   }
 
   // A new run: every bonfire is out, and none has been lit.
@@ -117,6 +113,7 @@ export class Bonfires {
       this.burning.clear();
       this.nextOut = Infinity;
       this.current = null;
+      this.reached = null;
       this.emit();
       return;
     }
@@ -135,6 +132,7 @@ export class Bonfires {
     for (const id of this.burning.keys()) if (!this.records.has(id)) this.burning.delete(id);
     this.schedule();
     if (this.current !== null && !this.records.has(this.current)) this.current = null;
+    if (this.reached !== null && !this.records.has(this.reached)) this.reached = null;
     if (changed) this.emit();
   }
 
@@ -158,10 +156,10 @@ export class Bonfires {
 
   private add(object: BonfireObject): void {
     const proxy = this.index.createProxy({
-      lowerBound: { x: object.x - BONFIRE.width / 2, y: object.y },
-      upperBound: { x: object.x + BONFIRE.width / 2, y: object.y + BONFIRE.height },
+      lowerBound: { x: object.x - BONFIRE.reach, y: object.y - BONFIRE.reach },
+      upperBound: { x: object.x + BONFIRE.reach, y: object.y + BONFIRE.reach },
     }, object.id);
-    this.records.set(object.id, { object, proxy, fire: { p: { x: object.x, y: object.y + BONFIRE.height / 2 }, q: { s: 0, c: 1 } } });
+    this.records.set(object.id, { object, proxy });
   }
 
   private remove(id: string): void {
@@ -176,14 +174,28 @@ export class Bonfires {
     for (const fire of this.burning.values()) this.nextOut = Math.min(this.nextOut, fire.outAt);
   }
 
+  // The bonfire nearest `foot` within reach of its base, or null.
+  private nearestTo(foot: Readonly<Point>): Bonfire | null {
+    if (this.records.size === 0) return null;
+    this.foot.x = foot.x;
+    this.foot.y = foot.y;
+    this.query.lowerBound.x = this.query.upperBound.x = foot.x;
+    this.query.lowerBound.y = this.query.upperBound.y = foot.y;
+    this.nearest = null;
+    this.nearestDistance = Infinity;
+    this.index.query(this.query, this.visit);
+    const nearest = this.nearest;
+    this.nearest = null;
+    return nearest;
+  }
+
   private readonly visit = (node: number): boolean => {
     const record = this.records.get(this.index.getUserData(node));
-    const head = this.head;
-    if (record === undefined || head === null || this.burning.has(record.object.id)) return true;
-    const distance = Math.hypot(this.headCentre.x - record.fire.p.x, this.headCentre.y - record.fire.p.y);
-    if (distance < this.struckDistance && testOverlap(FIRE, 0, head.getShape(), 0, record.fire, head.getBody().getTransform())) {
-      this.struck = record;
-      this.struckDistance = distance;
+    if (record === undefined) return true;
+    const distance = Math.hypot(this.foot.x - record.object.x, this.foot.y - record.object.y);
+    if (distance <= BONFIRE.reach && distance < this.nearestDistance) {
+      this.nearest = record;
+      this.nearestDistance = distance;
     }
     return true;
   };

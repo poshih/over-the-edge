@@ -251,6 +251,7 @@ export class Simulation {
       block: (hit) => this.block(hit),
     });
     this.bonfires = new Bonfires(level.objects.filter(isBonfireObject));
+    this.bonfires.place(this.playerPosition(this.footScratch));
     this.liquids = new LiquidWorld(level.objects.filter(isPoolObject));
     this.aim = this.initialAim();
     this.current = this.createPlayerFrame();
@@ -346,6 +347,8 @@ export class Simulation {
     this.enemies.apply(change, this.elapsed);
     this.hazards.apply(change, this.elapsed);
     this.bonfires.apply(change);
+    // Now that the new level's bonfires are in, the player placed at its start is at any within reach there.
+    if (change.kind === 'replace') this.bonfires.place(this.playerPosition(this.footScratch));
     this.liquids.apply(change);
   }
 
@@ -625,11 +628,9 @@ export class Simulation {
     }
     if (!this.dying && this.terminal() === null) {
       this.platforms.board(this.rig.potFixture, this.manifold, SUPPORT_NORMAL);
-      this.bestHeight = Math.max(this.bestHeight, this.playerPosition(this.footScratch).y);
-      const head = this.rig.tool.head, velocity = partVelocity(head, this.velocityScratch);
-      const { bonfireStrikeSpeed, bonfireBurnTime } = this.settings.physics;
-      const bonfire = this.bonfires.strike(head.fixture, Math.hypot(velocity.x, velocity.y), bonfireStrikeSpeed, bonfireBurnTime,
-        this.elapsed);
+      const foot = this.playerPosition(this.footScratch);
+      this.bestHeight = Math.max(this.bestHeight, foot.y);
+      const bonfire = this.bonfires.touch(foot, this.settings.physics.bonfireBurnTime, this.elapsed);
       if (bonfire !== null) this.rest(bonfire);
     }
     this.capture(this.current);
@@ -860,6 +861,8 @@ export class Simulation {
     this.terminalRaised = false;
     this.health = this.settings.physics.health;
     this.placements++;
+    // Placed within a bonfire's reach, the player is at it already: it lights only once they leave and come back.
+    this.bonfires.place(this.playerPosition(this.footScratch));
     this.aim = this.initialAim();
     this.lastAimInput = this.elapsed;
     Object.assign(this.command, IDLE_COMMAND);
@@ -876,8 +879,8 @@ export class Simulation {
     return !this.dying && this.health > 0 && this.elapsed >= this.safeUntil;
   }
 
-  // The hammer lit `bonfire`, so the player rests there: healed, with every enemy back home at full health, and a death
-  // now returns there.
+  // The player reached `bonfire` and lit it, so they rest there: healed, with every enemy back home at full health, and
+  // a death now returns there.
   private rest(bonfire: BonfireObject): void {
     this.health = this.settings.physics.health;
     this.enemies.reset(this.elapsed);

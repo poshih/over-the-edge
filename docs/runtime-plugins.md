@@ -1,7 +1,7 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, strike, lava, enemy health and extra effects, death pose and screen, object,
+camera following, backdrop, aim marks, strike, lava, enemy health, rest and extra effects, death pose and screen, object,
 enemy and phantom looks, scene layers, audio, event messages, gameplay observers, key bindings
 and additional input devices; character choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
@@ -216,9 +216,9 @@ of its kind:
   scalar values into your own state if you need history. Do not use array or pose identity
   to detect changes, and a slot does not identify a particular shot.
 - `setBurning(burning)`, the bonfire look's alone, receives the bonfires that burn, each a
-  `BurningBonfire`, `{ id, litAt, outAt }`: the hammer lit it at `litAt` and it goes out at
+  `BurningBonfire`, `{ id, litAt, outAt }`: the player lit it at `litAt` and it goes out at
   `outAt`, in the run seconds `update(time)` receives. The rest are out. It runs as the game
-  starts and whenever that changes: the hammer lights one, one goes out, or a new run or an edit
+  starts and whenever that changes: the player lights one, one goes out, or a new run or an edit
   puts them out. Changes during physics are staged: after the step loop, it runs at most once per
   notification flush, with the latest set. The array and its entries are frozen, so a look may
   keep them and draw each fire's whole life from its times; the engine's flames flare up over
@@ -491,7 +491,8 @@ piece. Each point holds a `MomentEffectFactory`, `() => MomentEffect`:
 | `EFFECTS.strikes` (`effects.strikes`) | Slot | `DEFAULT_EFFECTS.strikes`: one shared burst pool for character strikes, hammer blocks and hammer strikes on enemies |
 | `EFFECTS.lava` (`effects.lava`) | Slot | `DEFAULT_EFFECTS.lava`: fire while lava burns the character |
 | `EFFECTS.enemyHealth` (`effects.enemy-health`) | Slot | `DEFAULT_EFFECTS.enemyHealth`: a health bar over each hurt enemy |
-| `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes, lava and enemy health in manifest order |
+| `EFFECTS.rest` (`effects.rest`) | Slot | `DEFAULT_EFFECTS.rest`: a wave of firelight across the whole screen as the player lights a bonfire |
+| `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes, lava, enemy health and rest in manifest order |
 
 ```ts
 interface MomentEffect {
@@ -576,6 +577,15 @@ which bring every enemy back home at full health.
 A hammer's killing blow empties the bar where the enemy fell, fading with it. Every bar shares
 one instanced draw with no textures or frame allocations, updated only while a bar shows.
 Replacing it changes neither strikes nor lava.
+
+**Default rest.** `DEFAULT_EFFECTS.rest` draws in top and takes `bonfire` and `placed`. As the
+player lights a bonfire, healing to full while every enemy comes back home at full health, a wave
+of firelight sweeps out from its fire past the screen's farthest corner in **0.85 s** and leaves
+the whole screen glowing, which settles by **1.6 s**: one quad, sized each frame to the course
+plane's rectangle in view (`frame.view`) so it covers the screen, with additive light and no
+textures or frame allocations. It draws only while the wave shows; any `placed` ends it. A player
+who prefers reduced motion sees the glow without the wave. Replace it to show a rest your own way,
+or wrap it to add to the engine's; it changes no other effect.
 
 To add a ring to the default strikes, wrap the factory and forward every method, keeping its
 pass and filter (the default includes `block` and `placed`):
@@ -697,7 +707,7 @@ reach the ordered effects/audio/observer drain. Blocks can continue while dying,
 placement appends `placed`; effects filter by the current placement while audio and
 observers receive the complete journal batch.
 
-The game settings (schema **20**) own `death: { wait, angularDamping, friction }`.
+The game settings (schema **21**) own `death: { wait, angularDamping, friction }`.
 Workshop / Physics / Death exposes the same fields:
 
 | Field | Values | Default |
@@ -1346,7 +1356,7 @@ type; otherwise a non-empty array of known types without repeats, fixed for the 
 | `death` | The health death sequence started; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
 | `placed` | `bonfire`: the checkpoint returned to, continuing the run; `null` starts a new run from its spawn, including Reset, rig rebuild, level replacement, Workshop placement or death before any bonfire is lit. Either way every enemy is back home at full health |
-| `bonfire` | `id`, `x`, `y`: the bonfire's ID and base. The hammer lit it: the player is healed to full, every enemy is back home at full health, and it is the checkpoint a death returns to, even if it was already |
+| `bonfire` | `id`, `x`, `y`: the bonfire's ID and base. The player reached it and lit it: the player is healed to full, every enemy is back home at full health, and it is the checkpoint a death returns to, even if it was already |
 | `enemy-hit` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `strikeX`, `strikeY`: where the head struck; `normalX`, `normalY`: the contact's unit normal there, toward the head; `damage`: hit points the strike took; `health`, `max`: hit points left and the enemy's maximum. On **every accepted surviving hit**, not just phase transitions |
 | `enemy-defeat` | `id`, `species`, `x`, `y`: enemy ID, species and centre; `by`: `'hammer'` or `'fall'`; `strikeX`, `strikeY`, `normalX`, `normalY`: the killing strike, as for `enemy-hit`, or for a fall the centre with a zero normal; `damage`: the hit points it had left; `max`: its maximum |
 | `launch` | An authored Launch player action executed |

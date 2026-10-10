@@ -617,6 +617,13 @@ body.touch-controls .level-check-pick {
   stroke: none;
 }
 
+.level-gizmo-reach {
+  fill: rgb(181 84 28 / 8%);
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
 .level-gizmo-aim {
   stroke: currentColor;
   stroke-width: 1.5;

@@ -49,7 +49,7 @@ export interface ObjectLook<T extends LevelObject> {
 
 export interface BonfireLook extends ObjectLook<BonfireObject> {
   // The bonfires that burn, each from its `litAt` until its `outAt`, in the run seconds `update` gets; the rest are out.
-  // Called as the game starts and whenever they change: the hammer lights one, one goes out, or a new run or an edit
+  // Called as the game starts and whenever they change: the player lights one, one goes out, or a new run or an edit
   // puts them out.
   setBurning(burning: readonly BurningBonfire[]): void;
 }

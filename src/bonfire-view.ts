@@ -44,7 +44,7 @@ function bonfireModel() {
 }
 
 /**
- * The level's bonfires, on the obstacle line in the course pass. One the hammer lights flares up, burns and dies down as
+ * The level's bonfires, on the obstacle line in the course pass. One the player lights flares up, burns and dies down as
  * it goes out, all in the flames' shader from its times, so a burning fire costs nothing per frame.
  */
 export class BonfireView extends ObjectView<BonfireObject> {

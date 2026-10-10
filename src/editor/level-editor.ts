@@ -11,7 +11,7 @@ import type {
   AxeObject, BonfireObject, DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, PlatformObject, PoolObject, ShapeKind,
   ShooterObject, StartObject, TerrainMesh, TerrainObject, TriggerObject, TriggerRegion,
 } from '../level';
-import { AXE, AXE_FIELDS, HAZARD_LIMITS, SHOOTER, SHOOTER_FIELDS } from '../hazards';
+import { AXE, AXE_FIELDS, BONFIRE, HAZARD_LIMITS, SHOOTER, SHOOTER_FIELDS } from '../hazards';
 import { LIQUID_LABELS, LIQUID_LIMITS, LIQUIDS } from '../liquids';
 import type { Liquid } from '../liquids';
 import type { MeshTerrain } from '../mesh-collision';
@@ -574,9 +574,10 @@ export function createLevelEditor(options: LevelEditorOptions) {
         </div>
         <div class="level-fields-bonfire">
           <p class="level-help">Position is the centre of its base; placing it rests the base on the terrain top under the
-            pointer. The hammer head lights it by passing through its fire, the dashed box, at Physics / Bonfires'
-            strike speed or faster: the player heals to full and every enemy comes back home at full health. It burns
-            for the burn time, then goes out, and only then can the hammer light it again. A death, from health running
+            pointer. It lights when the player's foot comes within ${BONFIRE.reach} m of the base, the dashed circle: the
+            player heals to full and every enemy comes back home at full health. It burns for Physics / Bonfires' burn
+            time, then goes out, and only then does coming within reach again light it; a player placed within reach,
+            as on returning there after a death, lights it once they leave and come back. A death, from health running
             out or a fall out of the level, brings the player back at the bonfire lit last, healed, protected for
             Physics / Health's Respawn invulnerability and with every enemy back; the run, its clock and the rest of the
             level go on. Before any bonfire is lit, a death restarts the run. Bonfires never collide.</p>

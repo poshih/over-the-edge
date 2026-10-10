@@ -112,7 +112,7 @@ names. Each plugin has up to four facets, one for each place its code runs:
 - **kinds**, the rig strategies and secondary-motion kinds its avatars select by ID in their
   `driver` and `motion`, checked identically wherever content is validated;
 - **runtime**, how play looks, sounds and responds: HUD readouts and extras, camera following, backdrop,
-  aim marks, strike, lava, enemy health and extra effects, death pose and screen, object, enemy and phantom looks,
+  aim marks, strike, lava, enemy health, rest and extra effects, death pose and screen, object, enemy and phantom looks,
   scene layers, audio, message presentation,
   gameplay observers, key bindings and additional input devices, in the Workshop's play-test,
   studio previews and releases; character choice in releases and studio previews;
@@ -260,7 +260,7 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 21**, and release content **schema 20**,
+Project manifests and bundles use **schema 22**, and release content **schema 21**,
 including course artwork without a course look, the audio record's `block` cue, game settings' death wait, archer, hit-point,
 armor and bonfire rules, jar outline and jar side friction, the theme camera's background blur and character light, the HUD's
 level readout and death text/fade and the hollow archer's enemy art; other versions are rejected.
@@ -324,7 +324,7 @@ only what it needs.
 | --- | --- |
 | The title, theme and lights, HUD labels and units, music and sound cues, characters and their models, course meshes, decorations, enemy art and game settings | The project: see [projects](docs/projects.md) |
 | How imported avatars are rigged, and their secondary motion: code that content selects by ID | A plugin's kinds facet: see [kinds plugins](docs/kinds-plugins.md) |
-| How the HUD's readouts (level, height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava, enemy health and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
+| How the HUD's readouts (level, height, health, timer and extras), camera following, backdrop, aim marks, flags, updrafts, pressure switches, bonfires, platforms, traps, projectiles, lava and swamp pools, enemies and phantoms look, plus strike, lava, enemy health, rest and extra effects, death pose and screen, scene layers, audio, message presentation, gameplay observers, key bindings and additional input devices, in Workshop play-tests, studio previews and releases; character choice in releases and studio previews | A plugin's runtime facet: see [runtime plugins](docs/runtime-plugins.md) |
 | Notices and fatal errors, sign-in and content access, the main menu with the player's saved run and settings, the phantom backend, the library models each player has, and the load's failures and progress, in releases | A plugin's release facet: see [release plugins](docs/release-plugins.md) and [content delivery](docs/content-delivery.md) |
 | The Workshop: the game's own tabs, sections, data, overlays, previews and motion controls | A plugin's workshop facet: see [Workshop plugins](docs/workshop-plugins.md) |
 
@@ -1077,16 +1077,15 @@ keeps its deadline, so edits apply at the next hit or respawn. Levels without
 enemies, traps or lava show no health.
 
 Choose **Workshop / Level / Bonfire**, then click/tap: its base rests on the terrain top
-under the pointer. A bonfire stays out as the player arrives: the hammer lights it, swung
-through its fire, a **1.2 m** wide, **1.3 m** tall box standing on its base, at **Bonfire
-strike speed** or faster (`bonfireStrikeSpeed`, 0–20 m/s, step 0.1, default **3 m/s**), so
-resting or brushing the head against it leaves it out; 0 lights it at a touch. Lighting it
-rests the player there: health refills, every enemy, dead or alive, comes back home at full
-health, and it becomes the bonfire a death returns to. It burns for
-**Bonfire burn time** (`bonfireBurnTime`, 1–120 s, step 0.5, default **10 s**), its flames
-dying down as it goes out, and only then can the hammer light it again. Both are in
-**Physics / Bonfires**; a strike speed applies to the next strike and a burn time to the next
-bonfire lit, while a burning one keeps its time. Health running out
+under the pointer. The player lights a bonfire by reaching it: their foot, the jar's base,
+comes within **1.5 m** of its base. Lighting it rests the player there: health refills, every
+enemy, dead or alive, comes back home at full health, a wave of firelight sweeps across the
+whole screen to show it, and it becomes the bonfire a death returns to. It burns for
+**Bonfire burn time** (`bonfireBurnTime`, 1–120 s, step 0.5, default **10 s**, in
+**Physics / Bonfires**), its flames dying down as it goes out, and only then does reaching it
+light it once more: a player who stays leaves it out, and one placed within reach, as on
+returning there after a death, lights it once they step away and come back. A burn time
+applies to the next bonfire lit, while a burning one keeps its time. Health running out
 or a fall out of the level starts a physical death: the character collapses as a passive
 ragdoll, lets go of the hammer and drops it. The jar and hammer keep their motion; the corpse
 and released hammer collide only with the course and platforms, never enemies or each other.
@@ -1129,7 +1128,7 @@ they stand on the obstacle line, behind the player.
 
 Health, burning bonfires and deaths are runtime state: saves and exports keep only the
 authored bonfires. The `hurt`, `death`, `fall` and `bonfire` [audio cues](docs/projects.md)
-sound them, the last as the hammer lights a bonfire; the `block` cue sounds a trap's
+sound them, the last as the player lights a bonfire; the `block` cue sounds a trap's
 projectile striking the hammer head. `death`/`fall` moments arrive at entry and `placed`
 after placement. The fatal hurt still reaches effects and observers, but has no hurt cue. Both
 [phantom recorders](docs/phantoms.md) stop before the fatal sample: no corpse movement,
@@ -1442,7 +1441,7 @@ vertex shader, so frames write nothing for them; projectile instances are writte
 for those in flight. Their borrowed pose array and pose slots are pooled up to the
 high-water count, at most 256 shots, rather than rebuilt each frame. Length-indexed
 arrays retain their backing storage through count changes and empty frames.
-Bonfires find the hammer head through a spatial index too, and their flames flare up and die
+Bonfires find the player's foot through a spatial index too, and their flames flare up and die
 down in their shader, so a burning fire writes nothing each frame. Liquid
 pools do as well: a step clips only the player's parts in the pools it is near, and the
 liquid moves in its shaders, so frames write nothing for pools.

@@ -8,6 +8,7 @@ import type { Moment, MomentType } from './moments';
 import { call0, call1, createInstance, instanceContract, invalidResult, listPoint, slotPoint } from './plugins/kernel';
 import type { CheckedInstance } from './plugins/kernel';
 import type { RuntimePlugins } from './plugins/runtime';
+import { RestWave } from './rest-wave';
 import type { SceneFrame } from './scene-frame';
 import { SCENE_PASSES } from './scene-layer';
 import type { ScenePass } from './scene-layer';
@@ -37,15 +38,18 @@ export const EFFECTS = Object.freeze({
   strikes: slotPoint('effects.strikes', 'runtime', effectFactory),
   lava: slotPoint('effects.lava', 'runtime', effectFactory),
   enemyHealth: slotPoint('effects.enemy-health', 'runtime', effectFactory),
+  rest: slotPoint('effects.rest', 'runtime', effectFactory),
   extras: listPoint('effects.extras', 'runtime', EFFECT_LIMITS.extras, effectFactory),
 });
 
 export const DEFAULT_EFFECTS: Readonly<{
   readonly strikes: MomentEffectFactory; readonly lava: MomentEffectFactory; readonly enemyHealth: MomentEffectFactory;
+  readonly rest: MomentEffectFactory;
 }> = Object.freeze({
   strikes: () => new HitBursts(),
   lava: () => new LavaFire(),
   enemyHealth: () => new EnemyHealthBars(),
+  rest: () => new RestWave(),
 });
 
 const EFFECT_CONTRACT = instanceContract({
@@ -78,6 +82,8 @@ export class SceneEffects {
       created.push(createInstance(EFFECT_CONTRACT, lava, lava.value));
       const enemyHealth = plugins.slot(EFFECTS.enemyHealth, DEFAULT_EFFECTS.enemyHealth);
       created.push(createInstance(EFFECT_CONTRACT, enemyHealth, enemyHealth.value));
+      const rest = plugins.slot(EFFECTS.rest, DEFAULT_EFFECTS.rest);
+      created.push(createInstance(EFFECT_CONTRACT, rest, rest.value));
       for (const factory of plugins.list(EFFECTS.extras)) {
         created.push(createInstance(EFFECT_CONTRACT, factory, factory.value));
       }

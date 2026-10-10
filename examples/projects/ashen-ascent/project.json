@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 21,
+  "schemaVersion": 22,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -8,7 +8,7 @@
     "decorations": {}
   },
   "settings": {
-    "schemaVersion": 20,
+    "schemaVersion": 21,
     "physics": {
       "hingeTorque": 420,
       "sliderForce": 850,
@@ -47,7 +47,6 @@
       "health": 100,
       "hurtInvulnerability": 1,
       "respawnInvulnerability": 2,
-      "bonfireStrikeSpeed": 3,
       "bonfireBurnTime": 10,
       "hurtWidth": 1,
       "hurtHeight": 1.58,

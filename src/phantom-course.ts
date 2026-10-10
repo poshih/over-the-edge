@@ -11,7 +11,7 @@ import { terrainCollision } from './level';
 import type { LevelDefinition, PlatformObject, ShooterObject } from './level';
 
 // Changes whenever what counts toward a course does, so every course changes with it.
-export const PHANTOM_COURSE_FORMAT = 10;
+export const PHANTOM_COURSE_FORMAT = 11;
 
 // The physics settings that move the player: every tuning field but the controls', and the hammer rig with the default
 // hammer's head and the jar. A library hammer's own head is a cosmetic's: recordings made with it join the course.

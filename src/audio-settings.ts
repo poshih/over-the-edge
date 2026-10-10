@@ -19,7 +19,7 @@ export const AUDIO_CUE_DESCRIPTIONS: Readonly<Record<AudioCue, string>> = {
   hurt: 'An enemy, a trap or lava hurts the player, who survives it.',
   death: 'The player\'s health runs out.',
   fall: 'The player falls out of the level.',
-  bonfire: 'The hammer lights a bonfire, which heals the player, brings every enemy back and becomes where a death returns.',
+  bonfire: 'The player reaches a bonfire and lights it, which heals the player, brings every enemy back and becomes where a death returns.',
 };
 
 export interface AudioClip {

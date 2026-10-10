@@ -50,8 +50,8 @@ connectors between pieces change from zone to zone rather than repeating one
 pattern. Stairs switch back or run in line, mixing shelves, slabs, crates, rocks and
 columns; floors, walls, towers and wind stones fill the rest. The first zone opens
 with the intro. Each later zone begins at a [bonfire](../README.md#health-and-bonfires),
-whose message names the zone the first time you arrive. Bonfires are checkpoints: strike
-one with the hammer to light it, refilling your health. The crows and the hollowed cost
+whose message names the zone the first time you arrive. Bonfires are checkpoints: reach
+one to light it, refilling your health. The crows and the hollowed cost
 health, and a death, from health running out or a fall out of the world, brings you back at
 the bonfire you lit last. Lighting a bonfire or coming back at one raises every crow and
 hollowed again. A fall within the course
