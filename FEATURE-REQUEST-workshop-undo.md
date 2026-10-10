@@ -1,6 +1,6 @@
 # Feature request: Workshop commands with one undo history
 
-**Date:** 2026-10-10 · **Baseline:** `281ab1b` · **Status:** Requested; not implemented.
+**Date:** 2026-10-10 · **Baseline:** `281ab1b` · **Status:** Requested; roadmap planned; not implemented.
 
 A designer who makes a change they do not like can take it back in only two places: an unfinished outline drops its
 last stroke, and the Level tab removes the last placed set piece. Every other edit, in every tab, stays unless the
@@ -415,6 +415,39 @@ export interface WorkshopPluginData {
 - **Acceptance:** undoing an avatar import removes it from the document at once while the rig lets it go, and Redo
   loads it again; rapid Undo and Redo end showing the document's value, never a stale load; edits that need a model's
   joints wait for it, as now; a diagram drag is one step.
+
+## Roadmap
+
+Each stage lands on `main` as one commit and starts from the stage before it, since every stage changes
+`src/editor/main.ts` and `src/editor/project-session.ts`. A stage opens with a read-only plan of its seams, then works
+in waves: the lanes of a wave change disjoint files and run side by side, and a lane that fixes a contract runs a wave
+ahead of the lanes that build on it. A stage's lanes are reviewed together before it lands; validation is code review.
+
+| Stage | Wave | Lane | Changes | Needs |
+| --- | --- | --- | --- | --- |
+| A | 1 | Document and history | New `src/editor/document/project-document.ts`, `history.ts` and `sections.ts`, with the level's adapter | The interfaces above |
+| A | 1 | Level changes | `src/editor/level-state.ts` follows the document and builds each edit's change instead of making it | The interfaces above |
+| A | 1 | Controls | New `src/editor/history-controls.ts`; Undo and Redo in the Workshop header (`ui.ts`) | `History` |
+| A | 2 | Level tab | `level-editor.ts`, `level-editor-host.ts`, `polygon-draft.ts`, `trigger-inspector.ts` | Wave 1 |
+| A | 2 | Wiring | `main.ts`, `project-session.ts`, `workshop-plugin-host.ts`, `level-checks.ts` | Wave 1 |
+| A | 3 | Manual | `README.md`: *Undo and redo*, *Drawing terrain* and removing set pieces | Wave 2 |
+| B | 1 | Files and commands | New `src/editor/document/files.ts` and `project-commands.ts`; the whole-value adapter | Stage A |
+| B | 1 | Settings editors | Physics in `ui.ts`, the hammer head and jar editors, coalescing in `range-control.ts` | Stage A |
+| B | 2 | Project session | `project-session.ts` saves, syncs and opens over the document; `project-editor.ts` | Wave 1 |
+| B | 2 | Wiring and docs | `main.ts`, `docs/projects.md`, `README.md` | Wave 1 |
+| C | 1 | Plugin history | `workshop-sdk.ts`, `workshop-plugin-host.ts`, `workshop-ui-kit.ts`, `docs/workshop-plugins.md` | Stage B |
+| D | 1 | Character | `sprite-state.ts` and the Character, Sprites and skeleton editors | Stage B |
+| D | 1 | Appearance | `appearance.ts`, `appearance-ui.ts`, `arm-ik-store.ts` | Stage B |
+| D | 2 | Wiring | `main.ts`, `project-session.ts` (`ProjectWorkspace` goes), the docs | Wave 1 |
+
+Three choices refine the stages above:
+
+- **Interface details.** `History` also exposes its `document`, `cut(sections)` for cuts without a server value
+  (Stage A's rule for artwork and media, a facet change) and `hold()` for the waits; each adapter names its section's
+  typed refusal and builds the change that opening a project makes; `LevelState` gains `check` and `command`.
+- **The whole-value adapter** arrives with Stage B, its first user, rather than with Stage A.
+- **Plugin data** joins the document in Stage B with the rest of `ProjectSession`'s sections, so Stage C changes only
+  the SDK and its host. Stages C and D then run side by side, and whichever lands second rebases on the other.
 
 ## Not planned
 
