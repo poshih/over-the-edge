@@ -2,6 +2,7 @@ import {
   AdditiveBlending, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, Mesh, PlaneGeometry,
   ShaderMaterial,
 } from 'three';
+import { between, seeded, VALUE_NOISE } from './effect-noise';
 import type { MomentEffect } from './effects';
 import type { Moment } from './moments';
 import type { SceneFrame } from './scene-frame';
@@ -37,31 +38,6 @@ const FIRE = {
   depth: { glow: 0.4, smoke: 0.5, flames: 0.55, embers: 0.6 },
 } as const;
 
-// Value noise and its fractal sum, shared by the flames and the smoke.
-const NOISE = /* glsl */ `
-float hash21(vec2 p) {
-  p = fract(p * vec2(234.34, 435.345));
-  p += dot(p, p + 34.23);
-  return fract(p.x * p.y);
-}
-float valueNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x), mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-float fbm(vec2 p) {
-  float sum = 0.0;
-  float amplitude = 0.5;
-  for (int octave = 0; octave < 4; octave++) {
-    sum += amplitude * valueNoise(p);
-    p = p * 2.03 + vec2(1.7, 9.2);
-    amplitude *= 0.5;
-  }
-  return sum;
-}
-`;
-
 const FLAME_VERTEX = /* glsl */ `
 attribute float seed;
 varying vec2 vUv;
@@ -81,7 +57,7 @@ uniform float intensity;
 uniform float lean;
 varying vec2 vUv;
 varying float vSeed;
-${NOISE}
+${VALUE_NOISE}
 void main() {
   float y = vUv.y;
   float x = vUv.x - 0.5 - (lean + 0.06 * sin(time * 1.3 + vSeed * 6.28)) * y * y;
@@ -142,7 +118,7 @@ uniform float time;
 varying vec2 vUv;
 varying float vSeed;
 varying float vFade;
-${NOISE}
+${VALUE_NOISE}
 void main() {
   float d = length(vUv - 0.5) * 2.0;
   float n = fbm(vUv * 3.0 + vec2(vSeed * 13.0, -time * 0.25));
@@ -171,18 +147,6 @@ void main() {
   gl_FragColor = vec4(vec3(1.0, 0.42, 0.1) * glow * 0.55, 1.0);
 }
 `;
-
-// A number in 0-1 for `index` and `salt`, the same on every run.
-function seeded(index: number, salt: number): number {
-  let hash = Math.imul(index + 1, 0x27d4eb2d) ^ Math.imul(salt + 1, 0x165667b1);
-  hash = Math.imul(hash ^ (hash >>> 15), 0x2c1b3c6d);
-  hash = Math.imul(hash ^ (hash >>> 12), 0x297a2d39);
-  return ((hash ^ (hash >>> 15)) >>> 0) / 4294967296;
-}
-
-function between(range: readonly [number, number], at: number): number {
-  return range[0] + (range[1] - range[0]) * at;
-}
 
 // A quad whose bottom edge is at the origin, so it grows upward from where it is placed.
 function standingQuad(): PlaneGeometry {

@@ -1,7 +1,7 @@
 # Runtime plugins
 
 A plugin's **runtime facet** changes what play shows, sounds and does: HUD readouts and extras,
-camera following, backdrop, aim marks, strike, lava, enemy health, rest and extra effects, death pose and screen, object,
+camera following, backdrop, aim marks, strike, impact, lava, enemy health, rest and extra effects, death pose and screen, object,
 enemy and phantom looks, scene layers, audio, event messages, gameplay observers, key bindings
 and additional input devices; character choice in releases and studio previews.
 It runs wherever the game plays: in the Workshop's play-test, in studio previews and in releases,
@@ -489,10 +489,11 @@ piece. Each point holds a `MomentEffectFactory`, `() => MomentEffect`:
 | Point | Type | Engine base |
 | --- | --- | --- |
 | `EFFECTS.strikes` (`effects.strikes`) | Slot | `DEFAULT_EFFECTS.strikes`: one shared burst pool for character strikes, hammer blocks and hammer strikes on enemies |
+| `EFFECTS.impacts` (`effects.impacts`) | Slot | `DEFAULT_EFFECTS.impacts`: debris, dust and sparks where the hammer head strikes terrain or a platform, each surface its own way |
 | `EFFECTS.lava` (`effects.lava`) | Slot | `DEFAULT_EFFECTS.lava`: fire while lava burns the character |
 | `EFFECTS.enemyHealth` (`effects.enemy-health`) | Slot | `DEFAULT_EFFECTS.enemyHealth`: a health bar over each hurt enemy |
 | `EFFECTS.rest` (`effects.rest`) | Slot | `DEFAULT_EFFECTS.rest`: a wave of firelight across the whole screen as the player lights a bonfire |
-| `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes, lava, enemy health and rest in manifest order |
+| `EFFECTS.extras` (`effects.extras`) | List, up to `EFFECT_LIMITS.extras` (32) | Empty; additions follow strikes, impacts, lava, enemy health and rest in manifest order |
 
 ```ts
 interface MomentEffect {
@@ -556,6 +557,36 @@ hits, blocks and enemy strikes share **one four-burst instanced pool**, geometry
 scratch, with no textures or frame allocations. The newest pending blow replaces the oldest when
 full, whatever its kind. Blows stay where they landed and can finish after a checkpoint return.
 A new run's `placed { bonfire: null }` ends active bursts and drops pending ones.
+
+**Default impacts.** `DEFAULT_EFFECTS.impacts` draws in actors and takes `impact` and `placed`.
+Where the hammer head strikes terrain or a platform, it shows what the moment's `surface` is
+made of:
+
+| `surface` | The blow throws |
+| --- | --- |
+| `rock` | Stone chips and grit into a cloud of dust; a blow of `strength` 0.45 or more also strikes a few sparks, and 0.6 or more a brief warm flash |
+| `wood` | Splinters in a puff of sawdust |
+| `metal` | A hot flash and a shower of sparks that cool from white through orange to red as they arc and fall; a harder blow also leaves a faint wisp of smoke |
+| `ice` | Glossy, see-through shards in drifting, settling frost that glints |
+| `rubber` | Only dust, squeezed out along its face both ways |
+
+Debris pieces are lit solids, rough chunks, splinters or flat shards, that tumble as they fly and
+fall, then shrink away. Dust puffs billow out from the face, lit by the actors' lights as the
+characters are, so they suit any theme, and grow and thin as they drift, rise or settle.
+Everything leaves the struck face, never into it. Debris and dust lean along the head's reflected
+path, `r = d - 2 * (d · n) * n` with `d` the moment's direction and `n` its normal, as a glancing
+blow carries them on; sparks glance off along `r`, fanned wide by a square blow and into a stream
+by a glancing one. `strength` sets how much a blow throws and how fast. Debris and dust weigh it
+by how squarely the head lands, `|d · n|`, so a fast scrape barely chips stone, while sparks take
+`strength` alone, so a scrape along metal still showers them. Impacts on enemies, `surface: null`,
+show nothing here: the strikes effect draws the hammer's strikes on enemies. An impact shows for
+up to about 1.7 s, and **ten** show at once, the newest taking the oldest's place. A new run's
+`placed { bonfire: null }` ends them; a checkpoint return lets them finish where they were struck.
+Debris draws among the characters, depth-tested, so a character in front of a piece hides it;
+dust, sparks and glows ignore depth and draw over the actors, and decorations in front of the
+obstacle line draw over all of it. Each kind is one instanced draw, debris one for each surface
+that breaks, refilled each drawn frame with only what shows, with no textures or frame
+allocations, and nothing draws between impacts.
 
 **Default lava.** `DEFAULT_EFFECTS.lava` draws in marks and takes `hurt` and `placed`.
 Lava burns kindle turbulent tongues of flame, deep red to white-hot, bending away from motion
@@ -678,6 +709,59 @@ const defeatSpark: MomentEffectFactory = () => {
 };
 
 export default defineRuntime({ start: () => [add(EFFECTS.extras, defeatSpark)] });
+```
+
+To restyle one surface and keep the others, wrap the impacts and withhold that surface's
+impacts from the default. Here metal strikes flash cold blue-white, the game's own look, while
+rock, wood, ice and rubber keep the engine's. The SDK exports `SURFACES` and the `Surface` type
+for code keyed by surface.
+
+```ts
+import { AdditiveBlending, CircleGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
+import { defineRuntime, EFFECTS, OBSTACLE_LINE, wrap } from '../../src/plugins/runtime-sdk';
+import type { MomentEffectFactory } from '../../src/plugins/runtime-sdk';
+
+const coldMetal = (previous: MomentEffectFactory): MomentEffectFactory => () => {
+  const base = previous();
+  const flash = new Mesh(new CircleGeometry(0.3, 24), new MeshBasicMaterial({
+    color: 0xb8dcff, transparent: true, blending: AdditiveBlending, depthTest: false, depthWrite: false,
+  }));
+  flash.visible = false;
+  const root = new Group().add(base.root, flash);
+  let start: number | null = null;
+  return {
+    root, pass: base.pass, moments: base.moments,
+    moment(moment) {
+      if (moment.type === 'impact' && moment.surface === 'metal') {
+        flash.position.set(moment.x, moment.y, OBSTACLE_LINE);
+        start = moment.time;
+        return;
+      }
+      if (moment.type === 'placed' && moment.bonfire === null) {
+        start = null;
+        flash.visible = false;
+      }
+      base.moment(moment);
+    },
+    update(frame) {
+      const showing = base.update(frame);
+      if (start === null) return showing;
+      const age = Math.max(0, frame.time - start);
+      flash.visible = age < 0.15;
+      flash.material.opacity = 1 - age / 0.15;
+      flash.scale.setScalar(0.5 + age * 4);
+      if (!flash.visible) start = null;
+      return showing || flash.visible;
+    },
+    dispose() {
+      base.dispose();
+      flash.geometry.dispose();
+      flash.material.dispose();
+    },
+  };
+};
+
+export default defineRuntime({ start: () => [wrap(EFFECTS.impacts, coldMetal)] });
 ```
 
 Replace a slot to draw it entirely your own way; wrap to keep selected default moments, and
@@ -1207,7 +1291,9 @@ interface GameAudio {
 - **Simulation limits impacts at their emission site** to one per `IMPACTS.interval`
   (70 ms of run time) in a placement. The live head must start touching at least
   `IMPACTS.minimumSpeed` (1 m/s); `IMPACTS.fullSpeed` (8 m/s) gives full strength. The moment
-  includes the contact point and outward surface normal. Pauses do not consume that limit.
+  includes the contact point, the outward surface normal, the head's direction and what it
+  struck, its `surface`, so a wrap can sound each surface its own way. Pauses do not consume
+  that limit.
 - `preview(cue)` is the Workshop's direct test of one authored cue at full strength.
   It is not a moment, is **not rate-limited**, and reaches neither effects nor observers.
   The host-owned `AudioOutput` outlives a halted Game, so previews remain available after
@@ -1247,8 +1333,9 @@ dependency on `AudioDirector`. The release still resolves and creates `AUDIO`, s
 or a wrap works without authored audio. The unchanged silent base is not passed to Game and
 enables no Web Audio context; a replacement or wrapper enables the shared device and moment
 delivery. Impact tracking is enabled iff Game has audio, an effect takes `impact`, or an
-observer takes `impact` (an absent filter takes every type). Visual/observer interest does
-not enable a Web Audio context.
+observer takes `impact` (an absent filter takes every type). The default impacts effect takes
+it, so tracking stays on unless that slot holds an effect that does not. Visual/observer
+interest does not enable a Web Audio context.
 
 To extend the engine's audio, use `wrap(AUDIO, previous => ...)`: `previous` is the engine's
 selected base or an earlier plugin's factory, so the wrap preserves music and every cue it
@@ -1352,7 +1439,7 @@ type; otherwise a non-empty array of known types without repeats, fixed for the 
 | --- | --- |
 | `hurt` | `health`, `max`: the player's hit points remaining after **each** accepted hurt, and its maximum, including 0 for the killing hit, independent of HUD visibility; `cause`: the `HurtCause` below |
 | `block` | `id`: the trap or hollow archer that fired the projectile; `x`, `y`: strike on the head; `directionX`, `directionY`: projectile's unit flight direction; `normalX`, `normalY`: head's outward unit normal there. Held or released, also while dying; a projectile that hurt the character is not also a block |
-| `impact` | `x`, `y`: mean contact point; `normalX`, `normalY`: struck surface's unit normal toward the head; `speed`: head approach speed (m/s); `strength`: 0–1. The live head began touching, limited per `IMPACTS` in run time; raised only while a consumer takes impacts |
+| `impact` | `x`, `y`: mean contact point; `normalX`, `normalY`: struck surface's unit normal toward the head; `directionX`, `directionY`: the head's unit direction of travel as it struck; `speed`: head approach speed (m/s); `strength`: 0–1; `surface`: what the head struck, the terrain's or platform's `Surface` (`'rock'`, `'wood'`, `'metal'`, `'ice'` or `'rubber'`), or `null` for an enemy. The live head began touching, limited per `IMPACTS` in run time; raised only while a consumer takes impacts |
 | `death` | The health death sequence started; `cause`: what dealt the killing hit, as for `hurt` |
 | `fall` | The fall death sequence started; takes precedence over death if both occur in the same step |
 | `placed` | `bonfire`: the checkpoint returned to, continuing the run; `null` starts a new run from its spawn, including Reset, rig rebuild, level replacement, Workshop placement or death before any bonfire is lit. Either way every enemy is back home at full health |

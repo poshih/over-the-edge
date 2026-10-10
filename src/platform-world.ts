@@ -4,7 +4,7 @@ import { PHYSICS } from './config';
 import { isPlatformObject } from './level';
 import type { LevelChange, PlatformObject } from './level';
 import { sameSurfaceMaterials } from './surfaces';
-import type { SurfaceMaterial, SurfaceMaterials } from './surfaces';
+import type { Surface, SurfaceMaterial, SurfaceMaterials } from './surfaces';
 import type { PlatformDestination } from './trigger-events';
 
 const PLATFORM_RIDE = { awaySeconds: 0.3 } as const;
@@ -310,6 +310,11 @@ export class PlatformWorld {
 
   isPlatform(body: Body): boolean {
     return this.bodies.has(body);
+  }
+
+  // What a platform body is made of; null for any other body.
+  surface(body: Body): Surface | null {
+    return this.bodies.get(body)?.object.surface ?? null;
   }
 
   isInside(body: Body, point: Readonly<{ x: number; y: number }>): boolean {

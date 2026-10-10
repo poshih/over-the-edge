@@ -1,5 +1,6 @@
 import type { EnemySpecies } from './enemy-types';
 import type { HurtCause } from './hazards';
+import type { Surface } from './surfaces';
 
 export const MOMENT_TYPES = Object.freeze([
   'hurt', 'block', 'impact', 'death', 'fall', 'placed', 'bonfire', 'enemy-hit', 'enemy-defeat', 'launch', 'finish', 'sound',
@@ -39,8 +40,13 @@ export interface ImpactMoment extends MomentStamp {
   // The struck surface's outward unit normal, toward the head.
   readonly normalX: number;
   readonly normalY: number;
+  // The head's unit direction of travel as it struck.
+  readonly directionX: number;
+  readonly directionY: number;
   readonly speed: number;
   readonly strength: number;
+  // What the head struck is made of: the terrain's or platform's surface, or null for an enemy.
+  readonly surface: Surface | null;
 }
 
 export interface DeathMoment extends MomentStamp { readonly type: 'death'; readonly cause: Readonly<HurtCause> }
@@ -131,7 +137,10 @@ export function copyCause(target: Readonly<HurtCause>, source: Readonly<HurtCaus
 const MOMENT_SEEDS: { readonly [T in MomentType]: () => MomentSlot<T> } = {
   hurt: () => ({ type: 'hurt', placement: 0, time: 0, cause: noCause(), health: 0, max: 0 }),
   block: () => ({ type: 'block', placement: 0, time: 0, id: '', x: 0, y: 0, directionX: 0, directionY: 0, normalX: 0, normalY: 0 }),
-  impact: () => ({ type: 'impact', placement: 0, time: 0, x: 0, y: 0, normalX: 0, normalY: 0, speed: 0, strength: 0 }),
+  impact: () => ({
+    type: 'impact', placement: 0, time: 0, x: 0, y: 0, normalX: 0, normalY: 0, directionX: 0, directionY: 0, speed: 0,
+    strength: 0, surface: null,
+  }),
   death: () => ({ type: 'death', placement: 0, time: 0, cause: noCause() }),
   fall: () => ({ type: 'fall', placement: 0, time: 0 }),
   placed: () => ({ type: 'placed', placement: 0, time: 0, bonfire: null }),

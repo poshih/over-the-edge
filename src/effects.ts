@@ -12,6 +12,7 @@ import { RestWave } from './rest-wave';
 import type { SceneFrame } from './scene-frame';
 import { SCENE_PASSES } from './scene-layer';
 import type { ScenePass } from './scene-layer';
+import { SurfaceImpacts } from './surface-impacts';
 
 export interface MomentEffect {
   readonly root: Object3D;
@@ -36,6 +37,7 @@ function effectFactory(value: unknown): MomentEffectFactory {
 
 export const EFFECTS = Object.freeze({
   strikes: slotPoint('effects.strikes', 'runtime', effectFactory),
+  impacts: slotPoint('effects.impacts', 'runtime', effectFactory),
   lava: slotPoint('effects.lava', 'runtime', effectFactory),
   enemyHealth: slotPoint('effects.enemy-health', 'runtime', effectFactory),
   rest: slotPoint('effects.rest', 'runtime', effectFactory),
@@ -43,10 +45,11 @@ export const EFFECTS = Object.freeze({
 });
 
 export const DEFAULT_EFFECTS: Readonly<{
-  readonly strikes: MomentEffectFactory; readonly lava: MomentEffectFactory; readonly enemyHealth: MomentEffectFactory;
-  readonly rest: MomentEffectFactory;
+  readonly strikes: MomentEffectFactory; readonly impacts: MomentEffectFactory; readonly lava: MomentEffectFactory;
+  readonly enemyHealth: MomentEffectFactory; readonly rest: MomentEffectFactory;
 }> = Object.freeze({
   strikes: () => new HitBursts(),
+  impacts: () => new SurfaceImpacts(),
   lava: () => new LavaFire(),
   enemyHealth: () => new EnemyHealthBars(),
   rest: () => new RestWave(),
@@ -78,6 +81,8 @@ export class SceneEffects {
     try {
       const strikes = plugins.slot(EFFECTS.strikes, DEFAULT_EFFECTS.strikes);
       created.push(createInstance(EFFECT_CONTRACT, strikes, strikes.value));
+      const impacts = plugins.slot(EFFECTS.impacts, DEFAULT_EFFECTS.impacts);
+      created.push(createInstance(EFFECT_CONTRACT, impacts, impacts.value));
       const lava = plugins.slot(EFFECTS.lava, DEFAULT_EFFECTS.lava);
       created.push(createInstance(EFFECT_CONTRACT, lava, lava.value));
       const enemyHealth = plugins.slot(EFFECTS.enemyHealth, DEFAULT_EFFECTS.enemyHealth);

@@ -604,13 +604,17 @@ export class Simulation {
             y += manifold.points[index]!.y;
           }
           const orientation = contact.getFixtureA() === fixture ? -1 : 1;
+          const struck = (orientation < 0 ? contact.getFixtureB() : contact.getFixtureA()).getBody();
           const moment = this.moments.append('impact', this.placements, this.elapsed);
           moment.x = x / manifold.pointCount;
           moment.y = y / manifold.pointCount;
           moment.normalX = manifold.normal.x * orientation;
           moment.normalY = manifold.normal.y * orientation;
+          moment.directionX = approachX / speed;
+          moment.directionY = approachY / speed;
           moment.speed = speed;
           moment.strength = impactStrength(speed);
+          moment.surface = this.terrain.surface(struck) ?? this.platforms.surface(struck);
           this.lastImpactAt = this.elapsed;
           break;
         }

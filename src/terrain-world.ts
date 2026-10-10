@@ -4,7 +4,7 @@ import { PHYSICS } from './config';
 import { geometryKey, ILLUSION, isSimplePolygon, isTerrainObject, objectContains, polygonArea, terrainCollision } from './level';
 import type { LevelChange, TerrainObject, TerrainEvent } from './level';
 import { sameSurfaceMaterials } from './surfaces';
-import type { SurfaceMaterial, SurfaceMaterials } from './surfaces';
+import type { Surface, SurfaceMaterial, SurfaceMaterials } from './surfaces';
 
 // Planck needs chain vertices farther apart than linearSlop, so near-duplicate authored points are welded.
 // Degenerate slivers that cannot form a valid loop keep their authored vertices.
@@ -158,6 +158,12 @@ export class TerrainWorld {
 
   isTerrain(body: Body): boolean {
     return this.ids.has(body);
+  }
+
+  // What a terrain body is made of; null for any other body.
+  surface(body: Body): Surface | null {
+    const id = this.ids.get(body);
+    return id === undefined ? null : this.object(id).surface;
   }
 
   // Terrain only collides from outside: a collider whose probe is inside an outline passes out.

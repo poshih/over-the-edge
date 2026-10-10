@@ -2,6 +2,7 @@ import {
   AdditiveBlending, DoubleSide, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, PlaneGeometry,
   ShaderMaterial,
 } from 'three';
+import { between, seeded } from './effect-noise';
 import type { MomentEffect } from './effects';
 import type { HurtSource } from './hazards';
 import type { Moment } from './moments';
@@ -158,18 +159,6 @@ void main() {
   gl_FragColor = vec4(vTint * (core * 1.7 + halo * 0.55) * shown * vState.y, 1.0);
 }
 `;
-
-// A number in 0-1 for `index` and `salt`, the same on every run.
-function seeded(index: number, salt: number): number {
-  let hash = Math.imul(index + 1, 0x27d4eb2d) ^ Math.imul(salt + 1, 0x165667b1);
-  hash = Math.imul(hash ^ (hash >>> 15), 0x2c1b3c6d);
-  hash = Math.imul(hash ^ (hash >>> 12), 0x297a2d39);
-  return ((hash ^ (hash >>> 15)) >>> 0) / 4294967296;
-}
-
-function between(range: readonly [number, number], at: number): number {
-  return range[0] + (range[1] - range[0]) * at;
-}
 
 // Additive, ignoring depth as everything in the marks pass must.
 function burstMaterial(vertexShader: string, fragmentShader: string): ShaderMaterial {
