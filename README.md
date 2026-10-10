@@ -511,8 +511,9 @@ file it removes, and of each it adds from this page, as an import does, since th
 may have to keep their bytes; removing a 64 MiB media file drops older steps. Step names are
 cut to 80 characters. A slider's or colour picker's scrub is one step, and so is a run of
 the same adjustment, each within a second of the last, such as presses of a slider's step
-buttons, unless another edit, Undo or Redo comes in between. The history belongs to the
-page, so a reload starts it empty. See
+buttons, unless another edit, Undo or Redo comes in between. A
+[Workshop plugin](docs/workshop-plugins.md#undo) can label its steps and group several of its
+edits into one. The history belongs to the page, so a reload starts it empty. See
 [Working in the Workshop](docs/projects.md#working-in-the-workshop) for how it meets saving,
 the project's files, opening projects and the project server.
 

@@ -1,6 +1,6 @@
 # Feature request: Workshop commands with one undo history
 
-**Date:** 2026-10-10 · **Baseline:** `281ab1b` · **Status:** Requested; roadmap planned; Stages A-B implemented; Stages C-D not implemented.
+**Date:** 2026-10-10 · **Baseline:** `281ab1b` · **Status:** Requested; roadmap planned; Stages A-C implemented; Stage D not implemented.
 
 A designer who makes a change they do not like can take it back in only two places: an unfinished outline drops its
 last stroke, and the Level tab removes the last placed set piece. Every other edit, in every tab, stays unless the

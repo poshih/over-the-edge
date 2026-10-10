@@ -70,14 +70,14 @@ export type {
 
 export interface WorkshopFacet {
   readonly contributes?: readonly Contribution[];
-  // Checks the plugin's own data whenever it loads or changes, refusing with PluginError and a code of the
-  // plugin's own. Pure: it may run before the plugin starts, and never touches the page. Anything else it throws stops
-  // the plugin. Until its facet changes, a plugin stopped by any error fails every check of its data with its
-  // `plugin-failed` failure, so edits and restores of the data refuse, while a project opening or a server update takes it
-  // unchecked. Undo and Redo never run it: they restore data as it was.
+  // Checks new data as it loads or changes, refusing with PluginError and a code of the plugin's own. Synchronous and
+  // pure: it may run before the plugin starts, and never touches the page. Calling a mutating host service from validate
+  // stops the plugin with invalid-contribution. Anything else it throws stops the plugin. Until its facet changes, a
+  // plugin stopped by any error fails every check of its data with its `plugin-failed` failure, so edits and restores
+  // refuse, while a project opening or a server update takes it unchecked. Undo and Redo never run it.
   validate?(data: PluginData): void;
-  // Starts the plugin once the Workshop's project is open. An error it throws, or a promise it rejects, stops it.
-  start(host: WorkshopHost): void | Promise<void>;
+  // Starts the plugin once the Workshop's project is open. Synchronous: an error or a promise-like result stops it.
+  start(host: WorkshopHost): void;
 }
 
 export function defineWorkshop<T extends WorkshopFacet>(facet: T): T { return facet; }
@@ -104,12 +104,15 @@ export interface WorkshopHost {
   readonly project: WorkshopProject;
   // The plugin's own data in the open project.
   readonly data: WorkshopPluginData;
+  // Groups in the Workshop's one undo history.
+  readonly history: WorkshopHistory;
   // The running game: overlays, canvas input, control, avatar facts and previews. Presentation only.
   readonly game: WorkshopGame;
+  // Refuses with plugin-stopped after stop, as ui.notice does.
   notice(message: string, kind?: 'info' | 'error'): void;
-  // `callback` wrapped so an error it throws, or a promise it rejects, is reported with the plugin's ID and stops the
-  // plugin, and so it does nothing once the plugin stops: for callbacks the plugin registers outside the host, such as
-  // its own timers.
+  // `callback` wrapped so an error or a promise-like result is reported with the plugin's ID and stops the
+  // plugin. Callbacks finish synchronously and do nothing once the plugin stops: for callbacks the plugin registers
+  // outside the host, such as its own timers.
   guard<A extends unknown[]>(callback: (...args: A) => void): (...args: A) => void;
   // Adds a guarded event listener that the plugin's stop removes.
   listen(target: EventTarget, type: string, listener: (event: Event) => void, options?: { readonly capture?: boolean; readonly passive?: boolean }): void;
@@ -154,7 +157,7 @@ export interface WorkshopToggle {
 
 export interface WorkshopUiKit {
   // A labelled slider with step buttons and its value, as Physics and Character show them. The project and data edits its
-  // onInput makes during one scrub are one undo step, named "<plugin>: <label>".
+  // onInput makes during one scrub are one undo step, named "<plugin>: <label>". The label is 1-80 characters.
   range(options: {
     readonly label: string; readonly min: number; readonly max: number; readonly step: number; readonly value: number;
     readonly unit?: string; readonly description?: string; onInput(value: number): void;
@@ -209,10 +212,12 @@ export type WorkshopRefusal = Error;
  * Every edit the built-in tabs make, through the same operations: each is validated, changes the draft, marks it
  * unsaved and goes through Save, Revert, export and conflict handling as it does in its tab. Each returns the refusal,
  * or null when the edit applied or changed nothing. Each but the character's and the appearance's is a step of the
- * Workshop's undo history named "<plugin>: <operation>", such as "<plugin>: theme", "<plugin>: upsert" or
- * "<plugin>: media.add", and calls of one operation each within a second of the last merge into one step. Of those, an
- * edit that waits for a file or a bake becomes a step of its own once ready; until then Undo, or another project
- * opening, cancels it and it resolves null, and it resolves `plugin-stopped` if the plugin stops first.
+ * Workshop's undo history, joining the plugin's open group or named "<plugin>: <operation>", such as "<plugin>: theme",
+ * "<plugin>: upsert" or "<plugin>: media.add". Outside a group, calls of one operation each within a second of the last
+ * merge into one step. A history-backed edit waiting for a file or a bake commits an open group before it starts and
+ * becomes a step of its own once ready; until then Undo, or another project opening, cancels it and it resolves null.
+ * It resolves `plugin-stopped` if the plugin stops first. Until character and appearance join the document, their calls
+ * commit an open group before delegating, and are neither grouped nor undone.
  */
 export interface WorkshopEdits {
   title(value: string): WorkshopRefusal | null;
@@ -282,19 +287,51 @@ export interface WorkshopCharacterEdits {
   presentation(value: DirectionalPresentation | null): WorkshopRefusal | null;
 }
 
+export type WorkshopChangeCause = 'edit' | 'undo' | 'redo' | 'open' | 'server';
+
+// Transient selection, not project data: at most 16 IDs in each list, each 1-64 characters.
+// Undo restores before, Redo after. Omitted selection records none, so the step restores no selection.
+export interface WorkshopSelection {
+  readonly before: readonly string[];
+  readonly after: readonly string[];
+}
+
+export interface WorkshopHistory {
+  // One live undo step, named "<plugin>: <label>"; label is 1-80 characters. A new begin, Undo, Redo or an outside edit
+  // commits it first; opening a project drops it, and stopping the plugin cancels it. Groups do not nest. A group that
+  // Undo, Redo, an outside edit or an opening already closed stays as History left it: commit and cancel do nothing,
+  // without reading options or affecting a newer group. After stop, even an ended handle refuses with plugin-stopped.
+  // Edits show at once; commit records one step, cancel restores exact prior values without a step and notifies as undo
+  // with no IDs. Bad labels, selections, null options or unknown option keys stop the plugin with invalid-contribution
+  // and cancel its open group, even if caught. Omitted select records none.
+  begin(label: string): {
+    commit(options?: { readonly select?: WorkshopSelection }): void;
+    cancel(): void;
+  };
+}
+
 // The plugin's own data: one bounded JSON document in the open project, its section `plugins/<id>`, which saves,
 // reverts, exports and conflict-checks with the project. The engine checks PLUGIN_DATA_LIMITS and runs the plugin's
 // validate; it never interprets the data.
 export interface WorkshopPluginData {
   get(): PluginData | null;
-  // Replaces the data, or removes it with null, as an undo step named "<plugin>: Set data"; sets each within a second of
-  // the last merge into one step. Returns null or the refusal: a PluginError, `invalid-contribution` for data beyond
+  // Replaces the data, or removes it with null, joining the open group or naming a step "<plugin>: <label>". The label
+  // is 1-80 characters, "Set data" by default; the same effective label each within a second of the last merges unless
+  // another history action intervenes.
+  // Bad labels, selections, null options or unknown option keys stop the plugin with invalid-contribution and cancel
+  // its open group, even if caught. Omitted select records none.
+  // Returns null or the refusal: a PluginError, `invalid-contribution` for data beyond
   // PLUGIN_DATA_LIMITS or `too-many` when the project already keeps data for as many plugins as they allow; the plugin's
   // own typed error when its validate refused; or its failure when its validate threw anything else, which stops it.
-  set(value: PluginData | null): WorkshopRefusal | null;
-  // Tells `listener` whenever the data changes, by this plugin, Undo or Redo, a project opening or the server; returns its
-  // removal.
-  subscribe(listener: (data: PluginData | null) => void): () => void;
+  set(value: PluginData | null, options?: {
+    readonly label?: string; readonly select?: WorkshopSelection;
+  }): WorkshopRefusal | null;
+  // Captured changes, FIFO a microtask later. Plugin steps (no tab) supply before IDs on Undo, after IDs on edit/Redo.
+  // Other steps, null selection, cancel and open/server supply none. Listeners finish synchronously.
+  // At most 200 undelivered receipts host-wide; too-many stops the plugin holding the most (ties: the one admitting now).
+  subscribe(listener: (data: PluginData | null, change: {
+    readonly cause: WorkshopChangeCause; readonly select: readonly string[];
+  }) => void): () => void;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

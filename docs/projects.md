@@ -813,7 +813,8 @@ it previews or edits it, so the library has no total size; see
 data, one JSON document of at most 64 KiB, nesting depth 16 and 8,192 values, for at most
 16 plugins. Each is a section of its own, `plugins/<id>`, with its own revision. The server
 and the project checks hold it to those limits but never interpret it; the Workshop runs the
-plugin's own validation whenever the section loads or changes, except on Undo and Redo (see
+plugin's own validation whenever the section loads or changes, except on Undo and Redo and when
+a plugin cancels its [undo group](workshop-plugins.md#undo) (see
 [a plugin's own data](workshop-plugins.md#a-plugins-own-data)).
 
 **Course artwork.** Assets come from **Level / Meshes**, `npm run pack:course` packages or the

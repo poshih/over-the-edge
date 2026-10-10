@@ -50,21 +50,25 @@ plugin's ID comes from the manifest, as `host.plugin`.
 
 - The Workshop starts each plugin once the project is open, with a host of its own.
   `host.signal` aborts when the plugin stops.
-- An error a plugin throws, or a promise it rejects, in `start`, a listener, a UI kit callback,
-  an overlay or a preview, stops that plugin alone. It carries `plugin-failed`, or the code of
-  a `PluginError` already attributed to that plugin and point. The Workshop shows the error's
-  message with the plugin's ID and action; the Workshop and the other plugins go on. A
-  failed plugin stays stopped until the workshop facets change. Callbacks the plugin registers
-  elsewhere, such as its own timers, get the same treatment through `host.guard(callback)` and
+- An error a plugin throws in `start`, a listener, a UI kit callback, an overlay or a preview
+  stops that plugin alone. It carries `plugin-failed`, or the code of a `PluginError` already
+  attributed to that plugin and point. The Workshop shows the error's message with the
+  plugin's ID and action; the Workshop and the other plugins go on. A failed plugin stays
+  stopped until the workshop facets change. Callbacks the plugin registers elsewhere, such as
+  its own timers, get the same treatment through `host.guard(callback)` and
   `host.listen(target, type, listener)`.
-- `start` and guarded callbacks may return promises. `validate(data)`, overlay `update` and
-  `dispose`, and preview `offset` are synchronous; a promise-like result is
-  `invalid-contribution` and stops that plugin. `validate` keeps a thrown typed data refusal
-  separate from failure: a refusal blocks the data operation, while another throw or a
-  promise-like return stops the plugin (see [its own data](#a-plugins-own-data)).
-- Stopping removes everything the plugin added: its tabs and sections, overlays, listeners,
-  preview, pause and drag. A stopped plugin's host then refuses anything that would add or
-  change something, with `plugin-stopped`.
+- Plugin callbacks are synchronous: `start`, `validate(data)`, listeners, UI kit and guarded
+  callbacks, overlay `update` and `dispose`, and preview `offset`. A promise-like result is
+  `invalid-contribution` and stops that plugin. The host's import services return promises:
+  a plugin starts one and takes its result in a guarded callback, as in
+  `host.project.edit.media.add(file).then(host.guard(report))`. `validate` keeps a thrown
+  typed data refusal separate from failure: a refusal blocks the data operation, while
+  another throw or a promise-like return stops the plugin (see
+  [its own data](#a-plugins-own-data)).
+- Stopping cancels the plugin's open [undo group](#undo) and removes everything it added: its
+  tabs and sections, overlays, listeners, preview, pause and drag. A stopped plugin's host
+  then refuses anything that would add or change something, a notice included, with
+  `plugin-stopped`.
 - Changing a workshop facet, or anything one imports, stops the plugins and starts them again;
   the project, with its unsaved changes, stays. Undo never checks the data it puts back, so the
   [undo history](../README.md#undo-and-redo) is cut at the data of each plugin whose facet
@@ -97,7 +101,8 @@ plugin's ID comes from the manifest, as `host.plugin`.
   Physics), `button`, `select`, `toggle`, `group` (a titled group of controls), `note` and
   `notice`. Their callbacks are guarded like the plugin's other callbacks. During a `range`'s
   scrub, the steps its `onInput` makes merge into one step of the
-  [undo history](../README.md#undo-and-redo), named `<plugin id>: <label>`. Create
+  [undo history](../README.md#undo-and-redo), named `<plugin id>: <label>`; its label is
+  1-80 characters ([Undo](#undo)). Create
   `const group = host.ui.group('Title');`, append each range/select/toggle's `.element`
   to it, and mount it with `mount.element.append(group)`. When the tab's content is at
   least 560px wide (excluding the navigation column), these label-and-control units
@@ -130,40 +135,119 @@ way.
 Every edit but those of the primary character, arm IK and appearance parts, which change
 outside the history as in their tabs, is a step of the Workshop's
 [undo history](../README.md#undo-and-redo), named `<plugin id>: <operation>`, such as
-`my-game: upsert` or `my-game: media.add`, with no tab. A plugin's calls of one operation, each
-within a second of the last, are one step, unless another edit, Undo or Redo comes in between.
-An edit that waits for a file or a bake, `enemyModel`, `enemyClips`, `coursePackage`,
-`media.add`, `library.add` or `library.avatar`, becomes a step of its own once ready; until
-then Undo, or another project opening, cancels it, and it resolves `null`, or `plugin-stopped`
-if the plugin stops first. A `replace` step holds only the objects that differ, so Undo and
-Redo change only those too and a playtest goes on. A refused edit, or one that changes
-nothing, records no step.
+`my-game: upsert` or `my-game: media.add`, with no tab, or joins the plugin's open
+[undo group](#undo). Outside a group, a plugin's calls of one operation, each within a second
+of the last, are one step, unless another edit, Undo or Redo comes in between. An edit that
+waits for a file or a bake, `enemyModel`, `enemyClips`, `coursePackage`, `media.add`,
+`library.add` or `library.avatar`, joins no group: it becomes a step of its own once ready;
+until then Undo, or another project opening, cancels it, and it resolves `null`, or
+`plugin-stopped` if the plugin stops first. A `replace` step holds only the objects that
+differ, so Undo and Redo change only those too and a playtest goes on. A refused edit, or one
+that changes nothing, records no step.
 
 ## A plugin's own data
 
 Each plugin may keep one JSON document in the open project: `host.data.get()`,
-`host.data.set(value)` (`null` removes it) and `host.data.subscribe(listener)`, which hears of
-every change: by the plugin, Undo or Redo, a project opening or the server. A `set` that
+`host.data.set(value, options?)` (`null` removes it) and `host.data.subscribe(listener)`, which
+hears of every change: an edit, Undo or Redo, a project opening or the server. A `set` that
 changes the data is a step of the [undo history](../README.md#undo-and-redo), named
-`<plugin id>: Set data`, and sets each within a second of the last are one step, unless
-another edit, Undo or Redo comes in between.
+`<plugin id>: Set data` or by its label, or joins the plugin's open group; [Undo](#undo) gives
+its options, how sets merge and what listeners hear.
 
 - It is stored in `project.json` under `plugins.<id>`, the plugin's ID from the manifest, and is
   the project section `plugins/<id>`. The engine saves, reverts, exports and conflict-checks it
   like any other section, but never interprets it.
 - It is limited to 64 KiB, nesting depth 16 and 8,192 values (`PLUGIN_DATA_LIMITS`); a project
   holds data for at most 16 plugins.
-- The plugin's `validate(data)` runs whenever the section loads or changes, but not on Undo or
-  Redo, which put back data as it was. It refuses with a `PluginError` of its own code
-  (lowercase letters, digits and hyphens, starting with a letter), which `data.set` returns.
-  Anything else it throws is a failure: the plugin stops, and the `data.set` or kept-changes
-  restore it was checking is refused with that failure. Until the workshop facets change, a
+- The plugin's `validate(data)` runs whenever the section loads or changes, but not when Undo,
+  Redo or a group's cancel puts back data as it was. It is pure: while it runs, a call to the
+  plugin's host that would add or change something throws `invalid-contribution` and stops
+  the plugin. It refuses with a `PluginError` of its own code (lowercase letters, digits and
+  hyphens, starting with a letter), which `data.set` returns. Anything else it throws is a
+  failure: the plugin stops, and the `data.set` or kept-changes restore it was checking is
+  refused with the plugin's `plugin-failed` failure. Until the workshop facets change, a
   failed plugin's data is refused the same way, whatever stopped the plugin, except by a
   project opening or a server update, which takes it unchecked, so a faulty plugin never
   blocks opening a project.
 - A project holding data for a plugin the Workshop lacks opens with a notice naming the plugin,
   and that section stays unchanged.
 - Scripts reach it at `/api/projects/{id}/plugins/{plugin}`; see [projects](projects.md#api-for-scripts-and-language-models).
+
+## Undo
+
+A plugin's edits share the Workshop's one [undo history](../README.md#undo-and-redo) with the
+built-in tabs. The Workshop records each step, and Undo and Redo put back the values it
+recorded, so a plugin writes no undo code. A tool that adds a level object and records it in
+its data makes both one step, `my-game: Add gate`, with a group:
+
+```ts
+// `gate` is the level object the tool built.
+const group = host.history.begin('Add gate');
+if (host.project.edit.level.upsert(gate) === null && host.data.set({ gate: gate.id }) === null) {
+  group.commit({ select: { before: [], after: [gate.id] } });
+} else {
+  group.cancel();
+}
+```
+
+- **Steps.** Outside a group, a `project.edit` call is a step named `<plugin id>: <operation>`,
+  as [the project](#the-project) describes, and a `range`'s scrub is one step named
+  `<plugin id>: <label>`. `host.data.set(value, { label?, select? })` names its step
+  `<plugin id>: <label>`, or `<plugin id>: Set data` without a label, as the
+  [example](#example)'s drag makes `my-game: Resize marker`. Sets with the same label, each
+  within a second of the last, are one step, unless another edit, Undo or Redo comes in
+  between; a set without a label counts as one labelled `Set data`. The labels of `data.set`,
+  `host.history.begin` and `ui.range` are 1-80 characters, and a step's name, with the
+  plugin's ID, is cut to 80 characters as every step's is.
+- **Selections.** `data.set` and a group's `commit` take `select`, `{ before, after }`: the IDs
+  selected before and after the step, each a list of at most 16 IDs of 1-64 characters. It is
+  not project data, and a step records none unless the plugin passes it. Undo hands `before`
+  back, and Redo `after`: to the plugin's data listeners when the step changes its data, and to
+  the Level tab, which selects from them as for its own steps, when it changes the level. A
+  `data.set` outside a group also hands its listeners `after`. A step without one, such as a
+  plain `project.edit.level` call's, leaves the Level selection as it is.
+- **Groups.** `host.history.begin(label)` opens a group named `<plugin id>: <label>` and returns
+  its `commit` and `cancel`. While it is open, the plugin's `data.set` and `project.edit` calls,
+  its ranges' scrubs included, join it and show at once; edits that wait and the character's
+  and appearance's commit it instead (below). `commit({ select? })` makes the group one step,
+  and `cancel()` puts back exactly the values from before it and records nothing. A group that
+  changes nothing records no step. Inside a group, `data.set` still checks its label and
+  selection, but the group names the step and its commit gives the selection.
+- **One group at a time.** Groups do not nest: a new `begin`, by this plugin or another, commits
+  the open group first. So do Undo, Redo, any other undoable edit, such as a built-in tab's or
+  another plugin's, and a change from outside the history, such as a server update; Undo then
+  takes the whole group back. Opening a project drops it, and stopping the plugin cancels it.
+  Once a group has ended, its `commit` and `cancel` do nothing: they never stop the plugin or
+  touch a newer group.
+- **Edits that wait.** An edit that waits for a file or a bake, such as `media.add`, commits the
+  open group before it starts. Once ready, it becomes a step of its own, committing any group
+  open then.
+- **Character and appearance.** Edits of the primary character, arm IK and appearance parts
+  change outside the history: each commits the open group first, and none is grouped or
+  undone.
+- **Listeners.** `host.data.subscribe(listener)` calls `listener(data, { cause, select })` for
+  each change of the plugin's data, in order, a microtask after it. `data` is the data as that
+  change left it. `cause` is `edit`, `undo`, `redo`, `open` (a project opening) or `server` (a
+  server update); a group's cancel comes as `undo`. `select` holds the IDs the plugin's own
+  step recorded: `before` on Undo, `after` on an edit or Redo. It is empty for a step that
+  recorded none, a group's edits and its cancel, a built-in tab's step, a kept-changes
+  restore, an opening and a server update. A listener hears the changes made while it is
+  subscribed, unless it is removed first, and the changes it makes come after those already
+  waiting.
+- **The queue.** Changes waiting for data listeners share one queue of at most 200 for all
+  plugins. A change that finds it full stops, with `too-many`, the plugin with the most
+  changes waiting, or the change's own plugin on a tie, and drops that plugin's waiting
+  changes; the change then joins the queue if its plugin still runs.
+- **Restoring.** Undo, Redo and a group's cancel never run `validate`: they put back data as it
+  was when checked. So when a workshop facet changes, the plugins stop, which cancels any open
+  group, and the history is cut at the data of each plugin whose facet changed, as a server
+  update cuts its sections: Undo loses the newest step that changed that data and every step
+  before it, and Redo loses every step.
+- **Mistakes.** A label or selection that breaks the rules above, options that are null, not an
+  object or hold any key the call does not take, or a data listener that is not a function
+  throws `invalid-contribution`, stops the plugin even if it catches the error, and cancels its
+  open group. After the plugin stops, `data.set`, `history.begin` and a group's `commit` and
+  `cancel`, even an ended group's, throw `plugin-stopped`.
 
 ## Motion controls
 
@@ -355,12 +439,13 @@ allocates nothing per frame on its behalf.
 The workshop facet of a plugin, `my-game`, kept in the game's own repository. Its Tuner tab edits
 a game setting, picks a joint of the loaded avatar, marks it with a circle and runs a 1 m drop;
 its Character section edits the configuration of the plugin's `my-game/charm` motion; dragging
-from the circle resizes it, kept in the plugin's own data.
+from the circle resizes it, kept in the plugin's own data as the undo step
+`my-game: Resize marker`.
 
 ```ts
 import { CircleGeometry, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import { defineWorkshop, PluginError } from '../../src/editor/workshop-sdk';
-import type { JsonValue } from '../../src/editor/workshop-sdk';
+import type { JsonValue, PluginData } from '../../src/editor/workshop-sdk';
 
 type JsonObject = { readonly [key: string]: JsonValue };
 // The plugin's data: the skin joint it marks and the marker's radius in metres.
@@ -379,7 +464,8 @@ export default defineWorkshop({
   },
   start(host) {
     const { ui, project, data, game } = host;
-    const marker = (): Marker => (data.get() as Marker | null) ?? { joint: 0, radius: 0.1 };
+    const markerOf = (value: PluginData | null): Marker => (value as Marker | null) ?? { joint: 0, radius: 0.1 };
+    const marker = (): Marker => markerOf(data.get());
 
     // Tuner tab: a game setting through Physics' edit, the marked joint, and previews.
     const tab = host.addTab({ id: 'main', label: 'Tuner' });
@@ -465,7 +551,11 @@ export default defineWorkshop({
     };
     tab.onVisibility(showCircle);
     showCircle(tab.shown);
-    data.subscribe(() => joints.set(String(marker().joint)));
+    // Undo, Redo, an opening or a server update replaces the marker: a drag under way stops previewing and records nothing.
+    data.subscribe((value, { cause }) => {
+      if (cause !== 'edit') dragRadius = null;
+      joints.set(String(markerOf(value).joint));
+    });
     game.onPointer((event) => {
       if (removeCircle === null || !circle.visible) return;
       const distance = Math.hypot(event.world.x - center.x, event.world.y - center.y);
@@ -475,7 +565,8 @@ export default defineWorkshop({
       } else if (dragRadius !== null && event.type === 'move') {
         dragRadius = Math.min(1, Math.max(0.02, distance));
       } else if (dragRadius !== null && (event.type === 'up' || event.type === 'cancel')) {
-        if (event.type === 'up') data.set({ ...marker(), radius: dragRadius });
+        // The release sets the radius as the undo step "my-game: Resize marker"; a cancelled drag records none.
+        if (event.type === 'up') data.set({ ...marker(), radius: dragRadius }, { label: 'Resize marker' });
         dragRadius = null;
       }
     });

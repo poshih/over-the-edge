@@ -9,6 +9,7 @@ import { ALIGNMENT_FIELDS, ARM_IK_FIELDS } from '../appearance-profile';
 import type { AppearancePart } from '../appearance-profile';
 import type { ArmIkSettings } from '../character';
 import type { Point } from '../config';
+import { Disposal } from '../disposal';
 import type { Game } from '../game';
 import type { MediaEntry } from '../media';
 import type { ModelLibrary } from '../model-library';
@@ -20,10 +21,12 @@ import type { PresentationPreview } from '../character-view';
 import { SCENE_LAYER_CONTRACT } from '../scene-layer';
 import type { SceneLayer } from '../scene-layer';
 import type { Appearance } from './appearance';
-import type { Command, History } from './document/history';
+import { HISTORY_LIMITS } from './document/history';
+import type { Command, History, Transaction } from './document/history';
 import type { ProjectCommandInfo, ProjectCommands, ProjectPlugins } from './document/project-commands';
 import type {
-  DocumentArt, DocumentMedia, DocumentModels, ProjectDocument, SectionChange, SomeSectionChange, StepPlace,
+  ChangeCause, DocumentArt, DocumentMedia, DocumentModels, PluginSectionName, ProjectDocument, SectionChange,
+  SomeSectionChange, StepInfo, StepPlace,
 } from './document/project-document';
 import type { EditOutcome, ImportOptions, ProjectImports } from './document/project-imports';
 import type { ProjectProjection } from './document/project-projection';
@@ -40,9 +43,9 @@ import { ENGINE_LEVEL_REACH, LEVEL_REACH } from './level-check-points';
 import type { LevelCheck, LevelReachSource } from './level-check-points';
 import { WORKSHOP_PREVIEW_LIMITS } from './workshop-sdk';
 import type {
-  WorkshopCharacterEdits, WorkshopEdits, WorkshopGame, WorkshopHost, WorkshopLevelEdits, WorkshopMount,
+  WorkshopCharacterEdits, WorkshopEdits, WorkshopGame, WorkshopHistory, WorkshopHost, WorkshopLevelEdits, WorkshopMount,
   WorkshopFacet, WorkshopPluginData, WorkshopPointerEvent, WorkshopPreview, WorkshopProject, WorkshopProjectSnapshot,
-  WorkshopRefusal, WorkshopSectionTab,
+  WorkshopRefusal, WorkshopSectionTab, WorkshopSelection,
 } from './workshop-sdk';
 import { createSection } from './workshop-section';
 import { createWorkshopUiKit } from './workshop-ui-kit';
@@ -54,6 +57,26 @@ const POINTER_TYPES: Readonly<Record<string, WorkshopPointerEvent['type']>> = {
 };
 // A plugin's steps belong to no tab or section.
 const PLUGIN_PLACE: StepPlace = Object.freeze({ tab: null, section: null, select: null });
+const PLUGIN_SELECTION_LIMITS = Object.freeze({ ids: 16, length: 64 });
+const NO_PLUGIN_IDS: readonly string[] = Object.freeze([]);
+const PLUGIN_DATA_NOTIFICATION_LIMIT = 200;
+
+type PluginDataListener = Parameters<WorkshopPluginData['subscribe']>[0];
+type PluginDataChange = Parameters<PluginDataListener>[1];
+
+interface PluginDataReceipt {
+  readonly plugin: RunningPlugin;
+  readonly data: PluginData | null;
+  readonly change: PluginDataChange;
+  readonly listeners: readonly PluginDataListener[];
+}
+
+interface OpenPluginGroup {
+  readonly owner: RunningPlugin;
+  readonly transaction: Transaction;
+  readonly unsubscribe: () => void;
+  closed: boolean;
+}
 
 type RegistryEvent =
   // `changed`: the plugins whose facet came, went or changed.
@@ -77,6 +100,8 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
   // Each plugin's last error, kept across hot updates.
   private readonly errors = new Map<string, Error>();
   private readonly listeners = new Set<(event: RegistryEvent) => void>();
+  private validating: string | null = null;
+  private validationFailure: { readonly error: unknown } | null = null;
 
   // Load and hot update share the same refusal state; the host reports it once the Workshop is ready.
   constructor(value: unknown, kinds: Kinds) {
@@ -119,14 +144,18 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
     return this.definitions.has(id);
   }
 
+  isValidating(id: string): boolean {
+    return this.validating === id;
+  }
+
   // The plugin's check of its data: its typed refusal, or null. A check that throws anything else fails the plugin, which
   // stops. Until its facet changes, a failed plugin's check refuses with its failure rather than pass data it cannot
   // check; a project opening or a server update takes such data unchecked itself.
   validate(id: string, data: PluginData): PluginError | null {
-    const plugin = this.definitions.get(id);
-    if (plugin?.validate === undefined) return null;
     const failed = this.failures.get(id);
     if (failed !== undefined) return failed;
+    const plugin = this.definitions.get(id);
+    if (plugin?.validate === undefined) return null;
     // A typed data refusal is not a thrown plugin fault. Intercept it before the adapter attributes thrown faults.
     let refusal: PluginError | null = null;
     const validate = attributed(id, null, (value: PluginData) => {
@@ -135,28 +164,47 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
         if (refusal === null) throw error;
       }
     });
+    const previous = this.validating;
+    const previousFailure = this.validationFailure;
+    this.validating = id;
+    this.validationFailure = null;
     try {
       apply1(validate, 'validate', data);
-      return refusal;
+      this.rethrowValidationFailure();
+      // A caught host fault may already have stopped it.
+      return this.failures.get(id) ?? refusal;
     } catch (error) {
+      this.rethrowValidationFailure();
       return this.failure(id, error, 'validate');
+    } finally {
+      this.validating = previous;
+      this.validationFailure = previousFailure;
     }
+  }
+
+  private rethrowValidationFailure(): void {
+    if (this.validationFailure !== null) throw this.validationFailure.error;
   }
 
   fail(id: string, error: unknown, action: string): void {
     if (this.definitions.has(id)) this.failure(id, error, action);
   }
 
-  // The plugin's failure, recorded and told once. It is `plugin-failed` whatever error caused it, so its check of its data
-  // refuses as a failed plugin's.
+  // Validation keeps a canonical plugin-failed refusal; diagnostics keep the attributed fault's code.
   private failure(id: string, error: unknown, action: string): PluginError {
     const recorded = this.failures.get(id);
     if (recorded !== undefined) return recorded;
     const fault = pluginFailure(error, id, null, action);
     const failure = fault.code === 'plugin-failed' ? fault : new PluginError('plugin-failed', fault.message, id, null, { cause: fault });
     this.failures.set(id, failure);
-    this.errors.set(id, failure);
-    for (const listener of this.listeners) listener({ kind: 'failed', id, error: failure });
+    this.errors.set(id, fault);
+    const disposal = new Disposal();
+    for (const listener of this.listeners) disposal.run(() => listener({ kind: 'failed', id, error: fault }));
+    try { disposal.finish(); } catch (error) {
+      // A validator may catch a host error; reporting's programmer errors still leave validation.
+      if (this.validating !== null && this.validationFailure === null) this.validationFailure = { error };
+      throw error;
+    }
     return failure;
   }
 
@@ -182,7 +230,9 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
     }
     const changed = Object.freeze([...new Set([...previous.keys(), ...this.definitions.keys()])]
       .filter((id) => previous.get(id) !== this.definitions.get(id)));
-    for (const listener of this.listeners) listener({ kind: 'replaced', changed });
+    const disposal = new Disposal();
+    for (const listener of this.listeners) disposal.run(() => listener({ kind: 'replaced', changed }));
+    disposal.finish();
   }
 
   subscribe(listener: (event: RegistryEvent) => void): () => void {
@@ -289,37 +339,61 @@ class RunningPlugin {
   readonly overlays = new Set<SceneLayer>();
   readonly pointerListeners = new Set<(event: WorkshopPointerEvent) => void>();
   readonly projectListeners = new Set<() => void>();
-  readonly dataListeners = new Set<(data: PluginData | null) => void>();
-  // The data its listeners last heard of.
-  data: PluginData | null;
+  readonly dataListeners = new Set<PluginDataListener>();
+  undelivered = 0;
   paused = false;
   // Set at once on a failure or stop, by halt(): nothing of the plugin runs after it, and its host refuses everything.
   stopping = false;
   private readonly registry: WorkshopPluginRegistry;
+  private readonly finishFailure: (plugin: RunningPlugin) => void;
+  // Host faults stay distinct from plugin faults, even if plugin code catches them or nests guarded callbacks.
+  private guarding = 0;
+  private hostFailure: { readonly error: unknown } | null = null;
 
-  constructor(id: string, registry: WorkshopPluginRegistry, data: PluginData | null) {
+  constructor(id: string, registry: WorkshopPluginRegistry, finishFailure: (plugin: RunningPlugin) => void) {
     this.id = id;
     this.registry = registry;
-    this.data = data;
+    this.finishFailure = finishFailure;
   }
 
-  // `callback`, so that an error it throws, or a promise it rejects, stops this plugin.
+  // Callbacks finish synchronously; the kernel rejects promise-like results.
   guard<A extends unknown[]>(callback: (...args: A) => unknown, action = 'callback'): (...args: A) => void {
+    const target = attributed(this.id, null, (args: A) => callback(...args));
     return (...args: A) => {
       if (this.stopping) return;
+      this.guarding++;
       try {
-        const result = callback(...args);
-        if (result instanceof Promise) result.catch((error: unknown) => this.fail(error, action));
-      } catch (error) {
-        this.fail(error, action);
+        try {
+          apply1(target, action, args);
+        } catch (error) {
+          this.rethrowHostFailure();
+          this.fail(error, action);
+        }
+        this.rethrowHostFailure();
+      } finally {
+        if (--this.guarding === 0) this.hostFailure = null;
       }
     };
   }
 
+  hostFailed(error: unknown): void {
+    if (this.guarding > 0 && this.hostFailure === null) this.hostFailure = { error };
+  }
+
+  private rethrowHostFailure(): void {
+    if (this.hostFailure !== null) throw this.hostFailure.error;
+  }
+
   fail(error: unknown, action: string): void {
     if (this.stopping) return;
-    this.halt();
-    this.registry.fail(this.id, error, action);
+    const disposal = new Disposal();
+    disposal.run(() => this.halt());
+    disposal.run(() => this.registry.fail(this.id, error, action));
+    disposal.run(() => this.finishFailure(this));
+    try { disposal.finish(); } catch (failure) {
+      this.hostFailed(failure);
+      throw failure;
+    }
   }
 
   // Stops the plugin at once; its stop removes what it added, outside the failing call.
@@ -331,6 +405,20 @@ class RunningPlugin {
   // Refuses a host operation once the plugin has stopped, so late work of a stopped plugin adds nothing.
   live(): void {
     if (this.stopping) throw this.stopped();
+  }
+
+  // Validation is pure, including while a command calls it synchronously.
+  checkMutation(): void {
+    if (!this.registry.isValidating(this.id)) return;
+    this.live();
+    const error = new PluginError('invalid-contribution', 'Workshop validate cannot call a mutating host service.', this.id);
+    this.fail(error, 'validate');
+    throw error;
+  }
+
+  mutating(): void {
+    this.live();
+    this.checkMutation();
   }
 
   // The refusal of everything a stopped plugin asks of its host.
@@ -359,6 +447,13 @@ export class WorkshopPluginHost {
   // What plugins' project listeners last heard of, and whether a batch of changes is waiting to be told.
   private told: WorkshopProjectSnapshot | null = null;
   private telling = false;
+  private openGroup: OpenPluginGroup | null = null;
+  // Failures inside a History call cancel only after it unwinds.
+  private applying = 0;
+  private readonly dataSubscribers = new Set<RunningPlugin>();
+  private dataReceipts: PluginDataReceipt[] = [];
+  private dataBatch: (PluginDataReceipt | null)[] | null = null;
+  private receiptCount = 0;
   private drag: { readonly plugin: RunningPlugin; readonly pointerId: number } | null = null;
   private preview: { readonly plugin: RunningPlugin; readonly preview: PresentationPreview } | null = null;
 
@@ -367,7 +462,7 @@ export class WorkshopPluginHost {
     this.workshop = options.ui.workshopState();
     this.unsubscribe.push(
       options.registry.subscribe((event) => this.registryChanged(event)),
-      options.history.document.subscribeAll((changes) => this.documentChanged(changes)),
+      options.history.document.subscribeAll((changes, cause, step) => this.documentChanged(changes, cause, step)),
       options.character.subscribe(() => {
         this.characterStale = true;
         this.projectChanged();
@@ -415,16 +510,19 @@ export class WorkshopPluginHost {
   }
 
   dispose(): void {
-    for (const id of [...this.running.keys()].reverse()) this.stop(id);
-    for (const unsubscribe of this.unsubscribe) unsubscribe();
-    this.lifecycle.abort();
+    const disposal = new Disposal();
+    for (const id of [...this.running.keys()].reverse()) disposal.run(() => this.stop(id));
+    for (const unsubscribe of this.unsubscribe) disposal.run(unsubscribe);
+    this.unsubscribe.length = 0;
+    disposal.run(() => this.lifecycle.abort());
+    disposal.finish();
   }
 
   private startAll(): void {
     this.told = this.snapshot();
     for (const { id, facet } of this.options.registry.plugins) {
       if (this.options.registry.failed(id)) continue;
-      const plugin = new RunningPlugin(id, this.options.registry, pluginData(this.options.history.document, id));
+      const plugin = new RunningPlugin(id, this.options.registry, (failed) => this.finishFailure(failed));
       const host = this.createHost(plugin);
       this.running.set(plugin.id, plugin);
       plugin.guard(() => facet.start(host), 'start')();
@@ -440,19 +538,26 @@ export class WorkshopPluginHost {
 
   private registryChanged(event: RegistryEvent): void {
     if (event.kind === 'failed') {
-      console.error(`Workshop plugin "${event.id}" failed.`, event.error);
-      this.options.notice(`Workshop plugin "${event.id}" failed and stopped: ${event.error.message}`, 'error');
+      const disposal = new Disposal();
       const plugin = this.running.get(event.id);
-      if (plugin === undefined) return;
-      plugin.halt();
-      // Outside the failing call, which may be the game's frame or another plugin's notification.
-      queueMicrotask(() => { if (this.running.get(event.id) === plugin) this.stop(event.id); });
+      if (plugin !== undefined) {
+        disposal.run(() => plugin.halt());
+        this.dataSubscribers.delete(plugin);
+        disposal.run(() => this.discardReceipts(plugin));
+        // Outside the failing call, which may be the game's frame or another plugin's notification.
+        queueMicrotask(() => { if (this.running.get(event.id) === plugin) this.stop(event.id); });
+      }
+      disposal.run(() => console.error(`Workshop plugin "${event.id}" failed.`, event.error));
+      disposal.run(() => this.options.notice(`Workshop plugin "${event.id}" failed and stopped: ${event.error.message}`, 'error'));
+      disposal.finish();
       return;
     }
-    for (const id of [...this.running.keys()].reverse()) this.stop(id);
+    const disposal = new Disposal();
+    for (const id of [...this.running.keys()].reverse()) disposal.run(() => this.stop(id));
     // Undo never checks the data it restores: steps holding data an old facet checked, or none did, go before the new
     // facets start.
-    if (event.changed.length > 0) this.options.history.cut(event.changed.map(pluginSection));
+    if (event.changed.length > 0) disposal.run(() => this.options.history.cut(event.changed.map(pluginSection)));
+    disposal.finish();
     if (this.showFacetError()) return;
     if (!this.started) return;
     this.startAll();
@@ -464,24 +569,155 @@ export class WorkshopPluginHost {
   private stop(id: string): void {
     const plugin = this.running.get(id);
     if (plugin === undefined) return;
+    const disposal = new Disposal();
+    disposal.run(() => plugin.halt());
+    disposal.run(() => this.cancelGroup(plugin));
+    this.dataSubscribers.delete(plugin);
+    disposal.run(() => this.discardReceipts(plugin));
     this.running.delete(id);
-    plugin.halt();
-    plugin.controller.abort();
-    for (const mount of [...plugin.mounts.values()]) mount.remove();
-    for (const layer of [...plugin.overlays]) this.options.game.view.removeLayer(layer);
+    disposal.run(() => plugin.controller.abort());
+    for (const mount of [...plugin.mounts.values()]) disposal.run(mount.remove);
+    plugin.mounts.clear();
+    for (const layer of [...plugin.overlays]) disposal.run(() => this.options.game.view.removeLayer(layer));
     plugin.overlays.clear();
     plugin.pointerListeners.clear();
     plugin.projectListeners.clear();
     plugin.dataListeners.clear();
-    this.endPreview(plugin);
-    if (this.drag?.plugin === plugin) this.endDrag();
-    if (plugin.paused) this.options.game.setPause({ reason: `plugin:${id}`, paused: false });
+    disposal.run(() => this.endPreview(plugin));
+    if (this.drag?.plugin === plugin) disposal.run(() => this.endDrag());
+    if (plugin.paused) disposal.run(() => this.options.game.setPause({ reason: `plugin:${id}`, paused: false }));
+    disposal.finish();
+  }
+
+  private closeGroup(group: OpenPluginGroup): void {
+    group.closed = true;
+    if (this.openGroup === group) this.openGroup = null;
+    group.unsubscribe();
+  }
+
+  private cancelGroup(plugin: RunningPlugin): void {
+    const group = this.openGroup;
+    if (group === null || group.owner !== plugin) return;
+    if (this.options.history.state().transaction === null) {
+      this.closeGroup(group);
+      return;
+    }
+    if (this.applying > 0 || this.options.registry.isValidating(plugin.id)) return;
+    this.applying++;
+    try { group.transaction.cancel(); } finally {
+      this.applying--;
+      if (this.options.history.state().transaction === null) this.closeGroup(group);
+    }
+  }
+
+  // An ending transaction may still be notifying before its lifetime subscriber clears openGroup.
+  private finishFailure(plugin: RunningPlugin): void {
+    if (this.openGroup === null || this.options.history.state().transaction === null) return;
+    this.cancelGroup(plugin);
+  }
+
+  private finishStoppedGroup(): void {
+    const group = this.openGroup;
+    if (group !== null && group.owner.stopping) this.finishFailure(group.owner);
+  }
+
+  private commitGroup(plugin: RunningPlugin): void {
+    this.changeHistory(plugin, () => this.openGroup?.transaction.commit());
+  }
+
+  private changeHistory<R>(plugin: RunningPlugin, run: () => R): R {
+    try {
+      this.finishStoppedGroup();
+      this.applying++;
+      let failure: { readonly error: unknown } | null = null;
+      try { return run(); } catch (error) {
+        failure = { error };
+        throw error;
+      } finally {
+        this.applying--;
+        if (failure === null) this.finishStoppedGroup();
+        else {
+          const disposal = new Disposal();
+          const failed = failure;
+          disposal.run(() => { throw failed.error; });
+          disposal.run(() => this.finishStoppedGroup());
+          disposal.finish();
+        }
+      }
+    } catch (error) {
+      // Engine listener faults must survive the kernel's attribution of plugin callbacks.
+      plugin.hostFailed(error);
+      throw error;
+    }
   }
 
   // A batch of the document's changes. Plugins' data is not part of the snapshot, though its listeners hear of it.
-  private documentChanged(changes: readonly SomeSectionChange[]): void {
+  private documentChanged(changes: readonly SomeSectionChange[], cause: ChangeCause, step: StepInfo | null): void {
     if (changes.some((change) => pluginOfSection(change.section) === null)) this.projectChanged();
-    else this.schedule();
+    if (this.dataSubscribers.size === 0) return;
+    let message: PluginDataChange | null = null;
+    for (const change of changes) {
+      const id = pluginOfSection(change.section);
+      if (id === null) continue;
+      const plugin = this.running.get(id);
+      if (plugin === undefined || plugin.stopping || plugin.dataListeners.size === 0) continue;
+      if (this.receiptCount === PLUGIN_DATA_NOTIFICATION_LIMIT) {
+        this.overflow(plugin);
+        if (plugin.stopping || this.running.get(id) !== plugin) continue;
+      }
+      if (message === null) {
+        const selection = step?.place.tab === null ? step.place.select : null;
+        const select = cause === 'open' || cause === 'server' ? NO_PLUGIN_IDS
+          : (cause === 'undo' ? selection?.before : selection?.after) ?? NO_PLUGIN_IDS;
+        message = Object.freeze({ cause, select });
+      }
+      this.dataReceipts.push(Object.freeze({
+        plugin, data: (change as SectionChange<PluginSectionName>).after?.data ?? null, change: message,
+        listeners: Object.freeze([...plugin.dataListeners]),
+      }));
+      this.receiptCount++;
+      plugin.undelivered++;
+      this.schedule();
+    }
+  }
+
+  // Admission halts immediately, but neither reporting nor teardown may mutate History during notification.
+  private overflow(admitting: RunningPlugin): void {
+    // Only at capacity; an admitting plugin tied for the most owns the overflow.
+    let plugin = admitting;
+    for (const candidate of this.running.values()) if (candidate.undelivered > plugin.undelivered) plugin = candidate;
+    const error = new PluginError('too-many',
+      `Workshop data listeners allow at most ${PLUGIN_DATA_NOTIFICATION_LIMIT} undelivered receipts host-wide.`, plugin.id);
+    const disposal = new Disposal();
+    disposal.run(() => plugin.halt());
+    this.dataSubscribers.delete(plugin);
+    disposal.run(() => this.discardReceipts(plugin));
+    queueMicrotask(() => {
+      if (this.running.get(plugin.id) === plugin) this.options.registry.fail(plugin.id, error, 'data.subscribe');
+    });
+    disposal.finish();
+  }
+
+  private releaseReceipt(receipt: PluginDataReceipt): void {
+    this.receiptCount--;
+    receipt.plugin.undelivered--;
+  }
+
+  private discardReceipts(plugin: RunningPlugin): void {
+    if (plugin.undelivered === 0) return;
+    this.dataReceipts = this.dataReceipts.filter((receipt) => {
+      if (receipt.plugin !== plugin) return true;
+      this.releaseReceipt(receipt);
+      return false;
+    });
+    const batch = this.dataBatch;
+    if (batch === null) return;
+    for (let index = 0; index < batch.length; index++) {
+      const receipt = batch[index];
+      if (receipt?.plugin !== plugin) continue;
+      batch[index] = null;
+      this.releaseReceipt(receipt);
+    }
   }
 
   // Something the project's snapshot holds may have changed.
@@ -502,17 +738,40 @@ export class WorkshopPluginHost {
 
   private tell(): void {
     if (this.running.size === 0) return;
-    const { document } = this.options.history;
-    for (const plugin of this.running.values()) {
-      const data = pluginData(document, plugin.id);
-      if (data === plugin.data) continue;
-      plugin.data = data;
-      for (const listener of plugin.dataListeners) listener(data);
-    }
+    if (this.dataReceipts.length > 0) this.tellData();
     const snapshot = this.snapshot();
     if (snapshot === this.told) return;
     this.told = snapshot;
     for (const plugin of this.running.values()) for (const listener of plugin.projectListeners) listener();
+  }
+
+  private tellData(): void {
+    const batch: (PluginDataReceipt | null)[] = this.dataReceipts;
+    this.dataReceipts = [];
+    this.dataBatch = batch;
+    let next = 0;
+    try {
+      // Only this batch: listener-generated edits wait for the next microtask.
+      while (next < batch.length) {
+        const receipt = batch[next];
+        batch[next++] = null;
+        if (receipt === null) continue;
+        this.releaseReceipt(receipt);
+        const { plugin } = receipt;
+        if (plugin.stopping || this.running.get(plugin.id) !== plugin) continue;
+        for (const listener of receipt.listeners) {
+          if (plugin.stopping || this.running.get(plugin.id) !== plugin) break;
+          if (plugin.dataListeners.has(listener)) listener(receipt.data, receipt.change);
+        }
+      }
+    } finally {
+      this.dataBatch = null;
+      if (next < batch.length) {
+        const remaining = batch.slice(next).filter((receipt): receipt is PluginDataReceipt => receipt !== null);
+        this.dataReceipts = remaining.concat(this.dataReceipts);
+      }
+      if (this.dataReceipts.length > 0) this.schedule();
+    }
   }
 
   // The open project as plugins read it: host.project.snapshot(), which the Level tab's checks also give plugins' rules.
@@ -575,12 +834,18 @@ export class WorkshopPluginHost {
       element,
       get shown() { return record.shown; },
       onVisibility: (listener: (shown: boolean) => void) => {
-        plugin.live();
+        plugin.mutating();
         const guarded = plugin.guard(listener);
         record.listeners.add(guarded);
-        return () => { record.listeners.delete(guarded); };
+        return () => {
+          plugin.checkMutation();
+          record.listeners.delete(guarded);
+        };
       },
-      remove: record.remove,
+      remove: () => {
+        plugin.checkMutation();
+        record.remove();
+      },
     });
   }
 
@@ -591,16 +856,109 @@ export class WorkshopPluginHost {
     if (plugin.mounts.has(id)) throw new PluginError('invalid-plugin', `Workshop plugin "${plugin.id}" already has a tab or section "${id}".`, plugin.id);
   }
 
+  private invalidContribution(plugin: RunningPlugin, message: string): never {
+    const error = new PluginError('invalid-contribution', message, plugin.id);
+    plugin.fail(error, 'history');
+    throw error;
+  }
+
+  private historyOptions(plugin: RunningPlugin, value: unknown, fields: readonly string[]): Record<string, unknown> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value) ||
+      Reflect.ownKeys(value).some((key) => typeof key !== 'string' || !fields.includes(key))) {
+      this.invalidContribution(plugin, `Workshop history options must be an object with only ${fields.join(', ')}.`);
+    }
+    return value as Record<string, unknown>;
+  }
+
+  private checkHistoryLabel(plugin: RunningPlugin, value: unknown): string {
+    if (typeof value !== 'string' || value.length < 1 || value.length > HISTORY_LIMITS.label) {
+      this.invalidContribution(plugin, `A Workshop history label is 1-${HISTORY_LIMITS.label} characters.`);
+    }
+    return value;
+  }
+
+  private selectionIds(plugin: RunningPlugin, value: unknown): readonly string[] {
+    if (!Array.isArray(value)) {
+      this.invalidContribution(plugin, `A Workshop selection lists at most ${PLUGIN_SELECTION_LIMITS.ids} IDs before and after.`);
+    }
+    const length = value.length;
+    if (!Number.isInteger(length) || length < 0 || length > PLUGIN_SELECTION_LIMITS.ids) {
+      this.invalidContribution(plugin, `A Workshop selection lists at most ${PLUGIN_SELECTION_LIMITS.ids} IDs before and after.`);
+    }
+    const ids: string[] = [];
+    for (let index = 0; index < length; index++) {
+      const id: unknown = value[index];
+      if (typeof id !== 'string' || id.length < 1 || id.length > PLUGIN_SELECTION_LIMITS.length) {
+        this.invalidContribution(plugin, `Workshop selection IDs are 1-${PLUGIN_SELECTION_LIMITS.length} characters.`);
+      }
+      ids.push(id);
+    }
+    return Object.freeze(ids);
+  }
+
+  private checkSelection(plugin: RunningPlugin, value: unknown): WorkshopSelection {
+    const select = this.historyOptions(plugin, value, ['before', 'after']);
+    return Object.freeze({
+      before: this.selectionIds(plugin, select.before), after: this.selectionIds(plugin, select.after),
+    });
+  }
+
+  private liveGroup(group: OpenPluginGroup): boolean {
+    group.owner.live();
+    if (group.closed || this.openGroup !== group) return false;
+    if (this.options.history.state().transaction === null) {
+      this.closeGroup(group);
+      return false;
+    }
+    group.owner.checkMutation();
+    return true;
+  }
+
+  private beginGroup(plugin: RunningPlugin, value: unknown): ReturnType<WorkshopHistory['begin']> {
+    plugin.mutating();
+    const label = this.checkHistoryLabel(plugin, value);
+    const { history } = this.options;
+    const group: OpenPluginGroup = {
+      owner: plugin, transaction: this.changeHistory(plugin, () => history.begin({ label: `${plugin.id}: ${label}`, place: PLUGIN_PLACE })),
+      closed: false, unsubscribe: () => unsubscribe(),
+    };
+    this.openGroup = group;
+    // Subscribe only while a plugin uses a group. This listener only tracks lifetime, never mutates History.
+    const unsubscribe = history.subscribe(() => {
+      if (history.state().transaction !== null) return;
+      this.closeGroup(group);
+    });
+    return Object.freeze({
+      commit: (options?: Parameters<ReturnType<WorkshopHistory['begin']>['commit']>[0]) => {
+        if (!this.liveGroup(group)) return;
+        const settings = options === undefined ? null : this.historyOptions(plugin, options, ['select']);
+        const value = settings?.select;
+        const select = value === undefined ? undefined : this.checkSelection(plugin, value);
+        this.changeHistory(plugin, () => group.transaction.commit(select));
+      },
+      cancel: () => {
+        if (!this.liveGroup(group)) return;
+        this.changeHistory(plugin, () => group.transaction.cancel());
+      },
+    });
+  }
+
   private createHost(plugin: RunningPlugin): WorkshopHost {
     const { options } = this;
     const signal = plugin.controller.signal;
-    const live = (): void => plugin.live();
-    const notice = (message: string, kind: 'info' | 'error' = 'info'): void => options.notice(message, kind);
+    const live = (): void => plugin.mutating();
+    const notice = (message: string, kind: 'info' | 'error' = 'info'): void => {
+      live();
+      options.notice(message, kind);
+    };
     const listener = <A extends unknown[]>(listeners: Set<(...args: A) => void>, callback: (...args: A) => void): () => void => {
       live();
       const guarded = plugin.guard(callback);
       listeners.add(guarded);
-      return () => { listeners.delete(guarded); };
+      return () => {
+        plugin.checkMutation();
+        listeners.delete(guarded);
+      };
     };
     const project: WorkshopProject = Object.freeze({
       snapshot: () => this.snapshot(),
@@ -609,11 +967,31 @@ export class WorkshopPluginHost {
     });
     const data: WorkshopPluginData = Object.freeze({
       get: () => pluginData(options.history.document, plugin.id),
-      set: (value: PluginData | null) => {
+      set: (value: PluginData | null, editOptions?: Parameters<WorkshopPluginData['set']>[1]) => {
         live();
-        return this.edit(plugin, 'Set data', `plugin:${plugin.id}:data`, (info) => options.commands.pluginData(plugin.id, value, info));
+        const settings = editOptions === undefined ? null : this.historyOptions(plugin, editOptions, ['label', 'select']);
+        const rawLabel = settings?.label;
+        const label = rawLabel === undefined ? 'Set data' : this.checkHistoryLabel(plugin, rawLabel);
+        const rawSelect = settings?.select;
+        const select = rawSelect === undefined ? null : this.checkSelection(plugin, rawSelect);
+        return this.edit(plugin, label, `plugin:${plugin.id}:data:${label}`,
+          (info) => options.commands.pluginData(plugin.id, value, info), select);
       },
-      subscribe: (callback: (value: PluginData | null) => void) => listener(plugin.dataListeners, callback),
+      subscribe: (callback: PluginDataListener) => {
+        live();
+        if (typeof callback !== 'function') this.invalidContribution(plugin, 'A Workshop data listener must be a function.');
+        const guarded = plugin.guard(callback);
+        plugin.dataListeners.add(guarded);
+        this.dataSubscribers.add(plugin);
+        return () => {
+          plugin.checkMutation();
+          plugin.dataListeners.delete(guarded);
+          if (plugin.dataListeners.size === 0) this.dataSubscribers.delete(plugin);
+        };
+      },
+    });
+    const history: WorkshopHistory = Object.freeze({
+      begin: (label: string) => this.beginGroup(plugin, label),
     });
     return Object.freeze({
       plugin: plugin.id,
@@ -635,10 +1013,12 @@ export class WorkshopPluginHost {
           () => created.root.remove(), created.root);
       },
       ui: createWorkshopUiKit({
-        prefix: `plugin_${plugin.id}`, plugin: plugin.id, history: options.history, signal, guard: (callback) => plugin.guard(callback), notice,
+        prefix: `plugin_${plugin.id}`, plugin: plugin.id, history: options.history, signal, live,
+        checkHistoryLabel: (value) => this.checkHistoryLabel(plugin, value), guard: (callback) => plugin.guard(callback), notice,
       }),
       project,
       data,
+      history,
       game: this.createGame(plugin),
       notice,
       guard: <A extends unknown[]>(callback: (...args: A) => void) => plugin.guard(callback),
@@ -651,7 +1031,7 @@ export class WorkshopPluginHost {
 
   private createGame(plugin: RunningPlugin): WorkshopGame {
     const { game, control } = this.options;
-    const live = (): void => plugin.live();
+    const live = (): void => plugin.mutating();
     return Object.freeze({
       addOverlay: (overlay: SceneLayer) => {
         live();
@@ -679,6 +1059,7 @@ export class WorkshopPluginHost {
         game.view.addLayer(layer, target);
         plugin.overlays.add(layer);
         return () => {
+          plugin.checkMutation();
           if (plugin.overlays.delete(layer)) game.view.removeLayer(layer);
         };
       },
@@ -686,7 +1067,10 @@ export class WorkshopPluginHost {
         live();
         const guarded = plugin.guard(callback);
         plugin.pointerListeners.add(guarded);
-        return () => { plugin.pointerListeners.delete(guarded); };
+        return () => {
+          plugin.checkMutation();
+          plugin.pointerListeners.delete(guarded);
+        };
       },
       project: (point: Point) => game.view.project(point),
       unproject: (client: Point) => game.view.unproject(client),
@@ -812,20 +1196,38 @@ export class WorkshopPluginHost {
     const drag = this.drag;
     if (drag === null) return;
     this.drag = null;
-    if (this.options.canvas.hasPointerCapture(drag.pointerId)) this.options.canvas.releasePointerCapture(drag.pointerId);
-    this.options.game.setInputBlock({ reason: `plugin:${drag.plugin.id}`, blocked: false });
+    const disposal = new Disposal();
+    disposal.run(() => {
+      if (this.options.canvas.hasPointerCapture(drag.pointerId)) this.options.canvas.releasePointerCapture(drag.pointerId);
+    });
+    disposal.run(() => this.options.game.setInputBlock({ reason: `plugin:${drag.plugin.id}`, blocked: false }));
+    disposal.finish();
   }
 
-  // One step named "<plugin>: <operation>" in no tab; the same key's calls within a second merge into it, as keyed commands
-  // do. Its refusal is reported, as its tab reports it, and returned.
+  // The owner's open group, otherwise one keyed step in no tab. RangeControl's context still owns scrubs.
   private edit(plugin: RunningPlugin, operation: string, key: string,
-    command: (info: ProjectCommandInfo) => Command): WorkshopRefusal | null {
+    command: (info: ProjectCommandInfo) => Command, select: WorkshopSelection | null = null): WorkshopRefusal | null {
     const { history } = this.options;
-    try {
-      return this.refused(plugin, history.apply(command({ label: `${plugin.id}: ${operation}`, place: PLUGIN_PLACE, coalesce: key })));
-    } finally {
-      history.seal(key);
-    }
+    return this.changeHistory(plugin, () => {
+      const built = command({
+        label: `${plugin.id}: ${operation}`, place: select === null ? PLUGIN_PLACE : { ...PLUGIN_PLACE, select }, coalesce: key,
+      });
+      const group = this.openGroup;
+      if (group !== null && group.owner === plugin) {
+        return this.refused(plugin, group.transaction.apply(built.run.bind(built)));
+      }
+      try {
+        return this.refused(plugin, history.apply(built));
+      } finally {
+        history.seal(key);
+      }
+    });
+  }
+
+  // Until these owners join the document, delegation is outside grouping and Undo.
+  private outsideGroup<R>(plugin: RunningPlugin, run: () => R): R {
+    this.commitGroup(plugin);
+    return run();
   }
 
   // An edit that waits for a file or a bake: a pending edit, then a step of its own. It ends with the plugin, so a stopped
@@ -833,6 +1235,7 @@ export class WorkshopPluginHost {
   // by another project opening, it changed nothing.
   private async load<T>(plugin: RunningPlugin, operation: string,
     run: (options: ImportOptions) => Promise<EditOutcome<T>>): Promise<WorkshopRefusal | null> {
+    this.commitGroup(plugin);
     const outcome = await run({
       info: { label: `${plugin.id}: ${operation}`, place: PLUGIN_PLACE, coalesce: null }, signal: plugin.waiting.signal,
     });
@@ -865,14 +1268,14 @@ export class WorkshopPluginHost {
       replace: (definition) => levelEdit('replace', (state) => state.merge(definition)),
     };
     const characterEdits: WorkshopCharacterEdits = {
-      document: (value) => character.setDocument(value),
-      riggingType: (value) => character.setCharacterRiggingType(value),
-      armForwardDistance: (value) => character.setArmForwardDistance(value),
-      waistLean: (value) => character.setWaistLean(value),
-      grips: (value) => character.setGrips(value),
-      arms: (value) => character.setArms(value),
-      avatarMotion: (value) => character.setAvatarMotion(value),
-      presentation: (value) => character.setPresentation(value),
+      document: (value) => this.outsideGroup(plugin, () => character.setDocument(value)),
+      riggingType: (value) => this.outsideGroup(plugin, () => character.setCharacterRiggingType(value)),
+      armForwardDistance: (value) => this.outsideGroup(plugin, () => character.setArmForwardDistance(value)),
+      waistLean: (value) => this.outsideGroup(plugin, () => character.setWaistLean(value)),
+      grips: (value) => this.outsideGroup(plugin, () => character.setGrips(value)),
+      arms: (value) => this.outsideGroup(plugin, () => character.setArms(value)),
+      avatarMotion: (value) => this.outsideGroup(plugin, () => character.setAvatarMotion(value)),
+      presentation: (value) => this.outsideGroup(plugin, () => character.setPresentation(value)),
     };
     const edits: WorkshopEdits = {
       title: (value) => project('title', (info) => commands.title(value, info)),
@@ -881,8 +1284,8 @@ export class WorkshopPluginHost {
       character: characterEdits,
       alternate: (document) => project('alternate', (info) => commands.alternate(document, info)),
       appearance: {
-        armIk: (value) => appearance.setArmIk(value),
-        parts: (parts) => appearance.setParts(parts),
+        armIk: (value) => this.outsideGroup(plugin, () => appearance.setArmIk(value)),
+        parts: (parts) => this.outsideGroup(plugin, () => appearance.setParts(parts)),
       },
       theme: (value) => project('theme', (info) => commands.theme(() => value, info)),
       hud: (value) => project('hud', (info) => commands.hud(() => value, info)),

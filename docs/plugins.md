@@ -263,7 +263,7 @@ Every plugin failure the engine detects is a **`PluginError`**:
 | `slot-conflict` | A plugin replaces a slot an earlier plugin already replaced or wrapped |
 | `duplicate-id` | Two items of a keyed point share an ID |
 | `foreign-namespace` | A keyed item is not named `<plugin>/<name>` under its own plugin |
-| `too-many` | A point holds more items than its limit, or a session more than 32 plugins |
+| `too-many` | A point holds more items than its limit, a session more than 32 plugins, or Workshop data listeners fall 200 changes behind, across all plugins |
 | `plugin-failed` | Plugin code throws or an asynchronous plugin call rejects, including startup, wrapping, creation, instance methods and callbacks. The error names the executing plugin, point and action and retains the original error as its cause. A `PluginError` already attributed to that same plugin and point passes through; an error from another plugin, point or the engine is attributed to the executing plugin instead. Documented content, phantom, event and Workshop-validation refusals keep their own semantics |
 | `plugin-stopped` | A stopped Workshop plugin's host, or a closed release session, refused a call |
 

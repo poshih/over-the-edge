@@ -14,6 +14,8 @@ export function createWorkshopUiKit(options: {
   readonly plugin: string;
   readonly history: ScrubHistory;
   readonly signal: AbortSignal;
+  readonly live: () => void;
+  readonly checkHistoryLabel: (value: unknown) => string;
   readonly guard: <A extends unknown[]>(callback: (...args: A) => void) => (...args: A) => void;
   readonly notice: (message: string, kind?: 'info' | 'error') => void;
 }): WorkshopUiKit {
@@ -30,17 +32,26 @@ export function createWorkshopUiKit(options: {
   };
   const kit: WorkshopUiKit = {
     range(spec): WorkshopRange {
+      options.live();
+      const label = options.checkHistoryLabel(spec.label);
       const onInput = options.guard((value: number) => spec.onInput(value));
       const control = createRangeControl({
-        label: spec.label, min: spec.min, max: spec.max, step: spec.step, unit: spec.unit ?? '', description: spec.description,
+        label, min: spec.min, max: spec.max, step: spec.step, unit: spec.unit ?? '', description: spec.description,
       }, {
-        id: id(), name: spec.label, signal: options.signal, onInput: (value) => onInput(value),
-        history: options.history, stepLabel: `${options.plugin}: ${spec.label}`,
+        id: id(), name: label, signal: options.signal, onInput: (value) => onInput(value),
+        history: options.history, stepLabel: `${options.plugin}: ${label}`,
       });
       control.setValue(spec.value);
-      return { element: control.row, input: control.input, set: (value, state) => control.setValue(value, state) };
+      return {
+        element: control.row, input: control.input,
+        set: (value, state) => {
+          options.live();
+          control.setValue(value, state);
+        },
+      };
     },
     button(spec): HTMLButtonElement {
+      options.live();
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'button';
@@ -50,6 +61,7 @@ export function createWorkshopUiKit(options: {
       return button;
     },
     select(spec): WorkshopSelect {
+      options.live();
       const element = document.createElement('div');
       element.className = 'workshop-plugin-field';
       const label = document.createElement('label');
@@ -66,6 +78,7 @@ export function createWorkshopUiKit(options: {
       return {
         element, select,
         set: (value, state = {}) => {
+          options.live();
           if (state.options !== undefined) fillOptions(select, state.options);
           select.value = value;
           select.disabled = state.disabled === true;
@@ -73,6 +86,7 @@ export function createWorkshopUiKit(options: {
       };
     },
     toggle(spec): WorkshopToggle {
+      options.live();
       const element = document.createElement('button');
       element.type = 'button';
       element.className = 'quick-toggle';
@@ -84,6 +98,7 @@ export function createWorkshopUiKit(options: {
       element.append(text, track);
       if (spec.title !== undefined) element.title = spec.title;
       const set = (value: boolean, state: { readonly disabled?: boolean } = {}): void => {
+        options.live();
         element.setAttribute('aria-pressed', String(value));
         element.disabled = state.disabled === true;
       };
@@ -97,6 +112,7 @@ export function createWorkshopUiKit(options: {
       return { element, set };
     },
     group(legend): HTMLFieldSetElement {
+      options.live();
       const group = document.createElement('fieldset');
       group.className = 'tuning-group';
       const title = document.createElement('legend');
@@ -105,12 +121,16 @@ export function createWorkshopUiKit(options: {
       return group;
     },
     note(text): HTMLParagraphElement {
+      options.live();
       const note = document.createElement('p');
       note.className = 'appearance-format';
       note.textContent = text;
       return note;
     },
-    notice: (message, kind = 'info') => options.notice(message, kind),
+    notice: (message, kind = 'info') => {
+      options.live();
+      options.notice(message, kind);
+    },
   };
   return Object.freeze(kit);
 }
