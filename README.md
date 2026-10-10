@@ -295,6 +295,23 @@ sideways ferry, ending at a timer-stopping flag. Open **Showcase** in
 for a game-only build. Regenerate it with `npm run generate:showcase`;
 change the generator, not the generated JSON.
 
+### Example scenes
+
+The `scenes/` folder holds example scenes: whole projects, with their level, models and settings, that only the
+Workshop serves. **Workshop / Project / Example scenes** opens one in place of the Workshop's game, as a new project
+that you save to keep. They stay in the Workshop: a game build refuses `GAME_PROJECT`, `GAME_LEVEL` and the other game
+inputs inside `scenes/`, and the project server will not keep its projects there, so save a scene as a project of your
+own to build a game from it. Name each scene's folder as a project ID; the Workshop checks every scene as it checks a
+`GAME_PROJECT` when it builds or its development server starts, and one that fails stops it, naming the scene.
+
+**Characters demo** ([`scenes/characters/`](scenes/characters)) is a short stage of 3D enemies, each species drawn by a
+[model](docs/enemy-models.md) playing its own clips: hollow soldiers and archers walk as far as their clips step, so
+their feet land where they go, and a faster patrol walks its clip faster; archers draw, loose and reload; a crow hovers,
+dives and flies home; and a hammer strike makes any of them reel away and fall. Rest at its bonfire to bring them back.
+`npm run generate:characters` builds it: [`scripts/scenes/characters/`](scripts/scenes/characters) models the
+low-poly figures and their clips in code, and the engine checks them and bakes their root motion. Change the generator,
+not the files it writes.
+
 ### Included souls-like example game
 
 **Ashen Ascent** is a complete project that uses all 67 set pieces from the
@@ -855,7 +872,8 @@ repository's `levels/` folder, listed by the level's name with its file name, or
 name alone when it has none, and first, in a Workshop built with
 `GAME_PROJECT`, that project's level. Builds validate each file and fail, naming it, when one
 is not a valid level. A level downloads when you load it, and replaces the current level like
-an import.
+an import. [Example scenes](#example-scenes), which bring their characters and artwork with their level, open from
+**Workshop / Project / Example scenes** instead.
 
 **New level**, at the top of the Level tab, starts again from flat ground and the start
 location. Like an import or a server level, it replaces the level without asking, as one step

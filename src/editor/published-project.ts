@@ -21,6 +21,11 @@ export interface PublishedProject {
   readonly files: readonly PublishedFile[];
 }
 
+/** An example scene of the Workshop's scenes folder, served next to it alone: a project of its own, named by its folder. */
+export interface WorkshopScene extends PublishedProject {
+  readonly name: string;
+}
+
 // A binary file of a project the Workshop opens: bytes this page holds, or a published file it downloads when it uses it.
 export type OpenedFile = Blob | PublishedFile;
 
@@ -84,7 +89,7 @@ export async function loadPublishedProject(project: PublishedProject, options: {
   const published = new Map(project.files.map((file) => [file.path, file]));
   const find = (path: string): PublishedFile => {
     const file = published.get(path);
-    if (file === undefined) throw new ProjectError(`The published project is missing ${path}.`, { section: path });
+    if (file === undefined) throw new ProjectError(`"${project.title}" as this Workshop serves it is missing ${path}.`, { section: path });
     return file;
   };
   // One failed file stops the others.

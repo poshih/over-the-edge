@@ -31,7 +31,7 @@ import { ProjectCopyStore } from './project-copy';
 import type { ProjectCopy, ProjectCopyFiles } from './project-copy';
 import { DEFAULT_COURSE_FILES, openDefaultCourse } from './default-course-files';
 import { loadPublishedProject } from './published-project';
-import type { OpenedFile, OpenedProject, PublishedProject } from './published-project';
+import type { OpenedFile, OpenedProject, PublishedProject, WorkshopScene } from './published-project';
 import type { History } from './document/history';
 import { BINARY_SECTIONS } from './document/files';
 import type { BinarySectionName, FileHandle, FileStore } from './document/files';
@@ -96,6 +96,8 @@ export interface ProjectSessionOptions {
   readonly plugins?: ProjectPlugins;
   readonly client?: ProjectClient;
   readonly published?: PublishedProject | null;
+  // The example scenes this Workshop serves, which openScene opens.
+  readonly scenes?: readonly WorkshopScene[];
 
   prepareLevel(): boolean;
   // Records `level` as the saved version; null records unsaved changes.
@@ -273,6 +275,7 @@ export class ProjectSession {
   private readonly plugins: ProjectPlugins;
   private readonly client: ProjectClient;
   private readonly published: PublishedProject | null;
+  private readonly scenes: readonly WorkshopScene[];
   private readonly copy: ProjectCopyStore | null;
   private readonly lifecycle = new AbortController();
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
@@ -325,7 +328,10 @@ export class ProjectSession {
     this.plugins = options.plugins ?? NO_PLUGINS;
     this.client = options.client ?? new ProjectClient();
     this.published = options.published ?? null;
-    this.copy = this.published === null ? null : new ProjectCopyStore([...this.published.files, ...DEFAULT_COURSE_FILES]);
+    this.scenes = options.scenes ?? [];
+    // A copy may hold a project opened from any file this Workshop serves.
+    this.copy = this.published === null ? null
+      : new ProjectCopyStore([...this.published.files, ...DEFAULT_COURSE_FILES, ...this.scenes.flatMap((scene) => scene.files)]);
     this.unsubscribeDocument = this.history.document.subscribeAll((changes) => {
       const bound = this.binding?.version ?? null;
       const status = changes.some((change) => {
@@ -527,6 +533,42 @@ export class ProjectSession {
       if (this.error !== null) return;
       this.options.notice(`Started a new project from the built-in course. ${this.copy === null ? 'Save it to keep it.'
         : 'This browser keeps it; export the project file to take it elsewhere.'}`, 'info');
+    }, true);
+  }
+
+  // The example scenes this Workshop serves, by folder name with their titles.
+  exampleScenes(): readonly { readonly name: string; readonly title: string }[] {
+    return this.scenes.map(({ name, title }) => ({ name, title }));
+  }
+
+  // Opens one of this Workshop's example scenes as a new game, not yet saved anywhere, as Import project file opens a
+  // project: it downloads what the editors use at once, and every other file when the page uses it.
+  async openScene(name: string): Promise<boolean> {
+    const scene = this.scenes.find((candidate) => candidate.name === name);
+    const label = `Opening the example scene "${scene?.title ?? name}"`;
+    return this.run(label, async () => {
+      if (scene === undefined) throw new ProjectError(`This Workshop serves no example scene "${name}".`);
+      let percent = -1;
+      const content = await loadPublishedProject(scene, {
+        signal: this.lifecycle.signal,
+        onProgress: (fraction) => {
+          const next = Math.floor(fraction * 100);
+          if (next === percent) return;
+          percent = next;
+          this.busy = `${label} (${next}%)`;
+          this.changed('status');
+        },
+      });
+      this.requireActive();
+      await this.applyContent(content);
+      this.requireActive();
+      await this.storeCopy();
+      this.requireActive();
+      // A failed copy keeps its notice.
+      if (this.error !== null) return;
+      this.options.notice(`Opened the example scene "${scene.title}" as a new project. ${this.copy === null
+        ? 'Save it to the project server or export it to keep your changes.'
+        : 'This browser keeps it with your changes; export the project file to take it elsewhere.'}`, 'info');
     }, true);
   }
 

@@ -5,6 +5,10 @@ project's [course artwork](course-artwork.md), and it plays one animation clip f
 clip's root motion, how far the clip's character travels, is worked out once when the model is chosen and kept with
 the project, so the game never reads an animation back from the screen.
 
+The Workshop's **Characters demo** [example scene](../README.md#example-scenes) draws every species with a model.
+Its generator, [`scripts/scenes/characters/`](../scripts/scenes/characters), builds each skinned GLB and its clips in
+code, its walks travelling as far as their feet step, and is a worked example of a model the engine accepts.
+
 ## Requirements
 
 - A self-contained, uncompressed binary glTF 2.0 file with at least one skinned mesh, +Y up and facing +Z, glTF's

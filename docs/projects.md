@@ -247,6 +247,11 @@ project waits for **Keep my version** or **Use the project's**.
 - **New project** starts from the [built-in course](course-artwork.md#the-built-in-course), with its meshes, and defaults.
 - **Export project file** downloads the whole game as one bundle; **Import project
   file** replaces the Workshop's game with one. Both work without a server.
+- **Example scenes** opens one of the [example scenes](../README.md#example-scenes) the Workshop serves from its
+  repository's `scenes/` folder as **Import project file** opens a project: it replaces the Workshop's game, asking
+  first when there are unsaved changes, and becomes a new project, saved nowhere. It downloads the level and characters
+  at once, and its other files when the page uses them. Scenes stay in the Workshop: game builds refuse `scenes/`, and
+  so does the project server for its projects, so save a scene as your own project to build a game from it.
 - **Publish standalone game** saves unsaved changes, builds the release on the
   server from a copy of the project's folder and links to it at `/play/<id>/`,
   where the studio also serves its content. It is a [studio preview](plugins.md#studio-previews):

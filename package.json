@@ -13,6 +13,7 @@
     "preview:game": "vite preview --config vite.game.config.ts",
     "pack:course": "node --experimental-strip-types scripts/pack-course.ts",
     "generate:showcase": "node --experimental-strip-types scripts/showcase/generate.ts",
+    "generate:characters": "node --experimental-strip-types scripts/scenes/characters/generate.ts",
     "generate:default-course": "node --experimental-strip-types scripts/default-course/generate.ts",
     "generate:ashen-ascent": "node --experimental-strip-types scripts/ashen-ascent/generate.ts",
     "generate:streaming": "node --experimental-strip-types scripts/level-streaming/generate.ts"

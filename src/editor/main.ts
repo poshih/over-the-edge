@@ -65,6 +65,7 @@ import { gameDiagnostics, workshopGameState } from './game-state';
 import { WorkshopPluginHost, workshopPlugins } from './workshop-plugin-host';
 import publishedProject from 'virtual:workshop-project';
 import folderLevels from 'virtual:workshop-levels';
+import exampleScenes from 'virtual:workshop-scenes';
 import serverModels from 'virtual:workshop-models';
 import kinds from 'virtual:game-plugins/kinds';
 import runtimeFacets from 'virtual:game-plugins/runtime';
@@ -302,6 +303,7 @@ const project: ProjectSession = boot(() => new ProjectSession({
   hasPendingLevelEdits: () => levelEditor.hasPendingEdits(),
   notice: (message, kind) => runtimeNotice(message, kind),
   published: publishedProject,
+  scenes: exampleScenes,
 }), (value) => value.dispose());
 // Play is recorded for phantoms unless this browser turned recording off.
 const RECORDING_KEY = 'over-the-edge:workshop:recording';

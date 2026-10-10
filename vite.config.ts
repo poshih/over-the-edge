@@ -8,14 +8,16 @@ import { DEFAULT_CONTENT_URL } from './build/release.ts';
 import { loadServerLevels, workshopLevels } from './build/workshop-levels.ts';
 import { loadServerModels, workshopModels } from './build/workshop-models.ts';
 import { workshopProject } from './build/workshop-project.ts';
+import { loadServerScenes, workshopScenes } from './build/workshop-scenes.ts';
 import { projectStudio } from './server/project-api.ts';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig(async ({ mode, isPreview }) => {
   // GAME_PROJECT publishes a game with its Workshop, which opens it; see docs/projects.md. Every
-  // Workshop also serves the levels folder's levels, and offers the models folder's models from
-  // WORKSHOP_CONTENT_URL. Previewing serves a finished build, so none of them is read again.
+  // Workshop also serves the levels folder's levels and the scenes folder's example scenes, which
+  // only the Workshop serves, and offers the models folder's models from WORKSHOP_CONTENT_URL.
+  // Previewing serves a finished build, so none of them is read again.
   const requested = isPreview === true ? undefined : process.env.GAME_PROJECT;
   // Only pure kinds facets run in Node. Workshop facets validate in the page, including on HMR.
   const manifest = readGamePlugins(project, process.env.GAME_PLUGINS);
@@ -24,6 +26,7 @@ export default defineConfig(async ({ mode, isPreview }) => {
   const environments = ['kinds', 'runtime', 'workshop'] as const;
   const input = requested === undefined ? null : loadProjectInput(project, requested, rigRegistry);
   const levels = isPreview === true ? [] : loadServerLevels(project);
+  const scenes = isPreview === true ? [] : loadServerScenes(project, rigRegistry);
   const models = isPreview === true ? [] : loadServerModels(project, rigRegistry);
   const contentUrl = locationUrl('WORKSHOP_CONTENT_URL', process.env.WORKSHOP_CONTENT_URL ?? DEFAULT_CONTENT_URL);
   return {
@@ -32,6 +35,7 @@ export default defineConfig(async ({ mode, isPreview }) => {
       gameTitle({ mode, envDir: project, projectTitle: input?.content.manifest.title }),
       workshopProject(input),
       workshopLevels(levels),
+      workshopScenes(scenes),
       workshopModels({ models, contentUrl }),
       pluginBoundary('workshop-boundary', facetBoundaryPaths(manifest, environments)),
       gamePlugins({ manifest, environments }),

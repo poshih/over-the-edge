@@ -44,6 +44,7 @@ import {
   newAvatarEntry, validateAvatarSettings, validateModelLibrary,
 } from '../src/model-library';
 import type { LibraryAvatarEntry, LibraryEntry, LibraryHammerEntry, ModelLibrary, PartRole } from '../src/model-library';
+import { refuseServerScene } from '../build/server-scene-paths';
 import { apiManual } from './api-manual';
 import { formatBytes, HttpError, mediaTypeOf, readBody, readJson, sendBytes, sendError, sendFile, sendJson } from './http';
 import { ProjectStore, SECTION_NAMES, sectionRevision } from './project-store';
@@ -1047,6 +1048,8 @@ export function projectStudio(options: { root: string; mode: string; avatarRigs:
   const token = env.STUDIO_TOKEN === undefined || env.STUDIO_TOKEN === '' ? null : env.STUDIO_TOKEN;
   if (token !== null && token.length < MIN_TOKEN) throw new Error(`STUDIO_TOKEN must contain at least ${MIN_TOKEN} characters.`);
   const projects = env.STUDIO_PROJECTS ? resolve(options.root, env.STUDIO_PROJECTS) : resolve(options.root, 'projects');
+  // The studio publishes its projects as games, so it never keeps them among the Workshop's example scenes.
+  refuseServerScene(options.root, projects, 'STUDIO_PROJECTS');
   const releases = insideRoot(options.root, env.STUDIO_RELEASES ?? 'releases', 'STUDIO_RELEASES');
   const shared = SHARED_KINDS.map((kind) => resolve(options.root, kind));
   const handler = createStudioHandler({

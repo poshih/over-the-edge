@@ -9,6 +9,7 @@ import { locationUrl } from './build/location-url.ts';
 import { DEFAULT_CONTENT_URL, gameRelease } from './build/release';
 import { loadFileRelease, loadProjectRelease } from './build/release-input';
 import { RECORDINGS_FOLDER } from './build/release-phantoms';
+import { refuseServerScene } from './build/server-scene-paths';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 const FILE_INPUTS = ['GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES'] as const;
@@ -19,6 +20,7 @@ function projectJson(variable: string): string | null {
   if (path !== null && (!path.startsWith(project) || !path.endsWith('.json'))) {
     throw new Error(`${variable} must name a JSON file inside this project.`);
   }
+  if (path !== null) refuseServerScene(project, path, variable);
   return path;
 }
 
@@ -50,6 +52,8 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   // GAME_PROJECT is a complete game; its parts cannot also come from the per-file inputs.
   const requested = process.env.GAME_PROJECT;
   if (requested !== undefined) {
+    // The path the release loader opens: GAME_PROJECT joined to this project, as written.
+    refuseServerScene(project, join(project, requested), 'GAME_PROJECT');
     for (const variable of FILE_INPUTS) {
       if (process.env[variable] !== undefined) throw new Error(`${variable} cannot be combined with GAME_PROJECT; the project already contains it.`);
     }

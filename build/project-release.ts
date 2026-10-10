@@ -16,9 +16,10 @@ function inside(root: string, path: string, label: string): string {
   return real;
 }
 
-// A project's data errors, named as GAME_PROJECT's; anything else is a bug and stays as it is.
-function projectFailure(error: unknown): unknown {
-  return error instanceof ProjectError || error instanceof SyntaxError ? new Error(`GAME_PROJECT: ${error.message}`, { cause: error }) : error;
+// A project's data errors, named as the project's (`label`, GAME_PROJECT by default); anything else is a bug and stays
+// as it is.
+function projectFailure(error: unknown, label: string): unknown {
+  return error instanceof ProjectError || error instanceof SyntaxError ? new Error(`${label}: ${error.message}`, { cause: error }) : error;
 }
 
 /** A binary project file a build takes: its bytes, and where it is on disk (null inside a project file). */
@@ -102,26 +103,26 @@ function openBundle(target: string): ProjectSource {
 }
 
 // Opens GAME_PROJECT (a project directory, its project.json, or a single-file project bundle) and validates its
-// documents; failures name the section.
-export function openProjectSource(root: string, requested: string): ProjectSource {
+// documents; failures name the section, and the project as `label`.
+export function openProjectSource(root: string, requested: string, label = 'GAME_PROJECT'): ProjectSource {
   let target: string;
   try {
-    target = inside(root, join(root, requested), 'GAME_PROJECT');
+    target = inside(root, join(root, requested), label);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(`GAME_PROJECT ${requested} does not exist.`);
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(`${label} ${requested} does not exist.`);
     throw error;
   }
   try {
     if (statSync(target).isDirectory()) return openDirectory(target);
     if (basename(target) === PROJECT_FILES.manifest) return openDirectory(dirname(target));
-    if (!target.endsWith('.json')) throw new ProjectError('GAME_PROJECT must be a project directory, its project.json, or a project bundle JSON file.');
+    if (!target.endsWith('.json')) throw new ProjectError(`${label} must be a project directory, its project.json, or a project bundle JSON file.`);
     return openBundle(target);
   } catch (error) {
-    throw projectFailure(error);
+    throw projectFailure(error, label);
   }
 }
 
-// A validated GAME_PROJECT with every file, as the Workshop build publishes it.
+// A validated GAME_PROJECT with every file, as the Workshop build publishes it or serves an example scene.
 export interface ProjectInput {
   readonly content: ProjectContent;
   // Files whose changes should reload a development server.
@@ -129,9 +130,9 @@ export interface ProjectInput {
 }
 
 // Loads all of GAME_PROJECT with every project check, for the Workshop, which edits all of it; failures name the
-// section. A game build takes only what the game uses, through openProjectSource.
-export function loadProjectInput(root: string, requested: string, avatarRigs: AvatarRigRegistry): ProjectInput {
-  const source = openProjectSource(root, requested);
+// section, and the project as `label`. A game build takes only what the game uses, through openProjectSource.
+export function loadProjectInput(root: string, requested: string, avatarRigs: AvatarRigRegistry, label = 'GAME_PROJECT'): ProjectInput {
+  const source = openProjectSource(root, requested, label);
   const files = [...source.files];
   let content: ProjectContent;
   try {
@@ -141,34 +142,34 @@ export function loadProjectInput(root: string, requested: string, avatarRigs: Av
       return taken.bytes;
     });
   } catch (error) {
-    throw projectFailure(error);
+    throw projectFailure(error, label);
   }
   const { manifest } = content;
-  const binary = projectBinary(content);
+  const binary = projectBinary(content, label);
   for (const asset of manifest.art.assets) {
     const hash = createHash('sha256').update(binary(artFile(asset.id))).digest('hex');
-    if (!artAssetHashMatches(asset.id, hash)) throw new Error(`GAME_PROJECT: course artwork ${asset.id} does not match its content hash.`);
+    if (!artAssetHashMatches(asset.id, hash)) throw new Error(`${label}: course artwork ${asset.id} does not match its content hash.`);
   }
   for (const part of manifest.appearance) {
     const bytes = binary(appearanceFile(part.part));
     try {
       checkAppearanceModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
     } catch (error) {
-      throw new Error(`GAME_PROJECT: appearance model ${part.name} (${part.part}): ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      throw new Error(`${label}: appearance model ${part.name} (${part.part}): ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   }
   try {
     checkModelLibrary(manifest.models, binary, avatarRigs);
   } catch (error) {
-    throw new Error(`GAME_PROJECT: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   return { content, files };
 }
 
-function projectBinary(content: ProjectContent): (path: string) => Uint8Array {
+function projectBinary(content: ProjectContent, label: string): (path: string) => Uint8Array {
   return (path) => {
     const bytes = content.files.get(path);
-    if (bytes === undefined) throw new Error(`GAME_PROJECT is missing ${path}.`);
+    if (bytes === undefined) throw new Error(`${label} is missing ${path}.`);
     return bytes;
   };
 }

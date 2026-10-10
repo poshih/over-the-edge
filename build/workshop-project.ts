@@ -7,7 +7,7 @@ import { workshopFiles } from './workshop-files';
 import type { WorkshopFile } from './workshop-files';
 
 // The project's files as they are stored in a project directory.
-function projectFiles(content: ProjectContent): WorkshopFile[] {
+export function projectFiles(content: ProjectContent): WorkshopFile[] {
   const encoder = new TextEncoder();
   const json = (value: unknown): Uint8Array => encoder.encode(JSON.stringify(value));
   const files: WorkshopFile[] = [{ path: PROJECT_FILES.manifest, type: 'application/json', bytes: json(content.manifest) }];

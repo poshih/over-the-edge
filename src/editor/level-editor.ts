@@ -829,7 +829,8 @@ export function createLevelEditor(options: LevelEditorOptions): LevelEditorHandl
         </div>
         <p class="snapshot-history-help">${options.serverLevels.length === 0
     ? 'This Workshop serves no levels. Put level JSON files in the levels folder of its repository, then build or start it again.'
-    : 'The same for everyone who opens this Workshop. Loading one replaces the current level.'}</p>
+    : 'The same for everyone who opens this Workshop. Loading one replaces the current level.'} Example scenes, which bring
+          their characters and artwork with their level, open from Project / Example scenes.</p>
       </div>
       `)}
       ${sectionMarkup({ id: 'level-replays', title: 'Replays', hint: 'Watch the play recorded on this project\'s level' }, `

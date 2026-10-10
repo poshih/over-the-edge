@@ -1,0 +1,289 @@
+{
+  "schemaVersion": 12,
+  "name": "Characters demo",
+  "labels": [
+    {
+      "x": 0,
+      "y": 2.6,
+      "text": "01 / CHARACTERS - HEAD RIGHT"
+    },
+    {
+      "x": 4.5,
+      "y": 2,
+      "text": "REST HERE TO BRING EVERY ENEMY BACK"
+    },
+    {
+      "x": 13,
+      "y": 3,
+      "text": "02 / SOLDIER: EACH STEP LANDS WHERE IT WALKS"
+    },
+    {
+      "x": 25,
+      "y": 3,
+      "text": "03 / FASTER PATROL, FASTER STRIDE"
+    },
+    {
+      "x": 38,
+      "y": 3,
+      "text": "04 / ARCHER: DRAW, LOOSE, RELOAD"
+    },
+    {
+      "x": 50,
+      "y": 3,
+      "text": "05 / ARCHER ON PATROL"
+    },
+    {
+      "x": 62,
+      "y": 4.4,
+      "text": "06 / CROW: HOVER, DIVE, FLY HOME"
+    },
+    {
+      "x": 70,
+      "y": 3.6,
+      "text": "07 / FINISH"
+    }
+  ],
+  "objects": [
+    {
+      "kind": "terrain",
+      "id": "ground",
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
+      },
+      "x": 32,
+      "y": -1,
+      "width": 84,
+      "height": 2,
+      "angle": 0,
+      "depth": 3,
+      "mirror": false,
+      "color": 5662796,
+      "illusion": false,
+      "surface": "rock"
+    },
+    {
+      "kind": "terrain",
+      "id": "west-wall",
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
+      },
+      "x": -11,
+      "y": 3,
+      "width": 2,
+      "height": 10,
+      "angle": 0,
+      "depth": 3,
+      "mirror": false,
+      "color": 4938311,
+      "illusion": false,
+      "surface": "rock"
+    },
+    {
+      "kind": "terrain",
+      "id": "east-wall",
+      "mesh": {
+        "type": "shape",
+        "shape": "box"
+      },
+      "x": 75,
+      "y": 3,
+      "width": 2,
+      "height": 10,
+      "angle": 0,
+      "depth": 3,
+      "mirror": false,
+      "color": 4938311,
+      "illusion": false,
+      "surface": "rock"
+    },
+    {
+      "kind": "start",
+      "id": "player-start",
+      "x": 0,
+      "y": 0.65,
+      "angle": -0.42,
+      "reach": 1.7
+    },
+    {
+      "kind": "trigger",
+      "id": "welcome",
+      "name": "Characters demo",
+      "x": 0.5,
+      "y": 0.9,
+      "region": {
+        "type": "box",
+        "width": 3,
+        "height": 1.8
+      },
+      "activation": "once",
+      "marker": "none",
+      "events": [
+        {
+          "type": "message",
+          "title": "Characters demo",
+          "message": "Every enemy here is a 3D character playing its own animation clips. Soldiers and archers walk as far as their clips step, so their feet land as they go; strike one with the hammer and it reels away from the blow, then falls. Rest at the bonfire to bring every enemy back. Example scenes stay in the Workshop: save this one as your own project to build a game from it."
+        }
+      ]
+    },
+    {
+      "kind": "bonfire",
+      "id": "rest-bonfire",
+      "x": 4.5,
+      "y": 0
+    },
+    {
+      "kind": "enemy",
+      "id": "soldier-patrol",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 13,
+      "y": 0.71,
+      "patrolDistance": 3,
+      "speed": 0.8
+    },
+    {
+      "kind": "enemy",
+      "id": "soldier-march",
+      "species": "hollow-soldier",
+      "facing": "left",
+      "x": 25,
+      "y": 0.71,
+      "patrolDistance": 3,
+      "speed": 1.6
+    },
+    {
+      "kind": "enemy",
+      "id": "archer-post",
+      "species": "hollow-archer",
+      "facing": "left",
+      "x": 38,
+      "y": 0.71,
+      "patrolDistance": 0,
+      "speed": 0.6
+    },
+    {
+      "kind": "enemy",
+      "id": "archer-patrol",
+      "species": "hollow-archer",
+      "facing": "left",
+      "x": 50,
+      "y": 0.71,
+      "patrolDistance": 2.5,
+      "speed": 0.6
+    },
+    {
+      "kind": "enemy",
+      "id": "crow",
+      "species": "bird",
+      "facing": "left",
+      "x": 62,
+      "y": 2.6,
+      "patrolDistance": 2,
+      "speed": 1.2
+    },
+    {
+      "kind": "trigger",
+      "id": "finish-flag",
+      "name": "Demo complete",
+      "x": 70,
+      "y": 1.5,
+      "region": {
+        "type": "box",
+        "width": 2.6,
+        "height": 3
+      },
+      "activation": "once",
+      "marker": "flag",
+      "events": [
+        {
+          "type": "stop-timer"
+        },
+        {
+          "type": "message",
+          "title": "Demo complete",
+          "message": "Head back to watch them again, or rest at the bonfire to bring them back."
+        }
+      ]
+    },
+    {
+      "kind": "decoration",
+      "id": "lantern-soldiers",
+      "model": "lantern-post",
+      "x": 8,
+      "y": 0,
+      "z": -0.8,
+      "height": 2.6,
+      "angle": 0,
+      "turn": 0,
+      "mirror": false,
+      "tint": 16777215
+    },
+    {
+      "kind": "decoration",
+      "id": "lantern-march",
+      "model": "lantern-post",
+      "x": 19.5,
+      "y": 0,
+      "z": -0.8,
+      "height": 2.6,
+      "angle": 0,
+      "turn": 0,
+      "mirror": false,
+      "tint": 16777215
+    },
+    {
+      "kind": "decoration",
+      "id": "lantern-archers",
+      "model": "lantern-post",
+      "x": 31.5,
+      "y": 0,
+      "z": -0.8,
+      "height": 2.6,
+      "angle": 0,
+      "turn": 0,
+      "mirror": false,
+      "tint": 16777215
+    },
+    {
+      "kind": "decoration",
+      "id": "lantern-patrol",
+      "model": "lantern-post",
+      "x": 44,
+      "y": 0,
+      "z": -0.8,
+      "height": 2.6,
+      "angle": 0,
+      "turn": 0,
+      "mirror": false,
+      "tint": 16777215
+    },
+    {
+      "kind": "decoration",
+      "id": "lantern-crow",
+      "model": "lantern-post",
+      "x": 56,
+      "y": 0,
+      "z": -0.8,
+      "height": 2.6,
+      "angle": 0,
+      "turn": 0,
+      "mirror": false,
+      "tint": 16777215
+    },
+    {
+      "kind": "decoration",
+      "id": "finish-banner",
+      "model": "banner",
+      "x": 72.5,
+      "y": 0,
+      "z": -0.8,
+      "height": 2.4,
+      "angle": 0,
+      "turn": 0,
+      "mirror": false,
+      "tint": 16777215
+    }
+  ]
+}

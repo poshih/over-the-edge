@@ -137,6 +137,15 @@ export function createProjectEditor(options: ProjectEditorOptions) {
           audio, enemy art, media and course artwork. Build it with GAME_PROJECT=path npm run build:game.</p>
       `)}
 
+      ${sectionMarkup({ id: 'project-scenes', title: 'Example scenes', hint: 'Demo projects served with this Workshop' }, `
+        <label class="appearance-label" for="project-scene-list">Example scene</label>
+        <select id="project-scene-list"></select>
+        <button type="button" class="button project-scene-open">Open scene</button>
+        <p class="appearance-format">${session.exampleScenes().length === 0
+    ? 'This Workshop serves no example scenes. Put project folders in the scenes folder of its repository, then build or start it again.'
+    : 'Opening one replaces the Workshop\'s game with it, as a new project. Example scenes stay in the Workshop: game builds refuse them, so save a scene as your own project to build a game from it.'}</p>
+      `)}
+
       ${sectionMarkup({ id: 'project-theme', title: 'Theme', hint: 'Sky, fog, camera, lights and colours' }, `
         <div class="project-fields project-theme-fields"></div>
         <button type="button" class="button project-theme-reset">Reset theme</button>
@@ -216,6 +225,10 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const idInput = element<HTMLInputElement>(root, '#project-id');
   const publishStatus = element<HTMLParagraphElement>(root, '.project-publish-status');
   const fileInput = element<HTMLInputElement>(root, '.project-file-input');
+  const sceneList = element<HTMLSelectElement>(root, '#project-scene-list');
+  const scenes = session.exampleScenes();
+  sceneList.replaceChildren(...(scenes.length === 0 ? [new Option('No example scenes', '')]
+    : scenes.map((scene) => new Option(scene.title, scene.name))));
   const mediaList = element<HTMLUListElement>(root, '.project-media-list');
   const mediaFile = element<HTMLInputElement>(root, '#project-media-file');
   const alternateStatus = element<HTMLParagraphElement>(root, '.project-alternate-status');
@@ -612,6 +625,8 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     for (const button of buttons) button.disabled = busy;
     element<HTMLButtonElement>(root, '.project-publish').disabled = busy || snapshot.binding === null;
     element<HTMLButtonElement>(root, '.project-open').disabled = busy || choices.length === 0;
+    element<HTMLButtonElement>(root, '.project-scene-open').disabled = busy || scenes.length === 0;
+    sceneList.disabled = busy || scenes.length === 0;
     renderAlternate();
     publishStatus.replaceChildren();
     const record = snapshot.publish;
@@ -672,6 +687,10 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     if (list.value !== '' && confirmReplace(`Opening "${list.value}"`)) void session.open(list.value);
   }, listen);
   element(root, '.project-refresh').addEventListener('click', () => { void session.refreshServer(); }, listen);
+  element(root, '.project-scene-open').addEventListener('click', () => {
+    const scene = scenes.find((candidate) => candidate.name === sceneList.value);
+    if (scene !== undefined && confirmReplace(`Opening the example scene "${scene.title}"`)) void session.openScene(scene.name);
+  }, listen);
   element(root, '.project-save-as').addEventListener('click', () => {
     const id = idInput.value.trim() || idInput.placeholder;
     const exists = session.snapshot().projects.some((project) => project.id === id);

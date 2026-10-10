@@ -17,6 +17,9 @@ export interface EngineModules {
   '/src/project.ts': Pick<typeof import('../src/project.ts'),
     'validateProjectManifest' | 'defaultProjectManifest' | 'checkProjectReferences' | 'loadProjectContent' | 'PROJECT_LIMITS'>;
   '/src/trigger-events.ts': Pick<typeof import('../src/trigger-events.ts'), 'ENDING_EVENTS'>;
+  '/src/enemy-types.ts': Pick<typeof import('../src/enemy-types.ts'), 'ENEMY_SPECS'>;
+  '/src/enemy-motion.ts': Pick<typeof import('../src/enemy-motion.ts'), 'readEnemyModel' | 'bakeEnemyMotion'>;
+  '/src/enemy-model-check.ts': Pick<typeof import('../src/enemy-model-check.ts'), 'validateEnemyModelAsset'>;
   '/src/surfaces.ts': Pick<typeof import('../src/surfaces.ts'), 'DEFAULT_SURFACE'>;
   '/src/course-checks.ts': Pick<typeof import('../src/course-checks.ts'),
     'createCourseJob' | 'DEFAULT_WORK_LIMITS' | 'DEFAULT_STANDING_SAMPLE_SPACING' | 'CourseCheckError' |
@@ -59,6 +62,9 @@ const EXPORTS = {
     PROJECT_LIMITS: 'object',
   },
   '/src/trigger-events.ts': { ENDING_EVENTS: 'array' },
+  '/src/enemy-types.ts': { ENEMY_SPECS: 'object' },
+  '/src/enemy-motion.ts': { readEnemyModel: 'function', bakeEnemyMotion: 'function' },
+  '/src/enemy-model-check.ts': { validateEnemyModelAsset: 'function' },
   '/src/surfaces.ts': { DEFAULT_SURFACE: 'string' },
   '/src/course-checks.ts': {
     createCourseJob: 'function', DEFAULT_WORK_LIMITS: 'object', DEFAULT_STANDING_SAMPLE_SPACING: 'number', CourseCheckError: 'function',
