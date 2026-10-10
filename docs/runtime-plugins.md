@@ -1015,7 +1015,7 @@ and point, including wrappers.
 ## Enemy looks
 
 `LOOKS.enemies`, the slot `looks.enemies`, holds an `EnemyLookFactory`,
-`(art: EnemyArtSettings) => EnemyLook`:
+`(art: EnemyArtSettings, models: EnemyModelLookFactory | null) => EnemyLook`:
 
 ```ts
 interface EnemyLook {
@@ -1028,8 +1028,11 @@ interface EnemyLook {
 }
 ```
 
-`DEFAULT_LOOKS.enemies` creates `EnemyView`, the engine's shared atlas and instanced sprites,
-including animation, windup, hurt and death effects. A bird's `windup` warns of its `dive`,
+`DEFAULT_LOOKS.enemies` creates `EngineEnemyLook`. It draws each species whose art is a
+[3D model](enemy-models.md#drawing) through the engine's enemy-model look, once its GLB has loaded,
+and every other species with `EnemyView`, the engine's shared atlas and instanced sprites,
+including animation, windup, hurt and death effects; a model's species shows its built-in pixel
+art while its GLB loads or when it cannot be drawn. A bird's `windup` warns of its `dive`,
 and it `recover`s home; a hollow archer's `windup` is its draw, warned alike, and `recover` its
 reload, also after a bump; a soldier `recover`s after a bump. The game forwards simulation membership
 events to `apply`: `reset` with every pose, `upsert` with one pose and `remove` with an ID.
@@ -1047,20 +1050,44 @@ clip at its own pace). A looping clip's time keeps counting, for a look to wrap 
 length; a clip played once holds its last frame past its end. A sprite species plays the same
 roles, so a look may animate any enemy by them. `update` receives the active poses and the corpses
 still shown, which a model's death clip may move, with simulation seconds, **only while the level
-has enemies**; sleeping sprites remain from `apply`. **The array and every drawn pose are pooled,
+has enemies**, plus one final empty update when its last enemy goes; sleeping sprites remain from
+`apply`. **The array and every drawn pose are pooled,
 borrowed until the next frame**: copy individual fields into your own state if needed later,
 never retain a pose or the array as a snapshot. The default look keeps its own poses for
 sleeping sprites, compaction and art changes. `setArt` receives the project's enemy art when
 it changes: each species' pixel art, [3D model](enemy-models.md) or `null` for the built-in
 art. `inspect`, optional, appears in the rendering diagnostics' `enemies`.
 
+`models` makes the engine's enemy-model look, or is `null` when the game draws no enemy models: a
+release includes the model renderer, with three.js's GLTF loader and skeleton utilities, only when
+its content has an enemy model. A look composes it rather than drawing models anew:
+
+```ts
+interface EnemyModelLook {
+  readonly root: Object3D;                      // Add it to the actors pass.
+  draws(species: EnemySpecies): boolean;        // Its model has loaded, with its clips.
+  subscribe(listener: () => void): () => void;  // draws() may have changed.
+  setArt(art: EnemyArtSettings): void;
+  load(signal: AbortSignal): Promise<void>;
+  update(poses: readonly EnemyPose[], time: number): void;
+  dispose(): void;
+  inspect(): unknown;
+}
+```
+
+Give its `update` every frame's poses: it draws those of the species it draws and nothing for an
+enemy no pose names, such as a sleeping one. Pass it each `setArt`, draw the other species your
+own way, and dispose it with your look. The engine waits for the models of the look's art before a
+release plays.
+
 Collider visuals stand on `OBSTACLE_LINE` and draw in **actors**, never hidden by terrain.
 `passes.course` and `passes.front` may add scenery behind or in front of them, following
 `LookPasses` and the [pass rules](#pass-rules-for-presentation-points); hide an empty front.
 Keep membership changes incremental, batch/shared geometry and materials, reuse scratch and
 allocate nothing in `update`. The look draws only: species, collision, hits and decisions stay
-the engine's. The SDK exports `EnemyEvent`, `EnemyPose`, `EnemyClipRole`, `EnemyArtSettings`, `ENEMY_SPECS`,
-`ENEMY_LIMITS`, `ENEMY_DIRECTION` and `ENEMY_BEHAVIOR`. Pass roots are detached before disposal.
+the engine's. The SDK exports `EnemyEvent`, `EnemyPose`, `EnemyClipRole`, `EnemyArtSettings`, `SpriteArt`,
+`ModelArt`, `EnemyModelLook`, `EnemyModelLookFactory`, `ENEMY_SPECS`, `ENEMY_LIMITS`, `ENEMY_DIRECTION` and
+`ENEMY_BEHAVIOR`. Pass roots are detached before disposal.
 
 A game's own aggregate sprite renderer can replace it without replacing any object look:
 

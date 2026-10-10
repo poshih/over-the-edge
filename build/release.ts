@@ -20,6 +20,7 @@ const MODULES = {
   content: 'virtual:game-content',
   models: 'virtual:game-character-models',
   art: 'virtual:game-art',
+  enemyModels: 'virtual:game-enemy-models',
   appearance: 'virtual:game-appearance',
   audio: 'virtual:game-audio',
   decorations: 'virtual:game-decorations',
@@ -32,6 +33,7 @@ const runtime = (path: string): string => fileURLToPath(new URL(`../src/${path}`
 const LOADERS = {
   models: `export { createCharacterModelLoader as default } from ${JSON.stringify(runtime('character-model-loader.ts'))};`,
   art: `export { createCourseArt as default } from ${JSON.stringify(runtime('course-art-view.ts'))};`,
+  enemyModels: `export { createEnemyModels as default } from ${JSON.stringify(runtime('enemy-models.ts'))};`,
   appearance: `export { loadAppearance as default } from ${JSON.stringify(runtime('appearance-loader.ts'))};`,
   audio: `export { DEFAULT_AUDIO_OUTPUT as default } from ${JSON.stringify(runtime('audio.ts'))};`,
   decorations: `export { createDecorationView as default } from ${JSON.stringify(runtime('decoration-library.ts'))};`,

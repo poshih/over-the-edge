@@ -22,6 +22,11 @@ declare module 'virtual:game-art' {
   export default create;
 }
 
+declare module 'virtual:game-enemy-models' {
+  const create: typeof import('./enemy-models').createEnemyModels | null;
+  export default create;
+}
+
 declare module 'virtual:game-appearance' {
   const load: typeof import('./appearance-loader').loadAppearance | null;
   export default load;

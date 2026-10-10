@@ -13,8 +13,9 @@ the project, so the game never reads an animation back from the screen.
 - One skeleton: every skin shares one top joint, the joint with no other joint above it, such as `Hips` in a
   Mixamo-style rig or a `Root` bone at the feet. Only that joint may travel: the nodes above it must not be animated.
 - Between 1 and 32 animation clips, each named, the names all different, each up to 10 seconds long.
-- It is fitted to the species' height, its bind pose as tall as the species' collider, its feet on the collider's
-  bottom and its middle on the obstacle line.
+- It is fitted to the species' height (`ENEMY_SPECS`: 1.4 m for soldiers and archers, 0.8 m for birds), its bind pose
+  scaled that tall, a ground enemy's feet on its collider's bottom, a bird centred on its body, and its middle on the
+  obstacle line.
 - It may not also be a terrain mesh or a decoration model, which must be static.
 
 ## Roles
@@ -75,6 +76,26 @@ A species drawn by a model moves as its clips travel; one drawn as pixel art mov
   [runtime plugins](runtime-plugins.md)), so a look plays exactly what play moved.
 - A ground enemy's motion joins the level's [course](phantoms.md#courses): changing a clip it moves by starts a new
   course, with new recordings.
+
+## Drawing
+
+The Workshop and releases draw enemies alike, through the engine's enemy look (see
+[runtime plugins](runtime-plugins.md#enemy-looks)):
+
+- Each species with a model loads its GLB once. Until it has loaded, and for good when it cannot be drawn, which shows
+  a notice, the species shows its built-in pixel art. A release loads every model before play.
+- An awake enemy draws a copy of the model, sharing its geometry and textures, with a mixer and materials of its own,
+  made when it wakes and dropped when it sleeps. Enemies far from the player sleep and are not drawn; **Level** still
+  shows their outlines.
+- The model stands on its collider's bottom, a bird's centred on its body, on the obstacle line, scaled to the species'
+  height, and turns a quarter turn to face the way the enemy faces.
+- Clips play in place: the top joint's travel along the facing is taken out, its sway and bob kept, since play already
+  moves the enemy that far. Each frame the clip plays at the time its pose gives, so the model never runs ahead of or
+  behind its body, and a change of clip cross-fades over 0.15 s.
+- A windup pulses its materials toward the warning colour, and a hurt flashes them white, as the sprites do.
+- A corpse plays its death clip and goes when play removes it, when that clip ends.
+- Frames cost only the awake enemies. A release includes the model renderer, with three.js's GLTF loader and skeleton
+  utilities, only when its content has an enemy model.
 
 ## Format
 

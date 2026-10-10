@@ -15,6 +15,7 @@ import type { RigGeometry } from './rig';
 import { DEFAULT_HAMMER_HEAD, hammerHeadRadius } from './hammer-head';
 import type { HammerHead } from './hammer-head';
 import { LevelLooks } from './object-looks';
+import type { EnemyModelLook, EnemyModelLookFactory } from './object-looks';
 import type { Kinds } from './plugins/kinds';
 import type { RuntimePlugins } from './plugins/runtime';
 import { call0, call1, call2, call3, checkInstance } from './plugins/kernel';
@@ -41,7 +42,8 @@ import { Disposal } from './disposal';
 import type { GameTheme } from './theme';
 import { enemyArtAssets } from './enemy-art-data';
 import type { EnemyArtSettings } from './enemy-art-data';
-import { ENEMY_SPECIES } from './enemy-types';
+import type { EnemyModelSource } from './enemy-models';
+import { ENEMY_SPECIES, ENEMY_SPECS } from './enemy-types';
 import type { EnemyEvent } from './enemy-types';
 import { NO_COURSE_ARTWORK } from './game-look';
 import type { CourseArtwork, GameLook } from './game-look';
@@ -74,6 +76,8 @@ export class GameView {
   readonly character: CharacterView;
   // How the level's flags, updrafts, bonfires, traps, projectiles, liquid pools and enemies look.
   private readonly looks: LevelLooks;
+  // The enemy-model looks made for the enemy look, whose models a release loads before play.
+  private readonly enemyModels: EnemyModelLook[] = [];
   private readonly renderer: WebGLRenderer;
   // Passes, each drawn over the last. The course: terrain, its artwork and the scenery behind the obstacle line.
   // Then, with depth cleared, the actors: the characters, phantoms and enemies, which the course's colliders,
@@ -158,6 +162,8 @@ export class GameView {
     look: GameLook;
     // Draws the course artwork's GLBs; without it the view draws none.
     courseArt?: CourseArtSource | null;
+    // Draws enemies' 3D models; without it, a species with a model shows its built-in pixel art.
+    enemyModels?: EnemyModelSource | null;
     // The simulation's terrain, which the course artwork follows.
     subscribeTerrain: (listener: (event: TerrainEvent) => void) => () => void;
     onNotice: (message: string) => void;
@@ -183,7 +189,20 @@ export class GameView {
         characterModels: options.characterModels, content: options.content, theme, kinds: options.kinds, plugins: options.plugins,
         onCharacterFigure: options.onCharacterFigure, prepareTexture: (texture) => this.renderer.initTexture(texture),
       });
-      looks = new LevelLooks(options.plugins, level.objects, options.look.enemies);
+      const enemyModels = options.enemyModels ?? null;
+      const models: EnemyModelLookFactory | null = enemyModels === null ? null : (art) => {
+        const look = enemyModels.create({
+          art, fetch: enemyModels.fetch,
+          onFailure: (species, error) => {
+            const names = species.map((name) => ENEMY_SPECS[name].label.toLowerCase()).join(', ');
+            options.onNotice(`The 3D model of the ${names} cannot be drawn, so it shows its built-in pixel art: ` +
+              `${error instanceof Error ? error.message : String(error)}`);
+          },
+        });
+        this.enemyModels.push(look);
+        return look;
+      };
+      looks = new LevelLooks(options.plugins, level.objects, options.look.enemies, models);
       this.looks = looks;
       this.backdrop = createBackdrop(options.plugins, theme);
       created.push(this.backdrop);
@@ -345,11 +364,15 @@ export class GameView {
     this.decorations?.useArtwork(art.decorations, this.courseArt);
   }
 
-  // Loads every course GLB `art` lists, keeping them while the view lasts, and only then draws it, so the course and its
-  // decorations draw whole from their first frame. The enemy models among them are the enemies' to load.
+  // Loads every course GLB `art` lists, keeping them while the view lasts, and the enemies' models, and only then draws
+  // the course, so the course, its decorations and its enemies draw whole from their first frame.
   async loadArtwork(art: CourseArtwork, enemies: EnemyArtSettings, signal: AbortSignal): Promise<void> {
     const models = enemyArtAssets(enemies, new Set(ENEMY_SPECIES));
-    if (this.courseArt !== null) await this.courseArt.load(art.assets.map((asset) => asset.id).filter((id) => !models.has(id)), signal);
+    const meshes = art.assets.map((asset) => asset.id).filter((id) => !models.has(id));
+    await Promise.all([
+      this.courseArt === null ? null : this.courseArt.load(meshes, signal),
+      ...this.enemyModels.map((look) => look.load(signal)),
+    ]);
     this.setArt(art);
   }
 

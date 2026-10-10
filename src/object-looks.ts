@@ -4,8 +4,8 @@ import { BonfireView } from './bonfire-view';
 import type { BurningBonfire } from './bonfires';
 import { Disposal } from './disposal';
 import type { EnemyArtSettings } from './enemy-art-data';
-import type { EnemyEvent, EnemyPose } from './enemy-types';
-import { EnemyView } from './enemy-view';
+import { EngineEnemyLook } from './enemy-look';
+import type { EnemyEvent, EnemyPose, EnemySpecies } from './enemy-types';
 import { FlagView } from './flag-view';
 import type { HammerHead } from './hammer-head';
 import type { PotOutline } from './pot-outline';
@@ -89,7 +89,31 @@ export interface EnemyLook {
   dispose(): void;
   inspect?(): unknown;
 }
-export type EnemyLookFactory = (art: EnemyArtSettings) => EnemyLook;
+
+/**
+ * The engine's enemy-model look (src/enemy-models.ts): it draws the species whose art is a 3D model, each once its GLB
+ * has loaded, as poses given each frame, and nothing for an enemy no pose names, such as a sleeping one. A release
+ * includes it only when it draws enemy models.
+ */
+export interface EnemyModelLook {
+  // Drawn in the actors pass.
+  readonly root: Object3D;
+  // Whether it draws `species` now: the art makes it a model whose GLB has loaded and has its clips.
+  draws(species: EnemySpecies): boolean;
+  // Tells `listener` whenever what draws() answers may have changed; returns its removal.
+  subscribe(listener: () => void): () => void;
+  setArt(art: EnemyArtSettings): void;
+  // Loads every model the art uses, rejecting when one cannot load; a release waits for it before play.
+  load(signal: AbortSignal): Promise<void>;
+  // Every pose of the frame, borrowed until the next, of which it draws those of the species it draws, and simulation
+  // seconds.
+  update(poses: readonly EnemyPose[], time: number): void;
+  dispose(): void;
+  inspect(): unknown;
+}
+export type EnemyModelLookFactory = (art: EnemyArtSettings) => EnemyModelLook;
+// `models` makes the engine's enemy-model look for a look to compose, or is null when the game draws no enemy models.
+export type EnemyLookFactory = (art: EnemyArtSettings, models: EnemyModelLookFactory | null) => EnemyLook;
 
 // One stable slot in engine-owned playback. Values, pose and tool are reused and read-only to a look.
 export interface PhantomFigureFrame {
@@ -204,7 +228,7 @@ export const DEFAULT_LOOKS: Omit<Looks, 'phantoms'> = Object.freeze({
     const view = new PoolView('swamp');
     return viewLook<PoolObject>(view, view.front);
   },
-  enemies: (art: EnemyArtSettings) => new EnemyView(art),
+  enemies: (art: EnemyArtSettings, models: EnemyModelLookFactory | null) => new EngineEnemyLook(art, models),
 });
 
 // The level objects each look draws.
@@ -283,6 +307,7 @@ interface Placed {
   objects: readonly LevelObject[] | null;
 }
 const NO_PROJECTILES: readonly ProjectilePose[] = Object.freeze([]);
+const NO_ENEMIES: readonly EnemyPose[] = Object.freeze([]);
 
 /**
  * The looks of the level's objects in one view, composed once from the runtime session.
@@ -301,10 +326,12 @@ export class LevelLooks {
   private active: readonly Placed[] = [];
   private hasShooters = false;
   private hasEnemies = false;
+  // Whether the enemy look has been updated since the level last had enemies, so it hears once that they are gone.
+  private enemiesActive = false;
   private hasPlatforms = false;
   private projectileActive = false;
 
-  constructor(plugins: RuntimePlugins, objects: readonly LevelObject[], art: EnemyArtSettings) {
+  constructor(plugins: RuntimePlugins, objects: readonly LevelObject[], art: EnemyArtSettings, models: EnemyModelLookFactory | null) {
     const factories = {
       flag: plugins.slot(LOOKS.flag, DEFAULT_LOOKS.flag),
       updraft: plugins.slot(LOOKS.updraft, DEFAULT_LOOKS.updraft),
@@ -326,7 +353,7 @@ export class LevelLooks {
       return look;
     };
     try {
-      this.enemies = build('enemies', factories.enemies, () => createEnemies(art));
+      this.enemies = build('enemies', factories.enemies, () => createEnemies(art, models));
       this.bonfire = build('bonfire', factories.bonfire, factories.bonfire.value);
       this.switch = build('switch', factories.switch, factories.switch.value);
       this.platform = build('platform', factories.platform, factories.platform.value);
@@ -403,7 +430,13 @@ export class LevelLooks {
       call2(this.platform, 'update', platforms.changes, time);
       platforms.acknowledge(revision);
     }
-    if (this.hasEnemies) call2(this.enemies, 'update', enemies, time);
+    if (this.hasEnemies) {
+      call2(this.enemies, 'update', enemies, time);
+      this.enemiesActive = true;
+    } else if (this.enemiesActive) {
+      call2(this.enemies, 'update', NO_ENEMIES, time);
+      this.enemiesActive = false;
+    }
     if (this.hasShooters || projectiles.length > 0) {
       call2(this.projectile, 'update', projectiles, time);
       this.projectileActive = true;

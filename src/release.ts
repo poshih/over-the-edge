@@ -15,6 +15,7 @@ import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
 import type { GameLook } from './game-look';
 import type { CourseArtSource } from './course-art-view';
+import type { EnemyModelSource } from './enemy-models';
 import type { MediaHost } from './media-host';
 import { Disposal } from './disposal';
 import { characterLabels, createPlayUI } from './play-ui';
@@ -47,6 +48,7 @@ export interface ReleaseCode {
   readonly course: string;
   readonly createCharacterModels: ((options: { content: ContentLoader }) => CharacterModelLoader) | null;
   readonly createCourseArt: CourseArtSource['create'] | null;
+  readonly createEnemyModels: EnemyModelSource['create'] | null;
   readonly loadAppearance: ((visuals: ReadonlyMap<VisualPartId, VisualBinding>, parts: readonly AppearanceSource[],
     options: { signal?: AbortSignal; content?: ContentLoader }) => Promise<unknown>) | null;
   readonly audioOutput: GameAudioFactory | null;
@@ -269,20 +271,21 @@ export class Release {
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
     const look: GameLook = { theme: manifest.theme, hud: manifest.hud, enemies: manifest.enemies, art: manifest.art };
     const sources = new Map(manifest.art.assets.map((asset) => [asset.id, asset.source]));
+    // Course meshes and enemy models are both GLBs of the course artwork.
+    const fetchArt = async (id: string, request: AbortSignal): Promise<Blob> => {
+      const source = sources.get(id);
+      if (source === undefined) throw new Error(`This release does not contain the course artwork GLB ${id}.`);
+      return new Blob([await content(source, request)], { type: 'model/gltf-binary' });
+    };
     const createCourseArt = this.code.createCourseArt;
+    const createEnemyModels = this.code.createEnemyModels;
     const game = new Game({
       canvas: this.canvas, onFatal: (message) => call1(this.fatalDisplay, 'show', message),
       eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
       look,
-      courseArt: createCourseArt === null ? null : {
-        create: createCourseArt,
-        fetch: async (id, request) => {
-          const source = sources.get(id);
-          if (source === undefined) throw new Error(`This release does not contain the course mesh ${id}.`);
-          return new Blob([await content(source, request)], { type: 'model/gltf-binary' });
-        },
-      },
+      courseArt: createCourseArt === null ? null : { create: createCourseArt, fetch: fetchArt },
+      enemyModels: createEnemyModels === null ? null : { create: createEnemyModels, fetch: fetchArt },
       audio: receivesAudio ? audio : null,
       onAction: (action, options) => game.perform(action, options),
       onNotice: notice,

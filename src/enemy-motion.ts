@@ -50,6 +50,9 @@ const GLB_MAGIC = 0x46546c67;
 const JSON_CHUNK = 0x4e4f534a;
 const BIN_CHUNK = 0x004e4942;
 const ROUND_DURATION = 10_000;
+// A normalized integer accessor's min and max are its stored integers; times these, by component type, they are the
+// fractions its values read as.
+const NORMALIZED_SCALE: Readonly<Record<number, number>> = { 5120: 1 / 127, 5121: 1 / 255, 5122: 1 / 32767, 5123: 1 / 65535 };
 
 export function readEnemyModel(data: ArrayBuffer): EnemyModelFacts {
   return readModel(() => {
@@ -312,8 +315,12 @@ function skinnedHeight(
       const position = accessor(json, buffers, positionIndex);
       if (position.components !== 3) throw new ModelError('Export skinned mesh positions as VEC3 accessors.');
       const source = record(list(json.accessors, 'accessor')[positionIndex], 'position accessor');
-      const min = vector(source.min, 3, 'POSITION min');
-      const max = vector(source.max, 3, 'POSITION max');
+      // Read as three.js reads normalized integers: scaled, a signed one no lower than -1.
+      const read = position.normalized
+        ? (value: number): number => Math.max(value * (NORMALIZED_SCALE[position.componentType] ?? 1), -1)
+        : (value: number): number => value;
+      const min = vector(source.min, 3, 'POSITION min').map(read);
+      const max = vector(source.max, 3, 'POSITION max').map(read);
       for (let corner = 0; corner < 8; corner++) {
         const point = transformPoint(matrix, corner & 1 ? max[0] : min[0], corner & 2 ? max[1] : min[1], corner & 4 ? max[2] : min[2]);
         minY = Math.min(minY, point[1]);

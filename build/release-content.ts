@@ -24,8 +24,8 @@ export interface ReleaseContent {
   readonly pins: Omit<ContentPins, 'contentUrl'>;
   // Which runtime loaders the shell needs; a release that uses none of a kind omits its code.
   readonly uses: {
-    readonly models: boolean; readonly art: boolean; readonly appearance: boolean; readonly audio: boolean; readonly decorations: boolean;
-    readonly phantoms: boolean;
+    readonly models: boolean; readonly art: boolean; readonly enemyModels: boolean; readonly appearance: boolean;
+    readonly audio: boolean; readonly decorations: boolean; readonly phantoms: boolean;
   };
 }
 
@@ -99,6 +99,7 @@ export function packReleaseContent(input: ReleaseInput, recordings: readonly Rel
       // Library swaps load GLBs too.
       models: primary.models !== undefined || alternate?.models !== undefined || PART_ROLES.some(role => input.library[role].length > 0),
       art: draft.art.assets.length > 0,
+      enemyModels: Object.values(input.enemies).some(entry => entry?.type === 'model'),
       appearance: draft.appearance.length > 0,
       audio: hasAudio(input.audio) || levelSoundSources(input.level).length > 0,
       decorations: input.level.objects.some(object => object.kind === 'decoration'),

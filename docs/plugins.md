@@ -85,6 +85,12 @@ version, without legacy readers or aliases. Version 2 breaks version-1 contracts
   and `ProjectilePose` gains `kind`, `'bolt'` or `'arrow'`.
 - The course has one look, so the Workshop SDK drops `ArtMode` and `edits.artMode()`, and
   `ProjectArt` drops `mode`.
+- Each species' `EnemyArtSettings` entry is `null`, pixel art `SpriteArt` (`{ type: 'sprite', frames,
+  palette }`) or a [3D model](enemy-models.md) `ModelArt` (`{ type: 'model', asset, clips, motion }`).
+  Workshop `edits.enemies()` keeps a model entry only as it is; `edits.enemyModel()` and
+  `edits.enemyClips()` give a species a model and choose its clips.
+- `EnemyPose` gains `clip` and `clipTime`, enemy looks' `update` also receives the corpses still
+  shown, and `EnemyLookFactory` receives `models`, the engine's `EnemyModelLookFactory`, or `null`.
 
 A plugin's identity comes from the manifest alone, and facet modules never repeat it. Each host
 tells its facet the ID, as `host.plugin`. The ID names the plugin in errors, keys its Workshop

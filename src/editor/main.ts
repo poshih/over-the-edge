@@ -11,6 +11,7 @@ import { Game } from '../game';
 import { Disposal } from '../disposal';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { createCourseArt } from '../course-art-view';
+import { createEnemyModels } from '../enemy-models';
 import { levelSpawn } from '../level';
 import { createPhantomPlayback } from '../phantom-playback';
 import { Appearance } from './appearance';
@@ -130,6 +131,8 @@ const game = boot(() => new Game({
   decorations: createDecorationView,
   // The course draws the project's GLBs, as its releases draw them, each loaded from the project as the level uses it.
   courseArt: { create: createCourseArt, fetch: (id) => project.courseMeshBlob(id) },
+  // Enemies draw their project models as releases draw them, each GLB loaded from the project once a species uses it.
+  enemyModels: { create: createEnemyModels, fetch: (id) => project.courseMeshBlob(id) },
   media,
   // The Workshop never plays trigger videos: each is skipped at once and its trigger goes on, so testing
   // is never interrupted. Releases play them.

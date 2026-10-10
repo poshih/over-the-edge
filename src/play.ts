@@ -3,6 +3,7 @@ import './play.css';
 import pins, { course } from 'virtual:game-content';
 import createCharacterModels from 'virtual:game-character-models';
 import createCourseArt from 'virtual:game-art';
+import createEnemyModels from 'virtual:game-enemy-models';
 import loadAppearance from 'virtual:game-appearance';
 import audioOutput from 'virtual:game-audio';
 import createDecorations from 'virtual:game-decorations';
@@ -18,7 +19,7 @@ const fatal = document.querySelector<HTMLElement>('#fatal-error');
 if (!canvas || !mount || !fatal) throw new Error('The game canvas and interface mounts are required.');
 
 const release = new Release({ canvas, mount, fatal }, {
-  pins, course, createCharacterModels, createCourseArt, loadAppearance, audioOutput, createDecorations, phantoms,
+  pins, course, createCharacterModels, createCourseArt, createEnemyModels, loadAppearance, audioOutput, createDecorations, phantoms,
   kinds, runtimePlugins, releasePlugins,
 });
 if (import.meta.hot) {

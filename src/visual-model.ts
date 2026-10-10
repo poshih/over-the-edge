@@ -1,7 +1,7 @@
 import {
   Box3, Camera, InstancedMesh, InterleavedBufferAttribute, Light, Line, LoadingManager, Mesh, Points, SkinnedMesh, Texture, Vector3,
 } from 'three';
-import type { BufferAttribute, BufferGeometry, Group, Material, Object3D, Skeleton } from 'three';
+import type { AnimationClip, BufferAttribute, BufferGeometry, Group, Material, Object3D, Skeleton } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { ModelError as AppearanceError, MODEL_LIMITS } from './model-data';
 
@@ -140,6 +140,8 @@ export interface LoadedVisual {
   triangles: number;
   // Scene objects by glTF node index; loader-assigned names are sanitized and deduplicated.
   nodes: ReadonlyMap<number, Object3D>;
+  // Its animation clips, each named as in the GLB.
+  animations: readonly AnimationClip[];
   footprint: () => VisualFootprint;
   dispose: () => void;
 }
@@ -246,7 +248,7 @@ export async function loadVisualModel(blob: Blob): Promise<LoadedVisual> {
       const node = gltf.parser.associations.get(object)?.nodes;
       if (node !== undefined) nodes.set(node, object);
     });
-    return { scene: gltf.scene, bounds, triangles, nodes, footprint, dispose };
+    return { scene: gltf.scene, bounds, triangles, nodes, animations: gltf.animations, footprint, dispose };
   } catch (error) {
     dispose();
     throw error;

@@ -28,6 +28,7 @@ import { enemyMotion } from './enemy-art-data';
 import { DEFAULT_LOOK } from './game-look';
 import type { GameLook } from './game-look';
 import type { CourseArtSource } from './course-art-view';
+import type { EnemyModelSource } from './enemy-models';
 import type { HammerHead } from './hammer-head';
 import type { PartRole } from './model-library';
 import type { PartModel } from './character-view';
@@ -139,6 +140,8 @@ export class Game {
     look?: GameLook;
     // Draws the course artwork's GLBs, when the game draws any.
     courseArt?: CourseArtSource | null;
+    // Draws enemies' 3D models, when the game draws any.
+    enemyModels?: EnemyModelSource | null;
     // Creates the decoration view, when the game draws decorations.
     decorations?: (() => DecorationView) | null;
     // Whether play-video events play or are skipped; they play by default. The Workshop skips them.
@@ -168,7 +171,8 @@ export class Game {
         DEFAULT_CHARACTER_FIGURE, this.journal, enemyMotion(this.currentLook.enemies));
       this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
         characterModels: options.characterModels, content: options.content, look: this.currentLook,
-        courseArt: options.courseArt, subscribeTerrain: (listener) => this.simulation.subscribeTerrain(listener),
+        courseArt: options.courseArt, enemyModels: options.enemyModels,
+        subscribeTerrain: (listener) => this.simulation.subscribeTerrain(listener),
         onNotice: options.onNotice, decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
         onCharacterFigure: (figure) => this.simulation.setCharacterFigure(figure),
       });
@@ -471,8 +475,9 @@ export class Game {
     return () => { this.lookListeners.delete(listener); };
   }
 
-  // Loads every GLB the look's course artwork lists and then draws it, so the course draws whole from its first frame; a
-  // release waits for it before play. A look set later draws each GLB as it loads.
+  // Loads every GLB the look's course artwork lists, and its enemies' models, and then draws it, so the course and its
+  // enemies draw whole from their first frame; a release waits for it before play. A look set later draws each GLB as it
+  // loads.
   loadArtwork(signal: AbortSignal): Promise<void> {
     return this.view.loadArtwork(this.currentLook.art, this.currentLook.enemies, signal);
   }

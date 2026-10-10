@@ -15,8 +15,8 @@ export type { HudSettings } from '../hud';
 export { formatElapsedTime } from '../dom';
 export { DEFAULT_LOOKS, LOOKS } from '../object-looks';
 export type {
-  BonfireLook, EnemyLook, EnemyLookFactory, LookName, LookPasses, Looks, ObjectLook, ObjectLooks, PhantomFigureFrame, PhantomLook,
-  PhantomLookFactory, PlatformLook, ProjectileLook, SwitchLook,
+  BonfireLook, EnemyLook, EnemyLookFactory, EnemyModelLook, EnemyModelLookFactory, LookName, LookPasses, Looks, ObjectLook, ObjectLooks,
+  PhantomFigureFrame, PhantomLook, PhantomLookFactory, PlatformLook, ProjectileLook, SwitchLook,
 } from '../object-looks';
 export { CAMERA, DEFAULT_CAMERA_DIRECTOR } from '../camera-director';
 export type { CameraAim, CameraDirector, CameraDirectorFactory, CameraView } from '../camera-director';
@@ -45,7 +45,7 @@ export { OBSTACLE_LINE } from '../obstacle-line';
 export { ARM_LAYER } from '../arm-layer';
 export type { Point } from '../config';
 export type { GameTheme } from '../theme';
-export type { EnemyArtSettings } from '../enemy-art-data';
+export type { EnemyArtSettings, ModelArt, SpriteArt } from '../enemy-art-data';
 export type { EnemyClipRole } from '../enemy-motion-data';
 export { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from '../enemy-types';
 export type { EnemyEvent, EnemyFacing, EnemyPhase, EnemyPose, EnemySpecies } from '../enemy-types';

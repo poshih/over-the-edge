@@ -6,14 +6,12 @@ import { createEnemyAtlas } from './enemy-art';
 import type { EnemyArtSettings } from './enemy-art-data';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
 import type { EnemyEvent, EnemyPhase, EnemyPose, EnemySpecies } from './enemy-types';
+import { ENEMY_TINT } from './enemy-tint';
 import { InstanceSlots, markInstanceSlot } from './instancing';
 import { OBSTACLE_LINE } from './obstacle-line';
 import type { EnemyLook } from './object-looks';
 
-const VISUAL = {
-  alphaCutoff: 0.5, warningColor: 0xffae53,
-  warningPulseHz: 5, warningMinimum: 0.3, warningAmplitude: 0.4, hurtFlash: 0.9,
-} as const;
+const ALPHA_CUTOFF = 0.5;
 const FRAME_RATE: Readonly<Record<EnemySpecies, number>> = { bird: 8, 'hollow-soldier': 6, 'hollow-archer': 6 };
 const PHASE: Readonly<Record<EnemyPhase, number>> = {
   patrol: 0, windup: 1, dive: 2, recover: 3, hurt: 4, dead: 5,
@@ -56,8 +54,12 @@ export class EnemyView implements EnemyLook {
   private clockWrites = 0;
   private artChanges = 0;
 
-  constructor(art: EnemyArtSettings) {
+  // The species another look draws, whose poses this one leaves alone; it may change.
+  private readonly skipped: ReadonlySet<EnemySpecies>;
+
+  constructor(art: EnemyArtSettings, skipped: ReadonlySet<EnemySpecies> = new Set()) {
     this.art = art;
+    this.skipped = skipped;
     this.atlas = createEnemyAtlas(art);
     this.root.name = 'enemies';
     this.root.visible = false;
@@ -69,7 +71,7 @@ export class EnemyView implements EnemyLook {
         atlas: { value: this.atlas.texture },
         atlasSize: { value: new Vector2(this.atlas.texture.image.width, this.atlas.texture.image.height) },
         time: this.clock,
-        warningColor: { value: new Color(VISUAL.warningColor) },
+        warningColor: { value: new Color(ENEMY_TINT.warningColor) },
       },
       depthTest: true, depthWrite: true, transparent: false, toneMapped: false,
       vertexShader: `
@@ -88,8 +90,8 @@ export class EnemyView implements EnemyLook {
           death = enemyState.y == ${PHASE.dead}.0
             ? clamp(age / ${ENEMY_BEHAVIOR.deathSeconds}, 0.0, 1.0) : 0.0;
           warning = enemyState.y == ${PHASE.windup}.0
-            ? ${VISUAL.warningMinimum} + ${VISUAL.warningAmplitude} *
-              (0.5 + 0.5 * sin(age * ${VISUAL.warningPulseHz * Math.PI * 2})) : 0.0;
+            ? ${ENEMY_TINT.warningMinimum} + ${ENEMY_TINT.warningAmplitude} *
+              (0.5 + 0.5 * sin(age * ${ENEMY_TINT.warningPulseHz * Math.PI * 2})) : 0.0;
           hurt = enemyState.y == ${PHASE.hurt}.0
             ? 1.0 - smoothstep(0.0, ${ENEMY_BEHAVIOR.hurtSeconds}, age) : 0.0;
           float frame = mod(floor(time * enemyState.w), ${this.atlas.frameCount}.0);
@@ -117,13 +119,13 @@ export class EnemyView implements EnemyLook {
         }
         void main() {
           vec4 color = texture2D(atlas, atlasUv);
-          if (color.a < ${VISUAL.alphaCutoff}) discard;
+          if (color.a < ${ALPHA_CUTOFF}) discard;
           // A fixed 4x4 pixel-space dither dissolves without sorted transparency.
           vec2 pixel = floor(artPixel);
           float threshold = (4.0 * bayer2(pixel) + bayer2(floor(pixel / 2.0)) + 0.5) / 16.0;
           if (death >= threshold) discard;
           color.rgb = mix(color.rgb, warningColor, warning);
-          color.rgb = mix(color.rgb, vec3(1.0), hurt * ${VISUAL.hurtFlash});
+          color.rgb = mix(color.rgb, vec3(1.0), hurt * ${ENEMY_TINT.hurtFlash});
           gl_FragColor = vec4(color.rgb, 1.0);
           #include <colorspace_fragment>
         }
@@ -176,7 +178,7 @@ export class EnemyView implements EnemyLook {
 
   update(poses: readonly EnemyPose[], time: number): void {
     this.ensureLive();
-    for (const pose of poses) this.upsert(pose);
+    for (const pose of poses) if (!this.skipped.has(pose.species)) this.upsert(pose);
     if (this.clock.value !== time) {
       this.clock.value = time;
       this.clockWrites++;
