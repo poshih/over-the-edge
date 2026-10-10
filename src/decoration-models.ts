@@ -543,13 +543,17 @@ export function builtInDecoration(id: string): DecorationModel | undefined {
   return MODELS.get(id);
 }
 
+/** Whether a decoration of `model` can be drawn: the library has it, or `art`, the course artwork, maps it to a GLB. */
+export function drawableDecorationModel(model: string, art: DecorationArt): boolean {
+  return MODELS.has(model) || decorationAsset(art, model) !== undefined;
+}
+
 /**
  * A level's decorations that nothing can draw, as one line each: their model is neither in the
  * library nor drawn by a GLB in `art`, the course artwork that draws decorations.
  */
-export function unknownDecorationModels(level: LevelDefinition, art: DecorationArt): string[] {
-  return level.objects.flatMap((object) => object.kind === 'decoration' && !MODELS.has(object.model) &&
-    decorationAsset(art, object.model) === undefined
+export function unknownDecorationModels(level: Pick<LevelDefinition, 'objects'>, art: DecorationArt): string[] {
+  return level.objects.flatMap((object) => object.kind === 'decoration' && !drawableDecorationModel(object.model, art)
     ? [`Decoration "${object.id}" uses model ${object.model}, which is neither in the decoration library nor in the course artwork.`] : []);
 }
 

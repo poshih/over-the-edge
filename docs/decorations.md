@@ -118,7 +118,12 @@ as the level first draws it, so a decoration shows its GLB a moment after the pr
 selection, outlines and placement use the model as drawn.
 
 The IDs of your own models need not be in the library: a model like `stone-idol` is drawn
-only by its GLB. GLBs follow the course artwork limits: static meshes,
+only by its GLB. **Workshop / Level / Decoration library** lists every model the course artwork
+draws under the **Project** category, and **Object properties**' Model list offers them too, so they
+are placed like the library's. One the library lacks starts at its GLB's own height, 3 m behind
+the course. Every decoration must use a model the library has or the course artwork draws: the
+Workshop refuses a level, imported or loaded from the server, or an edit that would place another,
+as project saves and game builds do. GLBs follow the course artwork limits: static meshes,
 up to 16 meshes and 50,000 triangles each, shared with the terrain's budget of 64 GLBs per
 course.
 

@@ -103,6 +103,8 @@ const ZOOM_FACTOR = 1.35;
 const WHEEL_ZOOM_RATE = 0.0015;
 const GRID_TARGET_PIXELS = 48;
 const DEFAULT_OBJECT_DEPTH = 1.5;
+// Where a project's own model starts when placed: 3 m behind the course, 4 m tall until its GLB says how tall it is.
+const PROJECT_MODEL = { height: 4, z: -3 } as const;
 const WHEEL_LINE_PIXELS = 16;
 /** Vertical pointer distance within which a set piece rests on the terrain top below or above it. */
 const SNAP_PIXELS = 28;
@@ -723,7 +725,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <p class="level-help">Scenery that never collides, to set the mood: far behind the course, just behind it,
           or in front of it. Pick a model, adjust its depth and height under Object properties, then click / tap the
           canvas. These are placeholders: the project's course artwork (npm run pack:course) can draw any model as the
-          game's own GLB, here as in releases.</p>
+          game's own GLB, here as in releases, and the Project category lists the models it draws, the game's own
+          among them. A level whose decorations use a model neither draws cannot be loaded here.</p>
         <p class="level-help">Depth reads best through a perspective camera (Project / Theme). Anything deeper than the
           theme's fog end disappears into the fog, and the theme's backdrop mountains, about 10-25 m back, hide what
           stands behind them: raise the fog end, or hide the backdrop, to show the far horizon.</p>
@@ -921,18 +924,28 @@ export function createLevelEditor(options: LevelEditorOptions) {
   // Most recent drops first to be removed; stale entries (parts already deleted) are skipped.
   const setPieceHistory: { readonly name: string; readonly ids: readonly string[]; readonly labels: readonly LevelLabel[] }[] = [];
   const setPieceButtons = new Map<string, HTMLButtonElement>();
-  // The library model being placed or last chosen, and the grid of the category on show.
+  // The model being placed or last chosen, and the grid of the category on show: one of the library's, or the project's
+  // own models, which its course artwork draws.
   let decorationId: string | null = null;
-  let decorationCategory: DecorationCategory = DECORATION_CATEGORIES[0].id;
-  let decorationGridCategory: DecorationCategory | null = null;
+  let decorationCategory: DecorationCategory | 'project' = DECORATION_CATEGORIES[0].id;
+  let decorationGridCategory: DecorationCategory | 'project' | null = null;
+  let projectModels: readonly { readonly id: string; readonly name: string }[] = [];
+  let projectModelsKey = '';
+  // A project model armed before its GLB arrived, which takes the GLB's own height once that is known.
+  let sizingModel: string | null = null;
   let decorationMirror = false;
   // A decoration about to be placed keeps the turn of the last one placed, as it keeps its mirroring.
   let decorationTurn = 0;
   let decorationPreview: DecorationObject | null = null;
   const decorationButtons = new Map<string, HTMLButtonElement>();
+  const projectButtons = new Map<string, HTMLButtonElement>();
   const decorationList = select('decoration-model');
-  // Holds a model the library does not have, so the inspector can still show it.
-  const unknownModel = document.createElement('option');
+  // The project's own models in the Model list, and its category in the library.
+  const projectOptions = document.createElement('optgroup');
+  projectOptions.label = 'Project';
+  const projectCategory = document.createElement('option');
+  projectCategory.value = 'project';
+  projectCategory.textContent = 'Project';
   const surfaces = new SurfaceIndex(() => level.definition());
 
   const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts() ||
@@ -1090,11 +1103,6 @@ Export the level first if you want to keep them. Continue without saving?`);
       input('reach').value = String(Number(start.reach.toFixed(4)));
     } else if (decoration !== null) {
       input('angle').value = String(Number((decoration.angle * DEGREES).toFixed(4)));
-      const known = builtInDecoration(decoration.model) !== undefined;
-      unknownModel.value = decoration.model;
-      unknownModel.textContent = `${decoration.model} (no placeholder: drawn only by course artwork)`;
-      if (known) unknownModel.remove();
-      else if (unknownModel.parentElement === null) decorationList.append(unknownModel);
       decorationList.value = decoration.model;
       input('decoration-z').value = String(Number(decoration.z.toFixed(4)));
       input('decoration-height').value = String(Number(decoration.height.toFixed(4)));
@@ -1240,37 +1248,111 @@ Export the level first if you want to keep them. Continue without saving?`);
     button.title = model.description;
     button.setAttribute('aria-pressed', 'false');
     button.append(decorationThumbnail(builtInGeometry(model)), document.createTextNode(model.name));
-    button.addEventListener('click', () => { if (active && !released(button)) armDecoration(model); }, listen);
+    button.addEventListener('click', () => { if (active && !released(button)) armDecoration(model.id); }, listen);
     decorationButtons.set(model.id, button);
     return button;
+  }
+
+  // A button for one of the project's own models, named by its ID; its GLB shows on the course once placed.
+  function projectDecorationButton(model: { readonly id: string; readonly name: string }): HTMLButtonElement {
+    const cached = projectButtons.get(model.id);
+    if (cached !== undefined) return cached;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button level-set-piece level-decoration';
+    button.dataset.decoration = model.id;
+    button.title = `Drawn by ${model.name}`;
+    button.setAttribute('aria-pressed', 'false');
+    button.textContent = modelName(model.id);
+    button.addEventListener('click', () => { if (active && !released(button)) armDecoration(model.id); }, listen);
+    projectButtons.set(model.id, button);
+    return button;
+  }
+
+  // Follows the models the project's course artwork draws: the library's Project category and the Model list offer them.
+  function syncProjectModels(): void {
+    const models = options.decorations.models();
+    const key = models.map(({ id, name }) => `${id}:${name}`).join('/');
+    if (key === projectModelsKey) return;
+    projectModelsKey = key;
+    projectModels = models;
+    projectButtons.clear();
+    decorationGridCategory = null;
+    projectOptions.replaceChildren(...models.filter(({ id }) => builtInDecoration(id) === undefined).map(({ id }) => {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = id;
+      return option;
+    }));
+    if (projectOptions.children.length > 0) decorationList.append(projectOptions);
+    else projectOptions.remove();
+    if (models.length > 0) select('decoration-category').append(projectCategory);
+    else projectCategory.remove();
+    if (models.length === 0 && decorationCategory === 'project') decorationCategory = DECORATION_CATEGORIES[0].id;
+    // A model the project no longer draws cannot be placed.
+    if (tool === 'place-decoration' && decorationId !== null && builtInDecoration(decorationId) === undefined &&
+      !models.some(({ id }) => id === decorationId)) chooseTool('select');
+  }
+
+  // Where a model starts when placed: at the library's height and depth for its models, and at the GLB's own height, 3 m
+  // behind the course, for the project's own; `sized` is false while that GLB has not arrived.
+  function decorationStart(id: string): { readonly height: number; readonly z: number; readonly sized: boolean } {
+    const library = builtInDecoration(id);
+    if (library !== undefined) return { height: library.height, z: library.z, sized: true };
+    const size = options.decorations.size(id);
+    const height = size === null ? PROJECT_MODEL.height
+      : Math.min(DECORATION_LIMITS.maximumHeight, Math.max(DECORATION_LIMITS.minimumHeight, Math.round(size.height * 100) / 100));
+    return { height, z: PROJECT_MODEL.z, sized: size !== null };
+  }
+
+  // A project model armed before its GLB arrived takes the GLB's own height, unless its height was changed meanwhile.
+  function sizePlacement(): void {
+    if (sizingModel === null) return;
+    const object = asDecoration(placement);
+    if (tool !== 'place-decoration' || object === null || object.model !== sizingModel || object.height !== PROJECT_MODEL.height) {
+      sizingModel = null;
+      return;
+    }
+    const start = decorationStart(object.model);
+    if (!start.sized) return;
+    sizingModel = null;
+    placement = validateLevelObject({ ...object, height: start.height });
   }
 
   function renderDecorations(): void {
     // Models are built, and thumbnails painted, on first view of their category.
     if (active && decorationGridCategory !== decorationCategory) {
       decorationGridCategory = decorationCategory;
-      element(root, '.level-decoration-grid').replaceChildren(
-        ...DECORATION_MODELS.filter((model) => model.category === decorationCategory).map(decorationButton));
+      element(root, '.level-decoration-grid').replaceChildren(...decorationCategory === 'project'
+        ? projectModels.map(projectDecorationButton)
+        : DECORATION_MODELS.filter((model) => model.category === decorationCategory).map(decorationButton));
     }
     const full = level.counts().decorations >= DECORATION_LIMITS.objects;
-    for (const [id, button] of decorationButtons) {
-      button.setAttribute('aria-pressed', String(tool === 'place-decoration' && decorationId === id));
-      button.disabled = full;
+    for (const buttons of [decorationButtons, projectButtons]) {
+      for (const [id, button] of buttons) {
+        button.setAttribute('aria-pressed', String(tool === 'place-decoration' && decorationId === id));
+        button.disabled = full;
+      }
     }
     const shown = decorationId === null ? null : builtInDecoration(decorationId) ?? null;
+    const drawn = projectModels.find(({ id }) => id === decorationId);
     const depth = (z: number): string => z < 0 ? `${-z} m behind the course` : z > 0 ? `${z} m in front of it` : 'on the course';
     element(root, '.level-decoration-detail').textContent = full ? `This level already has ${DECORATION_LIMITS.objects} decorations.`
-      : shown === null ? 'Choose a model to see what it is for.'
-        : `${shown.name}: ${shown.description} It starts ${shown.height} m tall, ${depth(shown.z)}.`;
+      : drawn !== undefined ? `${modelName(drawn.id)}: the project's course artwork draws it as ${drawn.name}. It starts ${
+        shown === null ? 'at its own height' : `${shown.height} m tall`}, ${depth(shown?.z ?? PROJECT_MODEL.z)}.`
+        : shown === null ? 'Choose a model to see what it is for.'
+          : `${shown.name}: ${shown.description} It starts ${shown.height} m tall, ${depth(shown.z)}.`;
   }
 
-  function armDecoration(model: DecorationModel): void {
+  function armDecoration(id: string): void {
     cancelGesture();
     const view = camera.state();
-    tool = 'place-decoration'; decorationId = model.id; presetId = null; selectedId = null; drawingCursor = null;
+    const start = decorationStart(id);
+    tool = 'place-decoration'; decorationId = id; presetId = null; selectedId = null; drawingCursor = null;
+    sizingModel = start.sized ? null : id;
     placement = validateLevelObject({
-      kind: 'decoration', id: 'placement-preview', model: model.id, x: view.x, y: view.y - model.height / 2, z: model.z,
-      height: model.height, angle: 0, turn: decorationTurn, mirror: decorationMirror, tint: 0xffffff,
+      kind: 'decoration', id: 'placement-preview', model: id, x: view.x, y: view.y - start.height / 2, z: start.z,
+      height: start.height, angle: 0, turn: decorationTurn, mirror: decorationMirror, tint: 0xffffff,
     });
     renderControls();
     draw();
@@ -2150,9 +2232,17 @@ Export the level first if you want to keep them. Continue without saving?`);
     void armWhenRead(options.meshes.add(file));
   }, listen);
   const unsubscribeMeshes = options.meshes.subscribe(renderMeshes);
+  // The library offers the project's own models, and outlines and handles follow a decoration's model as drawn, which
+  // changes as its GLB arrives.
+  syncProjectModels();
+  const unsubscribeDecorations = options.decorations.subscribe(() => {
+    syncProjectModels();
+    if (!active) return;
+    sizePlacement();
+    renderControls();
+    draw();
+  });
 
-  // Outlines and handles follow a decoration's model as drawn, which changes as its GLB arrives.
-  const unsubscribeDecorations = options.decorations.subscribe(draw);
   for (const preset of TRIGGER_PRESETS) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -2319,9 +2409,11 @@ Export the level first if you want to keep them. Continue without saving?`);
     return { mirror: input('decoration-mirror').checked };
   }), listen);
   select('decoration-category').addEventListener('change', () => {
-    const category = DECORATION_CATEGORIES.find((candidate) => candidate.id === select('decoration-category').value);
+    const value = select('decoration-category').value;
+    const category = value === 'project' && projectModels.length > 0 ? 'project'
+      : DECORATION_CATEGORIES.find((candidate) => candidate.id === value)?.id;
     if (!active || category === undefined) return;
-    decorationCategory = category.id;
+    decorationCategory = category;
     renderControls();
   }, listen);
   input('reach').addEventListener('change', () => {
@@ -2591,6 +2683,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         throw new LevelError('Level JSON is malformed.');
       }
       definition = validateLevel(raw);
+      level.checkDecorations(definition.objects);
     } catch (error) {
       if (!disposed && generation === importGeneration) report(error);
       else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
@@ -2619,6 +2712,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     let definition: LevelDefinition;
     try {
       definition = await downloadServerLevel(entry, events.signal);
+      level.checkDecorations(definition.objects);
     } catch (error) {
       if (!disposed && generation === importGeneration) report(error);
       else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;

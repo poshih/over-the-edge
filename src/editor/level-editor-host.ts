@@ -32,7 +32,9 @@ export interface LevelEditorOptions {
     size: (model: string) => { readonly width: number; readonly height: number; readonly depth: number } | null;
     // Shows a placement or drag as a translucent model in the scene, or nothing.
     preview: (object: DecorationObject | null) => void;
-    // Calls `listener` whenever a model's size may have changed, as when its GLB arrives.
+    // The models the project's course artwork draws, by model ID, each with the name of its GLB.
+    models: () => readonly { readonly id: string; readonly name: string }[];
+    // Calls `listener` whenever those models, or a model's size, may have changed, as when its GLB arrives.
     subscribe: (listener: () => void) => () => void;
   };
   // The project's course meshes, which Level places as terrain.

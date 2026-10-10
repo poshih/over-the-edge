@@ -3,6 +3,9 @@ import {
   validateLevel, validateLevelLabels, validateLevelMetadata, validateLevelObject, validateTriggerTargets,
 } from '../level';
 import type { LevelChange, LevelDefinition, LevelObject, StartObject, TriggerObject } from '../level';
+import { NO_DECORATION_ART } from '../decoration-art';
+import type { DecorationArt } from '../decoration-art';
+import { unknownDecorationModels } from '../decoration-models';
 import { ENEMY_LIMITS } from '../enemy-types';
 import { HAZARD_LIMITS } from '../hazards';
 import { LIQUID_LIMITS } from '../liquids';
@@ -73,9 +76,12 @@ export class LevelState {
   private tallies: Counts = emptyCounts();
   private readonly geometryUse = new Map<string, number>();
   private readonly listeners = new Set<(change: LevelChange) => void>();
+  // The course artwork whose models the level may place besides the decoration library's.
+  private decorationArt: () => DecorationArt = () => NO_DECORATION_ART;
 
   constructor(level: LevelDefinition) {
     this.current = validateLevel(level);
+    this.checkDecorations(this.current.objects);
     this.objects = new Map(this.current.objects.map((object) => [object.id, object]));
     this.startObject = levelStart(this.current);
     this.indexObjects();
@@ -97,10 +103,25 @@ export class LevelState {
     return { ...this.tallies, total: this.objects.size };
   }
 
+  /**
+   * Keeps the level to decorations something draws: the decoration library's models and those `art` maps. Every change
+   * that would place another is refused, as saves and releases refuse it.
+   */
+  drawDecorationsWith(art: () => DecorationArt): void {
+    this.decorationArt = art;
+  }
+
+  /** Refuses decorations among `objects` whose model nothing draws, with the message a save gives. */
+  checkDecorations(objects: readonly LevelObject[]): void {
+    const unknown = unknownDecorationModels({ objects }, this.decorationArt());
+    if (unknown.length > 0) throw new LevelError(unknown.slice(0, 8).join(' ') + (unknown.length > 8 ? ` (${unknown.length - 8} more)` : ''));
+  }
+
   upsert(value: unknown): void {
     const object = validateLevelObject(value);
     const previous = this.objects.get(object.id);
     if (previous && JSON.stringify(previous) === JSON.stringify(object)) return;
+    if (object.kind === 'decoration') this.checkDecorations([object]);
     if ((object.kind === 'start') !== (previous?.kind === 'start')) {
       throw new LevelError('A level needs one start location. Move the existing start instead of replacing or duplicating it.');
     }
@@ -151,6 +172,7 @@ export class LevelState {
    */
   edit(batch: LevelBatchEdit): readonly LevelObject[] {
     const added = (batch.add ?? []).map(validateLevelObject);
+    this.checkDecorations(added);
     const replacedLabels = batch.labels === undefined ? null : validateLevelLabels(batch.labels);
     const removed = new Map<string, LevelObject>();
     for (const id of batch.remove ?? []) {
@@ -206,6 +228,7 @@ export class LevelState {
 
   replace(value: unknown): void {
     const level = validateLevel(value);
+    this.checkDecorations(level.objects);
     const next = new Map(level.objects.map((object) => [object.id, object]));
     const remove = [...this.objects.keys()].filter((id) => !next.has(id));
     const upsert = level.objects.filter((object) => JSON.stringify(this.objects.get(object.id)) !== JSON.stringify(object));
@@ -222,6 +245,7 @@ export class LevelState {
    */
   merge(value: unknown): void {
     const level = validateLevel(value);
+    this.checkDecorations(level.objects);
     const next = new Map(level.objects.map((object) => [object.id, object]));
     const remove = [...this.objects.keys()].filter((id) => !next.has(id));
     const upsert = level.objects.filter((object) => JSON.stringify(this.objects.get(object.id)) !== JSON.stringify(object));

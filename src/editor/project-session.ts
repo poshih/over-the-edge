@@ -9,6 +9,7 @@ import { embeddedModel } from '../character-profile';
 import { checkCharacterModels } from '../character-model-check';
 import { ART_LIMITS, ArtError, artName } from '../art-types';
 import type { DecorationArt } from '../decoration-art';
+import { unknownDecorationModels } from '../decoration-models';
 import { validateCoursePackage } from '../course-package';
 import { STARTER_LEVEL } from '../default-course';
 import { DEFAULT_ENEMY_ART, validateEnemyArt } from '../enemy-art-data';
@@ -589,6 +590,17 @@ export class ProjectSession {
   // The course artwork's GLBs, which the level places as terrain meshes and course artwork maps onto decorations.
   courseMeshes(): readonly { readonly id: string; readonly name: string }[] {
     return this.art.assets.map(({ id, name }) => ({ id, name }));
+  }
+
+  // The decoration models the course artwork draws, by model ID, as the project stands.
+  decorationArt(): DecorationArt {
+    return this.art.decorations;
+  }
+
+  // The decoration models the course artwork draws, by model ID, each with the name of the GLB drawing it.
+  decorationModels(): readonly { readonly id: string; readonly name: string }[] {
+    const names = new Map(this.art.assets.map((asset) => [asset.id, asset.name]));
+    return Object.entries(this.art.decorations).map(([id, asset]) => ({ id, name: names.get(asset) ?? asset }));
   }
 
   // A course mesh's GLB, from this page, the server project that holds it or the published project.
@@ -1686,6 +1698,14 @@ export class ProjectSession {
     opened: CourseArt | null = null): Promise<void> {
     const has = new Set(names);
     const level = has.has('level') ? validateLevel(values.get('level')) : null;
+    // The level, kept or incoming, must be drawable with the course artwork it will have, so sections that would leave a
+    // decoration nothing draws are refused before anything in the page changes.
+    const decorationArt = opened?.decorations ?? (has.has('art') ? manifest.art.decorations : this.art.decorations);
+    const stranded = unknownDecorationModels(level ?? this.workspace.level.get(), decorationArt);
+    if (stranded.length > 0) {
+      throw new ProjectError(stranded.slice(0, 8).join(' ') + (stranded.length > 8 ? ` (${stranded.length - 8} more)` : ''),
+        { section: level === null ? 'art' : 'level' });
+    }
     const primary = has.has('characters/primary') ? values.get('characters/primary') === null ? EMPTY_SPRITES
       : validateProjectCharacter(values.get('characters/primary')) : null;
     const alternate = has.has('characters/alternate') ? values.get('characters/alternate') === null ? null

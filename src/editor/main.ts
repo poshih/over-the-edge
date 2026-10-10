@@ -196,6 +196,8 @@ const project: ProjectSession = new ProjectSession({
   },
   published: publishedProject,
 });
+// The level places only decorations something draws: the library's models and those the project's course artwork maps.
+level.drawDecorationsWith(() => project.decorationArt());
 // Play is recorded for phantoms unless this browser turned recording off.
 const RECORDING_KEY = 'over-the-edge:workshop:recording';
 function recordingPreference(): boolean {
@@ -330,7 +332,12 @@ const levelEditor = createLevelEditor({
   decorations: {
     size: (model) => decorations.size(model),
     preview: (object) => decorations.setPreview(object),
-    subscribe: (listener) => decorations.subscribe(listener),
+    models: () => project.decorationModels(),
+    subscribe: (listener) => {
+      const unsubscribeView = decorations.subscribe(listener);
+      const unsubscribeProject = project.subscribe((event) => { if (event.kind === 'content') listener(); });
+      return () => { unsubscribeView(); unsubscribeProject(); };
+    },
   },
   meshes: {
     list: () => project.courseMeshes(),

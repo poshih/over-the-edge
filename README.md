@@ -1337,7 +1337,8 @@ an obelisk, a knight statue), wilds (dead trees, a glowing golden great tree, cr
 rock shelf for background scenery to stand on, a mountain ridge), relics (graves, a sword grave, skulls, a hanging cage, chains, banners,
 fences) and fire & light (an ember cairn, a brazier, a candelabra, a lantern post). Pick
 one, tune its depth, height, tint and mirror under **Object properties**, then click/tap
-where its base should stand. Near the course its base rests on the terrain top under the
+where its base should stand. Its **Project** category lists the models the project's course
+artwork draws, the game's own among them. Near the course its base rests on the terrain top under the
 pointer. **Select decorations** picks and drags them, nearest first, at their own depth;
 ordinary selecting never picks them, so scenery cannot get in the way of editing the course.
 

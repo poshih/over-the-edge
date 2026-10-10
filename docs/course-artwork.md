@@ -206,7 +206,10 @@ placeholder of every decoration of that model, including decorations placed afte
 in the Workshop and in releases alike. A model ID the library lacks, such as `stone-idol`,
 is drawn only by its GLB. The Workshop loads a decoration's GLB as the level first draws it,
 and selects, outlines and places the decoration by the model as drawn; a GLB that cannot load
-is reported, and its decorations draw their built-in model if the library has one.
+is reported, and its decorations draw their built-in model if the library has one. The
+**Project** category of **Level / Decoration library** offers every model the course artwork
+draws. A decoration's model must be in the library or drawn by the course artwork: the Workshop
+refuses levels and edits that break this, as saves and builds do.
 
 A decoration model keeps its own proportions, unlike terrain meshes, which stretch to
 their box. The game measures the GLB's bounding box and scales it uniformly so its
