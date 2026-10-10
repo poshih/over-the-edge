@@ -21,14 +21,25 @@ place keeps the turn, as it keeps the mirroring. A translucent preview follows t
 (within 20 m of it) the base rests on the terrain top under the pointer, so graves and
 braziers sit on the ground.
 
-After placing, the Workshop switches to **Select decorations**, with the new decoration
-selected. This tool picks the nearest decoration under the pointer and drags it in its own
-depth plane, so it stays under the pointer however deep it is. Its round handle tilts it about
-its base, Shift snapping to 15°, as **Q** / **E** do. The dial under it, a turntable whose knob
-marks where the model's front faces, turns it as you drag left or right, Shift snapping to 15°,
-as **[** / **]** do; **Delete selected object** or
-the Delete key removes it. Ordinary selecting never picks decorations, so scenery never gets in
-the way of editing the course; click **Select decorations** again to go back to it.
+After placing, the Level editor switches to **Scenery**, with the new decoration selected. The
+**Course | Scenery** switch at the top of **Build** chooses what the canvas edits: **Course** picks
+what the player climbs and never picks decorations, so scenery never gets in the way of editing
+the course, and **Scenery** picks only decorations. In Scenery, a click picks the nearest
+decoration under the pointer and drags it in its own depth plane, so it stays under the pointer
+however deep it is. **Pick scenery at** limits picking to one of the
+[depth layers](depth-and-parallax.md#build-layers), so a far piece can be picked behind a nearer
+one: **Front**, the foreground, on or in front of the course; **Near**, up to 12 m behind it; **Middle**, 12-80 m
+behind it; and **Far**, beyond 80 m. **All**, the default, picks at any depth. A selected
+decoration's round handle tilts it about its base, Shift snapping to 15°, as **Q** / **E** do. The
+dial under it, a turntable whose knob marks where the model's front faces, turns it as you drag
+left or right, Shift snapping to 15°, as **[** / **]** do; **Delete selected object** or the Delete
+key removes it. Switch back to **Course** to edit the course. There, turning off **Show scenery**
+hides every decoration while you work, without changing the level; Scenery, play and the other
+Workshop tabs always show them.
+
+The rest of the background is the theme's: the sky, fog, backdrop mountains, background blur
+and the perspective camera that gives depth its parallax are in **Workshop / Project / Theme**
+(see [depth and parallax](depth-and-parallax.md)).
 
 | Property | Meaning |
 | --- | --- |

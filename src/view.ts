@@ -707,7 +707,8 @@ export class GameView {
 
   // Whether anything draws in front of the obstacle line, over the actors.
   private drawsFront(): boolean {
-    return (this.decorations !== null && this.decorations.front.children.length > 0) || this.looks.drawsFront();
+    const decorations = this.decorations;
+    return (decorations !== null && decorations.front.visible && decorations.front.children.length > 0) || this.looks.drawsFront();
   }
 
   // Whether anything shows over the tool.

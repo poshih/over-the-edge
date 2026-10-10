@@ -338,6 +338,7 @@ const levelEditor = createLevelEditor({
       const unsubscribeProject = project.subscribe((event) => { if (event.kind === 'content') listener(); });
       return () => { unsubscribeView(); unsubscribeProject(); };
     },
+    show: (shown) => decorations.setShown(shown),
   },
   meshes: {
     list: () => project.courseMeshes(),

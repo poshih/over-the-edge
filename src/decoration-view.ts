@@ -233,6 +233,12 @@ export class DecorationView {
     if (this.preview.parent !== group) group.add(this.preview);
   }
 
+  /** Shows or hides every decoration, the placement preview included, without changing what is placed. */
+  setShown(shown: boolean): void {
+    this.root.visible = shown;
+    this.front.visible = shown;
+  }
+
   /** Recomputes the culling bounds of batches that changed since the last frame. */
   update(): void {
     if (this.dirtyBounds.size === 0) return;

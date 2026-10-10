@@ -49,8 +49,11 @@ export type { LevelEditorOptions } from './level-editor-host';
 
 // 'player' moves the live player without editing the level; it previews in the start's pose.
 type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-hazard' | 'place-set-piece' | 'place-decoration' | 'start' | 'player';
-// 'decorate' selects and moves decorations; 'select' never picks them, so scenery cannot get in the way of the course.
+// 'decorate' selects and moves decorations, the scenery; 'select' never picks them, so scenery cannot get in the way of
+// the course.
 type Tool = 'select' | 'decorate' | 'draw' | PlacementTool;
+// The depths Scenery mode picks decorations at: all of them, or one of the depth guide's layers.
+type SceneryBand = 'all' | 'front' | 'near' | 'middle' | 'far';
 interface Bounds { left: number; right: number; bottom: number; top: number }
 interface TerrainPreset { id: string; label: string; shape: ShapeKind; width: number; height: number }
 interface TriggerPreset {
@@ -245,6 +248,29 @@ function asPlatform(object: LevelObject | null): PlatformObject | null {
 function isPlacementTool(tool: Tool): tool is PlacementTool {
   return tool === 'place' || tool === 'place-trigger' || tool === 'place-enemy' || tool === 'place-hazard' || tool === 'place-set-piece' ||
     tool === 'place-decoration' || tool === 'start' || tool === 'player';
+}
+
+// Whether `tool` edits the scenery rather than the course.
+function editsScenery(tool: Tool): boolean {
+  return tool === 'decorate' || tool === 'place-decoration';
+}
+
+// Where the depth guide's scenery layers meet, in metres behind the course: Near reaches 12 m back and Middle 80 m; Far
+// lies beyond, and Front is on or in front of the course.
+const SCENERY_DEPTHS = { middle: 12, far: 80 } as const;
+
+function inBand(z: number, band: SceneryBand): boolean {
+  switch (band) {
+    case 'all': return true;
+    case 'front': return z >= 0;
+    case 'near': return z < 0 && z >= -SCENERY_DEPTHS.middle;
+    case 'middle': return z < -SCENERY_DEPTHS.middle && z >= -SCENERY_DEPTHS.far;
+    case 'far': return z < -SCENERY_DEPTHS.far;
+  }
+}
+
+function isSceneryBand(value: string | undefined): value is SceneryBand {
+  return value === 'all' || value === 'front' || value === 'near' || value === 'middle' || value === 'far';
 }
 
 // Bonfires, traps, liquid pools and elevator platforms: objects the palette places whole, each by its anchor.
@@ -449,10 +475,31 @@ export function createLevelEditor(options: LevelEditorOptions) {
       ${sectionMarkup({ id: 'level-build', title: 'Build', hint: 'Tools, view and object palettes', open: true }, `
       <fieldset class="tuning-group level-tools">
         <legend class="visually-hidden">Build</legend>
-        <div class="level-action-row">
-          <button type="button" class="button" data-level-tool="decorate" aria-pressed="false">Select decorations</button>
-          <button type="button" class="button" data-level-tool="player" aria-pressed="false">Place player</button>
+        <div class="level-layer-switch" role="group" aria-label="Edit">
+          <button type="button" class="button" data-level-layer="course" aria-pressed="true"
+            title="Edit what the player climbs: terrain, triggers, enemies, traps and platforms. Scenery cannot be picked.">Course</button>
+          <button type="button" class="button" data-level-layer="scenery" aria-pressed="false"
+            title="Edit the decorations behind and in front of the course, which never collide. The course cannot be picked.">Scenery</button>
         </div>
+        <label class="level-checkbox level-show-scenery" for="level-show-scenery"
+          title="Hide the decorations while you edit the course; the level keeps them, and play always shows them">
+          <input id="level-show-scenery" type="checkbox" checked /> Show scenery
+        </label>
+        <div class="level-scenery-pick" hidden>
+          <p class="level-help level-palette-label" id="level-scenery-pick-label">Pick scenery at</p>
+          <div class="level-scenery-bands" role="group" aria-labelledby="level-scenery-pick-label">
+            <button type="button" class="button" data-level-band="all" aria-pressed="true" title="Any depth, nearest first">All</button>
+            <button type="button" class="button" data-level-band="front" aria-pressed="false"
+              title="On or in front of the course">Front</button>
+            <button type="button" class="button" data-level-band="near" aria-pressed="false"
+              title="Up to ${SCENERY_DEPTHS.middle} m behind the course">Near</button>
+            <button type="button" class="button" data-level-band="middle" aria-pressed="false"
+              title="${SCENERY_DEPTHS.middle}-${SCENERY_DEPTHS.far} m behind the course">Middle</button>
+            <button type="button" class="button" data-level-band="far" aria-pressed="false"
+              title="More than ${SCENERY_DEPTHS.far} m behind the course">Far</button>
+          </div>
+        </div>
+        <button type="button" class="button level-place-player" data-level-tool="player" aria-pressed="false">Place player</button>
         <div class="level-camera-controls" aria-label="Editor camera">
           <button type="button" class="button level-zoom-out" aria-label="Zoom out">−</button>
           <button type="button" class="button level-zoom-in" aria-label="Zoom in">+</button>
@@ -882,6 +929,11 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let active = false;
   let disposed = false;
   let tool: Tool = 'select';
+  // Scenery mode picks only decorations at these depths; Course mode hides them all unless the designer shows them.
+  let sceneryBand: SceneryBand = 'all';
+  let showScenery = true;
+  // Whether the scene was last told to show the decorations.
+  let sceneryShown = true;
   let selectedId: string | null = null;
   let presetId: string | null = null;
   // The latest mesh being read to place; one finishing after another request or a change of tool is not armed.
@@ -1167,6 +1219,17 @@ Export the level first if you want to keep them. Continue without saving?`);
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-tool]')) {
       button.setAttribute('aria-pressed', String(button.dataset.levelTool === tool));
     }
+    const scenery = editsScenery(tool);
+    for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-layer]')) {
+      button.setAttribute('aria-pressed', String((button.dataset.levelLayer === 'scenery') === scenery));
+    }
+    for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-band]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.levelBand === sceneryBand));
+    }
+    element(root, '.level-scenery-pick').hidden = !scenery;
+    element(root, '.level-show-scenery').hidden = scenery;
+    input('show-scenery').checked = showScenery;
+    syncScenery();
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-preset]')) {
       button.setAttribute('aria-pressed', String(isPlacementTool(tool) && button.dataset.levelPreset === presetId));
     }
@@ -1199,10 +1262,13 @@ Export the level first if you want to keep them. Continue without saving?`);
         'wheel and + / − zoom. On a touch screen, drag with two fingers to pan and pinch to zoom. Pick enemies on their bodies, ' +
         'starts and triggers near their centre handle, and liquid pools in their box where no terrain is. Select a trigger to see ' +
         'outgoing links, or a projectile trap or platform for incoming links. Links shows all; drag a trigger\'s link handle onto ' +
-        'a trap or platform to connect. Escape cancels a drag without changing the level. Decorations are picked with Select decorations.',
+        'a trap or platform to connect. Escape cancels a drag without changing the level. Decorations, the scenery, are picked in ' +
+        'Scenery; Show scenery hides them while you edit the course.',
       decorate: 'Click / tap a decoration to select it, nearest first; drag to move it at its own depth, or drag empty space to ' +
-        'pan. Drag its round handle to tilt it, or the dial under it left or right to turn it, Shift snapping to 15°; Q / E tilt it ' +
-        'and [ / ] turn it 15°. The course cannot be picked in this mode; click Select decorations again to pick it. Delete removes the selection.',
+        'pan. Pick scenery at a depth to reach far pieces behind nearer ones. Drag its round handle to tilt it, or the dial under it ' +
+        'left or right to turn it, Shift snapping to 15°; Q / E tilt it and [ / ] turn it 15°. Delete removes the selection. New ' +
+        'scenery comes from the Decoration library; the sky, fog, backdrop mountains and background blur are in Project / Theme. ' +
+        'The course cannot be picked in this mode; switch to Course to pick it.',
       draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
         'Escape cancels. Pan with the middle button or two fingers and zoom as usual; your unfinished outline is kept.',
       place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it; Q / E tilt it 15°, and [ / ] turn a GLB ' +
@@ -1292,7 +1358,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     if (models.length === 0 && decorationCategory === 'project') decorationCategory = DECORATION_CATEGORIES[0].id;
     // A model the project no longer draws cannot be placed.
     if (tool === 'place-decoration' && decorationId !== null && builtInDecoration(decorationId) === undefined &&
-      !models.some(({ id }) => id === decorationId)) chooseTool('select');
+      !models.some(({ id }) => id === decorationId)) chooseTool('decorate');
   }
 
   // Where a model starts when placed: at the library's height and depth for its models, and at the GLB's own height, 3 m
@@ -1585,7 +1651,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     hitTestCount++;
     let hit: DecorationObject | null = null;
     for (const object of level.definition().objects) {
-      if (object.kind !== 'decoration' || (hit !== null && object.z <= hit.z)) continue;
+      if (object.kind !== 'decoration' || !inBand(object.z, sceneryBand) || (hit !== null && object.z <= hit.z)) continue;
       const at = camera.unprojectDepth(client, object.z);
       if (at === null) continue;
       const { width, height } = decorationSize(object);
@@ -1951,8 +2017,21 @@ Export the level first if you want to keep them. Continue without saving?`);
   // A pressed tool or palette button switches off on a second click, back to selecting.
   function released(button: HTMLButtonElement): boolean {
     if (button.getAttribute('aria-pressed') !== 'true') return false;
-    chooseTool('select');
+    chooseTool(selecting());
     return true;
+  }
+
+  // The selecting tool of what is being edited: cancelling in Scenery stays in Scenery.
+  function selecting(): 'select' | 'decorate' {
+    return editsScenery(tool) ? 'decorate' : 'select';
+  }
+
+  // The decorations show, except while the designer edits the course with Show scenery off; leaving Level shows them.
+  function syncScenery(): void {
+    const shown = !active || editsScenery(tool) || showScenery;
+    if (shown === sceneryShown) return;
+    sceneryShown = shown;
+    options.decorations.show(shown);
   }
 
   function chooseTool(next: 'select' | 'decorate' | 'start' | 'player' | 'draw'): void {
@@ -2050,7 +2129,7 @@ Export the level first if you want to keep them. Continue without saving?`);
 
   function cancelDrawing(): void {
     drawing.clear();
-    chooseTool('select');
+    chooseTool(selecting());
   }
 
   function moveSetPiece(world: Point): void {
@@ -2328,10 +2407,31 @@ Export the level first if you want to keep them. Continue without saving?`);
     button.addEventListener('click', () => {
       if (!active || released(button)) return;
       const next = button.dataset.levelTool;
-      if (next !== 'decorate' && next !== 'start' && next !== 'player' && next !== 'draw') throw new Error('Unknown level tool.');
+      if (next !== 'start' && next !== 'player' && next !== 'draw') throw new Error('Unknown level tool.');
       chooseTool(next);
     }, listen);
   }
+  // Course selects the course, Scenery the decorations; choosing either ends any placement.
+  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-layer]')) {
+    button.addEventListener('click', () => {
+      if (!active) return;
+      const next = button.dataset.levelLayer === 'scenery' ? 'decorate' : 'select';
+      if (tool !== next) chooseTool(next);
+    }, listen);
+  }
+  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-level-band]')) {
+    button.addEventListener('click', () => {
+      const band = button.dataset.levelBand;
+      if (!active || !isSceneryBand(band)) return;
+      sceneryBand = band;
+      renderControls();
+    }, listen);
+  }
+  input('show-scenery').addEventListener('change', () => {
+    if (!active) return;
+    showScenery = input('show-scenery').checked;
+    renderControls();
+  }, listen);
   for (const name of ['x', 'y'] as const) {
     input(name).addEventListener('change', () => {
       if (!active) return;
@@ -3256,7 +3356,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         if (gesture?.kind === 'connect') cancelGesture();
         else { selectedId = null; cancelDrawing(); }
         break;
-      case 'v': chooseTool('select'); break;
+      case 'v': chooseTool(selecting()); break;
       case 'm':
         if (tool === 'place-set-piece') toggleSetPieceMirror();
         else if (tool === 'place' && placement !== null && placement.kind === 'terrain') {
@@ -3392,6 +3492,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         setLoading(null);
         decorationPreview = null;
         options.decorations.preview(null);
+        syncScenery();
         terrainPreview = new Map();
         options.meshes.preview(terrainPreview);
         camera.set(null);
@@ -3436,6 +3537,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       drawing.clear();
       active = false; disposed = true; importGeneration++;
       options.decorations.preview(null);
+      syncScenery();
       options.meshes.preview(new Map());
       replays.dispose();
       options.checks.setActive(false);

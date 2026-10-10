@@ -62,6 +62,11 @@ Roughly doubling the depth from one layer to the next keeps them distinct:
 | Middle | 15-60 m back | 51-21% | Crags, towers, rock shelves |
 | Far | 100-1,000 m back | 14-2% | Castles, ridges and the horizon |
 
+The Level editor works in these layers too: in its **Scenery** mode, **Pick scenery at**
+picks only the foreground (**Front**, on or in front of the course), **Near** (up to 12 m back),
+**Middle** (12-80 m back) or **Far** (beyond 80 m), so a far piece can be picked and moved behind
+the nearer layers covering it (see [placing decorations](decorations.md#placing-decorations)).
+
 Give background scenery ground to stand on. Seen through a perspective camera from above, a
 tree standing on empty ground behind the course seems to float as the player climbs past
 it; stand it on **Rock shelf** models, whose tops reach 30 m back, or on hills of its own.

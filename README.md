@@ -756,7 +756,7 @@ outlines only tilt. Drag empty
 space, or drag with the middle button from anywhere, to pan; the wheel and + / - zoom.
 On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
-selecting when you click it again or press Escape.
+selecting, in Course or Scenery as it was, when you click it again or press Escape.
 The level editor's keys work while the **Level** tab is shown, except while a text field
 or the Workshop's tabs, section bar or width handle have focus.
 
@@ -1342,8 +1342,12 @@ fences) and fire & light (an ember cairn, a brazier, a candelabra, a lantern pos
 one, tune its depth, height, tint and mirror under **Object properties**, then click/tap
 where its base should stand. Its **Project** category lists the models the project's course
 artwork draws, the game's own among them. Near the course its base rests on the terrain top under the
-pointer. **Select decorations** picks and drags them, nearest first, at their own depth;
-ordinary selecting never picks them, so scenery cannot get in the way of editing the course.
+pointer. Build's **Course | Scenery** switch chooses what the canvas edits. **Scenery** picks and
+drags decorations, nearest first, at their own depth, and **Pick scenery at** (**Front**, **Near**,
+**Middle** or **Far**) reaches a far piece behind nearer ones. **Course** never picks them, so
+scenery cannot get in the way of editing the course, and turning off **Show scenery** there hides
+them while you work, without changing the level. The sky, fog, backdrop mountains and background
+blur are the theme's, in **Workshop / Project / Theme**.
 
 Dress levels with decorations, not small terrain. Small colliders close together, such
 as headstones, fence posts or rubble within about 1.2 m of each other, leave slots that

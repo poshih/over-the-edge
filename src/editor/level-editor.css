@@ -94,6 +94,24 @@
   gap: 8px;
 }
 
+/* Course | Scenery: what the canvas picks and edits. */
+.level-layer-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.level-scenery-bands {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.level-place-player {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .level-editor .tuning-group {
   min-width: 0;
 }

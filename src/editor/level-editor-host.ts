@@ -36,6 +36,8 @@ export interface LevelEditorOptions {
     models: () => readonly { readonly id: string; readonly name: string }[];
     // Calls `listener` whenever those models, or a model's size, may have changed, as when its GLB arrives.
     subscribe: (listener: () => void) => () => void;
+    // Shows or hides every decoration in the scene, without changing the level.
+    show: (shown: boolean) => void;
   };
   // The project's course meshes, which Level places as terrain.
   meshes: {
