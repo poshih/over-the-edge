@@ -56,11 +56,17 @@ export interface GameUi {
   // Physics / Hammer head, which main.ts fills: it edits the game settings and the model library together.
   hammerHeadMount: HTMLElement;
   jarMount: HTMLElement;
+  // Where main.ts puts Undo and Redo: first among the Workshop header's tools.
+  historyMount: HTMLElement;
   // A Workshop plugin's tab after the built-in ones: its button and pane, and its removal.
   addTab: (options: { readonly id: PluginWorkshopTab; readonly label: string; readonly title?: string }) =>
     { readonly body: HTMLElement; remove(): void };
   // Where Workshop plugins' sections go in a built-in tab: after its own.
   pluginSections: (tab: PluginSectionTab) => HTMLElement;
+  // A tab's name, as its button shows it; throws for a tab the Workshop does not have.
+  tabLabel(tab: WorkshopTab): string;
+  // A tab's pane; null for a tab the Workshop does not have.
+  tabPane(tab: WorkshopTab): HTMLElement | null;
   workshopState: () => WorkshopState;
   closeWorkshop: () => void;
   update: (frame: HudFrame, state: HudState) => void;

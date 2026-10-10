@@ -25,7 +25,8 @@ import { createWorkshopWidth } from './workshop-width';
 import workshopMarkup from './workshop.html?raw';
 
 const WORKSHOP_CLASS = 'workshop-open';
-const TEXT_ENTRY = 'textarea, [contenteditable]:not([contenteditable="false"]), ' +
+// Text entry keeps its keys, such as "/" and Ctrl/Cmd+Z.
+export const TEXT_ENTRY = 'textarea, [contenteditable]:not([contenteditable="false"]), ' +
   'input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="button"], [type="submit"], [type="reset"])';
 const TABS = ['project', 'physics', 'character', 'appearance', 'sprites', 'level'] as const;
 type TuningGroup = (typeof TUNING_FIELDS)[number]['group'];
@@ -74,6 +75,14 @@ export function createUI(options: UiOptions): GameUi {
   const tabs: { readonly id: WorkshopTab; readonly button: HTMLButtonElement; readonly pane: HTMLElement }[] = TABS.map((id) => ({
     id, button: element<HTMLButtonElement>(root, `#${id}-tab`), pane: element<HTMLElement>(root, `#${id}-pane`),
   }));
+  // A tab's name, as its button shows it.
+  const labelOf = (tab: (typeof tabs)[number]): string => tab.button.textContent.trim();
+  const tabLabel = (id: WorkshopTab): string => {
+    const tab = tabs.find((candidate) => candidate.id === id);
+    if (tab === undefined) throw new Error(`Missing Workshop tab: ${id}.`);
+    return labelOf(tab);
+  };
+  const tabPane = (id: WorkshopTab): HTMLElement | null => tabs.find((tab) => tab.id === id)?.pane ?? null;
   const navigation = element<HTMLElement>(root, '.workshop-navigation');
   const tabList = element<HTMLElement>(root, '.workshop-tabs');
   navigation.addEventListener('focusin', (event) => {
@@ -107,7 +116,7 @@ export function createUI(options: UiOptions): GameUi {
   // The section bar lists the selected tab's sections while the Workshop is open.
   const showSections = (): void => {
     const tab = tabs.find((candidate) => candidate.id === selectedTab);
-    sectionBar.show(panel.hidden || tab === undefined ? null : tab.pane, tab?.button.textContent?.trim() ?? '');
+    sectionBar.show(panel.hidden || tab === undefined ? null : tab.pane, tab === undefined ? '' : labelOf(tab));
   };
   const selectTab = (id: WorkshopTab): void => {
     selectedTab = id;
@@ -484,11 +493,17 @@ export function createUI(options: UiOptions): GameUi {
   rememberSections(panel, events.signal);
   keepClosingHeadingsInView(panel, events.signal);
   const quick = element<HTMLElement>(root, '.workshop-quick');
+  // Undo and Redo, which main.ts adds, lead the header's tools, which the search finds.
+  const historyMount = document.createElement('div');
+  historyMount.className = 'workshop-history';
+  historyMount.setAttribute('role', 'group');
+  historyMount.setAttribute('aria-label', 'Undo history');
+  quick.prepend(historyMount);
   const search = createWorkshopSearch({
     root: element(root, '.workshop-search'), signal: events.signal, selectTab, selectedTab: () => selectedTab,
     scopes: () => [
       { label: 'Workshop', root: quick, tab: null },
-      ...tabs.map((tab) => ({ label: tab.button.textContent?.trim() ?? tab.id, root: tab.pane, tab: tab.id })),
+      ...tabs.map((tab) => ({ label: labelOf(tab), root: tab.pane, tab: tab.id })),
     ],
   });
   // "/" finds a control from anywhere except text entry or captured-mouse play.
@@ -504,6 +519,7 @@ export function createUI(options: UiOptions): GameUi {
   renderWorkshop(desktop.matches ? 'open' : 'closed');
   return {
     projectMount, characterMount, appearanceMount, spriteMount, levelMount, hammerHeadMount, jarMount, addTab, pluginSections, workshopState,
+    historyMount, tabLabel, tabPane,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
     applySettings: commitSettings,

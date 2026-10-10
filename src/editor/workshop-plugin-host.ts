@@ -9,11 +9,12 @@ import type { Game } from '../game';
 import type { GameSettings } from '../game-settings';
 import type { PluginData } from '../plugin-data';
 import { isPluginId } from '../plugin-data';
-import { isProjectDataError } from '../project';
 import type { PresentationPreview } from '../character-view';
 import { SCENE_LAYER_CONTRACT } from '../scene-layer';
 import type { SceneLayer } from '../scene-layer';
 import type { Appearance } from './appearance';
+import type { History } from './document/history';
+import type { SectionChange } from './document/project-document';
 import type { WorkshopGameState } from './game-state';
 import type { LevelState } from './level-state';
 import { PROJECT_SECTIONS } from './project-session';
@@ -175,6 +176,7 @@ export interface WorkshopPluginHostOptions {
   readonly game: Game;
   readonly canvas: HTMLCanvasElement;
   readonly project: ProjectSession;
+  readonly history: History;
   readonly level: LevelState;
   readonly character: Pick<SpriteEditorHandle, 'snapshot' | 'subscribe' | 'edits'>;
   readonly appearance: Appearance;
@@ -265,7 +267,6 @@ export class WorkshopPluginHost {
   private readonly running = new Map<string, RunningPlugin>();
   private readonly lifecycle = new AbortController();
   private readonly unsubscribe: (() => void)[] = [];
-  private readonly edits: WorkshopEdits;
   private started = false;
   private workshop: WorkshopState;
   // The snapshot plugins read and the sections it shows; `stale` once anything may have changed them.
@@ -280,12 +281,11 @@ export class WorkshopPluginHost {
   constructor(options: WorkshopPluginHostOptions) {
     this.options = options;
     this.workshop = options.ui.workshopState();
-    this.edits = this.createEdits();
     const changed = (): void => this.projectChanged();
     this.unsubscribe.push(
       options.registry.subscribe((event) => this.registryChanged(event)),
       options.project.subscribe(changed),
-      options.level.subscribe(changed),
+      options.history.document.subscribe('level', changed),
       options.character.subscribe(changed),
       options.appearance.subscribe(changed),
     );
@@ -425,7 +425,7 @@ export class WorkshopPluginHost {
   private snapshot(): WorkshopProjectSnapshot {
     const cached = this.snapshotCache;
     if (cached !== null && !this.stale) return cached.snapshot;
-    const { project, level, character, appearance } = this.options;
+    const { project, history, character, appearance } = this.options;
     const fingerprints = project.fingerprints();
     if (cached !== null && sameProject(cached.fingerprints, fingerprints)) {
       this.stale = false;
@@ -433,7 +433,7 @@ export class WorkshopPluginHost {
     }
     const manifest = project.manifest();
     const snapshot: WorkshopProjectSnapshot = Object.freeze({
-      title: manifest.title, settings: manifest.settings, level: level.definition(),
+      title: manifest.title, settings: manifest.settings, level: history.document.get('level'),
       characters: Object.freeze({ primary: character.snapshot().document, alternate: project.alternateCharacter() }),
       library: manifest.models, theme: manifest.theme, hud: manifest.hud, audio: manifest.audio, enemies: manifest.enemies,
       art: manifest.art, media: manifest.media, armIk: appearance.armIkSettings(), appearance: manifest.appearance,
@@ -499,7 +499,7 @@ export class WorkshopPluginHost {
     const project: WorkshopProject = Object.freeze({
       snapshot: () => this.snapshot(),
       subscribe: (callback: () => void) => listener(plugin.projectListeners, callback),
-      edit: checkedEdits(this.edits, live),
+      edit: checkedEdits(this.createEdits(plugin), live),
     });
     const data: WorkshopPluginData = Object.freeze({
       get: () => options.project.pluginDataOf(plugin.id),
@@ -709,28 +709,32 @@ export class WorkshopPluginHost {
   }
 
   // The engine's edit operations, as the built-in tabs make them: each reports a refusal as its tab does, and returns it.
-  private createEdits(): WorkshopEdits {
+  private createEdits(plugin: RunningPlugin): WorkshopEdits {
     const { options } = this;
     const project = options.project;
     const character = options.character.edits;
-    // The Level tab's operations throw their refusals.
-    const level = (edit: () => void): WorkshopRefusal | null => {
+    const level = (operation: keyof WorkshopLevelEdits,
+      build: (level: LevelState) => SectionChange<'level'> | null): WorkshopRefusal | null => {
+      const key = `plugin:${plugin.id}:level:${operation}`;
       try {
-        edit();
-        return null;
-      } catch (error) {
-        if (!isProjectDataError(error)) throw error;
-        options.notice(error.message, 'error');
-        return error;
+        const refusal = options.history.apply(options.level.command({
+          label: `${plugin.id}: ${operation}`,
+          place: { tab: null, section: null, select: null },
+          coalesce: key,
+        }, build));
+        if (refusal !== null) options.notice(refusal.message, 'error');
+        return refusal;
+      } finally {
+        options.history.seal(key);
       }
     };
     const levelEdits: WorkshopLevelEdits = {
-      upsert: (object) => level(() => options.level.upsert(object)),
-      remove: (id) => level(() => options.level.remove(id)),
-      edit: (batch) => level(() => { options.level.edit(batch); }),
-      labels: (labels) => level(() => options.level.metadata({ labels })),
-      name: (name) => level(() => options.level.metadata({ name })),
-      replace: (definition) => level(() => options.level.merge(definition)),
+      upsert: (object) => level('upsert', (state) => state.upsert(object)),
+      remove: (id) => level('remove', (state) => state.remove(id)),
+      edit: (batch) => level('edit', (state) => state.edit(batch)),
+      labels: (labels) => level('labels', (state) => state.metadata({ labels })),
+      name: (name) => level('name', (state) => state.metadata({ name })),
+      replace: (definition) => level('replace', (state) => state.merge(definition)),
     };
     const characterEdits: WorkshopCharacterEdits = {
       document: (value) => character.setDocument(value),

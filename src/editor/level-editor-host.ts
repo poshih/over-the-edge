@@ -1,12 +1,15 @@
 import type { Point } from '../config';
-import type { DecorationObject } from '../level';
+import type { DecorationCategory } from '../decoration-models';
+import type { DecorationObject, LevelDefinition, LevelObject, StartObject } from '../level';
 import type { MeshTerrain } from '../mesh-collision';
+import type { History } from './document/history';
 import type { LevelChecks } from './level-checks';
 import type { LevelState } from './level-state';
 import type { ProjectSaveTarget } from './project-save';
 import type { PlayedVersion } from './project-session';
 import type { ReplayFigure, ReplaySource } from './replay-viewer';
 import type { ServerLevel } from './server-levels';
+import type { SetPieceCategory } from './set-pieces';
 
 export interface EditorCamera {
   x: number;
@@ -17,6 +20,8 @@ export interface EditorCamera {
 export interface LevelEditorOptions {
   mount: HTMLElement;
   canvas: HTMLCanvasElement;
+  // The project's one history: every level edit the tab makes is a step of it, and the tab follows its document's level.
+  history: History;
   level: LevelState;
   camera: {
     state: () => EditorCamera;
@@ -75,4 +80,78 @@ export interface LevelEditorOptions {
   // False when the project warns about leaving instead (a Workshop built with GAME_PROJECT, which
   // keeps its project, level included, in the browser).
   warnBeforeUnload?: boolean;
+}
+
+// 'player' moves the live player without editing the level; it previews in the start's pose. 'decorate' selects and moves
+// decorations, the scenery; 'select' never picks them, so scenery cannot get in the way of the course.
+export type LevelEditorTool =
+  | 'select' | 'decorate' | 'draw'
+  | 'place' | 'place-trigger' | 'place-enemy' | 'place-hazard'
+  | 'place-set-piece' | 'place-decoration' | 'start' | 'player';
+
+export type LevelEditorDragKind =
+  | 'move' | 'platform-end' | 'connect' | 'pan' | 'pinch'
+  | 'draw' | 'tilt' | 'turn'
+  | Exclude<LevelEditorTool, 'select' | 'decorate' | 'draw'>;
+
+export interface LevelEditorSnapshot {
+  readonly mode: 'edit' | 'inactive';
+  readonly tool: LevelEditorTool;
+  readonly selectedId: string | null;
+  readonly selected: LevelObject | null;
+  readonly preset: string | null;
+  readonly preview: Readonly<LevelObject> | null;
+  readonly dragging: LevelEditorDragKind | null;
+  readonly capturedPointer: number | null;
+  readonly drawing: {
+    readonly vertices: readonly Readonly<Point>[];
+    readonly strokeSamples: number;
+  };
+  readonly dirty: boolean;
+  readonly loading: 'file' | 'server' | null;
+  readonly objectCount: number;
+  readonly start: StartObject;
+  readonly counts: ReturnType<LevelState['counts']>;
+  readonly labelCount: number;
+  readonly camera: Readonly<EditorCamera>;
+  readonly overlay: {
+    readonly visible: boolean;
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+  readonly commits: number;
+  readonly hitTests: number;
+  readonly draws: number;
+  readonly setPieces: {
+    readonly armed: string | null;
+    readonly chosen: string | null;
+    readonly mirror: boolean;
+    readonly category: SetPieceCategory;
+    readonly anchor: Readonly<Point>;
+    readonly snapped: boolean;
+    readonly surfaceIndexBuilds: number;
+    readonly catalog: typeof import('./set-pieces').SET_PIECE_CATALOG;
+  };
+  readonly decorations: {
+    readonly armed: string | null;
+    readonly category: DecorationCategory | 'project';
+    readonly mirror: boolean;
+    readonly turn: number;
+    readonly preview: Readonly<DecorationObject> | null;
+  };
+}
+
+export interface LevelEditorHandle {
+  // Applies unapplied trigger events; false, having said why, while an unfinished outline or an invalid event keeps the
+  // level from being saved, exported or played.
+  preparePlay(): boolean;
+  // Records `definition` as the level last saved; null records that the current level has unsaved changes.
+  markSaved(definition: LevelDefinition | null): void;
+  // Whether work the level does not hold yet is pending: unapplied trigger events, an outline, a bake or a level file.
+  hasPendingEdits(): boolean;
+  setMode(mode: 'edit' | 'inactive'): void;
+  snapshot(): LevelEditorSnapshot;
+  dispose(): void;
 }

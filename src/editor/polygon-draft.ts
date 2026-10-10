@@ -39,10 +39,11 @@ function simplifyStroke(points: readonly Readonly<Point>[], tolerance: number): 
   return points.filter((_point, index) => keep[index] === 1);
 }
 
+// An outline's points as it is drawn; the level's history keeps what each stroke added, so this keeps no history.
 export class PolygonDraft {
   private points: readonly Readonly<Point>[] = [];
-  private readonly history: number[] = [];
 
+  // A new array whenever the outline changes, never changed in place, so a stroke can keep the points before and after.
   get vertices(): readonly Readonly<Point>[] { return this.points; }
 
   append(
@@ -64,20 +65,16 @@ export class PolygonDraft {
     if (next.length > LEVEL_LIMITS.polygonVertices) {
       throw new LevelError(`The outline exceeds ${LEVEL_LIMITS.polygonVertices} points. This stroke was not added; draw a simpler outline.`);
     }
-    if (next.length > this.points.length) {
-      this.history.push(this.points.length);
-      this.points = next;
-    }
+    if (next.length > this.points.length) this.points = next;
     return closed ? 'closed' : 'open';
   }
 
-  undo(): void {
-    const start = this.history.pop();
-    if (start !== undefined) this.points = this.points.slice(0, start);
+  // Puts back points the outline had, as Undo and Redo of a stroke do.
+  restore(vertices: readonly Readonly<Point>[]): void {
+    this.points = vertices;
   }
 
   clear(): void {
     this.points = [];
-    this.history.length = 0;
   }
 }

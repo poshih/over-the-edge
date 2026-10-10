@@ -2,13 +2,15 @@ import {
   DECORATION_LIMITS, geometryKey, LEVEL_LIMITS, LevelError, levelStart, PLATFORM_LIMITS, TRIGGER_LIMITS,
   validateLevel, validateLevelLabels, validateLevelMetadata, validateLevelObject, validateTriggerTargets,
 } from '../level';
-import type { LevelChange, LevelDefinition, LevelObject, StartObject, TriggerObject } from '../level';
+import type { LevelChange, LevelDefinition, LevelLabel, LevelObject, StartObject, TriggerObject } from '../level';
 import { NO_DECORATION_ART } from '../decoration-art';
 import type { DecorationArt } from '../decoration-art';
 import { unknownDecorationModels } from '../decoration-models';
 import { ENEMY_LIMITS } from '../enemy-types';
 import { HAZARD_LIMITS } from '../hazards';
 import { LIQUID_LIMITS } from '../liquids';
+import type { Command } from './document/history';
+import type { ChangeCause, LevelDelta, ProjectDocument, SectionChange, StepInfo } from './document/project-document';
 
 // What each kind of object counts toward: projectile traps and swinging axes share the traps' limit.
 const TALLIES = {
@@ -48,6 +50,18 @@ function checkCounts(counts: Readonly<Counts>): void {
   }
 }
 
+// Counts `object` into (1) or out of (-1) `counts` and `geometry`, the uses of each terrain collision shape.
+function count(counts: Counts, geometry: Map<string, number>, object: LevelObject, change: 1 | -1): void {
+  const name = tally(object);
+  if (name !== null) counts[name] += change;
+  if (object.kind !== 'terrain') return;
+  const key = geometryKey(object);
+  const uses = (geometry.get(key) ?? 0) + change;
+  if (uses < 0) throw new Error('Level geometry reference counts are inconsistent.');
+  if (uses === 0) geometry.delete(key);
+  else geometry.set(key, uses);
+}
+
 function removeTriggerTargets(objects: Iterable<LevelObject>, removed: ReadonlySet<string>): TriggerObject[] {
   const upsert: TriggerObject[] = [];
   if (removed.size === 0) return upsert;
@@ -62,6 +76,18 @@ function removeTriggerTargets(objects: Iterable<LevelObject>, removed: ReadonlyS
   return upsert;
 }
 
+// `labels`, or the level's own when they are equal, so unchanged labels keep their identity.
+function keptLabels(labels: readonly LevelLabel[], level: LevelDefinition): readonly LevelLabel[] {
+  return JSON.stringify(labels) === JSON.stringify(level.labels) ? level.labels : labels;
+}
+
+// The change from `before` to a frozen copy of it with `next`'s name, labels and objects.
+function sectionChange(before: LevelDefinition, next: Pick<LevelDefinition, 'name' | 'labels' | 'objects'>,
+  delta: LevelDelta): SectionChange<'level'> {
+  const after = Object.freeze({ ...before, name: next.name, labels: next.labels, objects: next.objects });
+  return { section: 'level', before, after, delta };
+}
+
 export interface LevelBatchEdit {
   readonly add?: readonly unknown[];
   readonly remove?: readonly string[];
@@ -70,25 +96,25 @@ export interface LevelBatchEdit {
 }
 
 export class LevelState {
-  private current: LevelDefinition;
-  private objects: Map<string, LevelObject>;
+  private readonly document: ProjectDocument;
+  private readonly unsubscribe: () => void;
+  private readonly objects = new Map<string, LevelObject>();
   private startObject: StartObject;
-  private tallies: Counts = emptyCounts();
+  private readonly tallies = emptyCounts();
   private readonly geometryUse = new Map<string, number>();
-  private readonly listeners = new Set<(change: LevelChange) => void>();
   // The course artwork whose models the level may place besides the decoration library's.
   private decorationArt: () => DecorationArt = () => NO_DECORATION_ART;
 
-  constructor(level: LevelDefinition) {
-    this.current = validateLevel(level);
-    this.checkDecorations(this.current.objects);
-    this.objects = new Map(this.current.objects.map((object) => [object.id, object]));
-    this.startObject = levelStart(this.current);
-    this.indexObjects();
+  // Follows the document's level: from each change's delta in O(changed), in full when a project opens. Construct it
+  // before any other subscriber to the level, so its indexes are current when they hear a change.
+  constructor(document: ProjectDocument) {
+    this.document = document;
+    this.startObject = this.index(document.get('level'));
+    this.unsubscribe = document.subscribe('level', (change, cause) => this.follow(change, cause));
   }
 
   definition(): LevelDefinition {
-    return this.current;
+    return this.document.get('level');
   }
 
   object(id: string): LevelObject {
@@ -117,10 +143,19 @@ export class LevelState {
     if (unknown.length > 0) throw new LevelError(unknown.slice(0, 8).join(' ') + (unknown.length > 8 ? ` (${unknown.length - 8} more)` : ''));
   }
 
-  upsert(value: unknown): void {
+  // Checks a whole level as replace() does, for a project to open with: the frozen definition, or throws LevelError.
+  check(value: unknown): LevelDefinition {
+    const level = validateLevel(value);
+    this.checkDecorations(level.objects);
+    return level;
+  }
+
+  // Change builders: each checks against the current level and returns the change it would make, or null when nothing
+  // would change. They throw LevelError and change nothing, not even the indexes, which follow the document.
+  upsert(value: unknown): SectionChange<'level'> | null {
     const object = validateLevelObject(value);
     const previous = this.objects.get(object.id);
-    if (previous && JSON.stringify(previous) === JSON.stringify(object)) return;
+    if (previous && JSON.stringify(previous) === JSON.stringify(object)) return null;
     if (object.kind === 'decoration') this.checkDecorations([object]);
     if ((object.kind === 'start') !== (previous?.kind === 'start')) {
       throw new LevelError('A level needs one start location. Move the existing start instead of replacing or duplicating it.');
@@ -128,49 +163,29 @@ export class LevelState {
     const lookup = (id: string): LevelObject | undefined => id === object.id ? object : this.objects.get(id);
     if (object.kind === 'trigger') validateTriggerTargets(object, lookup);
     if (previous !== undefined && previous.kind !== object.kind) {
-      for (const trigger of this.objects.values()) {
+      for (const trigger of this.definition().objects) {
         if (trigger.kind === 'trigger' && trigger.id !== object.id) validateTriggerTargets(trigger, lookup);
       }
     }
-    const counts = { ...this.tallies };
-    const added = tally(object);
-    const replaced = previous === undefined ? null : tally(previous);
-    if (added !== null) counts[added]++;
-    if (replaced !== null) counts[replaced]--;
-    checkCounts(counts);
-    const nextKey = object.kind === 'terrain' ? geometryKey(object) : null;
-    const previousKey = previous?.kind === 'terrain' ? geometryKey(previous) : null;
-    const freed = previousKey !== null && previousKey !== nextKey && this.geometryUse.get(previousKey) === 1;
-    const kinds = this.geometryUse.size + (nextKey !== null && !this.geometryUse.has(nextKey) ? 1 : 0) - (freed ? 1 : 0);
-    if (kinds > LEVEL_LIMITS.geometryKinds) {
-      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
-    }
-    if (previousKey !== null) this.removeGeometry(previousKey);
-    if (nextKey !== null) this.addGeometry(nextKey);
-    if (object.kind === 'start') this.startObject = object;
-    this.tallies = counts;
-    this.objects.set(object.id, object);
-    this.publish({ ...this.current, objects: Object.freeze([...this.objects.values()]) }, [object], []);
+    this.checkLimits(previous === undefined ? [] : [previous], [object]);
+    return this.change('edit', [object], []);
   }
 
-  remove(id: string): void {
+  // Also strips the trigger events that target the object.
+  remove(id: string): SectionChange<'level'> | null {
     const object = this.object(id);
     if (object.kind === 'start') throw new LevelError('A level needs its start location. Move it instead of deleting it.');
-    const upsert = object.kind === 'shooter' || object.kind === 'platform'
-      ? removeTriggerTargets(this.objects.values(), new Set([id])) : [];
-    if (object.kind === 'terrain') this.removeGeometry(geometryKey(object));
-    const removed = tally(object);
-    if (removed !== null) this.tallies = { ...this.tallies, [removed]: this.tallies[removed] - 1 };
-    this.objects.delete(id);
-    for (const trigger of upsert) this.objects.set(trigger.id, trigger);
-    this.publish({ ...this.current, objects: Object.freeze([...this.objects.values()]) }, upsert, [id]);
+    const cleaned = object.kind === 'shooter' || object.kind === 'platform'
+      ? removeTriggerTargets(this.definition().objects, new Set([id])) : [];
+    return this.change('edit', cleaned, [id]);
   }
 
   /**
-   * Adds new objects, removes existing ones and optionally replaces labels as one atomic change.
-   * Everything is validated before the level changes, and listeners receive a single edit.
+   * Adds new objects, removes existing ones and optionally replaces the labels, as one edit. Its added objects are the
+   * upserts its delta has no previous object for.
    */
-  edit(batch: LevelBatchEdit): readonly LevelObject[] {
+  edit(batch: LevelBatchEdit): SectionChange<'level'> | null {
+    const level = this.definition();
     const added = (batch.add ?? []).map(validateLevelObject);
     this.checkDecorations(added);
     const replacedLabels = batch.labels === undefined ? null : validateLevelLabels(batch.labels);
@@ -188,109 +203,159 @@ export class LevelState {
     }
     const lookup = (id: string): LevelObject | undefined => additions.get(id) ?? (removed.has(id) ? undefined : this.objects.get(id));
     for (const object of added) if (object.kind === 'trigger') validateTriggerTargets(object, lookup);
-    const cleaned = removeTriggerTargets(this.objects.values(), new Set(removed.keys()));
-    const geometry = new Map(this.geometryUse);
-    const counts = { ...this.tallies };
-    const count = (object: LevelObject, change: 1 | -1): void => {
-      const name = tally(object);
-      if (name !== null) counts[name] += change;
-      if (object.kind !== 'terrain') return;
-      const key = geometryKey(object);
-      const next = (geometry.get(key) ?? 0) + change;
-      if (next === 0) geometry.delete(key);
-      else geometry.set(key, next);
-    };
-    for (const object of removed.values()) count(object, -1);
-    for (const object of added) count(object, 1);
-    checkCounts(counts);
-    if (geometry.size > LEVEL_LIMITS.geometryKinds) {
-      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
-    }
-    const labels = replacedLabels !== null && JSON.stringify(replacedLabels) !== JSON.stringify(this.current.labels)
-      ? replacedLabels : this.current.labels;
-    if (added.length === 0 && removed.size === 0 && labels === this.current.labels) return [];
-    for (const id of removed.keys()) this.objects.delete(id);
-    for (const trigger of cleaned) this.objects.set(trigger.id, trigger);
-    for (const object of added) this.objects.set(object.id, object);
-    this.tallies = counts;
-    this.geometryUse.clear();
-    for (const [key, count] of geometry) this.geometryUse.set(key, count);
-    this.publish({ ...this.current, labels, objects: Object.freeze([...this.objects.values()]) }, [...added, ...cleaned], [...removed.keys()]);
-    return added;
+    this.checkLimits(removed.values(), added);
+    const labels = replacedLabels === null ? level.labels : keptLabels(replacedLabels, level);
+    if (added.length === 0 && removed.size === 0 && labels === level.labels) return null;
+    const cleaned = removeTriggerTargets(level.objects, new Set(removed.keys()));
+    return this.change('edit', [...added, ...cleaned], [...removed.keys()], { name: level.name, labels });
   }
 
   // Renames the level or replaces its labels, as one edit; what `value` leaves out stays as it is.
-  metadata(value: Partial<Pick<LevelDefinition, 'name' | 'labels'>>): void {
-    const metadata = validateLevelMetadata({ name: this.current.name, labels: this.current.labels, ...value });
-    if (metadata.name === this.current.name && JSON.stringify(metadata.labels) === JSON.stringify(this.current.labels)) return;
-    this.publish({ ...this.current, ...metadata }, [], []);
+  metadata(value: Partial<Pick<LevelDefinition, 'name' | 'labels'>>): SectionChange<'level'> | null {
+    const level = this.definition();
+    const metadata = validateLevelMetadata({ name: level.name, labels: level.labels, ...value });
+    const labels = keptLabels(metadata.labels, level);
+    if (metadata.name === level.name && labels === level.labels) return null;
+    return this.change('edit', [], [], { name: metadata.name, labels });
   }
 
-  replace(value: unknown): void {
-    const level = validateLevel(value);
-    this.checkDecorations(level.objects);
-    const next = new Map(level.objects.map((object) => [object.id, object]));
-    const remove = [...this.objects.keys()].filter((id) => !next.has(id));
-    const upsert = level.objects.filter((object) => JSON.stringify(this.objects.get(object.id)) !== JSON.stringify(object));
-    this.objects = next;
-    this.current = level;
-    this.startObject = levelStart(level);
-    this.indexObjects();
-    this.emit({ kind: 'replace', level, upsert, remove });
+  // Another level in place of this one: the game restarts the run.
+  replace(value: unknown): SectionChange<'level'> | null {
+    return this.adopt('replace', value);
   }
 
   /**
    * Adopts another version of this level as one incremental edit: only objects that differ are
    * upserted or removed, so an open playtest continues instead of restarting as it does for replace().
    */
-  merge(value: unknown): void {
-    const level = validateLevel(value);
-    this.checkDecorations(level.objects);
-    const next = new Map(level.objects.map((object) => [object.id, object]));
-    const remove = [...this.objects.keys()].filter((id) => !next.has(id));
-    const upsert = level.objects.filter((object) => JSON.stringify(this.objects.get(object.id)) !== JSON.stringify(object));
-    if (remove.length === 0 && upsert.length === 0 && level.name === this.current.name &&
-      JSON.stringify(level.labels) === JSON.stringify(this.current.labels)) return;
-    this.objects = next;
-    this.current = level;
-    this.startObject = levelStart(level);
-    this.indexObjects();
-    this.emit({ kind: 'edit', level, upsert, remove });
+  merge(value: unknown): SectionChange<'level'> | null {
+    return this.adopt('edit', value);
   }
 
-  subscribe(listener: (change: LevelChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  // A command whose run returns `build`'s change, or none for null.
+  command(info: StepInfo & { readonly coalesce?: string | null },
+    build: (level: LevelState) => SectionChange<'level'> | null): Command {
+    return {
+      label: info.label,
+      place: info.place,
+      coalesce: info.coalesce ?? null,
+      run: () => {
+        const change = build(this);
+        return change === null ? [] : [change];
+      },
+    };
   }
 
-  private publish(level: LevelDefinition, upsert: readonly LevelObject[], remove: readonly string[]): void {
-    this.current = Object.freeze(level);
-    this.emit({ kind: 'edit', level: this.current, upsert, remove });
+  // Stops following the document.
+  dispose(): void {
+    this.unsubscribe();
   }
 
-  private emit(change: LevelChange): void {
-    for (const listener of this.listeners) listener(change);
+  private add(object: LevelObject): void {
+    this.objects.set(object.id, object);
+    count(this.tallies, this.geometryUse, object, 1);
   }
 
-  private addGeometry(key: string): void {
-    const count = this.geometryUse.get(key);
-    this.geometryUse.set(key, count === undefined ? 1 : count + 1);
+  // The change to the level `value` whole, in its own object order, keeping every current object JSON-equal to its
+  // incoming one. A new order alone is a change with an empty delta.
+  private adopt(kind: LevelDelta['kind'], value: unknown): SectionChange<'level'> | null {
+    const level = this.check(value);
+    const before = this.definition();
+    const objects: LevelObject[] = [];
+    const upsert: LevelObject[] = [];
+    const previous = new Map<string, LevelObject>();
+    for (const object of level.objects) {
+      const current = this.objects.get(object.id);
+      if (current !== undefined && JSON.stringify(current) === JSON.stringify(object)) {
+        objects.push(current);
+        continue;
+      }
+      if (current !== undefined) previous.set(object.id, current);
+      upsert.push(object);
+      objects.push(object);
+    }
+    const ids = new Set(level.objects.map((object) => object.id));
+    const remove: string[] = [];
+    for (const object of before.objects) {
+      if (ids.has(object.id)) continue;
+      remove.push(object.id);
+      previous.set(object.id, object);
+    }
+    const labels = keptLabels(level.labels, before);
+    if (level.name === before.name && labels === before.labels && objects.length === before.objects.length &&
+      objects.every((object, index) => object === before.objects[index])) return null;
+    return sectionChange(before, { name: level.name, labels, objects: Object.freeze(objects) },
+      { kind, upsert, remove, previous });
   }
 
-  private indexObjects(): void {
-    this.geometryUse.clear();
-    this.tallies = emptyCounts();
-    for (const object of this.objects.values()) {
-      if (object.kind === 'terrain') this.addGeometry(geometryKey(object));
-      const name = tally(object);
-      if (name !== null) this.tallies[name]++;
+  // The change to the current level with `upsert` in place of the objects of the same ID, the others following in the
+  // order given, `remove` dropped, and `metadata`'s name and labels, else the current ones. Object order comes from the
+  // level, never the index.
+  private change(kind: LevelDelta['kind'], upsert: readonly LevelObject[], remove: readonly string[],
+    metadata?: Pick<LevelDefinition, 'name' | 'labels'>): SectionChange<'level'> {
+    const before = this.definition();
+    const { name, labels } = metadata ?? before;
+    const previous = new Map<string, LevelObject>();
+    let objects = before.objects;
+    if (upsert.length > 0 || remove.length > 0) {
+      const replacements = new Map(upsert.map((object) => [object.id, object]));
+      const removed = new Set(remove);
+      const next: LevelObject[] = [];
+      for (const object of before.objects) {
+        const replacement = replacements.get(object.id);
+        if (replacement !== undefined || removed.has(object.id)) previous.set(object.id, object);
+        if (replacement !== undefined) next.push(replacement);
+        else if (!removed.has(object.id)) next.push(object);
+      }
+      for (const object of upsert) if (!previous.has(object.id)) next.push(object);
+      objects = Object.freeze(next);
+    }
+    return sectionChange(before, { name, labels, objects }, { kind, upsert, remove, previous });
+  }
+
+  // Refuses taking `removed` out and putting `added` in where the level would pass its limits.
+  private checkLimits(removed: Iterable<LevelObject>, added: Iterable<LevelObject>): void {
+    const counts = { ...this.tallies };
+    const geometry = new Map(this.geometryUse);
+    for (const object of removed) count(counts, geometry, object, -1);
+    for (const object of added) count(counts, geometry, object, 1);
+    checkCounts(counts);
+    if (geometry.size > LEVEL_LIMITS.geometryKinds) {
+      throw new LevelError(`A level supports up to ${LEVEL_LIMITS.geometryKinds} distinct terrain collision shapes.`);
     }
   }
 
-  private removeGeometry(key: string): void {
-    const count = this.geometryUse.get(key);
-    if (count === undefined) throw new Error('Level geometry reference counts are inconsistent.');
-    if (count === 1) this.geometryUse.delete(key);
-    else this.geometryUse.set(key, count - 1);
+  private follow(change: SectionChange<'level'>, cause: ChangeCause): void {
+    if (cause === 'open') {
+      this.startObject = this.index(change.after);
+      return;
+    }
+    for (const id of change.delta.remove) {
+      const object = this.objects.get(id);
+      if (object === undefined) throw new Error(`Level object "${id}" is not indexed.`);
+      this.objects.delete(id);
+      count(this.tallies, this.geometryUse, object, -1);
+    }
+    for (const object of change.delta.upsert) {
+      const replaced = this.objects.get(object.id);
+      if (replaced !== undefined) count(this.tallies, this.geometryUse, replaced, -1);
+      this.add(object);
+      if (object.kind === 'start') this.startObject = object;
+    }
   }
+
+  // Indexes every object of `level` afresh and returns its start.
+  private index(level: LevelDefinition): StartObject {
+    this.objects.clear();
+    this.geometryUse.clear();
+    Object.assign(this.tallies, emptyCounts());
+    for (const object of level.objects) this.add(object);
+    return levelStart(level);
+  }
+}
+
+// The game's LevelChange for a level section change.
+export function levelChange(change: SectionChange<'level'>): LevelChange {
+  const { kind, upsert, remove } = change.delta;
+  return { kind, level: change.after, upsert, remove };
 }

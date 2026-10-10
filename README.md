@@ -357,6 +357,8 @@ new feature ships with its extension point.
 | C | Recenter the camera |
 | 1 / 2 / 3 / 4 | Ascent / ledge hold / ground push / vault (editor only) |
 | / | Find a Workshop control (editor only) |
+| Ctrl/Cmd+Z | [Undo](#undo-and-redo) (editor only) |
+| Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo (editor only) |
 
 These are the engine's default controls. Runtime plugins can change the reset, pause and
 recenter key bindings or add devices; see [Input](docs/runtime-plugins.md#input).
@@ -468,6 +470,39 @@ Workshop header on every tab.
 The Workshop never plays trigger videos: a **Play video** event is skipped at once and its
 trigger goes on, so an intro film never interrupts testing. A game-only release plays them
 (`npm run dev:game`).
+
+### Undo and redo
+
+The Workshop keeps one undo history for the open project, shared by every tab. It records
+the level's edits: those made in **Level**, or by a Workshop plugin's
+[level edits](docs/workshop-plugins.md#the-project), become its steps. Game settings,
+characters, appearance, the project's other sections and plugins' own data change outside
+it, and Undo leaves them as they are.
+
+**Undo** and **Redo** lead the Workshop header's tools on every tab. Each names the step
+it would take back or put back, with the tab it was made in, as in
+**Undo Move Block at D7 (Level)**, and is disabled with **Nothing to undo** or
+**Nothing to redo** when there is none. **Ctrl/Cmd+Z** undoes, and **Ctrl/Cmd+Shift+Z**
+or **Ctrl+Y** redoes, while the Workshop is open and the mouse is not captured; in a text
+field, the browser's own undo edits the text instead.
+
+Undo takes back the newest change, whichever tab made it: a step, or an edit still waiting
+for its data, which it cancels, its button saying **Cancel** with the edit's name. The
+Workshop stays on the tab shown: when the step's tab is not shown, a notice says what was
+undone or redone and in which tab, and when it is, the section where the step was made
+opens. Each undo and redo is announced to screen readers, and on touch screens, where tips
+do not show, a notice says it too. While a project opens, is imported or updates from the
+server, while course artwork or a media file is imported, and while this browser's
+[kept changes](docs/projects.md#publishing-a-workshop-with-its-project) come back through
+**Restore into the project**, Undo and Redo are unavailable, and their tips say they wait
+for the project.
+
+The history keeps at most **200** steps and about **64 MiB**, dropping the oldest first; the
+newest step always stays, however large. Step names are cut to 80 characters. Some
+adjustments repeated within a second make one step, unless another level edit, Undo or Redo
+comes in between. The history belongs to the page, so a reload starts it empty. See
+[Working in the Workshop](docs/projects.md#working-in-the-workshop) for how it meets saving,
+opening projects, the project server, course artwork and media.
 
 ## Physics architecture
 
@@ -751,14 +786,23 @@ vertical axis to show another side: drag the dial under the selection left or ri
 marking where the front faces and Shift snapping to 15°, press **[** or **]** to turn the
 selection, or the object about to be placed, 15°, or type its **Turn**. A turned GLB's
 collision is generated again for the turn off the page's thread: the course shows the turn at
-once, and the turn and its collision change together a moment later. Built-in shapes and drawn
+once, and the turn and its collision change together a moment later, as one step (see
+[turning a mesh](docs/course-artwork.md#turning-a-mesh)). Built-in shapes and drawn
 outlines only tilt. Drag empty
 space, or drag with the middle button from anywhere, to pan; the wheel and + / - zoom.
 On a touch screen, drag with two fingers to pan and pinch to zoom. There are no
 separate select and pan modes: a pressed tool, such as a shape to place, goes back to
 selecting, in Course or Scenery as it was, when you click it again or press Escape.
 The level editor's keys work while the **Level** tab is shown, except while a text field
-or the Workshop's tabs, section bar or width handle have focus.
+or the Workshop's tabs, section bar or width handle have focus; the
+[undo and redo](#undo-and-redo) keys are the Workshop's, on every tab.
+
+Each edit in Level is one step of the [undo history](#undo-and-redo), named for what it does
+and, for objects, where on the [level board](#level-board), as in **Move Block at D7** (or
+**left of column A** off the board). Dragging an object makes one step, and so does a run of
+**Q** and **E**, or of **[** and **]**, presses on one object. Undo restores the selection from
+before its step, and Redo the one from after it, if the mode shown, Course or Scenery, can
+select it; with Level shown, either centres the view on it when it is wholly out of view.
 
 The start location and trigger zones are map objects, not special summit
 settings. Place or drag **Start location** to choose the spawn and adjust its
@@ -788,15 +832,23 @@ it saves the level a moment after you stop editing, and **Save to project**, at 
 the Level tab, saves it at once. Every save becomes the project's next numbered
 [level version](docs/projects.md#level-versions), and the status line shows the one the page
 holds. Without a server project, use **Level JSON** to export/import level data between
-browsers or feed the game-only build. Imports are validated before replacing the current
-level; malformed files produce visible errors.
+browsers or feed the game-only build; only then does exporting mark the level saved. Imports
+are validated before replacing the current level; malformed files produce visible errors.
 
 **Server levels** loads the levels served with the Workshop: every level JSON file in this
 repository's `levels/` folder, listed by the level's name with its file name, or by its file
 name alone when it has none, and first, in a Workshop built with
 `GAME_PROJECT`, that project's level. Builds validate each file and fail, naming it, when one
 is not a valid level. A level downloads when you load it, and replaces the current level like
-an import, asking first when there are unsaved changes.
+an import.
+
+**New level**, at the top of the Level tab, starts again from flat ground and the start
+location. Like an import or a server level, it replaces the level without asking, as one step
+that Undo takes back. Each first applies pending trigger event edits, as saving does, each
+trigger's as a step of its own, so Undo of the replacement brings them back; an invalid one
+stops the replacement and says why. An import or a server level is first an edit waiting for
+its file or download, which Undo, or leaving the Level tab, cancels; trigger events edited
+while it waits apply before it replaces the level, and an invalid one cancels it.
 
 **Replays** plays back the runs the Workshop [recorded](docs/phantoms.md#recording-in-the-workshop)
 on each saved version: pick a version and a run, then **Play**, change the speed, move through
@@ -853,13 +905,17 @@ outline. Clockwise and counterclockwise input both work; the shared terrain
 converter normalizes winding and rejects invalid geometry. Concave outlines,
 including ledges and notches, are stored as one outline mesh like any drawn shape.
 
-**Undo point / stroke**, Backspace, or Ctrl/Cmd+Z removes the last point or
-completed stroke. During a stroke, undo cancels only that in-progress stroke.
-**Cancel outline** or Escape discards the draft without changing the level.
+Each point or stroke that adds to the outline is a step of the outline's own, such
+as **Draw stroke at D7**. While the outline is the newest change, **Undo** takes
+them back one by one, then cancels the outline, and **Redo** puts them back.
+**Backspace** takes back the outline's newest point or stroke even after other
+edits, or, during a stroke, drops only that stroke. Closing the outline makes it
+one step, such as **Draw shape at D7**, in place of its strokes; **Cancel outline**
+or Escape discards it, leaving no step and the level unchanged.
 Pointer cancellation or a viewport resize cancels the current stroke while
-retaining completed points. Pan, zoom, and switching Workshop tabs preserve
-the draft. Unfinished outlines must be finished or canceled before saving,
-exporting, or starting a playtest.
+retaining completed points. Pan, zoom, switching Workshop tabs, **New level**, an
+import and a server level keep the draft. Unfinished outlines must be finished or
+canceled before saving, exporting, or starting a playtest.
 Drafts are not saved terrain and do not create physics bodies or render meshes.
 
 Finished drawings are ordinary terrain objects: select, move, resize, rotate,
@@ -967,7 +1023,8 @@ This places a generic trigger preset with a visible wind marker and one
 Move/resize its region like any trigger; activation uses the player's foot position.
 
 In **Trigger events**, adjust **Lift height (m)** and **Launch strength (x)**,
-then **Apply events**. Level saves/exports also apply valid pending event edits.
+then **Apply events**. Level saves/exports also apply valid pending event edits;
+Undo or Redo of a change to a trigger discards that trigger's pending edits.
 The default is an 8 m lift at 1x strength. Height supports 0.5-100 m; strength
 supports 0.25-2x. The action serializes as
 `{"type":"launch-player","height":8,"strength":1}` and the visual marker is
@@ -1313,12 +1370,13 @@ press Escape to cancel.
 
 The ghost rests on the nearest exposed terrain top within **28 screen pixels** of
 the pointer, and its base line turns solid when it snaps. Elsewhere, it floats at
-the pointer. Each drop is **one atomic level edit** that adds ordinary terrain,
-trigger, enemy, and label objects, then returns to Select. Parts are not grouped:
-select, move, resize, retune, or delete any of them as usual. Object IDs follow
-`<piece>-<stamp>-<part>`. **Remove last placed set piece** removes whatever remains
-of the most recent drop, remembering up to **64** drops. Importing, loading, or
-starting a new level clears that history.
+the pointer. Each drop is **one step**, such as **Place set piece Orange hell at D7**, that
+adds ordinary terrain, trigger and enemy objects and course labels, then returns to Select.
+Parts are not grouped: select, move, resize, retune, or delete any of its objects as usual.
+Object IDs follow `<piece>-<stamp>-<part>`. Undo takes back the whole drop, labels included,
+once the edits made after it are undone, and Redo puts it back with the same IDs. Labels
+cannot be selected: **Remove course labels**, under **Course labels**, removes every label
+after asking.
 
 Pieces use only the built-in block, ramp, triangle, circle, and hexagon meshes, so
 they share the built-in collision shapes and never add custom outlines; a mirrored piece's
@@ -1773,6 +1831,13 @@ illusion/collider state, editor selection/mode, set piece placement state, and
 render/cache counts, including the imported avatar's joints and bone writes, the
 hammer model, the active character profile, the arm chains it draws, and its
 grip placement and slide point with both grips' current distances from the butt.
+`window.gettingOver.history()` reports the [undo history](#undo-and-redo): `steps` and
+`redoSteps`, how many steps Undo can take back and Redo can put back; `bytes`, their
+estimated size; `undo` and `redo`, what each would do now, even while `held`, with its
+`label`, `place` (tab, section and selection) and `kind` (`'step'`, `'stroke'` or
+`'cancel'`), or `null`; `pending`, the labels of pending edits, oldest first;
+`transaction`, the label of a step still being built, or `null`; and `held`, whether
+Undo and Redo wait for the project.
 `window.gettingOver.events()` reports trigger/action lifecycles, presentation
 state (including the message toast showing and how many wait), and the independent
 run timer. Restart resets the attempt; physics time continues to be available

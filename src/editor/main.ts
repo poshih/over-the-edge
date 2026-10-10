@@ -12,7 +12,7 @@ import { Disposal } from '../disposal';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { createCourseArt } from '../course-art-view';
 import { createEnemyModels } from '../enemy-models';
-import { levelSpawn } from '../level';
+import { levelSpawn, validateLevel } from '../level';
 import { createPhantomPlayback } from '../phantom-playback';
 import { Appearance } from './appearance';
 import { AppearanceRig } from '../appearance-rig';
@@ -21,7 +21,9 @@ import { VISUAL_PARTS } from './appearance-types';
 import { CollisionOverlay } from './collision-overlay';
 import { createLevelEditor } from './level-editor';
 import { createLevelChecks } from './level-checks';
-import { LevelState } from './level-state';
+import { levelChange, LevelState } from './level-state';
+import { createHistory } from './document/history';
+import { createHistoryControls } from './history-controls';
 import { PRACTICES, practiceById } from './practices';
 import type { PracticeId } from './practices';
 import { createUI } from './ui';
@@ -76,15 +78,27 @@ function startRuntime(): RuntimePlugins {
 }
 const runtimePlugins = startRuntime();
 const avatarRigs = kinds.avatarRigs;
+const cleanup: (() => void)[] = [() => runtimePlugins.dispose()];
+
+function disposeWorkshop(): void {
+  const disposal = new Disposal();
+  while (cleanup.length > 0) disposal.run(cleanup.pop()!);
+  disposal.finish();
+}
+
+function startupFailed(error: unknown): never {
+  showFatal(`The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`);
+  try { disposeWorkshop(); } finally { throw error; }
+}
 
 // Consumer construction is also fatal: never keep a runtime session whose Game or HUD could not be built.
-function boot<T>(create: () => T, discard: () => void): T {
+function boot<T>(create: () => T, discard?: (value: T) => void): T {
   try {
-    return create();
+    const value = create();
+    if (discard !== undefined) cleanup.push(() => discard(value));
+    return value;
   } catch (error) {
-    showFatal(`The Workshop could not start: ${error instanceof Error ? error.message : String(error)}`);
-    try { discard(); } finally { runtimePlugins.dispose(); }
-    throw error;
+    return startupFailed(error);
   }
 }
 
@@ -92,7 +106,8 @@ function boot<T>(create: () => T, discard: () => void): T {
 // browser's copy of the project; the editors' own browser saves do not open at start.
 const opensProject = publishedProject !== null;
 const client = new ProjectClient();
-const level = new LevelState(DEFAULT_LEVEL);
+const history = boot(() => createHistory({ level: validateLevel(DEFAULT_LEVEL) }));
+const level = boot(() => new LevelState(history.document), (value) => value.dispose());
 let debug = false;
 // Where attempts start: a starting point, or where the designer placed the player in the Level tab to
 // test part of the course. Placing the player never moves the level's own start.
@@ -100,30 +115,16 @@ let origin: PracticeId | PlayerSpawn = 'start';
 let editing = false;
 // The game's Workshop plugins, which start once the project is open.
 let plugins: WorkshopPluginHost | null = null;
-// The Level tab's checks, which read the game settings and the project only while it is edited.
-const levelChecks = createLevelChecks({
-  level,
-  settings: () => game.settings(),
-  plugins: {
-    checks: () => workshopPlugins.levelChecks(),
-    reach: () => workshopPlugins.levelReach(),
-    failed: (id) => workshopPlugins.failed(id),
-    lastError: (id) => workshopPlugins.lastError(id),
-    fail: (id, error, action) => workshopPlugins.fail(id, error, action),
-    subscribe: (listener) => workshopPlugins.subscribe(() => listener()),
-    project: () => plugins?.projectSnapshot() ?? null,
-  },
-});
 // Media resolve through the open project once it starts.
 let resolveMedia = (source: string): string => source;
 let mediaVersion = 0;
 // The Workshop plays media from the open project's files, or from the URLs a level names.
 const media = urlMediaHost((source) => resolveMedia(source));
-const audioDevice = new AudioDevice(DEFAULT_AUDIO.volume);
+const audioDevice = boot(() => new AudioDevice(DEFAULT_AUDIO.volume), (value) => value.dispose());
 const audio = boot(() => createAudioOutput(runtimePlugins.slot(AUDIO, DEFAULT_AUDIO_OUTPUT), {
   settings: DEFAULT_AUDIO, media, sounds: levelSoundSources(level.definition()), device: audioDevice,
   notice: (message) => runtimeNotice(message, 'error'),
-}), () => audioDevice.dispose());
+}), (value) => value.dispose());
 const game = boot(() => new Game({
   canvas, eventMount: mount, level: level.definition(),
   onFatal: showFatal,
@@ -151,25 +152,35 @@ const game = boot(() => new Game({
       resetPractice(PRACTICES[Number(key) - 1].id);
     }
   },
-}), () => {
-  audio.dispose();
-  audioDevice.dispose();
-});
-const unsubscribeLevel = level.subscribe((change) => {
-  game.applyLevel(change);
-  if (change.kind === 'replace') origin = 'start';
-});
+}), (value) => value.dispose());
+boot(() => history.document.subscribe('level', (change) => {
+  game.applyLevel(levelChange(change));
+  if (change.delta.kind === 'replace') origin = 'start';
+}), (unsubscribe) => unsubscribe());
+// Registered before the UI exists; bootstrap changes the document only after the editors mount.
+boot(() => history.document.subscribe('level', (change) => ui.setLevelName(change.after.name)),
+  (unsubscribe) => unsubscribe());
+// The Level tab's checks, which read the game settings and the project only while it is edited.
+const levelChecks = boot(() => createLevelChecks({
+  document: history.document,
+  settings: () => game.settings(),
+  plugins: {
+    checks: () => workshopPlugins.levelChecks(),
+    reach: () => workshopPlugins.levelReach(),
+    failed: (id) => workshopPlugins.failed(id),
+    lastError: (id) => workshopPlugins.lastError(id),
+    fail: (id, error, action) => workshopPlugins.fail(id, error, action),
+    subscribe: (listener) => workshopPlugins.subscribe(() => listener()),
+    project: () => plugins?.projectSnapshot() ?? null,
+  },
+}), (value) => value.dispose());
 // The open project, created before the editors so each can save into it; it reads them only once started.
-const project: ProjectSession = new ProjectSession({
-  avatarRigs, client, plugins: workshopPlugins,
+const project: ProjectSession = boot(() => new ProjectSession({
+  history, level, avatarRigs, client, plugins: workshopPlugins,
   workspace: {
-    level: {
-      get: () => level.definition(),
-      load: (definition) => levelEditor.loadLevel(definition),
-      sync: (definition) => levelEditor.syncLevel(definition),
-      prepare: () => levelEditor.preparePlay(),
-      markSaved: (definition) => levelEditor.markSaved(definition),
-    },
+    prepareLevel: () => levelEditor.preparePlay(),
+    markLevelSaved: (definition) => levelEditor.markSaved(definition),
+    hasPendingLevelEdits: () => levelEditor.hasPendingEdits(),
     settings: { get: () => ui.settings(), load: (settings) => ui.applySettings(settings) },
     character: {
       draft: () => spriteEditor.snapshot().document,
@@ -198,7 +209,7 @@ const project: ProjectSession = new ProjectSession({
     notice: (message, kind) => ui.notice(message, kind),
   },
   published: publishedProject,
-});
+}), (value) => value.dispose());
 // The level places only decorations something draws: the library's models and those the project's course artwork maps.
 level.drawDecorationsWith(() => project.decorationArt());
 // Play is recorded for phantoms unless this browser turned recording off.
@@ -211,12 +222,12 @@ function recordingPreference(): boolean {
     throw error;
   }
 }
-const recorder = new PlayRecorder({
+const recorder = boot(() => new PlayRecorder({
   game, enabled: recordingPreference(),
   target: () => project.playedVersion(),
   upload: (target, clip, recording) => client.postPhantom(target.project, target.version, clip, recording),
   onFailure: (error) => ui.notice(`Play recordings are not being saved: ${error instanceof Error ? error.message : String(error)}`, 'error'),
-});
+}), (value) => value.dispose());
 function toggleRecording(): void {
   recorder.setEnabled(!recorder.on);
   try {
@@ -232,10 +243,10 @@ function recordingNote(): string {
   if (project.playedVersion() === null) return 'Recording waits for the level and game settings to save, a moment after each change.';
   return 'Recording your play as phantoms of the saved version of the open project\'s level and game settings.';
 }
-const serverCopies = new ServerCopies({
+const serverCopies = boot(() => new ServerCopies({
   client, health: () => project.serverHealth(), watch: (listener) => project.subscribe(listener),
-});
-const published = publishedLevel(publishedProject);
+}), (value) => value.dispose());
+const published = boot(() => publishedLevel(publishedProject));
 const ui: GameUi = boot(() => createUI({
   mount,
   plugins: runtimePlugins,
@@ -255,32 +266,24 @@ const ui: GameUi = boot(() => createUI({
     levelChecks.invalidate();
   },
   projectSave: project, serverCopies,
-}), () => {
-  recorder.dispose();
-  serverCopies.dispose();
-  project.dispose();
-  audio.dispose();
-  audioDevice.dispose();
-  unsubscribeLevel();
-  game.dispose();
-});
+}), (value) => value.dispose());
 runtimeNotice = (message, kind = 'info') => ui.notice(message, kind);
 // The readout shows the HUD as the game's look sets it, and the header keeps legible over its sky.
-const unsubscribeGameLook = game.subscribeLook((look) => {
+boot(() => game.subscribeLook((look) => {
   ui.setHud(look.hud);
   ui.setSceneTone(isDarkSky(look.theme));
-});
+}), (unsubscribe) => unsubscribe());
 for (const { message, kind } of startupNotices.splice(0)) ui.notice(message, kind);
 // The game header names the open level, following each rename and each level opened.
 ui.setLevelName(level.definition().name);
-const unsubscribeLevelName = level.subscribe((change) => ui.setLevelName(change.level.name));
-const rig = new AppearanceRig(game.view.character.visuals);
-const appearance = new Appearance(rig, ui.notice, { browserStore: !opensProject });
-const appearanceUi = createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice, projectSave: project, serverCopies });
-const unsubscribeAppearance = appearance.subscribe(() => game.setCharacter({
+const rig = boot(() => new AppearanceRig(game.view.character.visuals), (value) => value.dispose());
+const appearance = boot(() => new Appearance(rig, ui.notice, { browserStore: !opensProject }), (value) => value.dispose());
+boot(() => createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice, projectSave: project, serverCopies }),
+  (value) => value.dispose());
+boot(() => appearance.subscribe(() => game.setCharacter({
   armIk: appearance.armIkSettings(),
-}));
-const spriteEditor = createSpriteEditor({
+})), (unsubscribe) => unsubscribe());
+const spriteEditor = boot(() => createSpriteEditor({
   mount: ui.spriteMount, characterMount: ui.characterMount, rig: game.view.character.sprites, onNotice: ui.notice,
   describeModel: (source, usage) => game.view.character.characterModelReport(source, usage),
   viewport: { canvas, project: (point) => game.view.project(point) },
@@ -309,21 +312,24 @@ const spriteEditor = createSpriteEditor({
     const center = binding.bounds.getCenter(new Vector3());
     return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
   }),
+}), (value) => value.dispose());
+const collisionOverlay = boot(() => {
+  const overlay = new CollisionOverlay(game.simulation.world, () => game.view.character.armPoses());
+  game.view.addLayer(overlay);
+  return overlay;
+}, (value) => game.view.removeLayer(value));
+const courseMeshes = boot(() => {
+  if (game.view.courseArt === null) throw new Error('The Workshop draws course artwork.');
+  return game.view.courseArt;
 });
-const collisionOverlay = new CollisionOverlay(game.simulation.world, () => game.view.character.armPoses());
-game.view.addLayer(collisionOverlay);
-const courseMeshes = game.view.courseArt;
-if (courseMeshes === null) throw new Error('The Workshop draws course artwork.');
 // The figure Level / Replays poses: one held phantom, none played by the game.
-const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins, 0), () => {
-  audio.dispose();
-  audioDevice.dispose();
-  game.dispose();
+const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins, 0), (value) => game.view.removeLayer(value));
+const decorations = boot(() => {
+  if (game.view.decorations === null) throw new Error('The Workshop draws decorations.');
+  return game.view.decorations;
 });
-const decorations = game.view.decorations;
-if (decorations === null) throw new Error('The Workshop draws decorations.');
-const levelEditor = createLevelEditor({
-  mount: ui.levelMount, canvas, level,
+const levelEditor = boot(() => createLevelEditor({
+  mount: ui.levelMount, canvas, history, level,
   camera: {
     state: () => game.view.cameraState(),
     set: (framing) => game.view.setFraming(framing),
@@ -372,11 +378,11 @@ const levelEditor = createLevelEditor({
       recording: (id, version, name, signal) => client.phantom(id, version, name, signal),
     },
   },
-});
-const appearanceRestored = appearance.restore();
+}), (value) => value.dispose());
+const appearanceRestored = boot(() => appearance.restore());
 // Physics / Hammer head shapes the default hammer's head, a game setting, and each library hammer's own.
 let hammerHeads: HammerHeadEditor | null = null;
-hammerHeads = createHammerHeadEditor({
+hammerHeads = boot(() => createHammerHeadEditor({
   mount: ui.hammerHeadMount,
   hammers: () => [
     // The game's settings, which are current while a settings change is still being shown.
@@ -390,24 +396,33 @@ hammerHeads = createHammerHeadEditor({
       return withRig(settings, { ...settings.rig, head });
     }) === null;
   },
-});
-const unsubscribeHammerHeads = project.subscribe((event) => { if (event.kind === 'content') hammerHeads?.refresh(); });
+}), (value) => value.dispose());
+boot(() => project.subscribe((event) => { if (event.kind === 'content') hammerHeads?.refresh(); }),
+  (unsubscribe) => unsubscribe());
 // Physics / Jar shapes the jar's collision outline, a game setting.
 let jarEditor: OutlineEditor | null = null;
-jarEditor = createJarEditor({
+jarEditor = boot(() => createJarEditor({
   mount: ui.jarMount,
   pot: () => game.settings().rig.pot,
   setPot: (pot) => applySettings(() => {
     const settings = game.settings();
     return withRig(settings, { ...settings.rig, pot });
   }) === null,
-});
-const projectEditor = createProjectEditor({
+}), (value) => value.dispose());
+boot(() => createProjectEditor({
   mount: ui.projectMount, session: project, onNotice: ui.notice,
   onTestCue: (cue) => audio.preview(cue),
   parts: game,
   serverModels,
-});
+}), (value) => value.dispose());
+boot(() => createHistoryControls({
+  history,
+  mount: ui.historyMount,
+  workshop: ui.workshopState,
+  tabLabel: ui.tabLabel,
+  tabPane: ui.tabPane,
+  notice: ui.notice,
+}), (value) => value.dispose());
 
 // Applies the game settings `next` builds, as Physics does: a refusal is reported and returned.
 function applySettings(next: () => GameSettings): GameSettingsError | null {
@@ -495,12 +510,12 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
 const gameContext = () => ({ practice: practice(), placedPlayer: typeof origin === 'string' ? null : origin, debug });
 const gameState = () => workshopGameState(game, gameContext());
 
-plugins = new WorkshopPluginHost({
-  registry: workshopPlugins, ui, game, canvas, project, level, character: spriteEditor, appearance,
+plugins = boot(() => new WorkshopPluginHost({
+  registry: workshopPlugins, ui, game, canvas, project, history, level, character: spriteEditor, appearance,
   settings: (settings) => applySettings(() => settings),
   control: { restart, placePlayer, state: gameState },
   notice: ui.notice,
-});
+}), (value) => value.dispose());
 
 const rendering = () => game.view.statistics();
 const diagnostics = Object.freeze({
@@ -513,6 +528,7 @@ const diagnostics = Object.freeze({
   snapshot: () => gameDiagnostics(game, gameContext()),
   project: (point: Point) => game.view.project(point),
   settings: () => game.settings(),
+  history: () => history.state(),
   appearance: () => appearance.snapshot(),
   sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.character.sprites.inspect() }),
   events: () => game.eventState(),
@@ -533,10 +549,11 @@ declare global {
   }
 }
 window.gettingOver = diagnostics;
-updateWorkshop(ui.workshopState());
-void project.start().then(() => plugins.start());
+cleanup.push(() => { delete window.gettingOver; });
+boot(() => updateWorkshop(ui.workshopState()));
+void project.start().then(() => plugins.start()).catch((error: unknown) => startupFailed(error));
 const hudState: HudState = { debug, practice: practice(), recording: recorder.on, capturing: false, recordingNote: recordingNote() };
-game.start((state) => {
+boot(() => game.start((state) => {
   hudState.debug = debug;
   hudState.practice = practice();
   hudState.recording = recorder.on;
@@ -544,36 +561,9 @@ game.start((state) => {
   hudState.recordingNote = recordingNote();
   ui.update(state, hudState);
   spriteEditor.updatePreview();
-});
+}));
 
 if (import.meta.hot) {
   import.meta.hot.accept();
-  import.meta.hot.dispose(() => {
-    const disposal = new Disposal();
-    disposal.run(() => plugins.dispose());
-    disposal.run(() => recorder.dispose());
-    disposal.run(() => unsubscribeHammerHeads());
-    disposal.run(() => hammerHeads.dispose());
-    disposal.run(() => jarEditor.dispose());
-    disposal.run(() => projectEditor.dispose());
-    disposal.run(() => serverCopies.dispose());
-    disposal.run(() => project.dispose());
-    disposal.run(() => audio.dispose());
-    disposal.run(() => audioDevice.dispose());
-    disposal.run(() => unsubscribeLevel());
-    disposal.run(() => unsubscribeLevelName());
-    disposal.run(() => unsubscribeAppearance());
-    disposal.run(() => unsubscribeGameLook());
-    disposal.run(() => levelEditor.dispose());
-    disposal.run(() => levelChecks.dispose());
-    disposal.run(() => spriteEditor.dispose());
-    disposal.run(() => appearanceUi.dispose());
-    disposal.run(() => appearance.dispose());
-    disposal.run(() => rig.dispose());
-    disposal.run(() => ui.dispose());
-    disposal.run(() => game.dispose());
-    disposal.run(() => runtimePlugins.dispose());
-    disposal.run(() => { delete window.gettingOver; });
-    disposal.finish();
-  });
+  import.meta.hot.dispose(disposeWorkshop);
 }

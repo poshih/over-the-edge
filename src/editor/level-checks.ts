@@ -11,9 +11,10 @@ import { createCourseJob } from '../course-snapshot';
 import type { CourseSnapshot } from '../course-snapshot';
 import type { GameSettings } from '../game-settings';
 import { objectLoops } from '../level';
-import type { LevelChange, LevelDefinition, TerrainObject } from '../level';
+import type { LevelDefinition, TerrainObject } from '../level';
 import { apply1, attributed, call1, namespaceOf, PluginError } from '../plugins/kernel';
 import type { Attributed } from '../plugins/kernel';
+import type { ProjectDocument } from './document/project-document';
 import { checkReachPlan, ENGINE_LEVEL_REACH, LEVEL_CHECKS, ruleFindings } from './level-check-points';
 import type { LevelCheck, LevelCheckCourse, LevelCheckInput, LevelReachPlan, LevelReachSource } from './level-check-points';
 import type { LevelCheckRequest, LevelCheckResponse } from './level-checks-worker';
@@ -44,7 +45,7 @@ export interface LevelChecksState {
 }
 
 export interface LevelChecksOptions {
-  readonly level: { definition(): LevelDefinition; subscribe(listener: (change: LevelChange) => void): () => void };
+  readonly document: ProjectDocument;
   // The game settings, which the reach model comes from.
   readonly settings: () => GameSettings;
   readonly plugins: {
@@ -158,7 +159,7 @@ export function createLevelChecks(options: LevelChecksOptions): LevelChecks {
       timer = null;
       start();
     }, delay);
-    // Listeners hear only of a change: this runs while the level tells its own listeners of an edit.
+    // Listeners hear only of a change: this runs while the document tells listeners of a level edit.
     const current = checkedVersion === version && state.current;
     if (!state.checking || state.current !== current) publish({ checking: true, current });
   }
@@ -185,7 +186,7 @@ export function createLevelChecks(options: LevelChecksOptions): LevelChecks {
       worker = null;
       running = null;
     }
-    const level = options.level.definition();
+    const level = options.document.get('level');
     // The plan first: a plugin whose reach source fails stops, which counts as a change, and the run covers it.
     const reach = plan(level);
     const run: Run = { id: ++runs, version, level, plan: reach };
@@ -286,7 +287,7 @@ export function createLevelChecks(options: LevelChecksOptions): LevelChecks {
   }
 
   const unsubscribe = [
-    options.level.subscribe(() => changed()),
+    options.document.subscribe('level', () => changed()),
     options.plugins.subscribe(() => changed()),
   ];
 

@@ -73,12 +73,17 @@ In the Workshop, select the mesh and drag the dial under it left or right, its k
 where the front faces and Shift snapping to 15°, press **[** / **]** to turn it 15°, or type
 its **Turn** under **Object properties**. The course shows the turn at once while a worker
 generates the turned collision off the page's thread; the turn and its collision then
-change together as one edit, each axis keeping its scale within the level's size limits, so
-the level never holds collision for another turn. A turn baked while you drag something waits
-for the drag to end. A newer turn replaces one still generating, and a turn whose collision
-cannot be generated leaves the mesh as it was and says why. Over the API, read the mesh
-entry at the new turn and multiply `width`, `height` and `depth` by its natural size over the
-one at the old turn, keeping them within the level's size limits and a circle's box square.
+change together as one step of the [undo history](../README.md#undo-and-redo), each axis
+keeping its scale within the level's size limits, so the level never holds collision for
+another turn. Until then the turn is an edit waiting for its data, which Undo cancels; Undo
+and Redo of a finished turn put back the mesh entry with its collision, without generating it
+again. A mesh turned while you place it and placed before its collision is ready is outlined
+where it will stand, then placed, as one step, once the collision is ready, unless Undo
+cancels it first. A turn baked while you drag something waits for the drag to end. A newer
+turn replaces one still generating, and a turn whose collision cannot be generated leaves the
+mesh as it was and says why. Over the API, read the mesh entry at the new turn and multiply
+`width`, `height` and `depth` by its natural size over the one at the old turn, keeping them
+within the level's size limits and a circle's box square.
 
 ### Declared collision
 
@@ -232,7 +237,8 @@ static.
 A course package is one JSON file holding a level and the GLBs it draws, for
 [level-file builds](../README.md#game-only-release) and for importing into a project with
 **Project / Course artwork / Import course package**, which replaces the level and brings
-the GLBs. Pack one from a level JSON, exported from **Workshop / Level**, and an assets
+the GLBs. Importing one clears the [undo history](../README.md#undo-and-redo), as opening a
+project does. Pack one from a level JSON, exported from **Workshop / Level**, and an assets
 file listing GLBs relative to itself:
 
 ```json

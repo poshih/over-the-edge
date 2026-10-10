@@ -8,7 +8,7 @@ import {
   TRIGGER_MARKERS, turnedTerrainBox, validateLevel, validateLevelObject,
 } from '../level';
 import type {
-  AxeObject, BonfireObject, DecorationObject, EnemyObject, LevelDefinition, LevelLabel, LevelObject, PlatformObject, PoolObject, ShapeKind,
+  AxeObject, BonfireObject, DecorationObject, EnemyObject, LevelDefinition, LevelObject, PlatformObject, PoolObject, ShapeKind,
   ShooterObject, StartObject, TerrainMesh, TerrainObject, TriggerObject, TriggerRegion,
 } from '../level';
 import { AXE, AXE_FIELDS, BONFIRE, HAZARD_LIMITS, SHOOTER, SHOOTER_FIELDS } from '../hazards';
@@ -28,7 +28,10 @@ import type { BoardSquare } from '../level-board';
 import { LevelBoardView, niceStep } from './level-board-view';
 import type { BoardViewport } from './level-board-view';
 import { createJsonDownload } from './json-download';
-import type { EditorCamera, LevelEditorOptions } from './level-editor-host';
+import type { PendingEdit } from './document/history';
+import type { SectionChange, Selection, StepPlace } from './document/project-document';
+import type { EditorCamera, LevelEditorHandle, LevelEditorOptions, LevelEditorSnapshot, LevelEditorTool } from './level-editor-host';
+import type { LevelState } from './level-state';
 import { EntityGizmos, enemyGlyph, objectGizmoBounds, triggerLinkHandle, updraftGlyph } from './object-gizmos';
 import { deriveConnectionLinks } from './connection-links';
 import type { ConnectionLink, ConnectionLinks, ConnectionTarget } from './connection-links';
@@ -47,11 +50,8 @@ import './level-editor.css';
 
 export type { LevelEditorOptions } from './level-editor-host';
 
-// 'player' moves the live player without editing the level; it previews in the start's pose.
-type PlacementTool = 'place' | 'place-trigger' | 'place-enemy' | 'place-hazard' | 'place-set-piece' | 'place-decoration' | 'start' | 'player';
-// 'decorate' selects and moves decorations, the scenery; 'select' never picks them, so scenery cannot get in the way of
-// the course.
-type Tool = 'select' | 'decorate' | 'draw' | PlacementTool;
+type PlacementTool = Exclude<LevelEditorTool, 'select' | 'decorate' | 'draw'>;
+type Tool = LevelEditorTool;
 // The depths Scenery mode picks decorations at: all of them, or one of the depth guide's layers.
 type SceneryBand = 'all' | 'front' | 'near' | 'middle' | 'far';
 interface Bounds { left: number; right: number; bottom: number; top: number }
@@ -82,6 +82,32 @@ type Gesture =
 type TiltedObject = TerrainObject | DecorationObject | StartObject | ShooterObject;
 // What turns about its own vertical axis: decorations, and terrain a GLB draws (see asTurned).
 type TurnedObject = DecorationObject | TerrainObject;
+// A GLB turn whose collision bakes, shown on the course meanwhile, by the ID of what it turns.
+interface Turn {
+  readonly turn: number;
+  readonly from: number;
+  readonly assetId: string;
+  // The pending edit that makes it one step once baked: the turn of an object the level holds, or the placing of `placed`
+  // turned. Null for the placement's turn, which is no edit.
+  readonly edit: {
+    readonly pending: PendingEdit;
+    readonly label: string;
+    readonly coalesce: string | null;
+    readonly placed: TerrainObject | null;
+  } | null;
+  // Its bake, kept while a drag holds objects.
+  baked: readonly [MeshTerrain, MeshTerrain] | null;
+}
+// A level file being read or a server level being downloaded: a pending edit until it replaces the level.
+interface Load {
+  readonly kind: 'file' | 'server';
+  readonly label: string;
+  readonly pending: PendingEdit;
+}
+// The Level tab's sections a step can open, each a details[data-section] its markup always has.
+type LevelSection = 'level-build' | 'level-inspector' | 'level-set-pieces' | 'level-decorations' | 'level-server' | 'level-file' |
+  'level-labels';
+type Outline = readonly Readonly<Point>[];
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEGREES = 180 / Math.PI;
@@ -116,7 +142,8 @@ const CHECK_FINDINGS_SHOWN = 200;
 // A finding's ring on the course, in screen pixels, and how far in picking one zooms at least, in metres of view height.
 const CHECK_MARKER_PIXELS = 9;
 const FOCUS_VIEW_HEIGHT = 24;
-const SET_PIECE_HISTORY = 64;
+// The section each kind of load starts from.
+const LOAD_SECTIONS: Readonly<Record<Load['kind'], LevelSection>> = { file: 'level-file', server: 'level-server' };
 /** Decorations nearer the course than this rest on terrain tops while being placed. */
 const DECORATION_SNAP_DEPTH = 20;
 const PRESET_SETTINGS: Record<ShapeKind, { label: string; width: number; height: number }> = {
@@ -230,6 +257,11 @@ function asTurned(object: LevelObject | null): TurnedObject | null {
 }
 function turnOf(object: TurnedObject): number {
   return object.kind === 'decoration' ? object.turn : object.mesh.type === 'asset' ? object.mesh.turn : 0;
+}
+// `object` as what `turn` turns: GLB terrain of its asset, still at the turn it turns from; null for anything else.
+function targetOf(turn: Turn, object: LevelObject | null): TerrainObject | null {
+  return object !== null && object.kind === 'terrain' && object.mesh.type === 'asset' && object.mesh.assetId === turn.assetId &&
+    object.mesh.turn === turn.from ? object : null;
 }
 // `angle` turned into -π to π, where every level angle lies.
 function wrapAngle(angle: number): number {
@@ -364,6 +396,13 @@ function boundsContain(bounds: Bounds, point: Point): boolean {
   return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.bottom && point.y <= bounds.top;
 }
 
+// The box around `points`, with the least y as its bottom.
+function boxOf(points: readonly Point[]): Bounds {
+  const xs = points.map(({ x }) => x);
+  const ys = points.map(({ y }) => y);
+  return { left: Math.min(...xs), right: Math.max(...xs), bottom: Math.min(...ys), top: Math.max(...ys) };
+}
+
 const BOARD_KEY = 'over-the-edge:level-board:v1';
 const LINKS_KEY = 'over-the-edge:level-links:v1';
 
@@ -447,8 +486,8 @@ function selectField(id: string, label: string, options: readonly { value: strin
   </label>`;
 }
 
-export function createLevelEditor(options: LevelEditorOptions) {
-  const { level, camera, onNotice } = options;
+export function createLevelEditor(options: LevelEditorOptions): LevelEditorHandle {
+  const { history, level, camera, onNotice } = options;
   const events = new AbortController();
   const listen = { signal: events.signal };
   const root = document.createElement('section');
@@ -526,7 +565,6 @@ export function createLevelEditor(options: LevelEditorOptions) {
           <p class="level-help level-drawing-status" role="status" aria-live="polite"></p>
           <div class="level-drawing-actions">
             <button type="button" class="button button-primary level-drawing-finish">Finish shape</button>
-            <button type="button" class="button level-drawing-undo">Undo point / stroke</button>
             <button type="button" class="button level-drawing-cancel">Cancel outline</button>
           </div>
         </div>
@@ -763,7 +801,6 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <label class="level-checkbox" for="level-set-piece-mirror">
           <input id="level-set-piece-mirror" type="checkbox" /> Mirror left / right (M)
         </label>
-        <button type="button" class="button level-set-piece-undo">Remove last placed set piece</button>
         <p class="level-help level-set-piece-status" role="status" aria-live="polite"></p>
       </fieldset>
       `)}
@@ -833,6 +870,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
     <g class="level-camera-group">
       <path class="level-selection" fill-rule="evenodd" vector-effect="non-scaling-stroke" hidden />
       <path class="level-ghost" fill-rule="evenodd" vector-effect="non-scaling-stroke" hidden />
+      <path class="level-ghost level-placing" fill-rule="evenodd" vector-effect="non-scaling-stroke" hidden />
       <g class="level-drawing-guide" hidden>
         <polyline class="level-drawing-line" vector-effect="non-scaling-stroke" />
         <path class="level-drawing-links" vector-effect="non-scaling-stroke" />
@@ -861,6 +899,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
   const cameraGroup = graphic<SVGGElement>('.level-camera-group');
   const selectionPolygon = graphic<SVGPathElement>('.level-selection');
   const ghostPolygon = graphic<SVGPathElement>('.level-ghost');
+  // Terrain dropped while its turn bakes, placed once baked.
+  const placingPolygon = graphic<SVGPathElement>('.level-placing');
   const drawingGuide = graphic<SVGGElement>('.level-drawing-guide');
   const drawingLine = graphic<SVGPolylineElement>('.level-drawing-line');
   const drawingLinks = graphic<SVGPathElement>('.level-drawing-links');
@@ -917,8 +957,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
       try {
         const target = level.object(id);
         if (target.kind !== 'trigger') return false;
-        level.upsert({ ...target, events: actions });
-        return true;
+        return commit(named('Apply events to', target), 'level-inspector', selectionTo(selection()),
+          (state) => state.upsert({ ...target, events: actions }));
       } catch (error) {
         if (!(error instanceof LevelError)) throw error;
         report(error);
@@ -941,11 +981,12 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let placement: LevelObject | null = null;
   let gesture: Gesture | null = null;
   // GLB terrain turned while its collision bakes for the turn, by object ID, shown on the course meanwhile. A newer turn of
-  // the same object supersedes one still baking; `request` tells them apart.
-  const turning = new Map<string, { readonly turn: number; readonly request: number; readonly assetId: string }>();
-  let turnRequest = 0;
-  // Turns baked while a drag held objects, committed once it ends.
-  const bakedTurns: (() => void)[] = [];
+  // the same object supersedes one still baking.
+  const turning = new Map<string, Turn>();
+  // The outline being drawn: a pending edit whose strokes are steps of their own until Finish shape makes it one step.
+  let outlineEdit: PendingEdit<Outline> | null = null;
+  // The coalescing key of each Q, E, [ or ] burst, by the key's code, sealed when the key is released.
+  const bursts = new Map<string, string>();
   // The terrain turns the course was last told to show.
   let terrainPreview: ReadonlyMap<string, number> = new Map();
   let connections = deriveConnectionLinks(level.definition().objects);
@@ -956,11 +997,11 @@ export function createLevelEditor(options: LevelEditorOptions) {
   // Fingers on the canvas, so a second one turns the first's gesture into a pinch.
   const touches = new Map<number, Point>();
   let drawingCursor: Point | null = null;
+  // The level last saved or exported, compared by identity, so undoing back to it is clean again; null for unsaved changes.
   let savedDefinition: LevelDefinition | null = level.definition();
   let savedCamera: EditorCamera | null = null;
-  let importGeneration = 0;
   // A level file being read, or a server level being downloaded; either blocks other loads.
-  let loading: 'file' | 'server' | null = null;
+  let load: Load | null = null;
   let rect = options.canvas.getBoundingClientRect();
   let drawCount = 0;
   let commitCount = 0;
@@ -974,8 +1015,6 @@ export function createLevelEditor(options: LevelEditorOptions) {
   let setPieceGhost: SVGGElement | null = null;
   let setPieceGhostKey: string | null = null;
   let setPieceStatus = '';
-  // Most recent drops first to be removed; stale entries (parts already deleted) are skipped.
-  const setPieceHistory: { readonly name: string; readonly ids: readonly string[]; readonly labels: readonly LevelLabel[] }[] = [];
   const setPieceButtons = new Map<string, HTMLButtonElement>();
   // The model being placed or last chosen, and the grid of the category on show: one of the library's, or the project's
   // own models, which its course artwork draws.
@@ -1001,9 +1040,12 @@ export function createLevelEditor(options: LevelEditorOptions) {
   projectCategory.textContent = 'Project';
   const surfaces = new SurfaceIndex(() => level.definition());
 
-  const dirty = () => level.definition() !== savedDefinition || triggerEvents.hasPendingDrafts() ||
-    drawing.vertices.length > 0 || gesture?.kind === 'draw';
+  // Whether the level differs from the one last saved, or work it does not hold yet is pending.
+  const dirty = (): boolean => level.definition() !== savedDefinition || hasPendingEdits();
   const selectedObject = () => selectedId === null ? null : level.object(selectedId);
+  // The selection as a step records it, and a step's selection from it to `after`.
+  const selection = (): readonly string[] => selectedId === null ? [] : [selectedId];
+  const selectionTo = (after: readonly string[]): Selection => ({ before: selection(), after });
   const armedSetPiece = (): SetPiece | null =>
     tool === 'place-set-piece' && setPieceId !== null ? setPieceById(setPieceId) : null;
   const inspectorObject = (): LevelObject | null =>
@@ -1034,37 +1076,77 @@ export function createLevelEditor(options: LevelEditorOptions) {
     }
   }
 
+  // Shows a refusal, and the controls as the level still has them.
+  function refuse(error: unknown): void {
+    report(error);
+    renderControls();
+    draw();
+  }
+
   function applyEdit(action: () => void): void {
     try {
       action();
     } catch (error) {
       if (!(error instanceof LevelError)) throw error;
-      report(error);
-      renderControls();
-      draw();
+      refuse(error);
     }
   }
 
-  function commitOrPreview(next: LevelObject): void {
+  // Where a point lies on the level board, for a step's name: at its square, or left of column A, which names none.
+  function where(point: Point): string {
+    const square = boardSquareName(boardSquareAt(boardLeft(terrainLeft), point));
+    return square === null ? 'left of column A' : `at ${square}`;
+  }
+
+  // An object's name as the Level tab gives it.
+  function objectName(object: LevelObject): string {
+    switch (object.kind) {
+      case 'terrain': return terrainName(object);
+      case 'start': return 'Start location';
+      case 'trigger': return `Trigger "${object.name}"`;
+      case 'enemy': return ENEMY_SPECS[object.species].label;
+      case 'decoration': return modelName(object.model);
+      default: return hazardName(object);
+    }
+  }
+
+  // A step's name: `verb` and the object it is done to, where it stands as the step is made, as in "Move Block at D7".
+  function named(verb: string, object: LevelObject): string {
+    return `${verb} ${objectName(object)} ${where(object)}`;
+  }
+
+  // Where a Level step is made: its section, null for the top of the tab, and the selection to restore.
+  function place(section: LevelSection | null, select: Selection | null): StepPlace {
+    return { tab: 'level', section, select };
+  }
+
+  // Applies `build`'s change of the level as one step named `label`, a burst keyed `coalesce` being one step; false, the
+  // refusal shown, when the level refuses it.
+  function commit(label: string, section: LevelSection | null, select: Selection,
+    build: (state: LevelState) => SectionChange<'level'> | null, coalesce: string | null = null): boolean {
+    const refusal = history.apply(level.command({ label, place: place(section, select), coalesce }, build));
+    if (refusal !== null) refuse(refusal);
+    return refusal === null;
+  }
+
+  // Puts `next` in place of the object it edits: the placement as a preview, or the level's object as one step, named for
+  // `verb` done to the object as it was.
+  function commitOrPreview(next: LevelObject, verb: string, coalesce: string | null = null): void {
     if (isPlacementTool(tool)) {
       placement = validateLevelObject(next);
       renderControls();
       draw();
     } else {
-      level.upsert(next);
+      commit(named(verb, level.object(next.id)), 'level-inspector', selectionTo(selection()), (state) => state.upsert(next),
+        coalesce);
     }
-  }
-
-  function confirmReplacement(action: string): boolean {
-    return !dirty() || window.confirm(`${action} replaces your unsaved level changes.
-Export the level first if you want to keep them. Continue without saving?`);
   }
 
   // Where the level is kept: in the open server project, which saves it a moment after each change, as part of the
   // numbered level version the page plays once its game settings are saved too; or nowhere until it is exported.
   function saveState(): string {
-    if (loading === 'file') return 'Reading level file…';
-    if (loading === 'server') return 'Downloading server level…';
+    if (load?.kind === 'file') return 'Reading level file…';
+    if (load?.kind === 'server') return 'Downloading server level…';
     if (drawing.vertices.length > 0) return 'Unfinished outline - finish or cancel before saving';
     const project = options.projectSave.openProject();
     if (project === null) return dirty() ? 'Unsaved changes — export, or open a server project in Project, to keep them' : 'No unsaved changes';
@@ -1241,7 +1323,6 @@ Export the level first if you want to keep them. Continue without saving?`);
       `${drawing.vertices.length} / ${LEVEL_LIMITS.polygonVertices} points. Click / tap corners or drag a trace. ` +
       'Tap the first point or finish to close. Freehand traces are simplified; concave outlines work, holes and crossing edges do not.';
     element<HTMLButtonElement>(root, '.level-drawing-finish').disabled = drawing.vertices.length < 3;
-    element<HTMLButtonElement>(root, '.level-drawing-undo').disabled = drawing.vertices.length === 0;
     for (const [selector, full] of [
       ['.level-palette', counts.terrain >= LEVEL_LIMITS.objects],
       ['.level-entity-palette', counts.triggers >= TRIGGER_LIMITS.objects],
@@ -1269,8 +1350,9 @@ Export the level first if you want to keep them. Continue without saving?`);
         'left or right to turn it, Shift snapping to 15°; Q / E tilt it and [ / ] turn it 15°. Delete removes the selection. New ' +
         'scenery comes from the Decoration library; the sky, fog, backdrop mountains and background blur are in Project / Theme. ' +
         'The course cannot be picked in this mode; switch to Course to pick it.',
-      draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace or Ctrl / Cmd + Z undoes a point or stroke. ' +
-        'Escape cancels. Pan with the middle button or two fingers and zoom as usual; your unfinished outline is kept.',
+      draw: 'Click / tap corners, or hold and drag to sketch. Enter finishes; Backspace takes back the last point or stroke, ' +
+        'and Undo and Redo step through them. Escape cancels. Pan with the middle button or two fingers and zoom as usual; ' +
+        'your unfinished outline is kept.',
       place: 'Click / tap to place it. Adjust its properties first if needed. M mirrors it; Q / E tilt it 15°, and [ / ] turn a GLB ' +
         '15°. Escape cancels placement.',
       'place-trigger': 'Click / tap to place this trigger or pressure switch. Select it after placing, then drag its link handle ' +
@@ -1484,14 +1566,37 @@ Export the level first if you want to keep them. Continue without saving?`);
     tiltKnob.setAttribute('r', String(TILT_KNOB_PIXELS * camera.state().worldHeight / Math.max(1, rect.height)));
   }
 
-  // Tilts the selection, or the object about to be placed, by `step` radians; false when it has no tilt.
-  function tiltBy(step: number): boolean {
+  // Tilts the selection, or the object about to be placed, by `step` radians, the presses of the key `code` being one step;
+  // false when it has no tilt.
+  function tiltBy(step: number, code: string): boolean {
     // Placing the player takes only where it stands.
     const object = tool === 'player' ? null : asTilted(inspectorObject());
     if (object === null) return false;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, angle: wrapAngle(object.angle + step) }));
+    applyEdit(() => commitOrPreview({ ...object, angle: wrapAngle(object.angle + step) }, aimsAlongAngle(object) ? 'Aim' : 'Tilt',
+      burst(code, object, 'angle')));
     return true;
+  }
+
+  // The coalescing key of the presses of the key `code` editing `object`'s `field`, which make one step until the key is
+  // released; none for the placement, which is no edit.
+  function burst(code: string, object: LevelObject, field: 'angle' | 'turn'): string | null {
+    if (isPlacementTool(tool)) return null;
+    const key = `level:${object.id}:${field}`;
+    bursts.set(code, key);
+    return key;
+  }
+
+  // Ends the burst of the key `code` once it is released.
+  function seal(code: string): void {
+    const key = bursts.get(code);
+    if (key === undefined) return;
+    bursts.delete(code);
+    history.seal(key);
+  }
+
+  function sealBursts(): void {
+    for (const code of [...bursts.keys()]) seal(code);
   }
 
   // The object whose turn dial shows: a selected decoration or GLB terrain, in the selecting mode that picks it, as a move,
@@ -1556,94 +1661,151 @@ Export the level first if you want to keep them. Continue without saving?`);
   }
 
   // Turns the selection, or the object about to be placed, so its front swings right for a positive `direction` and left
-  // for a negative one, 15° a press, from the turn it shows; false when it does not turn.
-  function turnBy(direction: number): boolean {
+  // for a negative one, 15° a press, from the turn it shows, the presses of the key `code` being one step; false when it
+  // does not turn.
+  function turnBy(direction: number, code: string): boolean {
     const object = asTurned(inspectorObject());
     if (object === null) return false;
     cancelGesture();
     const step = direction * TURN_STEP * (object.mirror ? -1 : 1);
-    applyEdit(() => turnObject(object, wrapAngle(shownTurn(object) + step)));
+    applyEdit(() => turnObject(object, wrapAngle(shownTurn(object) + step), burst(code, object, 'turn')));
     return true;
   }
 
   // Turns the selection, or the object about to be placed: a decoration at once, GLB terrain once its collision is baked
-  // for the turn.
-  function turnObject(object: TurnedObject, turn: number): void {
+  // for the turn. Turns keyed `coalesce` make one step.
+  function turnObject(object: TurnedObject, turn: number, coalesce: string | null = null): void {
     if (object.kind === 'decoration') {
       if (tool === 'place-decoration') decorationTurn = turn;
-      commitOrPreview({ ...object, turn });
+      commitOrPreview({ ...object, turn }, 'Turn', coalesce);
     } else {
-      turnTerrain(object, turn);
+      turnTerrain(object, turn, coalesce);
     }
   }
 
   // Turns GLB terrain to `turn` once the project has baked its collision for it, each axis keeping its scale within the
-  // level's limits, and shows the turn on the course meanwhile. A newer turn of the same object supersedes it.
-  function turnTerrain(object: TerrainObject, turn: number): void {
+  // level's limits, and shows the turn on the course meanwhile: the placement's, or an object's the level holds as a
+  // pending edit. A newer turn of the same object supersedes it.
+  function turnTerrain(object: TerrainObject, turn: number, coalesce: string | null): void {
     const { mesh } = object;
     if (mesh.type !== 'asset') return;
     // The level's own check of the turn, before anything bakes for it.
     validateLevelObject({ ...object, mesh: { ...mesh, turn } });
-    const request = ++turnRequest;
-    turning.set(object.id, { turn, request, assetId: mesh.assetId });
+    turning.get(object.id)?.edit?.pending.cancel();
+    bakeTurn(object.id, mesh.assetId, mesh.turn, turn,
+      object.id === PREVIEW_ID ? null : { label: named('Turn', object), coalesce, placed: null });
+  }
+
+  // Bakes the collision of the object `id` turned from `from` to `to`, showing the turn meanwhile: the placement's, or
+  // that of the pending edit `step` describes, which becomes one step once baked.
+  function bakeTurn(id: string, assetId: string, from: number, to: number,
+    step: Omit<NonNullable<Turn['edit']>, 'pending'> | null): void {
+    const entry: Turn = {
+      turn: to, from, assetId, baked: null,
+      edit: step === null ? null : {
+        ...step,
+        pending: history.prepare({
+          label: step.label, place: place(step.placed === null ? 'level-inspector' : 'level-build', null),
+          cancelled: () => endTurn(id, entry),
+        }),
+      },
+    };
+    turning.set(id, entry);
     renderControls();
     draw();
-    void bakeTurn(object, mesh.assetId, mesh.turn, turn, request);
+    void bake(id, entry);
   }
 
-  // Commits terrain turned from `from` to `to` with the collision baked for it, unless a newer turn of it superseded this
-  // one, once no drag holds objects. When the project refuses the bake, which it reports, or the object has gone or
-  // changed mesh or turn meanwhile, the object stays as it is.
-  async function bakeTurn(object: TerrainObject, assetId: string, from: number, to: number, request: number): Promise<void> {
-    const pending = (): boolean => !disposed && turning.get(object.id)?.request === request;
-    const drop = (): void => {
-      turning.delete(object.id);
-      renderControls();
-      draw();
-    };
+  // Waits for a turn's bake, then makes the turn once no drag holds objects, unless a newer turn or its cancelling has
+  // ended it. The project reports a bake it refuses, and the turn goes.
+  async function bake(id: string, entry: Turn): Promise<void> {
+    const current = (): boolean => !disposed && turning.get(id) === entry;
     let baked: [MeshTerrain | Error, MeshTerrain | Error];
     try {
-      baked = await Promise.all([options.meshes.terrain(assetId, from), options.meshes.terrain(assetId, to)]);
+      baked = await Promise.all([options.meshes.terrain(entry.assetId, entry.from), options.meshes.terrain(entry.assetId, entry.turn)]);
     } catch (error) {
-      if (pending()) drop();
+      if (current()) stopTurn(id, entry);
       throw error;
     }
+    if (!current()) return;
     const [before, after] = baked;
     if (before instanceof Error || after instanceof Error) {
-      if (pending()) drop();
+      stopTurn(id, entry);
       return;
     }
-    const commit = (): void => {
-      if (!pending()) return;
-      turning.delete(object.id);
-      // The object as it is now, keeping whatever else changed meanwhile.
-      const held = placement !== null && object.id === placement.id ? placement : bounds.has(object.id) ? level.object(object.id) : null;
-      const terrain = asTerrain(held);
-      if (terrain === null || terrain.mesh.type !== 'asset' || terrain.mesh.assetId !== assetId || terrain.mesh.turn !== from) {
-        renderControls();
-        draw();
-        return;
-      }
-      const next = { ...terrain, mesh: after.mesh, ...turnedTerrainBox(terrain, before, after) };
-      applyEdit(() => {
-        if (held !== placement) {
-          level.upsert(next);
-          return;
-        }
-        placement = validateLevelObject(next);
-        renderControls();
-        draw();
-      });
-    };
-    // An edit would end a drag holding objects, so a turn of a level object waits for it to end; a placement is no edit.
-    if (holdsObjects() && object.id !== PREVIEW_ID) bakedTurns.push(commit);
-    else commit();
+    entry.baked = [before, after];
+    // An edit would end a drag holding objects, so a turn's step waits for it to end; the placement's turn is no edit.
+    if (entry.edit === null || !holdsObjects()) settleTurn(id, entry, entry.baked);
   }
 
-  // Commits the turns baked while a drag held objects, once none does.
+  // Drops a turn that will not be made, cancelling its pending edit.
+  function stopTurn(id: string, entry: Turn): void {
+    if (entry.edit === null) endTurn(id, entry);
+    else entry.edit.pending.cancel();
+  }
+
+  // Forgets a turn that has ended, so the course shows the object as the level turns it.
+  function endTurn(id: string, entry: Turn): void {
+    if (turning.get(id) !== entry) return;
+    turning.delete(id);
+    renderControls();
+    draw();
+  }
+
+  // A turn baking for an object a change removed, or turned another way, can no longer be made: it goes at once, and its
+  // pending edit once the change has been told.
+  function forgetTurn(id: string, object: LevelObject | null): void {
+    const entry = turning.get(id);
+    if (entry === undefined || entry.edit === null || targetOf(entry, object) !== null) return;
+    turning.delete(id);
+    const { pending } = entry.edit;
+    queueMicrotask(() => { if (!pending.done) pending.cancel(); });
+  }
+
+  // Makes a turn, baked `before` and `after`: the placement's at once, and a pending edit's as one step, built from the
+  // object as the level then holds it, keeping whatever else changed meanwhile; nothing when the object has gone or turned
+  // another way, and a refusal when the project no longer has the mesh.
+  function settleTurn(id: string, entry: Turn, [before, after]: readonly [MeshTerrain, MeshTerrain]): void {
+    const turned = (object: LevelObject | null): TerrainObject | null => {
+      const terrain = targetOf(entry, object);
+      return terrain === null ? null : { ...terrain, mesh: after.mesh, ...turnedTerrainBox(terrain, before, after) };
+    };
+    turning.delete(id);
+    if (entry.edit === null) {
+      const next = turned(placement);
+      if (next !== null) applyEdit(() => { placement = validateLevelObject(next); });
+      renderControls();
+      draw();
+      return;
+    }
+    const { pending, label, coalesce, placed } = entry.edit;
+    // A placing selects what it places, unless something else has been selected meanwhile; a turn leaves the selection be.
+    const selects = placed !== null && selectedId === null && tool === 'select';
+    const refusal = pending.finish(level.command({
+      label, coalesce,
+      place: place(placed === null ? 'level-inspector' : 'level-build', selectionTo(selects ? [id] : selection())),
+    }, (state) => {
+      const next = turned(placed ?? (bounds.has(id) ? state.object(id) : null));
+      if (next === null) return null;
+      if (!options.meshes.list().some((mesh) => mesh.id === entry.assetId)) {
+        throw new LevelError(`${label}: its mesh is no longer in the course artwork.`);
+      }
+      return state.upsert(next);
+    }));
+    if (refusal !== null) refuse(refusal);
+    else if (selects && bounds.has(id)) {
+      selectedId = id;
+      renderControls();
+      draw();
+    }
+  }
+
+  // Makes the turns baked while a drag held objects, once none does.
   function settleTurns(): void {
-    if (holdsObjects()) return;
-    for (const commit of bakedTurns.splice(0)) commit();
+    if (disposed || holdsObjects()) return;
+    for (const [id, entry] of [...turning]) {
+      if (entry.baked !== null && turning.get(id) === entry) settleTurn(id, entry, entry.baked);
+    }
   }
 
   // The nearest decoration drawn under a client position.
@@ -1727,7 +1889,6 @@ Export the level first if you want to keep them. Continue without saving?`);
       : `${shown.name}: ${shown.skill} Adds ${terrain} terrain object${terrain === 1 ? '' : 's'}${
         extras.length === 0 ? '' : ` and ${extras.join(', ')}`}.`;
     input('set-piece-mirror').checked = setPieceMirror;
-    element<HTMLButtonElement>(root, '.level-set-piece-undo').disabled = setPieceHistory.length === 0;
     element(root, '.level-set-piece-status').textContent = setPieceStatus;
   }
 
@@ -1792,6 +1953,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     else drawPolygon(selectionPolygon, asTerrain(selected));
     if (ghostDecoration !== null) drawPoints(ghostPolygon, decorationOutline(ghostDecoration));
     else drawPolygon(ghostPolygon, ghost !== null ? asTerrain(ghost) : null);
+    drawPlacings();
     if (ghostDecoration !== decorationPreview) {
       decorationPreview = ghostDecoration;
       options.decorations.preview(ghostDecoration);
@@ -1814,6 +1976,14 @@ Export the level first if you want to keep them. Continue without saving?`);
         options.meshes.preview(turns);
       }
     }
+  }
+
+  // Outlines the terrain dropped while its turn bakes, which the level holds once baked.
+  function drawPlacings(): void {
+    const loops: Point[][] = [];
+    for (const { edit } of turning.values()) if (edit !== null && edit.placed !== null) loops.push(...objectLoops(edit.placed));
+    placingPolygon.toggleAttribute('hidden', loops.length === 0);
+    if (loops.length > 0) placingPolygon.setAttribute('d', loopsPath(loops));
   }
 
   function objectConnections(id: string | null): readonly ConnectionLink[] {
@@ -1996,7 +2166,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     const previous = gesture;
     gesture = null;
     // After whatever ended the drag, which may be a level edit still being told to its listeners.
-    if (bakedTurns.length > 0) queueMicrotask(settleTurns);
+    if (turning.size > 0) queueMicrotask(settleTurns);
     if (previous === null) {
       draw();
       return;
@@ -2082,21 +2252,23 @@ Export the level first if you want to keep them. Continue without saving?`);
     pan.unitsPerPixel = camera.state().worldHeight / Math.max(1, rect.height);
   }
 
+  // Starts afresh on a level that replaced the one shown: nothing selected, dragged or being placed.
   function resetSelection(): void {
-    // Turns baking for the level being replaced are dropped.
-    turning.clear();
-    bakedTurns.length = 0;
-    cancelGesture();
-    drawing.clear();
-    drawingCursor = null;
     selectedId = null;
     chooseTool('select');
   }
 
-  // Null records that the current level has unsaved changes.
-  function markSaved(definition: LevelDefinition | null = level.definition()): void {
+  // Records `definition` as the level last saved; null records that the current level has unsaved changes.
+  function markSaved(definition: LevelDefinition | null): void {
     savedDefinition = definition;
     renderStatus();
+  }
+
+  // Work the level does not hold yet: unapplied trigger events, an outline, and edits waiting for a bake or a level file.
+  function hasPendingEdits(): boolean {
+    if (triggerEvents.hasPendingDrafts() || drawing.vertices.length > 0 || gesture?.kind === 'draw' || load !== null) return true;
+    for (const entry of turning.values()) if (entry.edit !== null) return true;
+    return false;
   }
 
   function prepareLevel(): boolean {
@@ -2107,28 +2279,63 @@ Export the level first if you want to keep them. Continue without saving?`);
     return triggerEvents.flush();
   }
 
+  // The outline being drawn, which a drawing press prepares as a pending edit: Undo and Redo walk its strokes, Backspace takes
+  // them back, and cancelling it, as Undo does once none is left, clears it.
+  function prepareOutline(): PendingEdit<Outline> {
+    return history.prepare<Outline>({
+      label: 'Draw shape', place: place('level-build', null),
+      restore: (vertices) => {
+        // A stroke being drawn would extend the outline as it was.
+        if (gesture?.kind === 'draw') cancelGesture();
+        drawing.restore(vertices);
+        renderControls();
+        draw();
+      },
+      cancelled: () => {
+        outlineEdit = null;
+        if (gesture?.kind === 'draw') cancelGesture();
+        drawing.clear();
+        renderControls();
+        draw();
+      },
+    });
+  }
+
+  function liveOutline(): PendingEdit<Outline> {
+    if (outlineEdit === null) throw new Error('No outline is being drawn.');
+    return outlineEdit;
+  }
+
+  // Makes the outline one step, "Draw shape", which selects the shape; an outline the level refuses stays to be corrected.
   function finishDrawing(): void {
     if (gesture?.kind === 'draw') throw new LevelError('Release the current stroke before finishing the outline.');
     const object = terrainFromOutline({
       id: `shape-${crypto.randomUUID()}`, vertices: drawing.vertices,
       color: ROCK_COLOR, depth: DEFAULT_OBJECT_DEPTH, surface: DEFAULT_SURFACE,
     });
-    level.upsert(object);
+    // Built before the outline ends, so a refusal leaves it as it is.
+    const change = level.upsert(object);
+    const refusal = liveOutline().finish(level.command(
+      { label: `Draw shape ${where(object)}`, place: place('level-build', selectionTo([object.id])) }, () => change));
+    if (refusal !== null) {
+      refuse(refusal);
+      return;
+    }
+    outlineEdit = null;
     drawing.clear();
     selectedId = object.id;
     chooseTool('select');
   }
 
-  function undoDrawing(): void {
-    const previous = gesture;
-    cancelGesture();
-    if (previous?.kind !== 'draw') drawing.undo();
-    drawingCursor = null;
-    renderControls(); draw();
+  // Backspace in Draw shape: drops the stroke being drawn, or else takes back the outline's newest stroke.
+  function undoStroke(): void {
+    if (gesture?.kind === 'draw') cancelGesture();
+    else outlineEdit?.undoStep();
   }
 
+  // Escape and Cancel outline: the outline goes, leaving no step.
   function cancelDrawing(): void {
-    drawing.clear();
+    outlineEdit?.cancel();
     chooseTool(selecting());
   }
 
@@ -2154,42 +2361,28 @@ Export the level first if you want to keep them. Continue without saving?`);
     draw();
   }
 
+  // Drops the armed set piece as one step, its parts and course labels together.
   function dropSetPiece(): void {
     const piece = armedSetPiece();
     if (piece === null) return;
     const stamp = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
     const placed = placeSetPiece(piece, setPieceAnchor, { mirror: setPieceMirror, stamp });
-    level.edit({
-      add: placed.objects,
-      labels: placed.labels.length === 0 ? undefined : [...level.definition().labels, ...placed.labels],
-    });
-    setPieceHistory.push({ name: piece.name, ids: placed.objects.map((object) => object.id), labels: placed.labels });
-    if (setPieceHistory.length > SET_PIECE_HISTORY) setPieceHistory.shift();
+    const dropped = commit(`Place set piece ${piece.name} ${where(setPieceAnchor)}`, 'level-set-pieces', selectionTo([]),
+      (state) => state.edit({
+        add: placed.objects,
+        labels: placed.labels.length === 0 ? undefined : [...state.definition().labels, ...placed.labels],
+      }));
+    if (!dropped) return;
     setPieceStatus = `Placed ${piece.name}${setPieceMirror ? ' (mirrored)' : ''}. Select any part to fine-tune it.`;
     selectedId = null;
     chooseTool('select');
   }
 
-  function removeLastSetPiece(): void {
-    cancelGesture();
-    while (setPieceHistory.length > 0) {
-      const entry = setPieceHistory.pop();
-      if (entry === undefined) break;
-      const ids = entry.ids.filter((id) => bounds.has(id));
-      const current = level.definition().labels;
-      const remaining = [...current];
-      for (const label of entry.labels) {
-        const index = remaining.findIndex((candidate) =>
-          candidate.x === label.x && candidate.y === label.y && candidate.text === label.text);
-        if (index >= 0) remaining.splice(index, 1);
-      }
-      if (ids.length === 0 && remaining.length === current.length) continue;
-      setPieceStatus = `Removed ${entry.name}.`;
-      level.edit({ remove: ids, labels: remaining.length === current.length ? undefined : remaining });
-      return;
-    }
-    setPieceStatus = 'Placed set pieces have already been deleted.';
-    renderControls();
+  // Places `object` as one step named for `verb` done where it stands, then selects it with the tool `next`.
+  function placeObject(object: LevelObject, section: LevelSection, verb: string, next: 'select' | 'decorate'): void {
+    if (!commit(named(verb, object), section, selectionTo([object.id]), (state) => state.upsert(object))) return;
+    selectedId = object.id;
+    chooseTool(next);
   }
 
   // Saving keeps the level as the open project's next version; each change also saves itself a moment later.
@@ -2208,15 +2401,67 @@ Export the level first if you want to keep them. Continue without saving?`);
       new Option(entry.levelName === null ? entry.name : `${entry.levelName} (${entry.name})`, String(index)))));
 
   function renderLoadControls(): void {
-    importButton.disabled = loading !== null;
-    serverList.disabled = !active || loading !== null || options.serverLevels.length === 0;
+    importButton.disabled = load !== null;
+    serverList.disabled = !active || load !== null || options.serverLevels.length === 0;
     serverLoad.disabled = serverList.disabled;
   }
 
-  function setLoading(next: typeof loading): void {
-    loading = next;
+  // Starts reading a level file or downloading a server level: a pending edit named `label` until the level it reads
+  // replaces the current one. Cancelling it, as Undo, leaving the tab or opening a project does, aborts `download`.
+  function startLoad(kind: Load['kind'], label: string, download: AbortController | null): Load {
+    const entry: Load = {
+      kind, label,
+      pending: history.prepare({
+        label, place: place(LOAD_SECTIONS[kind], null),
+        cancelled: () => {
+          download?.abort();
+          endLoad(entry);
+        },
+      }),
+    };
+    load = entry;
     renderLoadControls();
     renderStatus();
+    return entry;
+  }
+
+  function endLoad(entry: Load): void {
+    if (load !== entry) return;
+    load = null;
+    renderLoadControls();
+    renderStatus();
+  }
+
+  // Shows why a load failed and cancels it; a load cancelled meanwhile is forgotten, whatever it read.
+  function failLoad(entry: Load, error: unknown): void {
+    if (entry.pending.done) {
+      if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
+      return;
+    }
+    entry.pending.cancel();
+    report(error);
+  }
+
+  // Replaces the level with the one a load read, as the load's one step, unless it was cancelled meanwhile; only once it
+  // has does the tab start afresh on it and say so. Trigger events edited meanwhile apply first, as steps of their own, so
+  // Undo of the replacement brings them back; an invalid one, reported, cancels the load.
+  function finishLoad(entry: Load, value: unknown, notice: string): void {
+    if (entry.pending.done) return;
+    endLoad(entry);
+    if (!triggerEvents.flush()) {
+      entry.pending.cancel();
+      onNotice('The level was not loaded: fix or revert the trigger events, then load it again.', 'error');
+      return;
+    }
+    const refusal = entry.pending.finish(level.command(
+      { label: entry.label, place: place(LOAD_SECTIONS[entry.kind], selectionTo([])) }, (state) => state.replace(value)));
+    if (refusal !== null) {
+      refuse(refusal);
+      return;
+    }
+    resetSelection();
+    fitCourse();
+    onNotice(notice, 'info');
   }
   renderLoadControls();
 
@@ -2299,7 +2544,11 @@ Export the level first if you want to keep them. Continue without saving?`);
       }, listen);
       return button;
     }));
-    // A mesh taken out of the project can no longer be placed.
+    // A mesh taken out of the project can no longer be placed or turned: its turns still baking go, and so does a placing
+    // waiting for one.
+    for (const [id, entry] of [...turning]) {
+      if (!meshes.some((mesh) => mesh.id === entry.assetId)) stopTurn(id, entry);
+    }
     if (presetId?.startsWith(MESH_PRESET) && !meshes.some((mesh) => presetId === `${MESH_PRESET}${mesh.id}`)) chooseTool('select');
     else renderControls();
   }
@@ -2438,7 +2687,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       const object = inspectorObject();
       if (object === null) return;
       cancelGesture();
-      applyEdit(() => commitOrPreview({ ...object, [name]: input(name).valueAsNumber }));
+      applyEdit(() => commitOrPreview({ ...object, [name]: input(name).valueAsNumber }, 'Move'));
     }, listen);
   }
   input('angle').addEventListener('change', () => {
@@ -2446,7 +2695,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     const object = inspectorObject();
     if (object === null || (object.kind !== 'terrain' && object.kind !== 'start' && object.kind !== 'decoration' && object.kind !== 'shooter')) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, angle: input('angle').valueAsNumber / DEGREES }));
+    applyEdit(() => commitOrPreview({ ...object, angle: input('angle').valueAsNumber / DEGREES }, aimsAlongAngle(object) ? 'Aim' : 'Tilt'));
   }, listen);
   input('turn').addEventListener('change', () => {
     if (!active) return;
@@ -2455,6 +2704,8 @@ Export the level first if you want to keep them. Continue without saving?`);
     cancelGesture();
     applyEdit(() => turnObject(object, input('turn').valueAsNumber / DEGREES));
   }, listen);
+  // A step's verb for a change of an object's size.
+  const sizeVerb = (name: 'width' | 'height' | 'depth'): string => name === 'depth' ? 'Set depth of' : 'Resize';
   for (const name of ['width', 'height', 'depth'] as const) {
     input(name).addEventListener('change', () => {
       if (!active) return;
@@ -2464,7 +2715,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       applyEdit(() => {
         const value = input(name).valueAsNumber;
         const circle = meshIsCircle(object.mesh) && (name === 'width' || name === 'height');
-        commitOrPreview({ ...object, [name]: value, ...(circle ? { width: value, height: value } : {}) });
+        commitOrPreview({ ...object, [name]: value, ...(circle ? { width: value, height: value } : {}) }, sizeVerb(name));
       });
     }, listen);
   }
@@ -2473,14 +2724,14 @@ Export the level first if you want to keep them. Continue without saving?`);
     const object = asTerrain(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, illusion: input('illusion').checked }));
+    applyEdit(() => commitOrPreview({ ...object, illusion: input('illusion').checked }, 'Set illusion of'));
   }, listen);
   input('terrain-mirror').addEventListener('change', () => {
     if (!active) return;
     const object = asTerrain(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, mirror: input('terrain-mirror').checked }));
+    applyEdit(() => commitOrPreview({ ...object, mirror: input('terrain-mirror').checked }, 'Mirror'));
   }, listen);
   select('surface').addEventListener('change', () => {
     if (!active) return;
@@ -2488,24 +2739,26 @@ Export the level first if you want to keep them. Continue without saving?`);
     const surface = select('surface').value;
     if (object === null || !isSurface(surface)) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, surface }));
+    applyEdit(() => commitOrPreview({ ...object, surface }, 'Set surface of'));
   }, listen);
-  const editDecoration = (change: (object: DecorationObject) => Partial<DecorationObject>): void => {
+  const editDecoration = (verb: string, change: (object: DecorationObject) => Partial<DecorationObject>): void => {
     if (!active) return;
     const object = asDecoration(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, ...change(object) }));
+    applyEdit(() => commitOrPreview({ ...object, ...change(object) }, verb));
   };
-  decorationList.addEventListener('change', () => editDecoration(() => {
+  decorationList.addEventListener('change', () => editDecoration('Set model of', () => {
     if (tool === 'place-decoration') decorationId = decorationList.value;
     return { model: decorationList.value };
   }), listen);
   for (const [name, field] of [['decoration-z', 'z'], ['decoration-height', 'height']] as const) {
-    input(name).addEventListener('change', () => editDecoration(() => ({ [field]: input(name).valueAsNumber })), listen);
+    input(name).addEventListener('change', () => editDecoration(field === 'z' ? 'Set depth of' : 'Resize',
+      () => ({ [field]: input(name).valueAsNumber })), listen);
   }
-  input('decoration-tint').addEventListener('change', () => editDecoration(() => ({ tint: Number.parseInt(input('decoration-tint').value.slice(1), 16) })), listen);
-  input('decoration-mirror').addEventListener('change', () => editDecoration(() => {
+  input('decoration-tint').addEventListener('change', () => editDecoration('Set tint of',
+    () => ({ tint: Number.parseInt(input('decoration-tint').value.slice(1), 16) })), listen);
+  input('decoration-mirror').addEventListener('change', () => editDecoration('Mirror', () => {
     if (tool === 'place-decoration') decorationMirror = input('decoration-mirror').checked;
     return { mirror: input('decoration-mirror').checked };
   }), listen);
@@ -2522,25 +2775,29 @@ Export the level first if you want to keep them. Continue without saving?`);
     const object = asStart(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, reach: input('reach').valueAsNumber }));
+    applyEdit(() => commitOrPreview({ ...object, reach: input('reach').valueAsNumber }, 'Set reach of'));
   }, listen);
+  // A step's verb for setting the numeric field labelled `label`.
+  const setField = (label: string): string => `Set ${label.toLowerCase()} of`;
   for (const name of ['patrolDistance', 'speed'] as const) {
     input(`enemy-${name}`).addEventListener('change', () => {
       if (!active) return;
       const object = asEnemy(inspectorObject());
       if (object === null) return;
       cancelGesture();
-      applyEdit(() => commitOrPreview({ ...object, [name]: input(`enemy-${name}`).valueAsNumber }));
+      applyEdit(() => commitOrPreview({ ...object, [name]: input(`enemy-${name}`).valueAsNumber }, setField(ENEMY_FIELDS[name].label)));
     }, listen);
   }
-  const editTrap = <K extends 'shooter' | 'axe'>(kind: K, name: string): void => {
+  const editTrap = <K extends 'shooter' | 'axe'>(kind: K, name: string, label: string): void => {
     if (!active) return;
     const object = inspectorObject();
     if (object === null || object.kind !== kind) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, [name]: input(`${kind}-${name}`).valueAsNumber }));
+    applyEdit(() => commitOrPreview({ ...object, [name]: input(`${kind}-${name}`).valueAsNumber }, setField(label)));
   };
-  for (const name of Object.keys(SHOOTER_FIELDS)) input(`shooter-${name}`).addEventListener('change', () => editTrap('shooter', name), listen);
+  for (const [name, field] of Object.entries(SHOOTER_FIELDS)) {
+    input(`shooter-${name}`).addEventListener('change', () => editTrap('shooter', name, field.label), listen);
+  }
   select('shooter-firing').addEventListener('change', () => {
     if (!active) return;
     const object = asShooter(inspectorObject());
@@ -2548,9 +2805,11 @@ Export the level first if you want to keep them. Continue without saving?`);
     const firing = select('shooter-firing').value;
     if (firing !== 'timer' && firing !== 'trigger') return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, firing }));
+    applyEdit(() => commitOrPreview({ ...object, firing }, 'Set firing of'));
   }, listen);
-  for (const name of Object.keys(AXE_FIELDS)) input(`axe-${name}`).addEventListener('change', () => editTrap('axe', name), listen);
+  for (const [name, field] of Object.entries(AXE_FIELDS)) {
+    input(`axe-${name}`).addEventListener('change', () => editTrap('axe', name, field.label), listen);
+  }
   select('pool-liquid').addEventListener('change', () => {
     if (!active) return;
     const object = asPool(inspectorObject());
@@ -2559,7 +2818,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     cancelGesture();
     // A pool being placed follows its new liquid in the palette.
     if (tool === 'place-hazard') presetId = liquid;
-    applyEdit(() => commitOrPreview({ ...object, liquid }));
+    applyEdit(() => commitOrPreview({ ...object, liquid }, 'Set liquid of'));
   }, listen);
   for (const name of ['width', 'height', 'depth'] as const) {
     input(`pool-${name}`).addEventListener('change', () => {
@@ -2567,7 +2826,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       const object = asPool(inspectorObject());
       if (object === null) return;
       cancelGesture();
-      applyEdit(() => commitOrPreview({ ...object, [name]: input(`pool-${name}`).valueAsNumber }));
+      applyEdit(() => commitOrPreview({ ...object, [name]: input(`pool-${name}`).valueAsNumber }, sizeVerb(name)));
     }, listen);
   }
   for (const name of ['travelX', 'travelY', 'width', 'height', 'depth', 'speed'] as const) {
@@ -2576,7 +2835,8 @@ Export the level first if you want to keep them. Continue without saving?`);
       const object = asPlatform(inspectorObject());
       if (object === null) return;
       cancelGesture();
-      applyEdit(() => commitOrPreview({ ...object, [name]: input(`platform-${name}`).valueAsNumber }));
+      const verb = name === 'travelX' || name === 'travelY' ? 'Set travel of' : name === 'speed' ? 'Set speed of' : sizeVerb(name);
+      applyEdit(() => commitOrPreview({ ...object, [name]: input(`platform-${name}`).valueAsNumber }, verb));
     }, listen);
   }
   select('platform-surface').addEventListener('change', () => {
@@ -2585,14 +2845,14 @@ Export the level first if you want to keep them. Continue without saving?`);
     const surface = SURFACES.find((candidate) => candidate === select('platform-surface').value);
     if (object === null || surface === undefined) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, surface }));
+    applyEdit(() => commitOrPreview({ ...object, surface }, 'Set surface of'));
   }, listen);
   input('platform-ride').addEventListener('change', () => {
     if (!active) return;
     const object = asPlatform(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, ride: input('platform-ride').checked }));
+    applyEdit(() => commitOrPreview({ ...object, ride: input('platform-ride').checked }, 'Set boarding of'));
   }, listen);
   select('enemy-facing').addEventListener('change', () => {
     if (!active) return;
@@ -2602,7 +2862,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     applyEdit(() => {
       const facing = ENEMY_FACINGS.find((candidate) => candidate === select('enemy-facing').value);
       if (facing === undefined) throw new LevelError('Choose a supported enemy facing.');
-      commitOrPreview({ ...object, facing });
+      commitOrPreview({ ...object, facing }, 'Set facing of');
     });
   }, listen);
   input('trigger-name').addEventListener('change', () => {
@@ -2610,7 +2870,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     const object = asTrigger(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, name: input('trigger-name').value }));
+    applyEdit(() => commitOrPreview({ ...object, name: input('trigger-name').value }, 'Rename'));
   }, listen);
   select('trigger-region').addEventListener('change', () => {
     if (!active) return;
@@ -2626,7 +2886,7 @@ Export the level first if you want to keep them. Continue without saving?`);
           width: object.region.type === 'box' ? object.region.width : object.region.radius * 2,
           height: object.region.type === 'box' ? object.region.height : object.region.radius * 2,
         };
-      commitOrPreview({ ...object, region });
+      commitOrPreview({ ...object, region }, 'Set region of');
     });
   }, listen);
   input('trigger-radius').addEventListener('change', () => {
@@ -2634,7 +2894,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     const object = asTrigger(inspectorObject());
     if (object === null || object.region.type !== 'circle') return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, region: { type: 'circle', radius: input('trigger-radius').valueAsNumber } }));
+    applyEdit(() => commitOrPreview({ ...object, region: { type: 'circle', radius: input('trigger-radius').valueAsNumber } }, 'Resize'));
   }, listen);
   for (const name of ['trigger-width', 'trigger-height'] as const) {
     input(name).addEventListener('change', () => {
@@ -2649,7 +2909,7 @@ Export the level first if you want to keep them. Continue without saving?`);
           width: name === 'trigger-width' ? input(name).valueAsNumber : region.width,
           height: name === 'trigger-height' ? input(name).valueAsNumber : region.height,
         },
-      }));
+      }, 'Resize'));
     }, listen);
   }
   select('trigger-activation').addEventListener('change', () => {
@@ -2657,7 +2917,8 @@ Export the level first if you want to keep them. Continue without saving?`);
     const object = asTrigger(inspectorObject());
     if (object === null) return;
     cancelGesture();
-    applyEdit(() => commitOrPreview({ ...object, activation: select('trigger-activation').value === 'on-enter' ? 'on-enter' : 'once' }));
+    applyEdit(() => commitOrPreview({ ...object, activation: select('trigger-activation').value === 'on-enter' ? 'on-enter' : 'once' },
+      'Set activation of'));
   }, listen);
   select('trigger-marker').addEventListener('change', () => {
     if (!active) return;
@@ -2667,7 +2928,7 @@ Export the level first if you want to keep them. Continue without saving?`);
     applyEdit(() => {
       const marker = TRIGGER_MARKERS.find((candidate) => candidate === select('trigger-marker').value);
       if (marker === undefined) throw new LevelError('Choose a supported trigger marker.');
-      commitOrPreview({ ...object, marker });
+      commitOrPreview({ ...object, marker }, 'Set marker of');
     });
   }, listen);
 
@@ -2684,19 +2945,15 @@ Export the level first if you want to keep them. Continue without saving?`);
     if (!active || input('set-piece-mirror').checked === setPieceMirror) return;
     toggleSetPieceMirror();
   }, listen);
-  action('.level-set-piece-undo', removeLastSetPiece);
   function deleteSelected(): void {
     if (selectedId === null || (tool !== 'select' && tool !== 'decorate')) return;
     const object = selectedObject();
     if (object === null || object.kind === 'start') return;
     cancelGesture();
-    const id = selectedId;
-    selectedId = null;
-    level.remove(id);
+    if (commit(named('Delete', object), 'level-inspector', selectionTo([]), (state) => state.remove(object.id))) selectedId = null;
   }
   action('.level-delete', deleteSelected);
   action('.level-drawing-finish', () => applyEdit(finishDrawing));
-  action('.level-drawing-undo', undoDrawing);
   action('.level-drawing-cancel', cancelDrawing);
   action('.level-play', options.onPlay);
   action('.level-player-clear', () => {
@@ -2739,65 +2996,62 @@ Export the level first if you want to keep them. Continue without saving?`);
   // A rename is one level edit, saved and exported with the rest; an empty name leaves the level unnamed.
   levelName.addEventListener('change', () => {
     const typed = levelName.value.trim();
-    if (active) applyEdit(() => level.metadata({ name: typed === '' ? null : typed }));
+    const name = typed === '' ? null : typed;
+    if (active) {
+      commit(name === null ? 'Rename level' : `Rename level to "${name}"`, null, selectionTo(selection()),
+        (state) => state.metadata({ name }));
+    }
     levelName.value = level.definition().name ?? '';
   }, listen);
   action('.level-clear-labels', () => {
     const { labels } = level.definition();
     if (labels.length === 0 || !window.confirm(`Remove all ${labels.length} course labels?`)) return;
-    level.metadata({ labels: [] });
+    commit('Remove course labels', 'level-labels', selectionTo(selection()), (state) => state.metadata({ labels: [] }));
   });
+  // Starts afresh with flat ground and the start location, as one step that Undo takes back. Unapplied trigger events
+  // apply first, as steps of their own, so that Undo brings them back; an invalid one, reported, keeps the level.
   action('.level-new', () => {
-    const project = options.projectSave.openProject();
-    if (!window.confirm(`Start a new level? This keeps flat ground and the start location, and removes the level's name and all other objects and labels. ${
-      project === null ? '' : `Project "${project}" keeps every saved version. `}${
-      dirty() ? 'Your unsaved changes will be discarded; export first to keep them.' : ''}`)) return;
+    if (!triggerEvents.flush()) return;
+    if (!commit('Start new level', null, selectionTo([]), (state) => state.replace(STARTER_LEVEL))) return;
     resetSelection();
-    level.replace(STARTER_LEVEL);
     fitCourse();
     onNotice(`New level started. Add terrain and place an ending trigger. ${keptNote()}`, 'info');
   });
   action('.level-export', () => {
     if (!prepareLevel()) return;
-    const definition = validateLevel(level.definition());
-    downloadJson('level.json', `${JSON.stringify(definition, null, 2)}\n`);
-    markSaved();
+    const exported = level.definition();
+    downloadJson('level.json', `${JSON.stringify(validateLevel(exported), null, 2)}\n`);
+    // Exporting saves the level only while no server project is open, which has yet to save it.
+    if (options.projectSave.openProject() === null) markSaved(exported);
     onNotice('Exported level.json. It contains only authored level data, ready for a game-only build.', 'info');
   });
   action('.level-import', () => fileInput.click());
 
+  // Reads a level file as a pending edit, then replaces the level with it as one step. Unapplied trigger events apply first,
+  // as steps of their own; an invalid one, reported, keeps the level.
   async function importFile(file: File): Promise<void> {
     if (file.size > LEVEL_LIMITS.fileBytes) {
       onNotice(`Level JSON must be at most ${LEVEL_LIMITS.fileBytes / (1024 * 1024)} MiB. Your current level was not changed.`, 'error');
       return;
     }
-    const generation = ++importGeneration;
-    setLoading('file');
-    let definition: LevelDefinition;
+    if (!triggerEvents.flush()) return;
+    // A newer file supersedes one still being read.
+    load?.pending.cancel();
+    const entry = startLoad('file', `Import level ${file.name}`, null);
+    let raw: unknown;
     try {
       const text = await file.text();
-      let raw: unknown;
       try {
         raw = JSON.parse(text);
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
         throw new LevelError('Level JSON is malformed.');
       }
-      definition = validateLevel(raw);
-      level.checkDecorations(definition.objects);
     } catch (error) {
-      if (!disposed && generation === importGeneration) report(error);
-      else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
+      failLoad(entry, error);
       return;
-    } finally {
-      if (!disposed && generation === importGeneration) setLoading(null);
     }
-    if (disposed || !active || generation !== importGeneration || !confirmReplacement('Importing this level')) return;
-    resetSelection();
-    level.replace(definition);
-    markSaved();
-    fitCourse();
-    onNotice(`Imported level JSON. ${keptNote()}`, 'info');
+    finishLoad(entry, raw, `Imported level JSON. ${keptNote()}`);
   }
   fileInput.addEventListener('change', () => {
     const file = fileInput.files?.[0];
@@ -2805,29 +3059,21 @@ Export the level first if you want to keep them. Continue without saving?`);
     if (active && file !== undefined) void importFile(file);
   }, listen);
 
+  // Downloads a server level as a pending edit, then replaces the level with it as one step. Unapplied trigger events apply
+  // first, as steps of their own; an invalid one, reported, keeps the level.
   async function loadServerLevel(): Promise<void> {
     const entry = options.serverLevels[Number(serverList.value)];
-    if (entry === undefined || loading !== null) return;
-    const generation = ++importGeneration;
-    setLoading('server');
+    if (entry === undefined || load !== null || !triggerEvents.flush()) return;
+    const download = new AbortController();
+    const started = startLoad('server', `Load level ${entry.levelName ?? entry.name}`, download);
     let definition: LevelDefinition;
     try {
-      definition = await downloadServerLevel(entry, events.signal);
-      level.checkDecorations(definition.objects);
+      definition = await downloadServerLevel(entry, download.signal);
     } catch (error) {
-      if (!disposed && generation === importGeneration) report(error);
-      else if (!(error instanceof LevelError) && !(error instanceof DOMException)) throw error;
+      failLoad(started, error);
       return;
-    } finally {
-      if (!disposed && generation === importGeneration) setLoading(null);
     }
-    // Leaving the Level tab cancels the load, as it cancels a file import.
-    if (disposed || !active || generation !== importGeneration || !confirmReplacement('Loading this server level')) return;
-    resetSelection();
-    level.replace(definition);
-    markSaved();
-    fitCourse();
-    onNotice(`Loaded "${entry.name}" from the server. ${keptNote()}`, 'info');
+    finishLoad(started, definition, `Loaded "${entry.name}" from the server. ${keptNote()}`);
   }
   action('.level-server-load', () => { void loadServerLevel(); });
 
@@ -2923,10 +3169,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       if (tool !== 'select') chooseTool('select');
       selectedId = id;
     }
-    if (at !== null) {
-      replays.stopFollowing();
-      setCamera({ x: at.x, y: at.y, worldHeight: Math.min(camera.state().worldHeight, FOCUS_VIEW_HEIGHT) });
-    }
+    if (at !== null) centreOn(at);
     // Marked in place, so the entry keeps its focus.
     const index = String(options.checks.state().findings.indexOf(finding));
     for (const pick of checksList.querySelectorAll<HTMLButtonElement>('.level-check-pick')) {
@@ -2935,6 +3178,45 @@ Export the level first if you want to keep them. Continue without saving?`);
     }
     renderControls();
     draw();
+  }
+
+  // Centres the view on `at`, zoomed in at least as far as FOCUS_VIEW_HEIGHT, and stops following a replay.
+  function centreOn(at: Point): void {
+    replays.stopFollowing();
+    setCamera({ x: at.x, y: at.y, worldHeight: Math.min(camera.state().worldHeight, FOCUS_VIEW_HEIGHT) });
+  }
+
+  // The first of `ids` the level holds that the current mode picks: decorations in Scenery, the rest in Course.
+  function selectable(ids: readonly string[]): string | null {
+    const scenery = editsScenery(tool);
+    return ids.find((id) => bounds.has(id) && (level.object(id).kind === 'decoration') === scenery) ?? null;
+  }
+
+  // Whether any of the box around the course-plane `points` shows in the overlay.
+  function shows(points: readonly Point[]): boolean {
+    const seen = boxOf(points.map(local));
+    return seen.right >= 0 && seen.left <= rect.width && seen.top >= 0 && seen.bottom <= rect.height;
+  }
+
+  // Centres the view on the object `id` when none of it shows: a course object as picking a finding does; a decoration,
+  // which its depth draws larger or smaller about the camera, on its middle on its own depth plane, which the middle of the
+  // view then shows. A decoration keeps the zoom, since zooming in brings the camera nearer and can put it behind the
+  // camera; one already behind it has no outline to show and is centred all the same, ready for zooming out.
+  function reveal(id: string): void {
+    const object = level.object(id);
+    if (object.kind === 'decoration') {
+      const outline = decorationOutline(object);
+      if (outline !== null && shows(outline)) return;
+      const rise = object.height / 2;
+      replays.stopFollowing();
+      setCamera({ ...camera.state(), x: object.x - Math.sin(object.angle) * rise, y: object.y + Math.cos(object.angle) * rise });
+      return;
+    }
+    const box = bounds.get(id);
+    if (box === undefined) throw new Error('Missing authored object bounds.');
+    const { left, right, bottom, top } = box;
+    if (shows([{ x: left, y: bottom }, { x: right, y: bottom }, { x: right, y: top }, { x: left, y: top }])) return;
+    centreOn({ x: (left + right) / 2, y: (bottom + top) / 2 });
   }
 
   // A ring on the course for each placed finding, a constant size on screen; the picked one is larger.
@@ -3204,6 +3486,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       }
     } else if (tool === 'draw') {
       overlay.focus({ preventScroll: true });
+      outlineEdit ??= prepareOutline();
       gesture = {
         kind: 'draw', pointerId: event.pointerId, start: client, samples: [world],
         unitsPerPixel: camera.state().worldHeight / Math.max(1, rect.height),
@@ -3248,10 +3531,17 @@ Export the level first if you want to keep them. Continue without saving?`);
     release(finished);
     const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
     applyEdit(() => {
-      if (finished.kind === 'move') {
-        if (finished.preview !== finished.original) level.upsert(finished.preview);
-      } else if (finished.kind === 'platform-end' || finished.kind === 'tilt') {
-        if (finished.preview !== finished.original) level.upsert(finished.preview);
+      if (finished.kind === 'move' || finished.kind === 'platform-end') {
+        if (finished.preview !== finished.original) {
+          commit(named(finished.kind === 'move' ? 'Move' : 'Set travel of', finished.original), 'level-inspector',
+            { before: finished.selected === null ? [] : [finished.selected], after: [finished.original.id] },
+            (state) => state.upsert(finished.preview));
+        }
+      } else if (finished.kind === 'tilt') {
+        if (finished.preview !== finished.original) {
+          commit(named(aimsAlongAngle(finished.original) ? 'Aim' : 'Tilt', finished.original), 'level-inspector',
+            selectionTo([finished.original.id]), (state) => state.upsert(finished.preview));
+        }
       } else if (finished.kind === 'turn') {
         if (finished.turn !== finished.from) turnObject(finished.original, finished.turn);
       } else if (finished.kind === 'connect' && inside && finished.target !== null) {
@@ -3264,48 +3554,40 @@ Export the level first if you want to keep them. Continue without saving?`);
         const client = pointFromEvent(event);
         const moved = finished.samples.length > 1 || Math.hypot(client.x - finished.start.x, client.y - finished.start.y) >= DRAG_DISTANCE;
         const samples = moved ? [...finished.samples, camera.unproject(client)] : [finished.samples[0]];
+        const before = drawing.vertices;
         const closure = drawing.append(samples, {
           tolerance: DRAWING.tolerancePixels * finished.unitsPerPixel,
           closeDistance: DRAWING.closePixels * finished.unitsPerPixel,
         });
+        // A stroke that added points is a step of the outline's own.
+        if (drawing.vertices !== before) {
+          liveOutline().step(`Draw ${moved ? 'stroke' : 'point'} ${where(samples[0])}`, before, drawing.vertices);
+        }
         if (closure === 'closed') finishDrawing();
       } else if (finished.kind === 'place' && inside && placement !== null) {
         const object = { ...placement, id: `shape-${crypto.randomUUID()}` };
-        level.upsert(object);
-        selectedId = object.id;
-        // A turn still baking for the mesh goes on for what it placed.
-        const pending = turning.get(placement.id);
-        chooseTool('select');
-        const placed = asTerrain(object);
-        if (pending !== undefined && placed !== null && placed.mesh.type === 'asset' && placed.mesh.assetId === pending.assetId) {
-          turnTerrain(placed, pending.turn);
+        const baking = turning.get(PREVIEW_ID);
+        const terrain = baking === undefined ? null : targetOf(baking, object);
+        if (baking !== undefined && terrain !== null) {
+          // The turn the placement shows is still baking, so it is placed, as one step, once baked.
+          validateLevelObject({ ...terrain, mesh: { ...terrain.mesh, turn: baking.turn } });
+          bakeTurn(terrain.id, baking.assetId, baking.from, baking.turn, { label: named('Place', terrain), coalesce: null, placed: terrain });
+          chooseTool('select');
+        } else {
+          placeObject(object, 'level-build', 'Place', 'select');
         }
       } else if (finished.kind === 'place-trigger' && inside && placement !== null) {
-        const object = { ...placement, id: `trigger-${crypto.randomUUID()}` };
-        level.upsert(object);
-        selectedId = object.id;
-        chooseTool('select');
+        placeObject({ ...placement, id: `trigger-${crypto.randomUUID()}` }, 'level-build', 'Place', 'select');
       } else if (finished.kind === 'place-enemy' && inside && placement !== null) {
-        const object = { ...placement, id: `enemy-${crypto.randomUUID()}` };
-        level.upsert(object);
-        selectedId = object.id;
-        chooseTool('select');
+        placeObject({ ...placement, id: `enemy-${crypto.randomUUID()}` }, 'level-build', 'Place', 'select');
       } else if (finished.kind === 'place-hazard' && inside && placement !== null) {
-        const object = { ...placement, id: `${placement.kind}-${crypto.randomUUID()}` };
-        level.upsert(object);
-        selectedId = object.id;
-        chooseTool('select');
+        placeObject({ ...placement, id: `${placement.kind}-${crypto.randomUUID()}` }, 'level-build', 'Place', 'select');
       } else if (finished.kind === 'place-set-piece' && inside) {
         dropSetPiece();
       } else if (finished.kind === 'place-decoration' && inside && placement !== null) {
-        const object = { ...placement, id: `decoration-${crypto.randomUUID()}` };
-        level.upsert(object);
-        selectedId = object.id;
-        chooseTool('decorate');
+        placeObject({ ...placement, id: `decoration-${crypto.randomUUID()}` }, 'level-decorations', 'Place', 'decorate');
       } else if (finished.kind === 'start' && inside && placement !== null) {
-        level.upsert(placement);
-        selectedId = placement.id;
-        chooseTool('select');
+        placeObject(placement, 'level-build', 'Move', 'select');
       } else if (finished.kind === 'player' && inside && placement !== null) {
         options.player.place({ x: placement.x, y: placement.y });
         chooseTool('select');
@@ -3339,18 +3621,12 @@ Export the level first if you want to keep them. Continue without saving?`);
     zoom(Math.exp(Math.max(-1, Math.min(1, delta * WHEEL_ZOOM_RATE))), { x: event.clientX, y: event.clientY });
   }, { ...listen, passive: false });
   window.addEventListener('keydown', (event) => {
-    if (!active || event.altKey) return;
+    // Keys with Ctrl or Cmd are the browser's, or Undo and Redo, which the Workshop's history controls handle.
+    if (!active || event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target;
     // Workshop navigation and the width handle own their keys.
     if (target instanceof Element && target.closest('.workshop-navigation, .workshop-width-handle')) return;
     if (target instanceof Element && target.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return;
-    if (event.ctrlKey || event.metaKey) {
-      if (event.key.toLowerCase() !== 'z' || event.shiftKey || (drawing.vertices.length === 0 && gesture?.kind !== 'draw')) return;
-      undoDrawing();
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
     switch (event.key.toLowerCase()) {
       case 'escape':
         if (gesture?.kind === 'connect') cancelGesture();
@@ -3370,11 +3646,11 @@ Export the level first if you want to keep them. Continue without saving?`);
         break;
       case 'q':
       case 'e':
-        if (!tiltBy(event.key.toLowerCase() === 'q' ? TILT_STEP : -TILT_STEP)) return;
+        if (!tiltBy(event.key.toLowerCase() === 'q' ? TILT_STEP : -TILT_STEP, event.code)) return;
         break;
       case '[':
       case ']':
-        if (!turnBy(event.key === ']' ? 1 : -1)) return;
+        if (!turnBy(event.key === ']' ? 1 : -1, event.code)) return;
         break;
       case 'enter':
         if (target instanceof Element && target.closest('button, a[href], summary, [role="button"], [role="tab"]')) return;
@@ -3384,7 +3660,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       case 'delete':
         deleteSelected(); break;
       case 'backspace':
-        if (tool === 'draw' || drawing.vertices.length > 0) undoDrawing();
+        if (tool === 'draw' || drawing.vertices.length > 0) undoStroke();
         else deleteSelected();
         break;
       case '+':
@@ -3396,7 +3672,13 @@ Export the level first if you want to keep them. Continue without saving?`);
     event.preventDefault();
     event.stopPropagation();
   }, { ...listen, capture: true });
-  window.addEventListener('blur', cancelGesture, listen);
+  // Releasing the key ends its burst, even once the tab is left.
+  window.addEventListener('keyup', (event) => seal(event.code), listen);
+  window.addEventListener('blur', () => {
+    cancelGesture();
+    // Keys released while the page has no focus are never heard.
+    sealBursts();
+  }, listen);
   if (options.warnBeforeUnload !== false) {
     window.addEventListener('beforeunload', (event) => {
       if (!dirty()) return;
@@ -3408,27 +3690,40 @@ Export the level first if you want to keep them. Continue without saving?`);
   window.addEventListener('scroll', alignOverlay, { ...listen, capture: true, passive: true });
   const resize = new ResizeObserver(alignOverlay);
   resize.observe(options.canvas);
-  const unsubscribe = level.subscribe((change) => {
+  // The tab follows the document's level: each change updates what it draws and indexes from the objects it touched, Undo
+  // and Redo restore the selection their step recorded, and another project's level starts the tab afresh. Hearing a
+  // change, it never changes the level itself; what must waits a microtask.
+  const unsubscribe = history.document.subscribe('level', (change, cause, step) => {
     commitCount++;
+    const { kind, upsert, remove } = change.delta;
+    const restoring = cause === 'undo' || cause === 'redo';
     surfaces.invalidate();
-    connections = deriveConnectionLinks(change.level.objects);
-    for (const id of change.remove) { bounds.delete(id); triggerEvents.forget(id); }
-    for (const object of change.upsert) {
+    connections = deriveConnectionLinks(change.after.objects);
+    // Unapplied trigger events go with their trigger, and with any trigger Undo or Redo changes.
+    for (const id of remove) { bounds.delete(id); triggerEvents.forget(id); }
+    for (const object of upsert) {
       bounds.set(object.id, objectBounds(object));
-      if (object.kind !== 'trigger') triggerEvents.forget(object.id);
+      if (restoring || object.kind !== 'trigger') triggerEvents.forget(object.id);
     }
-    trackTerrainLeft(change.upsert, change.remove);
-    entityGizmos.sync(change.upsert, change.remove);
-    if (change.kind === 'replace') {
+    trackTerrainLeft(upsert, remove);
+    entityGizmos.sync(upsert, remove);
+    if (kind === 'replace') {
       triggerEvents.clear();
-      setPieceHistory.length = 0;
       setPieceStatus = '';
     }
+    for (const id of remove) forgetTurn(id, null);
+    for (const object of upsert) forgetTurn(object.id, object);
+    const restored = restoring ? step?.place.select ?? null : null;
+    if (cause === 'open') resetSelection();
+    else if (restored !== null) selectedId = selectable(cause === 'undo' ? restored.before : restored.after);
     if (selectedId !== null && !bounds.has(selectedId)) selectedId = null;
     // An edit ends gestures on objects; dragging the view goes on.
     if (holdsObjects()) cancelGesture();
     renderControls();
     draw();
+    if (!active) return;
+    if (cause === 'open') fitCourse();
+    else if (restored !== null && selectedId !== null) reveal(selectedId);
   });
   renderMeshes();
   root.inert = true;
@@ -3448,22 +3743,8 @@ Export the level first if you want to keep them. Continue without saving?`);
 
   return {
     preparePlay: prepareLevel,
-    // Replaces the whole level, for example when a project opens, and treats it as saved.
-    loadLevel(definition: LevelDefinition): void {
-      if (disposed) return;
-      resetSelection();
-      level.replace(definition);
-      markSaved();
-      if (active) fitCourse();
-    },
-    // Applies a newer version of the same level, e.g. from the project server, as one edit.
-    syncLevel(definition: LevelDefinition): void {
-      if (disposed) return;
-      level.merge(definition);
-      markSaved();
-    },
     markSaved,
-    isDirty: () => dirty(),
+    hasPendingEdits,
     setMode(mode: 'edit' | 'inactive'): void {
       if (disposed) return;
       if (mode === 'edit') {
@@ -3485,11 +3766,11 @@ Export the level first if you want to keep them. Continue without saving?`);
         active = false;
         replays.setActive(false);
         options.checks.setActive(false);
-        importGeneration++;
+        // Leaving the tab cancels a level file being read or a server level being downloaded.
+        load?.pending.cancel();
         // The hidden canvas never hears these fingers lift.
         touches.clear();
         root.hidden = true; root.inert = true; overlay.hidden = true;
-        setLoading(null);
         decorationPreview = null;
         options.decorations.preview(null);
         syncScenery();
@@ -3498,7 +3779,7 @@ Export the level first if you want to keep them. Continue without saving?`);
         camera.set(null);
       }
     },
-    snapshot() {
+    snapshot(): LevelEditorSnapshot {
       const current = level.definition();
       const object = selectedObject();
       const ghost = ghostObject();
@@ -3511,7 +3792,7 @@ Export the level first if you want to keep them. Continue without saving?`);
           vertices: Object.freeze(drawing.vertices.map((point) => Object.freeze({ ...point }))),
           strokeSamples: gesture?.kind === 'draw' ? gesture.samples.length : 0,
         }),
-        dirty: dirty(), loading, objectCount: current.objects.length,
+        dirty: dirty(), loading: load?.kind ?? null, objectCount: current.objects.length,
         start: level.start(), counts: level.counts(), labelCount: current.labels.length,
         camera: Object.freeze({ ...camera.state() }),
         overlay: Object.freeze({ visible: active && !overlay.hidden, x: rect.left, y: rect.top, width: rect.width, height: rect.height }),
@@ -3519,9 +3800,6 @@ Export the level first if you want to keep them. Continue without saving?`);
         setPieces: Object.freeze({
           armed: armedSetPiece()?.id ?? null, chosen: setPieceId, mirror: setPieceMirror, category: setPieceCategory,
           anchor: Object.freeze({ ...setPieceAnchor }), snapped: setPieceSnapped,
-          history: Object.freeze(setPieceHistory.map((entry) => Object.freeze({
-            name: entry.name, ids: Object.freeze([...entry.ids]), labels: Object.freeze([...entry.labels]),
-          }))),
           surfaceIndexBuilds: surfaces.builds, catalog: SET_PIECE_CATALOG,
         }),
         decorations: Object.freeze({
@@ -3534,8 +3812,12 @@ Export the level first if you want to keep them. Continue without saving?`);
     dispose(): void {
       if (disposed) return;
       cancelGesture();
-      drawing.clear();
-      active = false; disposed = true; importGeneration++;
+      // The pending edits it made end with it.
+      outlineEdit?.cancel();
+      load?.pending.cancel();
+      for (const { edit } of [...turning.values()]) edit?.pending.cancel();
+      sealBursts();
+      active = false; disposed = true;
       options.decorations.preview(null);
       syncScenery();
       options.meshes.preview(new Map());

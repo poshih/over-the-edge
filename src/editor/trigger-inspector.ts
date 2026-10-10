@@ -1,8 +1,9 @@
-// Editor-only event list authoring for trigger objects. Add/remove/reorder only mutate a local
-// draft; nothing reaches LevelState until "Apply events" (or an automatic flush before a save/
-// export/import/new/load action) validates the whole ordered list at once. This keeps partially
-// typed data (e.g. a half-typed video URL) out of LevelState, while still guaranteeing that valid
-// pending edits are never silently dropped when the author moves on to save their level.
+// Editor-only event list authoring for trigger objects. Add/remove/reorder only change a local
+// draft; nothing reaches the level until "Apply events" (or an automatic flush before a save,
+// export, playtest or new, imported or server level) applies the whole ordered list at once, as
+// one step of the level's history. This keeps partially typed data (e.g. a half-typed video URL)
+// out of the level, while still guaranteeing that valid pending edits are never silently dropped
+// when the author moves on to save or replace their level.
 import { TRIGGER_LIMITS } from '../level';
 import type { LevelObject } from '../level';
 import { DEFAULT_LAUNCH, FIRE_TRAP_FIELDS, LAUNCH_FIELDS, PLATFORM_DESTINATIONS, SOUND_VOLUME } from '../trigger-events';
@@ -52,8 +53,8 @@ interface Draft { committed: TriggerAction[]; draft: TriggerAction[] }
 export interface TriggerEventEditorOptions {
   mount: HTMLElement;
   signal: AbortSignal;
-  /** Validates and commits the whole ordered list for a trigger id via LevelState; returns
-   *  whether it succeeded (a LevelError has already been reported to the author on failure). */
+  /** Applies the whole ordered list for a trigger id as one step of the level's history; returns
+   *  whether it succeeded (the refusal has already been reported to the author on failure). */
   onApply: (id: string, events: readonly TriggerAction[]) => boolean;
   onNotice: (message: string, kind: 'info' | 'error') => void;
   objects: () => readonly LevelObject[];
@@ -63,7 +64,8 @@ export interface TriggerEventEditor {
   /** Show (or resume editing) the ordered events for a trigger id. */
   show(id: string, events: readonly TriggerAction[]): void;
   hide(): void;
-  /** Drop any draft tracked for an id, e.g. because the object was deleted or replaced. */
+  /** Drop any draft tracked for an id, e.g. because the object was deleted or replaced, or Undo
+   *  or Redo changed it. */
   forget(id: string): void;
   /** Drop every tracked draft, e.g. because the whole level was replaced. */
   clear(): void;

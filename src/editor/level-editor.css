@@ -144,7 +144,7 @@
 
 .level-drawing-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -205,11 +205,6 @@
   fill: rgb(248 243 228 / 85%);
   stroke: #173f35;
   stroke-width: 1;
-}
-
-.level-set-piece-undo {
-  width: 100%;
-  margin-top: 12px;
 }
 
 /* Decoration library: painted front views of the placeholder models. */

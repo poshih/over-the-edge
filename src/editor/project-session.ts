@@ -21,6 +21,7 @@ import { ENEMY_SPECIES } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import { defaultEnemyClips } from './enemy-clips';
 import type { GameSettings } from '../game-settings';
+import { Disposal } from '../disposal';
 import { DEFAULT_HUD, validateHud } from '../hud';
 import type { HudSettings } from '../hud';
 import { validateLevel } from '../level';
@@ -65,6 +66,8 @@ import { DEFAULT_COURSE_FILES, openDefaultCourse } from './default-course-files'
 import { downloadPublishedFile, loadPublishedProject } from './published-project';
 import type { OpenedFile, OpenedProject, PublishedFile, PublishedProject } from './published-project';
 import { ServerModelError } from './server-models';
+import type { History } from './document/history';
+import type { LevelState } from './level-state';
 
 // The engine's sections. Besides them, each Workshop plugin's data is a section of its own, `plugins/<id>`.
 export const PROJECT_SECTIONS = [
@@ -103,9 +106,6 @@ const COPY_MS = 1000;
 // reach the server is retried after SAVE_RETRY_MS; one the server refused waits for the sections to change.
 const SAVE_MS = 1000;
 const SAVE_RETRY_MS = 5000;
-// Sections whose files a server project keeps on the server; a project opened from anywhere else lists them from its own
-// files (openedMedia, openedArt and openedLibrary).
-const LOCAL_FILES: ReadonlySet<ProjectSectionName> = new Set(['media', 'art', 'models']);
 // A section reopened with unsaved changes: equal to no fingerprint, so it stays unsaved.
 const UNSAVED = Symbol('unsaved');
 
@@ -116,17 +116,12 @@ export interface AppearanceFile {
   readonly alignment: VisualAlignment;
 }
 
-// The Workshop's editors, adapted so a project can be captured from them and loaded into them.
+// Editor state outside the document, and the UI hooks a project opening or save needs.
 export interface ProjectWorkspace {
-  readonly level: {
-    get(): LevelDefinition;
-    load(level: LevelDefinition): void;
-    // Adopts a newer version incrementally, without restarting a playtest.
-    sync(level: LevelDefinition): void;
-    prepare(): boolean;
-    // Records `level` (default: the current level) as the saved version; null records unsaved changes.
-    markSaved(level?: LevelDefinition | null): void;
-  };
+  prepareLevel(): boolean;
+  // Records `level` as the saved version; null records unsaved changes.
+  markLevelSaved(level: LevelDefinition | null): void;
+  hasPendingLevelEdits(): boolean;
   readonly settings: { get(): GameSettings; load(settings: GameSettings): void };
   readonly character: {
     draft(): SpriteDocument;
@@ -144,6 +139,16 @@ export interface ProjectWorkspace {
   readonly ready: Promise<unknown>;
   onLook(look: ProjectLook): void;
   notice(message: string, kind: 'info' | 'error'): void;
+}
+
+export interface ProjectSessionOptions {
+  workspace: ProjectWorkspace;
+  history: History;
+  level: LevelState;
+  avatarRigs: AvatarRigRegistry;
+  plugins?: ProjectPlugins;
+  client?: ProjectClient;
+  published?: PublishedProject | null;
 }
 
 export interface ProjectLook {
@@ -309,6 +314,13 @@ export interface ProjectSnapshot {
   readonly kept: readonly ProjectSectionName[] | null;
 }
 
+class SessionClosed extends Error {
+  constructor() {
+    super('The project session has closed.');
+    this.name = 'SessionClosed';
+  }
+}
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -320,12 +332,18 @@ function isExpected(error: unknown): error is Error {
 
 /**
  * The open game project: owns the project-only sections (title, look, HUD, audio, enemies, media,
- * alternate character, course artwork) and moves every section between the Workshop's editors,
+ * alternate character, course artwork) and moves every section between the document, the Workshop's editors,
  * project bundle files and the self-hosted project server. In a Workshop built with a project it
  * opens that published project and keeps the open project, with its changes, in this browser.
  */
 export class ProjectSession {
   private readonly workspace: ProjectWorkspace;
+  private readonly history: History;
+  private readonly level: LevelState;
+  private readonly unsubscribeLevel: () => void;
+  private readonly historyHolds = new Set<() => void>();
+  // Async edits belong to the project they began in, not one opened while their files or models arrived.
+  private generation = 0;
   // The avatar drivers this Workshop accepts; the composed Kinds registry reaches every validator.
   private readonly avatarRigs: AvatarRigRegistry;
   private readonly plugins: ProjectPlugins;
@@ -407,38 +425,54 @@ export class ProjectSession {
   // Each character draft validated once, so repeated saves do not report the same problem again.
   private readonly validatedDrafts = new WeakMap<SpriteDocument, SpriteDocument | null>();
 
-  constructor(options: {
-    workspace: ProjectWorkspace; avatarRigs: AvatarRigRegistry; plugins?: ProjectPlugins; client?: ProjectClient; published?: PublishedProject | null;
-  }) {
+  constructor(options: ProjectSessionOptions) {
     this.workspace = options.workspace;
+    this.history = options.history;
+    this.level = options.level;
     this.avatarRigs = options.avatarRigs;
     this.plugins = options.plugins ?? NO_PLUGINS;
     this.client = options.client ?? new ProjectClient();
     this.published = options.published ?? null;
     this.copy = this.published === null ? null : new ProjectCopyStore([...this.published.files, ...DEFAULT_COURSE_FILES]);
+    this.unsubscribeLevel = this.history.document.subscribe('level', (change) => {
+      const saved = this.synced?.level;
+      const written = this.copyWritten?.fingerprints.level;
+      const bound = this.binding?.version ?? null;
+      const played = bound !== null && bound.settings === this.settingsText() && bound.enemies === this.enemies ? bound.level : undefined;
+      if ([saved, written, played].some((value) => (change.before === value) !== (change.after === value))) this.changed('status');
+    });
   }
 
   // After the editors restore their browser-local state: find the server and open its project, the one this page
   // opened last or else the one this Workshop was started with; every change then saves to it. Otherwise a Workshop
   // built with a project reopens this browser's copy or the published project.
   async start(): Promise<void> {
+    if (this.disposed) return;
+    const generation = this.generation;
     await this.workspace.ready;
     if (this.disposed) return;
-    this.synced = this.fingerprints();
+    if (generation === this.generation) this.synced = this.fingerprints();
     this.applyLook();
     await this.refreshServer();
-    const server = this.server;
-    const signedIn = server !== null && server.available && server.authenticated;
-    const listed = (id: string | null): string | null => id !== null && this.projects.some((project) => project.id === id) ? id : null;
-    const remembered = signedIn ? listed(this.rememberedProject()) : null;
-    const own = signedIn ? listed(server.project) : null;
-    // This browser's copy of the Workshop's own project, which may hold changes from an earlier session.
-    const copy = own === null ? null : await this.readCopy();
-    // A copy holding another project (imported or new) reopens instead, as without a server.
-    const opening = remembered ?? (copy?.origin === null ? null : own);
-    if (opening !== null && !this.disposed) await this.open(opening);
-    if (own !== null && this.binding?.id === own && !this.disposed) await this.keepChanges(own, copy);
-    if (this.binding === null && this.published !== null && !this.disposed) await this.openStartProject();
+    if (this.disposed) return;
+    // Discovery never blocks editing; a project the designer chose meanwhile owns the page.
+    if (generation === this.generation) {
+      const server = this.server;
+      const signedIn = server !== null && server.available && server.authenticated;
+      const listed = (id: string | null): string | null => id !== null && this.projects.some((project) => project.id === id) ? id : null;
+      const remembered = signedIn ? listed(this.rememberedProject()) : null;
+      const own = signedIn ? listed(server.project) : null;
+      // This browser's copy of the Workshop's own project, which may hold changes from an earlier session.
+      const copy = own === null ? null : await this.readCopy();
+      if (this.disposed) return;
+      if (generation === this.generation) {
+        // A copy holding another project (imported or new) reopens instead, as without a server.
+        const opening = remembered ?? (copy?.origin === null ? null : own);
+        if (opening !== null) await this.open(opening);
+        if (own !== null && this.binding?.id === own && !this.disposed) await this.keepChanges(own, copy);
+        if (this.binding === null && this.published !== null && !this.disposed) await this.openStartProject();
+      }
+    }
     if (this.disposed) return;
     this.courseShown = true;
     this.applyLook();
@@ -527,10 +561,11 @@ export class ProjectSession {
     }
   }
 
-  // Unsaved work that exists only in this page (the level editor warns about its own changes). A
+  // Unsaved work that exists only in this page, including level drafts no browser copy stores. A
   // Workshop built with a project warns for every section instead, and while this browser's copy
   // keeps the project only changes not stored there yet count.
   hasUnsavedProjectChanges(): boolean {
+    if (this.workspace.hasPendingLevelEdits()) return true;
     if (this.copy !== null) {
       if (!this.keeping || this.binding !== null) return this.dirtySections().length > 0;
       const state = this.copyState();
@@ -569,10 +604,9 @@ export class ProjectSession {
       }
       const assets = this.withoutDroppedModels(enemies, this.art.assets);
       const art = { assets: assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations };
-      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.workspace.level.get());
-      this.art = { ...this.art, assets };
+      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.history.document.get('level'));
       this.enemies = enemies;
-      this.applyLook();
+      this.commitDependencies({ ...this.art, assets }, null);
       this.changed('content');
       return null;
     } catch (error) {
@@ -600,27 +634,29 @@ export class ProjectSession {
 
   // The added file's /media/ path, or the refusal.
   async addMedia(file: File): Promise<string | Error> {
-    try {
+    return this.edit(async (generation) => {
       const path = mediaPathForFile(file.name);
       if (path === null) throw new ProjectError('Choose a .webm, .mp4, .mp3, .ogg, .wav or .m4a file with a letter or digit in its name.', { section: 'media' });
       if (file.size === 0 || file.size > MEDIA_LIMITS.bytes) throw new ProjectError(`Media files hold 1 byte to ${MEDIA_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'media' });
       // The signature is at the start; the server checks the whole file again on upload.
-      checkMediaBytes(path, new Uint8Array(await file.slice(0, 64).arrayBuffer()));
+      const bytes = await file.slice(0, 64).arrayBuffer();
+      this.requireActive(generation);
+      checkMediaBytes(path, new Uint8Array(bytes));
       validateMediaIndex([...[...this.media.keys()].filter((existing) => existing !== path).map((existing) => ({ path: existing })), { path }]);
       const total = [...this.media.values()].reduce((sum, item) => sum + (item.path === path ? 0 : item.bytes), file.size);
       if (total > MEDIA_LIMITS.totalBytes) throw new ProjectError(`The media library holds at most ${MEDIA_LIMITS.totalBytes / 1024 ** 2} MiB.`, { section: 'media' });
+      if (this.media.get(path)?.blob === file) return path;
       this.replaceMedia(path, { path, blob: file, server: null, published: null, url: URL.createObjectURL(file), bytes: file.size });
       this.changed('content');
       return path;
-    } catch (error) {
-      return this.refuse(error);
-    }
+    }, true);
   }
 
   removeMedia(path: string): Error | null {
     try {
+      if (!this.media.has(path)) return null;
       const manifest = { ...this.draftManifest(), media: [...this.media.keys()].filter((existing) => existing !== path).map((existing) => ({ path: existing })) };
-      checkProjectReferences(validateProjectManifest(manifest), this.workspace.level.get());
+      checkProjectReferences(validateProjectManifest(manifest), this.history.document.get('level'));
       this.replaceMedia(path, null);
       this.changed('content');
       return null;
@@ -677,12 +713,14 @@ export class ProjectSession {
   // Adds a GLB to the course artwork as a mesh to place, checked like releases check it; the same GLB again adds
   // nothing. The mesh ready to place, or the refusal.
   async addCourseMesh(file: File): Promise<{ readonly id: string; readonly name: string; readonly terrain: MeshTerrain } | Error> {
-    try {
+    return this.edit(async (generation) => {
       if (file.size === 0 || file.size > ART_LIMITS.bytes) {
         throw new ArtError(`Choose a GLB file no larger than ${ART_LIMITS.bytes / 1024 ** 2} MiB.`);
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
+      this.requireActive(generation);
       const id = `asset-${await sha256Hex(bytes)}`;
+      this.requireActive(generation);
       const terrain = meshTerrain(id, bytes.buffer);
       this.meshTerrains.set(`${id}:0`, Promise.resolve(terrain));
       const existing = this.art.assets.find((asset) => asset.id === id);
@@ -692,13 +730,10 @@ export class ProjectSession {
       const assets = [...this.art.assets, { id, name, blob, server: null, published: null, bytes: blob.size }];
       inSection('art', () => validateProjectArt({ assets: assets.map((asset) => ({ id: asset.id, name: asset.name })), decorations: this.art.decorations }));
       checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
-      this.art = { ...this.art, assets };
-      this.applyLook();
+      this.commitDependencies({ ...this.art, assets }, null);
       this.changed('content');
       return { id, name, terrain };
-    } catch (error) {
-      return this.refuse(error);
-    }
+    }, true);
   }
 
   // An enemy model GLB of the course artwork: its clips, with their lengths, and every clip's root motion, read off the
@@ -714,34 +749,37 @@ export class ProjectSession {
   // Draws `species` as the skinned GLB `file`, which joins the course artwork: each of its roles plays the clip its name
   // suggests, and its moves travel as that clip does. The refusal, or null once it draws.
   async addEnemyModel(species: EnemySpecies, file: File): Promise<Error | null> {
-    try {
+    return this.edit(async (generation) => {
       if (file.size === 0 || file.size > ART_LIMITS.bytes) {
         throw new ArtError(`Choose a GLB file no larger than ${ART_LIMITS.bytes / 1024 ** 2} MiB.`);
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
+      this.requireActive(generation);
       const id = `asset-${await sha256Hex(bytes)}`;
+      this.requireActive(generation);
       const bake = this.baker.bakeEnemy(bytes.slice().buffer);
       this.enemyBakes.set(id, bake);
       bake.catch(() => { if (this.enemyBakes.get(id) === bake) this.enemyBakes.delete(id); });
       const { clips } = await bake;
+      this.requireActive(generation);
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
       const name = artName(file.name.replace(/\.glb$/i, '').slice(0, 80) || 'Enemy');
-      return await this.useEnemyModel(species, id, defaultEnemyClips(species, clips.map((clip) => clip.name)),
-        { id, name, blob, server: null, published: null, bytes: blob.size });
-    } catch (error) {
-      return this.refuse(error);
-    }
+      const refusal = await this.useEnemyModel(species, id, defaultEnemyClips(species, clips.map((clip) => clip.name)),
+        { id, name, blob, server: null, published: null, bytes: blob.size }, generation);
+      this.requireActive(generation);
+      return refusal;
+    }, true);
   }
 
   // Chooses the clip each of `species`' roles plays, its motion baked from that clip. The refusal, or null.
   async setEnemyClips(species: EnemySpecies, clips: Readonly<Partial<Record<EnemyClipRole, string>>>): Promise<Error | null> {
-    try {
+    return this.edit(async (generation) => {
       const entry = this.enemies[species];
       if (entry?.type !== 'model') throw new ProjectError(`The ${species} is not drawn by a model.`, { section: 'enemies' });
-      return await this.useEnemyModel(species, entry.asset, { ...entry.clips, ...clips }, null);
-    } catch (error) {
-      return this.refuse(error);
-    }
+      const refusal = await this.useEnemyModel(species, entry.asset, { ...entry.clips, ...clips }, null, generation);
+      this.requireActive(generation);
+      return refusal;
+    });
   }
 
   private enemyBake(assetId: string): Promise<EnemyBake> {
@@ -759,8 +797,9 @@ export class ProjectSession {
   // Draws `species` with the course artwork asset `id` playing `clips`, `added` joining the course artwork unless it is
   // there already; the project is checked whole before anything changes. Throws the refusal.
   private async useEnemyModel(species: EnemySpecies, id: string, clips: Readonly<Partial<Record<EnemyClipRole, string>>>,
-    added: ArtItem | null): Promise<null> {
+    added: ArtItem | null, generation: number): Promise<null> {
     const bake = await this.enemyBake(id);
+    this.requireActive(generation);
     const motion = Object.fromEntries(SPECIES_CLIP_ROLES[species].map((role) => {
       const name = clips[role];
       const baked = name === undefined ? undefined : bake.motion[name];
@@ -773,10 +812,9 @@ export class ProjectSession {
     const art = { assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
     inSection('art', () => validateProjectArt(art));
     checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
-    checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.workspace.level.get());
-    this.art = { ...this.art, assets };
+    checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.history.document.get('level'));
     this.enemies = enemies;
-    this.applyLook();
+    this.commitDependencies({ ...this.art, assets }, null);
     this.changed('content');
     return null;
   }
@@ -785,6 +823,7 @@ export class ProjectSession {
   // is it.
   removeCourseMesh(id: string): Error | null {
     try {
+      if (!this.art.assets.some((asset) => asset.id === id)) return null;
       const species = Object.entries(this.enemies).flatMap(([name, entry]) => entry?.type === 'model' && entry.asset === id ? [name] : []);
       if (species.length > 0) {
         throw new ProjectError(`The mesh draws the ${species.join(', ')}; give ${species.length === 1 ? 'it' : 'them'} pixel art in Enemy art first.`, { section: 'art' });
@@ -795,9 +834,8 @@ export class ProjectSession {
         throw new ProjectError(`The mesh draws the decoration model ${decorations.join(', ')}; import a course package without it first.`, { section: 'art' });
       }
       const art = { assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
-      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art }), this.workspace.level.get());
-      this.art = { ...this.art, assets };
-      this.applyLook();
+      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art }), this.history.document.get('level'));
+      this.commitDependencies({ ...this.art, assets }, null);
       this.changed('content');
       return null;
     } catch (error) {
@@ -809,19 +847,20 @@ export class ProjectSession {
   // arrives. Null when another operation is running or the download failed, which is reported.
   async download(label: string, source: () => Promise<File>): Promise<File | null> {
     const result: { file: File | null } = { file: null };
-    await this.run(label, async () => { result.file = await source(); });
-    return result.file;
+    const finished = await this.run(label, async () => { result.file = await source(); });
+    return finished ? result.file : null;
   }
 
   // Adds a GLB to the model library for one part, checked like releases check it. A new avatar uses `model` (its bone
   // map, driver and hair) or maps its joints automatically, and takes the open character's grips, arm lengths and arm
   // forward distance. Returns the new model, or the refusal.
   async addLibraryModel(role: PartRole, file: File, model?: AvatarModelSettings): Promise<LibraryModel | Error> {
-    try {
+    return this.edit(async (generation) => {
       if (file.size === 0 || file.size > MODEL_LIMITS.bytes) {
         throw new ProjectError(`Choose a GLB file no larger than ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'models' });
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
+      this.requireActive(generation);
       const taken = new Set(this.library.filter((item) => item.role === role).map((item) => item.entry.id));
       const stem = libraryIdForName(file.name);
       let id = stem;
@@ -840,9 +879,7 @@ export class ProjectSession {
       this.library = items;
       this.changed('content');
       return this.snapshot().library.find((model) => model.role === role && model.id === id)!;
-    } catch (error) {
-      return this.refuse(error);
-    }
+    });
   }
 
   removeLibraryModel(role: PartRole, id: string): void {
@@ -870,12 +907,15 @@ export class ProjectSession {
   }
 
   async setLibraryAvatar(id: string, settings: LibraryAvatarSettings): Promise<Error | null> {
-    try {
+    return this.edit(async (generation) => {
       const item = this.libraryItem('avatar', id);
       const entry: LibraryAvatarEntry = Object.freeze({
         id, name: item.entry.name, ...inSection('models', () => validateAvatarSettings(settings as unknown as Record<string, unknown>)),
       });
-      const bytes = new Uint8Array(await (await this.libraryBlob('avatar', id)).arrayBuffer());
+      const blob = await this.libraryBlob('avatar', id);
+      this.requireActive(generation);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      this.requireActive(generation);
       inSection('models', () => checkLibraryModel('avatar', entry, bytes, this.avatarRigs));
       if (!this.library.includes(item)) {
         throw new ProjectError(`Library avatar "${id}" changed while its model was checked; try again.`, { section: 'models' });
@@ -883,9 +923,7 @@ export class ProjectSession {
       this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
       this.changed('content');
       return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
+    });
   }
 
   // Gives a library avatar the open character's grips, arm lengths and arm forward distance.
@@ -961,26 +999,31 @@ export class ProjectSession {
   }
 
   async swapCharacters(): Promise<boolean> {
-    const alternate = this.alternate;
-    const current = this.workspace.character.validated();
-    if (alternate === null || current === null) return false;
-    if (!await this.workspace.character.load(alternate)) return false;
-    this.alternate = current;
-    this.changed('content');
-    return true;
+    const result = await this.edit(async (generation) => {
+      const alternate = this.alternate;
+      const current = this.workspace.character.validated();
+      if (alternate === null || current === null) return false;
+      const loaded = await this.workspace.character.load(alternate);
+      this.requireActive(generation);
+      if (!loaded) return false;
+      this.alternate = current;
+      this.changed('content');
+      return true;
+    });
+    return result instanceof Error ? false : result;
   }
 
   async importAlternate(file: File): Promise<boolean> {
-    try {
-      const document = parseProjectCharacter(await file.text());
+    const result = await this.edit(async (generation) => {
+      const text = await file.text();
+      this.requireActive(generation);
+      const document = parseProjectCharacter(text);
       this.checkCharacterProfile(document, 'alternate character');
       this.alternate = document;
       this.changed('content');
       return true;
-    } catch (error) {
-      this.report(error);
-      return false;
-    }
+    });
+    return result instanceof Error ? false : result;
   }
 
   alternateCharacter(): SpriteDocument | null {
@@ -1015,7 +1058,9 @@ export class ProjectSession {
   async importCoursePackage(file: File): Promise<Error | null> {
     return this.attempt('Importing course package', async () => {
       if (file.size > 96 * 1024 * 1024) throw new ArtError('Course packages are limited to 96 MiB.');
-      const pack = validateCoursePackage(JSON.parse(await file.text()));
+      const text = await file.text();
+      this.requireActive();
+      const pack = validateCoursePackage(JSON.parse(text));
       const packed: ArtItem[] = pack.assets.map((asset) => {
         const blob = new Blob([decodeBase64(asset.source.slice('data:model/gltf-binary;base64,'.length))], { type: 'model/gltf-binary' });
         return { id: asset.id, name: asset.name, blob, server: null, published: null, bytes: blob.size };
@@ -1027,22 +1072,29 @@ export class ProjectSession {
         ...this.draftManifest(), art: { assets: assets.map(({ id, name }) => ({ id, name })), decorations: pack.decorations },
       }), pack.level);
       // The course meshes come before the level, which draws them as soon as it loads.
-      this.art = { assets, decorations: pack.decorations };
-      this.applyLook();
-      this.workspace.level.load(pack.level);
+      this.generation++;
+      this.commitDependencies({ assets, decorations: pack.decorations }, null,
+        () => this.history.load({ level: this.level.check(pack.level) }));
       this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${packed.length} GLBs.`, 'info');
       this.changed('content');
-    });
+      return null;
+    }, true);
   }
 
   async refreshServer(): Promise<void> {
-    this.server = await this.client.health();
+    if (this.disposed) return;
+    const server = await this.client.health();
+    if (this.disposed) return;
+    this.server = server;
     this.projects = [];
-    if (this.server.available && this.server.authenticated) {
+    if (server.available && server.authenticated) {
       try {
-        this.projects = await this.client.list();
+        const projects = await this.client.list();
+        if (this.disposed) return;
+        this.projects = projects;
       } catch (error) {
         if (!isExpected(error)) throw error;
+        if (this.disposed) return;
         this.error = error.message;
       }
     }
@@ -1060,12 +1112,14 @@ export class ProjectSession {
   async newProject(): Promise<boolean> {
     return this.run('Starting a new project', async () => {
       await this.applyContent(openDefaultCourse('Untitled game'));
+      this.requireActive();
       await this.storeCopy();
+      this.requireActive();
       // A failed copy keeps its notice.
       if (this.error !== null) return;
       this.workspace.notice(`Started a new project from the built-in course. ${this.copy === null ? 'Save it to keep it.'
         : 'This browser keeps it; export the project file to take it elsewhere.'}`, 'info');
-    });
+    }, true);
   }
 
   async open(id: string): Promise<boolean> {
@@ -1080,9 +1134,12 @@ export class ProjectSession {
       await this.applyServerProject(project.manifest, project, {
         level: level.value, levelRevision: level.revision ?? project.sections.level!, primary, alternate, models, sizes: fileSizes(project.files),
       });
-      this.publishRecord = (await this.client.publishStatus(id)).release;
+      this.requireActive();
+      const published = await this.client.publishStatus(id);
+      this.requireActive();
+      this.publishRecord = published.release;
       this.workspace.notice(`Opened "${project.manifest.title}" from the project server; every change saves to it.`, 'info');
-    });
+    }, true);
   }
 
   async importBundle(file: File): Promise<boolean> {
@@ -1092,11 +1149,13 @@ export class ProjectSession {
       // Library models a release would refuse fail here, before anything in the page changes.
       inSection('models', () => checkModelLibrary(content.manifest.models, (path) => content.files.get(path)!, this.avatarRigs));
       await this.applyContent(openedContent(content));
+      this.requireActive();
       await this.storeCopy();
+      this.requireActive();
       if (this.error !== null) return;
       this.workspace.notice(`Imported "${content.manifest.title}". ${this.copy === null ? 'Save it to the project server or export it to keep changes.'
         : 'This browser keeps it with your changes; export the project file to take it elsewhere.'}`, 'info');
-    });
+    }, true);
   }
 
   // Discards this browser's copy and opens the project this Workshop was built with.
@@ -1145,9 +1204,9 @@ export class ProjectSession {
     if (binding === null || this.conflicts.size === 0) return false;
     return this.run('Loading the project\'s version', async () => {
       const names = [...this.conflicts];
-      await this.loadFromServer(binding, names);
+      await this.loadFromServer(binding, names, false);
       this.workspace.notice(`Loaded the project's ${names.join(', ')}.`, 'info');
-    });
+    }, true);
   }
 
   // Loads the changes this browser kept from an earlier session into their server project, where they save like any
@@ -1164,7 +1223,7 @@ export class ProjectSession {
       this.kept = null;
       await this.copy!.clear();
       this.workspace.notice(`Restored your changes to ${kept.sections.join(', ')}; they save to the project now.`, 'info');
-    });
+    }, true);
   }
 
   async discardKept(): Promise<boolean> {
@@ -1186,7 +1245,7 @@ export class ProjectSession {
   // The same object until the version changes; cheap enough for every physics step.
   playedVersion(): PlayedVersion | null {
     const bound = this.binding?.version ?? null;
-    return bound !== null && bound.level === this.workspace.level.get() && bound.settings === this.settingsText() &&
+    return bound !== null && bound.level === this.history.document.get('level') && bound.settings === this.settingsText() &&
       bound.enemies === this.enemies ? bound : null;
   }
 
@@ -1204,7 +1263,7 @@ export class ProjectSession {
       this.report(new ProjectError('Open or save a server project in Project to save into it.'));
       return false;
     }
-    if (names.includes('level') && !this.workspace.level.prepare()) return false;
+    if (names.includes('level') && !this.workspace.prepareLevel()) return false;
     return this.run('Saving to the project', async () => {
       if (this.binding !== binding) throw new ProjectError('The server project was closed; open it again in Project.');
       const conflicts = names.filter((name) => this.conflicts.has(name));
@@ -1254,7 +1313,7 @@ export class ProjectSession {
         // Nothing of the page is in the new project yet, so a section the writes below do not reach stays unsaved and
         // saves like any change; the move completes once every section is stored.
         for (const name of names) this.synced![name] = UNSAVED;
-        this.workspace.level.markSaved(null);
+        this.workspace.markLevelSaved(null);
       }
       // The page's version replaces the project's, conflicts included.
       this.conflicts.clear();
@@ -1272,7 +1331,7 @@ export class ProjectSession {
       return null;
     }
     // A release builds what the server holds: pending level edits apply and every change is saved first.
-    if (!this.workspace.level.prepare() || !await this.saveEverything(binding)) return null;
+    if (!this.workspace.prepareLevel() || !await this.saveEverything(binding)) return null;
     const id = binding.id;
     let record: PublishRecord | null = null;
     await this.run('Publishing', async () => {
@@ -1286,15 +1345,19 @@ export class ProjectSession {
 
   dispose(): void {
     this.disposed = true;
-    this.lifecycle.abort();
+    const disposal = new Disposal();
+    disposal.run(() => this.unsubscribeLevel());
+    disposal.run(() => this.lifecycle.abort());
     if (this.poller !== null) clearInterval(this.poller);
     if (this.saver !== null) clearInterval(this.saver);
     if (this.copyTimer !== null) clearInterval(this.copyTimer);
-    this.copy?.dispose();
-    this.baker.dispose();
-    for (const item of this.media.values()) if (item.blob !== null) URL.revokeObjectURL(item.url);
+    for (const release of [...this.historyHolds]) disposal.run(release);
+    disposal.run(() => this.copy?.dispose());
+    disposal.run(() => this.baker.dispose());
+    for (const item of this.media.values()) if (item.blob !== null) disposal.run(() => URL.revokeObjectURL(item.url));
     this.media.clear();
     this.listeners.clear();
+    disposal.finish();
   }
 
   // This browser's copy of the published project, or null without one; a copy that cannot be read is reported.
@@ -1365,23 +1428,26 @@ export class ProjectSession {
   // server could not be reached; a section that also changed in the project becomes a conflict for the owner.
   private async attemptSave(binding: Binding, names: ReadonlySet<ProjectSectionName>,
     fingerprints: SectionRecord<unknown>): Promise<void> {
+    if (this.disposed) return;
     let message: string | null = null;
     let retryAt: number | null = null;
     try {
       const problems = await this.write(binding, names, new Set());
       if (problems.size > 0) message = [...problems].map(([name, reason]) => `${name}: ${reason}`).join(' ');
     } catch (error) {
+      if (error instanceof SessionClosed) return;
+      if (!isExpected(error)) throw error;
+      if (this.disposed) return;
       if (error instanceof ProjectApiError && error.status === 412 && error.section !== null) {
         this.conflicts.add(error.section as ProjectSectionName);
         this.saveFailure = null;
         this.workspace.notice(`${error.section} changed in the project while you edited it here; choose which version to keep in Project.`, 'error');
         return;
       }
-      if (!isExpected(error)) throw error;
       message = describe(error);
       if (error instanceof ProjectApiError && (error.status === 0 || error.status >= 500)) retryAt = Date.now() + SAVE_RETRY_MS;
     }
-    if (this.binding !== binding) return;
+    if (this.disposed || this.binding !== binding) return;
     if (message !== null && message !== this.saveFailure?.message) this.workspace.notice(`Not saved yet: ${message}`, 'error');
     this.saveFailure = message === null ? null : { fingerprints, message, retryAt };
   }
@@ -1411,7 +1477,7 @@ export class ProjectSession {
     overwrite: ReadonlySet<ProjectSectionName>): Promise<Map<ProjectSectionName, string>> {
     // Exactly what this save sends; edits made while its requests run stay unsaved.
     const baseline = this.fingerprints();
-    const savedLevel = this.workspace.level.get();
+    const savedLevel = this.history.document.get('level');
     const parts = this.workspace.appearance.parts();
     const media = [...this.media.values()];
     const assets = [...this.art.assets];
@@ -1486,7 +1552,7 @@ export class ProjectSession {
       this.markSynced(name, baseline[name]);
       this.conflicts.delete(name);
       this.adoptVersion(binding, state);
-      if (name === 'level') this.workspace.level.markSaved(savedLevel);
+      if (name === 'level') this.workspace.markLevelSaved(savedLevel);
       if (name === 'appearance') this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
       this.changed('status');
     }
@@ -1539,48 +1605,58 @@ export class ProjectSession {
   }
 
   // Loads `names` from the bound server project into the page, as saved.
-  private async loadFromServer(binding: Binding, names: readonly ProjectSectionName[]): Promise<void> {
+  private async loadFromServer(binding: Binding, names: readonly ProjectSectionName[], protectEdits: boolean): Promise<readonly ProjectSectionName[]> {
+    const generation = this.generation;
+    this.requireActive(generation);
     // The level first: reading it numbers a level version the project lost, which the project's answer then says. It
     // may be older than that answer, so its own revision, when it has one, says which it is.
     const level = names.includes('level') ? await this.client.section(binding.id, 'level') : null;
+    this.requireActive(generation);
     const levelRevision = level?.revision ?? null;
     const project = await this.client.project(binding.id);
+    this.requireActive(generation);
     const values = new Map<ProjectSectionName, unknown>();
     if (level !== null) values.set('level', level.value);
     for (const name of names) {
       if (name === 'characters/primary' || name === 'characters/alternate') {
         values.set(name, project.manifest.characters[name === 'characters/primary' ? 'primary' : 'alternate'] === null ? null
           : (await this.client.section(binding.id, name)).value);
+        this.requireActive(generation);
       }
     }
     const models = names.includes('appearance')
       ? await Promise.all(project.manifest.appearance.map((part) => this.client.blob(this.client.modelUrl(binding.id, part.part)))) : [];
-    await this.applySections(project.manifest, names, values, models, binding.id, 'sync', fileSizes(project.files));
-    if (names.includes('appearance')) this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
-    for (const name of names) binding.sections[name] = name === 'level' && levelRevision !== null ? levelRevision : project.sections[name] ?? 0;
-    const synced = this.fingerprints();
-    for (const name of names) {
-      this.markSynced(name, synced[name]);
+    this.requireActive(generation);
+    const applied = await this.applySections(project.manifest, names, values, models, binding.id, 'server', fileSizes(project.files), null, protectEdits);
+    this.requireActive(generation);
+    if (applied.names.includes('appearance')) this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
+    for (const name of applied.names) binding.sections[name] = name === 'level' && levelRevision !== null ? levelRevision : project.sections[name] ?? 0;
+    for (const name of applied.names) {
+      this.markSynced(name, applied.fingerprints[name]);
       this.conflicts.delete(name);
     }
+    if (applied.names.includes('level')) this.workspace.markLevelSaved(applied.level);
     this.adoptVersion(binding, project);
+    const conflicting = names.filter((name) => !applied.names.includes(name));
+    if (conflicting.length > 0) {
+      this.workspace.notice(`${conflicting.join(', ')} changed here while the project's version loaded; choose which version to keep in Project.`, 'error');
+    }
+    return applied.names;
   }
 
   // A copy that holds changes, or another project, reopens; otherwise the published project opens.
   private async openStartProject(): Promise<void> {
-    let copy: ProjectCopy | null = null;
-    let failure: string | null = null;
-    // Busy from the start, so no action can replace the game before the start project opens.
-    this.busy = 'Opening the project';
-    this.changed('status');
-    try {
-      copy = await this.copy!.read();
-    } catch (error) {
-      if (!isExpected(error)) throw error;
-      failure = error.message;
-    } finally {
-      this.busy = null;
-    }
+    const generation = this.generation;
+    const read = await this.attempt('Opening the project', async () => {
+      try {
+        return { copy: await this.copy!.read(), failure: null };
+      } catch (error) {
+        if (!isExpected(error)) throw error;
+        return { copy: null, failure: error.message };
+      }
+    }, true);
+    if (read instanceof Error || generation !== this.generation) return;
+    let { copy, failure } = read;
     if (copy !== null && (copy.origin === null || copy.dirty.length > 0)) {
       if (await this.openCopy(copy)) return;
       failure = this.error;
@@ -1598,10 +1674,11 @@ export class ProjectSession {
     const published = this.published!;
     return this.run('Opening this browser\'s copy', async () => {
       await this.applyContent(copy.content);
+      this.requireActive();
       this.origin = copy.origin;
       const dirty = copy.dirty.filter(isProjectSection);
       for (const name of dirty) this.synced![name] = UNSAVED;
-      if (dirty.includes('level')) this.workspace.level.markSaved(null);
+      if (dirty.includes('level')) this.workspace.markLevelSaved(null);
       // The page now shows exactly what the copy holds.
       const files = this.copyFiles();
       if (files !== null) {
@@ -1613,7 +1690,7 @@ export class ProjectSession {
       this.workspace.notice(copy.origin !== null && copy.origin !== published.version
         ? `"${published.title}" has a newer published version. This browser kept your unsaved changes to "${title}"; Reopen published project in Project takes the new version and discards them.`
         : `Reopened "${title}" from this browser${dirty.length > 0 ? ` with unsaved changes: ${dirty.join(', ')}` : ''}.`, 'info');
-    });
+    }, true);
   }
 
   // Opens the published project as Import project file does, replacing any copy: it downloads what the editors use at
@@ -1634,12 +1711,15 @@ export class ProjectSession {
           this.changed('status');
         },
       });
+      this.requireActive();
       await this.applyContent(content);
+      this.requireActive();
       this.origin = published.version;
       await this.storeCopy();
+      this.requireActive();
       if (this.error !== null) return;
       this.workspace.notice(`Opened the published project "${content.manifest.title}".`, 'info');
-    });
+    }, true);
   }
 
   // Whether the page holds what the published project does not: changes, or another project.
@@ -1723,7 +1803,7 @@ export class ProjectSession {
   private copyFiles(): Map<string, unknown> | null {
     const document = this.workspace.character.draft();
     const primary = this.workspace.character.hasContent() || this.alternate !== null ? document : null;
-    const level = this.workspace.level.get();
+    const level = this.history.document.get('level');
     let manifest: ProjectManifest;
     try {
       manifest = validateProjectManifest({
@@ -1767,7 +1847,7 @@ export class ProjectSession {
       if (!isExpected(error)) throw error;
       return;
     }
-    if (this.binding !== binding || this.busy !== null || this.saving !== null) return;
+    if (this.disposed || this.binding !== binding || this.busy !== null || this.saving !== null) return;
     this.adoptVersion(binding, state);
     // binding.revision is the server revision this page has fully reconciled with.
     if (state.revision === binding.revision) return;
@@ -1790,57 +1870,87 @@ export class ProjectSession {
       for (const name of incoming) if (edited.has(name)) this.conflicts.add(name);
       const applying = incoming.filter((name) => !edited.has(name));
       if (applying.length > 0) {
+        let applied: readonly ProjectSectionName[];
         try {
-          await this.loadFromServer(binding, applying);
+          applied = await this.loadFromServer(binding, applying, true);
         } catch (error) {
           // Stop retrying every poll; keeping this page's version or using the project's resolves it.
           for (const name of applying) this.conflicts.add(name);
           throw error;
         }
-        this.workspace.notice(`Updated ${applying.join(', ')} from the project server.`, 'info');
+        if (applied.length > 0) this.workspace.notice(`Updated ${applied.join(', ')} from the project server.`, 'info');
       }
       // Every section that changed by this revision is now loaded or reported as a conflict.
       binding.revision = state.revision;
-    });
+    }, true);
   }
 
   private async applyServerProject(manifest: ProjectManifest, state: ServerRevisions & { id: string }, files: {
     level: unknown; levelRevision: number; primary: unknown; alternate: unknown; models: readonly Blob[]; sizes: ReadonlyMap<string, number>;
   }): Promise<void> {
+    this.requireActive();
     const values = new Map<ProjectSectionName, unknown>([
       ['level', files.level], ['characters/primary', files.primary], ['characters/alternate', files.alternate],
     ]);
     this.unbind();
-    await this.applySections(manifest, this.wholeProject(manifest), values, files.models, state.id, 'load', files.sizes);
+    const applied = await this.applySections(manifest, this.wholeProject(manifest), values, files.models, state.id, 'open', files.sizes);
+    this.requireActive();
     // The level came on its own, maybe older than the project's answer: its own revision says which it is.
     const binding: Binding = { id: state.id, revision: state.revision, sections: { ...state.sections, level: files.levelRevision }, version: null };
     this.binding = binding;
     this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
-    this.synced = this.fingerprints();
+    this.synced = applied.fingerprints;
     this.adoptVersion(binding, state);
     this.remember(state.id);
-    this.workspace.level.markSaved();
+    this.workspace.markLevelSaved(applied.level);
     this.keeping = true;
     // The server holds the project now, so this browser's copy goes.
     await this.storeCopy();
   }
 
   // Validates the incoming sections completely, loads the parts that can fail, then applies the rest.
-  // `opened` is the course artwork of a project opened from anywhere but a server, whose files the page holds or the
+  // `opened` is a project opened from anywhere but a server, whose files the page holds or the
   // published project does.
   private async applySections(manifest: ProjectManifest, names: readonly ProjectSectionName[], values: ReadonlyMap<ProjectSectionName, unknown>,
-    models: readonly Blob[], serverId: string | null, mode: 'load' | 'sync' = 'load', sizes: ReadonlyMap<string, number> = new Map(),
-    opened: CourseArt | null = null): Promise<void> {
+    models: readonly Blob[], serverId: string | null, mode: 'open' | 'server' | 'edit', sizes: ReadonlyMap<string, number> = new Map(),
+    opened: OpenedProject | null = null, protectEdits = false): Promise<{
+      readonly names: readonly ProjectSectionName[]; readonly level: LevelDefinition; readonly fingerprints: SectionRecord<unknown>;
+    }> {
+    const generation = this.generation;
+    this.requireActive(generation);
     const has = new Set(names);
+    const loadedFingerprints: SectionRecord<unknown> = {};
+    const retainClean = (pending: readonly ProjectSectionName[]): void => {
+      if (!protectEdits) return;
+      const dirty = new Set(this.dirtySections());
+      for (const name of pending) {
+        if (!has.has(name) || !dirty.has(name)) continue;
+        has.delete(name);
+        this.conflicts.add(name);
+      }
+    };
+    retainClean(names);
     const level = has.has('level') ? validateLevel(values.get('level')) : null;
-    // The level, kept or incoming, must be drawable with the course artwork it will have, so sections that would leave a
-    // decoration nothing draws are refused before anything in the page changes.
-    const decorationArt = opened?.decorations ?? (has.has('art') ? manifest.art.decorations : this.art.decorations);
-    const stranded = unknownDecorationModels(level ?? this.workspace.level.get(), decorationArt);
-    if (stranded.length > 0) {
-      throw new ProjectError(stranded.slice(0, 8).join(' ') + (stranded.length > 8 ? ` (${stranded.length - 8} more)` : ''),
-        { section: level === null ? 'art' : 'level' });
-    }
+    const checkReferences = (): void => {
+      if (!(['level', 'art', 'media', 'enemies', 'audio'] as const).some((name) => has.has(name))) return;
+      const current = level !== null && has.has('level') ? level : this.history.document.get('level');
+      const prospective = validateProjectManifest({
+        ...this.draftManifest(),
+        art: has.has('art') ? manifest.art : {
+          assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations,
+        },
+        media: has.has('media') ? manifest.media : [...this.media.keys()].map((path) => ({ path })),
+        enemies: has.has('enemies') ? manifest.enemies : this.enemies,
+        audio: has.has('audio') ? manifest.audio : this.audio,
+      });
+      const stranded = unknownDecorationModels(current, prospective.art.decorations);
+      if (stranded.length > 0) {
+        throw new ProjectError(stranded.slice(0, 8).join(' ') + (stranded.length > 8 ? ` (${stranded.length - 8} more)` : ''),
+          { section: has.has('level') ? 'level' : 'art' });
+      }
+      checkProjectReferences(prospective, current);
+    };
+    checkReferences();
     const primary = has.has('characters/primary') ? values.get('characters/primary') === null ? EMPTY_SPRITES
       : validateProjectCharacter(values.get('characters/primary')) : null;
     const alternate = has.has('characters/alternate') ? values.get('characters/alternate') === null ? null
@@ -1850,6 +1960,7 @@ export class ProjectSession {
     const parts = has.has('appearance') ? validateAppearanceParts(manifest.appearance).map((part, index) => ({ ...part, blob: models[index]! })) : null;
     // Each plugin checks its incoming data; a plugin this Workshop lacks keeps its data as it came.
     const plugins = names.flatMap((name) => {
+      if (!has.has(name)) return [];
       const id = pluginOfSection(name);
       return id === null ? [] : [id];
     });
@@ -1862,21 +1973,35 @@ export class ProjectSession {
     // Models the runtime would refuse fail here, before anything in the page changes.
     for (const part of parts ?? []) {
       const bytes = await part.blob.arrayBuffer();
+      this.requireActive(generation);
       inSection('appearance', () => checkAppearanceModel(bytes));
     }
     // A project that replaces the whole character has already let go of the previous project, so it waits
     // for a character operation in progress; a sync keeps refusing, which records the conflict.
-    if (primary !== null && !await this.workspace.character.load(primary, { wait: mode === 'load' })) {
-      throw new ProjectError('The project character could not be loaded; see Character.', { section: 'characters/primary' });
+    retainClean(['characters/primary']);
+    if (primary !== null && has.has('characters/primary')) {
+      const loaded = await this.workspace.character.load(primary, { wait: mode !== 'server' });
+      this.requireActive(generation);
+      if (!loaded) throw new ProjectError('The project character could not be loaded; see Character.', { section: 'characters/primary' });
+      loadedFingerprints['characters/primary'] = primary;
     }
-    if (parts !== null && !await this.workspace.appearance.load(parts)) {
-      throw new ProjectError('Some appearance models could not be loaded; see Appearance.', { section: 'appearance' });
+    retainClean(['appearance']);
+    if (parts !== null && has.has('appearance')) {
+      const loaded = await this.workspace.appearance.load(parts);
+      this.requireActive(generation);
+      if (!loaded) throw new ProjectError('Some appearance models could not be loaded; see Appearance.', { section: 'appearance' });
+      loadedFingerprints.appearance = this.fingerprints().appearance;
     }
-    // The course meshes come before the level, which draws them as soon as it loads.
-    if (opened !== null) this.art = opened;
+    this.requireActive(generation);
+    // The remaining sections commit synchronously; edits made during downloads or model loads win over a poll.
+    retainClean(names.filter((name) => name !== 'characters/primary' && name !== 'appearance'));
+    checkReferences();
+    if (mode === 'open') this.generation++;
+    let art: CourseArt | null = null;
+    if (has.has('art') && opened !== null) art = openedArt(opened);
     else if (has.has('art')) {
       const existing = new Map(this.art.assets.map((asset) => [asset.id, asset]));
-      this.art = {
+      art = {
         decorations: manifest.art.decorations,
         // An asset is named by its content, so bytes the page already has for it stay usable.
         assets: manifest.art.assets.map((asset) => {
@@ -1888,38 +2013,54 @@ export class ProjectSession {
         }),
       };
     }
-    if (level !== null) {
-      if (mode === 'sync') this.workspace.level.sync(level);
-      else this.workspace.level.load(level);
-    }
     if (has.has('settings')) this.workspace.settings.load(manifest.settings);
-    if (alternate !== undefined) this.alternate = alternate;
+    if (has.has('characters/alternate') && alternate !== undefined) this.alternate = alternate;
     if (has.has('arm-ik')) this.workspace.appearance.loadArmIk(manifest.armIk);
     if (has.has('title')) this.title = manifest.title;
     if (has.has('theme')) this.theme = manifest.theme;
     if (has.has('hud')) this.hud = manifest.hud;
     if (has.has('enemies')) this.enemies = manifest.enemies;
     // A server project's library files stay on the server until the Workshop needs them.
-    if (has.has('models') && serverId !== null) {
-      this.library = libraryEntries(manifest.models).map(({ role, entry }) => ({
+    if (has.has('models')) {
+      if (opened !== null) this.library = this.openedLibrary(opened);
+      else if (serverId !== null) this.library = libraryEntries(manifest.models).map(({ role, entry }) => ({
         role, entry, key: this.nextLibraryKey++, blob: null, server: serverId, published: null,
         bytes: sizes.get(libraryModelFile(role, entry.id)) ?? 0,
       }));
     }
-    if (has.has('media') && serverId !== null) {
-      const next = new Map<string, MediaItem>();
+    let media: Map<string, MediaItem> | null = null;
+    if (has.has('media') && opened !== null) media = openedMedia(opened);
+    else if (has.has('media') && serverId !== null) {
+      media = new Map();
       for (const entry of manifest.media) {
-        next.set(entry.path, {
+        media.set(entry.path, {
           path: entry.path, blob: null, server: serverId, published: null, url: this.client.mediaUrl(serverId, entry.path),
           bytes: sizes.get(mediaFile(entry.path)) ?? this.media.get(entry.path)?.bytes ?? 0,
         });
       }
-      this.setMedia(next);
     }
     // Audio references media, so it follows the library.
     if (has.has('audio')) this.audio = manifest.audio;
-    for (const id of plugins) this.pluginData = withPluginData(this.pluginData, id, pluginDataIn(manifest.plugins, id));
-    if (mode === 'load') {
+    for (const id of plugins) {
+      if (has.has(pluginSection(id))) this.pluginData = withPluginData(this.pluginData, id, pluginDataIn(manifest.plugins, id));
+    }
+    // Install the level's files before its listeners run; a coupled restore cuts after its command.
+    this.commitDependencies(art, media, () => {
+      if (level === null || !has.has('level')) return;
+      if (mode === 'open') this.history.load({ level: this.level.check(level) });
+      else if (mode === 'server') {
+        const change = this.level.merge(level);
+        if (change === null) this.history.cut(['level']);
+        else this.history.external([change]);
+      } else {
+        const refusal = this.history.apply(this.level.command({
+          label: 'Restore kept level',
+          place: { tab: 'project', section: null, select: null },
+        }, (state) => state.replace(level)));
+        if (refusal !== null) throw refusal;
+      }
+    });
+    if (mode !== 'server') {
       const lacking = plugins.filter((id) => pluginDataIn(manifest.plugins, id) !== null && !this.plugins.has(id));
       if (lacking.length > 0) {
         this.workspace.notice(`This project keeps data for the Workshop plugin${lacking.length === 1 ? '' : 's'} ${lacking.map((id) => `"${id}"`).join(', ')
@@ -1927,37 +2068,36 @@ export class ProjectSession {
       }
     }
     this.changed('content');
-    this.applyLook();
+    return {
+      names: names.filter((name) => has.has(name)),
+      level: this.history.document.get('level'),
+      // Edits to a loaded editor while the other loads finish stay unsaved.
+      fingerprints: { ...this.fingerprints(), ...loadedFingerprints },
+    };
   }
 
   // Replaces the page's game with a whole project opened from a project file, this browser's copy, the published project
   // or the defaults. Files the page does not hold stay where they are until it uses them.
   private async applyContent(content: OpenedProject): Promise<void> {
+    this.requireActive();
     // Appearance models the page cannot show fail here, before anything in the page changes.
     const appearance = appearanceBlobs(content);
     this.unbind();
-    await this.applySections(content.manifest, this.wholeProject(content.manifest).filter((name) => !LOCAL_FILES.has(name)), contentValues(content),
-      appearance, null, 'load', new Map(), openedArt(content));
-    this.setMedia(openedMedia(content));
-    this.library = this.openedLibrary(content);
+    const applied = await this.applySections(content.manifest, this.wholeProject(content.manifest), contentValues(content),
+      appearance, null, 'open', new Map(), content);
+    this.requireActive();
     this.syncedModels.clear();
-    this.synced = this.fingerprints();
-    this.workspace.level.markSaved();
+    this.synced = applied.fingerprints;
+    this.workspace.markLevelSaved(applied.level);
     this.keeping = true;
     this.changed('content');
     this.applyLook();
   }
 
-  // Loads `names` from `content`, a browser copy, into the page as changes to the open project: they save like any edit.
+  // Restores `names` from `content`, a browser copy, as edits to the open project.
   private async applyChanges(content: OpenedProject, names: readonly ProjectSectionName[]): Promise<void> {
-    const has = new Set(names);
-    await this.applySections(content.manifest, names.filter((name) => !LOCAL_FILES.has(name)), contentValues(content), appearanceBlobs(content), null,
-      'load', new Map(), has.has('art') ? openedArt(content) : null);
-    if (has.has('level')) this.workspace.level.markSaved(null);
-    if (has.has('media')) this.setMedia(openedMedia(content));
-    if (has.has('models')) this.library = this.openedLibrary(content);
-    this.changed('content');
-    this.applyLook();
+    await this.applySections(content.manifest, names, contentValues(content), appearanceBlobs(content), null,
+      'edit', new Map(), content);
   }
 
   // The library of a project opened from anywhere but a server: the page's bytes or the published project's files.
@@ -1970,6 +2110,7 @@ export class ProjectSession {
   // Before a whole project replaces the page's game: a failure part way must not leave the page
   // bound to the previous server project while holding the new project's data.
   private unbind(): void {
+    this.generation++;
     this.binding = null;
     this.moving = null;
     this.origin = null;
@@ -1981,6 +2122,31 @@ export class ProjectSession {
     for (const [path, item] of this.media) if (item.blob !== null && next.get(path) !== item) URL.revokeObjectURL(item.url);
     this.media = next;
     this.mediaVersion++;
+  }
+
+  // Only removed artwork/media references cut level history; uploads relocate sources outside this boundary.
+  private commitDependencies(art: CourseArt | null, media: Map<string, MediaItem> | null, applyLevel?: () => void): void {
+    this.requireActive();
+    let removed = false;
+    if (art !== null) {
+      const decorations = Object.entries(art.decorations);
+      const sameDecorations = decorations.length === Object.keys(this.art.decorations).length &&
+        decorations.every(([id, asset]) => this.art.decorations[id] === asset);
+      const assets = new Set(art.assets.map((asset) => asset.id));
+      removed = this.art.assets.some((asset) => !assets.has(asset.id)) ||
+        Object.keys(this.art.decorations).some((id) => !Object.hasOwn(art.decorations, id));
+      this.art = { ...art, decorations: sameDecorations ? this.art.decorations : art.decorations };
+    }
+    if (media !== null) {
+      removed ||= [...this.media.keys()].some((path) => !media.has(path));
+      this.setMedia(media);
+    }
+    try {
+      this.applyLook();
+      applyLevel?.();
+    } finally {
+      if (removed) this.history.cut(['level']);
+    }
   }
 
   private draftManifest(): ProjectManifest {
@@ -2000,7 +2166,7 @@ export class ProjectSession {
 
   // Before exporting or storing a whole project: pending trigger event edits apply, and an unfinished outline stops it.
   private prepareLevel(): void {
-    if (!this.workspace.level.prepare()) {
+    if (!this.workspace.prepareLevel()) {
       throw new ProjectError('Finish or cancel the unfinished outline, and fix any trigger events, in Level first.', { section: 'level' });
     }
   }
@@ -2048,7 +2214,7 @@ export class ProjectSession {
 
   // The level as a project stores it, with every media and artwork reference found in `manifest`.
   private levelDraft(manifest: ProjectManifest): LevelDefinition {
-    const level = validateLevel(this.workspace.level.get());
+    const level = this.history.document.get('level');
     checkProjectReferences(manifest, level);
     return level;
   }
@@ -2105,7 +2271,7 @@ export class ProjectSession {
     };
     return {
       title: this.title,
-      level: this.workspace.level.get(),
+      level: this.history.document.get('level'),
       settings: this.settingsText(),
       'characters/primary': this.workspace.character.draft(),
       'characters/alternate': this.alternate,
@@ -2148,8 +2314,7 @@ export class ProjectSession {
     const next = new Map(this.media);
     if (item === null) next.delete(path);
     else next.set(path, item);
-    this.setMedia(next);
-    this.applyLook();
+    this.commitDependencies(null, next);
   }
 
   private setSection(update: () => void): Error | null {
@@ -2185,45 +2350,100 @@ export class ProjectSession {
     return this.artwork;
   }
 
-  private async run(label: string, task: () => Promise<void>): Promise<boolean> {
-    return await this.attempt(label, task) === null;
+  private async run(label: string, task: () => Promise<void>, held = false): Promise<boolean> {
+    return await this.attempt(label, task, held) === undefined;
   }
 
-  // Runs one operation of the session, reporting a refusal; returns the refusal, or null when the operation finished.
-  private async attempt(label: string, task: () => Promise<void>): Promise<Error | null> {
-    // An automatic save finishes first, so an action never sees the project half written.
-    while (this.saving !== null) await this.saving;
-    if (this.busy !== null) {
-      const refusal = new ProjectError(`Wait for "${this.busy}" to finish first.`);
-      this.workspace.notice(refusal.message, 'error');
-      return refusal;
-    }
-    this.busy = label;
-    this.error = null;
-    this.changed('status');
+  private requireActive(generation = this.generation): void {
+    if (this.disposed) throw new SessionClosed();
+    if (generation !== this.generation) throw new ProjectError('The project was replaced while this operation was running. Try again.');
+  }
+
+  private holdHistory(): () => void {
+    const release = this.history.hold();
+    const done = (): void => {
+      this.historyHolds.delete(done);
+      release();
+    };
+    this.historyHolds.add(done);
+    return done;
+  }
+
+  // Single-section edits stay concurrent; only artwork/media imports hold Undo while their data arrives.
+  private async edit<T>(task: (generation: number) => Promise<T>, held = false): Promise<T | Error> {
+    const generation = this.generation;
+    let release: (() => void) | null = null;
     try {
-      await task();
-      return null;
+      this.requireActive(generation);
+      if (held) release = this.holdHistory();
+      const result = await task(generation);
+      this.requireActive(generation);
+      return result;
     } catch (error) {
+      if (isExpected(error)) {
+        try { this.requireActive(generation); } catch (refusal) { return this.refuse(refusal); }
+      }
+      return this.refuse(error);
+    } finally {
+      release?.();
+    }
+  }
+
+  // Runs one operation, reporting a typed refusal; project boundaries hold Undo/Redo while they wait.
+  private async attempt<T>(label: string, task: () => Promise<T>, held = false): Promise<T | Error> {
+    let release: (() => void) | null = null;
+    let running = false;
+    try {
+      this.requireActive();
+      if (held) release = this.holdHistory();
+      // An automatic save finishes first, so an action never sees the project half written.
+      while (this.saving !== null) {
+        await this.saving;
+        this.requireActive();
+      }
+      if (this.busy !== null) {
+        const refusal = new ProjectError(`Wait for "${this.busy}" to finish first.`);
+        this.workspace.notice(refusal.message, 'error');
+        return refusal;
+      }
+      this.busy = label;
+      running = true;
+      this.error = null;
+      this.changed('status');
+      const result = await task();
+      this.requireActive();
+      return result;
+    } catch (error) {
+      if (error instanceof SessionClosed || (this.disposed && isExpected(error))) return this.refuse(error);
       if (error instanceof ProjectApiError && error.status === 412 && error.section !== null) {
         this.conflicts.add(error.section as ProjectSectionName);
         return this.refuse(new ProjectError(`${error.message} In Project, keep your version of ${error.section} or use the project's.`));
       }
       return this.refuse(error);
     } finally {
-      this.busy = null;
-      this.changed('status');
+      try {
+        if (running) {
+          this.busy = null;
+          this.changed('status');
+        }
+      } finally {
+        release?.();
+      }
     }
   }
 
   // Reports a refusal and returns it; anything but an expected refusal is a programmer error and propagates.
   private refuse(error: unknown): Error {
+    if (error instanceof SessionClosed) return error;
+    if (this.disposed && isExpected(error)) return new SessionClosed();
     this.report(error);
     return error as Error;
   }
 
   private report(error: unknown): void {
+    if (error instanceof SessionClosed) return;
     if (!isExpected(error)) throw error;
+    if (this.disposed) return;
     this.error = error instanceof SyntaxError ? `The file is not valid JSON: ${error.message}` : describe(error);
     this.workspace.notice(this.error, 'error');
     this.changed('status');

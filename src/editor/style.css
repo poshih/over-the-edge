@@ -198,6 +198,71 @@ body.touch-controls .workshop-width-handle {
   gap: 6px;
 }
 
+/* A panel too narrow for the heading and the tools in one row gives the tools a row of their own. */
+@media (width >= 1040px) {
+  @container workshop (width < 600px) {
+    .workshop-header {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "heading close"
+        "quick quick"
+        "search search";
+    }
+  }
+}
+
+/* A narrow panel's tools, on a row of their own, wrap within it; Undo and Redo stay together as one item. */
+@container workshop (width < 600px) {
+  .workshop-quick {
+    flex-wrap: wrap;
+  }
+}
+
+.workshop-history {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Until Undo and Redo are added, the group takes no room. */
+.workshop-history:empty {
+  display: none;
+}
+
+.history-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* A stroke turning back on itself, its arrowhead pointing left; Redo's mirrors it. */
+.undo-icon,
+.redo-icon {
+  position: relative;
+  top: 1.5px;
+  width: 11px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-left: 0;
+  border-radius: 0 4.5px 4.5px 0;
+}
+
+.undo-icon::before,
+.redo-icon::before {
+  position: absolute;
+  top: -3.25px;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-bottom: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  content: "";
+}
+
+.redo-icon {
+  transform: scaleX(-1);
+}
+
 .recenter-icon {
   position: relative;
   width: 13px;
@@ -1520,6 +1585,16 @@ body.workshop-open[data-game-chrome="compact"] [data-action="reset"] {
     grid-template-areas: "search quick close";
     gap: 6px;
     padding: 8px 16px;
+  }
+
+  /* A panel too narrow for the tools beside the search gives them the row above it. */
+  @container workshop (width < 600px) {
+    .workshop-header {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "quick quick"
+        "search close";
+    }
   }
 
   .workshop-heading {

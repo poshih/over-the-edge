@@ -124,6 +124,14 @@ conflict handling as in its tab. Each returns the engine's typed error when it r
 the Workshop has shown as it shows its own, or `null`. A plugin changes the project no other
 way.
 
+Each level edit is a step of the Workshop's [undo history](../README.md#undo-and-redo), named
+`<plugin id>: <operation>`, such as `my-game: upsert`, with no tab. A plugin's calls of one
+operation within a second of its first call are one step, unless another level edit, Undo or
+Redo comes in between. A `replace` step holds only the objects that differ, so Undo and Redo
+change only those too and a playtest goes on. A refused edit, or one that changes nothing,
+records no step. The plugin's other edits are not steps; course packages, course artwork and
+media meet the history as in [Working in the Workshop](projects.md#working-in-the-workshop).
+
 ## A plugin's own data
 
 Each plugin may keep one JSON document in the open project: `host.data.get()`,
