@@ -19,7 +19,7 @@ by a person following this protocol.
 
 The Workshop exposes performance diagnostics through `window.gettingOver`:
 
-- `window.gettingOver.rendering()` returns the view statistics plus `courseArt`.
+- `window.gettingOver.rendering()` returns the view statistics, `courseArt` among them.
 - `window.gettingOver.level().rendering` returns the same.
 
 ### View statistics

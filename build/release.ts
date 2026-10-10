@@ -30,7 +30,7 @@ const runtime = (path: string): string => fileURLToPath(new URL(`../src/${path}`
 // Each loader enters the shell only when the release uses it.
 const LOADERS = {
   models: `export { createCharacterModelLoader as default } from ${JSON.stringify(runtime('character-model-loader.ts'))};`,
-  art: `export { loadCourseArt as default } from ${JSON.stringify(runtime('release-art.ts'))};`,
+  art: `export { createCourseArt as default } from ${JSON.stringify(runtime('course-art-view.ts'))};`,
   appearance: `export { loadAppearance as default } from ${JSON.stringify(runtime('appearance-loader.ts'))};`,
   audio: `export { DEFAULT_AUDIO_OUTPUT as default } from ${JSON.stringify(runtime('audio.ts'))};`,
   decorations: `export { createDecorationView as default } from ${JSON.stringify(runtime('decoration-library.ts'))};`,

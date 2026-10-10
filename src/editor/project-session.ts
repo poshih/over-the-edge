@@ -44,6 +44,8 @@ import type { HammerHead } from '../hammer-head';
 import type { AvatarRigRegistry } from '../avatar-rig';
 import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
+import { DEFAULT_LOOK, NO_COURSE_ARTWORK } from '../game-look';
+import type { CourseArtwork, GameLook } from '../game-look';
 import { NO_PLUGIN_DATA, pluginDataIn, pluginOfSection, pluginSection, validatePluginData, withPluginData } from '../plugin-data';
 import type { PluginData } from '../plugin-data';
 import { sameJson } from '../bounded-json';
@@ -138,9 +140,8 @@ export interface ProjectWorkspace {
 }
 
 export interface ProjectLook {
-  readonly theme: GameTheme;
-  readonly hud: HudSettings;
-  readonly enemies: EnemyArtSettings;
+  // How the game looks, as the project stands, saved or not.
+  readonly game: GameLook;
   readonly audio: AudioSettings;
   readonly resolveMedia: (source: string) => string;
   // Changes whenever media files change, so caches of their contents can be dropped.
@@ -339,6 +340,12 @@ export class ProjectSession {
   private enemies: EnemyArtSettings = DEFAULT_ENEMY_ART;
   // The page starts on the built-in course, which DEFAULT_LEVEL draws with these meshes.
   private art: CourseArt = openedArt(openDefaultCourse(this.title));
+  // The look last given to the game, and its course artwork, kept while they stay the same so the game redraws nothing.
+  private gameLook: GameLook = DEFAULT_LOOK;
+  private artwork: CourseArtwork = NO_COURSE_ARTWORK;
+  // Whether the project the page edits has opened; until then the game draws no course artwork, so the meshes of a
+  // course replaced at start never load.
+  private courseShown = false;
   private media = new Map<string, MediaItem>();
   private mediaVersion = 0;
   private library: LibraryItem[] = [];
@@ -423,6 +430,8 @@ export class ProjectSession {
     if (own !== null && this.binding?.id === own && !this.disposed) await this.keepChanges(own, copy);
     if (this.binding === null && this.published !== null && !this.disposed) await this.openStartProject();
     if (this.disposed) return;
+    this.courseShown = true;
+    this.applyLook();
     this.poller = setInterval(() => { void this.poll(); }, POLL_MS);
     this.saver = setInterval(() => { void this.autosave(); }, SAVE_MS);
     // Leaving the page saves, or stores in this browser, the latest changes at once.
@@ -628,6 +637,7 @@ export class ProjectSession {
       inSection('art', () => validateProjectArt({ assets: assets.map((asset) => ({ id: asset.id, name: asset.name })), decorations: this.art.decorations }));
       checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
       this.art = { ...this.art, assets };
+      this.applyLook();
       this.changed('content');
       return { id, name, terrain };
     } catch (error) {
@@ -646,6 +656,7 @@ export class ProjectSession {
       const art = { assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
       checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art }), this.workspace.level.get());
       this.art = { ...this.art, assets };
+      this.applyLook();
       this.changed('content');
       return null;
     } catch (error) {
@@ -873,6 +884,7 @@ export class ProjectSession {
       }), pack.level);
       // The course meshes come before the level, which draws them as soon as it loads.
       this.art = { assets, decorations: pack.decorations };
+      this.applyLook();
       this.workspace.level.load(pack.level);
       this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${assets.length} GLBs.`, 'info');
       this.changed('content');
@@ -1992,10 +2004,25 @@ export class ProjectSession {
   }
 
   private applyLook(): void {
-    this.workspace.onLook({
-      theme: this.theme, hud: this.hud, enemies: this.enemies, audio: this.audio,
-      resolveMedia: this.resolveMedia, mediaVersion: this.mediaVersion,
-    });
+    const art = this.courseArtwork();
+    const look = this.gameLook;
+    if (look.theme !== this.theme || look.hud !== this.hud || look.enemies !== this.enemies || look.art !== art) {
+      this.gameLook = Object.freeze({ theme: this.theme, hud: this.hud, enemies: this.enemies, art });
+    }
+    this.workspace.onLook({ game: this.gameLook, audio: this.audio, resolveMedia: this.resolveMedia, mediaVersion: this.mediaVersion });
+  }
+
+  // The course artwork as the game draws it, none until the project has opened: the same object while its GLBs and the
+  // decoration models they draw stay the same.
+  private courseArtwork(): CourseArtwork {
+    if (!this.courseShown) return NO_COURSE_ARTWORK;
+    const { assets, decorations } = this.art;
+    const previous = this.artwork;
+    if (previous.decorations !== decorations || previous.assets.length !== assets.length ||
+      previous.assets.some((asset, index) => asset.id !== assets[index]!.id || asset.name !== assets[index]!.name)) {
+      this.artwork = Object.freeze({ assets: Object.freeze(assets.map(({ id, name }) => Object.freeze({ id, name }))), decorations });
+    }
+    return this.artwork;
   }
 
   private async run(label: string, task: () => Promise<void>): Promise<boolean> {

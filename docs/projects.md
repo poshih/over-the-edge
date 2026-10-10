@@ -55,6 +55,13 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 Nothing else reaches a release, and plugin data never does: game builds do not copy
 `public/`, so a project release ships only the content its game uses plus the site icon.
 
+The `theme`, `hud`, `enemies` and `art` sections are the game's look (`GameLook`,
+[`src/game-look.ts`](../src/game-look.ts)), the one value that sets how the game looks. A release
+makes its game with the look its content holds and loads every GLB it lists before play; the
+Workshop gives its game the open project's look through `Game.setLook` whenever the project
+changes, saved or not, and loads each GLB as the level comes to use it, once the project has
+opened.
+
 ## Project directory
 
 ```text

@@ -4,7 +4,6 @@
 import type { Game } from './game';
 import { createMenu, MENU } from './game-menu';
 import type { Menu, MenuApi, MenuFactory, MenuState } from './game-menu';
-import type { HudSettings } from './hud';
 import { call0, invalidResult, PluginError } from './plugins/kernel';
 import type { Attributed, CheckedInstance } from './plugins/kernel';
 import type { PlayerSettings } from './player-settings';
@@ -20,7 +19,6 @@ export interface MenuHost {
   readonly game: Game;
   // The SHA-256 of the level's play layout and physics, which the saved run belongs to.
   readonly course: string;
-  readonly hud: HudSettings;
   readonly characters: readonly string[];
   settings(): PlayerSettings;
   // The player's settings with `changes`. Throws a RangeError stating the rule a change breaks.
@@ -65,7 +63,7 @@ export class MenuSession {
       get settings() { return host.settings(); },
       changeSettings: (changes: Partial<PlayerSettings>) => this.changeSettings(changes),
       characters: host.characters,
-      hud: host.hud,
+      get hud() { return host.game.look.hud; },
       get halted() { return host.game.halted; },
     });
     try {

@@ -5,7 +5,7 @@ import { AUDIO, createAudioOutput, SILENT_AUDIO_OUTPUT } from './game-audio';
 import type { AudioOutput, GameAudioFactory } from './game-audio';
 import { AudioDevice } from './audio-device';
 import { bootSources, levelSoundSources } from './content';
-import type { ContentArt, ContentManifest, ContentPins } from './content';
+import type { ContentManifest, ContentPins } from './content';
 import type { ContentLoader } from './content-ref';
 import { ContentError, ContentSession, publicAccess } from './content-session';
 import type { ContentAccess } from './content-session';
@@ -13,6 +13,8 @@ import type { CharacterModelLoader } from './character-model-types';
 import type { AppearanceSource } from './appearance-loader';
 import type { VisualBinding, VisualPartId } from './character';
 import { Game } from './game';
+import type { GameLook } from './game-look';
+import type { CourseArtSource } from './course-art-view';
 import type { MediaHost } from './media-host';
 import { Disposal } from './disposal';
 import { characterLabels, createPlayUI } from './play-ui';
@@ -44,7 +46,7 @@ export interface ReleaseCode {
   // The SHA-256 of the level's play layout and physics, which phantom recordings and saved runs belong to.
   readonly course: string;
   readonly createCharacterModels: ((options: { content: ContentLoader }) => CharacterModelLoader) | null;
-  readonly loadCourseArt: ((game: Game, art: ContentArt, content: ContentLoader, signal: AbortSignal) => Promise<void>) | null;
+  readonly createCourseArt: CourseArtSource['create'] | null;
   readonly loadAppearance: ((visuals: ReadonlyMap<VisualPartId, VisualBinding>, parts: readonly AppearanceSource[],
     options: { signal?: AbortSignal; content?: ContentLoader }) => Promise<unknown>) | null;
   readonly audioOutput: GameAudioFactory | null;
@@ -265,11 +267,22 @@ export class Release {
     });
     attempt.audio = audio;
     const characterModels = this.code.createCharacterModels?.({ content }) ?? null;
+    const look: GameLook = { theme: manifest.theme, hud: manifest.hud, enemies: manifest.enemies, art: manifest.art };
+    const sources = new Map(manifest.art.assets.map((asset) => [asset.id, asset.source]));
+    const createCourseArt = this.code.createCourseArt;
     const game = new Game({
       canvas: this.canvas, onFatal: (message) => call1(this.fatalDisplay, 'show', message),
       eventMount: this.mount, level: manifest.level, settings: manifest.settings,
       characterModels, content, media, decorations: this.code.createDecorations, kinds: this.code.kinds, plugins,
-      theme: manifest.theme, enemyArt: manifest.enemies, hud: manifest.hud,
+      look,
+      courseArt: createCourseArt === null ? null : {
+        create: createCourseArt,
+        fetch: async (id, request) => {
+          const source = sources.get(id);
+          if (source === undefined) throw new Error(`This release does not contain the course mesh ${id}.`);
+          return new Blob([await content(source, request)], { type: 'model/gltf-binary' });
+        },
+      },
       audio: receivesAudio ? audio : null,
       onAction: (action, options) => game.perform(action, options),
       onNotice: notice,
@@ -293,7 +306,7 @@ export class Release {
     await Promise.all([
       game.loadSprites(primary),
       ...(alternate === null ? [] : [game.loadAlternateSprites(alternate)]),
-      ...(this.code.loadCourseArt === null ? [] : [this.code.loadCourseArt(game, manifest.art, content, signal)]),
+      game.loadArtwork(signal),
       ...(this.code.loadAppearance === null ? [] : [this.code.loadAppearance(game.view.character.visuals,
         manifest.appearance, { signal, content })]),
       parts,
@@ -325,7 +338,7 @@ export class Release {
     // A kept choice this release does not have falls back to its first character.
     if (this.playerSettings.character >= types.length) this.playerSettings = Object.freeze({ ...this.playerSettings, character: 0 });
     this.ui.show({
-      hud: manifest.hud,
+      hud: game.look.hud,
       plugins,
       characters: alternate === null ? null : {
         types,
@@ -351,7 +364,7 @@ export class Release {
     const menu = this.menuFactory;
     if (menu !== null) {
       this.menu = new MenuSession(menu, this.ui.addMenu(), {
-        game, course: this.code.course, hud: manifest.hud, characters: Object.freeze(characterLabels(types)),
+        game, course: this.code.course, characters: Object.freeze(characterLabels(types)),
         settings: () => this.playerSettings,
         checkSettings: (changes) => this.checkPlayerSettings(loaded, changes),
         applySettings: (settings) => this.applyPlayerSettings(loaded, settings),

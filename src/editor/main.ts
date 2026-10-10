@@ -10,7 +10,7 @@ import type { GameSettings } from '../game-settings';
 import { Game } from '../game';
 import { Disposal } from '../disposal';
 import { createCharacterModelLoader } from '../character-model-loader';
-import { CourseArtView } from '../course-art-view';
+import { createCourseArt } from '../course-art-view';
 import { levelSpawn } from '../level';
 import { createPhantomPlayback } from '../phantom-playback';
 import { Appearance } from './appearance';
@@ -128,6 +128,8 @@ const game = boot(() => new Game({
   onFatal: showFatal,
   characterModels: createCharacterModelLoader(),
   decorations: createDecorationView,
+  // The course draws the project's GLBs, as its releases draw them, each loaded from the project as the level uses it.
+  courseArt: { create: createCourseArt, fetch: (id) => project.courseMeshBlob(id) },
   media,
   // The Workshop never plays trigger videos: each is skipped at once and its trigger goes on, so testing
   // is never interrupted. Releases play them.
@@ -186,11 +188,7 @@ const project: ProjectSession = new ProjectSession({
         mediaVersion = look.mediaVersion;
         audio.setMedia(urlMediaHost(look.resolveMedia));
       }
-      game.setTheme(look.theme);
-      ui.setSceneTone(isDarkSky(look.theme));
-      game.setEnemyArt(look.enemies);
-      ui.setHud(look.hud);
-      game.setHud(look.hud);
+      game.setLook(look.game);
       audioDevice.setVolume(look.audio.volume);
       audio.setSettings(look.audio);
     },
@@ -262,6 +260,11 @@ const ui: GameUi = boot(() => createUI({
   game.dispose();
 });
 runtimeNotice = (message, kind = 'info') => ui.notice(message, kind);
+// The readout shows the HUD as the game's look sets it, and the header keeps legible over its sky.
+const unsubscribeGameLook = game.subscribeLook((look) => {
+  ui.setHud(look.hud);
+  ui.setSceneTone(isDarkSky(look.theme));
+});
 for (const { message, kind } of startupNotices.splice(0)) ui.notice(message, kind);
 // The game header names the open level, following each rename and each level opened.
 ui.setLevelName(level.definition().name);
@@ -304,19 +307,8 @@ const spriteEditor = createSpriteEditor({
 });
 const collisionOverlay = new CollisionOverlay(game.simulation.world, () => game.view.character.armPoses());
 game.view.addLayer(collisionOverlay);
-// The course draws the project's GLBs, as its releases draw them, each loaded from the project as the level uses it.
-const courseMeshes = new CourseArtView({
-  terrain: game.view.terrain,
-  subscribe: (listener) => game.simulation.subscribeTerrain(listener),
-  fetch: (id) => project.courseMeshBlob(id),
-  onFailure: (id, error) => {
-    const name = project.courseMeshes().find((mesh) => mesh.id === id)?.name ?? id;
-    ui.notice(`The mesh "${name}" cannot be drawn, so its terrain shows its collision: ${error instanceof Error ? error.message : String(error)}`, 'error');
-  },
-});
-game.view.addLayer(courseMeshes);
-// The course draws the project's GLBs once the project has opened, so meshes of a course replaced at start never load.
-let unsubscribeCourseMeshes = (): void => undefined;
+const courseMeshes = game.view.courseArt;
+if (courseMeshes === null) throw new Error('The Workshop draws course artwork.');
 // The figure Level / Replays poses: one held phantom, none played by the game.
 const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins, 0), () => {
   audio.dispose();
@@ -498,7 +490,7 @@ plugins = new WorkshopPluginHost({
   notice: ui.notice,
 });
 
-const rendering = () => ({ ...game.view.statistics(), courseArt: courseMeshes.inspect() });
+const rendering = () => game.view.statistics();
 const diagnostics = Object.freeze({
   rendering,
   measurements: Object.freeze({
@@ -530,12 +522,7 @@ declare global {
 }
 window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
-void project.start().then(() => {
-  const listCourseMeshes = (): void => courseMeshes.setAssets(project.courseMeshes().map((mesh) => mesh.id));
-  listCourseMeshes();
-  unsubscribeCourseMeshes = project.subscribe(listCourseMeshes);
-  plugins.start();
-});
+void project.start().then(() => plugins.start());
 const hudState: HudState = { debug, practice: practice(), recording: recorder.on, capturing: false, recordingNote: recordingNote() };
 game.start((state) => {
   hudState.debug = debug;
@@ -564,7 +551,7 @@ if (import.meta.hot) {
     disposal.run(() => unsubscribeLevel());
     disposal.run(() => unsubscribeLevelName());
     disposal.run(() => unsubscribeAppearance());
-    disposal.run(() => unsubscribeCourseMeshes());
+    disposal.run(() => unsubscribeGameLook());
     disposal.run(() => levelEditor.dispose());
     disposal.run(() => levelChecks.dispose());
     disposal.run(() => spriteEditor.dispose());

@@ -104,6 +104,28 @@ function exactNormals(material: Material): Material {
   return material;
 }
 
+export interface CourseArtOptions {
+  readonly terrain: TerrainView;
+  readonly subscribe: (listener: (event: TerrainEvent) => void) => () => void;
+  // A GLB's bytes, by asset ID: a release's packaged content, or the Workshop's project file.
+  readonly fetch: (assetId: string, signal: AbortSignal) => Promise<Blob>;
+  // A GLB that could not load; its terrain keeps drawing as its collision.
+  readonly onFailure: (assetId: string, error: unknown) => void;
+}
+
+/**
+ * How a game draws its course artwork: the renderer, which a release includes only when it draws a GLB, and where the
+ * GLBs come from.
+ */
+export interface CourseArtSource {
+  readonly create: (options: CourseArtOptions) => CourseArtView;
+  readonly fetch: (assetId: string, signal: AbortSignal) => Promise<Blob>;
+}
+
+export function createCourseArt(options: CourseArtOptions): CourseArtView {
+  return new CourseArtView(options);
+}
+
 function disposeAsset(asset: Asset): void {
   for (const primitives of asset.templates.values()) for (const primitive of primitives) primitive.geometry.dispose();
   for (const part of asset.decoration?.parts ?? []) part.geometry.dispose();
@@ -151,14 +173,7 @@ export class CourseArtView implements SceneLayer {
   private boundsUpdates = 0;
   private materialUpdates = 0;
 
-  constructor(options: {
-    terrain: TerrainView;
-    subscribe: (listener: (event: TerrainEvent) => void) => () => void;
-    // A GLB's bytes, by asset ID: a release's packaged content, or the Workshop's project file.
-    fetch: (assetId: string, signal: AbortSignal) => Promise<Blob>;
-    // A GLB that could not load; its terrain keeps drawing as its collision.
-    onFailure: (assetId: string, error: unknown) => void;
-  }) {
+  constructor(options: CourseArtOptions) {
     this.terrain = options.terrain;
     this.fetch = options.fetch;
     this.failure = options.onFailure;

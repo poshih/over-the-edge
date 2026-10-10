@@ -18,8 +18,8 @@ declare module 'virtual:game-character-models' {
 }
 
 declare module 'virtual:game-art' {
-  const load: typeof import('./release-art').loadCourseArt | null;
-  export default load;
+  const create: typeof import('./course-art-view').createCourseArt | null;
+  export default create;
 }
 
 declare module 'virtual:game-appearance' {

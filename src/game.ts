@@ -16,8 +16,6 @@ import { TriggerRuntime } from './triggers';
 import { DEFAULT_VIDEO_PLAYBACK } from './trigger-events';
 import type { EventOutcome, TriggerAction, VideoPlayback } from './trigger-events';
 import { EventPresenter } from './event-presenter';
-import { DEFAULT_HUD } from './hud';
-import type { HudSettings } from './hud';
 import { createDeathScreen } from './death-screen';
 import type { DeathScreen } from './death-screen';
 import { deathInfo, DEATH_POSE_SECONDS, DeathSequenceError } from './death-sequence';
@@ -26,8 +24,9 @@ import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
 import type { MediaHost } from './media-host';
 import type { ContentLoader } from './content-ref';
-import type { GameTheme } from './theme';
-import type { EnemyArtSettings } from './enemy-art-data';
+import { DEFAULT_LOOK } from './game-look';
+import type { GameLook } from './game-look';
+import type { CourseArtSource } from './course-art-view';
 import type { HammerHead } from './hammer-head';
 import type { PartRole } from './model-library';
 import type { PartModel } from './character-view';
@@ -100,7 +99,8 @@ export class Game {
   private readonly stepObservers = new Set<StepObserver>();
   private stepPlacement = 0;
   private readonly renderState: { dt: number; death: DeathFrame | null } = { dt: 0, death: null };
-  private hud: HudSettings;
+  private currentLook: GameLook;
+  private readonly lookListeners = new Set<(look: GameLook) => void>();
   private death: Dying | null = null;
   private readonly deathFrame: { -readonly [K in keyof DeathFrame]: DeathFrame[K] } = {
     elapsed: 0, duration: 0, poseProgress: 0, reducedMotion: false,
@@ -134,11 +134,12 @@ export class Game {
     plugins: RuntimePlugins;
     // Loads a release's packaged sprite images.
     content?: ContentLoader;
-    theme?: GameTheme;
-    enemyArt?: EnemyArtSettings;
+    // How the game looks at first, its course artwork drawn once loadArtwork() has loaded it; setLook() changes it.
+    look?: GameLook;
+    // Draws the course artwork's GLBs, when the game draws any.
+    courseArt?: CourseArtSource | null;
     // Creates the decoration view, when the game draws decorations.
     decorations?: (() => DecorationView) | null;
-    hud?: HudSettings;
     // Whether play-video events play or are skipped; they play by default. The Workshop skips them.
     videos?: VideoPlayback;
     // Streams authored video sources; by default sources are URLs.
@@ -154,7 +155,7 @@ export class Game {
     this.onFatal = options.onFatal;
     this.onAction = options.onAction;
     this.audio = options.audio ?? null;
-    this.hud = options.hud ?? DEFAULT_HUD;
+    this.currentLook = options.look ?? DEFAULT_LOOK;
     this.videos = options.videos ?? DEFAULT_VIDEO_PLAYBACK;
     this.hudFrame.level = options.level.name;
     const listen = { signal: this.lifecycle.signal };
@@ -165,8 +166,9 @@ export class Game {
       this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level,
         DEFAULT_CHARACTER_FIGURE, this.journal);
       this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
-        characterModels: options.characterModels, content: options.content, theme: options.theme, enemyArt: options.enemyArt,
-        decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
+        characterModels: options.characterModels, content: options.content, look: this.currentLook,
+        courseArt: options.courseArt, subscribeTerrain: (listener) => this.simulation.subscribeTerrain(listener),
+        onNotice: options.onNotice, decorations: options.decorations, kinds: options.kinds, plugins: options.plugins,
         onCharacterFigure: (figure) => this.simulation.setCharacterFigure(figure),
       });
       this.input = new PointerInput(options.canvas, {
@@ -438,14 +440,39 @@ export class Game {
     this.view.character.setArmIk(state.armIk);
   }
 
-  setTheme(theme: GameTheme): void { if (!this.stopped) this.view.setTheme(theme); }
+  // How the game looks now.
+  get look(): GameLook { return this.currentLook; }
 
-  setEnemyArt(art: EnemyArtSettings): void { if (!this.stopped) this.view.setEnemyArt(art); }
+  /**
+   * Shows the game as `look` says, the only way its look changes: restyles the scene, swaps the enemies' art, draws the
+   * course artwork and takes the HUD settings for future messages and deaths, an active death keeping the text and
+   * duration it started with; each part only when it changed. Then tells the look's listeners.
+   */
+  setLook(look: GameLook): void {
+    if (this.stopped || look === this.currentLook) return;
+    const previous = this.currentLook;
+    this.currentLook = look;
+    if (look.theme !== previous.theme) this.view.setTheme(look.theme);
+    if (look.enemies !== previous.enemies) this.view.setEnemyArt(look.enemies);
+    if (look.art !== previous.art) this.view.setArt(look.art);
+    for (const listener of [...this.lookListeners]) listener(look);
+  }
+
+  // Tells `listener` the look now and whenever it changes, as the HUD shown around the game follows it; returns its
+  // removal.
+  subscribeLook(listener: (look: GameLook) => void): () => void {
+    this.lookListeners.add(listener);
+    listener(this.currentLook);
+    return () => { this.lookListeners.delete(listener); };
+  }
+
+  // Loads every GLB the look's course artwork lists and then draws it, so the course draws whole from its first frame; a
+  // release waits for it before play. A look set later draws each GLB as it loads.
+  loadArtwork(signal: AbortSignal): Promise<void> {
+    return this.view.loadArtwork(this.currentLook.art, signal);
+  }
 
   setMedia(media: MediaHost): void { if (!this.stopped) this.presenter.setMedia(media); }
-
-  // Applies to future messages and deaths; an active death keeps the text and duration it started with.
-  setHud(settings: HudSettings): void { if (!this.stopped) this.hud = settings; }
 
   setPause(options: { reason: string; paused: boolean }): void {
     const wasPaused = this.pauseReasons.size > 0;
@@ -600,6 +627,7 @@ export class Game {
     this.pendingLooks.clear();
     this.deliveringLooks.clear();
     this.stepObservers.clear();
+    this.lookListeners.clear();
     disposal.finish();
   }
 
@@ -640,7 +668,7 @@ export class Game {
 
   private beginDeath(info: DeathInfo): void {
     const kind = info.kind;
-    const settings = this.hud.death;
+    const settings = this.currentLook.hud.death;
     const dying: Dying = {
       info, duration: this.settings().death.wait, placement: this.simulation.placement,
       elapsed: 0, previousElapsed: 0, reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -720,7 +748,7 @@ export class Game {
       return 'completed';
     }
     // A toast never holds up the triggers: the next event, or the next trigger, starts at once.
-    if (action.type === 'message' && this.hud.messages.style === 'toast') {
+    if (action.type === 'message' && this.currentLook.hud.messages.style === 'toast') {
       this.presenter.toast(action);
       return 'completed';
     }

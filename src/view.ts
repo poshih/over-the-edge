@@ -10,7 +10,7 @@ import type { CharacterModelLoader } from './character-model-types';
 import type { CharacterFigure } from './character-figure';
 import { CharacterView } from './character-view';
 import type { InputMode, Point } from './config';
-import type { LevelChange, LevelDefinition, LevelLabel } from './level';
+import type { LevelChange, LevelDefinition, LevelLabel, TerrainEvent } from './level';
 import type { RigGeometry } from './rig';
 import { DEFAULT_HAMMER_HEAD, hammerHeadRadius } from './hammer-head';
 import type { HammerHead } from './hammer-head';
@@ -36,12 +36,13 @@ import { physicsPart } from './simulation';
 import type { PhysicsFrame } from './simulation';
 import { TerrainView } from './terrain-view';
 import type { DecorationView } from './decoration-view';
+import type { CourseArtSource, CourseArtView } from './course-art-view';
 import { Disposal } from './disposal';
-import { DEFAULT_THEME } from './theme';
 import type { GameTheme } from './theme';
 import type { EnemyArtSettings } from './enemy-art-data';
 import type { EnemyEvent } from './enemy-types';
-import { DEFAULT_ENEMY_ART } from './enemy-art-data';
+import { NO_COURSE_ARTWORK } from './game-look';
+import type { CourseArtwork, GameLook } from './game-look';
 import type { ContentLoader } from './content-ref';
 import { ViewMeasurements } from './view-measurements';
 import { BackgroundDefocus } from './background-defocus';
@@ -115,6 +116,9 @@ export class GameView {
   private readonly labels = new Group();
   // Null in a release whose level has no decorations; its shell then carries none of their code.
   readonly decorations: DecorationView | null;
+  // The course artwork's GLBs; null in a release that draws none, whose shell then carries no GLTF loader.
+  readonly courseArt: CourseArtView | null;
+  private art: CourseArtwork = NO_COURSE_ARTWORK;
   private readonly layers = new Map<SceneLayer, CheckedInstance<SceneLayer>>();
   private updatingLayers: readonly Attributed<SceneLayer>[] = [];
   private readonly sceneFrame: MutableSceneFrame;
@@ -149,8 +153,12 @@ export class GameView {
     characterModels?: CharacterModelLoader | null;
     // Loads a release's packaged sprite images.
     content?: ContentLoader;
-    theme?: GameTheme;
-    enemyArt?: EnemyArtSettings;
+    look: GameLook;
+    // Draws the course artwork's GLBs; without it the view draws none.
+    courseArt?: CourseArtSource | null;
+    // The simulation's terrain, which the course artwork follows.
+    subscribeTerrain: (listener: (event: TerrainEvent) => void) => () => void;
+    onNotice: (message: string) => void;
     kinds: Kinds;
     plugins: RuntimePlugins;
     onCharacterFigure: (figure: CharacterFigure) => void;
@@ -158,7 +166,7 @@ export class GameView {
     decorations?: (() => DecorationView) | null;
   }) {
     this.canvas = canvas;
-    this.theme = options.theme ?? DEFAULT_THEME;
+    this.theme = options.look.theme;
     const theme = this.theme;
     this.camera = theme.camera.perspective ? this.perspective : this.orthographic;
     // Resolve and check plugin factories before creating a WebGL renderer or attaching any view listeners.
@@ -173,7 +181,7 @@ export class GameView {
         characterModels: options.characterModels, content: options.content, theme, kinds: options.kinds, plugins: options.plugins,
         onCharacterFigure: options.onCharacterFigure, prepareTexture: (texture) => this.renderer.initTexture(texture),
       });
-      looks = new LevelLooks(options.plugins, level.objects, options.enemyArt === undefined ? DEFAULT_ENEMY_ART : options.enemyArt);
+      looks = new LevelLooks(options.plugins, level.objects, options.look.enemies);
       this.looks = looks;
       this.backdrop = createBackdrop(options.plugins, theme);
       created.push(this.backdrop);
@@ -246,6 +254,15 @@ export class GameView {
       this.backdropScene.add(this.backdrop.value.root);
       this.decorations = options.decorations?.() ?? null;
       this.decorations?.setObjects(level.objects);
+      const courseArt = options.courseArt ?? null;
+      this.courseArt = courseArt === null ? null : courseArt.create({
+        terrain: this.terrain, subscribe: options.subscribeTerrain, fetch: courseArt.fetch,
+        onFailure: (id, error) => {
+          const name = this.art.assets.find((asset) => asset.id === id)?.name ?? id;
+          options.onNotice(`The mesh "${name}" cannot be drawn, so its terrain shows its collision: ${
+            error instanceof Error ? error.message : String(error)}`);
+        },
+      });
       this.course.add(this.terrain.root);
       for (const passes of this.looks.passes()) {
         if (passes.course !== undefined) this.course.add(passes.course);
@@ -264,6 +281,7 @@ export class GameView {
       this.marks.add(this.aimMarks.value.root);
       for (const effect of this.effects.all) this.passScene(effect.captured.pass).add(effect.value.root);
       for (const layer of layers) this.addLayer(layer.value, layer);
+      if (this.courseArt !== null) this.addLayer(this.courseArt);
       this.observer = new ResizeObserver(() => {
         const size = this.readSize();
         this.pendingSize = size.width === this.width && size.height === this.height ? null : size;
@@ -309,6 +327,28 @@ export class GameView {
 
   applyEnemy(event: EnemyEvent): void { this.looks.applyEnemy(event); }
   setEnemyArt(art: EnemyArtSettings): void { this.looks.setEnemyArt(art); }
+
+  // Draws the GLBs `art` lists, each as it loads.
+  setArt(art: CourseArtwork): void {
+    if (art === this.art) return;
+    this.art = art;
+    if (this.courseArt === null) {
+      if (art.assets.length > 0) throw new Error('This game draws course artwork without its course art renderer.');
+      return;
+    }
+    this.courseArt.setAssets(art.assets.map((asset) => asset.id));
+  }
+
+  // Loads every GLB `art` lists, keeping them while the view lasts, and only then draws it, so the course and its
+  // decorations draw whole from their first frame.
+  async loadArtwork(art: CourseArtwork, signal: AbortSignal): Promise<void> {
+    const courseArt = this.courseArt;
+    if (courseArt !== null) await courseArt.load(art.assets.map((asset) => asset.id), signal);
+    this.setArt(art);
+    if (courseArt === null || Object.keys(art.decorations).length === 0) return;
+    if (this.decorations === null) throw new Error('This game draws decoration artwork without its decoration view.');
+    this.decorations.useArtwork(art.decorations, (id) => courseArt.decorationMesh(id));
+  }
 
   addLayer(layer: SceneLayer, source: Pick<Attributed<unknown>, 'plugin' | 'point'> = ENGINE): void {
     const target = this.layers.get(layer) ?? checkInstance<SceneLayer>(SCENE_LAYER_CONTRACT, layer, source);
@@ -529,6 +569,7 @@ export class GameView {
       textures: this.renderer.info.memory.textures,
       terrain: this.terrain.inspect(),
       decorations: this.decorations?.inspect() ?? null,
+      courseArt: this.courseArt?.inspect() ?? null,
       looks: this.looks.inspect(),
       enemies: this.looks.inspectEnemies(),
       sprites: character.sprites,
