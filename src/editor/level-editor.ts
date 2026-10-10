@@ -722,8 +722,8 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <legend class="visually-hidden">Decoration library</legend>
         <p class="level-help">Scenery that never collides, to set the mood: far behind the course, just behind it,
           or in front of it. Pick a model, adjust its depth and height under Object properties, then click / tap the
-          canvas. These are placeholders: course artwork (npm run pack:course) replaces any model with the game's own
-          GLB in releases, while the Workshop keeps showing the placeholder.</p>
+          canvas. These are placeholders: the project's course artwork (npm run pack:course) can draw any model as the
+          game's own GLB, here as in releases.</p>
         <p class="level-help">Depth reads best through a perspective camera (Project / Theme). Anything deeper than the
           theme's fog end disappears into the fog, and the theme's backdrop mountains, about 10-25 m back, hide what
           stands behind them: raise the fog end, or hide the backdrop, to show the far horizon.</p>
@@ -2151,6 +2151,8 @@ Export the level first if you want to keep them. Continue without saving?`);
   }, listen);
   const unsubscribeMeshes = options.meshes.subscribe(renderMeshes);
 
+  // Outlines and handles follow a decoration's model as drawn, which changes as its GLB arrives.
+  const unsubscribeDecorations = options.decorations.subscribe(draw);
   for (const preset of TRIGGER_PRESETS) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -3343,7 +3345,7 @@ Export the level first if you want to keep them. Continue without saving?`);
       replays.dispose();
       options.checks.setActive(false);
       unsubscribeChecks();
-      events.abort(); resize.disconnect(); unsubscribe(); unsubscribeMeshes();
+      events.abort(); resize.disconnect(); unsubscribe(); unsubscribeMeshes(); unsubscribeDecorations();
       camera.set(null);
       bounds.clear();
       entityGizmos.destroy();

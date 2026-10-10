@@ -241,7 +241,7 @@ export function apiManual(auth: 'token' | 'loopback') {
       },
       art: {
         value: '{ assets: [{ id, name }], decorations: { [modelId]: assetId } }', patch: true, limits: ART_LIMITS,
-        description: 'Course artwork: the GLBs terrain meshes draw and decoration models may draw. Upload GLBs with POST art/assets; PUT can rename or drop unused assets and map decoration models to assets: releases then draw every decoration of that model as the asset, whether the decoration library has the model or not.',
+        description: 'Course artwork: the GLBs terrain meshes draw and decoration models may draw. Upload GLBs with POST art/assets; PUT can rename or drop unused assets and map decoration models to assets: the Workshop and releases then draw every decoration of that model as the asset, whether the decoration library has the model or not.',
       },
       media: { value: '[{ "path": "/media/file.ext" }]', types: MEDIA_TYPES, limits: MEDIA_LIMITS, description: 'Upload with PUT media/{file}; PUT this list to drop unused files.' },
       'plugins/{plugin}': {

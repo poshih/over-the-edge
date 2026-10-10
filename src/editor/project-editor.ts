@@ -161,7 +161,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       `)}
 
       ${sectionMarkup({ id: 'project-art', title: 'Course artwork', hint: 'The meshes the course is built from' }, `
-        <p class="appearance-format">The Workshop and releases draw each terrain mesh as its GLB. Releases also draw each
+        <p class="appearance-format">The Workshop and releases draw the course alike: each terrain mesh as its GLB, and each
           decoration model the artwork maps as that GLB instead of its built-in model.</p>
         <ul class="project-media-list project-art-list" aria-label="Course meshes"></ul>
         <p class="appearance-format project-art-status"></p>
@@ -421,7 +421,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     artStatus.textContent = snapshot.art.assets.length === 0
       ? 'No meshes yet: terrain draws as its collision extruded, and decorations as their built-in models.'
       : models.length === 0 ? 'Decorations draw their built-in models.'
-        : `In releases the meshes draw the decoration model${models.length === 1 ? '' : 's'} ${models.join(', ')}.`;
+        : `The meshes draw the decoration model${models.length === 1 ? '' : 's'} ${models.join(', ')}.`;
     previousContent = snapshot;
   }
 

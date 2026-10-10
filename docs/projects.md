@@ -56,11 +56,11 @@ Nothing else reaches a release, and plugin data never does: game builds do not c
 `public/`, so a project release ships only the content its game uses plus the site icon.
 
 The `theme`, `hud`, `enemies` and `art` sections are the game's look (`GameLook`,
-[`src/game-look.ts`](../src/game-look.ts)), the one value that sets how the game looks. A release
-makes its game with the look its content holds and loads every GLB it lists before play; the
-Workshop gives its game the open project's look through `Game.setLook` whenever the project
-changes, saved or not, and loads each GLB as the level comes to use it, once the project has
-opened.
+[`src/game-look.ts`](../src/game-look.ts)), the one value that sets how the game looks, so a project
+looks the same in the Workshop as in its releases. A release makes its game with the look its
+content holds and loads every GLB it lists before play; the Workshop gives its game the open
+project's look through `Game.setLook` whenever the project changes, saved or not, and loads each
+GLB as the level comes to use it, once the project has opened.
 
 ## Project directory
 
@@ -782,8 +782,8 @@ plugin's own validation whenever the section loads or changes.
 
 **Course artwork.** Assets come from **Level / Meshes**, `npm run pack:course` packages or the
 API upload; terrain places them as meshes. `decorations` maps decoration model IDs to assets:
-in releases each asset replaces its model's placeholder on every decoration, and can draw a
-model the built-in library lacks. See [course meshes](course-artwork.md).
+in the Workshop and in releases each asset replaces its model's placeholder on every decoration,
+and can draw a model the built-in library lacks. See [course meshes](course-artwork.md).
 
 ## Limits
 

@@ -259,8 +259,8 @@ export class GameView {
         terrain: this.terrain, subscribe: options.subscribeTerrain, fetch: courseArt.fetch,
         onFailure: (id, error) => {
           const name = this.art.assets.find((asset) => asset.id === id)?.name ?? id;
-          options.onNotice(`The mesh "${name}" cannot be drawn, so its terrain shows its collision: ${
-            error instanceof Error ? error.message : String(error)}`);
+          options.onNotice(`The mesh "${name}" cannot be drawn, so terrain placing it shows its collision and decorations it ` +
+            `draws their built-in model: ${error instanceof Error ? error.message : String(error)}`);
         },
       });
       this.course.add(this.terrain.root);
@@ -328,26 +328,26 @@ export class GameView {
   applyEnemy(event: EnemyEvent): void { this.looks.applyEnemy(event); }
   setEnemyArt(art: EnemyArtSettings): void { this.looks.setEnemyArt(art); }
 
-  // Draws the GLBs `art` lists, each as it loads.
+  // Draws the course artwork: terrain the GLBs `art` lists, and decorations the GLBs it maps their models to, each as it
+  // loads.
   setArt(art: CourseArtwork): void {
     if (art === this.art) return;
     this.art = art;
+    const mapped = Object.keys(art.decorations).length > 0;
     if (this.courseArt === null) {
       if (art.assets.length > 0) throw new Error('This game draws course artwork without its course art renderer.');
       return;
     }
+    if (this.decorations === null && mapped) throw new Error('This game draws decoration artwork without its decoration view.');
     this.courseArt.setAssets(art.assets.map((asset) => asset.id));
+    this.decorations?.useArtwork(art.decorations, this.courseArt);
   }
 
   // Loads every GLB `art` lists, keeping them while the view lasts, and only then draws it, so the course and its
   // decorations draw whole from their first frame.
   async loadArtwork(art: CourseArtwork, signal: AbortSignal): Promise<void> {
-    const courseArt = this.courseArt;
-    if (courseArt !== null) await courseArt.load(art.assets.map((asset) => asset.id), signal);
+    if (this.courseArt !== null) await this.courseArt.load(art.assets.map((asset) => asset.id), signal);
     this.setArt(art);
-    if (courseArt === null || Object.keys(art.decorations).length === 0) return;
-    if (this.decorations === null) throw new Error('This game draws decoration artwork without its decoration view.');
-    this.decorations.useArtwork(art.decorations, (id) => courseArt.decorationMesh(id));
   }
 
   addLayer(layer: SceneLayer, source: Pick<Attributed<unknown>, 'plugin' | 'point'> = ENGINE): void {

@@ -202,10 +202,11 @@ the Workshop when it draws them; new server projects copy them, and builds witho
 
 Decorations are placed with the built-in placeholder library, and each names its model
 by ID. Mapping a model ID to a GLB in a [course package](#course-packages) replaces the
-placeholder of every decoration of that model in releases, including decorations placed
-after packing. The Workshop keeps showing the placeholder. A model ID the library lacks,
-such as `stone-idol`, is drawn only by its GLB. The Workshop shows such decorations nowhere
-and lists their model as waiting.
+placeholder of every decoration of that model, including decorations placed after packing,
+in the Workshop and in releases alike. A model ID the library lacks, such as `stone-idol`,
+is drawn only by its GLB. The Workshop loads a decoration's GLB as the level first draws it,
+and selects, outlines and places the decoration by the model as drawn; a GLB that cannot load
+is reported, and its decorations draw their built-in model if the library has one.
 
 A decoration model keeps its own proportions, unlike terrain meshes, which stretch to
 their box. The game measures the GLB's bounding box and scales it uniformly so its
@@ -294,6 +295,6 @@ chunks, turned or not: a turn is part of each placement's transform, worked out 
 mesh and turn, and its normals follow it exactly however the placement is stretched. Only
 edited transforms and dirty chunk bounds are uploaded, and fades
 update only active fading batches. Reusing a GLB never duplicates its textures, and the
-Workshop lets go of a GLB once the level no longer places it. Decoration GLBs are
+Workshop lets go of a GLB once nothing in the level draws it. Decoration GLBs are
 instanced like the placeholders they replace (see
 [decoration performance](decorations.md#performance)).

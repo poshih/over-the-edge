@@ -1352,7 +1352,7 @@ Fog still applies, so raise the theme's fog end to see the far horizon, and hide
 theme's backdrop mountains if they stand in front of it. Decorations draw in instanced
 batches with no physics, and a game-only release includes their code only when its level
 places any. The models are placeholders: a [course package](docs/course-artwork.md#decoration-models)
-replaces any model, by ID, with your own textured GLB in releases. See the
+replaces any model, by ID, with your own textured GLB, in the Workshop as in releases. See the
 [decoration guide](docs/decorations.md) for every model, the level format and performance.
 
 ### Obstacle line

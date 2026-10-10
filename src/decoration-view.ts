@@ -4,7 +4,7 @@ import { DECORATION_LIMITS } from './level';
 import type { DecorationObject, LevelChange, LevelObject } from './level';
 import { markInstanceSlot } from './instancing';
 import { OBSTACLE_LINE } from './obstacle-line';
-import { decorationAsset } from './decoration-art';
+import { decorationAsset, NO_DECORATION_ART } from './decoration-art';
 import type { DecorationArt } from './decoration-art';
 import { mirroredGeometry } from './decoration-geometry';
 
@@ -33,11 +33,28 @@ export interface DecorationMesh {
 /** Where decoration models come from; null while a model is unknown or still loading. */
 export type DecorationSource = (id: string) => DecorationMesh | null;
 
-// What draws a decoration: its model's placeholder, or the course artwork asset replacing it.
+/**
+ * The GLBs course artwork draws decoration models with, by asset ID. A decoration holds the GLB it draws, or waits for,
+ * so each loads once, as the first needs it, and is let go of once none does.
+ */
+export interface DecorationArtwork {
+  // The asset as a model, or null while it loads or if it could not.
+  decorationMesh(assetId: string): DecorationMesh | null;
+  // Whether the asset could not load; its decorations draw their built-in model, if there is one.
+  hasFailed(assetId: string): boolean;
+  // Holds the asset while a decoration draws it, loading it if it has not loaded yet; release() lets go of it.
+  acquire(assetId: string): void;
+  release(assetId: string): void;
+  // Tells `listener` the ID of each asset that arrives or cannot load; returns its removal.
+  subscribe(listener: (assetId: string) => void): () => void;
+}
+
+// What draws a decoration: its built-in model, or the course artwork asset drawing its model instead.
 interface Look {
   readonly key: string;
   readonly mesh: DecorationMesh | null;
-  readonly artwork: boolean;
+  // The asset, or null for the built-in model.
+  readonly asset: string | null;
 }
 
 interface Batch {
@@ -101,8 +118,8 @@ export function decorationMatrix(object: DecorationObject, model: DecorationMesh
 /**
  * Draws decorations: scenery only, never colliders. Instances are batched by 32 m chunk, model and
  * mirror side, so frustum culling skips distant chunks, and an edit rewrites only its own instances.
- * Idle frames do no work. A preview mesh shows a placement without changing the level. A mesh
- * release's course artwork can replace any model's placeholder with the game's own GLB. Decorations
+ * Idle frames do no work. A preview mesh shows a placement without changing the level. Course
+ * artwork can draw any model as the game's own GLB, in the Workshop as in releases. Decorations
  * behind the obstacle line draw in `root`, with the course; those on or in front of it in `front`,
  * over the characters but under a 3D character's arms and the tool.
  */
@@ -110,10 +127,15 @@ export class DecorationView {
   readonly root = new Group();
   readonly front = new Group();
   private readonly source: DecorationSource;
-  private artwork: { readonly art: DecorationArt; readonly mesh: DecorationSource } | null = null;
+  private artwork: { readonly art: DecorationArt; readonly source: DecorationArtwork; readonly unsubscribe: () => void } | null = null;
   private readonly instances = new Map<string, Instance>();
-  // Decorations whose model is unknown or not loaded yet; they appear once `refresh` finds it.
+  // Decorations whose model is unknown or whose GLB has not arrived; each appears once it does.
   private readonly waiting = new Map<string, DecorationObject>();
+  // The GLB each decoration, drawn or waiting, holds, by decoration ID; and the one the preview holds.
+  private readonly held = new Map<string, string>();
+  private previewAsset: string | null = null;
+  private previewObject: DecorationObject | null = null;
+  private readonly listeners = new Set<() => void>();
   private readonly batches = new Map<string, Batch>();
   private readonly dirtyBounds = new Set<InstancedMesh>();
   private readonly mirrored = new WeakMap<BufferGeometry, BufferGeometry>();
@@ -156,21 +178,25 @@ export class DecorationView {
   }
 
   /**
-   * Draws the models `art` maps with course artwork from now on: `mesh` gives each asset as a model.
-   * Every decoration of those models redraws; the placeholders of other models stay.
+   * Draws the models `art` maps as those GLBs from now on, which `source` holds, and the rest as their built-in models.
+   * Only the decorations of models whose GLB changed redraw, each as its GLB arrives.
    */
-  useArtwork(art: DecorationArt, mesh: DecorationSource): void {
-    this.artwork = { art, mesh };
-    for (const model of Object.keys(art)) this.refresh(model);
+  useArtwork(art: DecorationArt, source: DecorationArtwork): void {
+    const previous = this.artwork;
+    if (previous !== null && previous.source !== source) throw new Error('Decorations draw course artwork from one source.');
+    if (previous?.art === art) return;
+    this.artwork = { art, source, unsubscribe: previous?.unsubscribe ?? source.subscribe((asset) => this.arrived(asset)) };
+    const before = previous?.art ?? NO_DECORATION_ART;
+    const changed = [...new Set([...Object.keys(before), ...Object.keys(art)])]
+      .filter((model) => decorationAsset(before, model) !== decorationAsset(art, model));
+    for (const model of changed) this.refresh(model);
+    if (changed.length > 0) this.changed();
   }
 
-  /** Redraws every decoration of a model whose geometry arrived or changed. */
-  refresh(model: string): void {
-    this.previewKey = null;
-    const affected = [...this.instances.values()].filter((instance) => instance.object.model === model).map((instance) => instance.object);
-    for (const object of this.waiting.values()) if (object.model === model) affected.push(object);
-    for (const object of affected) this.forget(object.id);
-    for (const object of affected) this.upsert(object);
+  /** Tells `listener` whenever a model's drawn size may have changed: its GLB arrived or failed, or the artwork changed. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   /** A model's natural size, or null while it is unknown or loading. */
@@ -178,10 +204,12 @@ export class DecorationView {
     return this.look(model).mesh;
   }
 
-  /** Shows `object` as a translucent placement preview, or nothing. */
+  /** Shows `object` as a translucent placement preview, or nothing; it shows once its GLB arrives. */
   setPreview(object: DecorationObject | null): void {
     this.counters.previewUpdates++;
+    this.previewObject = object;
     const look = object === null ? null : this.look(object.model);
+    this.holdPreview(look?.asset ?? null);
     const model = look?.mesh ?? null;
     if (object === null || look === null || model === null) {
       this.preview.clear();
@@ -249,6 +277,11 @@ export class DecorationView {
   dispose(): void {
     if (this.disposed) return;
     this.clear();
+    this.holdPreview(null);
+    this.previewObject = null;
+    this.artwork?.unsubscribe();
+    this.artwork = null;
+    this.listeners.clear();
     this.preview.clear();
     this.previewKey = null;
     this.root.removeFromParent();
@@ -271,6 +304,10 @@ export class DecorationView {
       return;
     }
     this.forget(object.id);
+    if (look.asset !== null) {
+      this.held.set(object.id, look.asset);
+      this.artwork!.source.acquire(look.asset);
+    }
     if (model === null) {
       this.waiting.set(object.id, object);
       return;
@@ -288,6 +325,11 @@ export class DecorationView {
 
   private forget(id: string): void {
     this.waiting.delete(id);
+    const asset = this.held.get(id);
+    if (asset !== undefined) {
+      this.held.delete(id);
+      this.artwork!.source.release(asset);
+    }
     const instance = this.instances.get(id);
     if (instance === undefined) return;
     const batch = instance.batch;
@@ -320,7 +362,7 @@ export class DecorationView {
     if (existing !== undefined) return existing;
     const mirrored = mirroredGeometryFor(object, model);
     const batch: Batch = {
-      key, cell: cellKey(object), artwork: look.artwork, group: inFront(object) ? this.front : this.root, entries: [],
+      key, cell: cellKey(object), artwork: look.asset !== null, group: inFront(object) ? this.front : this.root, entries: [],
       meshes: model.parts.map((part) => this.mesh(mirrored ? this.mirror(part.geometry, model) : part.geometry, part.material, INITIAL_CAPACITY)),
     };
     for (const mesh of batch.meshes) batch.group.add(mesh);
@@ -396,13 +438,53 @@ export class DecorationView {
     for (const batch of [...this.batches.values()]) this.destroy(batch);
     this.instances.clear();
     this.waiting.clear();
+    for (const asset of this.held.values()) this.artwork!.source.release(asset);
+    this.held.clear();
   }
 
   private look(model: string): Look {
-    const asset = this.artwork === null ? undefined : decorationAsset(this.artwork.art, model);
-    if (asset === undefined) return { key: model, mesh: this.source(model), artwork: false };
+    const artwork = this.artwork;
+    const asset = artwork === null ? undefined : decorationAsset(artwork.art, model);
+    if (artwork === null || asset === undefined || artwork.source.hasFailed(asset)) {
+      return { key: model, mesh: this.source(model), asset: null };
+    }
     // Model IDs never contain a colon, so an artwork key cannot equal a model's.
-    return { key: `art:${asset}`, mesh: this.artwork!.mesh(asset), artwork: true };
+    return { key: `art:${asset}`, mesh: artwork.source.decorationMesh(asset), asset };
+  }
+
+  // Redraws every decoration of a model whose GLB arrived, failed or changed, and the preview if it shows one.
+  private refresh(model: string): void {
+    this.previewKey = null;
+    const affected = [...this.instances.values()].filter((instance) => instance.object.model === model).map((instance) => instance.object);
+    for (const object of this.waiting.values()) if (object.model === model) affected.push(object);
+    for (const object of affected) this.forget(object.id);
+    for (const object of affected) this.upsert(object);
+    if (this.previewObject?.model === model) this.setPreview(this.previewObject);
+  }
+
+  // A GLB arrived, or could not load: the models it draws redraw with it, or with their built-in models.
+  private arrived(asset: string): void {
+    const art = this.artwork?.art ?? NO_DECORATION_ART;
+    let redrawn = false;
+    for (const [model, mapped] of Object.entries(art)) {
+      if (mapped !== asset) continue;
+      this.refresh(model);
+      redrawn = true;
+    }
+    if (redrawn) this.changed();
+  }
+
+  // Holds the GLB the preview shows, letting go of the one it showed.
+  private holdPreview(asset: string | null): void {
+    const previous = this.previewAsset;
+    if (asset === previous) return;
+    this.previewAsset = asset;
+    if (asset !== null) this.artwork!.source.acquire(asset);
+    if (previous !== null) this.artwork!.source.release(previous);
+  }
+
+  private changed(): void {
+    for (const listener of [...this.listeners]) listener();
   }
 
   private mirror(geometry: BufferGeometry, model: DecorationMesh): BufferGeometry {

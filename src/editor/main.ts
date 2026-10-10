@@ -330,6 +330,7 @@ const levelEditor = createLevelEditor({
   decorations: {
     size: (model) => decorations.size(model),
     preview: (object) => decorations.setPreview(object),
+    subscribe: (listener) => decorations.subscribe(listener),
   },
   meshes: {
     list: () => project.courseMeshes(),

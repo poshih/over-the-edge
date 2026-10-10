@@ -13,7 +13,7 @@ import type { TerrainView } from './terrain-view';
 import { geometryBytes, loadVisualModel } from './visual-model';
 import type { LoadedVisual } from './visual-model';
 import { validateCourseModel } from './course-art-model';
-import type { DecorationMesh } from './decoration-view';
+import type { DecorationArtwork, DecorationMesh } from './decoration-view';
 
 interface Primitive { geometry: BufferGeometry; material: Material | Material[] }
 // A mesh turned about its vertical axis and fitted to the bounds of every turned vertex, as its collision is baked
@@ -109,7 +109,8 @@ export interface CourseArtOptions {
   readonly subscribe: (listener: (event: TerrainEvent) => void) => () => void;
   // A GLB's bytes, by asset ID: a release's packaged content, or the Workshop's project file.
   readonly fetch: (assetId: string, signal: AbortSignal) => Promise<Blob>;
-  // A GLB that could not load; its terrain keeps drawing as its collision.
+  // A GLB that could not load: terrain placing it keeps drawing as its collision, and decorations it draws as their
+  // built-in model, or nothing for a model the library lacks.
   readonly onFailure: (assetId: string, error: unknown) => void;
 }
 
@@ -129,17 +130,18 @@ export function createCourseArt(options: CourseArtOptions): CourseArtView {
 function disposeAsset(asset: Asset): void {
   for (const primitives of asset.templates.values()) for (const primitive of primitives) primitive.geometry.dispose();
   for (const part of asset.decoration?.parts ?? []) part.geometry.dispose();
+  for (const geometry of asset.decorationMirrors) geometry.dispose();
   asset.model.dispose();
 }
 
 /**
- * Draws the course's meshes: each terrain object whose mesh is a GLB draws that GLB, turned, fitted to its box and
- * mirrored as placed, in place of its collision's extrusion, and decorations may draw GLBs in place of their built-in
- * models. It draws only the GLBs the course artwork lists (`setAssets`), loading each one the terrain uses as it first
- * appears and letting go of one nothing uses any more; terrain keeps drawing as its collision until its GLB loads, or
- * if it cannot.
+ * Draws the course's meshes, and holds every GLB the course draws: each terrain object whose mesh is a GLB draws that GLB,
+ * turned, fitted to its box and mirrored as placed, in place of its collision's extrusion, and decorations draw the GLBs
+ * course artwork maps their models to, as their DecorationArtwork. Terrain draws only the GLBs the course artwork lists
+ * (`setAssets`). Each GLB loads once, as the first terrain object or decoration needs it, and is let go of a frame after
+ * the last stops; terrain keeps drawing as its collision until its GLB loads, or if it cannot.
  */
-export class CourseArtView implements SceneLayer {
+export class CourseArtView implements SceneLayer, DecorationArtwork {
   readonly root = new Group();
   // Course meshes are the course's own look: they draw with the terrain.
   readonly pass = 'course';
@@ -150,12 +152,14 @@ export class CourseArtView implements SceneLayer {
   // GLBs being loaded, and those that could not be, which are not tried again.
   private readonly loading = new Map<string, Promise<void>>();
   private readonly failed = new Set<string>();
-  // How many terrain objects draw each GLB, and the GLBs loaded up front, kept while nothing draws them.
+  // How many terrain objects and decorations draw each GLB, and the GLBs loaded up front, kept while nothing draws them.
   private readonly uses = new Map<string, number>();
   private readonly pinned = new Set<string>();
   // Loaded GLBs nothing draws any more, let go of on the next frame unless the course takes them back first, as it does
   // when an edit replaces a placement.
   private readonly unused = new Set<string>();
+  // Told of each GLB that arrives or cannot load, which decorations draw as it says.
+  private readonly artworkListeners = new Set<(assetId: string) => void>();
   private readonly states = new Map<string, State>();
   private readonly entries = new Map<string, Entry>();
   private readonly batches = new Map<string, Batch>();
@@ -246,6 +250,42 @@ export class CourseArtView implements SceneLayer {
       model, pixels, bytes: blob.size, loadMs, templates: new Map(), turns: new Map(), decoration: null, decorationMirrors: new Set(),
     });
     for (const state of this.states.values()) if (meshAsset(state.object) === id) this.sync(state);
+    this.arrived(id);
+  }
+
+  // Loads a GLB something here draws, once; one that cannot load is reported and not tried again until the course changes.
+  private fetchDrawn(id: string): void {
+    if (this.assets.has(id) || this.loading.has(id) || this.failed.has(id)) return;
+    this.request(id, this.lifecycle.signal).catch((error: unknown) => {
+      if (this.disposed) return;
+      this.failed.add(id);
+      this.failure(id, error);
+      this.arrived(id);
+    });
+  }
+
+  // Tells the decorations a GLB arrived, or could not.
+  private arrived(id: string): void {
+    for (const listener of [...this.artworkListeners]) listener(id);
+  }
+
+  // Holds a GLB while a decoration draws it, loading it if it has not loaded yet.
+  acquire(assetId: string): void {
+    this.use(assetId);
+    this.fetchDrawn(assetId);
+  }
+
+  release(assetId: string): void {
+    this.unuse(assetId);
+  }
+
+  hasFailed(assetId: string): boolean {
+    return this.failed.has(assetId);
+  }
+
+  subscribe(listener: (assetId: string) => void): () => void {
+    this.artworkListeners.add(listener);
+    return () => { this.artworkListeners.delete(listener); };
   }
 
   /**
@@ -367,13 +407,15 @@ export class CourseArtView implements SceneLayer {
     for (const id of this.states.keys()) this.terrain.setHidden(id, false);
     for (const asset of this.assets.values()) disposeAsset(asset);
     this.assets.clear(); this.states.clear(); this.uses.clear(); this.pinned.clear(); this.unused.clear();
+    this.artworkListeners.clear();
     this.root.removeFromParent();
     this.disposed = true;
   }
 
   private apply(event: TerrainEvent): void {
     if (event.type === 'reset') {
-      // A new course tries again the GLBs that could not load.
+      // A new course tries again the GLBs that could not load, decorations' included.
+      const retried = [...this.failed];
       this.failed.clear();
       for (const entry of [...this.entries.values()]) this.remove(entry);
       for (const id of this.states.keys()) this.terrain.setHidden(id, false);
@@ -381,14 +423,15 @@ export class CourseArtView implements SceneLayer {
       this.states.clear();
       for (const object of event.objects) this.apply({ type: 'upsert', object });
       // Counted after the new objects, so a GLB the course keeps using stays loaded.
-      for (const asset of previous) this.release(asset);
+      for (const asset of previous) this.unuse(asset);
+      for (const id of retried) this.arrived(id);
     } else if (event.type === 'upsert') {
       const previous = this.states.get(event.object.id);
       const state: State = { object: event.object, fade: null, active: true };
       this.states.set(event.object.id, state);
       this.use(meshAsset(event.object));
       this.sync(state);
-      if (previous) this.release(meshAsset(previous.object));
+      if (previous) this.unuse(meshAsset(previous.object));
     } else if (event.type === 'remove' || event.type === 'disappear') {
       const entry = this.entries.get(event.id);
       if (entry) this.remove(entry);
@@ -397,7 +440,7 @@ export class CourseArtView implements SceneLayer {
       if (event.type === 'remove' && state) {
         this.states.delete(event.id);
         this.terrain.setHidden(event.id, false);
-        this.release(meshAsset(state.object));
+        this.unuse(meshAsset(state.object));
       }
     } else if (event.type === 'fade') {
       const state = this.states.get(event.id);
@@ -409,8 +452,8 @@ export class CourseArtView implements SceneLayer {
     if (asset !== null) this.uses.set(asset, (this.uses.get(asset) ?? 0) + 1);
   }
 
-  // Lets go of a GLB once no terrain draws it, unless it was loaded up front.
-  private release(asset: string | null): void {
+  // Lets go of a GLB once nothing draws it, unless it was loaded up front.
+  private unuse(asset: string | null): void {
     if (asset === null) return;
     const uses = (this.uses.get(asset) ?? 0) - 1;
     if (uses > 0) {
@@ -430,13 +473,7 @@ export class CourseArtView implements SceneLayer {
     let entry = this.entries.get(object.id);
     if (!visible || asset === null) {
       if (entry) this.remove(entry);
-      if (asset !== null && this.listed.has(asset) && !available && !this.failed.has(asset) && !this.loading.has(asset)) {
-        this.request(asset, this.lifecycle.signal).catch((error: unknown) => {
-          if (this.disposed) return;
-          this.failed.add(asset);
-          this.failure(asset, error);
-        });
-      }
+      if (asset !== null && this.listed.has(asset)) this.fetchDrawn(asset);
       return;
     }
     const cell = `${Math.floor(object.x / 32)},${Math.floor(object.y / 32)}`;
