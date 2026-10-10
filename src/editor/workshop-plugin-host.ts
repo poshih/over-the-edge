@@ -756,7 +756,6 @@ export class WorkshopPluginHost {
       hud: (value) => project.setHud(value),
       audio: (value) => project.setAudio(value),
       enemies: (value) => project.setEnemies(value),
-      artMode: (mode) => project.setArtMode(mode),
       coursePackage: (file) => project.importCoursePackage(file),
       media: {
         add: async (file) => {

@@ -28,9 +28,9 @@ export const DEFAULT_COURSE_MESHES: readonly DefaultCourseMesh[] = Object.freeze
 
 export const DEFAULT_LEVEL: LevelDefinition = validateLevel(COURSE.level);
 
-// The built-in course's artwork: its meshes, drawn as meshes.
+// The built-in course's artwork: its meshes.
 export const DEFAULT_COURSE_ART: ProjectArt = validateProjectArt({
-  mode: 'meshes', assets: DEFAULT_COURSE_MESHES.map(({ id, name }) => ({ id, name })), decorations: NO_DECORATION_ART,
+  assets: DEFAULT_COURSE_MESHES.map(({ id, name }) => ({ id, name })), decorations: NO_DECORATION_ART,
 });
 
 /** A new game: the default settings and look, with the built-in course's artwork for DEFAULT_LEVEL. */

@@ -10,8 +10,6 @@ export const ART_LIMITS = {
 } as const;
 
 export class ArtError extends Error {}
-// How a release draws its course: its meshes, or every terrain object as its collision outline extruded.
-export type ArtMode = 'shapes' | 'meshes';
 export interface ArtResource {
   readonly id: string;
   readonly name: string;

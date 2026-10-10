@@ -13,7 +13,6 @@
 import type { Matrix4 } from 'three';
 import type { ArmIkSettings, VisualPartId } from '../character';
 import type { AppearancePart, VisualAlignment } from '../appearance-profile';
-import type { ArtMode } from '../art-types';
 import type { AudioSettings } from '../audio-settings';
 import type { AvatarMotionEntry } from '../avatar-motion-data';
 import type { AvatarMotionModel } from '../avatar-motion';
@@ -58,7 +57,7 @@ export type { WorkshopGameState } from './game-state';
 export type { SceneLayer } from '../scene-layer';
 export type { SceneBounds, SceneCharacter, SceneFrame, SceneHammer, ScenePoint, ScenePose } from '../scene-frame';
 export type {
-  AppearancePart, ArmIkSettings, ArtMode, AudioSettings, AvatarMotionEntry, AvatarMotionModel, CharacterArms, CharacterRiggingType,
+  AppearancePart, ArmIkSettings, AudioSettings, AvatarMotionEntry, AvatarMotionModel, CharacterArms, CharacterRiggingType,
   DirectionalPresentation, EnemyArtSettings, EnemyPose, GameSettings, GameTheme, Grips, HammerHead, HudSettings,
   LevelDefinition, LevelLabel, LevelObject, LibraryAvatarSettings, MediaEntry, ModelLibrary, PartRole, Point, ProjectArt,
   SpriteDocument, VisualAlignment, VisualPartId,
@@ -225,7 +224,6 @@ export interface WorkshopEdits {
   hud(value: HudSettings): WorkshopRefusal | null;
   audio(value: AudioSettings): WorkshopRefusal | null;
   enemies(value: EnemyArtSettings): WorkshopRefusal | null;
-  artMode(mode: ArtMode): WorkshopRefusal | null;
   // A course package from `npm run pack:course`: its level and course artwork.
   coursePackage(file: File): Promise<WorkshopRefusal | null>;
   readonly media: {

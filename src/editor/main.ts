@@ -304,8 +304,7 @@ const spriteEditor = createSpriteEditor({
 });
 const collisionOverlay = new CollisionOverlay(game.simulation.world, () => game.view.character.armPoses());
 game.view.addLayer(collisionOverlay);
-// The course draws as the project's look says, as its releases draw it: placed GLBs, loaded from the project as the level
-// uses them, or every terrain object as its collision.
+// The course draws the project's GLBs, as its releases draw them, each loaded from the project as the level uses it.
 const courseMeshes = new CourseArtView({
   terrain: game.view.terrain,
   subscribe: (listener) => game.simulation.subscribeTerrain(listener),
@@ -316,8 +315,8 @@ const courseMeshes = new CourseArtView({
   },
 });
 game.view.addLayer(courseMeshes);
-// The course takes the project's look once the project has opened, so meshes of a course replaced at start never load.
-let unsubscribeCourseLook = (): void => undefined;
+// The course draws the project's GLBs once the project has opened, so meshes of a course replaced at start never load.
+let unsubscribeCourseMeshes = (): void => undefined;
 // The figure Level / Replays poses: one held phantom, none played by the game.
 const replayFigure = boot(() => createPhantomPlayback(game.view, runtimePlugins, 0), () => {
   audio.dispose();
@@ -532,8 +531,9 @@ declare global {
 window.gettingOver = diagnostics;
 updateWorkshop(ui.workshopState());
 void project.start().then(() => {
-  courseMeshes.setMode(project.courseLook());
-  unsubscribeCourseLook = project.subscribe(() => courseMeshes.setMode(project.courseLook()));
+  const listCourseMeshes = (): void => courseMeshes.setAssets(project.courseMeshes().map((mesh) => mesh.id));
+  listCourseMeshes();
+  unsubscribeCourseMeshes = project.subscribe(listCourseMeshes);
   plugins.start();
 });
 const hudState: HudState = { debug, practice: practice(), recording: recorder.on, capturing: false, recordingNote: recordingNote() };
@@ -564,7 +564,7 @@ if (import.meta.hot) {
     disposal.run(() => unsubscribeLevel());
     disposal.run(() => unsubscribeLevelName());
     disposal.run(() => unsubscribeAppearance());
-    disposal.run(() => unsubscribeCourseLook());
+    disposal.run(() => unsubscribeCourseMeshes());
     disposal.run(() => levelEditor.dispose());
     disposal.run(() => levelChecks.dispose());
     disposal.run(() => spriteEditor.dispose());

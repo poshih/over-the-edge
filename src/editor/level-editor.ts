@@ -723,7 +723,7 @@ export function createLevelEditor(options: LevelEditorOptions) {
         <p class="level-help">Scenery that never collides, to set the mood: far behind the course, just behind it,
           or in front of it. Pick a model, adjust its depth and height under Object properties, then click / tap the
           canvas. These are placeholders: course artwork (npm run pack:course) replaces any model with the game's own
-          GLB in mesh releases, while the Workshop keeps showing the placeholder.</p>
+          GLB in releases, while the Workshop keeps showing the placeholder.</p>
         <p class="level-help">Depth reads best through a perspective camera (Project / Theme). Anything deeper than the
           theme's fog end disappears into the fog, and the theme's backdrop mountains, about 10-25 m back, hide what
           stands behind them: raise the fog end, or hide the backdrop, to show the far horizon.</p>

@@ -1,10 +1,9 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 20,
+  "schemaVersion": 21,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
-    "mode": "meshes",
     "assets": [],
     "decorations": {}
   },

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Usage: npm run pack:course -- <level.json> <assets.json> <output.json> [--mode=meshes|shapes]
+// Usage: npm run pack:course -- <level.json> <assets.json> <output.json>
 // Packs a level and the GLBs it draws into one self-contained course package. assets.json lists GLB files, relative to
 // it: "meshes", the GLBs the level's terrain meshes place, matched to them by content; and "decorations", the GLB that
-// draws each decoration model in mesh releases.
+// draws each decoration model.
 import { createHash } from 'node:crypto';
 import { basename, dirname, resolve } from 'node:path';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
-import type { ArtMode, ArtResource } from '../src/art-types.ts';
+import type { ArtResource } from '../src/art-types.ts';
 import type { CoursePackage } from '../src/course-package.ts';
 
 const LIMITS = { fileBytes: 20 * 1024 * 1024, totalBytes: 64 * 1024 * 1024, assets: 64 };
@@ -19,7 +19,7 @@ function fail(message: unknown): never {
 }
 
 function usage(): never {
-  fail('Usage: npm run pack:course -- <level.json> <assets.json> <output.json> [--mode=meshes|shapes]');
+  fail('Usage: npm run pack:course -- <level.json> <assets.json> <output.json>');
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -33,14 +33,8 @@ function levelObjects(level: unknown, kind: string) {
 }
 
 const args = process.argv.slice(2);
-if (args.length < 3 || args.length > 4) usage();
-const [levelFile, assetsFile, outputFile, option] = args;
-let mode: ArtMode = 'meshes';
-if (option !== undefined) {
-  const match = /^--mode=(shapes|meshes)$/.exec(option);
-  if (!match) usage();
-  mode = match[1] as ArtMode;
-}
+if (args.length !== 3) usage();
+const [levelFile, assetsFile, outputFile] = args;
 
 try {
   // JSON stays unknown until the same structural checks the packer has always performed.
@@ -103,7 +97,7 @@ try {
   }
 
   const course: Omit<CoursePackage, 'level'> & { level: unknown } = {
-    format: 'over-the-edge-course', schemaVersion: 2, mode, level, assets: [...assets.values()], decorations,
+    format: 'over-the-edge-course', schemaVersion: 3, level, assets: [...assets.values()], decorations,
   };
   const output = JSON.stringify(course);
   await writeFile(outputFile, output);

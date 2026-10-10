@@ -5,7 +5,6 @@ import { DEFAULT_ARM_IK, SPRITE_TARGET_IDS, VISUAL_PART_IDS } from '../src/chara
 import type { AppearancePart } from '../src/appearance-profile';
 import { checkAppearanceModel } from '../src/appearance-model';
 import { ART_LIMITS } from '../src/art-types';
-import type { ArtMode } from '../src/art-types';
 import { audioSources, DEFAULT_AUDIO } from '../src/audio-settings';
 import type { AudioSettings } from '../src/audio-settings';
 import type { AvatarRigRegistry } from '../src/avatar-rig';
@@ -13,7 +12,7 @@ import { checkCharacterModels } from '../src/character-model-check';
 import { levelMediaSources } from '../src/content';
 import { validateCourseModel } from '../src/course-art-model';
 import { embeddedGlb, isCoursePackage, validateCoursePackage } from '../src/course-package';
-import { NO_DECORATION_ART, usedDecorationArt } from '../src/decoration-art';
+import { NO_DECORATION_ART, usedCourseArt } from '../src/decoration-art';
 import type { DecorationArt } from '../src/decoration-art';
 import { DEFAULT_COURSE_ART, DEFAULT_COURSE_MESHES, DEFAULT_LEVEL } from '../src/default-course';
 import { DEFAULT_ENEMY_ART } from '../src/enemy-art-data';
@@ -23,7 +22,7 @@ import { DEFAULT_GAME_SETTINGS, GAME_SETTINGS_LIMITS, validateGameSettings } fro
 import type { GameSettings } from '../src/game-settings';
 import { DEFAULT_HUD } from '../src/hud';
 import type { HudSettings } from '../src/hud';
-import { LEVEL_LIMITS, terrainAssets, validateLevel } from '../src/level';
+import { LEVEL_LIMITS, validateLevel } from '../src/level';
 import type { LevelDefinition } from '../src/level';
 import { checkMediaBytes, isMediaLibraryPath, MEDIA_LIMITS, mediaFile, mediaPath } from '../src/media';
 import { appearanceFile, artFile, checkFileBudget, projectFileRefs } from '../src/project';
@@ -48,7 +47,6 @@ export interface ReleaseInput {
   readonly files: readonly string[];
   readonly level: LevelDefinition;
   readonly art: {
-    readonly mode: ArtMode;
     readonly assets: readonly { readonly id: string; readonly name: string; readonly file: ReleaseFile }[];
     readonly decorations: DecorationArt;
   };
@@ -84,17 +82,6 @@ function failure(label: string, error: unknown): Error {
   return new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
 }
 
-// The course artwork a release draws in `mode`: the decoration models it maps for the level, and the assets that the
-// level's terrain and those models use. The shapes look draws none.
-function drawnArt(level: LevelDefinition, mode: ArtMode, art: DecorationArt): { decorations: DecorationArt; assets: ReadonlySet<string> } {
-  if (mode === 'shapes') return { decorations: NO_DECORATION_ART, assets: new Set() };
-  const decorations = usedDecorationArt(level, art);
-  return {
-    decorations,
-    assets: new Set([...terrainAssets(level), ...Object.values(decorations)]),
-  };
-}
-
 // The media library paths a release plays: its level's video and sound events, its music and its cues.
 function playedMedia(level: LevelDefinition, audio: AudioSettings): ReadonlySet<string> {
   return new Set([...levelMediaSources(level), ...audioSources(audio)]);
@@ -102,11 +89,10 @@ function playedMedia(level: LevelDefinition, audio: AudioSettings): ReadonlySet<
 
 /**
  * The binary files of a project that a release takes (see loadProjectRelease): every appearance model, the course
- * artwork it draws in `mode`, the media it plays and, for a game whose backend selects them (`library`), the model
- * library.
+ * artwork its level draws, the media it plays and, for a game whose backend selects them (`library`), the model library.
  */
-export function releaseProjectFiles(manifest: ProjectManifest, level: LevelDefinition, mode: ArtMode, library: boolean): string[] {
-  const art = drawnArt(level, mode, manifest.art.decorations).assets;
+export function releaseProjectFiles(manifest: ProjectManifest, level: LevelDefinition, library: boolean): string[] {
+  const art = usedCourseArt(level, manifest.art.decorations).assets;
   const played = playedMedia(level, manifest.audio);
   return [
     ...manifest.appearance.map(part => appearanceFile(part.part)),
@@ -116,11 +102,11 @@ export function releaseProjectFiles(manifest: ProjectManifest, level: LevelDefin
   ];
 }
 
-// The meshes a course draws in the chosen look, each read only when it is drawn and checked like course packages at
-// import: its terrain's and those replacing the placeholders of the decoration models it uses.
-function courseArt(level: LevelDefinition, mode: ArtMode, assets: readonly { id: string; name: string; read: () => TakenFile }[],
+// The meshes a course draws, each read only when it is drawn and checked like course packages at import: its terrain's
+// and those of the decoration models it uses that course artwork draws.
+function courseArt(level: LevelDefinition, assets: readonly { id: string; name: string; read: () => TakenFile }[],
   art: DecorationArt): ReleaseInput['art'] {
-  const { decorations, assets: used } = drawnArt(level, mode, art);
+  const { decorations, assets: used } = usedCourseArt(level, art);
   let pixels = 0;
   const packaged = assets.filter(asset => used.has(asset.id)).map(asset => {
     const taken = asset.read();
@@ -130,14 +116,10 @@ function courseArt(level: LevelDefinition, mode: ArtMode, assets: readonly { id:
     if (asset.id !== `asset-${sha256Hex(bytes)}`) throw new Error(`Packaged asset "${asset.name}" does not match its content hash.`);
     return { id: asset.id, name: asset.name, file: releaseFile(taken) };
   });
-  if (packaged.length !== used.size) throw new Error('Mesh artwork needs a self-contained course package, not level JSON containing only asset IDs.');
-  return { mode, assets: packaged, decorations };
-}
-
-function artMode(selected: string | undefined, packaged: ArtMode): ArtMode {
-  if (selected === undefined) return packaged;
-  if (selected !== 'shapes' && selected !== 'meshes') throw new Error('GAME_ART_MODE must be shapes or meshes.');
-  return selected;
+  if (packaged.length !== used.size) {
+    throw new Error('The level draws GLBs this build was not given: build from its course package (npm run pack:course) or its GAME_PROJECT.');
+  }
+  return { assets: packaged, decorations };
 }
 
 // The art of the enemy species the level places; a species it never places keeps the built-in art, which nothing draws.
@@ -163,11 +145,11 @@ function profile(path: string | null, variable: string, registry: AvatarRigRegis
 }
 
 // The level and course artwork of GAME_LEVEL, a level or course package, or else of the built-in course with its meshes.
-function fileCourse(path: string | null, selectedMode: string | undefined): { level: LevelDefinition; art: ReleaseInput['art'] } {
+function fileCourse(path: string | null): { level: LevelDefinition; art: ReleaseInput['art'] } {
   if (path === null) {
     return {
       level: DEFAULT_LEVEL,
-      art: courseArt(DEFAULT_LEVEL, artMode(selectedMode, DEFAULT_COURSE_ART.mode), DEFAULT_COURSE_MESHES.map(mesh => ({
+      art: courseArt(DEFAULT_LEVEL, DEFAULT_COURSE_MESHES.map(mesh => ({
         id: mesh.id, name: mesh.name, read: () => ({ bytes: readDefaultCourseMesh(mesh), path: defaultCourseMeshPath(mesh) }),
       })), DEFAULT_COURSE_ART.decorations),
     };
@@ -180,7 +162,7 @@ function fileCourse(path: string | null, selectedMode: string | undefined): { le
   const level = pack?.level ?? validateLevel(raw);
   return {
     level,
-    art: courseArt(level, artMode(selectedMode, pack?.mode ?? 'shapes'),
+    art: courseArt(level,
       (pack?.assets ?? []).map(asset => ({ id: asset.id, name: asset.name, read: () => ({ bytes: embeddedGlb(asset.source), path: null }) })),
       pack?.decorations ?? NO_DECORATION_ART),
   };
@@ -188,10 +170,9 @@ function fileCourse(path: string | null, selectedMode: string | undefined): { le
 
 // A build from the per-file inputs: a level or course package, settings and up to two profiles.
 // Its /media/ sources come from public/media/.
-export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode: string | undefined,
-  avatarRigs: AvatarRigRegistry): ReleaseInput {
+export function loadFileRelease(root: string, files: ReleaseFiles, avatarRigs: AvatarRigRegistry): ReleaseInput {
   const watched = [files.level, files.settings, files.sprites, files.alternateSprites].filter((path): path is string => path !== null);
-  const { level, art } = fileCourse(files.level, selectedMode);
+  const { level, art } = fileCourse(files.level);
   let settings = DEFAULT_GAME_SETTINGS;
   if (files.settings !== null) {
     if (statSync(files.settings).size > GAME_SETTINGS_LIMITS.fileBytes) throw new Error('GAME_SETTINGS exceeds the file size limit.');
@@ -225,14 +206,13 @@ export function loadFileRelease(root: string, files: ReleaseFiles, selectedMode:
 }
 
 /**
- * A build from GAME_PROJECT, with GAME_ART_MODE applied. It takes only what the game uses, each file read once and
- * checked like every project's: the course artwork its level draws in the release's look, the appearance models, the
- * media its level and audio play and the art of the enemies its level places. The model library is the game's when
- * `library` says it has a release facet that can select its models (docs/release-plugins.md); without one no library model can show, so
- * none is packaged.
+ * A build from GAME_PROJECT. It takes only what the game uses, each file read once and checked like every project's:
+ * the course artwork its level draws, the appearance models, the media its level and audio play and the art of the
+ * enemies its level places. The model library is the game's when `library` says it has a release facet that can select
+ * its models (docs/release-plugins.md); without one no library model can show, so none is packaged.
  */
-export function loadProjectRelease(root: string, requested: string, selectedMode: string | undefined,
-  avatarRigs: AvatarRigRegistry, options: { readonly library: boolean }): ReleaseInput {
+export function loadProjectRelease(root: string, requested: string, avatarRigs: AvatarRigRegistry,
+  options: { readonly library: boolean }): ReleaseInput {
   const source = openProjectSource(root, requested);
   const { manifest, level } = source;
   const files = [...source.files];
@@ -260,7 +240,7 @@ export function loadProjectRelease(root: string, requested: string, selectedMode
   };
   let art;
   try {
-    art = courseArt(level, artMode(selectedMode, manifest.art.mode),
+    art = courseArt(level,
       manifest.art.assets.map(asset => ({ id: asset.id, name: asset.name, read: () => read(artFile(asset.id)) })),
       manifest.art.decorations);
   } catch (error) {

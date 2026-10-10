@@ -60,7 +60,7 @@ per instance:
 
 ### Course art
 
-- `mode`: course look, `'meshes'` or `'shapes'`.
+- `listed`: number of GLBs the course artwork lists, the only ones drawn.
 - `loading`: number of assets still loading.
 - `failed`: IDs of assets that failed to load.
 - `chunks`: count of spatial cells.
@@ -169,7 +169,7 @@ GAME_PROJECT=artifacts/level-streaming/<case> npm run build:game
 **spread:** 1,000 terrain objects (box-colliding meshes reusing 4 assets) on a 64 m world grid
 out to the ±2,048 m coordinate limits, plus 1,000 decorations using the built-in models
 `ruined-pillar`, `obelisk`, `dead-tree` and `lantern-post`. The Workshop draws the built-in
-models; mesh releases draw the generated GLBs.
+models; releases draw the generated GLBs.
 
 **dense:** 64 unique textured meshes of 16 parts each (one 512² image per asset), placed as one
 14 × 2 m terrain block of 1.75 m tiles, plus a 2-rung climb.
@@ -178,7 +178,7 @@ models; mesh releases draw the generated GLBs.
 the course plane back to z = −1000 with heights up to 1,000 m.
 
 **slices:** 1,000 terrain objects over 64 collision shapes, each with 16 loops of 16 vertices,
-drawn in shapes art mode. It measures collision memory and makes no reachability claim.
+drawn as their meshes. It measures collision memory and makes no reachability claim.
 
 ### Common features
 

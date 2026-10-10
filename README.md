@@ -197,9 +197,8 @@ level service. The `/media/` files its events play are packaged from `public/med
 and a game build fails on any source it cannot package, such as an external URL. Level exports do not contain gameplay settings, sprite layouts,
 private character GLBs, or IK profiles; a [project](docs/projects.md) holds all of them. A level that places GLB
 meshes from your own art pipeline, or maps decorations to them, builds from a course package, the level JSON with
-its GLBs, made with `npm run pack:course`; pass the package as `GAME_LEVEL`. `GAME_ART_MODE=shapes`
-or `GAME_ART_MODE=meshes` overrides the package's look; shape-only releases omit
-the GLBs and mesh loader. See [course meshes](docs/course-artwork.md).
+its GLBs, made with `npm run pack:course`; pass the package as `GAME_LEVEL`. A release that draws no GLB omits the
+mesh loader. See [course meshes](docs/course-artwork.md).
 
 To bundle your physics and cursor behavior into the game-only release, export a
 game-settings profile from **Workshop / Physics**, put it inside the project,
@@ -261,8 +260,8 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 20**, and release content **schema 19**,
-including the audio record's `block` cue, game settings' death wait, archer, hit-point,
+Project manifests and bundles use **schema 21**, and release content **schema 20**,
+including course artwork without a course look, the audio record's `block` cue, game settings' death wait, archer, hit-point,
 armor and bonfire rules, jar outline and jar side friction, the theme camera's background blur and character light, the HUD's
 level readout and death text/fade and the hollow archer's enemy art; other versions are rejected.
 
@@ -1353,7 +1352,7 @@ Fog still applies, so raise the theme's fog end to see the far horizon, and hide
 theme's backdrop mountains if they stand in front of it. Decorations draw in instanced
 batches with no physics, and a game-only release includes their code only when its level
 places any. The models are placeholders: a [course package](docs/course-artwork.md#decoration-models)
-replaces any model, by ID, with your own textured GLB in mesh releases. See the
+replaces any model, by ID, with your own textured GLB in releases. See the
 [decoration guide](docs/decorations.md) for every model, the level format and performance.
 
 ### Obstacle line
@@ -1409,8 +1408,8 @@ resets remain per object. A course package can also map decoration model IDs to 
 replacing those placeholders.
 
 The editor never generates meshes. The GLBs are the [project's](docs/projects.md) course
-artwork, and **Workshop / Project / Course artwork** chooses whether the Workshop and releases
-draw them or every terrain object as its extruded collision. See the
+artwork, listed in **Workshop / Project / Course artwork**, and the Workshop and releases draw
+them alike; a placed GLB draws as its extruded collision until it loads, or if it cannot. See the
 [course meshes guide](docs/course-artwork.md) for the fitting, slicing and projection rules, the level
 format, packing, and limits.
 

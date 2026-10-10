@@ -54,8 +54,6 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
       if (process.env[variable] !== undefined) throw new Error(`${variable} cannot be combined with GAME_PROJECT; the project already contains it.`);
     }
   }
-  const selectedMode = process.env.GAME_ART_MODE;
-  if (selectedMode !== undefined && selectedMode !== 'shapes' && selectedMode !== 'meshes') throw new Error('GAME_ART_MODE must be shapes or meshes.');
   const files = {
     level: projectJson('GAME_LEVEL'), settings: projectJson('GAME_SETTINGS'),
     sprites: projectJson('GAME_SPRITES'), alternateSprites: projectJson('GAME_ALTERNATE_SPRITES'),
@@ -78,7 +76,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   // Only a release facet can select library models; studio previews have public access and no library.
   const library = !studioPreview && manifest.plugins.some(plugin => plugin.release !== undefined);
   const release = requested === undefined ? null
-    : loadProjectRelease(project, requested, selectedMode, rigRegistry, { library });
+    : loadProjectRelease(project, requested, rigRegistry, { library });
   return {
     root: resolve(project, 'play'),
     envDir: project,
@@ -88,7 +86,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
     plugins: [
       gameTitle({ mode, envDir: project, projectTitle: release?.title }),
       gameRelease({
-        load: release === null ? () => loadFileRelease(project, files, selectedMode, rigRegistry) : () => release,
+        load: release === null ? () => loadFileRelease(project, files, rigRegistry) : () => release,
         contentUrl: contentUrl(),
         phantomsUrl: studioPreview ? null : phantomsUrl(),
         recordings: phantomRecordings(requested),

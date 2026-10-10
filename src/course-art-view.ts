@@ -3,7 +3,6 @@ import {
 } from 'three';
 import type { BufferGeometry, Material } from 'three';
 import { ART_LIMITS, ArtError } from './art-types';
-import type { ArtMode } from './art-types';
 import { ILLUSION, LEVEL_LIMITS, turnedTerrainBox } from './level';
 import type { TerrainEvent, TerrainObject } from './level';
 import { markInstanceSlot } from './instancing';
@@ -113,9 +112,10 @@ function disposeAsset(asset: Asset): void {
 
 /**
  * Draws the course's meshes: each terrain object whose mesh is a GLB draws that GLB, turned, fitted to its box and
- * mirrored as placed, in place of its collision's extrusion, and decorations may draw GLBs in place of their placeholders. In the
- * meshes look it loads each GLB the terrain uses as it first appears, and lets go of one nothing uses any more; terrain
- * keeps drawing as its collision until its GLB loads, or if it cannot, and every terrain object does in the shapes look.
+ * mirrored as placed, in place of its collision's extrusion, and decorations may draw GLBs in place of their built-in
+ * models. It draws only the GLBs the course artwork lists (`setAssets`), loading each one the terrain uses as it first
+ * appears and letting go of one nothing uses any more; terrain keeps drawing as its collision until its GLB loads, or
+ * if it cannot.
  */
 export class CourseArtView implements SceneLayer {
   readonly root = new Group();
@@ -144,7 +144,8 @@ export class CourseArtView implements SceneLayer {
   private turnPreviews: ReadonlyMap<string, number> = new Map();
   private readonly unsubscribe: () => void;
   private readonly lifecycle = new AbortController();
-  private mode: ArtMode = 'shapes';
+  // The GLBs the course artwork lists, the only ones drawn.
+  private listed: ReadonlySet<string> = new Set();
   private disposed = false;
   private matrixWrites = 0;
   private boundsUpdates = 0;
@@ -155,7 +156,7 @@ export class CourseArtView implements SceneLayer {
     subscribe: (listener: (event: TerrainEvent) => void) => () => void;
     // A GLB's bytes, by asset ID: a release's packaged content, or the Workshop's project file.
     fetch: (assetId: string, signal: AbortSignal) => Promise<Blob>;
-    // A GLB the meshes look could not load on its own; its terrain keeps drawing as its collision.
+    // A GLB that could not load; its terrain keeps drawing as its collision.
     onFailure: (assetId: string, error: unknown) => void;
   }) {
     this.terrain = options.terrain;
@@ -229,7 +230,7 @@ export class CourseArtView implements SceneLayer {
     this.assets.set(id, {
       model, pixels, bytes: blob.size, loadMs, templates: new Map(), turns: new Map(), decoration: null, decorationMirrors: new Set(),
     });
-    if (this.mode === 'meshes') for (const state of this.states.values()) if (meshAsset(state.object) === id) this.sync(state);
+    for (const state of this.states.values()) if (meshAsset(state.object) === id) this.sync(state);
   }
 
   /**
@@ -269,10 +270,16 @@ export class CourseArtView implements SceneLayer {
     }
   }
 
-  setMode(mode: ArtMode): void {
-    if (this.mode === mode) return;
-    this.mode = mode;
-    for (const state of this.states.values()) this.sync(state);
+  // Draws the GLBs `ids` lists, and only those: terrain placing another draws as its collision.
+  setAssets(ids: Iterable<string>): void {
+    const previous = this.listed;
+    const listed = new Set(ids);
+    if (listed.size === previous.size && [...listed].every((id) => previous.has(id))) return;
+    this.listed = listed;
+    for (const state of this.states.values()) {
+      const asset = meshAsset(state.object);
+      if (asset !== null && previous.has(asset) !== listed.has(asset)) this.sync(state);
+    }
   }
 
   update(frame: SceneFrame): void {
@@ -329,7 +336,7 @@ export class CourseArtView implements SceneLayer {
       }];
     }));
     return {
-      mode: this.mode, assets, loading: this.loading.size, failed: [...this.failed],
+      listed: this.listed.size, assets, loading: this.loading.size, failed: [...this.failed],
       instances: this.entries.size, chunks: cells.size, batches: this.batches.size, meshes,
       instanceCapacity, usedInstanceSlots, instanceBufferBytes,
       fadingBatches: this.fading.size, matrixWrites: this.matrixWrites, boundsUpdates: this.boundsUpdates,
@@ -402,13 +409,13 @@ export class CourseArtView implements SceneLayer {
   private sync(state: State): void {
     const { object, active, fade } = state;
     const asset = meshAsset(object);
-    const available = asset !== null && this.assets.has(asset);
-    const visible = this.mode === 'meshes' && active && available;
-    this.terrain.setHidden(object.id, this.mode === 'meshes' && available);
+    const available = asset !== null && this.listed.has(asset) && this.assets.has(asset);
+    const visible = active && available;
+    this.terrain.setHidden(object.id, available);
     let entry = this.entries.get(object.id);
     if (!visible || asset === null) {
       if (entry) this.remove(entry);
-      if (this.mode === 'meshes' && asset !== null && !available && !this.failed.has(asset) && !this.loading.has(asset)) {
+      if (asset !== null && this.listed.has(asset) && !available && !this.failed.has(asset) && !this.loading.has(asset)) {
         this.request(asset, this.lifecycle.signal).catch((error: unknown) => {
           if (this.disposed) return;
           this.failed.add(asset);

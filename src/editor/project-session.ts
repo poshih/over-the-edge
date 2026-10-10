@@ -8,7 +8,6 @@ import type { AvatarModelSettings } from '../character-profile';
 import { embeddedModel } from '../character-profile';
 import { checkCharacterModels } from '../character-model-check';
 import { ART_LIMITS, ArtError, artName } from '../art-types';
-import type { ArtMode } from '../art-types';
 import type { DecorationArt } from '../decoration-art';
 import { validateCoursePackage } from '../course-package';
 import { STARTER_LEVEL } from '../default-course';
@@ -171,9 +170,8 @@ interface ArtItem extends FileSource {
   readonly bytes: number;
 }
 
-// The course artwork: the course look, the GLBs and the decoration models they draw.
+// The course artwork: the GLBs and the decoration models they draw.
 interface CourseArt {
-  mode: ArtMode;
   assets: ArtItem[];
   decorations: DecorationArt;
 }
@@ -279,7 +277,6 @@ export interface ProjectSnapshot {
   readonly audio: AudioSettings;
   readonly enemies: EnemyArtSettings;
   readonly art: {
-    readonly mode: ArtMode;
     readonly assets: readonly { readonly id: string; readonly name: string }[];
     readonly decorations: DecorationArt;
   };
@@ -447,7 +444,7 @@ export class ProjectSession {
       server: this.server, projects: this.projects, busy: this.busy,
       dirty: this.dirtySections(), conflicts: [...this.conflicts],
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
-      art: { mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations },
+      art: { assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations },
       media: [...this.media.values()].map((item) => ({ path: item.path, bytes: item.bytes, kind: mediaKind(item.path) })),
       library: this.library.map(({ role, entry, key }) => ({
         role, id: entry.id, name: entry.name, key, avatar: role === 'avatar' ? this.settingsOf(entry as LibraryAvatarEntry) : null,
@@ -549,17 +546,6 @@ export class ProjectSession {
     });
   }
 
-  setArtMode(mode: ArtMode): Error | null {
-    try {
-      inSection('art', () => validateProjectArt({ mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations }));
-      this.art = { ...this.art, mode };
-      this.changed('status');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
   // The added file's /media/ path, or the refusal.
   async addMedia(file: File): Promise<string | Error> {
     try {
@@ -594,11 +580,6 @@ export class ProjectSession {
   // The course artwork's GLBs, which the level places as terrain meshes and course artwork maps onto decorations.
   courseMeshes(): readonly { readonly id: string; readonly name: string }[] {
     return this.art.assets.map(({ id, name }) => ({ id, name }));
-  }
-
-  // How the course draws: the project's meshes, or every terrain object as its collision extruded.
-  courseLook(): ArtMode {
-    return this.art.mode;
   }
 
   // A course mesh's GLB, from this page, the server project that holds it or the published project.
@@ -644,7 +625,7 @@ export class ProjectSession {
       const name = artName(file.name.replace(/\.glb$/i, '').slice(0, 80) || 'Mesh');
       const blob = new Blob([bytes], { type: 'model/gltf-binary' });
       const assets = [...this.art.assets, { id, name, blob, server: null, published: null, bytes: blob.size }];
-      inSection('art', () => validateProjectArt({ mode: this.art.mode, assets: assets.map((asset) => ({ id: asset.id, name: asset.name })), decorations: this.art.decorations }));
+      inSection('art', () => validateProjectArt({ assets: assets.map((asset) => ({ id: asset.id, name: asset.name })), decorations: this.art.decorations }));
       checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
       this.art = { ...this.art, assets };
       this.changed('content');
@@ -662,7 +643,7 @@ export class ProjectSession {
       if (decorations.length > 0) {
         throw new ProjectError(`The mesh draws the decoration model ${decorations.join(', ')}; import a course package without it first.`, { section: 'art' });
       }
-      const art = { mode: this.art.mode, assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
+      const art = { assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
       checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art }), this.workspace.level.get());
       this.art = { ...this.art, assets };
       this.changed('content');
@@ -888,10 +869,10 @@ export class ProjectSession {
         return { id: asset.id, name: asset.name, blob, server: null, published: null, bytes: blob.size };
       });
       checkProjectReferences(validateProjectManifest({
-        ...this.draftManifest(), art: { mode: pack.mode, assets: assets.map(({ id, name }) => ({ id, name })), decorations: pack.decorations },
+        ...this.draftManifest(), art: { assets: assets.map(({ id, name }) => ({ id, name })), decorations: pack.decorations },
       }), pack.level);
       // The course meshes come before the level, which draws them as soon as it loads.
-      this.art = { mode: pack.mode, assets, decorations: pack.decorations };
+      this.art = { assets, decorations: pack.decorations };
       this.workspace.level.load(pack.level);
       this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${assets.length} GLBs.`, 'info');
       this.changed('content');
@@ -1332,7 +1313,7 @@ export class ProjectSession {
       const storedValue = (await this.client.section(binding.id, 'art')).value;
       const stored = inSection('art', () => validateProjectArt(storedValue));
       const combined = [...stored.assets, ...page.assets.filter((asset) => !stored.assets.some((known) => known.id === asset.id))];
-      const both = inSection('art', () => validateProjectArt({ mode: page.mode, assets: combined, decorations: { ...stored.decorations, ...page.decorations } }));
+      const both = inSection('art', () => validateProjectArt({ assets: combined, decorations: { ...stored.decorations, ...page.decorations } }));
       adopt('art', await this.client.putSection(binding.id, 'art', both, revision('art')));
     }
     // The server removes an alternate before the primary it depends on, and adds them the other way round.
@@ -1729,7 +1710,7 @@ export class ProjectSession {
     else if (has.has('art')) {
       const existing = new Map(this.art.assets.map((asset) => [asset.id, asset]));
       this.art = {
-        mode: manifest.art.mode, decorations: manifest.art.decorations,
+        decorations: manifest.art.decorations,
         // An asset is named by its content, so bytes the page already has for it stay usable.
         assets: manifest.art.assets.map((asset) => {
           const known = existing.get(asset.id);
@@ -1838,7 +1819,7 @@ export class ProjectSession {
   private draftManifest(): ProjectManifest {
     return validateProjectManifest({
       format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title: this.title, level: PROJECT_FILES.level,
-      art: validateProjectArt({ mode: this.art.mode, assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations }),
+      art: validateProjectArt({ assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations }),
       settings: this.workspace.settings.get(),
       characters: { primary: null, alternate: null },
       armIk: this.workspace.appearance.armIk(),
@@ -1965,7 +1946,7 @@ export class ProjectSession {
       appearance: JSON.stringify(this.workspace.appearance.parts().map((part) => [part.part, part.name, blob(part.blob), part.alignment])),
       models: JSON.stringify(this.library.map((item) => [item.role, item.entry, blob(item.blob)])),
       theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
-      art: JSON.stringify([this.art.mode, this.art.assets.map((asset) => [asset.id, asset.name]), this.art.decorations]),
+      art: JSON.stringify([this.art.assets.map((asset) => [asset.id, asset.name]), this.art.decorations]),
       media: JSON.stringify([...this.media.values()].map((item) => [item.path, blob(item.blob)])),
       ...Object.fromEntries(Object.entries(this.pluginData).map(([id, data]) => [pluginSection(id), data])),
     };
@@ -2143,7 +2124,7 @@ function openedMedia(content: OpenedProject): Map<string, MediaItem> {
 function openedArt(content: OpenedProject): CourseArt {
   const { art } = content.manifest;
   return {
-    mode: art.mode, decorations: art.decorations,
+    decorations: art.decorations,
     assets: art.assets.map((asset) => ({ ...asset, ...openedSource(content, artFile(asset.id)) })),
   };
 }

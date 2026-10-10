@@ -65,9 +65,7 @@ export function packReleaseContent(input: ReleaseInput, recordings: readonly Rel
     }
   }
   const unknown = unknownDecorationModels(input.level, input.art.decorations);
-  if (unknown.length > 0) {
-    throw new Error(`${unknown.join(' ')}${input.art.mode === 'shapes' ? ' Shape releases draw only the built-in library.' : ''}`);
-  }
+  if (unknown.length > 0) throw new Error(unknown.join(' '));
   const draft = {
     format: CONTENT_FORMAT, schemaVersion: CONTENT_SCHEMA_VERSION,
     level: input.level, settings: input.settings, theme: input.theme, hud: input.hud, enemies: input.enemies,
@@ -78,7 +76,7 @@ export function packReleaseContent(input: ReleaseInput, recordings: readonly Rel
     },
     appearance: input.appearance.map(part => ({ part: part.part, name: part.name, alignment: part.alignment, source: add(part.file, 'glb') })),
     art: {
-      mode: input.art.mode, decorations: input.art.decorations,
+      decorations: input.art.decorations,
       assets: input.art.assets.map(asset => ({ id: asset.id, name: asset.name, source: add(asset.file, 'glb') })),
     },
     media,

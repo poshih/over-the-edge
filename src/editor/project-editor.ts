@@ -161,13 +161,8 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       `)}
 
       ${sectionMarkup({ id: 'project-art', title: 'Course artwork', hint: 'The meshes the course is built from' }, `
-        <label class="appearance-label" for="project-art-mode">Course look</label>
-        <select id="project-art-mode">
-          <option value="meshes">Meshes</option>
-          <option value="shapes">Extruded collision and placeholders</option>
-        </select>
-        <p class="appearance-format">How the Workshop and releases draw the course: its GLB meshes, or every terrain object
-          as its collision extruded and decorations as their placeholders, for a quick blockout.</p>
+        <p class="appearance-format">The Workshop and releases draw each terrain mesh as its GLB. Releases also draw each
+          decoration model the artwork maps as that GLB instead of its built-in model.</p>
         <ul class="project-media-list project-art-list" aria-label="Course meshes"></ul>
         <p class="appearance-format project-art-status"></p>
         <label class="appearance-label" for="project-course-file">Import course package</label>
@@ -197,7 +192,6 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const mediaFile = element<HTMLInputElement>(root, '#project-media-file');
   const alternateStatus = element<HTMLParagraphElement>(root, '.project-alternate-status');
   const alternateFile = element<HTMLInputElement>(root, '.project-alternate-file');
-  const artMode = element<HTMLSelectElement>(root, '#project-art-mode');
   const artStatus = element<HTMLParagraphElement>(root, '.project-art-status');
   const artList = element<HTMLUListElement>(root, '.project-art-list');
   const courseFile = element<HTMLInputElement>(root, '#project-course-file');
@@ -409,7 +403,6 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     alternateStatus.textContent = snapshot.alternate === null
       ? 'No alternate character. The standalone game shows no character choice.'
       : `Alternate character: ${snapshot.alternate.characterRiggingType}. Players can switch in the standalone game's corner control.`;
-    artMode.value = snapshot.art.mode;
     const models = Object.keys(snapshot.art.decorations);
     artList.replaceChildren(...snapshot.art.assets.map((asset) => {
       const entry = document.createElement('li');
@@ -426,9 +419,9 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       return entry;
     }));
     artStatus.textContent = snapshot.art.assets.length === 0
-      ? 'No meshes yet: terrain draws as its collision extruded, and decorations as their placeholders.'
-      : models.length === 0 ? 'Decorations draw their placeholders.'
-        : `In mesh releases the meshes replace the decoration placeholder${models.length === 1 ? '' : 's'} ${models.join(', ')}.`;
+      ? 'No meshes yet: terrain draws as its collision extruded, and decorations as their built-in models.'
+      : models.length === 0 ? 'Decorations draw their built-in models.'
+        : `In releases the meshes draw the decoration model${models.length === 1 ? '' : 's'} ${models.join(', ')}.`;
     previousContent = snapshot;
   }
 
@@ -568,7 +561,6 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     if (file !== undefined) void session.importAlternate(file);
   }, listen);
   element(root, '.project-alternate-remove').addEventListener('click', () => session.removeAlternate(), listen);
-  artMode.addEventListener('change', () => session.setArtMode(artMode.value === 'meshes' ? 'meshes' : 'shapes'), listen);
   courseFile.addEventListener('change', () => {
     const file = courseFile.files?.[0];
     courseFile.value = '';

@@ -55,7 +55,7 @@ dist-game-content/
   project's media library files the level and the audio play.
 - **Only what the game uses.** A game build reads and checks only the files it packages, so an
   unused file in a project cannot fail the build. It packages the course meshes the level
-  draws in the release's look, the media the level and the audio play, and the art of the
+  draws, the media the level and the audio play, and the art of the
   enemy species the level places. The model library is packaged only for a game with a
   release facet, outside studio previews: without a backend to select them, no library model
   can ever show.

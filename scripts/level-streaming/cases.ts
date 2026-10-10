@@ -190,7 +190,6 @@ export function buildCase(name: CaseName, job: CourseJob, decorations: Decoratio
   const manifest: ProjectManifest = {
     ...defaults, theme,
     art: {
-      mode: name === 'slices' ? 'shapes' : 'meshes',
       assets: artwork.map(({ id, name }) => ({ id, name })),
       decorations: Object.fromEntries(artwork.flatMap((asset): [string, string][] => asset.model === null ? [] : [[asset.model, asset.id]])),
     },

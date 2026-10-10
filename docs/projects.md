@@ -6,8 +6,8 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 20**; their release content uses **schema 19**.
-Both embed the audio record's `block` cue, game settings' death wait, archer and bonfire rules, jar
+Project manifests and bundles use **schema 21**; their release content uses **schema 20**.
+Both hold course artwork without a course look, and embed the audio record's `block` cue, game settings' death wait, archer and bonfire rules, jar
 outline and jar side friction, the theme's background blur and character light, the HUD's level readout and death
 text/fade, and the hollow archer's enemy art. Other versions are rejected, not converted.
 
@@ -48,7 +48,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, the level's name among them, in Workshop play-tests and releases; how trigger messages appear, and death text/fade |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
 | `enemies` | `project.json` | Replacement pixel art per enemy species |
-| `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the course look, the GLB meshes terrain places and the GLBs replacing decoration models |
+| `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the GLB meshes terrain places and the GLBs drawing decoration models |
 | `media` | `project.json` + `media/<file>` | Videos and sounds, used as `/media/<file>` |
 | `plugins/<id>` | `project.json` | One [Workshop plugin](workshop-plugins.md)'s own data, for the Workshop only |
 
@@ -78,10 +78,10 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 20,
+  "schemaVersion": 21,
   "title": "Lantern Cavern",
   "level": "level.json",
-  "art": { "mode": "meshes", "assets": [], "decorations": {} },
+  "art": { "assets": [], "decorations": {} },
   "settings": {
     "schemaVersion": 20, "physics": { "...": "..." },
     "rig": { "handleLength": 1.5, "maxExtension": 1.15, "minReach": 0, "head": [{ "x": -0.1, "y": -0.23 }, "..."],
@@ -118,7 +118,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 20,
+  "schemaVersion": 21,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 12, "name": null, "labels": [], "objects": [] },
@@ -163,7 +163,7 @@ no project data: the validated level, settings and presentation, the character,
 appearance and course GLBs, and the media become content files in
 `dist-game-content/`, which the shell loads and verifies; see
 [content delivery](content-delivery.md). The build takes only what the game uses: the
-course meshes its level draws in the release's look, the media its level and audio
+course meshes its level draws, the media its level and audio
 play, and the art of the enemies its level places. From a project directory it never reads
 the other files, and copies each file it takes into the content one at a time. That content is the
 base game every player loads. Each model library entry, such as a cosmetic avatar, hammer
@@ -179,8 +179,7 @@ restarts when a project file it uses changes. A project directory's `phantoms/` 
 `GAME_PROJECT` is the whole game, so combining it with `GAME_LEVEL`,
 `GAME_SETTINGS`, `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES` fails. The project
 title replaces `GAME_TITLE`: a `GAME_TITLE` from `.env` files is ignored, and one
-passed on the command line fails. `GAME_ART_MODE` still overrides the project's
-course look.
+passed on the command line fails.
 
 Deploy it like any other release: the shell to any static host, and the content to the
 host or CDN that serves `GAME_CONTENT_URL`. A game adds its own code with [plugins](plugins.md), named by
@@ -238,8 +237,8 @@ test buttons), **Enemy art** (JSON pixel art, starting from the built-in art),
 profile), **Model library** (add library avatars, hammers and pots from files or the Workshop's
 [server models](characters.md#server-models), then preview and remove them; see
 [imported 3D characters](characters.md#model-library-and-runtime-swaps)) and
-**Course artwork** (the course look, the meshes Level imported, with **Remove** for unused
-ones, or import a `pack:course` package).
+**Course artwork** (the meshes Level imported, with **Remove** for unused ones, or import a
+`pack:course` package).
 
 Everything else keeps its usual tab. Opening or importing a project replaces the
 page's current game, its sprite draft and its browser-saved appearance models; the
@@ -511,8 +510,8 @@ An open Workshop page shows each change within two seconds.
 ## Section reference
 
 **Game settings.** The nested settings schema is **20**, exported in code as
-`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **20**, release content
-**19**, and browser game-settings snapshots **12**. All settings are required and
+`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **21**, release content
+**20**, and browser game-settings snapshots **12**. All settings are required and
 unknown fields or other versions are rejected, with no legacy reader or conversion.
 `death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
 returning at a bonfire, or restarting when none was lit. A death captures this
@@ -774,13 +773,10 @@ data, one JSON document of at most 64 KiB, nesting depth 16 and 8,192 values, fo
 and the project checks hold it to those limits but never interpret it; the Workshop runs the
 plugin's own validation whenever the section loads or changes.
 
-**Course artwork.** `mode` is `meshes` or `shapes`: how the Workshop and releases draw the
-course, its GLB meshes or every terrain object as its collision extruded (see
-[course look](course-artwork.md#course-look)). Assets come from **Level / Meshes**,
-`npm run pack:course` packages or the API upload; terrain places them as meshes. `decorations`
-maps decoration model IDs to assets: in mesh releases each asset replaces its model's
-placeholder on every decoration, and can draw a model the built-in library lacks. See
-[course meshes](course-artwork.md).
+**Course artwork.** Assets come from **Level / Meshes**, `npm run pack:course` packages or the
+API upload; terrain places them as meshes. `decorations` maps decoration model IDs to assets:
+in releases each asset replaces its model's placeholder on every decoration, and can draw a
+model the built-in library lacks. See [course meshes](course-artwork.md).
 
 ## Limits
 

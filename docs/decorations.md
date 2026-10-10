@@ -111,13 +111,13 @@ and 3,600 triangles.
 A game replaces placeholders with its own static GLB models, with PBR materials and
 textures, through [course artwork](course-artwork.md#decoration-models). Map a model ID to a
 GLB in the `decorations` section of the `npm run pack:course` assets file, or in the
-project's `art.decorations` through the project API. In mesh releases, every decoration of
+project's `art.decorations` through the project API. In releases, every decoration of
 that model then draws the GLB, which keeps its own proportions, is scaled to the
 decoration's height and stands on the decoration's position. The Workshop keeps drawing
-the placeholder, so levels stay light to edit, and shape releases draw placeholders too.
+the placeholder, so levels stay light to edit.
 
 The IDs of your own models need not be in the library: a model like `stone-idol` is drawn
-only by its GLB, in mesh releases. GLBs follow the course artwork limits: static meshes,
+only by its GLB, in releases. GLBs follow the course artwork limits: static meshes,
 up to 16 meshes and 50,000 triangles each, shared with the terrain's budget of 64 GLBs per
 course.
 

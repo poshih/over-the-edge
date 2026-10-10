@@ -87,7 +87,7 @@ export class Publisher {
     try {
       // Only the files the release takes: a studio preview keeps runtime facets but has no release facets, so no
       // library models.
-      const revision = await snapshot(join(work, 'project'), (manifest, level) => releaseProjectFiles(manifest, level, manifest.art.mode, false));
+      const revision = await snapshot(join(work, 'project'), (manifest, level) => releaseProjectFiles(manifest, level, false));
       const task = this.queue.then(() => this.build(id, revision, work, recordings));
       this.queue = task.catch(() => undefined);
       return await task;
@@ -170,7 +170,7 @@ export class Publisher {
     // it has no phantom service: it replays the project's own recordings. It keeps GAME_PLUGINS for kinds and runtime,
     // but serves no release facets and packages no library models (docs/plugins.md).
     for (const variable of [
-      'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_ART_MODE', 'GAME_CONTENT_URL',
+      'GAME_LEVEL', 'GAME_SETTINGS', 'GAME_SPRITES', 'GAME_ALTERNATE_SPRITES', 'GAME_TITLE', 'GAME_CONTENT_URL',
       'GAME_PHANTOMS_URL',
     ]) delete env[variable];
     const vite = join(this.root, 'node_modules', 'vite', 'bin', 'vite.js');

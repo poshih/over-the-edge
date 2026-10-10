@@ -6,8 +6,8 @@ import type { ArmIkSettings, VisualPartId } from './character';
 import { validateAppearanceParts, validateArmIk } from './appearance-profile';
 import type { VisualAlignment } from './appearance-profile';
 import { ART_LIMITS, artId, artName } from './art-types';
-import type { ArtMode, ArtResource } from './art-types';
-import { usedDecorationArt, validateDecorationArt } from './decoration-art';
+import type { ArtResource } from './art-types';
+import { usedCourseArt, validateDecorationArt } from './decoration-art';
 import type { DecorationArt } from './decoration-art';
 import { audioSources, validateAudio } from './audio-settings';
 import type { AudioSettings } from './audio-settings';
@@ -17,7 +17,7 @@ import { validateGameSettings } from './game-settings';
 import type { GameSettings } from './game-settings';
 import { validateHud } from './hud';
 import type { HudSettings } from './hud';
-import { LEVEL_LIMITS, terrainAssets, validateLevel } from './level';
+import { LEVEL_LIMITS, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 import { MEDIA_LIMITS, MEDIA_TYPES, mediaExtension, mediaPath } from './media';
 import { MODEL_LIMITS } from './model-data';
@@ -39,7 +39,7 @@ import {
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
-export const CONTENT_SCHEMA_VERSION = 19;
+export const CONTENT_SCHEMA_VERSION = 20;
 // The group holding everything the release itself uses; other groups are granted separately.
 export const GAME_GROUP = 'game';
 export const CONTENT_TYPES: Readonly<Record<ContentExtension, string>> = {
@@ -108,9 +108,8 @@ export interface ContentAppearance {
 }
 
 export interface ContentArt {
-  readonly mode: ArtMode;
   readonly assets: readonly ArtResource[];
-  // The assets that draw decoration models in place of their placeholders.
+  // The assets that draw decoration models, in place of the built-in models of the same IDs.
   readonly decorations: DecorationArt;
 }
 
@@ -231,8 +230,7 @@ function validateContentAppearance(value: unknown): readonly ContentAppearance[]
 }
 
 function validateContentArt(value: unknown, level: LevelDefinition): ContentArt {
-  const art = exactRecord(value, ['mode', 'assets', 'decorations'], 'Course artwork');
-  if (art.mode !== 'shapes' && art.mode !== 'meshes') throw new ContentManifestError('Course artwork mode must be shapes or meshes.');
+  const art = exactRecord(value, ['assets', 'decorations'], 'Course artwork');
   if (!Array.isArray(art.assets) || art.assets.length > ART_LIMITS.assets) {
     throw new ContentManifestError(`Course artwork lists at most ${ART_LIMITS.assets} assets.`);
   }
@@ -243,15 +241,15 @@ function validateContentArt(value: unknown, level: LevelDefinition): ContentArt 
   const ids = new Set(assets.map(asset => asset.id));
   if (ids.size !== assets.length) throw new ContentManifestError('Course artwork lists an asset twice.');
   const decorations = validateDecorationArt(art.decorations, ids);
-  // Shape releases carry no meshes; mesh releases carry exactly the meshes the level uses.
-  if (Object.keys(decorations).length !== Object.keys(usedDecorationArt(level, decorations)).length) {
+  // A release carries exactly the course artwork its level draws.
+  const used = usedCourseArt(level, decorations);
+  if (Object.keys(decorations).length !== Object.keys(used.decorations).length) {
     throw new ContentManifestError('Decoration artwork must map only models the level uses.');
   }
-  const used = new Set(art.mode === 'shapes' ? [] : [...terrainAssets(level), ...Object.values(decorations)]);
-  if (used.size !== ids.size || [...used].some(id => !ids.has(id))) {
+  if (used.assets.size !== ids.size || [...used.assets].some(id => !ids.has(id))) {
     throw new ContentManifestError('Course artwork must list exactly the meshes the level uses.');
   }
-  return Object.freeze({ mode: art.mode, assets: Object.freeze(assets), decorations });
+  return Object.freeze({ assets: Object.freeze(assets), decorations });
 }
 
 function validateMediaTable(value: unknown): Readonly<Record<string, string>> {

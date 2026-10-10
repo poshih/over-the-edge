@@ -32,9 +32,8 @@ left / right** under **Object properties** mirrors it afterwards. **Object prope
 how it collides. **Project / Course
 artwork** lists the meshes; **Remove** takes out one the level no longer places.
 
-The Workshop draws the course as the project's **Course look** says, as its releases do
-(see [course look](#course-look)). A placed GLB draws as its collision until it has loaded,
-and keeps doing so if it cannot load.
+The Workshop draws the course as its releases do. A placed GLB draws as its collision until
+it has loaded, and keeps doing so if it cannot load.
 
 Over the [project API](projects.md#api-for-scripts-and-language-models), upload the GLB with
 `POST /api/projects/{id}/art/assets`, then `GET /api/projects/{id}/art/assets/{assetId}/terrain`
@@ -199,22 +198,14 @@ places them with the hazards and validates the level. About 6,800 triangles and 
 the Workshop when it draws them; new server projects copy them, and builds without
 `GAME_LEVEL` package them.
 
-## Course look
-
-**Project / Course artwork / Course look** chooses how the Workshop and releases draw the
-course. **Meshes**, the default, draws every placed GLB. **Extruded collision and
-placeholders** draws every terrain object as its collision extruded in its colour, and
-decorations as their placeholders, for a quick blockout; such releases include no GLBs,
-no GLTF loader and no mesh renderer.
-
 ## Decoration models
 
 Decorations are placed with the built-in placeholder library, and each names its model
 by ID. Mapping a model ID to a GLB in a [course package](#course-packages) replaces the
-placeholder of every decoration of that model in mesh releases, including decorations
-placed after packing. The Workshop keeps showing the placeholder. A model ID the library
-lacks, such as `stone-idol`, is drawn only by its GLB. The Workshop shows such decorations
-nowhere and lists their model as waiting, and shape releases refuse them.
+placeholder of every decoration of that model in releases, including decorations placed
+after packing. The Workshop keeps showing the placeholder. A model ID the library lacks,
+such as `stone-idol`, is drawn only by its GLB. The Workshop shows such decorations nowhere
+and lists their model as waiting.
 
 A decoration model keeps its own proportions, unlike terrain meshes, which stretch to
 their box. The game measures the GLB's bounding box and scales it uniformly so its
@@ -259,34 +250,21 @@ matches, decoration models no decoration in the level uses, missing or non-GLB f
 size limits. Keep assets files and packages out of `levels/`: the Workshop serves every
 file there as a level (see [server levels](../README.md#level-editing)).
 
-Packages default to the meshes look; add `--mode=shapes` to package the GLBs but release
-the extruded collision unless overridden:
-
-```sh
-# Use the look saved in the package:
-GAME_LEVEL=courses/my-course.json npm run build:game
-
-# Explicitly override it:
-GAME_LEVEL=courses/my-course.json GAME_ART_MODE=shapes npm run build:game
-GAME_LEVEL=courses/my-course.json GAME_ART_MODE=meshes npm run build:game
-```
-
-`GAME_ART_MODE` also works with `npm run dev:game`. Plain level JSON defaults to shapes;
-the [built-in course](#the-built-in-course), built without `GAME_LEVEL`, to meshes, with its
-own GLBs. Meshes mode needs a package containing every placed GLB.
-Unknown modes, missing assets, invalid GLBs, and content/hash mismatches fail the build
-instead of producing a misleading release. Mesh releases package each drawn GLB once as
-release content and load all of them, in parallel and verified, before play starts. Both
-looks are static, editor-free builds; see [content delivery](content-delivery.md) for how
-their content is served.
+Builds take the GLBs from the package. Plain level JSON carries none, so a build from level
+JSON whose terrain places GLBs fails, pointing to its course package or a `GAME_PROJECT`;
+the [built-in course](#the-built-in-course), built without `GAME_LEVEL`, brings its own GLBs.
+Missing assets, invalid GLBs, and content/hash mismatches fail the build instead of
+producing a misleading release. Releases package each GLB they draw once as release content
+and load all of them, in parallel and verified, before play starts; a release that draws no
+GLB includes no GLTF loader and no mesh renderer. Releases are static, editor-free builds;
+see [content delivery](content-delivery.md) for how their content is served.
 
 ### Course package format
 
 ```json
 {
   "format": "over-the-edge-course",
-  "schemaVersion": 2,
-  "mode": "meshes",
+  "schemaVersion": 3,
   "level": { "schemaVersion": 12, "name": "Boulder Run", "labels": [], "objects": [] },
   "assets": [
     { "id": "asset-<sha256 hex of the GLB>", "name": "boulder.glb", "source": "data:model/gltf-binary;base64,..." }

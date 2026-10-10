@@ -1,8 +1,8 @@
-// Course artwork for decorations: which GLB draws each decoration model in mesh releases, so a
-// game's own models replace the built-in placeholders by model ID. DOM-free, so project, package
-// and release validation share it.
+// Course artwork for decorations: which GLB draws each decoration model, in place of the built-in model of
+// the same ID, so a game's own models draw by model ID. DOM-free, so project, package and release
+// validation share it.
 import { ART_LIMITS, ArtError, artId, artRecord } from './art-types';
-import { DECORATION_LIMITS, DECORATION_MODEL_ID } from './level';
+import { DECORATION_LIMITS, DECORATION_MODEL_ID, terrainAssets } from './level';
 import type { LevelDefinition } from './level';
 
 /** Course artwork asset IDs by decoration model ID. */
@@ -28,7 +28,7 @@ export function validateDecorationArt(value: unknown, assets: ReadonlySet<string
   return Object.freeze(art);
 }
 
-/** The asset that draws `model`, or undefined when its placeholder does. */
+/** The asset that draws `model`, or undefined when its built-in model does. */
 export function decorationAsset(art: DecorationArt, model: string): string | undefined {
   return Object.hasOwn(art, model) ? art[model] : undefined;
 }
@@ -42,4 +42,13 @@ export function usedDecorationArt(level: LevelDefinition, art: DecorationArt): D
     if (asset !== undefined) used[object.model] = asset;
   }
   return Object.freeze(Object.fromEntries(Object.entries(used).sort(([a], [b]) => (a < b ? -1 : 1))));
+}
+
+/**
+ * The course artwork a level draws: the part of `art` its decorations use, and every GLB it draws, its terrain's and
+ * those of the decoration models it places. A release carries exactly these.
+ */
+export function usedCourseArt(level: LevelDefinition, art: DecorationArt): { readonly decorations: DecorationArt; readonly assets: ReadonlySet<string> } {
+  const decorations = usedDecorationArt(level, art);
+  return { decorations, assets: new Set([...terrainAssets(level), ...Object.values(decorations)]) };
 }

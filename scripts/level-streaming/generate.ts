@@ -95,7 +95,7 @@ function checkWorkload(snapshot: CourseSnapshot, benchmark: BenchmarkCase, decor
   }
   if (benchmark.name === 'spread' || benchmark.name === 'perspective') {
     ensure(scenery.every((object) => REPEATED_MODELS.some((model) => model === object.model) &&
-      benchmark.manifest.art.decorations[object.model] !== undefined), 'Workshop placeholders and release decoration artwork', benchmark.name);
+      benchmark.manifest.art.decorations[object.model] !== undefined), 'decoration artwork drawing built-in models', benchmark.name);
     const used = new Set<string | undefined>(scenery.map((object) => benchmark.manifest.art.decorations[object.model]));
     ensure(used.size === expected.assets && !used.has(undefined), 'every repeated decoration asset placed', used.size);
   }
@@ -116,7 +116,7 @@ function checkWorkload(snapshot: CourseSnapshot, benchmark: BenchmarkCase, decor
       Math.max(...scenery.map((object) => object.height)) === decorations.maximumHeight,
     'perspective camera, distant fog and maximum decoration depth and height', benchmark.manifest.theme);
   } else {
-    ensure(keys.size === limits.geometryKinds && benchmark.manifest.art.mode === 'shapes', 'slice collision keys and shapes mode', keys.size);
+    ensure(keys.size === limits.geometryKinds, 'slice collision keys', keys.size);
     for (const { object } of snapshot.solids) {
       const mesh = object.mesh;
       ensure(mesh.type === 'asset' && mesh.collision.type === 'slice' && !object.mirror, 'unmirrored mesh slice', object.id);

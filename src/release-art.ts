@@ -18,8 +18,9 @@ export async function loadCourseArt(game: Game, art: ContentArt, content: Conten
     onFailure: (id, error) => console.error(`The course mesh ${id} could not load; its terrain draws as its collision.`, error),
   });
   game.view.addLayer(view);
-  await view.load(art.assets.map((asset) => asset.id), signal);
-  view.setMode('meshes');
+  const ids = art.assets.map((asset) => asset.id);
+  await view.load(ids, signal);
+  view.setAssets(ids);
   if (Object.keys(art.decorations).length === 0) return;
   if (game.view.decorations === null) throw new Error('This release draws decoration artwork without its decoration view.');
   game.view.decorations.useArtwork(art.decorations, (id) => view.decorationMesh(id));
