@@ -2,6 +2,8 @@
 // the same ID, so a game's own models draw by model ID. DOM-free, so project, package and release
 // validation share it.
 import { ART_LIMITS, ArtError, artId, artRecord } from './art-types';
+import { enemyArtAssets, placedSpecies } from './enemy-art-data';
+import type { EnemyArtSettings } from './enemy-art-data';
 import { DECORATION_LIMITS, DECORATION_MODEL_ID, terrainAssets } from './level';
 import type { LevelDefinition } from './level';
 
@@ -45,10 +47,16 @@ export function usedDecorationArt(level: LevelDefinition, art: DecorationArt): D
 }
 
 /**
- * The course artwork a level draws: the part of `art` its decorations use, and every GLB it draws, its terrain's and
- * those of the decoration models it places. A release carries exactly these.
+ * The course artwork a level draws: the part of `art` its decorations use, and every GLB it draws, its terrain's, those
+ * of the decoration models it places and those of the enemies it places that `enemies` draws as models. A release
+ * carries exactly these.
  */
-export function usedCourseArt(level: LevelDefinition, art: DecorationArt): { readonly decorations: DecorationArt; readonly assets: ReadonlySet<string> } {
+export function usedCourseArt(level: LevelDefinition, art: DecorationArt, enemies: EnemyArtSettings): {
+  readonly decorations: DecorationArt; readonly assets: ReadonlySet<string>;
+} {
   const decorations = usedDecorationArt(level, art);
-  return { decorations, assets: new Set([...terrainAssets(level), ...Object.values(decorations)]) };
+  return {
+    decorations,
+    assets: new Set([...terrainAssets(level), ...Object.values(decorations), ...enemyArtAssets(enemies, placedSpecies(level))]),
+  };
 }

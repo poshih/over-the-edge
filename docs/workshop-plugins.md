@@ -116,7 +116,9 @@ with `null` leaves it unnamed, and `replace`, which changes only the objects tha
 goes on), the primary character (the whole
 profile, or its rigging type, arm forward distance, waist lean, grips, arms, avatar motion and
 presentation), the alternate character, arm IK and appearance parts, theme, HUD,
-audio, enemy art, course artwork mode and packages, media and the model library. Each edit is
+audio, enemy art (a species' 3D model changes only through `enemyModel`, which imports it, and
+`enemyClips`, which chooses its clips, since those bake its motion), course packages, media and the
+model library. Each edit is
 validated, changes the draft, marks it unsaved and goes through Save, Revert, export and
 conflict handling as in its tab. Each returns the engine's typed error when it refuses, which
 the Workshop has shown as it shows its own, or `null`. A plugin changes the project no other

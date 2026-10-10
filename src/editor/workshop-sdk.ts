@@ -20,7 +20,8 @@ import type { CharacterArms } from '../character-arms';
 import type { Point } from '../config';
 import type { DirectionalPresentation } from '../directional-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
-import type { EnemyPose } from '../enemy-types';
+import type { EnemyClipRole } from '../enemy-motion-data';
+import type { EnemyPose, EnemySpecies } from '../enemy-types';
 import type { GameSettings } from '../game-settings';
 import type { Grips } from '../grips';
 import type { HammerHead } from '../hammer-head';
@@ -58,7 +59,7 @@ export type { SceneLayer } from '../scene-layer';
 export type { SceneBounds, SceneCharacter, SceneFrame, SceneHammer, ScenePoint, ScenePose } from '../scene-frame';
 export type {
   AppearancePart, ArmIkSettings, AudioSettings, AvatarMotionEntry, AvatarMotionModel, CharacterArms, CharacterRiggingType,
-  DirectionalPresentation, EnemyArtSettings, EnemyPose, GameSettings, GameTheme, Grips, HammerHead, HudSettings,
+  DirectionalPresentation, EnemyArtSettings, EnemyClipRole, EnemyPose, EnemySpecies, GameSettings, GameTheme, Grips, HammerHead, HudSettings,
   LevelDefinition, LevelLabel, LevelObject, LibraryAvatarSettings, MediaEntry, ModelLibrary, PartRole, Point, ProjectArt,
   SpriteDocument, VisualAlignment, VisualPartId,
 };
@@ -224,6 +225,11 @@ export interface WorkshopEdits {
   hud(value: HudSettings): WorkshopRefusal | null;
   audio(value: AudioSettings): WorkshopRefusal | null;
   enemies(value: EnemyArtSettings): WorkshopRefusal | null;
+  // Draws a species as a skinned GLB, as Project / Enemy art does: the GLB joins the course artwork, and each of the
+  // species' roles plays the clip its name suggests.
+  enemyModel(species: EnemySpecies, file: File): Promise<WorkshopRefusal | null>;
+  // Chooses the clip a model species plays for each role given, its moves travelling as the clip does.
+  enemyClips(species: EnemySpecies, clips: Readonly<Partial<Record<EnemyClipRole, string>>>): Promise<WorkshopRefusal | null>;
   // A course package from `npm run pack:course`: its level and course artwork.
   coursePackage(file: File): Promise<WorkshopRefusal | null>;
   readonly media: {

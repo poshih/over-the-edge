@@ -10,12 +10,12 @@ import type { AudioSettings } from '../src/audio-settings';
 import type { AvatarRigRegistry } from '../src/avatar-rig';
 import { checkCharacterModels } from '../src/character-model-check';
 import { levelMediaSources } from '../src/content';
-import { validateCourseModel } from '../src/course-art-model';
 import { embeddedGlb, isCoursePackage, validateCoursePackage } from '../src/course-package';
 import { NO_DECORATION_ART, usedCourseArt } from '../src/decoration-art';
 import type { DecorationArt } from '../src/decoration-art';
 import { DEFAULT_COURSE_ART, DEFAULT_COURSE_MESHES, DEFAULT_LEVEL } from '../src/default-course';
-import { DEFAULT_ENEMY_ART } from '../src/enemy-art-data';
+import { DEFAULT_ENEMY_ART, enemyArtAssets, placedSpecies } from '../src/enemy-art-data';
+import { checkEnemyModelMotion, validateArtAsset } from '../src/enemy-model-check';
 import type { EnemyArtSettings } from '../src/enemy-art-data';
 import { ENEMY_SPECIES } from '../src/enemy-types';
 import { DEFAULT_GAME_SETTINGS, GAME_SETTINGS_LIMITS, validateGameSettings } from '../src/game-settings';
@@ -92,7 +92,7 @@ function playedMedia(level: LevelDefinition, audio: AudioSettings): ReadonlySet<
  * artwork its level draws, the media it plays and, for a game whose backend selects them (`library`), the model library.
  */
 export function releaseProjectFiles(manifest: ProjectManifest, level: LevelDefinition, library: boolean): string[] {
-  const art = usedCourseArt(level, manifest.art.decorations).assets;
+  const art = usedCourseArt(level, manifest.art.decorations, manifest.enemies).assets;
   const played = playedMedia(level, manifest.audio);
   return [
     ...manifest.appearance.map(part => appearanceFile(part.part)),
@@ -102,18 +102,26 @@ export function releaseProjectFiles(manifest: ProjectManifest, level: LevelDefin
   ];
 }
 
-// The meshes a course draws, each read only when it is drawn and checked like course packages at import: its terrain's
-// and those of the decoration models it uses that course artwork draws.
+// The GLBs a course draws, each read only when it is drawn and checked like course packages at import: its terrain's,
+// those of the decoration models it uses that course artwork draws and those of its enemies' models, whose baked
+// motion must still be what their clips travel.
 function courseArt(level: LevelDefinition, assets: readonly { id: string; name: string; read: () => TakenFile }[],
-  art: DecorationArt): ReleaseInput['art'] {
-  const { decorations, assets: used } = usedCourseArt(level, art);
+  art: DecorationArt, enemies: EnemyArtSettings): ReleaseInput['art'] {
+  const { decorations, assets: used } = usedCourseArt(level, art, enemies);
+  const placed = placedSpecies(level);
+  const models = enemyArtAssets(enemies, placed);
   let pixels = 0;
   const packaged = assets.filter(asset => used.has(asset.id)).map(asset => {
     const taken = asset.read();
     const { bytes } = taken;
-    pixels += validateCourseModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer).pixels;
+    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    pixels += validateArtAsset(data, models.has(asset.id) ? 'enemy' : 'course').pixels;
     if (pixels > ART_LIMITS.texturePixels) throw new Error('Course artwork exceeds 32 million decoded texture pixels.');
     if (asset.id !== `asset-${sha256Hex(bytes)}`) throw new Error(`Packaged asset "${asset.name}" does not match its content hash.`);
+    for (const species of placed) {
+      const entry = enemies[species];
+      if (entry?.type === 'model' && entry.asset === asset.id) checkEnemyModelMotion(data, entry, species);
+    }
     return { id: asset.id, name: asset.name, file: releaseFile(taken) };
   });
   if (packaged.length !== used.size) {
@@ -124,7 +132,7 @@ function courseArt(level: LevelDefinition, assets: readonly { id: string; name: 
 
 // The art of the enemy species the level places; a species it never places keeps the built-in art, which nothing draws.
 function placedEnemyArt(level: LevelDefinition, art: EnemyArtSettings): EnemyArtSettings {
-  const placed = new Set(level.objects.flatMap(object => object.kind === 'enemy' ? [object.species] : []));
+  const placed = placedSpecies(level);
   return Object.freeze(Object.fromEntries(ENEMY_SPECIES.map(species => [species, placed.has(species) ? art[species] : null]))) as EnemyArtSettings;
 }
 
@@ -151,7 +159,7 @@ function fileCourse(path: string | null): { level: LevelDefinition; art: Release
       level: DEFAULT_LEVEL,
       art: courseArt(DEFAULT_LEVEL, DEFAULT_COURSE_MESHES.map(mesh => ({
         id: mesh.id, name: mesh.name, read: () => ({ bytes: readDefaultCourseMesh(mesh), path: defaultCourseMeshPath(mesh) }),
-      })), DEFAULT_COURSE_ART.decorations),
+      })), DEFAULT_COURSE_ART.decorations, DEFAULT_ENEMY_ART),
     };
   }
   const bytes = statSync(path).size;
@@ -164,7 +172,7 @@ function fileCourse(path: string | null): { level: LevelDefinition; art: Release
     level,
     art: courseArt(level,
       (pack?.assets ?? []).map(asset => ({ id: asset.id, name: asset.name, read: () => ({ bytes: embeddedGlb(asset.source), path: null }) })),
-      pack?.decorations ?? NO_DECORATION_ART),
+      pack?.decorations ?? NO_DECORATION_ART, DEFAULT_ENEMY_ART),
   };
 }
 
@@ -238,11 +246,12 @@ export function loadProjectRelease(root: string, requested: string, avatarRigs: 
       throw failure(label, error);
     }
   };
+  const enemies = placedEnemyArt(level, manifest.enemies);
   let art;
   try {
     art = courseArt(level,
       manifest.art.assets.map(asset => ({ id: asset.id, name: asset.name, read: () => read(artFile(asset.id)) })),
-      manifest.art.decorations);
+      manifest.art.decorations, enemies);
   } catch (error) {
     throw failure('GAME_PROJECT course artwork', error);
   }
@@ -268,7 +277,7 @@ export function loadProjectRelease(root: string, requested: string, avatarRigs: 
     title: manifest.title, files, level, art, settings: manifest.settings,
     primary: primary === null ? EMPTY_SPRITES : character(primary, 'GAME_PROJECT primary character', avatarRigs),
     alternate: alternate === null ? null : character(alternate, 'GAME_PROJECT alternate character', avatarRigs),
-    theme: manifest.theme, hud: manifest.hud, enemies: placedEnemyArt(level, manifest.enemies), armIk: manifest.armIk,
+    theme: manifest.theme, hud: manifest.hud, enemies, armIk: manifest.armIk,
     audio: manifest.audio, appearance, media, library,
   };
 }

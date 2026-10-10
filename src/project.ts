@@ -22,7 +22,7 @@ import { DEFAULT_ENEMY_ART, validateEnemyArt } from './enemy-art-data';
 import type { EnemyArtSettings } from './enemy-art-data';
 import { checkMediaBytes, isMediaLibraryPath, MEDIA_LIMITS, mediaFile, mediaPath, mediaType } from './media';
 import type { MediaEntry } from './media';
-import { LEVEL_LIMITS, LevelError, validateLevel } from './level';
+import { LEVEL_LIMITS, LevelError, terrainAssets, validateLevel } from './level';
 import type { LevelDefinition } from './level';
 import { parseSpriteDocument, SPRITE_FILE_BYTES, validateSpriteAnchors, validateSpriteDocument } from './sprite-data';
 import type { SpriteDocument } from './sprite-data';
@@ -40,7 +40,7 @@ export { ProjectError } from './project-fields';
 
 export const PROJECT_FORMAT = 'over-the-edge-project';
 export const PROJECT_BUNDLE_FORMAT = 'over-the-edge-project-bundle';
-export const PROJECT_SCHEMA_VERSION = 22;
+export const PROJECT_SCHEMA_VERSION = 23;
 export const PROJECT_FILES = {
   manifest: 'project.json',
   level: 'level.json',
@@ -276,6 +276,13 @@ export function checkProjectReferences(manifest: ProjectManifest, level: LevelDe
     }
   }
   problems.push(...unknownDecorationModels(level, manifest.art.decorations));
+  // An enemy model is a skinned GLB of the course artwork, so never also a course mesh, which must be static.
+  const courseMeshes = new Set([...terrainAssets(level), ...Object.values(manifest.art.decorations)]);
+  for (const [species, entry] of Object.entries(manifest.enemies)) {
+    if (entry?.type !== 'model') continue;
+    if (!assets.has(entry.asset)) problems.push(`The ${species} model is ${entry.asset}, which is not in the course artwork.`);
+    else if (courseMeshes.has(entry.asset)) problems.push(`The ${species} model ${entry.asset} is also a course mesh; course meshes are static GLBs.`);
+  }
   for (const source of audioSources(manifest.audio)) checkSource(source, 'Audio');
   if (problems.length > 0) throw new ProjectError(problems.slice(0, 8).join(' ') + (problems.length > 8 ? ` (${problems.length - 8} more)` : ''), { section: 'level' });
 }

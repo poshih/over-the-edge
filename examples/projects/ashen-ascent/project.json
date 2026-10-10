@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 22,
+  "schemaVersion": 23,
   "title": "Ashen Ascent",
   "level": "level.json",
   "art": {
@@ -323,6 +323,7 @@
   },
   "enemies": {
     "bird": {
+      "type": "sprite",
       "frames": [
         [
           "................",
@@ -358,6 +359,7 @@
       }
     },
     "hollow-soldier": {
+      "type": "sprite",
       "frames": [
         [
           "....####....",

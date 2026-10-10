@@ -9,6 +9,7 @@ import { GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_RANGE_LIMITS, GRIP_ROTATION_LIMITS, 
 import { WAIST_LEAN_LIMITS } from '../src/waist-lean';
 import { VISUAL_PART_IDS } from '../src/character';
 import { builtInEnemyArt, ENEMY_ART_LIMITS } from '../src/enemy-art-data';
+import { ENEMY_MOTION, SPECIES_CLIP_ROLES } from '../src/enemy-motion-data';
 import { ENEMY_FIELDS, ENEMY_LIMITS, ENEMY_SPECIES } from '../src/enemy-types';
 import {
   CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEATH_FIELDS, DEFAULT_DEATH_SETTINGS, GAME_SETTINGS_SCHEMA_VERSION, RIG_FIELDS, TUNING_FIELDS,
@@ -83,8 +84,9 @@ export function apiManual(auth: 'token' | 'loopback') {
       endpoint('GET', '/api/projects/{id}/level/versions/{version}', 'One version: { "version", "course", "savedAt", "level", "settings" }, with its level JSON and game settings.'),
       endpoint('GET|POST', '/api/projects/{id}/level/versions/{version}/phantoms?session={session}&clip={clip}', 'List the phantom recordings played on a version ({ "phantoms": [{ "name", "bytes", "savedAt" }] }), or store one: POST the recording\'s bytes as application/octet-stream with its play session (32 lowercase hex digits) and clip number; the same session and clip replace the earlier upload.', 'phantom recording bytes'),
       endpoint('GET|DELETE', '/api/projects/{id}/level/versions/{version}/phantoms/{name}', 'Download or delete one recording, named v{version}-{session}-{clip}.phantom.'),
-      endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a static course GLB; returns its content ID, to place it as a terrain mesh or map a decoration model to it in art.decorations.', 'GLB bytes'),
+      endpoint('POST', '/api/projects/{id}/art/assets?name=Stone', 'Upload a course GLB; returns its content ID. A static GLB is checked as course artwork, to place as a terrain mesh or map a decoration model to in art.decorations; a skinned or animated one as an enemy model, for an enemies model entry.', 'GLB bytes'),
       endpoint('GET|DELETE', '/api/projects/{id}/art/assets/{assetId}', 'Download or remove course artwork (unused only).'),
+      endpoint('GET', '/api/projects/{id}/art/assets/{assetId}/enemy', 'The GLB as an enemy model: { asset, clips: [{ name, duration }], motion: { <clip name>: { duration, travel } } }, every clip\'s root motion, the travel of its top joint along the model\'s facing at 60 samples a second in ten-thousandths of the model\'s height. Put the motion of the clips a species\' roles play in its enemies model entry. 400 when the GLB is not a skinned model with named clips.'),
       endpoint('GET', '/api/projects/{id}/art/assets/{assetId}/terrain?turn=0', 'The GLB as terrain to place, turned turn radians (-π to π, 0 by default) about its vertical axis: { mesh, width, height, depth }, its natural size in metres as turned and its mesh entry, which carries the turn and the collision the GLB declares (extras.collision on its scene or a root node: a shape, or projection for its outermost outline seen along the view) or else the turned mesh\'s slice on the obstacle line, the middle of its depth. Place it with that mesh, at any size. To turn placed terrain, fetch its mesh at the new turn and keep each axis\'s scale: multiply width, height and depth by the new natural size over the one at its old turn, then keep them within the level\'s size limits, a circle\'s box square. 400 when the turn is out of range or the GLB has no usable slice or projection.'),
       endpoint('GET|PUT|DELETE', '/api/projects/{id}/appearance/{part}/model?name=Torso.glb', 'Per-part GLB replacement for the Mesh parts character.', 'GLB bytes'),
       endpoint('GET|PATCH|DELETE', '/api/projects/{id}/appearance/{part}', 'A part\'s name and alignment.', '{ "alignment"?: {...}, "name"?: "..." }'),
@@ -234,14 +236,14 @@ export function apiManual(auth: 'token' | 'loopback') {
         cues: Object.fromEntries(AUDIO_CUES.map((cue) => [cue, AUDIO_CUE_DESCRIPTIONS[cue]])),
       },
       enemies: {
-        value: '{ <species>: { frames: [[rows], [rows]], palette: { "<char>": "#rrggbb" } } | null }',
-        patch: true, species: ENEMY_SPECIES, limits: ENEMY_ART_LIMITS,
-        description: 'Replacement pixel art (cosmetic only). Two frames of equal size, rows top to bottom, facing right; "." is transparent.',
-        builtIn: Object.fromEntries(ENEMY_SPECIES.map((species) => [species, builtInEnemyArt(species)])),
+        value: '{ <species>: { type: "sprite", frames: [[rows], [rows]], palette: { "<char>": "#rrggbb" } } | { type: "model", asset: "asset-<SHA-256>", clips: { <role>: "<clip name>" }, motion: { <role>: { duration, travel: [integers] } } } | null }',
+        patch: true, species: ENEMY_SPECIES, roles: SPECIES_CLIP_ROLES, motion: ENEMY_MOTION, limits: ENEMY_ART_LIMITS,
+        description: 'Each species\' look: null for the built-in pixel art; a sprite, replacement pixel art (cosmetic only: two frames of equal size, rows top to bottom, facing right; "." is transparent); or a model, a skinned GLB of the course artwork (+Y up, facing +Z, with named clips, fitted to the species\' height) that plays one clip for each of the species\' roles. A model\'s motion is each role\'s root motion, copied from GET art/assets/{assetId}/enemy for the clip it plays: a ground enemy\'s moves travel as its clips do, so a model is gameplay too and joins the course a recording belongs to. A model GLB may not also be a terrain mesh or a decoration model. Writing a new or changed model entry, importing a bundle and building all refuse motion that does not match its clips.',
+        builtIn: Object.fromEntries(ENEMY_SPECIES.map((species) => [species, { type: 'sprite', ...builtInEnemyArt(species) }])),
       },
       art: {
         value: '{ assets: [{ id, name }], decorations: { [modelId]: assetId } }', patch: true, limits: ART_LIMITS,
-        description: 'Course artwork: the GLBs terrain meshes draw and decoration models may draw. Upload GLBs with POST art/assets; PUT can rename or drop unused assets and map decoration models to assets: the Workshop and releases then draw every decoration of that model as the asset, whether the decoration library has the model or not.',
+        description: 'Course artwork: the GLBs that terrain meshes, mapped decoration models and enemy models draw. Upload GLBs with POST art/assets; PUT can rename or drop unused assets and map decoration models to assets: the Workshop and releases then draw every decoration of that model as the asset, whether the decoration library has the model or not.',
       },
       media: { value: '[{ "path": "/media/file.ext" }]', types: MEDIA_TYPES, limits: MEDIA_LIMITS, description: 'Upload with PUT media/{file}; PUT this list to drop unused files.' },
       'plugins/{plugin}': {

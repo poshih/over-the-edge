@@ -1,6 +1,6 @@
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 22,
+  "schemaVersion": 23,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": {
@@ -259,6 +259,7 @@
   },
   "enemies": {
     "bird": {
+      "type": "sprite",
       "frames": [
         [
           "W..............W",
@@ -293,6 +294,7 @@
       }
     },
     "hollow-soldier": {
+      "type": "sprite",
       "frames": [
         [
           "...######...",

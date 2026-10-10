@@ -6,8 +6,8 @@ enemy art, media and course artwork, and the data of the game's
 [Workshop plugins](workshop-plugins.md). The engine is the same for every project, so you can
 make different total conversions and switch between them by switching projects.
 
-Project manifests and bundles use **schema 22**; their release content uses **schema 21**.
-Both hold course artwork without a course look, and embed the audio record's `block` cue, game settings' death wait, archer and bonfire rules, jar
+Project manifests and bundles use **schema 23**; their release content uses **schema 22**.
+Both hold course artwork without a course look and enemy art that is pixel art or a model, and embed the audio record's `block` cue, game settings' death wait, archer and bonfire rules, jar
 outline and jar side friction, the theme's background blur and character light, the HUD's level readout and death
 text/fade, and the hollow archer's enemy art. Other versions are rejected, not converted.
 
@@ -47,7 +47,7 @@ castle in the sky. It is generated; see [Ashen Ascent](ashen-ascent.md).
 | `theme` | `project.json` | Sky, fog, exposure, camera, lights, the character light and its shadows, sun disc, backdrop, aim marker, procedural character colours |
 | `hud` | `project.json` | HUD readout labels, unit, scale, decimals and visibility, the level's name among them, in Workshop play-tests and releases; how trigger messages appear, and death text/fade |
 | `audio` | `project.json` | Master volume, looping music and sound cues |
-| `enemies` | `project.json` | Replacement pixel art per enemy species |
+| `enemies` | `project.json` | Each enemy species' pixel art, or its [3D model](enemy-models.md): a skinned GLB of the course artwork with a clip and baked root motion for each role |
 | `art` | `project.json` + `art/<assetId>.glb` | Course artwork: the GLB meshes terrain places and the GLBs drawing decoration models |
 | `media` | `project.json` + `media/<file>` | Videos and sounds, used as `/media/<file>` |
 | `plugins/<id>` | `project.json` | One [Workshop plugin](workshop-plugins.md)'s own data, for the Workshop only |
@@ -85,7 +85,7 @@ The paths are fixed, so a manifest only says which files exist:
 ```json
 {
   "format": "over-the-edge-project",
-  "schemaVersion": 22,
+  "schemaVersion": 23,
   "title": "Lantern Cavern",
   "level": "level.json",
   "art": { "assets": [], "decorations": {} },
@@ -109,7 +109,7 @@ The paths are fixed, so a manifest only says which files exist:
            "timer": { "visible": true, "label": "LANTERN TIME" }, "messages": { "style": "toast" },
            "death": { "text": "You are dead...", "fadeIn": 1.5 } },
   "audio": { "volume": 0.9, "music": { "source": "/media/cavern-loop.wav", "volume": 0.35 }, "cues": { "...": "..." } },
-  "enemies": { "bird": { "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null, "hollow-archer": null },
+  "enemies": { "bird": { "type": "sprite", "frames": [["..."], ["..."]], "palette": { "#": "#0b0d10" } }, "hollow-soldier": null, "hollow-archer": null },
   "media": [{ "path": "/media/cavern-loop.wav" }],
   "plugins": { "tuner": { "joint": 12, "radius": 0.1 } }
 }
@@ -125,7 +125,7 @@ files as base64 data URLs:
 ```json
 {
   "format": "over-the-edge-project-bundle",
-  "schemaVersion": 22,
+  "schemaVersion": 23,
   "files": {
     "project.json": { "format": "over-the-edge-project", "...": "..." },
     "level.json": { "schemaVersion": 12, "name": null, "labels": [], "objects": [] },
@@ -239,7 +239,8 @@ project waits for **Keep my version** or **Use the project's**.
 
 The remaining sections edit what only a project has, with a live preview:
 **Theme**, **HUD**, **Audio** (music and cue sounds from the media library, with
-test buttons), **Enemy art** (JSON pixel art, starting from the built-in art),
+test buttons), **Enemy art** (JSON pixel art, starting from the built-in art, or an imported
+[3D model](enemy-models.md) with the clip each role plays),
 **Media library**, **Alternate character** (use, swap, import or remove a second
 profile), **Model library** (add library avatars, hammers and pots from files or the Workshop's
 [server models](characters.md#server-models), then preview and remove them; see
@@ -468,8 +469,9 @@ Conventions:
 | GET | `/api/projects/{id}/level/versions/{version}` | One version: `{ "version", "course", "savedAt", "level", "settings" }` |
 | GET, POST | `/api/projects/{id}/level/versions/{version}/phantoms?session=&clip=` | List or store recordings played on a version |
 | GET, DELETE | `/api/projects/{id}/level/versions/{version}/phantoms/{name}` | One recording |
-| POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB; returns its asset ID |
+| POST | `/api/projects/{id}/art/assets?name=` | Upload a course GLB or an enemy model; returns its asset ID |
 | GET | `/api/projects/{id}/art/assets/{assetId}/terrain?turn=` | The GLB as terrain to place, turned `turn` radians about its vertical axis (0 by default): its natural size as turned and its `mesh` entry, with the collision it declares, or its turned slice or projection |
+| GET | `/api/projects/{id}/art/assets/{assetId}/enemy` | The GLB as an [enemy model](enemy-models.md): its clips with their lengths and every clip's baked root motion, for an `enemies` model entry |
 | GET, PUT, DELETE | `/api/projects/{id}/appearance/{part}/model?name=` | A part's GLB |
 | GET, PATCH, DELETE | `/api/projects/{id}/appearance/{part}` | A part's name and alignment |
 | GET, PUT, DELETE | `/api/projects/{id}/models/{part}/{model}/model?name=&settings=` | A library GLB for `avatar`, `hammer` or `pot`, adding or replacing its entry |
@@ -517,8 +519,8 @@ An open Workshop page shows each change within two seconds.
 ## Section reference
 
 **Game settings.** The nested settings schema is **21**, exported in code as
-`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **22**, release content
-**21**, and browser game-settings snapshots **13**. All settings are required and
+`GAME_SETTINGS_SCHEMA_VERSION`; the outer project schema is **23**, release content
+**22**, and browser game-settings snapshots **13**. All settings are required and
 unknown fields or other versions are rejected, with no legacy reader or conversion.
 `death.wait` is **0.5–15 s**, step **0.1**, default **4**: the gameplay delay before
 returning at a bonfire, or restarting when none was lit. A death captures this
@@ -742,10 +744,11 @@ silent base, so plugin audio works there too.
 starts immediately. Levels using it need an updated runtime.
 
 **Enemy art.** Per species (`bird`, `hollow-soldier`, `hollow-archer`): `null` for the built-in art,
-or `{ "frames": [rows, rows], "palette": { "<char>": "#rrggbb" } }` with exactly two
-frames of equal size, at most 64 x 64 pixels and 32 palette colours. Rows read top
-to bottom and face right; `.` is transparent. Art is cosmetic: colliders, health,
-behaviour and display size stay the same, and all enemies still share one draw batch.
+pixel art `{ "type": "sprite", "frames": [rows, rows], "palette": { "<char>": "#rrggbb" } }` with exactly two
+frames of equal size, at most 64 x 64 pixels and 32 palette colours, or a 3D model
+`{ "type": "model", "asset", "clips", "motion" }`, described in [enemy models](enemy-models.md#format).
+Pixel-art rows read top to bottom and face right; `.` is transparent. Pixel art is cosmetic: colliders,
+health, behaviour and display size stay the same, and all sprite enemies share one draw batch.
 
 **Media.** Files are addressed as `/media/<name>` with a lowercase name ending in
 `.webm`, `.mp4`, `.mp3`, `.ogg`, `.wav` or `.m4a`; at most 64 files, 64 MiB each and

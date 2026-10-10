@@ -39,7 +39,7 @@ import {
 import type { LibraryAvatarSettings, PartRole } from './model-library';
 
 export const CONTENT_FORMAT = 'over-the-edge-content';
-export const CONTENT_SCHEMA_VERSION = 21;
+export const CONTENT_SCHEMA_VERSION = 22;
 // The group holding everything the release itself uses; other groups are granted separately.
 export const GAME_GROUP = 'game';
 export const CONTENT_TYPES: Readonly<Record<ContentExtension, string>> = {
@@ -229,7 +229,7 @@ function validateContentAppearance(value: unknown): readonly ContentAppearance[]
   })));
 }
 
-function validateContentArt(value: unknown, level: LevelDefinition): ContentArt {
+function validateContentArt(value: unknown, level: LevelDefinition, enemies: EnemyArtSettings): ContentArt {
   const art = exactRecord(value, ['assets', 'decorations'], 'Course artwork');
   if (!Array.isArray(art.assets) || art.assets.length > ART_LIMITS.assets) {
     throw new ContentManifestError(`Course artwork lists at most ${ART_LIMITS.assets} assets.`);
@@ -242,7 +242,7 @@ function validateContentArt(value: unknown, level: LevelDefinition): ContentArt 
   if (ids.size !== assets.length) throw new ContentManifestError('Course artwork lists an asset twice.');
   const decorations = validateDecorationArt(art.decorations, ids);
   // A release carries exactly the course artwork its level draws.
-  const used = usedCourseArt(level, decorations);
+  const used = usedCourseArt(level, decorations, enemies);
   if (Object.keys(decorations).length !== Object.keys(used.decorations).length) {
     throw new ContentManifestError('Decoration artwork must map only models the level uses.');
   }
@@ -351,12 +351,19 @@ function validateSections(data: Record<string, unknown>): Omit<ContentManifest, 
     if (!Object.hasOwn(media, source)) throw new ContentManifestError(`${source} is played but not packaged.`);
   }
   const characters = exactRecord(data.characters, ['primary', 'alternate'], 'Characters');
+  const enemies = validateEnemyArt(data.enemies);
+  const art = validateContentArt(data.art, level, enemies);
+  // Every enemy model draws from the packaged course artwork.
+  const assets = new Set(art.assets.map(asset => asset.id));
+  for (const entry of Object.values(enemies)) {
+    if (entry?.type === 'model' && !assets.has(entry.asset)) throw new ContentManifestError(`Enemy model ${entry.asset} is not packaged.`);
+  }
   return {
     format: CONTENT_FORMAT, schemaVersion: CONTENT_SCHEMA_VERSION, level,
     settings: validateGameSettings(data.settings),
     theme: validateTheme(data.theme),
     hud: validateHud(data.hud),
-    enemies: validateEnemyArt(data.enemies),
+    enemies,
     armIk: Object.freeze(validateArmIk(data.armIk)),
     audio,
     characters: Object.freeze({
@@ -364,7 +371,7 @@ function validateSections(data: Record<string, unknown>): Omit<ContentManifest, 
       alternate: characters.alternate === null ? null : validateCharacter(characters.alternate, 'The alternate character'),
     }),
     appearance: validateContentAppearance(data.appearance),
-    art: validateContentArt(data.art, level),
+    art,
     media,
     library: validateLibrary(data.library),
     phantoms: validatePhantomPacks(data.phantoms),

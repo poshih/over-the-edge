@@ -7,7 +7,11 @@ import type { EnemyArtSettings } from './enemy-art-data';
 // Packs every species' two frames into one texture, so all enemies share a single draw batch.
 export function createEnemyAtlas(art: EnemyArtSettings = DEFAULT_ENEMY_ART) {
   const frameCount = ENEMY_ART_LIMITS.frames;
-  const sources = ENEMY_SPECIES.map((species) => ({ species, art: art[species] ?? builtInEnemyArt(species) }));
+  // A species drawn as a model keeps its built-in frames here, unused.
+  const sources = ENEMY_SPECIES.map((species) => {
+    const entry = art[species];
+    return { species, art: entry?.type === 'sprite' ? entry : builtInEnemyArt(species) };
+  });
   const sizes = sources.map(({ species, art: source }) => ({
     species, source, width: source.frames[0]![0]!.length, height: source.frames[0]!.length,
   }));

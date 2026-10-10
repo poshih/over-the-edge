@@ -221,6 +221,12 @@ right after the turn, and its tint multiplies
 the model's material colours, so white leaves them unchanged. The GLB's own materials
 and PBR textures are used, and every copy shares them.
 
+## Enemy models
+
+A skinned GLB of the course artwork can draw an enemy species instead of its pixel art, with a clip for each of its
+roles. See [enemy models](enemy-models.md). Such a GLB is never also a terrain mesh or a decoration model, which must be
+static.
+
 ## Course packages
 
 A course package is one JSON file holding a level and the GLBs it draws, for

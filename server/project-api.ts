@@ -11,14 +11,15 @@ import type { AvatarRigRegistry } from '../src/avatar-rig';
 import { sameAvatarModelSettings } from '../src/character-profile';
 import { VISUAL_PART_IDS } from '../src/character';
 import type { VisualPartId } from '../src/character';
-import { validateCourseModel } from '../src/course-art-model';
 import { DEFAULT_LEVEL, defaultCourseManifest } from '../src/default-course';
 import { defaultCourseFile } from '../build/default-course';
 import { meshTerrain } from '../src/mesh-collision';
-import { validateEnemyArt } from '../src/enemy-art-data';
+import { enemyArtAssets, validateEnemyArt } from '../src/enemy-art-data';
+import { checkEnemyModelMotion, enemyModelBake, validateArtAsset, validateEnemyModelAsset } from '../src/enemy-model-check';
+import { ENEMY_SPECIES } from '../src/enemy-types';
 import { validateGameSettings } from '../src/game-settings';
 import { validateHud } from '../src/hud';
-import { LEVEL_LIMITS, validateLevel } from '../src/level';
+import { LEVEL_LIMITS, terrainAssets, validateLevel } from '../src/level';
 import type { LevelDefinition, LevelObject } from '../src/level';
 import { checkMediaBytes, MEDIA_LIMITS, mediaFile, mediaPath, mediaType } from '../src/media';
 import { MODEL_LIMITS } from '../src/model-data';
@@ -295,7 +296,28 @@ export function createStudioHandler(config: StudioConfig) {
         return { manifest: next };
       },
     },
-    enemies: manifestSection('enemies', validateEnemyArt),
+    // A model draws from the course artwork, so its GLB must be there, and not also a course mesh; a new or changed model
+    // must be an enemy model whose clips travel as its motion says.
+    enemies: {
+      limit: JSON_LIMIT,
+      read: async (_id, manifest) => manifest.enemies,
+      write: async (id, manifest, value) => {
+        const enemies = inSection('enemies', () => validateEnemyArt(value));
+        const next = withManifest(manifest, { enemies });
+        checkProjectReferences(next, await level(id));
+        for (const species of ENEMY_SPECIES) {
+          const entry = enemies[species];
+          if (entry?.type !== 'model' || JSON.stringify(entry) === JSON.stringify(manifest.enemies[species])) continue;
+          const bytes = await store.readBytes(id, { path: artFile(entry.asset), maxBytes: ART_LIMITS.bytes });
+          const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+          inSection('enemies', () => {
+            validateEnemyModelAsset(data);
+            checkEnemyModelMotion(data, entry, species);
+          });
+        }
+        return { manifest: next };
+      },
+    },
     art: {
       limit: JSON_LIMIT,
       read: async (_id, manifest) => manifest.art,
@@ -324,7 +346,7 @@ export function createStudioHandler(config: StudioConfig) {
     },
   };
 
-  function manifestSection<K extends 'theme' | 'hud' | 'enemies'>(key: K, validate: (value: unknown) => ProjectManifest[K]) {
+  function manifestSection<K extends 'theme' | 'hud'>(key: K, validate: (value: unknown) => ProjectManifest[K]) {
     return {
       limit: JSON_LIMIT,
       read: async (_id: string, manifest: ProjectManifest) => manifest[key],
@@ -547,7 +569,7 @@ export function createStudioHandler(config: StudioConfig) {
   route('POST', '/api/projects/:id/art/assets', async (context) => {
     const bytes = await readUpload(context.request, ART_LIMITS.bytes, ['model/gltf-binary']);
     const name = context.url.searchParams.get('name') ?? 'Course model';
-    inSection('art', () => validateCourseModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer));
+    inSection('art', () => validateArtAsset(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'any'));
     const id = `asset-${sha256Hex(bytes)}`;
     await change(context, ['art'], async (manifest) => {
       if (manifest.art.assets.some((asset) => asset.id === id)) return { result: { id } };
@@ -575,6 +597,16 @@ export function createStudioHandler(config: StudioConfig) {
     sendJson(context.response, 200, inSection('art', () =>
       meshTerrain(asset.id, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, turn)));
   });
+  // A skinned GLB as an enemy model: its clips with their lengths and every clip's baked root motion, to put in an
+  // `enemies` model entry with the clips its species' roles play.
+  route('GET', '/api/projects/:id/art/assets/:assetId/enemy', async (context) => {
+    const { manifest } = await project(context);
+    const asset = manifest.art.assets.find((candidate) => candidate.id === context.params.assetId);
+    if (asset === undefined) throw new HttpError(404, 'not-found', 'Unknown course artwork.', { section: 'art' });
+    const bytes = await store.readBytes(context.params.id!, { path: artFile(asset.id), maxBytes: ART_LIMITS.bytes });
+    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    sendJson(context.response, 200, inSection('enemies', () => ({ asset: asset.id, ...enemyModelBake(data) })));
+  });
   route('DELETE', '/api/projects/:id/art/assets/:assetId', async (context) => {
     await change(context, ['art'], async (manifest) => {
       const assets = manifest.art.assets.filter((asset) => asset.id !== context.params.assetId);
@@ -582,6 +614,11 @@ export function createStudioHandler(config: StudioConfig) {
       const models = Object.keys(manifest.art.decorations).filter((model) => manifest.art.decorations[model] === context.params.assetId);
       if (models.length > 0) {
         throw new HttpError(409, 'in-use', `${artFile(context.params.assetId!)} still draws decoration model${models.length === 1 ? '' : 's'} ${models.join(', ')}; unmap ${models.length === 1 ? 'it' : 'them'} in art.decorations first.`, { section: 'art' });
+      }
+      const species = Object.entries(manifest.enemies).flatMap(([name, entry]) =>
+        entry?.type === 'model' && entry.asset === context.params.assetId ? [name] : []);
+      if (species.length > 0) {
+        throw new HttpError(409, 'in-use', `${artFile(context.params.assetId!)} still draws the ${species.join(', ')} model; give ${species.length === 1 ? 'it' : 'them'} pixel art in enemies first.`, { section: 'art' });
       }
       const next = withManifest(manifest, { art: { ...manifest.art, assets } });
       stillUnused(context.params.assetId!, next, await level(context.params.id!));
@@ -889,12 +926,21 @@ export function createStudioHandler(config: StudioConfig) {
     return verifyContent(unpackProjectBundle(value));
   }
 
-  // The checks a release build makes beyond the file formats: hashes, GLB structure and character rigs.
+  // The checks a release build makes beyond the file formats: hashes, GLB structure, enemy models' motion and character
+  // rigs. A GLB is checked as what uses it, an enemy model or a course mesh; one nothing uses as what it is.
   function verifyContent(content: ProjectContent): ProjectContent {
-    for (const asset of content.manifest.art.assets) {
+    const { enemies, art } = content.manifest;
+    const models = enemyArtAssets(enemies, new Set(ENEMY_SPECIES));
+    const meshes = new Set([...terrainAssets(content.level), ...Object.values(art.decorations)]);
+    for (const asset of art.assets) {
       const bytes = content.files.get(artFile(asset.id))!;
       if (!artAssetHashMatches(asset.id, sha256Hex(bytes))) throw new ProjectError(`Course artwork ${asset.id} does not match its content hash.`, { section: 'art' });
-      inSection('art', () => validateCourseModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer));
+      const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      inSection('art', () => validateArtAsset(data, models.has(asset.id) ? 'enemy' : meshes.has(asset.id) ? 'course' : 'any'));
+      for (const species of ENEMY_SPECIES) {
+        const entry = enemies[species];
+        if (entry?.type === 'model' && entry.asset === asset.id) inSection('enemies', () => checkEnemyModelMotion(data, entry, species));
+      }
     }
     for (const part of content.manifest.appearance) {
       const bytes = content.files.get(appearanceFile(part.part))!;

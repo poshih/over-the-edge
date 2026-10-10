@@ -39,7 +39,9 @@ import type { DecorationView } from './decoration-view';
 import type { CourseArtSource, CourseArtView } from './course-art-view';
 import { Disposal } from './disposal';
 import type { GameTheme } from './theme';
+import { enemyArtAssets } from './enemy-art-data';
 import type { EnemyArtSettings } from './enemy-art-data';
+import { ENEMY_SPECIES } from './enemy-types';
 import type { EnemyEvent } from './enemy-types';
 import { NO_COURSE_ARTWORK } from './game-look';
 import type { CourseArtwork, GameLook } from './game-look';
@@ -343,10 +345,11 @@ export class GameView {
     this.decorations?.useArtwork(art.decorations, this.courseArt);
   }
 
-  // Loads every GLB `art` lists, keeping them while the view lasts, and only then draws it, so the course and its
-  // decorations draw whole from their first frame.
-  async loadArtwork(art: CourseArtwork, signal: AbortSignal): Promise<void> {
-    if (this.courseArt !== null) await this.courseArt.load(art.assets.map((asset) => asset.id), signal);
+  // Loads every course GLB `art` lists, keeping them while the view lasts, and only then draws it, so the course and its
+  // decorations draw whole from their first frame. The enemy models among them are the enemies' to load.
+  async loadArtwork(art: CourseArtwork, enemies: EnemyArtSettings, signal: AbortSignal): Promise<void> {
+    const models = enemyArtAssets(enemies, new Set(ENEMY_SPECIES));
+    if (this.courseArt !== null) await this.courseArt.load(art.assets.map((asset) => asset.id).filter((id) => !models.has(id)), signal);
     this.setArt(art);
   }
 

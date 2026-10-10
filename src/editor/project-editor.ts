@@ -3,6 +3,7 @@ import type { AudioClip, AudioCue, AudioSettings } from '../audio-settings';
 import { element } from '../dom';
 import { builtInEnemyArt } from '../enemy-art-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
+import { clipTravel, SPECIES_CLIP_ROLES } from '../enemy-motion-data';
 import { ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import { DEFAULT_HUD, HUD_FIELDS } from '../hud';
@@ -129,9 +130,13 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         <div class="project-audio-fields"></div>
       `)}
 
-      ${sectionMarkup({ id: 'project-enemies', title: 'Enemy art', hint: 'Pixel art for enemies' }, `
-        <p class="appearance-format">Two frames of equal size, rows top to bottom, facing right. "." is transparent; every
-          other character is a palette key. Art is cosmetic: colliders, health and behaviour stay the same.</p>
+      ${sectionMarkup({ id: 'project-enemies', title: 'Enemy art', hint: 'Pixel art or 3D models for enemies' }, `
+        <p class="appearance-format">Pixel art: two frames of equal size, rows top to bottom, facing right. "." is
+          transparent; every other character is a palette key. Pixel art is cosmetic: colliders, health and behaviour stay
+          the same.</p>
+        <p class="appearance-format">A 3D model is a skinned GLB, +Y up and facing +Z, with named animation clips. It joins
+          the course artwork, is fitted to the enemy's height, and plays a clip for each role. A ground enemy's moves then
+          travel as its clips do, so choosing a clip changes how it plays; a bird still flies where it steers.</p>
         <div class="project-enemy-fields"></div>
       `)}
 
@@ -304,18 +309,36 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   // Enemy art ---------------------------------------------------------------------------------
   const enemyMount = element<HTMLDivElement>(root, '.project-enemy-fields');
   const enemyAreas = new Map<EnemySpecies, HTMLTextAreaElement>();
+  // Each species' 3D model: what it is, and the clip each role plays.
+  const enemyModels = new Map<EnemySpecies, { readonly status: HTMLParagraphElement; readonly clips: HTMLDivElement }>();
+  // Clip lists arrive later than the snapshot they were asked for; only the latest is shown.
+  const enemyReads = new Map<EnemySpecies, number>();
   for (const species of ENEMY_SPECIES) {
     const row = document.createElement('div');
     row.className = 'project-enemy';
     const label = document.createElement('label');
     label.className = 'appearance-label';
     label.htmlFor = `project-enemy-${species}`;
-    label.textContent = `${ENEMY_SPECS[species].label} art (JSON)`;
+    label.textContent = `${ENEMY_SPECS[species].label} pixel art (JSON)`;
     const area = document.createElement('textarea');
     area.id = `project-enemy-${species}`;
     area.rows = 6;
     area.spellcheck = false;
     area.placeholder = 'Built-in art. Choose "Edit built-in art" to start from it.';
+    const modelFile = document.createElement('input');
+    modelFile.type = 'file';
+    modelFile.accept = '.glb,model/gltf-binary';
+    modelFile.hidden = true;
+    modelFile.setAttribute('aria-label', `3D model GLB: ${ENEMY_SPECS[species].label}`);
+    modelFile.addEventListener('change', () => {
+      const file = modelFile.files?.[0];
+      modelFile.value = '';
+      if (file !== undefined) void session.addEnemyModel(species, file);
+    }, listen);
+    const status = document.createElement('p');
+    status.className = 'appearance-format';
+    const clips = document.createElement('div');
+    clips.className = 'project-enemy-clips';
     const actions = document.createElement('div');
     actions.className = 'sprite-action-row';
     const action = (text: string, run: () => void): void => {
@@ -341,11 +364,50 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         }
       }
     });
-    action('Edit built-in art', () => { area.value = JSON.stringify(builtInEnemyArt(species), null, 1); });
+    action('Edit built-in art', () => { area.value = JSON.stringify({ type: 'sprite', ...builtInEnemyArt(species) }, null, 1); });
     action('Use built-in art', () => { area.value = ''; apply(null); });
-    row.append(label, area, actions);
+    action('Import 3D model', () => modelFile.click());
+    row.append(label, area, actions, modelFile, status, clips);
     enemyMount.append(row);
     enemyAreas.set(species, area);
+    enemyModels.set(species, { status, clips });
+  }
+
+  // Shows the species' model: its GLB, and for each role a choice of its clips with how fast the clip travels.
+  function renderEnemyModel(species: EnemySpecies, snapshot: ProjectSnapshot): void {
+    const view = enemyModels.get(species)!;
+    const entry = snapshot.enemies[species];
+    const read = (enemyReads.get(species) ?? 0) + 1;
+    enemyReads.set(species, read);
+    if (entry?.type !== 'model') {
+      view.status.textContent = 'Pixel art. Import a skinned GLB with named animation clips to draw it as a 3D model.';
+      view.clips.replaceChildren();
+      return;
+    }
+    const name = snapshot.art.assets.find((asset) => asset.id === entry.asset)?.name ?? entry.asset;
+    view.status.textContent = `3D model "${name}". Each role plays a clip, and the enemy moves as far as the clip travels. ` +
+      'Use built-in art, or apply pixel art, to stop drawing it as a model; its GLB then leaves the course artwork unless another enemy uses it.';
+    void session.enemyClips(entry.asset).then((bake) => {
+      if (enemyReads.get(species) !== read || bake instanceof Error) return;
+      view.clips.replaceChildren(...SPECIES_CLIP_ROLES[species].map((role) => {
+        const field = document.createElement('label');
+        field.className = 'appearance-label';
+        const motion = entry.motion[role];
+        const speed = motion === undefined ? 0 : Math.abs(clipTravel(motion, motion.duration, false)) * ENEMY_SPECS[species].height / motion.duration;
+        field.textContent = `${role} (${speed.toFixed(2)} m/s)`;
+        const select = document.createElement('select');
+        select.append(...bake.clips.map((clip) => {
+          const option = document.createElement('option');
+          option.value = clip.name;
+          option.textContent = `${clip.name} (${clip.duration.toFixed(2)} s)`;
+          return option;
+        }));
+        select.value = entry.clips[role] ?? '';
+        select.addEventListener('change', () => { void session.setEnemyClips(species, { [role]: select.value }); });
+        field.append(select);
+        return field;
+      }));
+    });
   }
 
   // Rendering ---------------------------------------------------------------------------------
@@ -374,7 +436,8 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     if (previousContent === null || previousContent.enemies !== snapshot.enemies) {
       for (const [species, area] of enemyAreas) {
         const art = snapshot.enemies[species];
-        if (document.activeElement !== area) area.value = art === null ? '' : JSON.stringify(art, null, 1);
+        if (document.activeElement !== area) area.value = art?.type === 'sprite' ? JSON.stringify(art, null, 1) : '';
+        renderEnemyModel(species, snapshot);
       }
     }
     mediaList.replaceChildren(...snapshot.media.map((item) => {

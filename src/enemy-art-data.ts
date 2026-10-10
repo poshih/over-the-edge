@@ -1,5 +1,9 @@
+import { artId } from './art-types';
+import { SPECIES_CLIP_ROLES, validateEnemyClipMotion } from './enemy-motion-data';
+import type { EnemyClipMotion, EnemyClipRole } from './enemy-motion-data';
 import { ENEMY_SPECIES } from './enemy-types';
 import type { EnemySpecies } from './enemy-types';
+import type { LevelDefinition } from './level';
 import { colorValue, exactRecord, ProjectError } from './project-fields';
 
 type Frames = readonly [readonly string[], readonly string[]];
@@ -163,10 +167,27 @@ export interface SpeciesArt {
   readonly palette: Readonly<Record<string, string>>;
 }
 
-// null keeps a species' built-in art. Art is cosmetic: colliders, health and behavior are unchanged.
-export type EnemyArtSettings = Readonly<Record<EnemySpecies, SpeciesArt | null>>;
+// A species drawn as pixel art of its own. Cosmetic: colliders, health and behaviour are unchanged.
+export interface SpriteArt extends SpeciesArt {
+  readonly type: 'sprite';
+}
 
-export const ENEMY_ART_LIMITS = { frames: 2, size: 64, palette: 32 } as const;
+/**
+ * A species drawn as an animated skinned GLB from the course artwork, playing one clip for each role its phases have.
+ * Its moves travel as those clips do: `motion` is each role's root motion, baked from its clip (src/enemy-motion.ts),
+ * which the simulation reads, so the model enemy's moves are gameplay as well as looks.
+ */
+export interface ModelArt {
+  readonly type: 'model';
+  readonly asset: string;
+  readonly clips: Readonly<Partial<Record<EnemyClipRole, string>>>;
+  readonly motion: Readonly<Partial<Record<EnemyClipRole, EnemyClipMotion>>>;
+}
+
+// null keeps a species' built-in pixel art.
+export type EnemyArtSettings = Readonly<Record<EnemySpecies, SpriteArt | ModelArt | null>>;
+
+export const ENEMY_ART_LIMITS = { frames: 2, size: 64, palette: 32, clipName: 128 } as const;
 
 export const DEFAULT_ENEMY_ART: EnemyArtSettings = Object.freeze({ bird: null, 'hollow-soldier': null, 'hollow-archer': null });
 
@@ -222,8 +243,51 @@ export function validateSpeciesArt(value: unknown, label: string): SpeciesArt {
   return Object.freeze({ frames: Object.freeze(frames), palette: Object.freeze(colours) });
 }
 
+// One species' art: its own pixel art, or a model with a clip and baked motion for each of the species' roles.
+function validateArtEntry(value: unknown, species: EnemySpecies): SpriteArt | ModelArt {
+  const label = `${species} art`;
+  const type = typeof value === 'object' && value !== null ? Reflect.get(value, 'type') : undefined;
+  if (type === 'sprite') {
+    const { type: _type, ...art } = exactRecord(value, ['type', 'frames', 'palette'], label);
+    return Object.freeze({ type: 'sprite', ...validateSpeciesArt(art, label) });
+  }
+  if (type !== 'model') throw new ProjectError(`${label} must be null, a "sprite" or a "model".`);
+  const art = exactRecord(value, ['type', 'asset', 'clips', 'motion'], label);
+  const roles = SPECIES_CLIP_ROLES[species];
+  const clips = exactRecord(art.clips, roles, `${label} clips`);
+  const motion = exactRecord(art.motion, roles, `${label} motion`);
+  return Object.freeze({
+    type: 'model',
+    asset: artId(art.asset),
+    clips: Object.freeze(Object.fromEntries(roles.map((role) => {
+      const name = clips[role];
+      if (typeof name !== 'string' || name.length === 0 || name.length > ENEMY_ART_LIMITS.clipName) {
+        throw new ProjectError(`${label} clip for ${role} needs a name of 1-${ENEMY_ART_LIMITS.clipName} characters.`);
+      }
+      return [role, name];
+    }))),
+    motion: Object.freeze(Object.fromEntries(roles.map((role) =>
+      [role, validateEnemyClipMotion(motion[role], `${label} ${role} motion`)]))),
+  });
+}
+
 export function validateEnemyArt(value: unknown): EnemyArtSettings {
   const art = exactRecord(value, ENEMY_SPECIES, 'Enemy art');
   return Object.freeze(Object.fromEntries(ENEMY_SPECIES.map(species =>
-    [species, art[species] === null ? null : validateSpeciesArt(art[species], `${species} art`)])) as Record<EnemySpecies, SpeciesArt | null>);
+    [species, art[species] === null ? null : validateArtEntry(art[species], species)])) as Record<EnemySpecies, SpriteArt | ModelArt | null>);
+}
+
+// The course artwork assets the art draws `species` with, for the species `placed`: each model's GLB.
+export function enemyArtAssets(art: EnemyArtSettings, placed: ReadonlySet<EnemySpecies>): Set<string> {
+  const assets = new Set<string>();
+  for (const species of placed) {
+    const entry = art[species];
+    if (entry?.type === 'model') assets.add(entry.asset);
+  }
+  return assets;
+}
+
+// The species a level places.
+export function placedSpecies(level: Pick<LevelDefinition, 'objects'>): Set<EnemySpecies> {
+  return new Set(level.objects.flatMap((object) => object.kind === 'enemy' ? [object.species] : []));
 }

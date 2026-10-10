@@ -469,7 +469,7 @@ export class Game {
   // Loads every GLB the look's course artwork lists and then draws it, so the course draws whole from its first frame; a
   // release waits for it before play. A look set later draws each GLB as it loads.
   loadArtwork(signal: AbortSignal): Promise<void> {
-    return this.view.loadArtwork(this.currentLook.art, signal);
+    return this.view.loadArtwork(this.currentLook.art, this.currentLook.enemies, signal);
   }
 
   setMedia(media: MediaHost): void { if (!this.stopped) this.presenter.setMedia(media); }

@@ -1,15 +1,19 @@
 import { ArtError } from '../art-types';
 import type { MeshTerrain } from '../mesh-collision';
+import type { EnemyBake } from '../enemy-model-check';
 import type { MeshBakeRequest, MeshBakeResponse } from './mesh-bake-worker';
 
+type Answer = Exclude<MeshBakeResponse, { readonly failure: string }>;
+
 interface Waiting {
-  readonly resolve: (terrain: MeshTerrain) => void;
+  readonly resolve: (answer: Answer) => void;
   readonly reject: (error: Error) => void;
 }
 
 /**
- * Bakes course meshes turned about their vertical axis in a worker (src/editor/mesh-bake-worker.ts), so a large mesh never
- * holds up the page. Each GLB goes to the worker once, ahead of the first bake asked of it.
+ * Bakes in a worker (src/editor/mesh-bake-worker.ts), so a large GLB never holds up the page: course meshes turned about
+ * their vertical axis, each GLB sent to the worker once, ahead of the first bake asked of it; and enemy models' clips and
+ * root motion.
  */
 export class MeshBaker {
   private worker: Worker | null = null;
@@ -25,6 +29,21 @@ export class MeshBaker {
   // ArtError saying what to change when the mesh cannot be baked at that turn.
   bake(assetId: string, bytes: () => Promise<ArrayBuffer>, turn: number): Promise<MeshTerrain> {
     return this.send(assetId, bytes, turn, false);
+  }
+
+  // An enemy model's clips and every clip's root motion. Rejects with an ArtError saying what to change when the GLB is
+  // not an enemy model.
+  bakeEnemy(bytes: ArrayBuffer): Promise<EnemyBake> {
+    if (this.disposed) return Promise.reject(new ArtError('The Workshop has closed.'));
+    const worker = this.connect();
+    const id = ++this.next;
+    const answer = new Promise<EnemyBake>((resolve, reject) => this.waiting.set(id, {
+      resolve: (response) => { if ('enemy' in response) resolve(response.enemy); else reject(new ArtError('The baker answered another request.')); },
+      reject,
+    }));
+    const request: MeshBakeRequest = { kind: 'enemy', id, bytes };
+    worker.postMessage(request, [bytes]);
+    return answer;
   }
 
   dispose(): void {
@@ -58,7 +77,10 @@ export class MeshBaker {
       return this.send(assetId, bytes, turn, true);
     }
     const id = ++this.next;
-    const answer = new Promise<MeshTerrain>((resolve, reject) => this.waiting.set(id, { resolve, reject }));
+    const answer = new Promise<MeshTerrain>((resolve, reject) => this.waiting.set(id, {
+      resolve: (response) => { if ('terrain' in response) resolve(response.terrain); else reject(new ArtError('The baker answered another request.')); },
+      reject,
+    }));
     const request: MeshBakeRequest = { kind: 'bake', id, assetId, turn };
     worker.postMessage(request);
     return answer;
@@ -74,7 +96,7 @@ export class MeshBaker {
       if (waiting === undefined) return;
       this.waiting.delete(response.id);
       if ('failure' in response) waiting.reject(new ArtError(response.failure));
-      else waiting.resolve(response.terrain);
+      else waiting.resolve(response);
     });
     created.addEventListener('error', (event) => {
       if (created !== this.worker) return;

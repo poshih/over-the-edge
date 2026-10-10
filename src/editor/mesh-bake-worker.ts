@@ -1,14 +1,19 @@
-// Bakes turned course meshes' collision off the page's thread (src/editor/mesh-baker.ts). A GLB arrives once and is read
-// once; then each bake message bakes it at one turn, answered with the terrain mesh or why it could not be baked.
+// Bakes off the page's thread (src/editor/mesh-baker.ts): turned course meshes' collision, and enemy models' root motion.
+// A course GLB arrives once and is read once; then each bake message bakes it at one turn, answered with the terrain
+// mesh or why it could not be baked. An enemy model is read and baked in one message.
 import { bakeMeshTerrain, readCourseMesh } from '../mesh-collision';
 import type { CourseMesh, MeshTerrain } from '../mesh-collision';
+import { enemyModelBake } from '../enemy-model-check';
+import type { EnemyBake } from '../enemy-model-check';
 
 export type MeshBakeRequest =
   | { readonly kind: 'mesh'; readonly assetId: string; readonly bytes: ArrayBuffer }
-  | { readonly kind: 'bake'; readonly id: number; readonly assetId: string; readonly turn: number };
+  | { readonly kind: 'bake'; readonly id: number; readonly assetId: string; readonly turn: number }
+  | { readonly kind: 'enemy'; readonly id: number; readonly bytes: ArrayBuffer };
 
 export type MeshBakeResponse =
   | { readonly id: number; readonly terrain: MeshTerrain }
+  | { readonly id: number; readonly enemy: EnemyBake }
   | { readonly id: number; readonly failure: string };
 
 // Each mesh as read, or why it could not be read.
@@ -26,6 +31,16 @@ addEventListener('message', (event: MessageEvent<MeshBakeRequest>) => {
     } catch (error) {
       meshes.set(request.assetId, reason(error));
     }
+    return;
+  }
+  if (request.kind === 'enemy') {
+    let answer: MeshBakeResponse;
+    try {
+      answer = { id: request.id, enemy: enemyModelBake(request.bytes) };
+    } catch (error) {
+      answer = { id: request.id, failure: reason(error) };
+    }
+    postMessage(answer);
     return;
   }
   let response: MeshBakeResponse;

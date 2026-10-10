@@ -61,6 +61,7 @@ export const AUDIO = {
 // Original pixel art: a carrion crow, and a hollow in a rusted helm with a broken blade. Facing right.
 export const ENEMIES = {
   bird: {
+    type: 'sprite',
     palette: { '#': '#101014', K: '#3a3a48', G: '#6e6e84', B: '#9a8f7a', E: '#ff5a3c' },
     frames: [
       [
@@ -90,6 +91,7 @@ export const ENEMIES = {
     ],
   },
   'hollow-soldier': {
+    type: 'sprite',
     palette: { '#': '#121214', H: '#5a5550', h: '#3d3a36', E: '#ffae42', S: '#8d8577', C: '#3b2f2a', c: '#2a211d', R: '#7a4a2e', M: '#8a8d90' },
     frames: [
       [

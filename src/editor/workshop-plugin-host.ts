@@ -756,6 +756,8 @@ export class WorkshopPluginHost {
       hud: (value) => project.setHud(value),
       audio: (value) => project.setAudio(value),
       enemies: (value) => project.setEnemies(value),
+      enemyModel: (species, file) => project.addEnemyModel(species, file),
+      enemyClips: (species, clips) => project.setEnemyClips(species, clips),
       coursePackage: (file) => project.importCoursePackage(file),
       media: {
         add: async (file) => {

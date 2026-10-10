@@ -260,8 +260,8 @@ as files. `GAME_PROJECT` cannot be combined with `GAME_LEVEL`, `GAME_SETTINGS`,
 `GAME_SPRITES` or `GAME_ALTERNATE_SPRITES`, and the project's title replaces
 `GAME_TITLE`. See [game projects](docs/projects.md) for the format, the Workshop
 workflow, publishing from the server and the API.
-Project manifests and bundles use **schema 22**, and release content **schema 21**,
-including course artwork without a course look, the audio record's `block` cue, game settings' death wait, archer, hit-point,
+Project manifests and bundles use **schema 23**, and release content **schema 22**,
+including course artwork without a course look, enemy art that is pixel art or a model, the audio record's `block` cue, game settings' death wait, archer, hit-point,
 armor and bonfire rules, jar outline and jar side friction, the theme camera's background blur and character light, the HUD's
 level readout and death text/fade and the hollow archer's enemy art; other versions are rejected.
 

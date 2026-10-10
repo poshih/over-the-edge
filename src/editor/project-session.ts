@@ -12,8 +12,14 @@ import type { DecorationArt } from '../decoration-art';
 import { unknownDecorationModels } from '../decoration-models';
 import { validateCoursePackage } from '../course-package';
 import { STARTER_LEVEL } from '../default-course';
-import { DEFAULT_ENEMY_ART, validateEnemyArt } from '../enemy-art-data';
+import { DEFAULT_ENEMY_ART, enemyArtAssets, validateEnemyArt } from '../enemy-art-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
+import { SPECIES_CLIP_ROLES } from '../enemy-motion-data';
+import type { EnemyClipRole } from '../enemy-motion-data';
+import type { EnemyBake } from '../enemy-model-check';
+import { ENEMY_SPECIES } from '../enemy-types';
+import type { EnemySpecies } from '../enemy-types';
+import { defaultEnemyClips } from './enemy-clips';
 import type { GameSettings } from '../game-settings';
 import { DEFAULT_HUD, validateHud } from '../hud';
 import type { HudSettings } from '../hud';
@@ -333,6 +339,8 @@ export class ProjectSession {
   private readonly meshTerrains = new Map<string, Promise<MeshTerrain>>();
   // Bakes them off the page's thread.
   private readonly baker = new MeshBaker();
+  // The clips and root motion of each enemy model read this session, by asset ID.
+  private readonly enemyBakes = new Map<string, Promise<EnemyBake>>();
   private nextBlobId = 1;
   private title = 'Untitled game';
   private theme: GameTheme = DEFAULT_THEME;
@@ -545,7 +553,40 @@ export class ProjectSession {
 
   setTheme(value: unknown): Error | null { return this.setSection(() => { this.theme = validateTheme(value); }); }
   setHud(value: unknown): Error | null { return this.setSection(() => { this.hud = validateHud(value); }); }
-  setEnemies(value: unknown): Error | null { return this.setSection(() => { this.enemies = validateEnemyArt(value); }); }
+
+  // Pixel art, models or neither for the enemies. Only enemyModel and enemyClips give a species a model or change it,
+  // since they bake the motion its clips travel; a model no species draws any more leaves the course artwork. The
+  // project is checked whole before anything changes.
+  setEnemies(value: unknown): Error | null {
+    try {
+      const enemies = inSection('enemies', () => validateEnemyArt(value));
+      for (const species of ENEMY_SPECIES) {
+        const entry = enemies[species];
+        if (entry?.type === 'model' && JSON.stringify(entry) !== JSON.stringify(this.enemies[species])) {
+          throw new ProjectError(`Import the ${species}'s 3D model in Enemy art, and choose its clips there.`, { section: 'enemies' });
+        }
+      }
+      const assets = this.withoutDroppedModels(enemies, this.art.assets);
+      const art = { assets: assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations };
+      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.workspace.level.get());
+      this.art = { ...this.art, assets };
+      this.enemies = enemies;
+      this.applyLook();
+      this.changed('content');
+      return null;
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  // `assets` without the GLBs of the models the enemies draw now that `enemies` no longer draws: an enemy model's GLB
+  // stays in the course artwork only while a species draws it.
+  private withoutDroppedModels(enemies: EnemyArtSettings, assets: ArtItem[]): ArtItem[] {
+    const species = new Set(ENEMY_SPECIES);
+    const drawn = enemyArtAssets(enemies, species);
+    const dropped = new Set([...enemyArtAssets(this.enemies, species)].filter((id) => !drawn.has(id)));
+    return dropped.size === 0 ? assets : assets.filter((asset) => !dropped.has(asset.id));
+  }
 
   setAudio(value: unknown): Error | null {
     return this.setSection(() => {
@@ -587,9 +628,11 @@ export class ProjectSession {
     }
   }
 
-  // The course artwork's GLBs, which the level places as terrain meshes and course artwork maps onto decorations.
+  // The course artwork's static GLBs, which the level places as terrain meshes and course artwork maps onto decorations;
+  // not its enemy models.
   courseMeshes(): readonly { readonly id: string; readonly name: string }[] {
-    return this.art.assets.map(({ id, name }) => ({ id, name }));
+    const models = enemyArtAssets(this.enemies, new Set(ENEMY_SPECIES));
+    return this.art.assets.filter(({ id }) => !models.has(id)).map(({ id, name }) => ({ id, name }));
   }
 
   // The decoration models the course artwork draws, by model ID, as the project stands.
@@ -657,9 +700,94 @@ export class ProjectSession {
     }
   }
 
-  // Removes a GLB from the course artwork; the refusal while the level places it or a decoration draws it.
+  // An enemy model GLB of the course artwork: its clips, with their lengths, and every clip's root motion, read off the
+  // page's thread once a session. Or the refusal, reported.
+  async enemyClips(assetId: string): Promise<EnemyBake | Error> {
+    try {
+      return await this.enemyBake(assetId);
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  // Draws `species` as the skinned GLB `file`, which joins the course artwork: each of its roles plays the clip its name
+  // suggests, and its moves travel as that clip does. The refusal, or null once it draws.
+  async addEnemyModel(species: EnemySpecies, file: File): Promise<Error | null> {
+    try {
+      if (file.size === 0 || file.size > ART_LIMITS.bytes) {
+        throw new ArtError(`Choose a GLB file no larger than ${ART_LIMITS.bytes / 1024 ** 2} MiB.`);
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const id = `asset-${await sha256Hex(bytes)}`;
+      const bake = this.baker.bakeEnemy(bytes.slice().buffer);
+      this.enemyBakes.set(id, bake);
+      bake.catch(() => { if (this.enemyBakes.get(id) === bake) this.enemyBakes.delete(id); });
+      const { clips } = await bake;
+      const blob = new Blob([bytes], { type: 'model/gltf-binary' });
+      const name = artName(file.name.replace(/\.glb$/i, '').slice(0, 80) || 'Enemy');
+      return await this.useEnemyModel(species, id, defaultEnemyClips(species, clips.map((clip) => clip.name)),
+        { id, name, blob, server: null, published: null, bytes: blob.size });
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  // Chooses the clip each of `species`' roles plays, its motion baked from that clip. The refusal, or null.
+  async setEnemyClips(species: EnemySpecies, clips: Readonly<Partial<Record<EnemyClipRole, string>>>): Promise<Error | null> {
+    try {
+      const entry = this.enemies[species];
+      if (entry?.type !== 'model') throw new ProjectError(`The ${species} is not drawn by a model.`, { section: 'enemies' });
+      return await this.useEnemyModel(species, entry.asset, { ...entry.clips, ...clips }, null);
+    } catch (error) {
+      return this.refuse(error);
+    }
+  }
+
+  private enemyBake(assetId: string): Promise<EnemyBake> {
+    let bake = this.enemyBakes.get(assetId);
+    if (bake === undefined) {
+      const reading = this.courseMeshBlob(assetId).then(async (blob) => this.baker.bakeEnemy(await blob.arrayBuffer()));
+      // A bake that failed is tried again next time.
+      reading.catch(() => { if (this.enemyBakes.get(assetId) === reading) this.enemyBakes.delete(assetId); });
+      this.enemyBakes.set(assetId, reading);
+      bake = reading;
+    }
+    return bake;
+  }
+
+  // Draws `species` with the course artwork asset `id` playing `clips`, `added` joining the course artwork unless it is
+  // there already; the project is checked whole before anything changes. Throws the refusal.
+  private async useEnemyModel(species: EnemySpecies, id: string, clips: Readonly<Partial<Record<EnemyClipRole, string>>>,
+    added: ArtItem | null): Promise<null> {
+    const bake = await this.enemyBake(id);
+    const motion = Object.fromEntries(SPECIES_CLIP_ROLES[species].map((role) => {
+      const name = clips[role];
+      const baked = name === undefined ? undefined : bake.motion[name];
+      if (baked === undefined) throw new ProjectError(`Choose one of the model's clips for the ${species}'s ${role}.`, { section: 'enemies' });
+      return [role, baked];
+    }));
+    const enemies = inSection('enemies', () => validateEnemyArt({ ...this.enemies, [species]: { type: 'model', asset: id, clips, motion } }));
+    const kept = this.withoutDroppedModels(enemies, this.art.assets);
+    const assets = added === null || kept.some((asset) => asset.id === id) ? kept : [...kept, added];
+    const art = { assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
+    inSection('art', () => validateProjectArt(art));
+    checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
+    checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.workspace.level.get());
+    this.art = { ...this.art, assets };
+    this.enemies = enemies;
+    this.applyLook();
+    this.changed('content');
+    return null;
+  }
+
+  // Removes a GLB from the course artwork; the refusal while the level places it, a decoration draws it or an enemy model
+  // is it.
   removeCourseMesh(id: string): Error | null {
     try {
+      const species = Object.entries(this.enemies).flatMap(([name, entry]) => entry?.type === 'model' && entry.asset === id ? [name] : []);
+      if (species.length > 0) {
+        throw new ProjectError(`The mesh draws the ${species.join(', ')}; give ${species.length === 1 ? 'it' : 'them'} pixel art in Enemy art first.`, { section: 'art' });
+      }
       const assets = this.art.assets.filter((asset) => asset.id !== id);
       const decorations = Object.entries(this.art.decorations).filter(([, asset]) => asset === id).map(([model]) => model);
       if (decorations.length > 0) {
@@ -881,16 +1009,19 @@ export class ProjectSession {
     }
   }
 
-  // A course package from `npm run pack:course`: its level replaces the current one, with its GLBs. Returns the refusal,
-  // or null once imported.
+  // A course package from `npm run pack:course`: its level replaces the current one, with its GLBs, and the enemies'
+  // models keep theirs. Returns the refusal, or null once imported.
   async importCoursePackage(file: File): Promise<Error | null> {
     return this.attempt('Importing course package', async () => {
       if (file.size > 96 * 1024 * 1024) throw new ArtError('Course packages are limited to 96 MiB.');
       const pack = validateCoursePackage(JSON.parse(await file.text()));
-      const assets: ArtItem[] = pack.assets.map((asset) => {
+      const packed: ArtItem[] = pack.assets.map((asset) => {
         const blob = new Blob([decodeBase64(asset.source.slice('data:model/gltf-binary;base64,'.length))], { type: 'model/gltf-binary' });
         return { id: asset.id, name: asset.name, blob, server: null, published: null, bytes: blob.size };
       });
+      const models = enemyArtAssets(this.enemies, new Set(ENEMY_SPECIES));
+      const assets = [...packed, ...this.art.assets.filter((asset) => models.has(asset.id) && !packed.some((item) => item.id === asset.id))];
+      checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
       checkProjectReferences(validateProjectManifest({
         ...this.draftManifest(), art: { assets: assets.map(({ id, name }) => ({ id, name })), decorations: pack.decorations },
       }), pack.level);
@@ -898,7 +1029,7 @@ export class ProjectSession {
       this.art = { assets, decorations: pack.decorations };
       this.applyLook();
       this.workspace.level.load(pack.level);
-      this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${assets.length} GLBs.`, 'info');
+      this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${packed.length} GLBs.`, 'info');
       this.changed('content');
     });
   }
@@ -1063,7 +1194,8 @@ export class ProjectSession {
   }
 
   // Saves `names`, one editor's sections, into the open server project now instead of at the next automatic save; a
-  // level takes along the media and course artwork it may name. `label` names them in the notice, e.g. "the level".
+  // level takes along the media and course artwork it may name, and the course artwork the enemies, whose models may
+  // have joined or left it. `label` names them in the notice, e.g. "the level".
   async saveToProject(names: readonly ProjectSectionName[], label: string): Promise<boolean> {
     const binding = this.binding;
     if (binding === null) {
@@ -1082,6 +1214,7 @@ export class ProjectSession {
       if (wanted.has('level')) {
         for (const name of ['media', 'art'] as const) if (dirty.has(name) && !this.conflicts.has(name)) wanted.add(name);
       }
+      if (wanted.has('art') && dirty.has('enemies') && !this.conflicts.has('enemies')) wanted.add('enemies');
       if (wanted.size > 0) this.requireSaved(await this.write(binding, wanted, new Set()));
       this.workspace.notice(wanted.size > 0 ? `Saved ${label} to project "${binding.id}".`
         : `${label[0]!.toUpperCase()}${label.slice(1)} was already saved in project "${binding.id}".`, 'info');

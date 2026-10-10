@@ -1045,8 +1045,9 @@ began (`changedAt`), whether it is `moving`, and its `health` and `maxHealth` in
 enemies**; sleeping sprites remain from `apply`. **The array and every drawn pose are pooled,
 borrowed until the next frame**: copy individual fields into your own state if needed later,
 never retain a pose or the array as a snapshot. The default look keeps its own poses for
-sleeping sprites, compaction and art changes. `setArt` receives the project's pixel-art
-settings when they change. `inspect`, optional, appears in the rendering diagnostics' `enemies`.
+sleeping sprites, compaction and art changes. `setArt` receives the project's enemy art when
+it changes: each species' pixel art, [3D model](enemy-models.md) or `null` for the built-in
+art. `inspect`, optional, appears in the rendering diagnostics' `enemies`.
 
 Collider visuals stand on `OBSTACLE_LINE` and draw in **actors**, never hidden by terrain.
 `passes.course` and `passes.front` may add scenery behind or in front of them, following
