@@ -3,7 +3,7 @@ import type { AudioClip, AudioCue, AudioSettings } from '../audio-settings';
 import { element } from '../dom';
 import { builtInEnemyArt } from '../enemy-art-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
-import { clipTravel, SPECIES_CLIP_ROLES } from '../enemy-motion-data';
+import { clipSpeed, modelHeight, rootMotion, SPECIES_CLIP_ROLES, walksInPlace } from '../enemy-motion-data';
 import { ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import { DEFAULT_HUD, HUD_FIELDS } from '../hud';
@@ -393,8 +393,10 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         const field = document.createElement('label');
         field.className = 'appearance-label';
         const motion = entry.motion[role];
-        const speed = motion === undefined ? 0 : Math.abs(clipTravel(motion, motion.duration, false)) * ENEMY_SPECS[species].height / motion.duration;
-        field.textContent = `${role} (${speed.toFixed(2)} m/s)`;
+        const speed = motion === undefined ? 0 : Math.abs(clipSpeed(motion, modelHeight(species)));
+        // A walk in place leaves the enemy walking at its Patrol speed.
+        field.textContent = role === 'walk' && rootMotion(species) && motion !== undefined && walksInPlace(motion)
+          ? `${role} (in place)` : `${role} (${speed.toFixed(2)} m/s)`;
         const select = document.createElement('select');
         select.append(...bake.clips.map((clip) => {
           const option = document.createElement('option');

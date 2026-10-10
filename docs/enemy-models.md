@@ -53,6 +53,29 @@ releases never do. The project server, writing a new or changed model entry or i
 bake the model's clips again and refuse motion that does not match them. Workshop plugins give a species a model only
 through `enemyModel` and `enemyClips`, which bake it; `enemies` keeps a model entry only as it is.
 
+## Play
+
+A species drawn by a model moves as its clips travel; one drawn as pixel art moves as before.
+
+- **Ground enemies**, soldiers and archers, move by root motion. Each step, the clip their phase plays sets the
+  velocity their body is driven toward along its facing, within the species' acceleration; gravity keeps the vertical.
+  - A patrol walks with its walk clip at the rate that travels at the enemy's Patrol speed, so its steps land where its
+    feet do, and idles while it stands. A walk clip travelling forward less than `ENEMY_MOTION.inPlaceStride` (5% of
+    the model's height) each cycle walks in place: it plays at its own pace while the enemy walks at its Patrol speed,
+    as pixel art does, so give walks root motion for steps that land.
+  - A hammer strike turns the enemy to face it. Its hurt clip then carries it, so a stagger backward moves it away from
+    the hammer, and a killing blow's death clip falls away from it.
+  - A soldier's pause after a bump, an archer's draw and its reload move as their clips do.
+  - Phases keep the game's timings: a clip longer than its phase is cut by the next, and a shorter one holds its last
+    frame and stops travelling.
+  - The corpse has no collider. It travels as its death clip does and stays until that clip ends.
+- **Birds** are steered as they fly, as ever: their clips play in place at their own pace, and a dead bird stays until
+  its death clip ends.
+- Every enemy pose carries the role it plays and its clip time (`clip`, `clipTime`; see
+  [runtime plugins](runtime-plugins.md)), so a look plays exactly what play moved.
+- A ground enemy's motion joins the level's [course](phantoms.md#courses): changing a clip it moves by starts a new
+  course, with new recordings.
+
 ## Format
 
 In `project.json`, each species in `enemies` is `null` for the built-in pixel art, a sprite, or a model:

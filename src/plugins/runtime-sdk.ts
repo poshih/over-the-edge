@@ -46,6 +46,7 @@ export { ARM_LAYER } from '../arm-layer';
 export type { Point } from '../config';
 export type { GameTheme } from '../theme';
 export type { EnemyArtSettings } from '../enemy-art-data';
+export type { EnemyClipRole } from '../enemy-motion-data';
 export { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from '../enemy-types';
 export type { EnemyEvent, EnemyFacing, EnemyPhase, EnemyPose, EnemySpecies } from '../enemy-types';
 export type { PhantomPose, PhantomTool } from '../phantom-format';

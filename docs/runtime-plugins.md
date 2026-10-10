@@ -1040,9 +1040,14 @@ These notifications are staged and applied in order after the frame's step loop,
 gameplay observers and rendering; the look never runs inside physics. Event envelopes are reused
 and read-only: consume them during `apply`, never retain them.
 Each pose gives the enemy's `id`, `species`, centre `x`, `y`, `facing`, `phase`, when that phase
-began (`changedAt`), whether it is `moving`, and its `health` and `maxHealth` in hit points.
-`update` receives only the active poses and simulation seconds, **only while the level has
-enemies**; sleeping sprites remain from `apply`. **The array and every drawn pose are pooled,
+began (`changedAt`), whether it is `moving`, its `health` and `maxHealth` in hit points, and the
+[clip role](enemy-models.md#roles) it plays (`clip`) with how far into it (`clipTime`, in seconds at
+the pace play runs it: a model's walk at the rate that travels at its Patrol speed, every other
+clip at its own pace). A looping clip's time keeps counting, for a look to wrap with the clip's
+length; a clip played once holds its last frame past its end. A sprite species plays the same
+roles, so a look may animate any enemy by them. `update` receives the active poses and the corpses
+still shown, which a model's death clip may move, with simulation seconds, **only while the level
+has enemies**; sleeping sprites remain from `apply`. **The array and every drawn pose are pooled,
 borrowed until the next frame**: copy individual fields into your own state if needed later,
 never retain a pose or the array as a snapshot. The default look keeps its own poses for
 sleeping sprites, compaction and art changes. `setArt` receives the project's enemy art when
@@ -1054,7 +1059,7 @@ Collider visuals stand on `OBSTACLE_LINE` and draw in **actors**, never hidden b
 `LookPasses` and the [pass rules](#pass-rules-for-presentation-points); hide an empty front.
 Keep membership changes incremental, batch/shared geometry and materials, reuse scratch and
 allocate nothing in `update`. The look draws only: species, collision, hits and decisions stay
-the engine's. The SDK exports `EnemyEvent`, `EnemyPose`, `EnemyArtSettings`, `ENEMY_SPECS`,
+the engine's. The SDK exports `EnemyEvent`, `EnemyPose`, `EnemyClipRole`, `EnemyArtSettings`, `ENEMY_SPECS`,
 `ENEMY_LIMITS`, `ENEMY_DIRECTION` and `ENEMY_BEHAVIOR`. Pass roots are detached before disposal.
 
 A game's own aggregate sprite renderer can replace it without replacing any object look:

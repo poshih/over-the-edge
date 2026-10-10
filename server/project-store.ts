@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { GameSettings } from '../src/game-settings';
+import { enemyMotion } from '../src/enemy-art-data';
 import { LEVEL_LIMITS, validateLevel } from '../src/level';
 import type { LevelDefinition } from '../src/level';
 import { PHANTOM_COURSE_FORMAT } from '../src/phantom-course';
@@ -62,8 +62,8 @@ interface StoredState extends ProjectState {
   readonly courseFormat: number;
 }
 
-// The sections a level version holds.
-const VERSIONED: ReadonlySet<SectionName> = new Set(['level', 'settings']);
+// The sections a level version holds, and the enemies, whose model motion joins its course.
+const VERSIONED: ReadonlySet<SectionName> = new Set(['level', 'settings', 'enemies']);
 
 // Each section's stored content: its part of the manifest (null for one kept only in files) and the files it owns.
 const SECTION_MANIFEST: Readonly<Record<BuiltinSectionName, (manifest: ProjectManifest) => unknown>> = {
@@ -224,7 +224,7 @@ export class ProjectStore {
     const versioned = recorded.observed === null || recorded.courseFormat !== PHANTOM_COURSE_FORMAT || changed.some((name) => VERSIONED.has(name));
     if (changed.length === 0 && !versioned) return { manifest, state: recorded };
     const sections = counted(recorded.sections, changed);
-    const level = versioned ? await this.version(id, null, manifest.settings) : recorded.level;
+    const level = versioned ? await this.version(id, null, manifest) : recorded.level;
     const state: StoredState = changed.length === 0 ? { ...recorded, observed, level, courseFormat: PHANTOM_COURSE_FORMAT } : {
       revision: recorded.revision + 1, sections, updatedAt: new Date().toISOString(), observed, level, courseFormat: PHANTOM_COURSE_FORMAT,
     };
@@ -232,9 +232,9 @@ export class ProjectStore {
     return { manifest, state };
   }
 
-  // The version of the stored level, or of `level` just stored, with `settings`, recorded if it is new; null while the
-  // stored level is not a valid level, on which nothing can be played.
-  private async version(id: string, level: LevelDefinition | null, settings: GameSettings): Promise<LevelVersionRef | null> {
+  // The version of the stored level, or of `level` just stored, with the manifest's settings and enemy model motion,
+  // recorded if it is new; null while the stored level is not a valid level, on which nothing can be played.
+  private async version(id: string, level: LevelDefinition | null, manifest: ProjectManifest): Promise<LevelVersionRef | null> {
     let played = level;
     if (played === null) {
       try {
@@ -244,7 +244,7 @@ export class ProjectStore {
         throw error;
       }
     }
-    const { version, course } = await recordLevelVersion(this.directory(id), played, settings);
+    const { version, course } = await recordLevelVersion(this.directory(id), played, manifest.settings, enemyMotion(manifest.enemies));
     return { version, course };
   }
 
@@ -409,7 +409,7 @@ export class ProjectStore {
           await rm(trash, { recursive: true, force: true });
         }
         const placed: StoredState = {
-          ...state, level: await this.version(id, content.level, content.manifest.settings), courseFormat: PHANTOM_COURSE_FORMAT,
+          ...state, level: await this.version(id, content.level, content.manifest), courseFormat: PHANTOM_COURSE_FORMAT,
         };
         await atomicWrite(join(directory, STATE_FILE), `${JSON.stringify(placed)}\n`);
         return placed;
@@ -479,7 +479,7 @@ export class ProjectStore {
     const next: StoredState = {
       revision: state.revision + 1, sections, updatedAt: new Date().toISOString(),
       observed: await signatures(this.directory(id), manifest),
-      level: change.sections.some((name) => VERSIONED.has(name)) ? await this.version(id, level ?? null, manifest.settings) : state.level,
+      level: change.sections.some((name) => VERSIONED.has(name)) ? await this.version(id, level ?? null, manifest) : state.level,
       courseFormat: PHANTOM_COURSE_FORMAT,
     };
     await atomicWrite(join(this.directory(id), STATE_FILE), `${JSON.stringify(next)}\n`);
@@ -492,7 +492,7 @@ export class ProjectStore {
     return this.locked(id, async () => {
       const { manifest, state } = await this.current(id);
       const level = await this.storedLevel(id);
-      const version = await this.version(id, level, manifest.settings);
+      const version = await this.version(id, level, manifest);
       if (version?.version === state.level?.version && version?.course === state.level?.course) return { level, state };
       const next: StoredState = { ...state, level: version };
       await atomicWrite(join(this.directory(id), STATE_FILE), `${JSON.stringify(next)}\n`);

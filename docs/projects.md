@@ -269,11 +269,12 @@ its level like any imported level, including intro events.
 ## Level versions
 
 The project server is where levels are saved, and a level is played with the project's game
-settings, so a **version** holds both: whenever the stored level or game settings change, they
-become the project's next numbered version, unless they are the same as the latest. That covers
-the Workshop's saves of the level or of Physics, the level, `level/objects`, `level/labels`,
-`level/name` and `settings` API changes, bundles, and a `level.json` or `project.json` a tool rewrote on disk,
-numbered when the project is next read. The Level tab's status shows the version the page
+settings, so a **version** holds both, and its [course](phantoms.md#courses) also counts the motion
+of the enemies' [3D models](enemy-models.md): whenever the stored level, game settings or that motion
+change, they become the project's next numbered version, unless they are the same as the latest.
+That covers the Workshop's saves of the level, of Physics or of enemy models' clips, the level,
+`level/objects`, `level/labels`, `level/name`, `settings` and `enemies` API changes, bundles, and a
+`level.json` or `project.json` a tool rewrote on disk, numbered when the project is next read. The Level tab's status shows the version the page
 holds, for example *Saved as version 14*; a change shows as unsaved until the project saves it
 a moment later.
 
@@ -292,8 +293,8 @@ While **Record** is on, the Workshop [records your play](phantoms.md#recording-i
 on the version it holds into `phantoms/<course>/v<version>-<session>-<clip>.phantom`, and
 **Level / Replays** plays each run back over the level. Versions
 that play the same share a course, so edits to the level's name, decorations, labels, colours, which mesh draws a
-collision, control sensitivity or the cursor keep a level's recordings, while any physics setting starts a new
-course; a release bundles the recordings of its level and settings' course. `phantoms/` grows
+collision, control sensitivity or the cursor keep a level's recordings, while any physics setting or a ground
+enemy model's clip starts a new course; a release bundles the recordings of its level and settings' course. `phantoms/` grows
 with use: commit it to keep the recordings, and delete those you no longer need.
 
 `level-versions/` stays with the checkout that saved it: Git ignores it wherever the project

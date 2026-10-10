@@ -78,8 +78,8 @@ export interface ProjectileLook {
   inspect?(): unknown;
 }
 
-// An aggregate look: event-driven membership, and only the active poses each drawn frame. Collider visuals stand
-// on the obstacle line and draw in actors; course/front passes may add scenery behind/in front of them.
+// An aggregate look: event-driven membership, and the active poses and shown corpses each drawn frame. Collider visuals
+// stand on the obstacle line and draw in actors; course/front passes may add scenery behind/in front of them.
 export interface EnemyLook {
   readonly passes: LookPasses;
   apply(event: EnemyEvent): void;

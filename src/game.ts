@@ -24,6 +24,7 @@ import type { SpriteDocument } from './sprite-data';
 import type { CharacterModelLoader } from './character-model-types';
 import type { MediaHost } from './media-host';
 import type { ContentLoader } from './content-ref';
+import { enemyMotion } from './enemy-art-data';
 import { DEFAULT_LOOK } from './game-look';
 import type { GameLook } from './game-look';
 import type { CourseArtSource } from './course-art-view';
@@ -164,7 +165,7 @@ export class Game {
       this.stop(event.reason instanceof Error ? event.reason.message : String(event.reason)), listen);
     try {
       this.simulation = new Simulation(options.settings === undefined ? DEFAULT_GAME_SETTINGS : options.settings, options.level,
-        DEFAULT_CHARACTER_FIGURE, this.journal);
+        DEFAULT_CHARACTER_FIGURE, this.journal, enemyMotion(this.currentLook.enemies));
       this.view = new GameView(options.canvas, this.simulation.frame(1), options.level, {
         characterModels: options.characterModels, content: options.content, look: this.currentLook,
         courseArt: options.courseArt, subscribeTerrain: (listener) => this.simulation.subscribeTerrain(listener),
@@ -444,16 +445,20 @@ export class Game {
   get look(): GameLook { return this.currentLook; }
 
   /**
-   * Shows the game as `look` says, the only way its look changes: restyles the scene, swaps the enemies' art, draws the
-   * course artwork and takes the HUD settings for future messages and deaths, an active death keeping the text and
-   * duration it started with; each part only when it changed. Then tells the look's listeners.
+   * Shows the game as `look` says, the only way its look changes: restyles the scene, swaps the enemies' art, and the
+   * motion their models move by, draws the course artwork and takes the HUD settings for future messages and deaths, an
+   * active death keeping the text and duration it started with; each part only when it changed. Then tells the look's
+   * listeners.
    */
   setLook(look: GameLook): void {
     if (this.stopped || look === this.currentLook) return;
     const previous = this.currentLook;
     this.currentLook = look;
     if (look.theme !== previous.theme) this.view.setTheme(look.theme);
-    if (look.enemies !== previous.enemies) this.view.setEnemyArt(look.enemies);
+    if (look.enemies !== previous.enemies) {
+      this.simulation.setEnemyMotion(enemyMotion(look.enemies));
+      this.view.setEnemyArt(look.enemies);
+    }
     if (look.art !== previous.art) this.view.setArt(look.art);
     for (const listener of [...this.lookListeners]) listener(look);
   }

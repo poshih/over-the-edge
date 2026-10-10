@@ -24,6 +24,7 @@ import { aimAt, limitAim, moveAim, returnAim, shiftAim } from './aim';
 import type { Aim } from './aim';
 import { TerrainWorld } from './terrain-world';
 import { EnemyWorld } from './enemy-world';
+import type { EnemyMotion } from './enemy-motion-data';
 import type { EnemyEvent, EnemyPose } from './enemy-types';
 import { HazardWorld } from './hazard-world';
 import type { ProjectilePose } from './hazard-world';
@@ -179,7 +180,9 @@ export class Simulation {
     contact.setFriction(Math.sqrt(this.settings.physics.potSideFriction * other.getFriction()));
   };
 
-  constructor(settings: Readonly<GameSettings>, level: LevelDefinition, figure: Readonly<CharacterFigure>, moments: MomentWriter) {
+  // `motion` is each enemy species' model motion, which moves a ground enemy with a model as its clips travel.
+  constructor(settings: Readonly<GameSettings>, level: LevelDefinition, figure: Readonly<CharacterFigure>, moments: MomentWriter,
+    motion: EnemyMotion) {
     this.settings = validateGameSettings(settings);
     this.figure = validateCharacterFigure(figure);
     this.moments = moments;
@@ -196,7 +199,7 @@ export class Simulation {
     this.platforms = new PlatformWorld(this.world, level.objects.filter(isPlatformObject), surfaceMaterials(this.settings.physics));
     this.rig = createPlayer(this.world, this.spawn, this.settings.physics, rigGeometry(this.settings.rig), this.settings.rig.head);
     this.preparePlayerFixtures();
-    this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), this.settings.physics, {
+    this.enemies = new EnemyWorld(this.world, level.objects.filter(isEnemyObject), this.settings.physics, motion, {
       getPot: () => this.rig.pot,
       getHeadFixture: () => this.dying ? null : this.rig.tool.head.fixture,
       canBump: () => !this.dying,
@@ -282,6 +285,12 @@ export class Simulation {
     this.ensureLive();
     this.hammerHead = head;
     if (!this.dying) this.applyHead();
+  }
+
+  // The enemies' model motion, from the next step: enemies carry on from where they are.
+  setEnemyMotion(motion: EnemyMotion): void {
+    this.ensureLive();
+    this.enemies.setMotion(motion);
   }
 
   // A rig is never rebuilt in place, except its head: other new rig settings rebuild the player and restart the run.

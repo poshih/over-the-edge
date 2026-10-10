@@ -1,6 +1,6 @@
 import { artId } from './art-types';
 import { SPECIES_CLIP_ROLES, validateEnemyClipMotion } from './enemy-motion-data';
-import type { EnemyClipMotion, EnemyClipRole } from './enemy-motion-data';
+import type { EnemyClipMotion, EnemyClipRole, EnemyMotion } from './enemy-motion-data';
 import { ENEMY_SPECIES } from './enemy-types';
 import type { EnemySpecies } from './enemy-types';
 import type { LevelDefinition } from './level';
@@ -285,6 +285,14 @@ export function enemyArtAssets(art: EnemyArtSettings, placed: ReadonlySet<EnemyS
     if (entry?.type === 'model') assets.add(entry.asset);
   }
   return assets;
+}
+
+// The motion each species' model travels by, which play moves it with; null for a species without a model.
+export function enemyMotion(art: EnemyArtSettings): EnemyMotion {
+  return Object.freeze(Object.fromEntries(ENEMY_SPECIES.map((species) => {
+    const entry = art[species];
+    return [species, entry?.type === 'model' ? entry.motion : null];
+  }))) as EnemyMotion;
 }
 
 // The species a level places.

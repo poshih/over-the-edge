@@ -1,4 +1,5 @@
 import type { Point } from './config';
+import type { EnemyClipRole } from './enemy-motion-data';
 
 export const ENEMY_SPECIES = ['bird', 'hollow-soldier', 'hollow-archer'] as const;
 export type EnemySpecies = (typeof ENEMY_SPECIES)[number];
@@ -58,6 +59,11 @@ export interface EnemyPose extends Readonly<Point> {
   // Hit points left, and the species' health when the enemy last reset or spawned.
   readonly health: number;
   readonly maxHealth: number;
+  // The clip the enemy plays and how far into it, in seconds at the pace play runs it: a model's walk at the rate
+  // that travels at its Patrol speed, every other clip at its own pace. A looping clip's time keeps counting, for a look
+  // to wrap with the clip's length; a clip played once holds its last frame past its end.
+  readonly clip: EnemyClipRole;
+  readonly clipTime: number;
 }
 
 export type EnemyEvent =

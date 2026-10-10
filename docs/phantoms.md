@@ -200,9 +200,9 @@ length and its bytes. A **pack**, a release's bundled recordings, is laid out th
 ### Courses
 
 Recordings belong to a **course**, which the build and the project server compute: the SHA-256,
-in lowercase hex, of the level's **play layout** and the game's **physics**
-(`src/phantom-course.ts`). They hold only what moves the player. The layout, without object IDs
-and in a fixed order, uses **course format 11**:
+in lowercase hex, of the level's **play layout**, the game's **physics** and its enemies' **model
+motion** (`src/phantom-course.ts`). They hold only what moves the player. The layout, without object IDs
+and in a fixed order, uses **course format 12**:
 
 - each terrain object's collision as mirrored, position, size, angle, illusion and surface;
 - each enemy's species, position, facing, patrol distance and speed;
@@ -226,6 +226,11 @@ handle length, maximum extension, minimum reach, default head and jar outline. A
 own head is a cosmetic's and is left out: recordings made with any hammer share the course,
 and phantom looks receive the game's current default head rather than the recorded player's.
 
+The model motion: for each ground species the level places drawn by a [3D model](enemy-models.md),
+the baked motion of every role it plays but its death, since those moves are how far it walks,
+staggers and pauses; a corpse has no collider. Birds' models play in place, and pixel art is only
+drawn, so neither counts.
+
 All death settings, including `death.wait`, and death timing, HUD text/fade and
 `DEATH_POSE` presentation are excluded: recordings never include dying. These settings
 shape only the death sequence, not the alive play a phantom records.
@@ -241,7 +246,8 @@ events other than launches, trap bursts and platform moves, control sensitivity 
 settings are left out. A recording replays only where its course holds, so editing those details, or
 swapping a mesh for one that collides alike, keeps a level's recordings. Changing the play
 layout above—terrain, enemies, bonfires, traps, pools, platforms, those triggers or the
-start—or a physics setting that counts starts a new course with none. Recordings made under
+start—a physics setting that counts, or a clip a ground enemy's model moves by starts a new course
+with none. Recordings made under
 a physics setting you go back to count again.
 
 `src/phantom-format.ts` implements all of this. It imports no DOM or three.js, and its imports

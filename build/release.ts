@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Plugin, ViteDevServer } from 'vite';
 import { pathType } from '../src/content';
 import { isContentPath } from '../src/content-ref';
+import { enemyMotion } from '../src/enemy-art-data';
 import { sendBytes, sendFile } from '../server/http';
 import { phantomMiddleware, PhantomStore } from '../server/phantom-store';
 import { phantomCourse } from './phantom-course';
@@ -89,7 +90,7 @@ export function gameRelease(options: {
   const current = (): Packed => {
     if (packed === null) {
       const input = options.load();
-      const course = phantomCourse(input.level, input.settings);
+      const course = phantomCourse(input.level, input.settings, enemyMotion(input.enemies));
       packed = { input, course, content: packReleaseContent(input, loadReleaseRecordings(options.recordings, course)) };
       // Files found while loading, such as a level's public/media/ files, join the watch.
       for (const file of input.files) {

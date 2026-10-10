@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { gunzip, gzip } from 'node:zlib';
 import { phantomCourse } from '../build/phantom-course';
 import { RECORDINGS_FOLDER } from '../build/release-phantoms';
+import type { EnemyMotion } from '../src/enemy-motion-data';
 import type { GameSettings } from '../src/game-settings';
 import type { LevelDefinition } from '../src/level';
 import { decodePhantom, isPhantomCourse, PhantomError } from '../src/phantom-format';
@@ -145,16 +146,18 @@ async function storeCopy(directory: string, hash: string, text: string): Promise
 }
 
 /**
- * The version of `level` and `settings`, validated, just stored as the project's: the latest version when that holds
- * the same level, settings and course, otherwise a new one. Callers hold the project's lock.
+ * The version of `level` and `settings`, validated, just stored as the project's with its enemies' model `motion`: the
+ * latest version when that holds the same level, settings and course, otherwise a new one. Callers hold the project's
+ * lock.
  */
-export async function recordLevelVersion(directory: string, level: LevelDefinition, settings: GameSettings): Promise<LevelVersion> {
+export async function recordLevelVersion(directory: string, level: LevelDefinition, settings: GameSettings,
+  motion: EnemyMotion): Promise<LevelVersion> {
   const levelText = JSON.stringify(level);
   const settingsText = JSON.stringify(settings);
   const levelHash = sha256(levelText);
   const settingsHash = sha256(settingsText);
   // Worked out every time: a new course format gives the same level and settings a new course.
-  const course = phantomCourse(level, settings);
+  const course = phantomCourse(level, settings, motion);
   const recent = await newest(directory);
   const previous = recent.versions.at(-1) ?? (recent.whole ? null : (await listLevelVersions(directory)).at(-1) ?? null);
   if (previous?.levelHash === levelHash && previous.settingsHash === settingsHash && previous.course === course) return previous;

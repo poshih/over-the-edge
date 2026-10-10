@@ -1,3 +1,4 @@
+import { ENEMY_SPECS } from './enemy-types';
 import type { EnemySpecies } from './enemy-types';
 import { exactRecord, ProjectError } from './project-fields';
 
@@ -9,14 +10,42 @@ export const SPECIES_CLIP_ROLES: Readonly<Record<EnemySpecies, readonly EnemyCli
   'hollow-soldier': ['idle', 'walk', 'recover', 'hurt', 'death'],
   'hollow-archer': ['idle', 'walk', 'windup', 'recover', 'hurt', 'death'],
 };
-export const ENEMY_MOTION = { sampleRate: 60, unit: 10_000, maxDuration: 10, maxClips: 32, maxTravel: 10_000_000 } as const;
+// `inPlaceStride`: a walk clip travelling less than this far forward each cycle, in model heights, walks in place.
+export const ENEMY_MOTION = { sampleRate: 60, unit: 10_000, maxDuration: 10, maxClips: 32, maxTravel: 10_000_000, inPlaceStride: 0.05 } as const;
 
 /** A clip's root motion: its length in seconds, and how far its top joint has travelled along the model's facing at each
  * sample, ENEMY_MOTION.sampleRate a second from 0, in ENEMY_MOTION.unit-ths of the model's bind-pose height. */
 export interface EnemyClipMotion { readonly duration: number; readonly travel: readonly number[] }
 
+// Each species' clip motion by role, from its model; null for a species drawn without one, which moves as its sprite
+// does.
+export type EnemyMotion = Readonly<Record<EnemySpecies, Readonly<Partial<Record<EnemyClipRole, EnemyClipMotion>>> | null>>;
+export const NO_ENEMY_MOTION: EnemyMotion = Object.freeze({ bird: null, 'hollow-soldier': null, 'hollow-archer': null });
+
 export function loopingRole(role: EnemyClipRole): boolean {
   return role === 'idle' || role === 'walk';
+}
+
+// Whether a species' model moves as its clips travel: ground enemies do, while birds are steered as they fly, their
+// clips playing in place.
+export function rootMotion(species: EnemySpecies): boolean {
+  return species !== 'bird';
+}
+
+// The metres one bind-pose height of a species' model stands: the species' height, which its model is fitted to.
+export function modelHeight(species: EnemySpecies): number {
+  return ENEMY_SPECS[species].height;
+}
+
+// How fast a clip travels along the facing over its whole length, in metres per second for a model `height` metres
+// tall; negative for one travelling backward.
+export function clipSpeed(motion: EnemyClipMotion, height: number): number {
+  return clipTravel(motion, motion.duration, false) * height / motion.duration;
+}
+
+// Whether a walk clip walks in place, travelling forward less than ENEMY_MOTION.inPlaceStride model heights a cycle.
+export function walksInPlace(motion: EnemyClipMotion): boolean {
+  return clipTravel(motion, motion.duration, false) < ENEMY_MOTION.inPlaceStride;
 }
 
 export function motionSamples(duration: number): number {

@@ -1,17 +1,21 @@
 // What shapes play on a level: its colliders and surfaces, enemies, traps, bonfires, pools and platforms, its triggers'
-// launches, trap bursts and platform moves, its start, and the physics the game runs with. Phantom recordings belong
-// to a course, the SHA-256 of this text. The level's name, decorations, labels, colours, depth, swapping a mesh for one
+// launches, trap bursts and platform moves, its start, the physics the game runs with and the motion its enemies' models
+// move by. Phantom recordings belong to a course, the SHA-256 of this text. The level's name, decorations, labels, colours, depth, swapping a mesh for one
 // that collides alike, message text, control sensitivity or the cursor leave it alone, keeping recordings. See
 // docs/phantoms.md.
 //
 // It uses no DOM or three.js.
+import { placedSpecies } from './enemy-art-data';
+import { rootMotion, SPECIES_CLIP_ROLES } from './enemy-motion-data';
+import type { EnemyMotion } from './enemy-motion-data';
+import { ENEMY_SPECIES } from './enemy-types';
 import { RIG_FIELDS, TUNING_FIELDS } from './game-settings';
 import type { GameSettings } from './game-settings';
 import { terrainCollision } from './level';
 import type { LevelDefinition, PlatformObject, ShooterObject } from './level';
 
 // Changes whenever what counts toward a course does, so every course changes with it.
-export const PHANTOM_COURSE_FORMAT = 11;
+export const PHANTOM_COURSE_FORMAT = 12;
 
 // The physics settings that move the player: every tuning field but the controls', and the hammer rig with the default
 // hammer's head and the jar. A library hammer's own head is a cosmetic's: recordings made with it join the course.
@@ -26,6 +30,17 @@ function platformEntry(object: PlatformObject) {
   return ['platform', object.x, object.y, object.ride, object.travelX, object.travelY, object.width, object.height, object.speed, object.surface];
 }
 
+// The motion of each ground species the level places with a model, by the roles that move its body: all but its death,
+// whose corpse has no collider. Birds' clips play in place, so their models leave play alone.
+function modelMotion(level: LevelDefinition, motion: EnemyMotion) {
+  const placed = placedSpecies(level);
+  return ENEMY_SPECIES.flatMap((species) => {
+    const clips = motion[species];
+    if (clips === null || !placed.has(species) || !rootMotion(species)) return [];
+    return [[species, SPECIES_CLIP_ROLES[species].filter((role) => role !== 'death').map((role) => [role, clips[role] ?? null])]];
+  });
+}
+
 function targetEntry(entries: ReadonlyMap<string, string>, id: string): string {
   const entry = entries.get(id);
   if (entry === undefined) throw new Error(`Validated levels must contain trigger target "${id}".`);
@@ -35,9 +50,9 @@ function targetEntry(entries: ReadonlyMap<string, string>, id: string): string {
 /**
  * The level's play layout and physics as canonical JSON: per object, only what moves the player, without IDs, in a
  * fixed order, so neither renaming nor reordering objects changes it; then the physics and hammer rig settings, by
- * name. A course is this text's SHA-256.
+ * name, and the motion of the models its ground enemies move by. A course is this text's SHA-256.
  */
-export function phantomCourseText(level: LevelDefinition, settings: GameSettings): string {
+export function phantomCourseText(level: LevelDefinition, settings: GameSettings, motion: EnemyMotion): string {
   const entries: string[] = [];
   const shooters = new Map<string, string>();
   const platforms = new Map<string, string>();
@@ -102,5 +117,5 @@ export function phantomCourseText(level: LevelDefinition, settings: GameSettings
   entries.sort();
   const physics = Object.fromEntries(PHYSICS_FIELDS.map((key) => [key, settings.physics[key]]));
   const rig = { ...Object.fromEntries(RIG_KEYS.map((key) => [key, settings.rig[key]])), head: settings.rig.head, pot: settings.rig.pot };
-  return `[${PHANTOM_COURSE_FORMAT},[${entries.join(',')}],${JSON.stringify(physics)},${JSON.stringify(rig)}]`;
+  return `[${PHANTOM_COURSE_FORMAT},[${entries.join(',')}],${JSON.stringify(physics)},${JSON.stringify(rig)},${JSON.stringify(modelMotion(level, motion))}]`;
 }

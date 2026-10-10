@@ -227,15 +227,16 @@ export interface PlayedVersion {
   readonly course: string;
 }
 
-// The page plays the version while its level is still this object and its settings this text: their synced fingerprints
-// when the project said which version they are.
+// The page plays the version while its level is still this object, its settings this text and its enemy art this object:
+// their synced fingerprints when the project said which version they are.
 interface BoundVersion extends PlayedVersion {
   readonly level: unknown;
   readonly settings: unknown;
+  readonly enemies: unknown;
 }
 
-// The sections a level version holds.
-const VERSIONED = ['level', 'settings'] as const;
+// The sections a level version holds, and the enemies, whose model motion joins its course.
+const VERSIONED = ['level', 'settings', 'enemies'] as const;
 
 // What this browser's copy holds, or would hold: compared section by section.
 interface CopyState {
@@ -1185,7 +1186,8 @@ export class ProjectSession {
   // The same object until the version changes; cheap enough for every physics step.
   playedVersion(): PlayedVersion | null {
     const bound = this.binding?.version ?? null;
-    return bound !== null && bound.level === this.workspace.level.get() && bound.settings === this.settingsText() ? bound : null;
+    return bound !== null && bound.level === this.workspace.level.get() && bound.settings === this.settingsText() &&
+      bound.enemies === this.enemies ? bound : null;
   }
 
   // The project server as this page last found it; null before the first check.
@@ -2124,16 +2126,21 @@ export class ProjectSession {
     return this.settingsJson.text;
   }
 
-  // Takes the project's level version from a server answer whose level and settings revisions are the ones this page
-  // last saved or loaded, which the synced fingerprints hold: the page plays that version while it holds them. Versions
-  // never change, so the binding stays right however the project moves on; answers about other revisions leave it.
+  // Takes the project's level version from a server answer whose level, settings and enemies revisions are the ones this
+  // page last saved or loaded, which the synced fingerprints hold: the page plays that version while it holds them.
+  // Versions never change, so the binding stays right however the project moves on; answers about other revisions leave
+  // it.
   private adoptVersion(binding: Binding, state: ServerRevisions): void {
     const level = state.level;
     if (level === null || VERSIONED.some((name) => state.sections[name] !== binding.sections[name])) return;
     const synced = this.synced!;
     const bound = binding.version;
-    if (bound?.version === level.version && bound.level === synced.level && bound.settings === synced.settings) return;
-    binding.version = { project: binding.id, version: level.version, course: level.course, level: synced.level, settings: synced.settings };
+    if (bound?.version === level.version && bound.level === synced.level && bound.settings === synced.settings &&
+      bound.enemies === synced.enemies) return;
+    binding.version = {
+      project: binding.id, version: level.version, course: level.course,
+      level: synced.level, settings: synced.settings, enemies: synced.enemies,
+    };
     this.changed('status');
   }
 

@@ -4,6 +4,8 @@ import { aimArc } from './ballistics';
 import type { Launch } from './ballistics';
 import { PHYSICS } from './config';
 import type { Point, Tuning } from './config';
+import { clipSpeed, clipTravel, loopingRole, modelHeight, rootMotion, walksInPlace } from './enemy-motion-data';
+import type { EnemyClipRole, EnemyMotion } from './enemy-motion-data';
 import { ENEMY_BEHAVIOR, ENEMY_DIRECTION, ENEMY_LIMITS, ENEMY_SPECS } from './enemy-types';
 import type { EnemyEvent, EnemyFacing, EnemyPhase, EnemyPose, EnemySpecies } from './enemy-types';
 import { ARROW } from './hazards';
@@ -40,6 +42,11 @@ interface EnemyRecord {
   readonly target: Point;
   hasTarget: boolean;
   defeatedBy: 'hammer' | 'fall' | null;
+  // The clip it plays and since when, in simulation seconds.
+  role: EnemyClipRole;
+  roleAt: number;
+  // Where a corpse whose death clip travels began it.
+  deathX: number;
 }
 
 interface EnemyCallbacks {
@@ -72,9 +79,16 @@ const SPECIES_TUNING = {
   'hollow-archer': { health: 'archerHealth', armor: 'archerArmor', mass: 'archerMass', acceleration: 'archerAcceleration' },
 } as const satisfies Readonly<Record<EnemySpecies, Readonly<Record<'health' | 'armor' | 'mass' | 'acceleration', keyof Tuning>>>>;
 type MutableEnemyPose = { -readonly [K in keyof EnemyPose]: EnemyPose[K] };
+// The clip each phase but patrol plays; a patrol idles or walks.
+const PHASE_ROLES = {
+  windup: 'windup', dive: 'dive', recover: 'recover', hurt: 'hurt', dead: 'death',
+} as const satisfies Readonly<Record<Exclude<EnemyPhase, 'patrol'>, EnemyClipRole>>;
 
 function emptyPose(): MutableEnemyPose {
-  return { id: '', species: 'bird', x: 0, y: 0, facing: 'right', phase: 'patrol', changedAt: 0, moving: false, health: 0, maxHealth: 0 };
+  return {
+    id: '', species: 'bird', x: 0, y: 0, facing: 'right', phase: 'patrol', changedAt: 0, moving: false, health: 0, maxHealth: 0,
+    clip: 'idle', clipTime: 0,
+  };
 }
 
 // The hit points a hammer-head strike closing at `speed` m/s takes: the full hammer damage at the full-damage speed and
@@ -107,6 +121,7 @@ export class EnemyWorld {
   private readonly world: World;
   private readonly callbacks: EnemyCallbacks;
   private tuning: Readonly<Tuning>;
+  private motion: EnemyMotion;
   private readonly records = new Map<string, EnemyRecord>();
   private readonly bodies = new Map<Body, EnemyRecord>();
   private readonly active = new Set<EnemyRecord>();
@@ -151,10 +166,12 @@ export class EnemyWorld {
   private bumpCount = 0;
   private disposed = false;
 
-  constructor(world: World, objects: readonly EnemyObject[], tuning: Readonly<Tuning>, callbacks: EnemyCallbacks) {
+  constructor(world: World, objects: readonly EnemyObject[], tuning: Readonly<Tuning>, motion: EnemyMotion,
+    callbacks: EnemyCallbacks) {
     this.world = world;
     this.callbacks = callbacks;
     this.tuning = tuning;
+    this.motion = motion;
     this.ensureMutable();
     for (const object of objects) this.createRecord(object);
     world.on('begin-contact', this.onBeginContact);
@@ -175,6 +192,12 @@ export class EnemyWorld {
       body.resetMassData();
       body.setAwake(true);
     }
+  }
+
+  // Each species' model motion, from the next step; a species without a model moves as its sprite does.
+  setMotion(motion: EnemyMotion): void {
+    this.ensureMutable();
+    this.motion = motion;
   }
 
   apply(change: LevelChange, time: number): void {
@@ -254,7 +277,8 @@ export class EnemyWorld {
     this.activeUpdates++;
     if (record.phase === 'hurt') {
       if (this.beforeTime - record.changedAt < ENEMY_BEHAVIOR.hurtSeconds) {
-        this.drive(record, 0, record.object.species === 'bird' ? 0 : null);
+        if (record.object.species === 'bird') this.drive(record, 0, 0);
+        else this.stride(record, 0);
         return;
       }
       this.transition(record, record.object.species === 'bird' ? 'recover' : 'patrol');
@@ -279,7 +303,7 @@ export class EnemyWorld {
       this.hits.clear();
       this.bumps.clear();
       this.obstacles.clear();
-      this.dying.forEach(this.removeExpired);
+      this.dying.forEach(this.advanceDying);
     } finally { this.afterTime = previousTime; }
   }
 
@@ -302,6 +326,12 @@ export class EnemyWorld {
     if (record.health === 0 || this.afterTime - record.lastHitAt < ENEMY_BEHAVIOR.hitSeconds) return;
     record.lastHitAt = this.afterTime;
     const damage = strikeDamage(speed, this.tuning);
+    // A model moving as its clips travel turns to face the strike, so its hurt or death carries it away from the hammer,
+    // and walks on that way.
+    if (this.travels(record) && record.struck.normalX !== 0) {
+      record.facing = record.struck.normalX < 0 ? 'left' : 'right';
+      record.desiredX = ENEMY_DIRECTION[record.facing] * Math.abs(record.desiredX);
+    }
     if (damage >= record.health) {
       this.defeat(record, 'hammer');
       return;
@@ -313,7 +343,8 @@ export class EnemyWorld {
   };
 
   private readonly resolveObstacle = (record: EnemyRecord): void => {
-    if (record.health === 0) return;
+    // A model struck this step keeps facing the strike, which its hurt carries it away from.
+    if (record.health === 0 || (this.travels(record) && record.phase !== 'patrol')) return;
     if (record.object.species === 'bird') {
       if (record.phase === 'dive') this.transition(record, 'recover');
       else if (record.phase === 'patrol') this.face(record, -ENEMY_DIRECTION[record.facing]);
@@ -323,8 +354,17 @@ export class EnemyWorld {
     }
   };
 
-  private readonly removeExpired = (record: EnemyRecord): void => {
-    if (this.afterTime < record.changedAt + ENEMY_BEHAVIOR.deathSeconds) return;
+  // A corpse travels as its model's death clip does, and goes when that clip ends; a sprite's once it has dissolved.
+  private readonly advanceDying = (record: EnemyRecord): void => {
+    const species = record.object.species;
+    const death = this.motion[species]?.death;
+    const age = this.afterTime - record.changedAt;
+    record.previous.x = record.current.x;
+    record.previous.y = record.current.y;
+    if (death !== undefined && rootMotion(species)) {
+      record.current.x = record.deathX + ENEMY_DIRECTION[record.facing] * clipTravel(death, age, false) * modelHeight(species);
+    }
+    if (age < (death?.duration ?? ENEMY_BEHAVIOR.deathSeconds)) return;
     this.dying.delete(record);
     if (this.listeners.size > 0) this.emit({ type: 'remove', id: record.object.id });
   };
@@ -340,12 +380,14 @@ export class EnemyWorld {
     record.previous.y = record.current.y;
   };
 
-  // The array and every pose are pooled and borrowed until the next frame().
+  // The active enemies and the corpses still shown. The array and every pose are pooled and borrowed until the next
+  // frame().
   frame(alpha: number): readonly EnemyPose[] {
     this.ensureLive();
     this.frameAlpha = alpha;
     this.frameCount = 0;
     this.active.forEach(this.writeFramePose);
+    this.dying.forEach(this.writeFramePose);
     return this.framePosePool[this.frameCount]!;
   }
 
@@ -471,6 +513,8 @@ export class EnemyWorld {
   private sleep(record: EnemyRecord): void {
     this.destroyBody(record);
     this.active.delete(record);
+    // It decides afresh when it wakes; asleep, it stands.
+    record.desiredX = 0;
     this.transition(record, 'patrol');
     this.faceAuthored(record);
     if (record.proxy === null) throw new Error('A living enemy must have an activation proxy.');
@@ -544,7 +588,7 @@ export class EnemyWorld {
 
   private walk(record: EnemyRecord): void {
     if (record.phase === 'recover') {
-      if (this.time - record.changedAt < ENEMY_BEHAVIOR.bumpSeconds) { this.drive(record, 0, null); return; }
+      if (this.time - record.changedAt < ENEMY_BEHAVIOR.bumpSeconds) { this.stride(record, 0); return; }
       this.transition(record, 'patrol');
     }
     if (this.time >= record.nextDecisionAt) {
@@ -562,7 +606,8 @@ export class EnemyWorld {
         if (clear) record.desiredX = ENEMY_DIRECTION[record.facing] * object.speed;
       } else this.faceAuthored(record);
     }
-    this.drive(record, record.desiredX, null);
+    this.play(record, record.desiredX === 0 ? 'idle' : 'walk');
+    this.stride(record, record.desiredX);
   }
 
   // An archer walks its patrol as a soldier does until it has a shot at the player, then stands, turned to the player,
@@ -571,7 +616,7 @@ export class EnemyWorld {
     const age = this.time - record.changedAt;
     if (record.phase === 'windup') {
       this.face(record, player.x - record.current.x);
-      this.drive(record, 0, null);
+      this.stride(record, 0);
       if (age < ENEMY_BEHAVIOR.archerDrawSeconds) return;
       if (this.aim(record, player)) {
         this.callbacks.shoot(record.object.id, record.current.x, record.current.y + ENEMY_BEHAVIOR.archerBowHeight,
@@ -581,7 +626,7 @@ export class EnemyWorld {
       return;
     }
     if (record.phase === 'recover') {
-      if (age < ENEMY_BEHAVIOR.archerReloadSeconds) { this.drive(record, 0, null); return; }
+      if (age < ENEMY_BEHAVIOR.archerReloadSeconds) { this.stride(record, 0); return; }
       this.transition(record, 'patrol');
     }
     if (this.time >= record.nextDecisionAt && this.aim(record, player)) {
@@ -590,7 +635,7 @@ export class EnemyWorld {
       record.desiredX = 0;
       this.face(record, player.x - record.current.x);
       this.transition(record, 'windup');
-      this.drive(record, 0, null);
+      this.stride(record, 0);
       return;
     }
     this.walk(record);
@@ -648,6 +693,44 @@ export class EnemyWorld {
     if (Math.abs(dx) > ENEMY_BEHAVIOR.patrolTolerance) record.facing = dx < 0 ? 'left' : 'right';
   }
 
+  // Whether the enemy moves as its model's clips travel: a ground enemy with a model.
+  private travels(record: EnemyRecord): boolean {
+    const species = record.object.species;
+    return rootMotion(species) && this.motion[species] !== null;
+  }
+
+  // Drives a ground enemy along its facing as far as its model's clip travels over this step; without a model, or while
+  // its walk walks in place, toward `speed` m/s, as a sprite moves.
+  private stride(record: EnemyRecord, speed: number): void {
+    const species = record.object.species;
+    const motion = this.motion[species]?.[record.role];
+    if (motion === undefined || (record.role === 'walk' && walksInPlace(motion))) {
+      this.drive(record, speed, null);
+      return;
+    }
+    const rate = this.clipRate(record);
+    const loop = loopingRole(record.role);
+    const from = (this.time - record.roleAt) * rate;
+    const travelled = clipTravel(motion, from + PHYSICS.dt * rate, loop) - clipTravel(motion, from, loop);
+    this.drive(record, ENEMY_DIRECTION[record.facing] * travelled * modelHeight(species) / PHYSICS.dt, null);
+  }
+
+  // How fast the enemy's clip plays: a model's walk at the rate that travels at its Patrol speed; every other clip, and
+  // a walk in place, at its own pace.
+  private clipRate(record: EnemyRecord): number {
+    const species = record.object.species;
+    if (record.role !== 'walk' || !rootMotion(species)) return 1;
+    const walk = this.motion[species]?.walk;
+    return walk === undefined || walksInPlace(walk) ? 1 : record.object.speed / clipSpeed(walk, modelHeight(species));
+  }
+
+  // Plays `role` from now, unless the enemy plays it already.
+  private play(record: EnemyRecord, role: EnemyClipRole): void {
+    if (record.role === role) return;
+    record.role = role;
+    record.roleAt = this.time;
+  }
+
   private drive(record: EnemyRecord, x: number, y: number | null): void {
     const body = this.body(record);
     const velocity = body.getLinearVelocity();
@@ -699,15 +782,27 @@ export class EnemyWorld {
   private transition(record: EnemyRecord, phase: EnemyPhase): void {
     record.phase = phase;
     record.changedAt = this.time;
+    // Each phase plays its clip from the start.
+    record.role = phase === 'patrol' ? this.patrolRole(record) : PHASE_ROLES[phase];
+    record.roleAt = this.time;
     if (phase !== 'windup' && phase !== 'dive') record.hasTarget = false;
     // Accepted surviving hits enter hurt once, after World.step unlocks. Publish the same pose snapshot as other upserts.
     if (phase === 'hurt') this.emitPose(record);
+  }
+
+  // A patrol walks while it moves and idles while it stands: a ground enemy as its last decision chose, a bird as its
+  // patrol flies it.
+  private patrolRole(record: EnemyRecord): EnemyClipRole {
+    const object = record.object;
+    const moving = object.species === 'bird' ? object.patrolDistance > 0 && object.speed > 0 : record.desiredX !== 0;
+    return moving ? 'walk' : 'idle';
   }
 
   private defeat(record: EnemyRecord, reason: 'hammer' | 'fall'): void {
     const damage = record.health;
     record.health = 0;
     record.defeatedBy = reason;
+    record.deathX = record.current.x;
     this.transition(record, 'dead');
     this.destroyCollider(record);
     this.dying.add(record);
@@ -724,6 +819,7 @@ export class EnemyWorld {
       facing: object.facing, phase: 'patrol', changedAt: this.time, health: 0, maxHealth: 0, strike: 0,
       struck: { x: 0, y: 0, normalX: 0, normalY: 0 },
       lastHitAt: -Infinity, nextDecisionAt: this.time, desiredX: 0, target: { x: 0, y: 0 }, hasTarget: false, defeatedBy: null,
+      role: 'idle', roleAt: this.time, deathX: object.x,
     };
     this.records.set(object.id, record);
     this.resetRecord(record);
@@ -825,6 +921,9 @@ export class EnemyWorld {
     pose.moving = velocity !== null && Math.hypot(velocity.x, velocity.y) > ENEMY_BEHAVIOR.movingSpeed;
     pose.health = record.health;
     pose.maxHealth = record.maxHealth;
+    pose.clip = record.role;
+    // The frame shows the state `alpha` of the way through the last step.
+    pose.clipTime = Math.max(0, this.time - (1 - alpha) * PHYSICS.dt - record.roleAt) * this.clipRate(record);
   }
 
   private emit(event: EnemyEvent): void {
