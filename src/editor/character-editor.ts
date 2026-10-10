@@ -1,7 +1,7 @@
 import { element, setText } from '../dom';
 import { CHARACTER_RIGGING_TYPES, SpriteError, SPRITE_FILE_BYTES } from '../sprite-data';
 import type { CharacterRiggingType, SpriteDocument } from '../sprite-data';
-import type { SpriteEditorState } from './sprite-state';
+import type { SpriteEditorSnapshot, SpriteEditorState } from './sprite-state';
 import { ARM_FORWARD_DISTANCE_LIMITS, DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
 import { UPPER_BODY_3D } from '../sprite-data';
 import { DEFAULT_WAIST_LEAN, WAIST_LEAN_LIMITS } from '../waist-lean';
@@ -21,22 +21,22 @@ import { withRig } from '../game-settings';
 import { RIG_LIMITS } from '../rig';
 import type { RigGeometry } from '../rig';
 import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
-import { validateProjectCharacter } from '../project';
 import type { History } from './document/history';
 import { applyProjectCommand } from './document/project-commands';
-import type { ProjectCommands } from './document/project-commands';
+import type { ProjectCommandInfo, ProjectCommands } from './document/project-commands';
+import type { ImportOptions } from './document/project-imports';
 import { createProjectSaveButton } from './project-save';
 import type { ProjectSaveTarget } from './project-save';
 import { createRangeControl } from './range-control';
 import type { ServerCopies } from './server-copies';
 import { createServerCopyPicker } from './server-copy-picker';
 import { createServerModelPicker } from './server-model-picker';
-import { serverModelSettings, ServerModelError } from './server-models';
-import type { ServerModel, ServerModels } from './server-models';
-import type { PartRole } from '../model-library';
+import { serverModelSettings } from './server-models';
+import type { ServerModels } from './server-models';
 import { createSpriteCharacterExample } from './sprite-character-example';
 import { createMotionEditor } from './motion-editor';
 import type { AvatarMotionControls } from './avatar-motion-controls';
+import type { WorkshopTab } from './ui-types';
 import type { LeanPreview } from '../waist-lean';
 import { sectionMarkup } from './workshop-section';
 import './character-editor.css';
@@ -89,6 +89,15 @@ export interface DocumentSettingsEditing {
   readonly commands: ProjectCommands;
 }
 
+// The whole profile's Save, Revert, import and export, which Character and Sprites share. Revert and an import are
+// steps of the tab they were made in.
+export interface ProfileActions {
+  save(): void;
+  revert(tab: WorkshopTab): void;
+  importDocument(tab: WorkshopTab): void;
+  exportDocument(): void;
+}
+
 export function createCharacterEditor(options: {
   readonly mount: HTMLElement;
   readonly state: SpriteEditorState;
@@ -98,12 +107,7 @@ export function createCharacterEditor(options: {
   readonly naturalArms: () => CharacterArms;
   // Edits the game's handle length, a physics setting shared by every character.
   readonly settingsEditing: DocumentSettingsEditing;
-  readonly actions: {
-    save(): void;
-    revert(): void;
-    importDocument(): void;
-    exportDocument(): void;
-  };
+  readonly actions: ProfileActions;
   // The avatars, hammers and pots this Workshop's server shares.
   readonly serverModels: ServerModels;
   readonly onNotice: (message: string, kind: 'info' | 'error') => void;
@@ -119,10 +123,15 @@ export function createCharacterEditor(options: {
     readonly preview: (kind: LeanPreview) => void;
   };
 }): { setHammerRig(rig: RigGeometry): void; dispose(): void } {
+  const { state } = options;
+  const { commands, imports, history } = state;
   const events = new AbortController();
   const listen = { signal: events.signal };
   let disposed = false;
   let describedDocument: SpriteDocument | null = null;
+  const info = (label: string, section: string | null): ProjectCommandInfo =>
+    ({ label, place: { tab: 'character', section, select: null }, coalesce: null });
+  const request = (label: string, section: string | null): ImportOptions => ({ info: info(label, section), signal: events.signal });
   const root = document.createElement('div');
   root.className = 'character-editor';
   root.innerHTML = `
@@ -131,12 +140,12 @@ export function createCharacterEditor(options: {
         <label class="appearance-label" for="character-rigging-type">Character type</label>
         <select id="character-rigging-type" name="characterRiggingType" aria-describedby="character-technology character-type-help"></select>
         <p id="character-technology" class="appearance-format" aria-live="polite"></p>
-        <p id="character-type-help" class="appearance-format">Type changes are drafts that keep all other artwork. Save keeps them across reloads.</p>
+        <p id="character-type-help" class="appearance-format">Type changes keep all other artwork and are steps Undo takes back. Save keeps them across reloads.</p>
         <div class="character-action-row character-quick-start" role="group" aria-label="Quick start">
           <button type="button" class="button character-use-avatar"
             title="Switch to the built-in connected, skinned upper-body avatar">Use Avatar</button>
           <button type="button" class="button character-load-example"
-            title="Load Paper Climber, a complete 2D cutout character, as a new draft">Load complete 2D example</button>
+            title="Load Paper Climber, a complete 2D cutout character, as one step Undo takes back">Load complete 2D example</button>
         </div>
         <p class="character-example-error" role="alert" aria-atomic="true" hidden></p>
         <p class="appearance-format character-external-warning" hidden>This profile references external images.
@@ -311,7 +320,7 @@ export function createCharacterEditor(options: {
             embedded PNGs, the imported avatar, hammer and pot GLBs and bone map. Public image URLs remain
             references. Import limit: ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB. Exported profiles can be used
             as game sprite data.</p>
-          <p class="appearance-format">Appearance's per-part GLB imports and their alignment stay browser-local;
+          <p class="appearance-format">Appearance's per-part GLB imports and their alignment are kept in the project's appearance;
             they are not bundled with profile JSON. The built-in avatar needs no embedded model file.</p>
         </fieldset>
       `)}
@@ -322,7 +331,7 @@ export function createCharacterEditor(options: {
             <strong>connected, skinned 3D avatar</strong>. The default remains the separate mesh-part character.
             Every type keeps <strong>Planck 2D physics</strong> and hammer motion; the hands follow the profile's
             grip placement.</p>
-          <p>Type changes are draft-only. Switching types keeps all images, layers, bones, directional settings
+          <p>Type changes are steps Undo takes back. Switching types keeps all images, layers, bones, directional settings
             and imported GLB parts; it ends temporary sprite previews. Choose Save to keep the profile across reloads.</p>
           <p><strong>Use Avatar</strong> selects a built-in skinned model with joined shoulders, arms, neck and head,
             rather than separate rigid body parts. Bone weights bend the skin at shoulders, elbows and wrists. The
@@ -332,10 +341,10 @@ export function createCharacterEditor(options: {
           <p><strong>Load complete 2D example</strong> loads Paper Climber, a complete custom cutout character: pot,
             jacket, helmet, both arms, gloves and hammer. Shared PNGs cover all 13 visual slots; eight custom 2D bones
             and two grip-target IK chains drive the arms. Eight custom helmet views follow aim with automatic neck
-            tilt. It loads a new 2D draft, not a save: Revert restores your last saved profile until you choose Save.
+            tilt. It loads as one step Undo takes back, not a save: Revert restores your last saved profile until you choose Save.
             Artwork is generated only when you load this example.</p>
           <p>Save and Revert apply to the whole character / sprite profile, not just the type. Only Save writes this
-            profile to browser storage.</p>
+            profile to browser storage. Undo takes back every change to it, Revert and loads included.</p>
         </section>
       `)}
     </div>
@@ -345,6 +354,7 @@ export function createCharacterEditor(options: {
           title="Save the whole character / sprite profile in this browser">Save character profile</button>
         <button type="button" class="button character-revert"
           title="Restore the last saved character / sprite profile">Revert character profile</button>
+        <button type="button" class="button character-retry" title="Load the character profile in the game again" hidden>Retry loading</button>
       </div>
       <div class="appearance-state character-state" role="status" aria-live="polite" aria-atomic="true">
         <p class="character-status"></p>
@@ -365,6 +375,7 @@ export function createCharacterEditor(options: {
   const exportButton = element<HTMLButtonElement>(root, '.character-export');
   const saveButton = element<HTMLButtonElement>(root, '.character-save');
   const revertButton = element<HTMLButtonElement>(root, '.character-revert');
+  const retryButton = element<HTMLButtonElement>(root, '.character-retry');
   element(root, '.character-footer .character-action-row').append(createProjectSaveButton({
     target: options.projectSave, sections: ['characters/primary'], label: 'the character profile', signal: events.signal,
   }));
@@ -372,9 +383,10 @@ export function createCharacterEditor(options: {
     mount: element(root, '.character-server'), signal: events.signal, copies: options.serverCopies, kind: 'characters',
     id: 'character', noun: 'character profile', plural: 'character profiles', placeholder: 'e.g. hooded-climber',
     onNotice: options.onNotice,
-    capture: () => options.state.validatedDraft(),
-    apply: (value) => options.state.loadDocument(validateProjectCharacter(value)),
-    afterLoad: 'It is a draft: Save keeps it in this browser.',
+    capture: () => state.definition(),
+    // The download is part of the load, one pending edit.
+    load: async (name, read) => state.settleProfile(await imports.profileRead(read, request(`Load server profile ${name}`, 'character-server'))),
+    afterLoad: 'Undo takes it back; Save keeps it in this browser.',
   });
   const externalWarning = element<HTMLParagraphElement>(root, '.character-external-warning');
   const forwardReset = element<HTMLButtonElement>(root, '.character-arm-forward-reset');
@@ -383,21 +395,25 @@ export function createCharacterEditor(options: {
     ...ARM_FORWARD_DISTANCE_LIMITS, label: 'Arm forward distance', unit: 'm',
     description: 'Distance between the configured chest front and both hand/hammer grip targets. Applies to the two 3D character modes.',
   }, {
-    id: 'character-arm-forward-distance', name: 'armForwardDistance', signal: events.signal,
-    onInput: value => { if (options.state.setArmForwardDistance(value) !== null) render(); },
+    id: 'character-arm-forward-distance', name: 'armForwardDistance', signal: events.signal, history,
+    onInput: (value) => { state.apply(commands.armForwardDistance(value, info('Set Arm forward distance', 'character-arms'))); },
   });
   element(root, '.character-arm-forward-control').append(forward.row);
-  forwardReset.addEventListener('click', () => { options.state.setArmForwardDistance(DEFAULT_ARM_FORWARD_DISTANCE); }, listen);
+  forwardReset.addEventListener('click', () => {
+    state.apply(commands.armForwardDistance(DEFAULT_ARM_FORWARD_DISTANCE, info('Reset arm forward distance', 'character-arms')));
+  }, listen);
   const leanReset = element<HTMLButtonElement>(root, '.character-waist-lean-reset');
   const lean = createRangeControl({
     ...WAIST_LEAN_LIMITS, label: 'Waist lean', unit: 'deg',
     description: 'The most the upper body leans toward the hammer, turning at the waist. Applies to the two 3D character modes.',
   }, {
-    id: 'character-waist-lean', name: 'waistLean', signal: events.signal,
-    onInput: value => { if (options.state.setWaistLean(value) !== null) render(); },
+    id: 'character-waist-lean', name: 'waistLean', signal: events.signal, history,
+    onInput: (value) => { state.apply(commands.waistLean(value, info('Set Waist lean', 'character-arms'))); },
   });
   element(root, '.character-waist-lean-control').append(lean.row);
-  leanReset.addEventListener('click', () => { options.state.setWaistLean(DEFAULT_WAIST_LEAN); }, listen);
+  leanReset.addEventListener('click', () => {
+    state.apply(commands.waistLean(DEFAULT_WAIST_LEAN, info('Reset waist lean', 'character-arms')));
+  }, listen);
 
   const avatarFile = element<HTMLInputElement>(root, '#character-avatar-file');
   const avatarStatus = element<HTMLParagraphElement>(root, '.character-avatar-status');
@@ -409,7 +425,7 @@ export function createCharacterEditor(options: {
   const avatarDiscard = element<HTMLButtonElement>(root, '.character-avatar-discard');
   const avatarRemove = element<HTMLButtonElement>(root, '.character-avatar-remove');
   const motionEditor = createMotionEditor({
-    mount: element<HTMLDivElement>(root, '.character-motion-mount'), state: options.state,
+    mount: element<HTMLDivElement>(root, '.character-motion-mount'), state,
     kinds: options.motion.kinds, controls: options.motion.controls, preview: options.motion.preview, signal: events.signal,
   });
   const hammerFile = element<HTMLInputElement>(root, '#character-hammer-file');
@@ -426,7 +442,8 @@ export function createCharacterEditor(options: {
   const armReset = element<HTMLButtonElement>(root, '.character-arm-length-reset');
   const hammerGeometry = element<HTMLSpanElement>(root, '.character-hammer-geometry');
   let hammerRig = options.hammerRig;
-  // The profile's arm lengths, or each type's own lengths, clamped so an edit starts from a valid profile.
+  // The profile's arm lengths, or each type's own lengths as the game shows them, clamped so an edit starts from a valid
+  // profile; render() holds these controls until the game shows the profile.
   const shownArms = (arms: CharacterArms | null): CharacterArms => {
     if (arms !== null) return arms;
     const natural = options.naturalArms();
@@ -442,9 +459,12 @@ export function createCharacterEditor(options: {
       description: `Length of the ${label.toLowerCase()}, from joint to joint, in every character type.`,
     }, {
       id: `character-${side}-${segment}-length`, name: `${side}${segment === 'upper' ? 'Upper' : 'Forearm'}Length`, signal: events.signal,
-      onInput: value => {
-        const arms = shownArms(options.state.snapshot().document.arms);
-        if (options.state.setArms({ ...arms, [side]: { ...arms[side], [segment]: value } }) !== null) render();
+      history,
+      onInput: (value) => {
+        state.apply(commands.arms((current) => {
+          const arms = shownArms(current);
+          return { ...arms, [side]: { ...arms[side], [segment]: value } };
+        }, info(`Set ${label}`, 'character-arm-lengths')));
       },
     });
     element(root, '.character-arm-length-controls').append(control.row);
@@ -455,25 +475,24 @@ export function createCharacterEditor(options: {
       ...GRIP_LIMITS, label, unit: 'm',
       description: `Where the ${side} hand holds the handle, measured from the butt.`,
     }, {
-      id: `character-${side}-grip`, name: `${side}Grip`, signal: events.signal,
-      onInput: value => {
-        if (options.state.setGrips({ ...options.state.snapshot().document.grips, [side]: value }) !== null) render();
-      },
+      id: `character-${side}-grip`, name: `${side}Grip`, signal: events.signal, history,
+      onInput: (value) => { state.apply(commands.grips((current) => ({ ...current, [side]: value }), info(`Set ${label}`, 'character-grips'))); },
     });
     element(root, '.character-grip-controls').append(control.row);
     return { side, control };
   });
   const gripRotationControls = GRIP_SIDES.flatMap(({ side }) => GRIP_ROTATION_AXES.map(({ axis, about }) => {
     const hand = side === 'left' ? 'Left hand' : 'Right hand';
+    const label = `${hand} ${axis.toUpperCase()}`;
     const control = createRangeControl({
-      ...GRIP_ROTATION_LIMITS, label: `${hand} ${axis.toUpperCase()}`, unit: 'deg',
+      ...GRIP_ROTATION_LIMITS, label, unit: 'deg',
       description: `Turns the ${side} hand on its grip about ${about}.`,
     }, {
-      id: `character-${side}-grip-rotation-${axis}`, name: `${side}GripRotation${axis.toUpperCase()}`, signal: events.signal,
-      onInput: value => {
-        const grips = options.state.snapshot().document.grips;
-        const rotation = { ...grips.rotation, [side]: { ...grips.rotation[side], [axis]: value } };
-        if (options.state.setGrips({ ...grips, rotation }) !== null) render();
+      id: `character-${side}-grip-rotation-${axis}`, name: `${side}GripRotation${axis.toUpperCase()}`, signal: events.signal, history,
+      onInput: (value) => {
+        state.apply(commands.grips((current) => ({
+          ...current, rotation: { ...current.rotation, [side]: { ...current.rotation[side], [axis]: value } },
+        }), info(`Set ${label}`, 'character-grips')));
       },
     });
     element(root, '.character-grip-rotation-controls').append(control.row);
@@ -485,9 +504,9 @@ export function createCharacterEditor(options: {
     description: 'Sliding hands hold on as the handle extends or retracts until one would be farther from its shoulder, ahead or ' +
       'behind, than this share of its arm\'s length as the camera sees it; then the handle slides through them and they hold on there.',
   }, {
-    id: 'character-grip-slide-at', name: 'gripSlideAt', signal: events.signal,
-    onInput: value => {
-      if (options.state.setGrips({ ...options.state.snapshot().document.grips, slideAt: value / 100 }) !== null) render();
+    id: 'character-grip-slide-at', name: 'gripSlideAt', signal: events.signal, history,
+    onInput: (value) => {
+      state.apply(commands.grips((current) => ({ ...current, slideAt: value / 100 }), info('Set Slide beyond', 'character-grips')));
     },
   });
   element(root, '.character-grip-slide-control').append(slidePoint.row);
@@ -497,14 +516,15 @@ export function createCharacterEditor(options: {
       description: `How near ${toward} sliding hands may hold, as a share of the handle a hand can hold: 0% is the butt and ` +
         `100% is the nearest a hand may come to the head, ${metres(HEAD_GRIP_CLEARANCE)} clear of its outline.`,
     }, {
-      id: `character-grip-range-${end}`, name: end === 'from' ? 'gripRangeFrom' : 'gripRangeTo', signal: events.signal,
-      onInput: value => {
-        const grips = options.state.snapshot().document.grips;
+      id: `character-grip-range-${end}`, name: end === 'from' ? 'gripRangeFrom' : 'gripRangeTo', signal: events.signal, history,
+      onInput: (value) => {
         const share = value / 100;
-        // Moving one end past the other carries the other along.
-        const slideRange = end === 'from' ? { from: share, to: Math.max(share, grips.slideRange.to) }
-          : { from: Math.min(share, grips.slideRange.from), to: share };
-        if (options.state.setGrips({ ...grips, slideRange }) !== null) render();
+        state.apply(commands.grips((grips) => {
+          // Moving one end past the other carries the other along.
+          const slideRange = end === 'from' ? { from: share, to: Math.max(share, grips.slideRange.to) }
+            : { from: Math.min(share, grips.slideRange.from), to: share };
+          return { ...grips, slideRange };
+        }, info(`Set ${label}`, 'character-grips')));
       },
     });
     element(root, '.character-grip-range-controls').append(control.row);
@@ -540,81 +560,65 @@ export function createCharacterEditor(options: {
     select.id = `character-bone-${joint}`;
     select.name = `bone-${joint}`;
     select.dataset.joint = joint;
-    select.addEventListener('change', () => { void options.state.setAvatarBone(joint, select.value === '' ? null : select.value); }, listen);
+    select.addEventListener('change', () => {
+      void imports.avatarBone(joint, select.value === '' ? null : select.value,
+        request(`Map avatar ${AVATAR_JOINT_LABELS[joint].toLowerCase()}`, 'character-avatar')).then((outcome) => state.settle(outcome));
+    }, listen);
     element(root, '.character-bone-grid').append(label, select);
     boneSelects.set(joint, select);
   }
   for (const input of gripModes) {
     input.addEventListener('change', () => {
       if (!input.checked) return;
-      if (options.state.setGrips({ ...options.state.snapshot().document.grips, placement: input.value }) !== null) render();
+      state.apply(commands.grips((current) => ({ ...current, placement: input.value }), info('Set grip placement', 'character-grips')));
     }, listen);
   }
   gripReset.addEventListener('click', () => {
-    const { placement, rotation } = options.state.snapshot().document.grips;
-    options.state.setGrips({ ...DEFAULT_GRIPS, placement, rotation });
+    state.apply(commands.grips(({ placement, rotation }) => ({ ...DEFAULT_GRIPS, placement, rotation }), info('Reset hand grips', 'character-grips')));
   }, listen);
   gripRotationReset.addEventListener('click', () => {
-    options.state.setGrips({ ...options.state.snapshot().document.grips, rotation: DEFAULT_GRIPS.rotation });
+    state.apply(commands.grips((current) => ({ ...current, rotation: DEFAULT_GRIPS.rotation }), info('Reset hand rotation', 'character-grips')));
   }, listen);
-  armReset.addEventListener('click', () => { options.state.setArms(null); }, listen);
+  armReset.addEventListener('click', () => {
+    state.apply(commands.arms(() => null, info('Use natural arm lengths', 'character-arm-lengths')));
+  }, listen);
   avatarFile.addEventListener('change', () => {
     const file = avatarFile.files?.[0];
     avatarFile.value = '';
-    if (file !== undefined) void options.state.importAvatarModel(file);
+    if (file === undefined) return;
+    void imports.avatar(file, request(`Import avatar ${file.name.replace(/\.glb$/i, '')}`, 'character-avatar'))
+      .then((outcome) => state.settle(outcome));
   }, listen);
-  avatarDiscard.addEventListener('click', () => options.state.cancelAvatarImport(), listen);
-  avatarRemove.addEventListener('click', () => { void options.state.removeAvatarModel(); }, listen);
-  hammerFile.addEventListener('change', () => {
-    const file = hammerFile.files?.[0];
-    hammerFile.value = '';
-    if (file !== undefined) void options.state.importPropModel('hammer', file);
+  avatarDiscard.addEventListener('click', () => imports.cancelAvatar(), listen);
+  avatarRemove.addEventListener('click', () => {
+    state.apply(commands.avatar(null, info('Use built-in avatar mesh', 'character-avatar')));
   }, listen);
-  hammerRemove.addEventListener('click', () => { void options.state.removePropModel('hammer'); }, listen);
-  potFile.addEventListener('change', () => {
-    const file = potFile.files?.[0];
-    potFile.value = '';
-    if (file !== undefined) void options.state.importPropModel('pot', file);
-  }, listen);
-  potRemove.addEventListener('click', () => { void options.state.removePropModel('pot'); }, listen);
-  // A server model downloads without holding the character, so a project can still open meanwhile, and
-  // is used like a GLB chosen from the computer only if the character did not change while it
-  // downloaded: whatever happened in between wins. One downloads at a time.
-  let downloading = false;
-  // An avatar comes with its own bone map, driver and hair when the server model carries them.
-  const serverPickers = ([
-    ['avatar', (file: File, model: ServerModel) => options.state.importAvatarModel(file, serverModelSettings(model))],
-    ['hammer', (file: File) => options.state.importPropModel('hammer', file)],
-    ['pot', (file: File) => options.state.importPropModel('pot', file)],
-  ] as const).map(([role, use]: readonly [PartRole, (file: File, model: ServerModel) => Promise<void>]) => {
-    const picker = createServerModelPicker({
+  for (const [role, file, remove, noun, section] of [
+    ['hammer', hammerFile, hammerRemove, 'Use two-part hammer', 'character-hammer'],
+    ['pot', potFile, potRemove, 'Use default pot', 'character-pot'],
+  ] as const) {
+    file.addEventListener('change', () => {
+      const chosen = file.files?.[0];
+      file.value = '';
+      if (chosen === undefined) return;
+      void imports.prop(role, chosen, request(`Import ${role} ${chosen.name.replace(/\.glb$/i, '')}`, section))
+        .then((outcome) => state.settle(outcome));
+    }, listen);
+    remove.addEventListener('click', () => { state.apply(commands.prop(role, null, info(noun, section))); }, listen);
+  }
+  // A server model's download is part of its import, one pending edit; an avatar comes with its own bone map, driver,
+  // hair and motions when the server model carries them.
+  for (const role of ['avatar', 'hammer', 'pot'] as const) {
+    element(root, `.character-${role}-server`).append(createServerModelPicker({
       role, id: `character-${role}-server`, action: 'Use', served: options.serverModels, signal: events.signal,
       take: async (download, model) => {
-        const before = options.state.snapshot();
-        downloading = true;
-        render();
-        let file: File;
-        try {
-          file = await download();
-        } catch (error) {
-          if (!(error instanceof ServerModelError)) throw error;
-          options.onNotice(error.message, 'error');
-          return;
-        } finally {
-          downloading = false;
-          render();
-        }
-        const now = options.state.snapshot();
-        if (now.restoring || now.busy || now.revision !== before.revision) {
-          options.onNotice(`"${file.name.replace(/\.glb$/i, '')}" was not used because the character changed while it downloaded. Choose it again to use it.`, 'error');
-          return;
-        }
-        await use(file, model);
+        const input = { name: `${model.name}.glb`, read: (signal: AbortSignal) => download(signal) };
+        const using = request(`Use server ${role} ${model.name}`, `character-${role}`);
+        state.settle(role === 'avatar' ? await imports.avatar(input, { ...using, model: serverModelSettings(model) })
+          : await imports.prop(role, input, using));
       },
-    });
-    element(root, `.character-${role}-server`).append(picker.root);
-    return picker;
-  });
+    }).root);
+  }
 
   for (const type of CHARACTER_RIGGING_TYPES) {
     const option = document.createElement('option');
@@ -622,90 +626,81 @@ export function createCharacterEditor(options: {
     option.textContent = CHARACTER_TYPES[type].label;
     typeSelect.append(option);
   }
-  typeSelect.addEventListener('change', () => {
-    if (options.state.setCharacterRiggingType(typeSelect.value) !== null) render();
-  }, listen);
-  avatarButton.addEventListener('click', () => { options.state.setCharacterRiggingType('avatar-3d'); }, listen);
+  // A refused type shows the profile's own again.
+  typeSelect.addEventListener('change', () => { state.apply(commands.riggingType(typeSelect.value, info('Set character type', null))); }, listen);
+  avatarButton.addEventListener('click', () => { state.apply(commands.riggingType('avatar-3d', info('Use Avatar', null))); }, listen);
   saveButton.addEventListener('click', options.actions.save, listen);
-  revertButton.addEventListener('click', options.actions.revert, listen);
-  importButton.addEventListener('click', options.actions.importDocument, listen);
+  revertButton.addEventListener('click', () => options.actions.revert('character'), listen);
+  importButton.addEventListener('click', () => options.actions.importDocument('character'), listen);
   exportButton.addEventListener('click', options.actions.exportDocument, listen);
+  retryButton.addEventListener('click', () => state.retry(), listen);
   exampleButton.addEventListener('click', () => {
-    const snapshot = options.state.snapshot();
-    if (snapshot.restoring || snapshot.busy) return;
-    if ((snapshot.hasContent || snapshot.dirty) && !window.confirm(
-      'Replace the current character / sprite draft with Paper Climber? Unsaved edits will be discarded. ' +
-      (snapshot.saved === null ? 'No saved profile is available to Revert to; export first to keep this draft.' :
-        'Your saved profile stays untouched and available through Revert until you choose Save.'),
-    )) return;
     exampleError.hidden = true;
     setText(exampleError, '');
+    let example: SpriteDocument;
     try {
-      void options.state.importDocument(new File(
-        [JSON.stringify(createSpriteCharacterExample())],
-        'paper-climber.sprites.json',
-        { type: 'application/json' },
-      ));
+      example = createSpriteCharacterExample();
     } catch (error) {
       if (!(error instanceof SpriteError)) throw error;
-      const message = `Could not create Paper Climber: ${error.message} Your current draft is unchanged.`;
+      const message = `Could not create Paper Climber: ${error.message} Your current profile is unchanged.`;
       setText(exampleError, message);
       exampleError.hidden = false;
       options.onNotice(message, 'error');
+      return;
     }
+    void imports.profileValue(example, request('Load Paper Climber', null)).then((outcome) => state.settleProfile(outcome));
   }, listen);
 
   function render(): void {
     if (disposed) return;
-    const snapshot = options.state.snapshot();
+    const snapshot = state.snapshot();
     const profile = snapshot.document;
-    const disabled = snapshot.restoring || snapshot.busy;
-    typeSelect.disabled = disabled;
     typeSelect.value = profile.characterRiggingType;
     const upperBody3d = UPPER_BODY_3D[profile.characterRiggingType];
-    const upperBodyDisabled = disabled || !upperBody3d;
+    const upperBodyDisabled = !upperBody3d;
     forward.setValue(profile.armForwardDistance, { disabled: upperBodyDisabled });
     forwardReset.disabled = upperBodyDisabled || profile.armForwardDistance === DEFAULT_ARM_FORWARD_DISTANCE;
     lean.setValue(profile.waistLean, { disabled: upperBodyDisabled });
     leanReset.disabled = upperBodyDisabled || profile.waistLean === DEFAULT_WAIST_LEAN;
     forwardInactive.hidden = upperBody3d;
-    for (const input of gripModes) {
-      input.checked = input.value === profile.grips.placement;
-      input.disabled = disabled;
-    }
-    for (const { side, control } of gripControls) control.setValue(profile.grips[side], { disabled });
+    for (const input of gripModes) input.checked = input.value === profile.grips.placement;
+    for (const { side, control } of gripControls) control.setValue(profile.grips[side]);
     const fixed = profile.grips.placement === 'fixed';
-    slidePoint.setValue(Math.round(profile.grips.slideAt * 100), { disabled: disabled || fixed });
+    slidePoint.setValue(Math.round(profile.grips.slideAt * 100), { disabled: fixed });
     for (const { end, control } of gripRangeControls) {
-      control.setValue(Math.round(profile.grips.slideRange[end] * 100), { disabled: disabled || fixed });
+      control.setValue(Math.round(profile.grips.slideRange[end] * 100), { disabled: fixed });
     }
-    gripReset.disabled = disabled || profile.grips.left === DEFAULT_GRIPS.left && profile.grips.right === DEFAULT_GRIPS.right &&
+    gripReset.disabled = profile.grips.left === DEFAULT_GRIPS.left && profile.grips.right === DEFAULT_GRIPS.right &&
       profile.grips.slideAt === DEFAULT_GRIPS.slideAt && profile.grips.slideRange.from === DEFAULT_GRIPS.slideRange.from &&
       profile.grips.slideRange.to === DEFAULT_GRIPS.slideRange.to;
     // 2D characters keep their authored wrist rotation, like their authored sprite depths.
     const rotationInactive = profile.characterRiggingType === 'sprite-2d';
     const { rotation } = profile.grips;
     for (const { side, axis, control } of gripRotationControls) {
-      control.setValue(rotation[side][axis], { disabled: disabled || rotationInactive });
+      control.setValue(rotation[side][axis], { disabled: rotationInactive });
     }
-    gripRotationReset.disabled = disabled || rotationInactive ||
+    gripRotationReset.disabled = rotationInactive ||
       sameGripRotation(rotation.left, NO_GRIP_ROTATION) && sameGripRotation(rotation.right, NO_GRIP_ROTATION);
     gripRotationInactive.hidden = !rotationInactive;
-    const arms = shownArms(profile.arms);
-    for (const { side, segment, control } of armControls) control.setValue(Number(arms[side][segment].toFixed(3)), { disabled });
-    setText(armStatus, profile.arms === null ? 'Using this character type\'s own arm lengths.' :
-      'This profile\'s arm lengths apply to every character type.');
-    armReset.disabled = disabled || profile.arms === null;
-    exampleButton.disabled = disabled;
-    avatarButton.disabled = disabled || profile.characterRiggingType === 'avatar-3d';
-    importButton.disabled = disabled;
-    exportButton.disabled = disabled || !snapshot.hasContent;
-    saveButton.disabled = disabled || !snapshot.dirty;
-    revertButton.disabled = disabled || !snapshot.dirty || snapshot.saved === null;
+    // Natural lengths are read from the game, so they wait until it shows this profile's type and models.
+    const naturalPending = profile.arms === null && snapshot.rendering.kind !== 'ready';
+    const arms = naturalPending ? null : shownArms(profile.arms);
+    for (const { side, segment, control } of armControls) {
+      control.setValue(arms === null ? control.input.valueAsNumber : Number(arms[side][segment].toFixed(3)), { disabled: arms === null });
+    }
+    setText(armStatus, profile.arms !== null ? 'This profile\'s arm lengths apply to every character type.' :
+      naturalPending ? 'Using this character type\'s own arm lengths; they show once the character loads.' :
+        'Using this character type\'s own arm lengths.');
+    armReset.disabled = profile.arms === null;
+    avatarButton.disabled = profile.characterRiggingType === 'avatar-3d';
+    exportButton.disabled = !snapshot.hasContent;
+    saveButton.disabled = snapshot.saving || !snapshot.dirty;
+    revertButton.disabled = !snapshot.dirty || snapshot.saved === null;
     externalWarning.hidden = !snapshot.externalSources;
     setText(technology, CHARACTER_TYPES[profile.characterRiggingType].description);
-    renderModels(snapshot, disabled);
-    motionEditor.render(snapshot, disabled);
+    renderModels(snapshot);
+    // Motions are checked against the avatar's model, so their controls wait for its report.
+    motionEditor.render(snapshot, snapshot.avatarModel?.joints == null);
 
     if (profile !== describedDocument) {
       let rigid = 0;
@@ -725,15 +720,18 @@ export function createCharacterEditor(options: {
       exampleError.hidden = true;
       setText(exampleError, '');
     }
-    if (disabled) exampleError.hidden = true;
-    const message = snapshot.restoring ? 'Restoring the saved character / sprite profile...' :
-      snapshot.busy ? 'Working on the character / sprite profile...' :
-      snapshot.error !== null ? snapshot.error :
+    const rendering = snapshot.rendering;
+    retryButton.hidden = rendering.kind !== 'failed';
+    const message = snapshot.error !== null ? snapshot.error :
+      rendering.kind === 'failed' ? `The character could not be shown: ${rendering.error.message} The game shows the previous one meanwhile.` :
+      rendering.kind === 'loading' ? 'Loading the character... The game shows the previous one until it is ready.' :
+      snapshot.saving ? 'Saving the character / sprite profile...' :
       snapshot.dirty ? 'Unsaved character profile changes. Save to keep them; Revert restores your last save.' :
       snapshot.hasContent ? 'Character / sprite profile saved on this device.' :
       'Built-in 3D character. No sprite artwork authored yet.';
     setText(status, message);
-    statusBox.dataset.kind = disabled ? 'busy' : snapshot.error !== null ? 'error' : snapshot.dirty ? 'draft' : 'ready';
+    statusBox.dataset.kind = snapshot.error !== null || rendering.kind === 'failed' ? 'error' :
+      rendering.kind === 'loading' || snapshot.saving ? 'busy' : snapshot.dirty ? 'draft' : 'ready';
     if (snapshot.modelIssue === null) delete statusBox.dataset.code;
     else statusBox.dataset.code = snapshot.modelIssue.code;
     // An avatar motion's refusal also names its kind.
@@ -741,13 +739,11 @@ export function createCharacterEditor(options: {
     else statusBox.dataset.motion = snapshot.modelIssue.motion;
   }
 
-  function renderModels(snapshot: ReturnType<SpriteEditorState['snapshot']>, disabled: boolean): void {
+  function renderModels(snapshot: SpriteEditorSnapshot): void {
     const avatar = snapshot.avatarModel;
-    avatarFile.disabled = disabled;
-    for (const picker of serverPickers) picker.setDisabled(disabled || downloading);
     setText(avatarStatus, avatar === null ? 'Using the built-in avatar mesh.' :
       avatar.pending ? `"${avatar.name}" is not applied: complete its bone map below.` :
-      `Using "${avatar.name}" as the avatar${avatar.joints === null ? '.' :
+      `Using "${avatar.name}" as the avatar${avatar.joints === null ? '; its joints list once its model loads.' :
         `: ${avatar.joints.length} skin joints, ${avatar.unmapped.length} unmapped.`}`);
     boneMap.hidden = avatar === null;
     const joints = avatar?.joints ?? null;
@@ -766,7 +762,8 @@ export function createCharacterEditor(options: {
     for (const [joint, select] of boneSelects) {
       const value = avatar?.boneMap[joint] ?? '';
       if (select.value !== value) select.value = value;
-      select.disabled = disabled || joints === null;
+      // A map resolves against the model's joints, so it waits for the model the profile holds.
+      select.disabled = joints === null;
       const issue = avatar?.issue ?? null;
       select.setAttribute('aria-invalid', String(issue !== null &&
         (issue.joints.includes(joint) || value !== '' && issue.joints.includes(value))));
@@ -790,16 +787,13 @@ export function createCharacterEditor(options: {
       }));
     }
     avatarDiscard.hidden = avatar?.pending !== true;
-    avatarDiscard.disabled = disabled;
-    avatarRemove.disabled = disabled || snapshot.document.avatar === undefined;
-    hammerFile.disabled = disabled;
+    avatarRemove.disabled = snapshot.document.avatar === undefined;
     setText(hammerStatus, snapshot.hammerModel === null ? 'Using the two-part hammer (default).' :
       `Using "${snapshot.hammerModel.name}" as a one-model hammer.`);
-    hammerRemove.disabled = disabled || snapshot.hammerModel === null;
-    potFile.disabled = disabled;
+    hammerRemove.disabled = snapshot.hammerModel === null;
     setText(potStatus, snapshot.potModel === null ? 'Using the default pot.' :
       `Using "${snapshot.potModel.name}" as the pot model.`);
-    potRemove.disabled = disabled || snapshot.potModel === null;
+    potRemove.disabled = snapshot.potModel === null;
   }
 
   function renderRig(): void {
@@ -809,7 +803,7 @@ export function createCharacterEditor(options: {
     const farthest = String(Number(Math.max(DEFAULT_GRIPS.right, head - HEAD_GRIP_MARGIN).toFixed(3)));
     for (const { side, control } of gripControls) {
       control.input.max = farthest;
-      control.setValue(options.state.snapshot().document.grips[side], { disabled: control.input.disabled });
+      control.setValue(state.definition().grips[side]);
     }
     setText(hammerGeometry, head === HAMMER_MODEL_HANDLE ? `This game's handle is ${metres(head)}, so the model draws as authored.` :
       `This game's handle is ${metres(head)}: the model's handle up to x = ${metres(HAMMER_MODEL_HEAD_END)} ` +
@@ -819,7 +813,7 @@ export function createCharacterEditor(options: {
 
   options.mount.append(root);
   renderRig();
-  const unsubscribe = options.state.subscribe(render);
+  const unsubscribe = state.subscribe(render);
   const unsubscribeMotion = options.motion.subscribe(render);
   options.signal.addEventListener('abort', dispose, { ...listen, once: true });
 

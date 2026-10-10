@@ -99,6 +99,8 @@ export function createProjectEditor(options: ProjectEditorOptions) {
         </div>
         <button type="button" class="button project-reopen" hidden
           title="Discard this browser's copy and open the project this Workshop was published with">Reopen published project</button>
+        <button type="button" class="button project-open-copy" hidden
+          title="Replace this page with the browser copy startup left unopened">Open browser copy</button>
       </section>
 
       ${sectionMarkup({ id: 'project-server', title: 'Project server', hint: 'Open, save as and publish', open: true }, `
@@ -205,6 +207,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const keptChanges = element<HTMLDivElement>(root, '.project-kept');
   const keptStatus = element<HTMLParagraphElement>(root, '.project-kept-status');
   const reopenButton = element<HTMLButtonElement>(root, '.project-reopen');
+  const openCopyButton = element<HTMLButtonElement>(root, '.project-open-copy');
   const serverStatus = element<HTMLParagraphElement>(root, '.project-server-status');
   const signin = element<HTMLDivElement>(root, '.project-signin');
   const token = element<HTMLInputElement>(root, '#project-token');
@@ -584,6 +587,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     keptStatus.textContent = snapshot.kept === null ? '' : `This browser kept unsaved changes to ${snapshot.kept.join(', ')} from an ` +
       'earlier session. Restoring them replaces those sections of the project.';
     reopenButton.hidden = published === null;
+    openCopyButton.hidden = snapshot.browserCopy === null || snapshot.browserCopy.deferred === null;
     idInput.placeholder = snapshot.binding?.id ?? projectIdForTitle(project.get('title'));
     const server = snapshot.server;
     const available = server !== null && server.available;
@@ -647,12 +651,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   element(root, '.project-keep-mine').addEventListener('click', () => { void session.keepMyVersions(); }, listen);
   element(root, '.project-use-project').addEventListener('click', () => { void session.useProjectVersions(); }, listen);
   element(root, '.project-restore').addEventListener('click', () => {
-    const sections = session.snapshot().kept ?? [];
-    if (sections.length === 0) return;
-    const mixed = sections.some((section) => section === 'characters/primary' || section === 'arm-ik' || section === 'appearance');
-    if (!mixed || window.confirm(`Restore this browser's changes to ${sections.join(', ')}? They replace the project's version of those sections.`)) {
-      void session.restoreKept();
-    }
+    void session.restoreKept();
   }, listen);
   element(root, '.project-discard').addEventListener('click', () => {
     if (window.confirm('Discard the changes this browser kept? They cannot be recovered.')) void session.discardKept();
@@ -662,6 +661,9 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   }, listen);
   reopenButton.addEventListener('click', () => {
     if (confirmReplace('Reopening the published project')) void session.reopenPublished();
+  }, listen);
+  openCopyButton.addEventListener('click', () => {
+    if (confirmReplace('Opening the browser copy')) void session.openBrowserCopy();
   }, listen);
   element(root, '.project-signin-button').addEventListener('click', () => {
     void session.signIn(token.value).then((signedIn) => { if (signedIn) token.value = ''; });
@@ -714,7 +716,9 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   element(root, '.project-alternate-current').addEventListener('click', () => {
     apply(commands.currentAsAlternate(info('Use current character as alternate', 'project-characters')));
   }, listen);
-  element(root, '.project-alternate-swap').addEventListener('click', () => { void session.swapCharacters(); }, listen);
+  element(root, '.project-alternate-swap').addEventListener('click', () => {
+    apply(commands.swapCharacters(info('Swap characters', 'project-characters')));
+  }, listen);
   element(root, '.project-alternate-import').addEventListener('click', () => alternateFile.click(), listen);
   alternateFile.addEventListener('change', () => {
     const file = alternateFile.files?.[0];

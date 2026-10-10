@@ -20,17 +20,17 @@ connected 3D character, or a skinned GLB imported in Character
 the same hammer length, the profile's grips and arm lengths, and the same input behavior.
 
 The type is authored profile data, not an inferred result of which assets happen
-to be loaded. Save/Revert and JSON actions in Character and Sprites operate on
-the same profile. Mode changes keep existing sprites, skeletons, presentation
-settings, and separately stored GLB assets, and end transient previews.
-Only Save writes storage. A 2D character needs sprite artwork; load the example
-or import a profile before selecting it. Switch to Mesh parts or Avatar before deleting
-the last 2D layer.
+to be loaded. Character and Sprites edit the same profile, the open project's primary
+character, and their Save/Revert and JSON actions operate on all of it. Mode changes keep
+existing sprites, skeletons, presentation settings, and separately stored GLB assets, and
+end transient previews. Only Save writes this browser's storage. A 2D character needs sprite
+artwork; load the example or import a profile before selecting it. Switch to Mesh parts or
+Avatar before deleting the last 2D layer.
 
 **Arm forward distance** controls the shared hand/hammer plane in Mesh parts
 and Avatar: 0-2 world metres from the configured chest front, in 0.01 m steps.
-The default is 0.25 m. It previews live, including while paused, and the reset
-button restores that default without saving. Save/Revert and profile
+The default is 0.25 m. It takes effect live, including while paused, and the reset
+button restores that default; neither saves. Save/Revert and profile
 import/export include `armForwardDistance`; `GAME_SPRITES` carries it into a
 game-only release. In pure 2D the control is disabled and its saved value is
 retained for the next 3D selection, without changing authored sprite depths.
@@ -97,7 +97,7 @@ Imported animation clips are not played.
 Choose or load a **2D sprite character**, then
 open **Workshop / Sprites**. Choose an anchor and a PNG to add a named layer.
 Layers have independent width, height, local X/Y/Z offsets, and local Z rotation
-in degrees. Select a layer to edit it; changes preview immediately, including
+in degrees. Select a layer to edit it; changes show at once, including
 while physics is paused. An unbound layer inherits its anchor's translation,
 rotation, and scale. Bone attachments and weighted meshes instead use the custom
 skeleton described below. Artwork stays in its local XY plane; it is not an
@@ -112,20 +112,27 @@ to tiled, bone-bound and weighted hammer sprites.
 all sprites. A pure 2D profile must supply all artwork it intends to show,
 including the tool. There is no Hybrid mode or Replace/Overlay control.
 
-**Save** persists the type, complete layout, and uploaded PNGs in this browser.
-The acknowledged save restores on startup. **Revert** restores it without
-overwriting it; imports, deletions, and offset edits remain drafts until Save.
-JSON import/export transfers the same layout between browsers. Selecting a
-different layer does not discard edits. Unreadable saves are reported and kept;
-failed imports leave the previous rendering and draft intact.
+Every edit in Sprites is one step of the [undo history](../README.md#undo-and-redo): a
+slider's scrub, a rename, a layer's deletion, each skeleton action such as **Apply**, and
+**New**, which starts an empty profile with the built-in 3D character. Undo selects again
+what was selected before the step, such as its layer or bone, and Redo what was selected
+after it. Adding a PNG layer or a flipbook's frames is a pending edit while the files are
+read and decoded, one PNG at a time, which Undo cancels; a refused import leaves the profile
+as it was. Selecting a layer is not a step.
 
-Sprite storage is a separate IndexedDB database, `over-the-edge:sprites`.
-Existing GLB, level, tuning, and IK records are unchanged. Saves are local to the
+**Save** stores the type, complete layout, and uploaded PNGs in this browser; it is not a
+step. **Revert** puts that save back as one step, without overwriting it. JSON
+import/export transfers the same layout between browsers, an import as one step.
+Unreadable saves are reported and kept.
+
+Sprite storage is a separate IndexedDB database, `over-the-edge:sprites`, apart from
+appearance models, levels, game settings and IK profiles. Saves are local to the
 site/origin and are not uploaded unless you save to your own project server:
 **Save to project** writes the profile into the open [game project](projects.md),
 and **Workshop / Character / Server character profiles** shares named
 [copies](projects.md#server-copies). Different tabs do not synchronize live edits;
-the last successful explicit Save becomes the next startup layout.
+outside a Workshop built with `GAME_PROJECT`, the last successful Save is the layout the
+Workshop opens at start.
 
 ## 2D skeletal rigging
 
@@ -147,8 +154,7 @@ saved layout, but cannot invent missing left/right facial views.
 
 Paper Climber supplies eight custom direction-tagged helmet views. They use
 the same cached direction as all sprite visibility and poses; only the active
-view is rendered. Load the example again to obtain that new artwork in an old
-saved single-view example. Loading remains draft-only.
+view is rendered.
 
 An explicit Directional Presentation replaces automatic head tilt, including
 its selected owners, disabled rotation, neutral angles and artist limits.
@@ -234,7 +240,7 @@ start, including the edge across zero. Ranges must make exactly one complete
 counterclockwise circle without gaps, overlaps, or empty sectors. A selection
 range includes its start and excludes its end: at an exact shared edge, the
 direction starting at that edge wins. Invalid edits are reported and leave
-the last valid draft intact.
+the last valid settings in place.
 
 When hysteresis is enabled, the active direction wins throughout its expanded
 hold range, including either hold boundary. Hold ranges may overlap, but each
@@ -278,11 +284,14 @@ rotated or reset with the head.
 Bones below simulated hair cannot be directional rotation owners either:
 their final parent transform is owned by the hair solver.
 
-#### Drafts and lifecycle
+#### Editing and lifecycle
 
-Panel controls use the same sprite document and **Save**, **Revert**, and JSON
-import/export actions as the rest of the Sprites tab. Resetting defaults edits
-the draft only. Save alone writes the browser record. A disabled presentation
+Panel controls edit the same profile, with the same **Save**, **Revert**, and JSON
+import/export actions, as the rest of the Sprites tab. Each change is one step of the
+[undo history](../README.md#undo-and-redo), **Reset directional defaults** included. Dragging
+a boundary handle applies live and is one step on release; Escape cancels the drag and records
+nothing, and a held arrow key's moves of one boundary are one step. Dragging the aim handle
+only previews. Save alone writes the browser record. A disabled presentation
 is stored as `null`, using fixed 45-degree sectors and the game's automatic
 head tilt for safe head owners. Authored settings never include active direction, preview aim,
 displayed rotation, or other smoothing state.
@@ -361,6 +370,9 @@ document is committed, so the first display of a frame never uploads during play
 In **Sprites**, select a layer, then choose its frame PNGs under **Aim
 flipbook**. File names set the order, with numbers sorted naturally
 (`head-5` before `head-10`); PNGs identical to existing images reuse them.
+The frames apply once all are read and decoded. Editing, removing or replacing the layer
+meanwhile, or another layer taking its ID, stops them, even if Undo then puts the layer back;
+choosing the frames the layer already shows, in the same order, records no step.
 A new flipbook starts at 0 degrees with 1 degree of hysteresis (half the
 allowed maximum above 90 frames); choosing new frames keeps valid settings.
 Set the start angle and hysteresis, and read the shown frame live. The
@@ -527,7 +539,17 @@ natural lengths change, after the committed presentation, so the active characte
 can resolve its figure once. Inactive profiles do no frame work. A presentation
 change stores the figure for the next death, never rebuilds the current corpse.
 Async `replace()` commits as soon as loading and validation succeed, respecting
-its abort signal without waiting for placement.
+its abort signal without waiting for placement. `prepareReplacement(document, { signal })`
+loads and validates the same way without showing anything. Its `commit(document?)` shows the
+prepared document, or a newer `document` that needs no image or model beyond those it loaded
+and those the rig shows, and `cancel()` lets go of what it staged; until either runs, the rig
+refuses other changes. `replacementNeeds(next, prepared)` says what `next` needs beyond what
+the rig shows: nothing (`'shown'`), only images and models a replacement of `prepared` loads
+(`'prepared'`), or more (`'more'`). `whenIdle(signal)` resolves once no replacement runs and
+no cancelled PNG decode or model load is still settling, so a host waits there instead of
+meeting that refusal. The Workshop waits there before each whole load of the character. While
+a load runs, a newer profile that needs only what it loads (`'prepared'`) lets it go on and
+shows in its place; one that needs none of it (`'shown'`) or more (`'more'`) cancels it.
 
 The portable JSON shape is:
 
@@ -630,8 +652,10 @@ new skeleton/layer allocation, with staged images still owned by the replace ope
 passes `armSlots: { left, right }`, each naming the arm's IK `target` and the anchors that
 depict its `upper` arm and `forearm`, so the arm lengths reach those 2D chains;
 `naturalArmLengths()` reports their authored lengths. Hosts that load character models also pass
-`characterAssets: { prepare(document, signal) }`, which acquires the document's models and returns
-`{ release() }`. The rig releases that lease in `finally` after success, failure or cancellation;
+`characterAssets: { prepare(document, signal), whenIdle(signal) }`. `prepare` acquires the
+document's models and returns `{ release() }`, and `whenIdle` resolves once none of the host's
+model loads is still running, abandoned ones included, which the rig's `whenIdle()` waits for.
+The rig releases that lease in `finally` after success, failure or cancellation;
 the host retains separate ownership for committed views. Without this hook, model documents are
 rejected. This game's per-profile pool coalesces loads and admits at most nine models, including
 abandoned decoders until they finish; last release disposes resources or aborts their load.
@@ -697,7 +721,7 @@ work and closes decoded bitmaps as well as releasing GPU resources. Unchanged
 sources are reused across replacements. Atomic staging can temporarily retain
 both the old and incoming layout's pixel budgets. Native bitmap decoding cannot
 be interrupted; after cancellation, further mutations are rejected until its
-late result has been closed.
+late result has been closed, which `whenIdle()` waits for.
 
 Removing a card leaves its loaded image cached until the next whole-document
 replacement or disposal, allowing incremental reuse without decoding again.
@@ -747,10 +771,10 @@ Character GLBs in either profile become content files and are validated at build
 
 ## Complete sprite-character example
 
-Open **Workshop / Character** and choose **Load complete 2D example**. This loads
-**Paper Climber** as a draft and selects the 2D sprite character type. Replacing
-existing content requires confirmation; the previous saved profile remains
-available through Revert until a new Save.
+Open **Workshop / Character** and choose **Load complete 2D example**. This replaces the
+profile with **Paper Climber**, a 2D sprite character, as one step of the
+[undo history](../README.md#undo-and-redo), which Undo takes back. The saved profile
+remains the Revert target until a new Save.
 
 The example covers all thirteen character/tool visual slots with custom PNG
 artwork: pot, torso, head, both upper arms, forearms, elbows and gloves, shaft,

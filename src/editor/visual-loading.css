@@ -1,0 +1,46 @@
+.visual-loading {
+  position: absolute;
+  z-index: 1;
+  top: max(110px, calc(env(safe-area-inset-top) + 90px));
+  left: var(--game-gutter);
+  max-width: min(360px, calc(100% - 2 * var(--game-gutter)));
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brass);
+  border-radius: 6px;
+  color: var(--ink);
+  background: rgb(243 241 232 / 94%);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.visual-loading p {
+  margin: 0;
+}
+
+.visual-loading p:not(:empty) ~ p:not(:empty) {
+  margin-top: 5px;
+}
+
+.visual-loading[data-kind="idle"] {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.visual-loading[data-kind="error"] {
+  border-left-color: #aa6b55;
+  color: #753e31;
+}
+
+body.workshop-open .visual-loading {
+  max-width: min(360px, calc(100% - var(--workshop-width) - 2 * var(--game-gutter)));
+}
+
+@media (width < 1040px) and (orientation: portrait) {
+  body.workshop-open .visual-loading {
+    max-width: min(360px, calc(100% - 2 * var(--game-gutter)));
+  }
+}

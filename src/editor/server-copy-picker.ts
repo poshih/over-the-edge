@@ -8,23 +8,10 @@ function expected(error: unknown): error is Error {
   return error instanceof ProjectApiError || isProjectDataError(error);
 }
 
-// How a loaded copy reaches its editor: `apply` takes its value once downloaded; `load` downloads it itself through
-// `read`, so an undoable load waits for the download as one pending edit. Either is false when nothing loaded.
-export type ServerCopyLoadOptions =
-  | {
-    // Validates and applies a loaded value; false when the editor declined it. Validation errors are reported here.
-    readonly apply: (value: unknown) => boolean | Promise<boolean>;
-    readonly load?: never;
-  }
-  | {
-    readonly apply?: never;
-    // Loads the copy `name`, reporting its own refusals; `read` downloads it, abandoned when `signal` aborts.
-    readonly load: (name: string, read: (signal: AbortSignal) => Promise<unknown>) => Promise<boolean>;
-  };
-
 /**
  * Save to server, and the server's copies of one kind, for an editor: a copy saved here is shared with everyone who
- * opens this Workshop, and loading one replaces the editor's current value, as an import does.
+ * opens this Workshop, and loading one replaces the editor's current value, as an import does. The editor's loader
+ * downloads the copy itself, so an undoable load waits for the download as one pending edit.
  */
 export function createServerCopyPicker<T>(options: {
   readonly mount: HTMLElement;
@@ -38,14 +25,15 @@ export function createServerCopyPicker<T>(options: {
   readonly placeholder: string;
   // The value to save, or null when it cannot be saved now; the editor says why.
   readonly capture: () => T | null;
+  // Loads the copy `name`, reporting its own refusals; `read` downloads it, abandoned when `signal` aborts. False when
+  // nothing loaded.
+  readonly load: (name: string, read: (signal: AbortSignal) => Promise<unknown>) => Promise<boolean>;
   // Ends the notice after a load, e.g. with how to keep what was loaded.
   readonly afterLoad: string;
-  // After a save, with the value saved, e.g. to count it as the editor's saved value.
-  readonly onSaved?: (value: T) => void;
   // While a copy loads, so the editor can hold back its other loads.
   readonly onLoading?: (loading: boolean) => void;
   readonly onNotice: (message: string, kind: 'info' | 'error') => void;
-} & ServerCopyLoadOptions): { setDisabled(disabled: boolean): void } {
+}): { setDisabled(disabled: boolean): void } {
   const { copies, id, kind, noun, plural, signal } = options;
   const listen = { signal };
   const root = options.mount;
@@ -166,7 +154,6 @@ export function createServerCopyPicker<T>(options: {
     }
     if (signal.aborted) return;
     nameInput.value = name;
-    options.onSaved?.(value);
     options.onNotice(`Saved "${name}" to the server; everyone who opens this Workshop can load it.`, 'info');
     await refresh(name);
   }
@@ -179,36 +166,11 @@ export function createServerCopyPicker<T>(options: {
     render();
   }
 
-  // Downloads the copy, then gives it to the editor; false when nothing loaded, as reported.
-  async function downloadAndApply(name: string, apply: (value: unknown) => boolean | Promise<boolean>): Promise<boolean> {
-    setBusy(true);
-    let value: unknown;
-    try {
-      value = await copies.read(kind, name);
-    } catch (error) {
-      if (signal.aborted) return false;
-      if (!expected(error)) throw error;
-      options.onNotice(error.message, 'error');
-      return false;
-    } finally {
-      setBusy(false);
-    }
-    if (signal.aborted) return false;
-    try {
-      return await apply(value);
-    } catch (error) {
-      if (!isProjectDataError(error)) throw error;
-      options.onNotice(`"${name}" on the server is not a valid ${noun}: ${error.message}`, 'error');
-      return false;
-    }
-  }
-
   // The editor's loader downloads the copy itself, so the download is part of what it loads.
-  async function loadThrough(name: string,
-    loader: (name: string, read: (signal: AbortSignal) => Promise<unknown>) => Promise<boolean>): Promise<boolean> {
+  async function loadThrough(name: string): Promise<boolean> {
     setBusy(true);
     try {
-      return await loader(name, (operation) => copies.read(kind, name, AbortSignal.any([operation, signal])));
+      return await options.load(name, (operation) => copies.read(kind, name, AbortSignal.any([operation, signal])));
     } catch (error) {
       if (signal.aborted) return false;
       if (!expected(error)) throw error;
@@ -222,8 +184,7 @@ export function createServerCopyPicker<T>(options: {
   async function loadSelected(): Promise<void> {
     const name = selected();
     if (name === undefined || disabled || busy) return;
-    const loaded = options.load === undefined
-      ? await downloadAndApply(name, options.apply) : await loadThrough(name, options.load);
+    const loaded = await loadThrough(name);
     if (!loaded || signal.aborted) return;
     nameInput.value = name;
     options.onNotice(`Loaded "${name}" from the server. ${options.afterLoad}`, 'info');

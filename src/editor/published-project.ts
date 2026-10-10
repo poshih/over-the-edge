@@ -1,5 +1,5 @@
 import { loadProjectDocuments, PROJECT_FILES, ProjectError, projectFileRefs, validateProjectManifest } from '../project';
-import type { ProjectDocuments, ProjectFileKind } from '../project';
+import type { ProjectDocuments } from '../project';
 import { sha256Hex } from '../sha256';
 
 /**
@@ -29,9 +29,6 @@ export type OpenedFile = Blob | PublishedFile;
 export interface OpenedProject extends ProjectDocuments {
   readonly files: ReadonlyMap<string, OpenedFile>;
 }
-
-// The files the editors use as soon as a project opens. Library models, media and course artwork download when used.
-const OPENING: ReadonlySet<ProjectFileKind> = new Set(['level', 'character', 'appearance']);
 
 function unavailable(path: string, detail: string): ProjectError {
   return new ProjectError(`${path} could not be downloaded from this Workshop (${detail}). Check the connection, then try again.`, { section: path });
@@ -77,9 +74,8 @@ export async function downloadPublishedFile(file: PublishedFile, signal: AbortSi
 }
 
 /**
- * Opens the published project: downloads its manifest and what the editors use at once (the level, the characters and
- * the appearance models) and validates them like an imported project file. Every other file stays a published file,
- * downloaded when the Workshop uses it.
+ * Opens the published project's manifest, level and characters, validating their documents and references. Every
+ * binary file stays a published file, downloaded when the Workshop uses it.
  */
 export async function loadPublishedProject(project: PublishedProject, options: {
   onProgress: (fraction: number) => void;
@@ -107,7 +103,7 @@ export async function loadPublishedProject(project: PublishedProject, options: {
   try {
     const manifest = validateProjectManifest(json(PROJECT_FILES.manifest, await downloadPublishedFile(find(PROJECT_FILES.manifest), downloads.signal)));
     const refs = projectFileRefs(manifest);
-    const opening = refs.filter((ref) => OPENING.has(ref.kind));
+    const opening = refs.filter((ref) => !ref.binary);
     const total = opening.reduce((sum, ref) => sum + find(ref.path).bytes, 0);
     let received = 0;
     const data = new Map(await Promise.all(opening.map(async (ref) => [ref.path, await downloadPublishedFile(find(ref.path), downloads.signal, (bytes) => {
@@ -118,9 +114,7 @@ export async function loadPublishedProject(project: PublishedProject, options: {
     const files = new Map<string, OpenedFile>();
     for (const ref of refs) {
       if (!ref.binary) continue;
-      const file = find(ref.path);
-      const bytes = data.get(ref.path);
-      files.set(ref.path, bytes === undefined ? file : new Blob([bytes], { type: 'model/gltf-binary' }));
+      files.set(ref.path, find(ref.path));
     }
     return Object.freeze({ ...documents, files });
   } catch (error) {

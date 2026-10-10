@@ -1,7 +1,9 @@
 import { setText } from '../dom';
 import type { RigJson } from '../avatar-driver';
 import type { AvatarMotionEntry } from '../avatar-motion-data';
+import { SpriteError } from '../sprite-data';
 import type { AvatarMotionControl, AvatarMotionControls, AvatarMotionNumberControl, AvatarMotionPath } from './avatar-motion-controls';
+import type { ProjectCommandInfo } from './document/project-commands';
 import type { LeanPreview } from '../waist-lean';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
@@ -9,10 +11,22 @@ import type { SpriteEditorSnapshot, SpriteEditorState } from './sprite-state';
 
 // One rendered control: the motion it edits, where its number sits in that motion's configuration, and its range.
 interface BoundControl {
-  readonly motion: number;
+  readonly motion: string;
+  readonly path: AvatarMotionPath;
+  readonly control: RangeControl;
+}
+
+// A number a kind's controls describe, with its path from the configuration's root.
+interface DescribedNumber {
+  readonly group: string | null;
   readonly path: AvatarMotionPath;
   readonly spec: AvatarMotionNumberControl;
-  readonly control: RangeControl;
+}
+
+// The controls one motion shows.
+interface MotionLayout {
+  readonly id: string;
+  readonly numbers: readonly DescribedNumber[];
 }
 
 // A control's number in a configuration, when the path reaches one.
@@ -43,9 +57,8 @@ function write(config: RigJson, path: AvatarMotionPath, value: number, at = 0): 
 
 // Every number a kind's controls describe in one motion's configuration, with its path from the configuration's root;
 // a list's controls repeat for each of its items, titled by the item's title field.
-function describedNumbers(config: RigJson, controls: readonly AvatarMotionControl[]):
-  { readonly group: string | null; readonly path: AvatarMotionPath; readonly spec: AvatarMotionNumberControl }[] {
-  const numbers: { group: string | null; path: AvatarMotionPath; spec: AvatarMotionNumberControl }[] = [];
+function describedNumbers(config: RigJson, controls: readonly AvatarMotionControl[]): DescribedNumber[] {
+  const numbers: DescribedNumber[] = [];
   for (const control of controls) {
     if (!('list' in control)) {
       if (readNumber(config, control.path) !== null) numbers.push({ group: null, path: control.path, spec: control });
@@ -65,12 +78,32 @@ function describedNumbers(config: RigJson, controls: readonly AvatarMotionContro
   return numbers;
 }
 
+function samePath(left: AvatarMotionPath, right: AvatarMotionPath): boolean {
+  return left === right || left.length === right.length && left.every((step, index) => step === right[index]);
+}
+
+// Whether two layouts show the same controls, compared field by field rather than serialised on every input.
+function sameLayout(left: readonly MotionLayout[], right: readonly MotionLayout[]): boolean {
+  return left.length === right.length && left.every((motion, index) => {
+    const other = right[index]!;
+    return motion.id === other.id && motion.numbers.length === other.numbers.length && motion.numbers.every((number, at) => {
+      const counterpart = other.numbers[at]!;
+      return number.group === counterpart.group && number.spec === counterpart.spec && samePath(number.path, counterpart.path);
+    });
+  });
+}
+
+// The undo key of one number: a motion kind and the typed steps of its path.
+function motionKey(id: string, path: AvatarMotionPath): string {
+  return `character-motion/${encodeURIComponent(id)}/${path.map((step) => typeof step === 'number' ? `#${step}` : encodeURIComponent(step)).join('/')}`;
+}
+
 /**
  * Workshop / Character / Secondary motion: the imported avatar's motions, each with the controls its kind describes in
  * a workshop facet's AVATAR_MOTION_CONTROLS (docs/workshop-plugins.md), a reset to their defaults, and a sway and a jolt that move the
- * avatar in the running game so the motion can be judged without playing. A change goes to the draft profile, where
- * the kind re-validates it against the model, and through Save and Revert. Hair shows here too; its chains are edited
- * in the profile JSON.
+ * avatar in the running game so the motion can be judged without playing. A change is a step of the profile, where the
+ * kind checks it again against the model; a scrub is one step. Hair shows here too; its chains are edited in the
+ * profile JSON.
  */
 export function createMotionEditor(options: {
   readonly mount: HTMLElement;
@@ -81,6 +114,7 @@ export function createMotionEditor(options: {
   readonly preview: (kind: LeanPreview) => void;
   readonly signal: AbortSignal;
 }): { render(snapshot: SpriteEditorSnapshot, disabled: boolean): void } {
+  const { state } = options;
   const root = document.createElement('div');
   root.className = 'character-motion';
   root.innerHTML = `
@@ -104,40 +138,44 @@ export function createMotionEditor(options: {
   jolt.addEventListener('click', () => options.preview('jolt'), { signal: options.signal });
   options.mount.append(root);
 
-  let layout: string | null = null;
+  let layout: readonly MotionLayout[] = [];
   let layoutEvents: AbortController | null = null;
   let bound: BoundControl[] = [];
   let resets: { readonly motion: number; readonly button: HTMLButtonElement }[] = [];
 
-  function motions(): readonly AvatarMotionEntry[] {
-    return options.state.snapshot().document.avatar?.motion ?? [];
+  const info = (label: string): ProjectCommandInfo =>
+    ({ label, place: { tab: 'character', section: 'character-motion', select: null }, coalesce: null });
+
+  // Changes motion `id`'s configuration as the profile holds it when the step runs.
+  function change(id: string, label: string, update: (config: RigJson) => RigJson): void {
+    state.apply(state.commands.avatarMotion((current) => current.map((entry): AvatarMotionEntry => {
+      if (entry.id !== id) return entry;
+      return { id, config: update(entry.config) };
+    }), info(label)));
   }
 
-  function change(index: number, update: (config: RigJson) => RigJson): void {
-    const current = motions();
-    const entry = current[index];
-    if (entry === undefined) return;
-    options.state.setAvatarMotion(current.map((other, at) => at === index ? { id: entry.id, config: update(entry.config) } : other));
+  function defaults(config: RigJson, numbers: readonly DescribedNumber[]): RigJson {
+    return numbers.reduce((next, { path, spec }) => write(next, path, spec.default), config);
   }
 
-  function defaults(config: RigJson, id: string): RigJson {
-    return describedNumbers(config, options.controls().get(id)?.controls ?? []).reduce((next, { path, spec }) => write(next, path, spec.default), config);
+  function describe(entries: readonly AvatarMotionEntry[]): readonly MotionLayout[] {
+    const controls = options.controls();
+    return entries.map((entry) => ({ id: entry.id, numbers: describedNumbers(entry.config, controls.get(entry.id)?.controls ?? []) }));
   }
 
-  function build(entries: readonly AvatarMotionEntry[]): void {
+  function build(motions: readonly MotionLayout[]): void {
     layoutEvents?.abort();
     layoutEvents = new AbortController();
     const signal = layoutEvents.signal;
     bound = [];
     resets = [];
-    list.replaceChildren(...entries.map((entry, motion) => {
+    list.replaceChildren(...motions.map(({ id, numbers }, motion) => {
       const group = document.createElement('fieldset');
       group.className = 'tuning-group character-motion-entry';
-      group.dataset.motion = entry.id;
+      group.dataset.motion = id;
       const legend = document.createElement('legend');
-      legend.textContent = entry.id;
+      legend.textContent = id;
       group.append(legend);
-      const numbers = describedNumbers(entry.config, options.controls().get(entry.id)?.controls ?? []);
       let parent: HTMLElement = group;
       let current: string | null = null;
       numbers.forEach(({ group: title, path, spec }, index) => {
@@ -153,12 +191,20 @@ export function createMotionEditor(options: {
             group.append(parent);
           }
         }
+        const label = `Set ${id} ${spec.label}`;
+        const key = motionKey(id, path);
         const control = createRangeControl(spec, {
-          id: `character-motion-${motion}-${index}`, name: `motion-${entry.id}-${path.join('.')}`, signal,
-          onInput: (value) => change(motion, config => write(config, path, value)),
+          id: `character-motion-${motion}-${index}`, name: `motion-${id}-${path.join('.')}`, signal,
+          history: state.history, stepLabel: label,
+          // Positions shift as motions come and go; the motion and its path name the number.
+          coalesceKey: () => key,
+          onInput: (value) => change(id, label, (config) => {
+            if (readNumber(config, path) === null) throw new SpriteError(`Motion "${id}" no longer has this setting.`);
+            return write(config, path, value);
+          }),
         });
         parent.append(control.row);
-        bound.push({ motion, path, spec, control });
+        bound.push({ motion: id, path, control });
       });
       if (numbers.length === 0) {
         const note = document.createElement('p');
@@ -169,8 +215,10 @@ export function createMotionEditor(options: {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'button character-motion-reset';
-        button.textContent = `Reset ${entry.id}`;
-        button.addEventListener('click', () => change(motion, config => defaults(config, entry.id)), { signal });
+        button.textContent = `Reset ${id}`;
+        // The kind's controls as the profile holds them when the step runs.
+        button.addEventListener('click', () => change(id, `Reset ${id}`,
+          (config) => defaults(config, describedNumbers(config, options.controls().get(id)?.controls ?? []))), { signal });
         group.append(button);
         resets.push({ motion, button });
       }
@@ -183,31 +231,31 @@ export function createMotionEditor(options: {
       const avatar = snapshot.document.characterRiggingType === 'avatar-3d' && snapshot.avatarModel?.pending !== true
         ? snapshot.document.avatar : undefined;
       const entries = avatar?.motion ?? [];
+      const described = describe(entries);
       // The controls are rebuilt only when what they show changes, so a slider keeps its focus while it drags.
-      const shape = JSON.stringify(entries.map(entry => [entry.id,
-        describedNumbers(entry.config, options.controls().get(entry.id)?.controls ?? [])
-          .map(({ group, path, spec }) => [group, path, spec])]));
-      if (shape !== layout) {
-        layout = shape;
-        build(entries);
-      }
+      if (!sameLayout(described, layout)) build(described);
+      layout = described;
+      const values = new Map(entries.map((entry) => [entry.id, entry.config]));
       for (const { motion, path, control } of bound) {
-        const value = readNumber(entries[motion]!.config, path);
+        const value = readNumber(values.get(motion)!, path);
         if (value !== null) control.setValue(value, { disabled });
       }
       for (const { motion, button } of resets) {
-        const entry = entries[motion]!;
-        button.disabled = disabled || JSON.stringify(defaults(entry.config, entry.id)) === JSON.stringify(entry.config);
+        const { numbers } = described[motion]!;
+        const config = entries[motion]!.config;
+        // Its numbers are all the defaults already exactly when a reset changes nothing.
+        button.disabled = disabled || numbers.every(({ path, spec }) => readNumber(config, path) === spec.default);
       }
       const chains = avatar?.hair.chains ?? [];
       const hair = chains.length === 0 ? '' : `Hair: ${chains.length} chain${chains.length === 1 ? '' : 's'} over ` +
         `${chains.reduce((sum, chain) => sum + chain.joints.length, 0)} joints, edited in the profile JSON's avatar.hair. `;
       const kinds = options.kinds.length === 0 ? 'This game registers no motion kinds.' : `Registered kinds: ${options.kinds.join(', ')}.`;
       setText(status, avatar === undefined ? 'Import a skinned avatar GLB above to give it secondary motion.' :
-        `${hair}${entries.length === 0 ? `No motion kinds run on this avatar. ${kinds}` : kinds}`);
+        `${hair}${entries.length === 0 ? `No motion kinds run on this avatar. ${kinds}` :
+          disabled ? `${kinds} The controls wait until the avatar's joints are known.` : kinds}`);
       const moving = avatar !== undefined && (chains.length > 0 || entries.length > 0);
-      sway.disabled = disabled || !moving;
-      jolt.disabled = disabled || !moving;
+      sway.disabled = !moving;
+      jolt.disabled = !moving;
     },
   };
 }

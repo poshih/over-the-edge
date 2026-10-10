@@ -115,8 +115,8 @@ plugin's ID comes from the manifest, as `host.plugin`.
 `host.project.snapshot()` is the open project as the Workshop holds it, unsaved changes
 included: the title, game settings, level, both character profiles, model library, theme, HUD,
 audio, enemy art, course artwork, media, arm IK and appearance parts. It is read-only and the
-same object until the project changes, and `host.project.subscribe(listener)` tells of each
-batch of changes.
+same object until the project changes. `host.project.subscribe(listener)` tells, a microtask
+later, of each batch of changes made while any plugin listens to the project.
 
 `host.project.edit` holds every edit the built-in tabs make, through the same operations: the
 title, game settings, the level (`upsert`, `remove`, `edit`, `labels`, `name`, which renames it or
@@ -126,24 +126,29 @@ profile, or its rigging type, arm forward distance, waist lean, grips, arms, ava
 presentation), the alternate character, arm IK and appearance parts, theme, HUD,
 audio, enemy art (a species' 3D model changes only through `enemyModel`, which imports it, and
 `enemyClips`, which chooses its clips, since those bake its motion), course packages, media and the
-model library. Each edit is
-validated, changes the draft, marks it unsaved and goes through Save, Revert, export and
-conflict handling as in its tab. Each returns the engine's typed error when it refuses, which
-the Workshop has shown as it shows its own, or `null`. A plugin changes the project no other
-way.
+model library. `character.document` checks a whole profile as an import does, and
+`appearance.parts` imports exactly the models it lists, each as Appearance imports one, so the
+parts it leaves out return to their procedural visuals. `character.avatarMotion` checks each
+motion against the joints of the avatar's model, as Character does, so it refuses until those
+are known: at once after the avatar's import, otherwise once the game has loaded the model.
+Each edit is validated, changes the project, marks it unsaved and goes through Save,
+Revert, export and conflict handling as in its tab. Each returns the engine's typed error when
+it refuses, which the Workshop has shown as it shows its own, or `null`. A plugin changes the
+project no other way. An applied edit is in the project, and in `snapshot()`, once the call
+returns or resolves; the game shows new character images and models, and new appearance
+models, once they load, the newest value winning.
 
-Every edit but those of the primary character, arm IK and appearance parts, which change
-outside the history as in their tabs, is a step of the Workshop's
-[undo history](../README.md#undo-and-redo), named `<plugin id>: <operation>`, such as
-`my-game: upsert` or `my-game: media.add`, with no tab, or joins the plugin's open
+Every edit is a step of the Workshop's [undo history](../README.md#undo-and-redo), named
+`<plugin id>: <operation>`, such as `my-game: upsert`, `my-game: character.grips`,
+`my-game: appearance.armIk` or `my-game: media.add`, with no tab, or joins the plugin's open
 [undo group](#undo). Outside a group, a plugin's calls of one operation, each within a second
 of the last, are one step, unless another edit, Undo or Redo comes in between. An edit that
-waits for a file or a bake, `enemyModel`, `enemyClips`, `coursePackage`, `media.add`,
-`library.add` or `library.avatar`, joins no group: it becomes a step of its own once ready;
-until then Undo, or another project opening, cancels it, and it resolves `null`, or
-`plugin-stopped` if the plugin stops first. A `replace` step holds only the objects that
-differ, so Undo and Redo change only those too and a playtest goes on. A refused edit, or one
-that changes nothing, records no step.
+waits for a file, a bake or its check, `character.document`, `appearance.parts`,
+`enemyModel`, `enemyClips`, `coursePackage`, `media.add`, `library.add` or `library.avatar`,
+joins no group: it becomes a step of its own once ready; until then Undo, or another project
+opening, cancels it, and it resolves `null`, or `plugin-stopped` if the plugin stops first. A
+`replace` step holds only the objects that differ, so Undo and Redo change only those too and
+a playtest goes on. A refused edit, or one that changes nothing, records no step.
 
 ## A plugin's own data
 
@@ -208,23 +213,22 @@ if (host.project.edit.level.upsert(gate) === null && host.data.set({ gate: gate.
   plain `project.edit.level` call's, leaves the Level selection as it is.
 - **Groups.** `host.history.begin(label)` opens a group named `<plugin id>: <label>` and returns
   its `commit` and `cancel`. While it is open, the plugin's `data.set` and `project.edit` calls,
-  its ranges' scrubs included, join it and show at once; edits that wait and the character's
-  and appearance's commit it instead (below). `commit({ select? })` makes the group one step,
-  and `cancel()` puts back exactly the values from before it and records nothing. A group that
-  changes nothing records no step. Inside a group, `data.set` still checks its label and
-  selection, but the group names the step and its commit gives the selection.
+  its ranges' scrubs included, join it and show at once; edits that wait commit it instead
+  (below). `commit({ select? })` makes the group one step, and `cancel()` puts back exactly the
+  values from before it and records nothing. A group that changes nothing records no step.
+  Inside a group, `data.set` still checks its label and selection, but the group names the step
+  and its commit gives the selection.
 - **One group at a time.** Groups do not nest: a new `begin`, by this plugin or another, commits
   the open group first. So do Undo, Redo, any other undoable edit, such as a built-in tab's or
   another plugin's, and a change from outside the history, such as a server update; Undo then
   takes the whole group back. Opening a project drops it, and stopping the plugin cancels it.
   Once a group has ended, its `commit` and `cancel` do nothing: they never stop the plugin or
   touch a newer group.
-- **Edits that wait.** An edit that waits for a file or a bake, such as `media.add`, commits the
-  open group before it starts. Once ready, it becomes a step of its own, committing any group
-  open then.
-- **Character and appearance.** Edits of the primary character, arm IK and appearance parts
-  change outside the history: each commits the open group first, and none is grouped or
-  undone.
+- **Edits that wait.** An edit that waits for a file, a bake or its check, such as `media.add`,
+  `character.document` or `appearance.parts`, commits the open group before it starts. Once
+  ready, it becomes a step of its own, committing any group open then. The character's and the
+  appearance's other edits, such as `character.grips` or `appearance.armIk`, apply at once and
+  join a group like any other edit.
 - **Listeners.** `host.data.subscribe(listener)` calls `listener(data, { cause, select })` for
   each change of the plugin's data, in order, a microtask after it. `data` is the data as that
   change left it. `cause` is `edit`, `undo`, `redo`, `open` (a project opening) or `server` (a
@@ -284,9 +288,9 @@ export default defineWorkshop({
 - The Workshop checks every set against the registered motion kinds: controls for a kind no
   kinds facet registers fail with `invalid-contribution`, and the facets then run no Workshop
   plugins until fixed.
-- Each motion shows its controls and a reset to their defaults. A change goes to the draft
-  profile, where the kind checks it again, and through Save and Revert. Releases contain none
-  of it.
+- Each motion shows its controls and a reset to their defaults. A change is a step of the
+  profile, where the kind checks it again, and goes through Save and Revert; a scrub is one
+  step. Releases contain none of it.
 
 ## Level checks
 
@@ -417,7 +421,8 @@ allocates nothing per frame on its behalf.
   **not a plugin contract**.
 - **Avatar facts.** `game.avatar()` is the loaded imported avatar, or `null`: the model facts its
   motion kinds get (`AvatarMotionModel`), each motion's claimed joints, and
-  `jointWorld(index, out)`, a skin joint's current world frame.
+  `jointWorld(index, out)`, a skin joint's current world frame. While a new avatar model
+  loads, it lags the project's profile.
 - **Previews.** `game.preview('sway')` and `game.preview('jolt')` run Character's Sway and
   Jolt. `game.preview({ duration, offset })` runs one of the plugin's own: for up to 10 seconds
   of game time, `offset(elapsed, out)` moves the character's whole presentation (body, pot and

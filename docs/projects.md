@@ -215,12 +215,13 @@ and the browser warns if something could not be saved yet.
   again, so autosave writes nothing and no new level version is made; undoing past a save
   is a change that saves like any other.
 - Undo and Redo bring back the very file a step removed or added, such as a media file, a
-  course mesh or a library model: while the server still holds it, saving uploads nothing.
-  Before a save deletes such a file from the server, the page keeps its own copy while the
-  history may still bring it back; once it is back, the next save uploads it again.
+  course mesh, a library model or an appearance model: while the server still holds it,
+  saving uploads nothing. Before a save deletes such a file from the server, the page keeps
+  its own copy while the history may still bring it back; once it is back, the next save
+  uploads it again.
 
 Level's save is **Save to project**, at the top of the Level tab; each other editor's own
-Save also has one under it: Physics' **Save game settings**, Appearance's **Save alignment**
+Save also has one under it: Physics' **Save game settings**, Appearance's model buttons
 (models and alignment) and **Save IK profile**, and the character profile's **Save** in
 Character and Sprites. It writes that part into the open server project at once and says so,
 instead of waiting for the automatic save; a level takes along the media and course meshes
@@ -229,9 +230,15 @@ project waits for **Keep my version** or **Use the project's**.
 
 - **Open project** loads a server project into every editor at once: the level,
   physics, character profile, appearance models, arm IK and all project sections.
-  The page remembers it and reopens it after a reload. A Workshop started with a
-  project that the project server holds (`GAME_PROJECT=projects/<id>` under
-  `npm run dev` or `npm run studio`) opens that server project at start instead.
+  The page remembers it and reopens it after a reload, in place of the editors' own
+  browser saves. A Workshop started with a project that the project server holds
+  (`GAME_PROJECT=projects/<id>` under `npm run dev` or `npm run studio`) opens that server
+  project at start instead. An automatic opening at start, of a server project or, in a
+  Workshop built with `GAME_PROJECT`, of the published project or this browser's copy, applies
+  only while the page is untouched. Once you make a step, start an edit that waits, such as
+  an import, or open an undo group, even if you undo it, the opening stands down: the page
+  keeps its document and undo history as a new unsaved project, and one notice names what was
+  skipped and how to open it.
 - **Save as project ID** stores the whole game as a new project (or replaces the
   project with that ID), which then saves itself. Its files go one at a time, each
   downloaded from wherever the page has it as it is sent. If saving stops part way, the
@@ -257,9 +264,10 @@ profile), **Model library** (add library avatars, hammers and pots from files or
 `pack:course` package).
 
 Everything else keeps its usual tab. Opening or importing a project replaces the
-page's current game, its sprite draft and its browser-saved appearance models; the
-Workshop asks first when there are unsaved changes. Opening any project, from the server,
-a project file, **New project**, the published project or this browser's copy, clears the
+page's whole game, its character profile, arm IK and appearance models included, and
+leaves the editors' own browser saves as they were; the Workshop asks first when there are
+unsaved changes. Opening any project, from the server, a project file, **New project**, the
+published project or this browser's copy, clears the
 [undo history](../README.md#undo-and-redo) and cancels edits still waiting to finish.
 
 While a server project is open, the page checks the server every two seconds.
@@ -347,12 +355,12 @@ The page title comes from the project, with the same `GAME_TITLE` rules as relea
 
 - **Opening.** A page without a project of its own opens the published project as **Import
   project file** does: every section, the primary character in its own rigging type and the
-  alternate under **Alternate character**. It downloads, showing its progress, only what the
-  editors use at once: the manifest, the level, the characters and the appearance models.
-  Library models, media and course artwork download when the page uses them: a library model
-  when you preview or edit it, every file the page sends when you save it to a server or export
-  the project file, each checked against its size and SHA-256, while media play straight from
-  the site.
+  alternate under **Alternate character**. It downloads, showing its progress, only the
+  manifest, the level and the characters. Appearance models, library models, media and course
+  artwork download when the page uses them: appearance models as the game loads them once the
+  project has opened, a library model when you preview or edit it, every file the page sends
+  when you save it to a server or export the project file, each checked against its size and
+  SHA-256, while media play straight from the site.
 - **This browser's copy.** Once the page holds something the published project does not (a
   change, or an imported or new project), it keeps the whole project with its unsaved
   changes in this browser (IndexedDB) and reopens it after a reload. The copy stores the
@@ -360,11 +368,13 @@ The page title comes from the project, with the same `GAME_TITLE` rules as relea
   names it by its SHA-256. Changes are stored about a second after you stop editing; leaving the
   page before that warns first. **Export project file** takes the work out; **Reopen published
   project** discards the copy, asking first when there are unsaved changes.
-- **Older browser saves.** Here the editors' own browser saves (the character profile from
-  **Save**, Appearance's models and the selected IK profile) do not open at start, and opening
-  a project never changes them. The saved character profile remains the Revert target, and
-  named IK profiles and game settings profiles stay available. Appearance models
-  are kept in the project's copy instead of Appearance's own storage.
+  **Open browser copy** opens a copy that the opening at start skipped, also asking first; the
+  copy stays as it was until the page opens a project.
+- **The editors' browser saves.** Here the editors' own browser saves (the character profile
+  from **Save** and the selected IK profile) do not open at start, and opening a project
+  never changes them. The saved character profile, read while the project opens, remains the
+  Revert target, and named IK profiles and game settings profiles stay available. Appearance
+  keeps its models and alignment only in the project's copy, with no browser saves of its own.
 - **New deployments.** A page without unsaved changes opens the new version. A page with
   unsaved changes keeps them and says that a newer version is published; **Reopen published
   project** takes it. A copy uses the published files it names from whichever deployment
@@ -380,10 +390,7 @@ The page title comes from the project, with the same `GAME_TITLE` rules as relea
   - Opening or saving a server project removes the browser copy.
   - A browser copy that still holds unsaved changes waits in Project instead: **Restore into
     the project** loads them, replacing those sections, and **Discard them** removes them.
-    Restoring them is one step, **Restore kept changes**, which Undo takes back. Changes that
-    include the character profile, appearance models or arm IK ask first and apply outside
-    the [undo history](../README.md#undo-and-redo), cutting it at the sections they change,
-    as a section loaded from the server does.
+    Restoring them is one step, **Restore kept changes**, which Undo takes back.
 
 **Workshop / Project** says what the page holds: the published project, an older version of
 it or another local project, and whether it is kept in this browser. A site has one copy,
@@ -397,7 +404,8 @@ Workshop: **Server game settings** in Physics, **Server IK profiles** in Appeara
 **Server character profiles** in Character. Type a name of
 1-64 lowercase letters, digits and inner hyphens, then choose **Save to server**; saving
 under a listed name replaces that copy, after asking. Choose a copy and load it to replace
-the editor's current one, as an import does: a character profile loads as a draft, and the
+the editor's current one, as an import does: one step of the
+[undo history](../README.md#undo-and-redo), which Undo cancels while the copy downloads. The
 editor's browser saves stay as they were. **Refresh** picks up copies saved since.
 
 Each kind is a folder of this repository, one JSON file per copy, named by the copy:
@@ -790,7 +798,7 @@ keep working wherever the content is served.
 
 **Appearance, arm IK and characters.** Appearance parts are the Workshop's
 per-part GLB replacements (20 MiB each, 64 MiB in total), fitted with the same
-alignment as in Workshop / Appearance, and now included in releases. Arm IK is the
+alignment as in Workshop / Appearance, and included in releases. Arm IK is the
 Appearance tab's body-relative elbow hints. Character profiles are the files
 Workshop / Character exports; see [imported 3D characters](characters.md) and
 [sprites](sprites.md).

@@ -1,4 +1,6 @@
+import type { AppearancePart } from '../../appearance-profile';
 import type { AudioSettings } from '../../audio-settings';
+import type { ArmIkSettings } from '../../character';
 import type { DecorationArt } from '../../decoration-art';
 import type { EnemyArtSettings } from '../../enemy-art-data';
 import type { GameSettings } from '../../game-settings';
@@ -42,6 +44,16 @@ export interface DocumentModels {
   readonly pot: readonly DocumentModel<LibraryEntry>[];
 }
 
+export type DocumentArmIk = Readonly<ArmIkSettings>;
+
+// One imported part model: its fit, and its GLB wherever the FileStore finds it.
+export interface DocumentAppearancePart extends AppearancePart {
+  readonly file: FileHandle;
+}
+
+// At most one entry per part, in VISUAL_PART_IDS order.
+export type DocumentAppearance = readonly DocumentAppearancePart[];
+
 // Validation provenance; null data is an absent section, not a wrapper.
 export interface FrozenPluginData {
   readonly data: Exclude<PluginData, null>;
@@ -60,9 +72,16 @@ export interface SectionValues {
   readonly art: DocumentArt;
   readonly media: DocumentMedia;
   readonly models: DocumentModels;
+  // EMPTY_SPRITES is the default character.
+  readonly 'characters/primary': SpriteDocument;
   readonly 'characters/alternate': SpriteDocument | null;
+  readonly 'arm-ik': DocumentArmIk;
+  readonly appearance: DocumentAppearance;
   readonly [section: PluginSectionName]: FrozenPluginData | null;
 }
+
+export type VisualSectionName = 'characters/primary' | 'arm-ik' | 'appearance';
+export type VisualSectionValues = Pick<SectionValues, VisualSectionName>;
 
 export type SectionName = keyof SectionValues;
 export type BuiltinDocumentSectionName = Exclude<SectionName, PluginSectionName>;

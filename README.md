@@ -474,17 +474,15 @@ trigger goes on, so an intro film never interrupts testing. A game-only release 
 ### Undo and redo
 
 The Workshop keeps one undo history for the open project, shared by every tab. Each edit of
-the level, the game settings, the title, theme, HUD, audio, enemy art, media, course
-artwork, model library or alternate character, or of a Workshop plugin's own data, is one
-of its steps, whether made in **Level**, **Physics** or **Project**, with Character's
-**Handle length** or by a [Workshop plugin](docs/workshop-plugins.md#the-project). The
-character profile, appearance models and arm IK, which **Character**, **Sprites** and
-**Appearance** edit, change outside it, and Undo leaves them as they are. A change from
-outside the history, such as a server update, cuts it at the sections it changes: Undo
-loses the newest step that changed one of them and every step before that, and Redo loses
-every step, so Undo never writes over a change it did not make. **Swap with current
-character**, in Project, changes the character profile as well as the alternate character,
-so it applies outside the history too and cuts it at the alternate character.
+the project is one of its steps, whether made in **Level**, **Physics**, **Character**,
+**Appearance**, **Sprites** or **Project**, or by a
+[Workshop plugin](docs/workshop-plugins.md#the-project): the level, the game settings, the
+title, theme, HUD, audio, enemy art, media, course artwork, model library, both characters,
+arm IK, appearance models and each plugin's own data. **Swap with current character**, in
+Project, trades the two characters in one step. A change from outside the history, such as
+a server update, cuts it at the sections it changes: Undo loses the newest step that changed
+one of them and every step before that, and Redo loses every step, so Undo never writes over
+a change it did not make.
 
 **Undo** and **Redo** lead the Workshop header's tools on every tab. Each names the step
 it would take back or put back, with the tab it was made in, as in
@@ -494,16 +492,16 @@ or **Ctrl+Y** redoes, while the Workshop is open and the mouse is not captured; 
 field, the browser's own undo edits the text instead.
 
 Undo takes back the newest change, whichever tab made it: a step, or an edit still waiting
-for its data, such as an import whose file is still being read or checked, or game settings
-still downloading from the server, which it cancels, its button saying **Cancel** with the
-edit's name. The Workshop stays on the tab shown: when the step's tab is not shown, a notice
-says what was undone or redone and in which tab, and when it is, the section where the step
-was made opens. Each undo and redo is announced to screen readers, and on touch screens,
-where tips do not show, a notice says it too. While a project opens, is imported or updates
-from the server, and while this browser's
-[kept changes](docs/projects.md#publishing-a-workshop-with-its-project) come back through
-**Restore into the project** with the character profile, appearance models or arm IK among
-them, Undo and Redo are unavailable, and their tips say they wait for the project.
+for its data, such as an import whose file is still being read or checked, an imported
+avatar waiting for its bone map, or game settings still downloading from the server, which
+it cancels, its button saying **Cancel** with the edit's name. The Workshop stays on the tab
+shown: when the step's tab is not shown, a notice says what was undone or redone and in which
+tab, and when it is, the section where the step was made opens. Each undo and redo is
+announced to screen readers, and on touch screens, where tips do not show, a notice says it
+too. Undo and Redo change the project at once and never wait for the game to load the
+character's images and models or Appearance's models (see [Custom visuals](#custom-visuals)).
+While a project you asked for opens or is imported, and while the project updates from the
+server, Undo and Redo are unavailable, and their tips say they wait for the project.
 
 The history keeps at most **200** steps and about **64 MiB**, dropping the oldest first; the
 newest step always stays, however large. Files count too: a step counts the size of each
@@ -1555,12 +1553,27 @@ profile's [grips](#hand-grips) on the physical tool, with its [arm lengths](#arm
 | 2D sprite character | PNG cutouts or a custom 2D bone/weighted rig; all 3D character underlays are hidden |
 | Avatar (3D, connected body) | One connected, GPU-skinned character, built in or an imported skinned GLB, containing the torso, head, arms and hands; pot and hammer remain separate |
 
-The choice is stored as `characterRiggingType` in the character/sprite profile.
-Changing it retains the other artwork, but does not silently save it. Use the
-profile's **Save**, **Revert**, and JSON controls; **Save to project** writes it into
-the open [server project](docs/projects.md#working-in-the-workshop), and **Server character
+The choice is stored as `characterRiggingType` in the character/sprite profile, the
+project's primary character, which Character and Sprites edit. Changing it retains the
+other artwork. Each change to the profile is one step of the [undo history](#undo-and-redo),
+a slider's whole scrub included, as are **New**, **Revert**, loading the complete example, an
+imported profile and a server profile. **Save** stores the profile in this browser without
+making a step: it is the profile **Revert** puts back, and outside a Workshop built with
+`GAME_PROJECT` the one the Workshop opens at start. Undoing back to the saved profile shows
+it saved again. **Save to project** writes it into the open
+[server project](docs/projects.md#working-in-the-workshop), and **Server character
 profiles** shares named [copies](docs/projects.md#server-copies). Profiles use **schema version
-18**; profiles in any other version are rejected, not converted.
+19**; profiles in any other version are rejected, not converted.
+
+The project takes each change at once, and the game follows it. Most edits show
+immediately; new images or models, an avatar's new bone map, or a change to much of the
+profile at once load the profile first. Meanwhile the game shows the previous one, and
+Character, Sprites and a note beside the game say the character is loading. The newest
+profile always wins: a load that finishes late never shows over a newer one. A profile the
+game cannot show stays in the project, and Character and Sprites say why, with
+**Retry loading**. Sprites' previews wait until the game shows the profile. An imported
+avatar's motions and bone map wait until its model's joints are known: at once after its
+import, otherwise once the game has loaded it.
 
 Choose **Use Avatar** for a built-in skinned character, included
 under this project's MIT license. Its shoulder, elbow and wrist weights bend
@@ -1579,9 +1592,9 @@ and invalid models or maps fail with typed error codes. The same tab adds a
 game's, and a **pot model** GLB that follows the physical pot body and hides the body
 inside it. Models render with their own PBR materials. All of these are part of the character
 profile, so Save, JSON and `GAME_SPRITES` carry them. See [imported 3D characters](docs/characters.md).
-Appearance's per-part GLB replacements are separate, browser-local assets that
-only a [project](docs/projects.md) carries into a release; imported animation clips
-are not played.
+Appearance's per-part GLB replacements are a project section of their own, not part of the
+profile, so only a [project](docs/projects.md) carries them into a release; imported animation
+clips are not played.
 
 Character heads follow the direction from the hammer hinge toward the aim
 cursor, without turning the torso or moving the grips. Mesh parts and Avatar share smooth, neck-pivoted 3D gaze;
@@ -1614,7 +1627,7 @@ passes in front of the palm and arm behind it, so each hand closes around the gr
 built-in avatar's arms, and an imported avatar's arm surfaces: its triangles skinned mostly to the arm
 joints or to joints that follow them, such as fingers and twist bones, and any rigid mesh attached
 below an arm joint (see [avatar motion](docs/characters.md#motion)). 2D characters keep their authored
-layer depths, and their hammer draws over them as before.
+layer depths, and their hammer draws over them.
 
 The theme's **character light** shades the characters from a direction of its own, set by its angle
 around the view and its tilt toward the camera, and a 3D character casts shadows on itself in it: its
@@ -1626,7 +1639,7 @@ small shadow map that follows it, so the cost never grows with the level.
 For a complete starting point, choose **Load complete 2D example** in Character.
 **Paper Climber** supplies custom PNG artwork for the body, pot, arms, hands,
 and hammer, plus a custom 2D arm rig that follows the actual grip targets.
-Loading it changes the draft only. Save it or export its embedded-PNG profile
+Loading it replaces the current profile. Save it or export its embedded-PNG profile
 for an editor-free release; the example generator itself stays out of the game.
 
 The **Sprites** tab adds named PNG layers with anchor selection, size, local
@@ -1661,6 +1674,10 @@ in Sprites; Save, JSON and `GAME_SPRITES` carry them. See
 [aim flipbooks](docs/sprites.md#aim-flipbooks).
 
 Open **Workshop / Appearance**, choose a **Body part**, and select a **GLB model**.
+The import is a pending edit while its file is read and checked, then one step of the
+[undo history](#undo-and-redo). The game then loads the model, one part at a time, and
+shows the previous one meanwhile; Appearance and the note beside the game say when a model
+is loading or could not be shown.
 Parts can be replaced independently: pot, torso/neck, character head, each upper
 arm, forearm, elbow and hand, the full hammer shaft, and the hammer head. Parts
 without an import keep their procedural visual in Mesh parts mode. In Avatar
@@ -1742,7 +1759,7 @@ its own: 0.82 m and 0.82 m for the built-in arms, an imported avatar's bind pose
 skeleton's authored bones. Live physics and reach are unchanged; these lengths also
 size the next corpse through the character figure. Sliding
 hands measure their slide point against them, and an arm too short for its grip straightens
-toward it as before.
+toward it.
 
 ### Body-relative arm IK
 
@@ -1767,35 +1784,29 @@ Shoulders use the torso's transform. Both hands hold the physical slider-to-head
 frame, including its depth, where the profile's grips put them, and the arms take the
 profile's arm lengths when it has them. Procedural segments,
 straight replacements, GLB models, and tiled sprites share these same targets;
-artwork never changes hammer length or hand placement. The preview
-works with procedural and imported arm parts. Model alignment remains cosmetic;
+artwork never changes hammer length or hand placement. The hints
+work with procedural and imported arm parts. Model alignment remains cosmetic;
 it does not redefine skeleton anchors. These controls do not change colliders,
 mass, reach limits, or motor tuning. **D** / the Workshop's **Overlay** toggle also
 shows arm chains and crosses at the body-relative hints.
 
-Enter an **IK profile name**, then **Save IK profile** (or press Enter). Every
-save creates a timestamped snapshot of all six coordinates; reusing a name
-keeps earlier versions. Choose **Past IK profiles**, then **Load IK profile**
-to apply one. Selecting an entry alone does not change the preview. The last
-successfully saved or loaded profile restores on reload. **Reset arm IK** only
-previews the defaults; save a profile afterward to keep the reset. **Save to project**
+The hints belong to the project. Each slider's scrub is one step of the
+[undo history](#undo-and-redo), and **Reset arm IK** puts back the defaults as one step.
+Enter an **IK profile name**, then **Save IK profile** (or press Enter). Every save
+stores a timestamped snapshot of all six coordinates in this browser and selects it;
+reusing a name keeps earlier versions. Choose **Past IK profiles**, then **Load IK profile**
+to apply one as a step and select it. Selecting an entry alone changes nothing. Outside a
+Workshop built with `GAME_PROJECT`, the selected profile opens at start. **Save to project**
 writes the hints into the open [server project](docs/projects.md#working-in-the-workshop),
 and **Server IK profiles** shares named [copies](docs/projects.md#server-copies); loading
-one only previews it.
+one is a step too.
 
-Profiles use independent localStorage keys and a separate active-profile
-reference. Other tabs refresh the history without replacing the current draft.
-If a profile saves but updating the active reference fails, the UI reports
-that partial result; the snapshot remains in history and can be loaded to retry.
-Malformed profiles are marked and preserved. An unreadable active profile or
-selection is reported, never silently replaced by another saved profile.
+Profiles use independent localStorage keys and a separate reference to the selected one.
+Saves in other tabs refresh the list. The status says whether the hints match the profile
+last saved or loaded. If a profile saves or loads but selecting it fails, Appearance reports
+that partial result; the snapshot remains in the list and can be loaded to retry.
+Unreadable profiles are marked and left untouched.
 Model files, model alignment, and named physics presets remain separate.
-
-The previous v1 swivel-angle record is left untouched for rollback. Those
-ray-relative angles cannot be faithfully converted to body-relative targets:
-when only that old selection exists, the editor explains the change and starts
-with the new hints. Saving a named profile does not rewrite or delete the old
-record.
 
 ### Model files
 
@@ -1807,10 +1818,10 @@ Use a self-contained **binary glTF 2.0 (`.glb`)** with embedded textures:
 - External resource URLs/files are rejected. Imported lights, cameras, line
   helpers and animations are not applied.
 
-Each model is uniformly fitted to the original visual's bounds. **Visual
-scale**, rotation in degrees, and local offsets preview immediately.
-**Save alignment** preserves those adjustments; **Reset fit** previews the
-original fit. **Use default** removes only the selected part's saved replacement.
+Each model is uniformly fitted to the original visual's bounds. Once a part's model
+shows, **Visual scale**, rotation in degrees, and local offsets change its alignment live,
+without loading the model again; each scrub is one step. **Reset fit** returns to the
+original fit, and **Use default** removes the selected part's model, each as one step.
 For arm pieces, length should run along local Y; the shaft runs along local X.
 Use the rotation controls if the export uses a different orientation.
 
@@ -1819,12 +1830,19 @@ endpoints: it is fitted to a 1.5 m artwork length and stretched to the physical
 handle, so it follows any handle length. The underlying three-segment shaft and
 its mass/compliance remain in the physics simulation.
 
-Files are saved locally in IndexedDB when imported, and saved appearances restore
-on reload; a Workshop built with `GAME_PROJECT` keeps them in the project's browser
-copy instead. Nothing is uploaded unless you save a [project](docs/projects.md) to your
-own project server; projects carry these parts into their standalone releases. This
-storage belongs to the current browser and site address; it is separate from physics
-presets and is not bundled into `dist/` or shared with other players. Original files on your computer are
+Outside a Workshop built with `GAME_PROJECT`, Appearance also saves each part in this
+browser's IndexedDB: an import or **Use default** saves the part once the project takes it,
+and **Save alignment** (**Save default** for a part without a model) saves it again after
+later changes. Undo and Redo never write it, and the status says whether the part matches
+its save. A Workshop built with `GAME_PROJECT` keeps the parts in the project's browser copy
+instead. Outside such a Workshop, the saved parts open at start as the project's own, without
+a step; if the saved parts, the saved character profile or the selected IK profile cannot be
+read, the Workshop says so and opens none of them. While they are read, the Workshop panel
+cannot be used and a note beside the game says so; the game, its header and notices stay
+available. Nothing is uploaded unless you save a [project](docs/projects.md) to your own
+project server; projects carry these parts into their standalone releases. This storage
+belongs to the current browser and site address; it is separate from physics presets and is
+not bundled into `dist/` or shared with other players. Original files on your computer are
 never modified.
 
 ## Runtime inspection
@@ -1840,9 +1858,11 @@ inspection.
 `snapshot().dying` reports an active death sequence, and `snapshot().death` is
 `'health'`, `'fall'` or `null` while alive.
 They do not expose commands that bypass the game's input or motor mechanism.
-`window.gettingOver.appearance()` reports imported parts, saved/draft alignment,
-loading errors, current rendering anchors and world transforms, and the arm IK
-settings, selected profile, and save state.
+`window.gettingOver.appearance()` reports each part's model and alignment in the project,
+its browser save state (whether it matches this browser's save, and a save under way or
+failed), its `rendering` (`loading`, `ready`, or `failed` with the error) and its current
+rendering anchor and world transform, and the arm IK settings and whether they match the IK
+profile last saved or loaded.
 `window.gettingOver.level()` reports the immutable authored definition, current
 illusion/collider state, editor selection/mode, set piece placement state, and
 render/cache counts, including the imported avatar's joints and bone writes, the
@@ -1859,9 +1879,9 @@ Undo and Redo wait for the project.
 state (including the message toast showing and how many wait), and the independent
 run timer. Restart resets the attempt; physics time continues to be available
 separately as `snapshot().time`.
-`window.gettingOver.sprites()` reports the character/sprite draft and save state
-with the sprite renderer's `inspect()` result, including each aim flipbook
-layer's shown frame.
+`window.gettingOver.sprites()` reports the character profile, its `rendering` (`loading`,
+`ready`, or `failed` with the error) and its save state with the sprite renderer's
+`inspect()` result, including each aim flipbook layer's shown frame.
 `window.gettingOver.gameProject()` reports the open project: title, server binding
 and revisions, unsaved and conflicting sections, the project sections and audio
 playback, and in a Workshop built with `GAME_PROJECT` the published project and this

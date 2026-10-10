@@ -1,11 +1,12 @@
+import { checkAppearanceModel } from '../../appearance-model';
 import { ART_LIMITS, artName } from '../../art-types';
 import type { AvatarRigRegistry } from '../../avatar-rig';
+import { VISUAL_PART_IDS } from '../../character';
 import { inspectCharacterModel, suggestAvatarBoneMap } from '../../character-model-inspect';
 import type { CharacterModelReport } from '../../character-model-inspect';
 import { AVATAR_JOINT_IDS, validateAvatarBoneMap } from '../../character-profile';
 import type { AvatarModelSettings, PartialAvatarBoneMap } from '../../character-profile';
 import { embeddedGlb, validateCoursePackage } from '../../course-package';
-import { Disposal } from '../../disposal';
 import { enemyArtAssets } from '../../enemy-art-data';
 import type { ModelArt } from '../../enemy-art-data';
 import { validateArtAsset } from '../../enemy-model-check';
@@ -24,7 +25,7 @@ import {
   MODEL_LIBRARY_LIMITS, PART_ROLES, validateAvatarSettings,
 } from '../../model-library';
 import type {
-  AvatarHoldSettings, LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, LibraryHammerEntry, PartRole,
+  LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, LibraryHammerEntry, PartRole,
 } from '../../model-library';
 import { pluginOfSection } from '../../plugin-data';
 import { PluginError } from '../../plugins/kernel';
@@ -35,13 +36,15 @@ import { defaultEnemyClips } from '../enemy-clips';
 import { ProjectApiError } from '../project-client';
 import { ServerModelError } from '../server-models';
 import type { FileHandle, FileStore } from './files';
-import type { Command, History, PendingEdit } from './history';
+import type { History } from './history';
+import type { ImportRunner, PendingContext, PreparedImport } from './import-runner';
 import type { ProjectCommandInfo, ProjectCommands, ProjectRefusal } from './project-commands';
 import type {
   DocumentArtAsset, DocumentModel, SectionName, SectionValues,
 } from './project-document';
 import type { LibraryModel, ProjectBake, ProjectProjection } from './project-projection';
 import { adapterFor, SECTION_ADAPTERS } from './sections';
+import { characterHoldSettings } from './visual-values';
 
 export type EditOutcome<T> =
   | { readonly kind: 'applied' | 'unchanged'; readonly value: T }
@@ -107,34 +110,18 @@ export interface ProjectImports {
   dispose(): void;
 }
 
-type ImportSection = 'settings' | 'media' | 'art' | 'enemies' | 'models' | 'characters/alternate' | 'level';
-
-interface TargetGuard {
-  readonly job: ImportJob;
-  readonly sections: readonly SectionName[];
-  readonly unchanged: () => boolean;
+export interface ProjectImportsOptions {
+  readonly history: History;
+  readonly commands: ProjectCommands;
+  readonly files: FileStore;
+  readonly projection: ProjectProjection;
+  readonly avatarRigs: AvatarRigRegistry;
+  readonly prepareLevel: () => boolean;
+  readonly runner: ImportRunner;
 }
 
-interface ImportJob {
-  readonly controller: AbortController;
-  readonly generation: number;
-  readonly releases: Set<() => void>;
-  readonly keys: Set<string>;
-  readonly guards: Set<TargetGuard>;
-  pending: PendingEdit | null;
-  finishing: boolean;
-  ended: boolean;
-  cancellationQueued: boolean;
-}
+type ImportSection = 'settings' | 'media' | 'art' | 'enemies' | 'models' | 'characters/alternate' | 'appearance' | 'level';
 
-interface Ready<T> {
-  readonly command: () => Command;
-  readonly value: () => T;
-}
-
-class CancelledImport extends Error {}
-
-const CANCELLED = Object.freeze({ kind: 'cancelled' } as const);
 const SPECIES = new Set(ENEMY_SPECIES);
 
 function refusal(error: unknown, section: ImportSection): ProjectRefusal {
@@ -149,12 +136,6 @@ function refusal(error: unknown, section: ImportSection): ProjectRefusal {
     return error instanceof SpriteError ? error : new SpriteError(error.message, { cause: error });
   }
   return error instanceof ProjectError ? error : new ProjectError(error.message, { section, cause: error });
-}
-
-function commandRefusal(error: Error): ProjectRefusal {
-  if (error instanceof LevelError || error instanceof GameSettingsError || error instanceof ProjectError ||
-    error instanceof SpriteError || error instanceof PluginError) return error;
-  throw error;
 }
 
 function checked<T>(section: ImportSection, run: () => T): T {
@@ -212,100 +193,20 @@ function checkMotion(species: EnemySpecies, entry: ModelArt, bake: EnemyBake): v
   }
 }
 
-export function createProjectImports(options: {
-  readonly history: History;
-  readonly commands: ProjectCommands;
-  readonly files: FileStore;
-  readonly projection: ProjectProjection;
-  readonly avatarRigs: AvatarRigRegistry;
-  readonly prepareLevel: () => boolean;
-  readonly holdSettings: () => AvatarHoldSettings;
-}): ProjectImports {
-  const { history, commands, files, projection } = options;
+export function createProjectImports(options: ProjectImportsOptions): ProjectImports {
+  const { history, commands, files, projection, runner } = options;
   const document = history.document;
-  const jobs = new Set<ImportJob>();
-  const targets = new Map<string, ImportJob>();
-  const watched = new Map<SectionName, Set<TargetGuard>>();
-  const leases = new Set<() => void>();
-  let generation = 0;
-  let disposed = false;
+  // Stops this service's imports; the runner, shared with the character's and the appearance's, outlives it.
+  const lifecycle = new AbortController();
 
-  function owned(release: () => void): () => void {
-    let released = false;
-    const done = (): void => {
-      if (released) return;
-      released = true;
-      leases.delete(done);
-      release();
-    };
-    leases.add(done);
-    return done;
-  }
-
-  function retain(job: ImportJob, handles: readonly FileHandle[]): void {
-    job.releases.add(owned(files.retain(handles, 'work')));
-  }
-
-  function cancelPending(job: ImportJob): void {
-    if (!job.finishing && job.pending !== null && !job.pending.done) job.pending.cancel();
-  }
-
-  function stop(job: ImportJob): void {
-    if (!job.controller.signal.aborted) job.controller.abort();
-  }
-
-  function live(job: ImportJob): void {
-    if (disposed || job.ended || job.generation !== generation || job.controller.signal.aborted ||
-      (job.pending !== null && job.pending.done && !job.finishing)) throw new CancelledImport();
-    for (const guard of job.guards) {
-      if (guard.unchanged()) continue;
-      stop(job);
-      throw new CancelledImport();
-    }
-  }
-
-  function watch(job: ImportJob, sections: readonly SectionName[], unchanged: () => boolean): void {
-    const guard: TargetGuard = { job, sections, unchanged };
-    job.guards.add(guard);
-    for (const section of sections) {
-      let guards = watched.get(section);
-      if (guards === undefined) { guards = new Set(); watched.set(section, guards); }
-      guards.add(guard);
-    }
-  }
-
-  function target(job: ImportJob, key: string, sections: readonly SectionName[] = [], unchanged?: () => boolean): void {
-    const previous = targets.get(key);
-    if (previous !== undefined && previous !== job) stop(previous);
-    targets.set(key, job);
-    job.keys.add(key);
-    if (unchanged !== undefined) watch(job, sections, unchanged);
-  }
-
-  function stopTargets(prefix: string): void {
-    const previous = new Set<ImportJob>();
-    for (const [key, job] of targets) if (key.startsWith(prefix)) previous.add(job);
-    for (const job of previous) stop(job);
-  }
-
-  // Native blob reads and shared bakes can settle late; cancellation never resumes their edit.
-  function wait<T>(job: ImportJob, run: () => Promise<T>): Promise<T> {
-    live(job);
-    const task = run();
-    const signal = job.controller.signal;
-    return new Promise<T>((resolve, reject) => {
-      let settled = false;
-      const finish = (run: () => void): void => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener('abort', aborted);
-        run();
-      };
-      const aborted = (): void => finish(() => reject(new CancelledImport()));
-      signal.addEventListener('abort', aborted, { once: true });
-      task.then((value) => finish(() => resolve(value)), (error: unknown) => finish(() => reject(error)));
-      if (signal.aborted) aborted();
-    });
+  function edit<T, P>(
+    input: ImportOptions,
+    section: ImportSection,
+    start: (work: PendingContext) => P,
+    build: (work: PendingContext, prepared: P) => Promise<PreparedImport<T>>,
+  ): Promise<EditOutcome<T>> {
+    return runner.edit({ info: input.info, signal: AbortSignal.any([input.signal, lifecycle.signal]) },
+      (error) => refusal(error, section), start, build);
   }
 
   function prepareLevel(): void {
@@ -314,132 +215,12 @@ export function createProjectImports(options: {
     }
   }
 
-  function close(job: ImportJob, owner: AbortSignal, ownerAborted: () => void, aborted: () => void): void {
-    job.ended = true;
-    jobs.delete(job);
-    for (const key of job.keys) if (targets.get(key) === job) targets.delete(key);
-    for (const guard of job.guards) {
-      for (const section of guard.sections) {
-        const guards = watched.get(section);
-        guards?.delete(guard);
-        if (guards?.size === 0) watched.delete(section);
-      }
-    }
-    const disposal = new Disposal();
-    disposal.run(() => cancelPending(job));
-    disposal.run(() => owner.removeEventListener('abort', ownerAborted));
-    disposal.run(() => job.controller.signal.removeEventListener('abort', aborted));
-    for (const release of job.releases) disposal.run(release);
-    job.releases.clear();
-    disposal.finish();
-  }
-
-  async function edit<T, P>(
-    input: ImportOptions,
-    section: ImportSection,
-    start: (job: ImportJob) => P,
-    build: (job: ImportJob, prepared: P) => Promise<Ready<T>>,
-  ): Promise<EditOutcome<T>> {
-    if (disposed || input.signal.aborted) return CANCELLED;
-    const job: ImportJob = {
-      controller: new AbortController(), generation, releases: new Set(), keys: new Set(), guards: new Set(),
-      pending: null, finishing: false, ended: false, cancellationQueued: false,
-    };
-    const ownerAborted = (): void => stop(job);
-    const aborted = (): void => {
-      if (job.ended || job.cancellationQueued) return;
-      job.cancellationQueued = true;
-      queueMicrotask(() => {
-        job.cancellationQueued = false;
-        if (!job.ended) cancelPending(job);
-      });
-    };
-    jobs.add(job);
-    input.signal.addEventListener('abort', ownerAborted, { once: true });
-    job.controller.signal.addEventListener('abort', aborted, { once: true });
-    let outcome: EditOutcome<T> | null = null;
-    let failure: { readonly error: unknown } | null = null;
-    try {
-      const prepared = start(job);
-      live(job);
-      job.pending = history.prepare({
-        ...input.info,
-        cancelled: () => { if (!job.finishing) stop(job); },
-      });
-      live(job);
-      const ready = await build(job, prepared);
-      live(job);
-      let changed = false;
-      let command: Command | null = null;
-      const preparedCommand = (): Command => {
-        live(job);
-        if (command === null) command = ready.command();
-        return command;
-      };
-      job.finishing = true;
-      let error: Error | null;
-      try {
-        error = job.pending.finish({
-          // The factory reads after finish commits any transaction, with no async gap before run.
-          get label() { return preparedCommand().label; },
-          get place() { return preparedCommand().place; },
-          get coalesce() { return preparedCommand().coalesce; },
-          run(current) {
-            live(job);
-            const changes = preparedCommand().run(current);
-            live(job);
-            changed = changes.some((change) => change.before !== change.after);
-            return changes;
-          },
-        });
-      } finally {
-        job.finishing = false;
-      }
-      outcome = error === null
-        ? Object.freeze({ kind: changed ? 'applied' : 'unchanged', value: ready.value() })
-        : Object.freeze({ kind: 'refused', error: commandRefusal(error) });
-      return outcome;
-    } catch (error) {
-      if (error instanceof CancelledImport || (!(error instanceof PluginError) &&
-        (job.controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')))) {
-        outcome = CANCELLED;
-      } else {
-        try {
-          outcome = Object.freeze({ kind: 'refused', error: refusal(error, section) });
-        } catch (unexpected) {
-          failure = { error: unexpected };
-          throw unexpected;
-        }
-      }
-      return outcome;
-    } finally {
-      const disposal = new Disposal();
-      const failed = failure;
-      if (failed !== null) disposal.run(() => { throw failed.error; });
-      if (outcome === null || outcome.kind === 'cancelled' || outcome.kind === 'refused') disposal.run(() => stop(job));
-      disposal.run(() => close(job, input.signal, ownerAborted, aborted));
-      disposal.finish();
-    }
-  }
-
-  async function read(job: ImportJob, input: FileInput, limit: number, section: ImportSection): Promise<File> {
-    live(job);
-    const file = 'read' in input ? await wait(job, () => input.read(job.controller.signal)) : input;
-    live(job);
+  async function read(work: PendingContext, input: FileInput, limit: number, section: ImportSection): Promise<File> {
+    work.check();
+    const file = 'read' in input ? await work.wait(() => input.read(work.signal)) : input;
+    work.check();
     size(file, limit, section);
     return file;
-  }
-
-  async function stage(job: ImportJob, blob: Blob): Promise<FileHandle> {
-    live(job);
-    return wait(job, () => files.stagePage(blob, job.controller.signal).then((staged) => {
-      if (job.ended || job.controller.signal.aborted || disposed) {
-        staged.release();
-        throw new CancelledImport();
-      }
-      job.releases.add(owned(() => staged.release()));
-      return staged.handle;
-    }));
   }
 
   function assetId(file: FileHandle): string {
@@ -448,17 +229,20 @@ export function createProjectImports(options: {
     return `asset-${sha256}`;
   }
 
-  function bake<T>(job: ImportJob, prepare: () => ProjectBake<T>): Promise<T> {
-    return wait(job, () => {
+  // The import keeps its bake leased until it ends; a stop lets it go at once.
+  function bake<T>(work: PendingContext, prepare: () => ProjectBake<T>): Promise<T> {
+    return work.wait(() => {
       const held = prepare();
-      const release = owned(() => held.release());
-      const signal = job.controller.signal;
-      signal.addEventListener('abort', release, { once: true });
-      job.releases.add(owned(() => {
-        signal.removeEventListener('abort', release);
-        release();
-      }));
-      if (signal.aborted) release();
+      let released = false;
+      const release = (): void => {
+        if (released) return;
+        released = true;
+        work.signal.removeEventListener('abort', release);
+        held.release();
+      };
+      work.signal.addEventListener('abort', release, { once: true });
+      work.own(release);
+      if (work.signal.aborted) release();
       return held.promise;
     });
   }
@@ -470,24 +254,24 @@ export function createProjectImports(options: {
     return model;
   }
 
-  function avatarTarget(job: ImportJob, id: string): DocumentModel<LibraryAvatarEntry> {
+  function avatarTarget(work: PendingContext, id: string): DocumentModel<LibraryAvatarEntry> {
     const expected = avatar(id);
-    target(job, `models/avatar/${id}`, ['models'],
+    work.target(`models/avatar/${id}`, ['models'],
       () => document.get('models').avatar.find((model) => model.entry.id === id) === expected);
-    retain(job, [expected.file]);
+    work.retain([expected.file]);
     return expected;
   }
 
-  async function avatarReport(job: ImportJob, id: string): Promise<CharacterModelReport> {
-    const blob = await wait(job, () => projection.libraryBlob('avatar', id, job.controller.signal));
-    const bytes = await wait(job, () => blob.arrayBuffer());
-    live(job);
+  async function avatarReport(work: PendingContext, id: string): Promise<CharacterModelReport> {
+    const blob = await work.wait(() => projection.libraryBlob('avatar', id, work.signal));
+    const bytes = await work.wait(() => blob.arrayBuffer());
+    work.check();
     return inspectCharacterModel(bytes, 'avatar');
   }
 
-  async function libraryReport(job: ImportJob, file: File, role: PartRole): Promise<CharacterModelReport> {
-    const bytes = await wait(job, () => file.arrayBuffer());
-    live(job);
+  async function libraryReport(work: PendingContext, file: File, role: PartRole): Promise<CharacterModelReport> {
+    const bytes = await work.wait(() => file.arrayBuffer());
+    work.check();
     return inspectCharacterModel(bytes, role);
   }
 
@@ -501,11 +285,12 @@ export function createProjectImports(options: {
     return Object.freeze({ id, name: name.replace(/\.glb$/i, '').trim().slice(0, MODEL_LIBRARY_LIMITS.name) || id });
   }
 
-  function characterHoldSettings(model: AvatarModelSettings): LibraryAvatarSettings {
-    return validateAvatarSettings({ ...model, ...options.holdSettings() });
+  // Read as the step finishes, so the avatar takes the character's hold settings at that moment.
+  function withHoldSettings(model: AvatarModelSettings): LibraryAvatarSettings {
+    return validateAvatarSettings({ ...model, ...characterHoldSettings(document) });
   }
 
-  async function checkSections(job: ImportJob, values: Partial<SectionValues>): Promise<void> {
+  async function checkSections(work: PendingContext, values: Partial<SectionValues>): Promise<void> {
     if (values.art !== undefined) {
       if (values.art.assets.length > ART_LIMITS.assets) throw new ProjectError('The restored artwork has too many assets.', { section: 'art' });
       checkFileBudget('art', values.art.assets.reduce((sum, asset) => sum + asset.file.bytes, 0));
@@ -513,6 +298,12 @@ export function createProjectImports(options: {
     if (values.media !== undefined) {
       if (values.media.length > MEDIA_LIMITS.files) throw new ProjectError('The restored media library has too many files.', { section: 'media' });
       checkFileBudget('media', values.media.reduce((sum, item) => sum + item.file.bytes, 0));
+    }
+    if (values.appearance !== undefined) {
+      if (values.appearance.length > VISUAL_PART_IDS.length) {
+        throw new ProjectError('The restored appearance has too many part models.', { section: 'appearance' });
+      }
+      checkFileBudget('appearance', values.appearance.reduce((sum, part) => sum + part.file.bytes, 0));
     }
     for (const role of PART_ROLES) {
       if (values.models !== undefined && values.models[role].length > MODEL_LIBRARY_LIMITS.entries) {
@@ -529,15 +320,15 @@ export function createProjectImports(options: {
       if (value === undefined) throw new ProjectError(`Missing restored section "${name}".`, { section: name });
       for (const file of adapterFor(section).files(value)) handles.add(file);
     }
-    retain(job, [...handles]);
+    work.retain([...handles]);
 
     for (const role of PART_ROLES) {
       for (const model of values.models?.[role] ?? []) {
         const current = document.get('models')[role].find((item) => item.entry.id === model.entry.id);
         if (current !== undefined && current.file === model.file && current.entry === model.entry) continue;
-        const blob = await wait(job, () => files.blob(model.file, job.controller.signal));
-        const bytes = await wait(job, () => blob.arrayBuffer());
-        live(job);
+        const blob = await work.wait(() => files.blob(model.file, work.signal));
+        const bytes = await work.wait(() => blob.arrayBuffer());
+        work.check();
         checked('models', () => {
           const report = inspectCharacterModel(bytes, role);
           if (role === 'avatar') checkAvatarModelSettings(report, model.entry as LibraryAvatarEntry, options.avatarRigs);
@@ -546,20 +337,31 @@ export function createProjectImports(options: {
     }
     for (const item of values.media ?? []) {
       if (document.get('media').some((current) => current.path === item.path && current.file === item.file)) continue;
-      const blob = await wait(job, () => files.blob(item.file, job.controller.signal));
+      const blob = await work.wait(() => files.blob(item.file, work.signal));
       size(blob, MEDIA_LIMITS.bytes, 'media');
-      const bytes = await wait(job, () => blob.slice(0, 64).arrayBuffer());
-      live(job);
+      const bytes = await work.wait(() => blob.slice(0, 64).arrayBuffer());
+      work.check();
       checked('media', () => checkMediaBytes(item.path, new Uint8Array(bytes)));
+    }
+    // Only files the appearance does not hold yet are read; a part model's check reads nothing but its bytes.
+    const held = new Set(document.get('appearance').map((part) => part.file));
+    for (const part of values.appearance ?? []) {
+      if (held.has(part.file)) continue;
+      const blob = await work.wait(() => files.blob(part.file, work.signal));
+      size(blob, MODEL_LIMITS.bytes, 'appearance');
+      const bytes = await work.wait(() => blob.arrayBuffer());
+      work.check();
+      checked('appearance', () => checkAppearanceModel(bytes));
+      held.add(part.file);
     }
     if (values.art === undefined && values.enemies === undefined) return;
 
     const currentLevel = document.get('level');
     const currentArt = document.get('art');
     const currentEnemies = document.get('enemies');
-    if (values.level === undefined) watch(job, ['level'], () => document.get('level') === currentLevel);
-    if (values.art === undefined) watch(job, ['art'], () => document.get('art') === currentArt);
-    if (values.enemies === undefined) watch(job, ['enemies'], () => document.get('enemies') === currentEnemies);
+    if (values.level === undefined) work.watch(['level'], () => document.get('level') === currentLevel);
+    if (values.art === undefined) work.watch(['art'], () => document.get('art') === currentArt);
+    if (values.enemies === undefined) work.watch(['enemies'], () => document.get('enemies') === currentEnemies);
     const art = values.art ?? currentArt;
     const enemies = values.enemies ?? currentEnemies;
     const level = values.level ?? currentLevel;
@@ -568,13 +370,13 @@ export function createProjectImports(options: {
     const oldCourses = new Set([...terrainAssets(currentLevel), ...Object.values(currentArt.decorations)]);
     const oldDrawn = enemyArtAssets(currentEnemies, SPECIES);
     const blobs = new Map<FileHandle, Blob>();
-    retain(job, art.assets.map((asset) => asset.file));
+    work.retain(art.assets.map((asset) => asset.file));
     const blobFor = async (file: FileHandle): Promise<Blob> => {
-      live(job);
+      work.check();
       const existing = blobs.get(file);
       if (existing !== undefined) return existing;
-      const blob = await wait(job, () => files.blob(file, job.controller.signal));
-      live(job);
+      const blob = await work.wait(() => files.blob(file, work.signal));
+      work.check();
       blobs.set(file, blob);
       return blob;
     };
@@ -586,8 +388,8 @@ export function createProjectImports(options: {
       const blob = await blobFor(asset.file);
       size(blob, ART_LIMITS.bytes, 'art');
       if (assetId(asset.file) !== asset.id) throw new ProjectError(`Artwork ${asset.id} does not match its file's digest.`, { section: 'art' });
-      const bytes = await wait(job, () => blob.arrayBuffer());
-      live(job);
+      const bytes = await work.wait(() => blob.arrayBuffer());
+      work.check();
       checked('art', () => validateArtAsset(bytes, use(asset.id, courses, drawn)));
     }
     for (const species of ENEMY_SPECIES) {
@@ -598,83 +400,64 @@ export function createProjectImports(options: {
       const previous = currentArt.assets.find((item) => item.id === entry.asset);
       if (entry === currentEnemies[species] && previous?.file === asset.file) continue;
       const blob = await blobFor(asset.file);
-      const result = await bake(job, () => projection.bakeEnemy(asset.file, blob));
-      live(job);
+      const result = await bake(work, () => projection.bakeEnemy(asset.file, blob));
+      work.check();
       checkMotion(species, entry, result);
     }
   }
 
-  const unsubscribe = document.subscribeAll((changes) => {
-    const guards = new Set<TargetGuard>();
-    for (const change of changes) for (const guard of watched.get(change.section) ?? []) guards.add(guard);
-    for (const guard of guards) {
-      if (guard.job.ended || guard.job.finishing || guard.job.pending?.done) continue;
-      if (!guard.unchanged()) stop(guard.job);
-    }
-  });
-
-  function invalidate(): void {
-    generation++;
-    const disposal = new Disposal();
-    for (const job of jobs) {
-      disposal.run(() => stop(job));
-      disposal.run(() => cancelPending(job));
-    }
-    disposal.finish();
-  }
-
   const imports: ProjectImports = {
     settings(input, request) {
-      return edit(request, 'settings', (job) => {
+      return edit(request, 'settings', (work) => {
         cheapSize(input, GAME_SETTINGS_LIMITS.fileBytes, 'settings');
         const expected = document.get('settings');
-        target(job, 'settings', ['settings'], () => document.get('settings') === expected);
-      }, async (job) => {
-        const file = await read(job, input, GAME_SETTINGS_LIMITS.fileBytes, 'settings');
-        const text = await wait(job, () => file.text());
-        live(job);
+        work.target('settings', ['settings'], () => document.get('settings') === expected);
+      }, async (work) => {
+        const file = await read(work, input, GAME_SETTINGS_LIMITS.fileBytes, 'settings');
+        const text = await work.wait(() => file.text());
+        work.check();
         const settings = validateGameSettings(JSON.parse(text));
         return { command: () => commands.settings(() => settings, request.info), value: () => undefined };
       });
     },
     serverSettings(name, read, request) {
-      return edit(request, 'settings', (job) => {
+      return edit(request, 'settings', (work) => {
         if (name.length === 0) throw new GameSettingsError('Choose a server settings copy.');
         const expected = document.get('settings');
-        target(job, 'settings', ['settings'], () => document.get('settings') === expected);
-      }, async (job) => {
-        const value = await wait(job, () => read(job.controller.signal));
-        live(job);
+        work.target('settings', ['settings'], () => document.get('settings') === expected);
+      }, async (work) => {
+        const value = await work.wait(() => read(work.signal));
+        work.check();
         const settings = validateGameSettings(value);
         return { command: () => commands.settings(() => settings, request.info), value: () => undefined };
       });
     },
     media(input, request) {
-      return edit(request, 'media', (job) => {
+      return edit(request, 'media', (work) => {
         cheapSize(input, MEDIA_LIMITS.bytes, 'media');
         const path = mediaPathForFile(input.name);
         if (path === null) throw new ProjectError('Choose a .webm, .mp4, .mp3, .ogg, .wav or .m4a file with a letter or digit in its name.', { section: 'media' });
         const expected = document.get('media').find((item) => item.path === path);
-        target(job, `media${path}`, ['media'], () => document.get('media').find((item) => item.path === path) === expected);
+        work.target(`media${path}`, ['media'], () => document.get('media').find((item) => item.path === path) === expected);
         return path;
-      }, async (job, path) => {
-        const file = await read(job, input, MEDIA_LIMITS.bytes, 'media');
-        const bytes = await wait(job, () => file.slice(0, 64).arrayBuffer());
-        live(job);
+      }, async (work, path) => {
+        const file = await read(work, input, MEDIA_LIMITS.bytes, 'media');
+        const bytes = await work.wait(() => file.slice(0, 64).arrayBuffer());
+        work.check();
         checkMediaBytes(path, new Uint8Array(bytes));
-        const handle = await stage(job, file);
-        live(job);
+        const handle = await work.stage(file);
+        work.check();
         return { command: () => commands.mediaAdd(Object.freeze({ path, file: handle }), request.info), value: () => path };
       });
     },
     courseMesh(input, request) {
-      return edit(request, 'art', () => cheapSize(input, ART_LIMITS.bytes, 'art'), async (job) => {
-        const file = await read(job, input, ART_LIMITS.bytes, 'art');
-        const handle = await stage(job, file);
-        live(job);
+      return edit(request, 'art', () => cheapSize(input, ART_LIMITS.bytes, 'art'), async (work) => {
+        const file = await read(work, input, ART_LIMITS.bytes, 'art');
+        const handle = await work.stage(file);
+        work.check();
         const id = assetId(handle);
-        const baked = await bake(job, () => projection.bakeMesh(handle, 0, file));
-        live(job);
+        const baked = await bake(work, () => projection.bakeMesh(handle, 0, file));
+        work.check();
         const terrain = Object.freeze({ ...baked, mesh: Object.freeze({ ...baked.mesh, assetId: id }) });
         const imported = Object.freeze({ id, name: artName(input.name.replace(/\.glb$/i, '').slice(0, 80) || 'Mesh'), file: handle });
         let asset: DocumentArtAsset | null = null;
@@ -691,19 +474,19 @@ export function createProjectImports(options: {
       });
     },
     enemyModel(speciesValue, input, request) {
-      return edit(request, 'enemies', (job) => {
+      return edit(request, 'enemies', (work) => {
         species(speciesValue);
         cheapSize(input, ART_LIMITS.bytes, 'art');
         const expected = document.get('enemies')[speciesValue];
-        stopTargets(`enemies/${speciesValue}/`);
-        target(job, `enemies/${speciesValue}/model`, ['enemies'], () => document.get('enemies')[speciesValue] === expected);
-      }, async (job) => {
-        const file = await read(job, input, ART_LIMITS.bytes, 'art');
-        const handle = await stage(job, file);
-        live(job);
+        work.stopTargets(`enemies/${speciesValue}/`);
+        work.target(`enemies/${speciesValue}/model`, ['enemies'], () => document.get('enemies')[speciesValue] === expected);
+      }, async (work) => {
+        const file = await read(work, input, ART_LIMITS.bytes, 'art');
+        const handle = await work.stage(file);
+        work.check();
         const id = assetId(handle);
-        const result = await bake(job, () => projection.bakeEnemy(handle, file));
-        live(job);
+        const result = await bake(work, () => projection.bakeEnemy(handle, file));
+        work.check();
         const clips = defaultEnemyClips(speciesValue, result.clips.map((clip) => clip.name));
         const imported = Object.freeze({ id, name: artName(input.name.replace(/\.glb$/i, '').slice(0, 80) || 'Enemy'), file: handle });
         return {
@@ -716,7 +499,7 @@ export function createProjectImports(options: {
       });
     },
     enemyClips(speciesValue, clips, request) {
-      return edit(request, 'enemies', (job) => {
+      return edit(request, 'enemies', (work) => {
         species(speciesValue);
         const expected = document.get('enemies')[speciesValue];
         if (expected?.type !== 'model') throw new ProjectError(`The ${speciesValue} is not drawn by a model.`, { section: 'enemies' });
@@ -726,19 +509,18 @@ export function createProjectImports(options: {
         }
         const asset = document.get('art').assets.find((asset) => asset.id === expected.asset);
         if (asset === undefined) throw new ProjectError(`The ${speciesValue}'s model is missing from the course artwork.`, { section: 'enemies' });
-        const modelImport = targets.get(`enemies/${speciesValue}/model`);
-        if (modelImport !== undefined) stop(modelImport);
-        for (const role of roles) target(job, `enemies/${speciesValue}/clips/${role}`);
-        watch(job, ['enemies', 'art'], () => {
+        work.stopTargets(`enemies/${speciesValue}/model`);
+        for (const role of roles) work.target(`enemies/${speciesValue}/clips/${role}`);
+        work.watch(['enemies', 'art'], () => {
           const current = document.get('enemies')[speciesValue];
           return current?.type === 'model' && current.asset === expected.asset &&
             document.get('art').assets.find((item) => item.id === expected.asset)?.file === asset.file;
         });
-        retain(job, [asset.file]);
+        work.retain([asset.file]);
         return expected.asset;
-      }, async (job, asset) => {
-        const bake = await wait(job, () => projection.enemyClips(asset));
-        live(job);
+      }, async (work, asset) => {
+        const bake = await work.wait(() => projection.enemyClips(asset));
+        work.check();
         if (bake instanceof ProjectError) throw bake;
         return {
           command: () => {
@@ -761,20 +543,20 @@ export function createProjectImports(options: {
         if (document.get('models')[roleValue].length >= MODEL_LIBRARY_LIMITS.entries) {
           throw new ProjectError(`The ${roleValue} library lists at most ${MODEL_LIBRARY_LIMITS.entries} models.`, { section: 'models' });
         }
-      }, async (job) => {
-        const file = await read(job, input, MODEL_LIMITS.bytes, 'models');
-        const report = await libraryReport(job, file, roleValue);
-        live(job);
-        const handle = await stage(job, file);
-        live(job);
+      }, async (work) => {
+        const file = await read(work, input, MODEL_LIMITS.bytes, 'models');
+        const report = await libraryReport(work, file, roleValue);
+        work.check();
+        const handle = await work.stage(file);
+        work.check();
         let model = request.model;
         if (roleValue === 'avatar' && model === undefined) {
           const proposed = suggestAvatarBoneMap(report);
           const configure = request.configure;
           model = configure === undefined
             ? mappedAvatarModel(validateAvatarBoneMap(Object.fromEntries(AVATAR_JOINT_IDS.map((joint) => [joint, proposed[joint] ?? null]))))
-            : await wait(job, () => configure(report, proposed, job.controller.signal));
-          live(job);
+            : await work.wait(() => configure(report, proposed, work.signal));
+          work.check();
         }
         const configured = model;
         let id: string | null = null;
@@ -784,7 +566,7 @@ export function createProjectImports(options: {
             id = base.id;
             if (roleValue === 'avatar') {
               if (configured === undefined) throw new Error('An imported avatar must have model settings.');
-              const settings = characterHoldSettings(configured);
+              const settings = withHoldSettings(configured);
               checkAvatarModelSettings(report, settings, options.avatarRigs);
               const entry: LibraryAvatarEntry = Object.freeze({ ...base, ...settings });
               return commands.libraryAdd({ role: 'avatar', model: Object.freeze({ entry, file: handle }) }, request.info);
@@ -804,26 +586,26 @@ export function createProjectImports(options: {
       });
     },
     libraryAvatar(id, settings, request) {
-      return edit(request, 'models', (job) => {
+      return edit(request, 'models', (work) => {
         const value = validateAvatarSettings(settings as unknown as Record<string, unknown>);
-        return { expected: avatarTarget(job, id), settings: value };
-      }, async (job, { expected, settings }) => {
-        const report = await avatarReport(job, id);
-        live(job);
+        return { expected: avatarTarget(work, id), settings: value };
+      }, async (work, { expected, settings }) => {
+        const report = await avatarReport(work, id);
+        work.check();
         const entry: LibraryAvatarEntry = Object.freeze({ id, name: expected.entry.name, ...settings });
         checkAvatarModelSettings(report, entry, options.avatarRigs);
         return { command: () => commands.libraryAvatar(id, expected, entry, request.info), value: () => undefined };
       });
     },
     useCharacterSettings(id, request) {
-      return edit(request, 'models', (job) => avatarTarget(job, id), async (job, expected) => {
-        const report = await avatarReport(job, id);
-        live(job);
+      return edit(request, 'models', (work) => avatarTarget(work, id), async (work, expected) => {
+        const report = await avatarReport(work, id);
+        work.check();
         return {
           command: () => {
             const current = avatar(id);
             if (current !== expected) throw new ProjectError(`Library avatar "${id}" changed while its model was checked.`, { section: 'models' });
-            const settings = characterHoldSettings(libraryAvatarSettings(current.entry));
+            const settings = withHoldSettings(libraryAvatarSettings(current.entry));
             const entry: LibraryAvatarEntry = Object.freeze({ id, name: current.entry.name, ...settings });
             checkAvatarModelSettings(report, entry, options.avatarRigs);
             return commands.libraryAvatar(id, current, entry, request.info);
@@ -833,42 +615,42 @@ export function createProjectImports(options: {
       });
     },
     alternate(input, request) {
-      return edit(request, 'characters/alternate', (job) => {
+      return edit(request, 'characters/alternate', (work) => {
         cheapSize(input, SPRITE_FILE_BYTES, 'characters/alternate');
         const expected = document.get('characters/alternate');
-        target(job, 'characters/alternate', ['characters/alternate'], () => document.get('characters/alternate') === expected);
-      }, async (job) => {
-        const file = await read(job, input, SPRITE_FILE_BYTES, 'characters/alternate');
-        const text = await wait(job, () => file.text());
-        live(job);
+        work.target('characters/alternate', ['characters/alternate'], () => document.get('characters/alternate') === expected);
+      }, async (work) => {
+        const file = await read(work, input, SPRITE_FILE_BYTES, 'characters/alternate');
+        const text = await work.wait(() => file.text());
+        work.check();
         const alternate = parseProjectCharacter(text);
         return { command: () => commands.alternate(alternate, request.info), value: () => undefined };
       });
     },
     coursePackage(input, request) {
-      return edit(request, 'art', (job) => {
+      return edit(request, 'art', (work) => {
         cheapSize(input, ART_LIMITS.packageBytes, 'art');
         prepareLevel();
-        target(job, 'course-package');
-      }, async (job) => {
-        const file = await read(job, input, ART_LIMITS.packageBytes, 'art');
-        const text = await wait(job, () => file.text());
-        live(job);
+        work.target('course-package');
+      }, async (work) => {
+        const file = await read(work, input, ART_LIMITS.packageBytes, 'art');
+        const text = await work.wait(() => file.text());
+        work.check();
         const pack = validateCoursePackage(JSON.parse(text));
         const assets: DocumentArtAsset[] = [];
         for (const asset of pack.assets) {
-          live(job);
+          work.check();
           const bytes = embeddedGlb(asset.source);
           validateArtAsset(bytes.buffer, 'course');
-          const handle = await stage(job, new Blob([bytes], { type: 'model/gltf-binary' }));
-          live(job);
+          const handle = await work.stage(new Blob([bytes], { type: 'model/gltf-binary' }));
+          work.check();
           if (assetId(handle) !== asset.id) throw new ProjectError(`Packaged artwork ${asset.id} does not match its GLB.`, { section: 'art' });
           assets.push(Object.freeze({ id: asset.id, name: asset.name, file: handle }));
         }
         checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.file.bytes, 0));
-        live(job);
+        work.check();
         prepareLevel();
-        live(job);
+        work.check();
         return {
           command: () => commands.coursePackage({ level: pack.level, art: Object.freeze({ assets: Object.freeze(assets), decorations: pack.decorations }) }, request.info),
           value: () => undefined,
@@ -876,27 +658,22 @@ export function createProjectImports(options: {
       });
     },
     sections(read, request) {
-      return edit(request, 'level', (job) => target(job, 'sections'), async (job) => {
-        const values = await wait(job, () => read(job.controller.signal));
-        live(job);
-        await checkSections(job, values);
-        live(job);
+      return edit(request, 'level', (work) => work.target('sections'), async (work) => {
+        const values = await work.wait(() => read(work.signal));
+        work.check();
+        await checkSections(work, values);
+        work.check();
         if (values.level !== undefined) prepareLevel();
-        live(job);
+        work.check();
         return { command: () => commands.sections(values, request.info), value: () => undefined };
       });
     },
+    // The runner's: every import of the project stops, the character's and the appearance's too.
     invalidateProject(): void {
-      if (!disposed) invalidate();
+      if (!lifecycle.signal.aborted) runner.invalidateProject();
     },
     dispose(): void {
-      if (disposed) return;
-      disposed = true;
-      const disposal = new Disposal();
-      disposal.run(unsubscribe);
-      disposal.run(invalidate);
-      for (const release of leases) disposal.run(release);
-      disposal.finish();
+      lifecycle.abort();
     },
   };
   return Object.freeze(imports);

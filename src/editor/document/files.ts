@@ -8,7 +8,9 @@ import type { PublishedFile } from '../published-project';
 
 declare const FILE_HANDLE: unique symbol;
 
-export type BinarySectionName = 'art' | 'media' | 'models';
+// The sections whose values hold file handles, each file at a path the section's listing names.
+export const BINARY_SECTIONS = Object.freeze(['art', 'media', 'models', 'appearance'] as const);
+export type BinarySectionName = (typeof BINARY_SECTIONS)[number];
 
 // One version of one binary file, the same frozen object wherever its bytes are: an upload or a download changes what
 // the FileStore knows of it, never the handle, so the sections holding it stay the same.
@@ -124,8 +126,6 @@ interface Entry {
   readonly uses: Record<FileUse, number>;
 }
 
-const SECTIONS: readonly BinarySectionName[] = ['art', 'media', 'models'];
-
 function pathKey(project: string, path: string): string {
   return `${project}\n${path}`;
 }
@@ -139,7 +139,7 @@ async function digest(blob: Blob, signal: AbortSignal): Promise<string> {
 }
 
 function serverRef(source: ServerFileRef): ServerFileRef {
-  if (!SECTIONS.includes(source.section) || !Number.isSafeInteger(source.revision) || source.revision < 0) {
+  if (!BINARY_SECTIONS.includes(source.section) || !Number.isSafeInteger(source.revision) || source.revision < 0) {
     throw new Error(`A server file needs a binary section and a revision, not ${source.section}@${source.revision}.`);
   }
   return Object.freeze({ project: source.project, section: source.section, revision: source.revision, path: source.path, url: source.url });

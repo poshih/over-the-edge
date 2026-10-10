@@ -9,6 +9,10 @@ import { adapterFor, SECTION_ADAPTERS } from './sections';
 
 export const HISTORY_LIMITS = Object.freeze({ steps: 200, bytes: 64 * 1024 * 1024, label: 80, coalesceMs: 1000 });
 
+// A call History refused, changing nothing, because it was telling its listeners of a change; once they have heard it,
+// the call can be made again.
+export class HistoryBusyError extends Error {}
+
 export interface Command extends StepInfo {
   readonly coalesce: string | null;
   // Changes from the current document, at most one per section; throws a typed refusal without changes.
@@ -17,6 +21,8 @@ export interface Command extends StepInfo {
 
 // One step built over time: a live drag or a plugin's group.
 export interface Transaction {
+  // True once it ends: by its own commit or cancel, or as another edit, Undo, Redo or opening a project ends it.
+  readonly done: boolean;
   apply(run: Command['run']): Error | null;          // Shown at once; returns a typed refusal without changes.
   commit(select?: Selection): void;                 // Everything applied becomes one step, unless nothing remains.
   cancel(): void;                                   // Restores its changes and records nothing.
@@ -60,7 +66,7 @@ export interface History {
   undo(): void;
   redo(): void;
   load(values: SectionValues): void;                // Another project: clears steps and pending edits.
-  external(changes: readonly SomeSectionChange[], cause?: 'server' | 'edit'): void;
+  external(changes: readonly SomeSectionChange[]): void;   // The server's: cuts the history at those sections.
   cut(sections: readonly SectionName[]): void;      // Drops the newest touching step, every older one and all redo.
   hold(): () => void;                               // Undo and Redo wait until every returned release has run.
   state(): HistoryState;
@@ -291,7 +297,7 @@ export function createHistory(initial: SectionValues, options: HistoryOptions): 
   });
 
   function guard(): void {
-    if (notifying) throw new Error('A listener cannot change the project while it hears a change.');
+    if (notifying) throw new HistoryBusyError('A listener cannot change the project while it hears a change.');
     if (disposed) throw new Error('The project history has closed.');
   }
 
@@ -659,6 +665,7 @@ export function createHistory(initial: SectionValues, options: HistoryOptions): 
       const value: LiveTransaction = { info: stepInfo(info), changes: [], release: () => {}, done: false };
       transaction = value;
       const result: Transaction = {
+        get done(): boolean { return value.done; },
         apply(run): Error | null {
           guard();
           liveTransaction(value);
@@ -839,7 +846,7 @@ export function createHistory(initial: SectionValues, options: HistoryOptions): 
       disposal.run(() => notify(changes, 'open', null, callbacks));
       disposal.finish();
     },
-    external(changes, cause = 'server'): void {
+    external(changes): void {
       guard();
       commitOpen();
       const next = checked(changes);
@@ -854,7 +861,7 @@ export function createHistory(initial: SectionValues, options: HistoryOptions): 
         throw error;
       }
       set(next, leases);
-      if (changed || next.length > 0) notify(next, cause);
+      if (changed || next.length > 0) notify(next, 'server');
     },
     cut(sections): void {
       guard();

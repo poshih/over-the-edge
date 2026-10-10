@@ -1,396 +1,359 @@
 import type { AppearanceRig } from '../appearance-rig';
-import { VisualStore, VisualStoreError } from './visual-store';
-import {
-  ALIGNMENT_FIELDS, AppearanceError, ARM_IK_FIELDS, DEFAULT_ALIGNMENT, DEFAULT_ARM_IK, isVisualPart, MODEL_LIMITS,
-  validateAlignment, validateArmIk, validateStoredVisual, VISUAL_PARTS,
-} from './appearance-types';
-import type { ArmIkSettings, StoredVisual, VisualAlignment, VisualPartId } from './appearance-types';
-import { activateArmIk, armIkProfiles, readActiveArmIk } from './arm-ik-store';
-import type { ArmIkProfile } from './arm-ik-store';
-import { SnapshotError } from './named-snapshots';
-import type { SnapshotEntry } from './named-snapshots';
+import type { VisualAlignment } from '../appearance-profile';
+import type { VisualPartId } from '../character';
+import { Disposal } from '../disposal';
+import { ModelError as AppearanceError } from '../model-data';
+import { ProjectError } from '../project';
+import { createAppearanceCommands } from './appearance-commands';
+import { createAppearanceImports } from './appearance-imports';
+import type { AppearanceImports, AppearancePartInput } from './appearance-imports';
+import { DEFAULT_ALIGNMENT, VISUAL_PARTS } from './appearance-types';
+import type { FileHandle, FileStore } from './document/files';
+import type { History } from './document/history';
+import type { ImportRunner } from './document/import-runner';
+import type { ProjectCommandInfo } from './document/project-commands';
+import type { DocumentAppearance, DocumentAppearancePart, DocumentArmIk } from './document/project-document';
+import type { EditOutcome, FileInput, ImportOptions } from './document/project-imports';
+import type { AppearanceCommands, ProjectionState, VisualProjectionEvent } from './document/visual-contract';
+import { ProjectApiError } from './project-client';
 import { loadVisualModel } from './visual-model';
-import { validateAppearanceParts } from '../appearance-profile';
-import type { AppearancePart } from '../appearance-profile';
+import type { LoadedVisual } from './visual-model';
+import type { VisualSaves } from './visual-saves';
 
+export interface AppearanceOptions {
+  readonly history: History;
+  readonly files: FileStore;
+  readonly rig: AppearanceRig;
+  readonly runner: ImportRunner;
+  readonly saves: VisualSaves;
+  readonly onNotice: (message: string, kind: 'info' | 'error') => void;
+  readonly onFault: (error: unknown) => void;
+}
+
+type PartValue = DocumentAppearancePart | null;
+
+type PartSaveState =
+  | { readonly kind: 'saving'; readonly value: PartValue }
+  | { readonly kind: 'failed'; readonly value: PartValue; readonly error: AppearanceError };
+
+interface PartProjection {
+  desired: PartValue;
+  token: object;
+  file: FileHandle | null;
+  alignment: Readonly<VisualAlignment> | null;
+  rendering: ProjectionState<PartValue, AppearanceError>;
+}
+
+interface PartWork {
+  readonly part: VisualPartId;
+  readonly file: FileHandle;
+  readonly token: object;
+  readonly controller: AbortController;
+}
+
+const STATUS: VisualProjectionEvent = Object.freeze({ cause: null, step: null });
+
+function refusal(error: unknown): AppearanceError {
+  if (error instanceof AppearanceError) return error;
+  if (!(error instanceof ProjectError || error instanceof ProjectApiError || error instanceof DOMException)) throw error;
+  return new AppearanceError(error.message, { cause: error });
+}
+
+// Part models follow the document. The only backlog is its latest entry for each part.
 export class Appearance {
-  private readonly rig: AppearanceRig;
-  // Null when the open project keeps the models instead (a Workshop built with GAME_PROJECT).
-  private readonly store: VisualStore<StoredVisual> | null;
-  private readonly notice: (message: string, kind: 'info' | 'error') => void;
-  private readonly records = new Map<VisualPartId, StoredVisual>();
-  private readonly drafts = new Map<VisualPartId, VisualAlignment>();
-  private readonly errors = new Map<VisualPartId, string>();
-  private readonly busy = new Set<VisualPartId>();
-  private readonly listeners = new Set<() => void>();
-  private restoring = true;
-  private storageIssue: string | null = null;
-  private armIk = { ...DEFAULT_ARM_IK };
-  private savedArmIk: ArmIkProfile | null = null;
-  private armIkIssue: string | null = null;
-  private previousArmIkSave = false;
+  readonly commands: AppearanceCommands;
+  readonly imports: AppearanceImports;
+  private readonly options: AppearanceOptions;
+  private readonly projections = new Map<VisualPartId, PartProjection>();
+  private readonly partSaves = new Map<VisualPartId, PartSaveState>();
+  private readonly listeners = new Set<(event: VisualProjectionEvent) => void>();
+  private readonly lifecycle = new AbortController();
+  private readonly unsubscribe: () => void;
+  private readonly unsubscribeFiles: () => void;
+  private loading: PartWork | null = null;
+  private active = false;
   private disposed = false;
 
-  constructor(rig: AppearanceRig, notice: (message: string, kind: 'info' | 'error') => void, options: { browserStore?: boolean } = {}) {
-    this.rig = rig;
-    this.notice = notice;
-    this.store = options.browserStore === false ? null : new VisualStore<StoredVisual>({
-      database: 'over-the-edge:appearance', store: 'parts', keyPath: 'slot',
-    });
-    rig.assertComplete();
-  }
-
-  async restore(): Promise<void> {
-    try {
-      const { profile, previousSave } = readActiveArmIk(localStorage);
-      this.previousArmIkSave = previousSave;
-      if (profile !== null) this.adoptArmIk(profile);
-    } catch (error) {
-      this.reportArmIkError(error);
-    }
-    try {
-      const entries = this.store === null ? [] : await this.store.entries();
-      for (const entry of entries) {
-        if (this.disposed) return;
-        if (!isVisualPart(entry.key)) {
-          this.storageIssue = 'Saved visuals contain an unknown part. That record has been preserved.';
-          this.notice(this.storageIssue, 'error');
-          continue;
-        }
-        const slot = entry.key;
-        await this.run(slot, async () => {
-          const record = validateStoredVisual(entry.value, slot);
-          const model = await loadVisualModel(record.data);
-          if (this.disposed) { model.dispose(); return; }
-          this.rig.setModel(slot, model, record.alignment);
-          this.records.set(slot, record);
-          this.drafts.set(slot, { ...record.alignment });
-        });
-      }
-    } catch (error) {
-      if (!(error instanceof AppearanceError || error instanceof VisualStoreError)) throw error;
-      if (!this.disposed) {
-        this.storageIssue = error.message;
-        this.notice(error.message, 'error');
-      }
-    } finally {
-      this.restoring = false;
-      this.changed();
-    }
-  }
-
-  armIkSettings(): Readonly<ArmIkSettings> {
-    return { ...this.armIk };
-  }
-
-  // Previews `value`; false while the appearance cannot change.
-  previewArmIk(value: unknown): boolean {
-    if (!this.canEdit()) return false;
-    this.armIk = validateArmIk(value);
-    this.armIkIssue = null;
-    this.changed();
-    return true;
-  }
-
-  resetArmIk(): void {
-    this.previewArmIk(DEFAULT_ARM_IK);
-  }
-
-  // Previews `value` as an edit: the refusal, reported, or null when it applied.
-  setArmIk(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      this.armIk = validateArmIk(value);
-      this.armIkIssue = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!(error instanceof AppearanceError)) throw error;
-      this.notice(error.message, 'error');
-      return error;
-    }
-  }
-
-  saveArmIk(name: string): SnapshotEntry | null {
-    if (!this.canEdit()) return null;
-    let saved: SnapshotEntry | null = null;
-    try {
-      saved = armIkProfiles.save(localStorage, name, this.armIk);
-      this.adoptArmIk(activateArmIk(localStorage, saved.key));
-      return saved;
-    } catch (error) {
-      if (saved !== null && (error instanceof DOMException || error instanceof SnapshotError || error instanceof AppearanceError)) {
-        this.reportArmIkError(new AppearanceError(
-          `Profile "${saved.name}" was saved in history, but could not be selected for reload. Load it to retry. The previous selection is unchanged.`,
-        ));
-      } else {
-        this.reportArmIkError(error);
-      }
-      return null;
-    } finally {
-      this.changed();
-    }
-  }
-
-  loadArmIk(key: string): ArmIkProfile | null {
-    if (!this.canEdit()) return null;
-    try {
-      const profile = activateArmIk(localStorage, key);
-      this.adoptArmIk(profile);
-      return profile;
-    } catch (error) {
-      this.reportArmIkError(error);
-      return null;
-    } finally {
-      this.changed();
-    }
-  }
-
-  private adoptArmIk(profile: ArmIkProfile): void {
-    this.armIk = { ...profile.settings };
-    this.savedArmIk = profile;
-    this.armIkIssue = null;
-    this.previousArmIkSave = false;
-  }
-
-  async importFile(slot: VisualPartId, file: File): Promise<void> {
-    if (!this.canEdit(slot)) return;
-    await this.run(slot, async () => {
-      if (!file.name.toLowerCase().endsWith('.glb') || file.name.length > 255) {
-        throw new AppearanceError('Choose one binary glTF (.glb) file for this part.');
-      }
-      if (file.size === 0 || file.size > MODEL_LIMITS.bytes) {
-        throw new AppearanceError('Choose a GLB file no larger than 20 MiB.');
-      }
-      const model = await loadVisualModel(file);
-      let adopted = false;
-      try {
-        if (this.disposed) return;
-        const record: StoredVisual = {
-          schemaVersion: 1, slot, name: file.name, data: file, alignment: { ...DEFAULT_ALIGNMENT },
-        };
-        await this.store?.write(record);
-        if (this.disposed) return;
-        this.rig.setModel(slot, model, record.alignment);
-        adopted = true;
-        this.records.set(slot, record);
-        this.drafts.set(slot, { ...record.alignment });
-      } finally {
-        if (!adopted) model.dispose();
-      }
-    });
-  }
-
-  // Every imported part with its file and current (draft) alignment, e.g. to save a project.
-  exportParts(): { part: VisualPartId; name: string; blob: Blob; alignment: VisualAlignment }[] {
-    return VISUAL_PARTS.flatMap(({ id }) => {
-      const record = this.records.get(id);
-      return record === undefined ? [] : [{ part: id, name: record.name, blob: record.data, alignment: { ...this.drafts.get(id) ?? record.alignment } }];
-    });
-  }
-
-  // Makes exactly these parts the saved appearance, for example when a project opens. Unchanged
-  // files are not reloaded; parts not listed return to their procedural visuals.
-  async replaceParts(parts: readonly { part: VisualPartId; name: string; blob: Blob; alignment: VisualAlignment }[]): Promise<boolean> {
-    if (!this.canEdit()) return false;
-    const wanted = new Map(parts.map((entry) => [entry.part, entry]));
-    let complete = true;
-    for (const { id } of VISUAL_PARTS) {
-      const entry = wanted.get(id);
-      const record = this.records.get(id);
-      if (entry === undefined) {
-        if (record !== undefined) await this.useDefault(id);
-        continue;
-      }
-      if (record !== undefined && record.data === entry.blob && record.name === entry.name) {
-        const alignment = validateAlignment(entry.alignment);
-        if (ALIGNMENT_FIELDS.some((field) => alignment[field.key] !== record.alignment[field.key])) {
-          await this.run(id, async () => {
-            const next = { ...record, alignment };
-            await this.store?.write(next);
-            if (this.disposed) return;
-            this.rig.align(id, alignment);
-            this.records.set(id, next);
-          });
-        }
-        this.drafts.set(id, validateAlignment(entry.alignment));
-        this.rig.align(id, entry.alignment);
-        continue;
-      }
-      await this.run(id, async () => {
-        const alignment = validateAlignment(entry.alignment);
-        const model = await loadVisualModel(entry.blob);
-        let adopted = false;
-        try {
-          if (this.disposed) return;
-          const next: StoredVisual = { schemaVersion: 1, slot: id, name: entry.name, data: entry.blob, alignment };
-          await this.store?.write(next);
-          if (this.disposed) return;
-          this.rig.setModel(id, model, alignment);
-          adopted = true;
-          this.records.set(id, next);
-          this.drafts.set(id, { ...alignment });
-        } finally {
-          if (!adopted) model.dispose();
-        }
-      });
-      if (this.errors.has(id)) complete = false;
-    }
-    this.changed();
-    return complete;
-  }
-
-  // replaceParts() as an edit, its list checked as a project's: the refusal, the reported failures of the parts that
-  // did not load, or null.
-  async setParts(parts: readonly { part: VisualPartId; name: string; blob: Blob; alignment: VisualAlignment }[]): Promise<Error | null> {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    let checked: readonly AppearancePart[];
-    try {
-      checked = validateAppearanceParts(parts.map(({ part, name, alignment }) => ({ part, name, alignment })));
-    } catch (error) {
-      if (!(error instanceof AppearanceError)) throw error;
-      this.notice(error.message, 'error');
-      return error;
-    }
-    if (await this.replaceParts(checked.map((entry, index) => ({ ...entry, blob: parts[index]!.blob, alignment: { ...entry.alignment } })))) return null;
-    const failures = parts.flatMap(({ part }) => {
-      const message = this.errors.get(part);
-      return message === undefined ? [] : [`${part}: ${message}`];
-    });
-    return new AppearanceError(failures.length === 0 ? 'Some appearance models could not be loaded.' : failures.join(' '));
-  }
-
-  preview(slot: VisualPartId, value: unknown): void {
-    if (!this.canEdit(slot)) return;
-    if (!this.records.has(slot)) throw new Error(`Cannot preview alignment without a model for ${slot}.`);
-    const alignment = validateAlignment(value);
-    this.rig.align(slot, alignment);
-    this.drafts.set(slot, alignment);
-    this.errors.delete(slot);
-    this.changed();
-  }
-
-  resetAlignment(slot: VisualPartId): void {
-    this.preview(slot, DEFAULT_ALIGNMENT);
-  }
-
-  async saveAlignment(slot: VisualPartId): Promise<void> {
-    if (!this.canEdit(slot)) return;
-    const record = this.records.get(slot);
-    const draft = this.drafts.get(slot);
-    if (!record || !draft) throw new Error(`Cannot save alignment without a model for ${slot}.`);
-    await this.run(slot, async () => {
-      const next = { ...record, alignment: { ...draft } };
-      await this.store?.write(next);
-      if (this.disposed) return;
-      this.records.set(slot, next);
-    });
-  }
-
-  async useDefault(slot: VisualPartId): Promise<void> {
-    if (!this.canEdit(slot)) return;
-    await this.run(slot, async () => {
-      await this.store?.remove(slot);
-      if (this.disposed) return;
-      this.rig.reset(slot);
-      this.records.delete(slot);
-      this.drafts.delete(slot);
-    });
-  }
-
-  snapshot() {
-    const savedArmIk = this.savedArmIk;
-    return {
-      restoring: this.restoring,
-      error: this.storageIssue,
-      armIk: {
-        settings: this.armIkSettings(),
-        dirty: savedArmIk === null || ARM_IK_FIELDS.some((field) =>
-          this.armIk[field.key] !== savedArmIk.settings[field.key]),
-        error: this.armIkIssue,
-        profile: savedArmIk === null ? null : { key: savedArmIk.key, name: savedArmIk.name },
-        previousSave: this.previousArmIkSave,
+  constructor(options: AppearanceOptions) {
+    this.options = options;
+    options.rig.assertComplete();
+    this.commands = createAppearanceCommands({ document: options.history.document, files: options.files });
+    this.imports = createAppearanceImports({
+      history: options.history, commands: this.commands, runner: options.runner,
+      onPartAccepted: (part, value) => this.saveAccepted([{ part, value }]),
+      onPartsAccepted: (value) => {
+        const parts = new Map(value.map((entry) => [entry.part, entry]));
+        this.saveAccepted(VISUAL_PARTS.map(({ id }) => ({ part: id, value: parts.get(id) ?? null })));
       },
-      parts: VISUAL_PARTS.map((part) => {
-        const record = this.records.get(part.id);
-        const draft = this.drafts.get(part.id);
-        const alignment = draft ? { ...draft } : { ...DEFAULT_ALIGNMENT };
-        return {
-          ...part,
-          ...this.rig.inspect(part.id),
-          name: record ? record.name : null,
-          alignment,
-          busy: this.restoring || this.busy.has(part.id),
-          error: this.errors.get(part.id) ?? null,
-          dirty: record !== undefined && ALIGNMENT_FIELDS.some((field) =>
-            alignment[field.key] !== record.alignment[field.key]),
-        };
-      }),
-    };
-  }
-
-  subscribe(listener: () => void): () => void {
-    this.listeners.add(listener);
-    listener();
-    return () => this.listeners.delete(listener);
-  }
-
-  dispose(): void {
-    this.disposed = true;
-    this.listeners.clear();
-    this.store?.close();
-    this.records.clear();
-    this.drafts.clear();
-  }
-
-  private canEdit(slot?: VisualPartId): boolean {
-    return this.editable(slot) === null;
-  }
-
-  // Why the appearance cannot change now, reported, or null when it can.
-  private editable(slot?: VisualPartId): AppearanceError | null {
-    if (this.disposed) return new AppearanceError('The appearance editor is closed.');
-    if (this.restoring || (slot !== undefined && this.busy.has(slot))) {
-      const refusal = new AppearanceError('Wait for this appearance operation to finish before editing.');
-      this.notice(refusal.message, 'error');
-      return refusal;
+    });
+    const entries = new Map(this.definition().map((entry) => [entry.part, entry]));
+    for (const { id } of VISUAL_PARTS) {
+      const desired = entries.get(id) ?? null;
+      this.projections.set(id, {
+        desired, token: {}, file: null, alignment: null,
+        rendering: desired === null ? Object.freeze({ kind: 'ready', value: null })
+          : Object.freeze({ kind: 'loading', value: desired }),
+      });
     }
+    this.unsubscribe = options.history.document.subscribeAll((changes, cause, step) => {
+      const appearance = changes.find((change) => change.section === 'appearance');
+      if (appearance !== undefined && appearance.section === 'appearance') this.follow(appearance.after, { cause, step });
+      else if (changes.some((change) => change.section === 'arm-ik')) this.changed({ cause, step });
+    });
+    this.unsubscribeFiles = options.files.subscribe((event) => this.filesChanged(event.files));
+  }
+
+  get browserAppearance(): boolean {
+    return this.options.saves.browserAppearance;
+  }
+
+  definition(): DocumentAppearance {
+    return this.options.history.document.get('appearance');
+  }
+
+  armIkSettings(): DocumentArmIk {
+    return this.options.history.document.get('arm-ik');
+  }
+
+  renderingState(part: VisualPartId): ProjectionState<PartValue, AppearanceError> {
+    return this.projection(part).rendering;
+  }
+
+  importPart(part: VisualPartId, input: FileInput, options: ImportOptions): Promise<EditOutcome<DocumentAppearancePart>> {
+    return this.imports.part(part, input, options);
+  }
+
+  useDefault(part: VisualPartId, info: ProjectCommandInfo): AppearanceError | null {
+    if (this.disposed) return new AppearanceError('The appearance editor is closed.');
+    const expected = this.definition().find((entry) => entry.part === part) ?? null;
+    const error = this.options.history.apply(this.commands.replacePart(part, expected, null, info));
+    if (error !== null) {
+      if (!(error instanceof AppearanceError)) throw error;
+      return error;
+    }
+    if (expected !== null) this.saveAccepted([{ part, value: null }]);
     return null;
   }
 
-  private reportArmIkError(error: unknown): void {
-    if (error instanceof DOMException) {
-      this.armIkIssue = 'IK profile storage is unavailable or full. The preview and previous selection are unchanged.';
-    } else if (error instanceof AppearanceError || error instanceof SnapshotError) {
-      this.armIkIssue = error.message;
-    } else {
-      throw error;
-    }
-    this.notice(this.armIkIssue, 'error');
+  replaceParts(value: readonly AppearancePartInput[], options: ImportOptions): Promise<EditOutcome<DocumentAppearance>> {
+    return this.imports.parts(value, options);
   }
 
-  private async run(slot: VisualPartId, operation: () => Promise<void>): Promise<void> {
-    this.busy.add(slot);
-    this.errors.delete(slot);
-    this.changed();
+  activate(): void {
+    if (this.disposed || this.active) return;
+    this.active = true;
+    this.follow(this.definition(), STATUS);
+  }
+
+  snapshot() {
+    const appearance = new Map(this.definition().map((entry) => [entry.part, entry]));
+    const settings = this.armIkSettings();
+    return Object.freeze({
+      armIk: Object.freeze({ settings, dirty: settings !== this.options.saves.armIkFingerprint() }),
+      parts: Object.freeze(VISUAL_PARTS.map((part) => {
+        const value = appearance.get(part.id) ?? null;
+        const saved = this.options.saves.partFingerprint(part.id);
+        const saving = this.partSaves.get(part.id);
+        return Object.freeze({
+          ...part, value, name: value?.name ?? null, alignment: value?.alignment ?? DEFAULT_ALIGNMENT,
+          custom: value !== null, dirty: value !== saved, saving: saving?.kind === 'saving',
+          saveError: saving?.kind === 'failed' && saving.value === value && value !== saved ? saving.error : null,
+          rendering: this.projection(part.id).rendering,
+          rig: this.options.rig.inspect(part.id),
+        });
+      })),
+    });
+  }
+
+  subscribe(listener: (event: VisualProjectionEvent) => void): () => void {
+    if (this.disposed) throw new Error('The appearance projection is closed.');
+    this.listeners.add(listener);
+    listener(STATUS);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    const disposal = new Disposal();
+    disposal.run(this.unsubscribe);
+    disposal.run(this.unsubscribeFiles);
+    disposal.run(() => this.lifecycle.abort());
+    disposal.run(() => this.imports.dispose());
+    disposal.run(() => this.loading?.controller.abort());
+    this.listeners.clear();
+    for (const [part, projection] of this.projections) {
+      if (projection.file !== null) disposal.run(() => this.options.rig.reset(part));
+    }
+    this.projections.clear();
+    this.partSaves.clear();
+    disposal.finish();
+  }
+
+  private projection(part: VisualPartId): PartProjection {
+    const projection = this.projections.get(part);
+    if (projection === undefined) throw new Error(`Missing appearance projection for ${part}.`);
+    return projection;
+  }
+
+  private saveAccepted(values: readonly { readonly part: VisualPartId; readonly value: PartValue }[]): void {
+    if (this.disposed || !this.browserAppearance) return;
+    for (const { part, value } of values) {
+      const saving: PartSaveState = Object.freeze({ kind: 'saving', value });
+      this.partSaves.set(part, saving);
+      // An accepted edit outlives its caller; only the appearance's disposal cancels its automatic save.
+      void this.options.saves.savePart(part, value, this.lifecycle.signal).then((result) => {
+        if (this.disposed) return;
+        if (result.kind === 'refused') {
+          const error = new AppearanceError(`The ${part} edit was accepted, but its browser save failed: ${result.error.message}`, { cause: result.error });
+          if (this.partSaves.get(part) === saving) this.partSaves.set(part, Object.freeze({ kind: 'failed', value, error }));
+          this.options.onNotice(error.message, 'error');
+        } else if (this.partSaves.get(part) === saving) {
+          this.partSaves.delete(part);
+        }
+        this.changed(STATUS);
+      }).catch((error: unknown) => {
+        const disposal = new Disposal();
+        disposal.run(() => this.options.onFault(error));
+        if (!this.disposed && this.partSaves.get(part) === saving) {
+          this.partSaves.delete(part);
+          disposal.run(() => this.changed(STATUS));
+        }
+        disposal.finish();
+      });
+    }
+    this.changed(STATUS);
+  }
+
+  private follow(value: DocumentAppearance, event: VisualProjectionEvent): void {
+    const entries = new Map(value.map((entry) => [entry.part, entry]));
+    for (const { id } of VISUAL_PARTS) {
+      const projection = this.projection(id);
+      const desired = entries.get(id) ?? null;
+      if (projection.desired === desired) continue;
+      const changedFile = projection.desired?.file !== desired?.file;
+      if (changedFile) {
+        projection.token = {};
+        if (this.loading?.part === id) this.loading.controller.abort();
+      }
+      projection.desired = desired;
+      if (desired === null) {
+        if (this.active) this.options.rig.reset(id);
+        projection.file = null;
+        projection.alignment = null;
+        projection.rendering = Object.freeze({ kind: 'ready', value: null });
+      } else if (this.active && projection.file === desired.file) {
+        try {
+          if (projection.alignment !== desired.alignment) this.options.rig.align(id, desired.alignment);
+          projection.alignment = desired.alignment;
+          projection.rendering = Object.freeze({ kind: 'ready', value: desired });
+        } catch (error) {
+          const failure = refusal(error);
+          projection.rendering = Object.freeze({ kind: 'failed', value: desired, error: failure });
+          this.options.onNotice(failure.message, 'error');
+        }
+      } else if (!changedFile && projection.rendering.kind === 'failed') {
+        projection.rendering = Object.freeze({ ...projection.rendering, value: desired });
+      } else {
+        projection.rendering = Object.freeze({ kind: 'loading', value: desired });
+      }
+    }
+    this.pump();
+    this.changed(event);
+  }
+
+  private wanted(work: PartWork): boolean {
+    if (this.disposed || !this.active || work.controller.signal.aborted) return false;
+    const projection = this.projection(work.part);
+    return projection.token === work.token && projection.desired?.file === work.file &&
+      this.definition().find((entry) => entry.part === work.part)?.file === work.file;
+  }
+
+  private filesChanged(files: readonly FileHandle[]): void {
+    if (this.disposed || !this.active) return;
+    const moved = new Set(files);
+    let changed = false;
+    for (const projection of this.projections.values()) {
+      const desired = projection.desired;
+      if (projection.rendering.kind !== 'failed' || desired === null || projection.file === desired.file || !moved.has(desired.file)) continue;
+      const locations = this.options.files.locations(desired.file);
+      if (locations.page === null && locations.servers.length === 0 && locations.published.length === 0) continue;
+      projection.token = {};
+      projection.rendering = Object.freeze({ kind: 'loading', value: desired });
+      changed = true;
+    }
+    if (!changed) return;
+    this.pump();
+    this.changed(STATUS);
+  }
+
+  private pump(): void {
+    if (this.disposed || !this.active || this.loading !== null) return;
+    for (const { id } of VISUAL_PARTS) {
+      const projection = this.projection(id);
+      if (projection.rendering.kind !== 'loading' || projection.desired === null) continue;
+      const work: PartWork = {
+        part: id, file: projection.desired.file, token: projection.token, controller: new AbortController(),
+      };
+      this.loading = work;
+      void this.load(work).catch((error: unknown) => this.options.onFault(error));
+      return;
+    }
+  }
+
+  private async load(work: PartWork): Promise<void> {
+    let model: LoadedVisual | null = null;
+    let release: (() => void) | null = null;
+    let failure: { readonly error: unknown } | null = null;
+    let changed = false;
     try {
-      await operation();
+      release = this.options.files.retain([work.file], 'work');
+      const blob = await this.options.files.blob(work.file, work.controller.signal);
+      if (!this.wanted(work)) return;
+      // Native parsing cannot abort. Keep the single slot until it settles, then discard obsolete results.
+      model = await loadVisualModel(blob);
+      if (!this.wanted(work)) return;
+      const desired = this.definition().find((entry) => entry.part === work.part)!;
+      this.options.rig.setModel(work.part, model, desired.alignment);
+      model = null;
+      const projection = this.projection(work.part);
+      projection.file = desired.file;
+      projection.alignment = desired.alignment;
+      projection.rendering = Object.freeze({ kind: 'ready', value: desired });
+      changed = true;
     } catch (error) {
-      if (!(error instanceof AppearanceError || error instanceof VisualStoreError)) throw error;
-      if (!this.disposed) {
-        this.errors.set(slot, error.message);
-        this.notice(error.message, 'error');
+      try {
+        const refused = refusal(error);
+        if (this.wanted(work)) {
+          const projection = this.projection(work.part);
+          projection.rendering = Object.freeze({ kind: 'failed', value: projection.desired, error: refused });
+          changed = true;
+          this.options.onNotice(refused.message, 'error');
+        }
+      } catch (error) {
+        failure = { error };
       }
     } finally {
-      this.busy.delete(slot);
-      this.changed();
+      const disposal = new Disposal();
+      const failed = failure;
+      if (failed !== null) disposal.run(() => { throw failed.error; });
+      if (model !== null) {
+        const obsolete = model;
+        disposal.run(() => obsolete.dispose());
+      }
+      if (release !== null) disposal.run(release);
+      this.loading = null;
+      if (changed) disposal.run(() => this.changed(STATUS));
+      if (failure === null) disposal.run(() => this.pump());
+      disposal.finish();
     }
   }
 
-  private changed(): void {
-    if (!this.disposed) for (const listener of this.listeners) listener();
+  private changed(event: VisualProjectionEvent): void {
+    if (this.disposed) return;
+    const disposal = new Disposal();
+    const change = Object.freeze(event);
+    for (const listener of this.listeners) disposal.run(() => listener(change));
+    disposal.finish();
   }
-
 }

@@ -38,6 +38,7 @@ export class CharacterModelPool {
   };
   private readonly admitted = new Set<PoolEntry>();
   private readonly lifecycle = new AbortController();
+  private readonly idleWaiters = new Set<() => void>();
 
   constructor(options: {
     readonly load: (model: CharacterModel, usage: CharacterModelUsage, signal: AbortSignal) => Promise<LoadedCharacterModel>;
@@ -76,10 +77,32 @@ export class CharacterModelPool {
     return this.entries[usage].get(source)?.value ?? undefined;
   }
 
+  async whenIdle(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    this.assertOpen();
+    while (!this.isIdle()) {
+      await new Promise<void>((resolve, reject) => {
+        const settle = (): void => {
+          this.idleWaiters.delete(settle);
+          signal.removeEventListener('abort', settle);
+          this.lifecycle.signal.removeEventListener('abort', settle);
+          if (signal.aborted) reject(signal.reason);
+          else if (this.lifecycle.signal.aborted) reject(this.lifecycle.signal.reason);
+          else resolve();
+        };
+        this.idleWaiters.add(settle);
+        signal.addEventListener('abort', settle, { once: true });
+        this.lifecycle.signal.addEventListener('abort', settle, { once: true });
+      });
+      signal.throwIfAborted();
+      this.assertOpen();
+    }
+  }
+
   dispose(): void {
     if (this.lifecycle.signal.aborted) return;
     // Each binding releases exactly its own ref; do not overwrite counts beneath live leases.
-    this.lifecycle.abort(abandoned());
+    this.lifecycle.abort(new DOMException('The character model pool is closed.', 'AbortError'));
     for (const cache of Object.values(this.entries)) {
       if (cache.size !== 0) throw new ModelPoolInvariantError('Character model leases survived pool shutdown.');
     }
@@ -96,13 +119,18 @@ export class CharacterModelPool {
       entry.controller.signal.throwIfAborted();
       return this.load(entry.model, entry.usage, entry.controller.signal);
     }).then(value => {
-      entry.loading = null;
       if (this.entries[entry.usage].get(entry.model.source) !== entry) {
-        value.dispose();
-        this.retire(entry);
+        try {
+          value.dispose();
+        } finally {
+          entry.loading = null;
+          this.retire(entry);
+        }
         throw abandoned();
       }
       entry.value = value;
+      entry.loading = null;
+      this.notifyIdle();
       return value;
     }, (error: unknown) => {
       entry.loading = null;
@@ -155,15 +183,31 @@ export class CharacterModelPool {
     if (entry.refs !== 0) return;
     const value = entry.value;
     entry.value = null;
-    value?.dispose();
-    this.retire(entry);
-    if (entry.loading !== null) entry.controller.abort(abandoned());
+    try {
+      value?.dispose();
+    } finally {
+      this.retire(entry);
+      if (entry.loading !== null) entry.controller.abort(abandoned());
+    }
   }
 
   private retire(entry: PoolEntry): void {
     const cache = this.entries[entry.usage];
     if (cache.get(entry.model.source) === entry) cache.delete(entry.model.source);
     // Retired, still-running decoders retain admission until their success/failure handler finishes.
-    if (entry.loading === null) this.admitted.delete(entry);
+    if (entry.loading === null) {
+      this.admitted.delete(entry);
+      this.notifyIdle();
+    }
+  }
+
+  private isIdle(): boolean {
+    for (const entry of this.admitted) if (entry.loading !== null) return false;
+    return true;
+  }
+
+  private notifyIdle(): void {
+    if (!this.isIdle()) return;
+    for (const settle of this.idleWaiters) settle();
   }
 }

@@ -16,6 +16,7 @@ import type { ArmLengths, CharacterArms } from './character-arms.ts';
 import { DEFAULT_GRIPS, GRIP_LIMITS, GRIP_PLACEMENTS, GRIP_RANGE_LIMITS, GRIP_ROTATION_LIMITS, SLIDE_AT_LIMITS } from './grips.ts';
 import type { GripRotation, Grips } from './grips.ts';
 import { number, record, SpriteError, text } from './sprite-fields.ts';
+import { spriteDocumentBytes } from './sprite-budget.ts';
 import { isContentRef, isPackagedSource, pathExtension } from './content-ref.ts';
 
 export { SpriteError };
@@ -202,22 +203,13 @@ export function validateCharacterRiggingType(value: unknown, layerCount: number)
 
 const PNG_PREFIX = 'data:image/png;base64,';
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
-const imageJsonBytes = new WeakMap<readonly SpriteImage[], number>();
 
 export function validateSpriteBudget(document: SpriteDocument): void {
-  const encoder = new TextEncoder();
-  let images = imageJsonBytes.get(document.images);
-  if (images === undefined) {
-    images = encoder.encode(JSON.stringify(document.images)).byteLength;
-    if (Object.isFrozen(document.images) && document.images.every(Object.isFrozen)) imageJsonBytes.set(document.images, images);
-  }
   // Embedded character models have their own budget, so they cannot crowd out sprite artwork.
-  const { models, ...sprites } = document;
-  const metadata = encoder.encode(JSON.stringify({ ...sprites, images: [] })).byteLength;
-  if (metadata + images - 2 > SPRITE_LIMITS.documentBytes) {
+  if (spriteDocumentBytes(document) > SPRITE_LIMITS.documentBytes) {
     throw new SpriteError('The sprite document exceeds its file-size budget.');
   }
-  if ((models ?? []).reduce((total, model) => total + model.source.length, 0) > CHARACTER_MODEL_LIMITS.encodedBytes) {
+  if ((document.models ?? []).reduce((total, model) => total + model.source.length, 0) > CHARACTER_MODEL_LIMITS.encodedBytes) {
     throw new SpriteError('Character models exceed their size budget.');
   }
 }

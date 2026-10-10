@@ -1,14 +1,16 @@
 import { GameSettingsError } from '../../game-settings';
 import { LevelError } from '../../level';
 import type { LevelDefinition, LevelObject } from '../../level';
+import { ModelError as AppearanceError } from '../../model-data';
 import { PART_ROLES } from '../../model-library';
 import { pluginOfSection } from '../../plugin-data';
 import { PluginError } from '../../plugins/kernel';
 import { ProjectError } from '../../project';
+import type { SpriteDocument } from '../../sprite-data';
 import { SpriteError } from '../../sprite-fields';
 import type { FileHandle } from './files';
 import type {
-  BuiltinDocumentSectionName, DocumentArt, DocumentMedia, DocumentModels, FrozenPluginData, LevelDelta,
+  BuiltinDocumentSectionName, DocumentAppearance, DocumentArt, DocumentMedia, DocumentModels, FrozenPluginData, LevelDelta,
   PluginSectionName, SectionChange, SectionName, SectionValue, WholeSectionName,
 } from './project-document';
 
@@ -130,6 +132,47 @@ function modelValueBytes(value: DocumentModels, other: DocumentModels): number {
   return bytes;
 }
 
+// Matched by ID, so a removal or reorder never charges unchanged entries, or their embedded sources, again.
+const KEYED_SPRITE_LISTS: ReadonlySet<string> = new Set(['images', 'layers', 'models']);
+
+function spriteValueBytes(value: SpriteDocument | null, other: SpriteDocument | null): number {
+  if (value === other) return 0;
+  if (value === null) return 8;
+  const keys = Object.keys(value) as (keyof SpriteDocument)[];
+  let bytes = 32 + 8 * keys.length;
+  for (const key of keys) {
+    const item: unknown = value[key];
+    const counterpart: unknown = other?.[key];
+    if (item === counterpart) continue;
+    if (!KEYED_SPRITE_LISTS.has(key) || !Array.isArray(item)) {
+      bytes += valueBytes(item, counterpart);
+      continue;
+    }
+    const previous = new Map<string, unknown>();
+    if (Array.isArray(counterpart)) for (const entry of counterpart as readonly { readonly id: string }[]) previous.set(entry.id, entry);
+    bytes += 16 + 8 * item.length;
+    for (const entry of item as readonly { readonly id: string }[]) bytes += valueBytes(entry, previous.get(entry.id));
+  }
+  return bytes;
+}
+
+// The primary and alternate characters: a scrub's step holds its changed branch, never the profile's sources.
+function spriteBytes(change: { readonly before: SpriteDocument | null; readonly after: SpriteDocument | null }): number {
+  return spriteValueBytes(change.before, change.after) + spriteValueBytes(change.after, change.before);
+}
+
+// Part metadata only: the history charges a step's files itself.
+function appearanceValueBytes(value: DocumentAppearance, other: DocumentAppearance): number {
+  if (value === other) return 0;
+  let bytes = 16 + 8 * value.length;
+  const previous = new Map(other.map((entry) => [entry.part, entry]));
+  for (const entry of value) {
+    const counterpart = previous.get(entry.part);
+    if (entry !== counterpart) bytes += 64 + 2 * entry.name.length + valueBytes(entry.alignment, counterpart?.alignment);
+  }
+  return bytes;
+}
+
 function pluginAdapter(section: PluginSectionName): SectionAdapter<PluginSectionName> {
   if (pluginOfSection(section) === null) throw new Error(`Unknown project section "${section}".`);
   const change = (before: FrozenPluginData | null, after: FrozenPluginData | null): SectionChange<PluginSectionName> =>
@@ -243,7 +286,8 @@ export const SECTION_ADAPTERS: SectionAdapters = Object.freeze({
     hud: wholeValueAdapter('hud', ProjectError, wholeBytes, () => NO_FILES),
     audio: wholeValueAdapter('audio', ProjectError, wholeBytes, () => NO_FILES),
     enemies: wholeValueAdapter('enemies', ProjectError, wholeBytes, () => NO_FILES),
-    'characters/alternate': wholeValueAdapter('characters/alternate', SpriteError, wholeBytes, () => NO_FILES),
+    'characters/primary': wholeValueAdapter('characters/primary', SpriteError, spriteBytes, () => NO_FILES),
+    'characters/alternate': wholeValueAdapter('characters/alternate', SpriteError, spriteBytes, () => NO_FILES),
     art: wholeValueAdapter('art', ProjectError,
       (change) => artValueBytes(change.before, change.after) + artValueBytes(change.after, change.before),
       (value) => value.assets.map((asset) => asset.file)),
@@ -253,6 +297,11 @@ export const SECTION_ADAPTERS: SectionAdapters = Object.freeze({
     models: wholeValueAdapter('models', ProjectError,
       (change) => modelValueBytes(change.before, change.after) + modelValueBytes(change.after, change.before),
       (value) => PART_ROLES.flatMap((role) => value[role].map((item) => item.file))),
+    'arm-ik': wholeValueAdapter('arm-ik', AppearanceError, wholeBytes, () => NO_FILES),
+    // Parts can share one GLB.
+    appearance: wholeValueAdapter('appearance', AppearanceError,
+      (change) => appearanceValueBytes(change.before, change.after) + appearanceValueBytes(change.after, change.before),
+      (value) => [...new Set(value.map((entry) => entry.file))]),
   }),
   plugins: Object.freeze({ refusal: PluginError, for: pluginAdapter }),
 });

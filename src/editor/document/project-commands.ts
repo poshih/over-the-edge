@@ -1,8 +1,7 @@
 import { audioSources, validateAudio } from '../../audio-settings';
 import type { AudioSettings } from '../../audio-settings';
 import type { AvatarRigRegistry } from '../../avatar-rig';
-import { checkCharacterModels } from '../../character-model-check';
-import { embeddedModel } from '../../character-profile';
+import { checkEmbeddedCharacterModels } from '../../character-model-check';
 import { ART_LIMITS } from '../../art-types';
 import { ENEMY_SPECIES } from '../../enemy-types';
 import type { EnemySpecies } from '../../enemy-types';
@@ -16,7 +15,7 @@ import type { HudSettings } from '../../hud';
 import { LevelError } from '../../level';
 import type { LevelDefinition } from '../../level';
 import { MEDIA_LIMITS } from '../../media';
-import { MODEL_LIMITS } from '../../model-data';
+import { MODEL_LIMITS, ModelError as AppearanceError } from '../../model-data';
 import { isPartRole, libraryHammerHead, libraryModelId, PART_ROLES, validateModelLibrary } from '../../model-library';
 import type { LibraryAvatarEntry, LibraryEntry, LibraryHammerEntry, PartRole } from '../../model-library';
 import { isPluginId, PLUGIN_DATA_LIMITS, pluginOfSection, pluginSection, validatePluginData } from '../../plugin-data';
@@ -40,10 +39,11 @@ import type {
   ProjectDocument, SectionName, SectionValue, SectionValues, SomeSectionChange, StepInfo,
 } from './project-document';
 import { adapterFor, SECTION_ADAPTERS } from './sections';
+import type { AppearanceCommands, CharacterCommands } from './visual-contract';
 
 export const UNTITLED_GAME_TITLE = 'Untitled game';
 
-export type ProjectRefusal = LevelError | GameSettingsError | ProjectError | SpriteError | PluginError;
+export type ProjectRefusal = LevelError | GameSettingsError | ProjectError | SpriteError | PluginError | AppearanceError;
 
 export interface ProjectPlugins {
   has(id: string): boolean;
@@ -82,7 +82,10 @@ export interface ProjectCommands {
   defaultHammerHead(before: HammerHead, after: HammerHead, info: ProjectCommandInfo): Command;
   pot(before: PotOutline, after: PotOutline, info: ProjectCommandInfo): Command;
   alternate(value: SpriteDocument | null, info: ProjectCommandInfo): Command;
+  // The primary character's exact profile as the alternate.
   currentAsAlternate(info: ProjectCommandInfo): Command;
+  // The primary and alternate characters trade their exact profiles in one step.
+  swapCharacters(info: ProjectCommandInfo): Command;
   coursePackage(value: { readonly level: LevelDefinition; readonly art: DocumentArt }, info: ProjectCommandInfo): Command;
   pluginData(id: string, value: PluginData | null, info: ProjectCommandInfo): Command;
   sections(values: Partial<SectionValues>, info: ProjectCommandInfo): Command;
@@ -94,13 +97,14 @@ export interface ProjectCommandsOptions {
   readonly files: FileStore;
   readonly plugins: ProjectPlugins;
   readonly avatarRigs: AvatarRigRegistry;
-  readonly primary: () => SpriteDocument | null;
+  readonly characterCommands: CharacterCommands;
+  readonly appearanceCommands: AppearanceCommands;
   readonly levelSelection: () => readonly string[];
 }
 
-// Validators make frozen copies; keep equal branches without serialising the old value.
-function keep<T>(next: T, current: unknown): T;
-function keep(next: unknown, current: unknown): unknown {
+// For validators' frozen copies: reuses `current`'s equal branches, matched by key or index, and `current` if equal.
+export function keep<T>(next: T, current: unknown): T;
+export function keep(next: unknown, current: unknown): unknown {
   if (next === current) return next;
   if (Array.isArray(next)) {
     if (!Array.isArray(current)) return next;
@@ -133,10 +137,15 @@ function whole<S extends Exclude<SectionName, 'level'>>(document: ProjectDocumen
   return before === after ? [] : [adapterFor(section).change(before, after) as SomeSectionChange];
 }
 
+// A refusal the history returned: every section's typed refusal is one of these.
+export function isProjectRefusal(error: Error): error is ProjectRefusal {
+  return error instanceof LevelError || error instanceof GameSettingsError || error instanceof ProjectError ||
+    error instanceof SpriteError || error instanceof PluginError || error instanceof AppearanceError;
+}
+
 export function applyProjectCommand(history: History, command: Command): ProjectRefusal | null {
   const error = history.apply(command);
-  if (error === null || error instanceof LevelError || error instanceof GameSettingsError || error instanceof ProjectError ||
-    error instanceof SpriteError || error instanceof PluginError) return error;
+  if (error === null || isProjectRefusal(error)) return error;
   throw error;
 }
 
@@ -248,9 +257,7 @@ export function createProjectCommands(options: ProjectCommandsOptions): ProjectC
     try {
       const after = keep(validateProjectCharacter(value), current);
       if (!checkedCharacters.has(after)) {
-        if (after.models !== undefined && after.models.every((model) => embeddedModel(model.source) !== null)) {
-          checkCharacterModels(after, 'alternate character', options.avatarRigs);
-        }
+        checkEmbeddedCharacterModels(after, 'alternate character', options.avatarRigs);
         checkedCharacters.add(after);
       }
       return after;
@@ -472,9 +479,19 @@ export function createProjectCommands(options: ProjectCommandsOptions): ProjectC
     },
     currentAsAlternate(info) {
       return command(info, (document) => {
-        const primary = options.primary();
-        if (primary === null) throw new SpriteError('The current character profile cannot be used as the alternate yet; see Character.');
-        return whole(document, 'characters/alternate', alternateValue(primary, document.get('characters/alternate')));
+        const primary = document.get('characters/primary');
+        options.characterCommands.checkStoredProfile(primary);
+        return whole(document, 'characters/alternate', primary);
+      });
+    },
+    swapCharacters(info) {
+      return command(info, (document) => {
+        const primary = document.get('characters/primary');
+        const alternate = document.get('characters/alternate');
+        if (alternate === null) throw new SpriteError('The project has no alternate character to swap with.');
+        options.characterCommands.checkStoredProfile(alternate);
+        options.characterCommands.checkStoredProfile(primary);
+        return [...whole(document, 'characters/primary', alternate), ...whole(document, 'characters/alternate', primary)];
       });
     },
     coursePackage(value, info) {
@@ -530,8 +547,13 @@ export function createProjectCommands(options: ProjectCommandsOptions): ProjectC
             case 'art': changes.push(...whole(document, 'art', art)); break;
             case 'media': changes.push(...whole(document, 'media', media)); break;
             case 'models': changes.push(...whole(document, 'models', modelsValue(values.models!, document.get('models')))); break;
+            case 'characters/primary': changes.push(...whole(document, 'characters/primary',
+              options.characterCommands.checkProfile(values['characters/primary'], document.get('characters/primary')))); break;
             case 'characters/alternate': changes.push(...whole(document, 'characters/alternate',
               alternateValue(values['characters/alternate']!, document.get('characters/alternate')))); break;
+            case 'arm-ik': changes.push(...options.appearanceCommands.armIk(() => values['arm-ik'], info).run(document)); break;
+            case 'appearance': changes.push(...whole(document, 'appearance',
+              options.appearanceCommands.checkParts(values.appearance!, document.get('appearance')))); break;
           }
         }
         if (['level', 'art', 'media', 'enemies', 'audio'].some((name) => Object.hasOwn(values, name))) {

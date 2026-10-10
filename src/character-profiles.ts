@@ -199,7 +199,10 @@ export class CharacterProfiles {
         pivot: { anchor: 'torso', x: HEAD_GEOMETRY.neck[0], y: HEAD_GEOMETRY.neck[1] },
       },
       prepareTexture: this.host.prepareTexture,
-      characterAssets: { prepare: (document, signal) => this.prepareModels(slot, document, signal) },
+      characterAssets: {
+        prepare: (document, signal) => this.prepareModels(slot, document, signal),
+        whenIdle: (signal) => slot.pool.whenIdle(signal),
+      },
       loadContent: this.content,
       armSlots: SPRITE_ARM_SLOTS,
       onNaturalArmsChange: () => { if (!this.disposed && this.active === slot) this.host.naturalArmsChanged(); },

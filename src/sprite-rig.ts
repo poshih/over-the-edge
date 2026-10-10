@@ -26,7 +26,7 @@ import { sameArms } from './character-arms';
 import type { ArmLengths, CharacterArms } from './character-arms';
 import { DEFAULT_GRIPS, sameGrips } from './grips';
 import type { Grips } from './grips';
-import { characterAssets } from './character-profile';
+import { characterAssets, characterModel, PROP_MODEL_ROLES } from './character-profile';
 import type { CharacterAssets } from './character-profile';
 import { sameAvatarMotion, validateAvatarMotion } from './avatar-motion-data';
 import type { AvatarMotionEntry } from './avatar-motion-data';
@@ -41,6 +41,7 @@ import type { RigPoint as RuntimePoint, RigTarget as RuntimeTarget, BoneWorld as
 import { compileSpriteHeadTracking } from './sprite-head-aim';
 import type { SpriteHeadTracking, SpriteHeadTrackingPlan } from './sprite-head-aim';
 import { selectFlipbookFrame } from './sprite-flipbook';
+import { Disposal } from './disposal';
 import { isContentRef } from './content-ref';
 import type { ContentLoader } from './content-ref';
 import type { HeldSkeletonFrame } from './skeleton-pose';
@@ -68,13 +69,17 @@ export interface CharacterAssetLease {
 // leave the previous presentation untouched. Hosts without one reject documents with models.
 export interface CharacterAssetHost {
   prepare(document: SpriteDocument, signal: AbortSignal): Promise<CharacterAssetLease>;
+  whenIdle(signal: AbortSignal): Promise<void>;
 }
 
 // A whole document staged off screen. Until it commits, showing it at once, or cancels, letting go of what it staged,
 // the rig refuses other changes.
 export interface PreparedSpriteReplacement {
-  // Throws the rig's SpriteError, or the cancellation once its signal aborted or the rig was disposed, showing nothing.
-  commit(): void;
+  // Shows the prepared document, or `document`, a newer one that needs no image or model beyond those this replacement
+  // loaded and those the rig shows (see SpriteRig.replacementNeeds), built from them in the same call. Throws the rig's
+  // SpriteError, or the cancellation once its signal aborted or the rig was disposed, showing nothing; either way what
+  // it staged is let go.
+  commit(document?: SpriteDocument): void;
   cancel(): void;
 }
 
@@ -203,6 +208,13 @@ const EMPTY_REFRESH = Object.freeze({});
 const SKIN_SAMPLE_LIMIT = 4;
 const DIRECTION_STEP_DEGREES = 360 / FACING_DIRECTIONS.length;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const MODEL_ROLES = ['avatar', ...PROP_MODEL_ROLES] as const;
+
+// The source of the model `assets` gives `role`, or null when it gives that role none.
+function modelSource(assets: CharacterAssets, role: (typeof MODEL_ROLES)[number]): string | null {
+  const profile = assets[role];
+  return profile === undefined ? null : characterModel(assets, profile.model).source;
+}
 
 function cancellation(signal: AbortSignal): DOMException {
   if (signal.reason instanceof DOMException && signal.reason.name === 'AbortError') return signal.reason;
@@ -248,18 +260,24 @@ function decodePng(bytes: Uint8Array<ArrayBuffer>, signal: AbortSignal, onSettle
       return;
     }
     decoding.then(bitmap => {
-      onSettled();
-      if (settled) {
-        bitmap.close();
-        return;
+      try {
+        if (settled) {
+          bitmap.close();
+          return;
+        }
+        finish();
+        resolve(bitmap);
+      } finally {
+        onSettled();
       }
-      finish();
-      resolve(bitmap);
     }, error => {
-      onSettled();
-      if (settled) return;
-      finish();
-      reject(decodeFailure(error));
+      try {
+        if (settled) return;
+        finish();
+        reject(decodeFailure(error));
+      } finally {
+        onSettled();
+      }
     });
   });
 }
@@ -398,6 +416,8 @@ export class SpriteRig {
   private readonly previewDirectionInput = { time: 0, aim: { x: 0, y: 0 } as RuntimePoint };
   private replacement: Replacement | null = null;
   private disposed = false;
+  private readonly lifecycle = new AbortController();
+  private readonly idleWaiters = new Set<() => void>();
   private pendingDecodes = 0;
   private texturesCreated = 0;
   private texturesDisposed = 0;
@@ -534,6 +554,21 @@ export class SpriteRig {
     (await this.prepareReplacement(document, options)).commit();
   }
 
+  async whenIdle(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    this.assertLive();
+    const waiting = AbortSignal.any([signal, this.lifecycle.signal]);
+    for (;;) {
+      await this.waitForSpriteIdle(waiting);
+      waiting.throwIfAborted();
+      if (this.assetHost !== undefined) await this.assetHost.whenIdle(waiting);
+      waiting.throwIfAborted();
+      this.assertLive();
+      // A replacement may start while its model host drains.
+      if (this.isSpriteIdle()) return;
+    }
+  }
+
   // Loads a whole document's models and decodes its images without showing it.
   async prepareReplacement(document: SpriteDocument, options: { readonly signal: AbortSignal }): Promise<PreparedSpriteReplacement> {
     this.assertMutable();
@@ -557,10 +592,13 @@ export class SpriteRig {
     // Lets go of what the replacement holds once it commits or fails, so the rig takes other changes again.
     const release = (): void => {
       options.signal.removeEventListener('abort', abort);
-      assetLease?.release();
-      for (const resource of operation.staged.values()) this.releaseResource(resource);
+      const disposal = new Disposal();
+      disposal.run(() => assetLease?.release());
+      for (const resource of operation.staged.values()) disposal.run(() => this.releaseResource(resource));
       operation.staged.clear();
       if (this.replacement === operation) this.replacement = null;
+      this.notifyIdle();
+      disposal.finish();
     };
     try {
       if (document.models !== undefined) {
@@ -613,18 +651,21 @@ export class SpriteRig {
     let ended = false;
     return {
       // Built only now, against the character's presentation as it stands, so nothing staged pairs with a presentation
-      // that moved meanwhile; shown in the same call.
-      commit: () => {
+      // that moved meanwhile; shown in the same call. Staged images the shown document does not use are let go.
+      commit: (next?: SpriteDocument) => {
         if (ended) throw new Error('The sprite replacement has already ended.');
         ended = true;
         try {
           checkSignal(signal);
-          const next = this.buildState(document.layers, document.skeleton, images, resources,
-            { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
-              armForwardDistance: document.armForwardDistance, waistLean: document.waistLean, grips: document.grips, arms: document.arms,
-              ...characterAssets(document) });
-          operation.staged.clear();
-          this.commit(next, { preview: null });
+          const shown = next === undefined ? { document, images, resources } : this.restage(next, document, resources);
+          const built = this.buildState(shown.document.layers, shown.document.skeleton, shown.images, shown.resources,
+            { mode: 'replace', presentation: shown.document.presentation, characterRiggingType: shown.document.characterRiggingType,
+              armForwardDistance: shown.document.armForwardDistance, waistLean: shown.document.waistLean,
+              grips: shown.document.grips, arms: shown.document.arms, ...characterAssets(shown.document) });
+          for (const [source, resource] of operation.staged) {
+            if (shown.resources.get(source) === resource) operation.staged.delete(source);
+          }
+          this.commit(built, { preview: null });
         } finally {
           release();
         }
@@ -635,6 +676,64 @@ export class SpriteRig {
         release();
       },
     };
+  }
+
+  // What showing `next` needs beyond what the rig shows: nothing ('shown'), only images and models a replacement of
+  // `prepared` loads ('prepared'), or more. A replacement of `prepared` can commit `next` in its stead unless it needs
+  // more; when `next` needs nothing it loads, cancelling it shows `next` sooner.
+  replacementNeeds(next: SpriteDocument, prepared: SpriteDocument): 'shown' | 'prepared' | 'more' {
+    this.assertLive();
+    const staged = new Set(prepared.images.map(image => image.source));
+    let uses = false;
+    for (const image of next.images) {
+      if (this.resources.has(image.source)) continue;
+      if (!staged.has(image.source)) return 'more';
+      uses = true;
+    }
+    for (const role of MODEL_ROLES) {
+      const source = modelSource(next, role);
+      if (source === null || source === modelSource(this.assets, role)) continue;
+      if (source !== modelSource(prepared, role)) return 'more';
+      uses = true;
+    }
+    return uses ? 'prepared' : 'shown';
+  }
+
+  // `next` in the stead of the replacement of `prepared`: its images taken from those `loaded` maps by source and those
+  // the rig shows, within the same budgets, and its models from those the replacement leased and the rig shows.
+  private restage(next: SpriteDocument, prepared: SpriteDocument, loaded: ReadonlyMap<string, ImageResource>): {
+    readonly document: SpriteDocument;
+    readonly images: Map<string, ImageResource>;
+    readonly resources: Map<string, ImageResource>;
+  } {
+    const document = validateSpriteMetadata(next);
+    validateSpriteAnchors(document, this.anchors.keys(), this.targetIds);
+    this.assertCharacterRenderer(document.characterRiggingType);
+    if (document.models !== undefined && this.assetHost === undefined) {
+      throw new SpriteError('This host cannot load character models.');
+    }
+    if (this.replacementNeeds(document, prepared) === 'more') {
+      throw new Error('A replacement commits only a document that its own images and models and the shown ones cover.');
+    }
+    const images = new Map<string, ImageResource>();
+    const resources = new Map<string, ImageResource>();
+    let pixels = 0;
+    let bytes = 0;
+    for (const image of document.images) {
+      let resource = resources.get(image.source);
+      if (resource === undefined) {
+        // replacementNeeds() found every source among these.
+        resource = loaded.get(image.source) ?? this.resources.get(image.source)!;
+        pixels += resource.pixels;
+        bytes += resource.bytes;
+        resources.set(image.source, resource);
+      }
+      images.set(image.id, resource);
+    }
+    if (pixels > SPRITE_LIMITS.decodedPixels || bytes > SPRITE_LIMITS.documentBytes) {
+      throw new SpriteError('The sprite document exceeds its image-memory or byte budget.');
+    }
+    return { document, images, resources };
   }
 
   setCharacterRiggingType(value: CharacterRiggingType): void {
@@ -1085,7 +1184,7 @@ export class SpriteRig {
       avatarModel: this.assets.avatar === undefined ? null : { model: this.assets.avatar.model, boneMap: { ...this.assets.avatar.boneMap } },
       hammerModel: this.assets.hammer?.model ?? null,
       potModel: this.assets.pot?.model ?? null,
-      busy: !this.disposed && (this.replacement !== null || this.pendingDecodes > 0),
+      busy: !this.disposed && !this.isSpriteIdle(),
       pendingDecodeCount: this.pendingDecodes,
       layerCount: this.layers.size,
       imageCount: this.images.size,
@@ -1146,11 +1245,12 @@ export class SpriteRig {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.lifecycle.abort(new DOMException('The sprite rig was disposed.', 'AbortError'));
+    this.replacement?.controller.abort(this.lifecycle.signal.reason);
     const commitPresentation = this.prepareCharacterPresentation?.({
       characterRiggingType: DEFAULT_CHARACTER_RIGGING_TYPE, armForwardDistance: DEFAULT_ARM_FORWARD_DISTANCE,
       waistLean: DEFAULT_WAIST_LEAN, grips: DEFAULT_GRIPS, arms: null,
     });
-    this.replacement?.controller.abort(new DOMException('The sprite rig was disposed.', 'AbortError'));
     for (const resource of this.replacement?.staged.values() ?? []) this.releaseResource(resource);
     this.replacement?.staged.clear();
     const previousCoverage = new Map(this.coverage);
@@ -1187,9 +1287,33 @@ export class SpriteRig {
 
   private assertMutable(): void {
     this.assertLive();
-    if (this.replacement !== null || this.pendingDecodes > 0) {
+    if (!this.isSpriteIdle()) {
       throw new SpriteError('A sprite replacement or cancelled PNG decode is still in progress.');
     }
+  }
+
+  private isSpriteIdle(): boolean {
+    return this.replacement === null && this.pendingDecodes === 0;
+  }
+
+  private waitForSpriteIdle(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.isSpriteIdle()) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const settle = (): void => {
+        this.idleWaiters.delete(settle);
+        signal.removeEventListener('abort', settle);
+        if (signal.aborted) reject(signal.reason);
+        else resolve();
+      };
+      this.idleWaiters.add(settle);
+      signal.addEventListener('abort', settle, { once: true });
+    });
+  }
+
+  private notifyIdle(): void {
+    if (!this.isSpriteIdle()) return;
+    for (const settle of this.idleWaiters) settle();
   }
 
   private assertSpritePreview(): void {
@@ -1213,10 +1337,14 @@ export class SpriteRig {
 
   private decode(bytes: Uint8Array<ArrayBuffer>, signal: AbortSignal): Promise<ImageBitmap> {
     this.pendingDecodes++;
-    try {
-      return decodePng(bytes, signal, () => { this.pendingDecodes--; });
-    } catch (error) {
+    const settled = (): void => {
       this.pendingDecodes--;
+      this.notifyIdle();
+    };
+    try {
+      return decodePng(bytes, signal, settled);
+    } catch (error) {
+      settled();
       throw error;
     }
   }
@@ -1248,10 +1376,16 @@ export class SpriteRig {
   private releaseResource(resource: ImageResource): void {
     if (resource.disposed) return;
     resource.disposed = true;
-    resource.material.dispose();
-    resource.texture.dispose();
-    resource.bitmap.close();
-    this.texturesDisposed++;
+    const disposal = new Disposal();
+    disposal.run(() => resource.material.dispose());
+    disposal.run(() => resource.texture.dispose());
+    disposal.run(() => resource.bitmap.close());
+    // Counted once marked disposed, so a failed dispose still leaves inspect() balanced before its error is rethrown.
+    try {
+      disposal.finish();
+    } finally {
+      this.texturesDisposed++;
+    }
   }
 
   private layerData(): SpriteLayer[] {

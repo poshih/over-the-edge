@@ -29,20 +29,36 @@ export interface RangeControlOptions {
   // Makes each scrub one undo step, keyed by the input's ID and named stepLabel ("Set <label>" by default).
   history?: ScrubHistory;
   stepLabel?: string;
+  // The undo key instead of the ID, for a control that edits whichever layer or part is selected.
+  coalesceKey?: () => string;
 }
 
-// Edits made on each input event take the input's ID as their undo key, and change seals it: a scrub, a held arrow key
-// or a burst of clicks whose gaps are each under a second is one step.
+// Edits made on each input event take the input's ID, or its target's coalesceKey, as their undo key, and change seals
+// it: a scrub, a held arrow key or a burst of clicks whose gaps are each under a second is one step. An input for another
+// target seals the previous key first, so two targets never share a step.
 export function bindScrubInput(input: HTMLInputElement, options: {
   readonly history: ScrubHistory;
   readonly label: string;
   readonly signal: AbortSignal;
   readonly onInput: () => void;
+  readonly coalesceKey?: () => string;
 }): void {
-  if (input.id === '') throw new Error('A scrubbed input needs an ID, its undo key.');
-  input.addEventListener('input', () => options.history.coalescing(input.id, options.label, options.onInput),
-    { signal: options.signal });
-  input.addEventListener('change', () => options.history.seal(input.id), { signal: options.signal });
+  const { history, coalesceKey } = options;
+  if (coalesceKey === undefined && input.id === '') throw new Error('A scrubbed input needs an ID, its undo key.');
+  // The key of the latest input until change seals it.
+  let open: string | null = null;
+  input.addEventListener('input', () => {
+    const key = coalesceKey === undefined ? input.id : coalesceKey();
+    if (key === '') throw new Error('A scrub needs an undo key.');
+    if (open !== null && open !== key) history.seal(open);
+    open = key;
+    history.coalescing(key, options.label, options.onInput);
+  }, { signal: options.signal });
+  input.addEventListener('change', () => {
+    if (open === null) return;
+    history.seal(open);
+    open = null;
+  }, { signal: options.signal });
 }
 
 export function createRangeControl(field: RangeSpec, options: RangeControlOptions): RangeControl {
@@ -95,6 +111,7 @@ export function createRangeControl(field: RangeSpec, options: RangeControlOption
   if (options.history === undefined) input.addEventListener('input', changed, { signal: options.signal });
   else bindScrubInput(input, {
     history: options.history, label: options.stepLabel ?? `Set ${field.label}`, signal: options.signal, onInput: changed,
+    coalesceKey: options.coalesceKey,
   });
   heading.append(label, output);
   controls.append(decrease, input, increase);

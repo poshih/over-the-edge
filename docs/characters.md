@@ -5,7 +5,11 @@ replace the hammer and the pot with their own models, and let players switch bet
 that character and a 2D sprite character. The engine owns the machinery; a game supplies
 only data: GLBs, a bone map and a profile. Everything below is authored in
 **Workshop / Character** and stored in the character / sprite profile, so Save,
-Revert, JSON export/import and `GAME_SPRITES` carry it.
+Revert, JSON export/import and `GAME_SPRITES` carry it. Each change, a slider's whole scrub
+included, is one step of the [undo history](../README.md#undo-and-redo). Importing a GLB,
+from a file or the [server](#server-models), is a pending edit while the file is read and
+checked, then one step. The game shows a new model once it loads, keeping the previous one
+until then, as [Custom visuals](../README.md#custom-visuals) describes.
 
 A typical 3D character is three models: a skinned body, the pot and the hammer.
 Live physics never depends on these models. Live colliders, masses, hammer length, reach,
@@ -61,9 +65,12 @@ that puts the `left-*` chain on the viewer's right fails with `crossed-arms`.
 Mixamo-style names, with or without a `mixamorig:` prefix, are mapped automatically
 on import. Blender-style `.L`/`.R` suffixes and `UpperArm`/`LowerArm` names are
 recognized too. Otherwise, choose the joints in the **Bone map** selectors. A map
-applies only once all eight joints resolve; until then the import stays pending,
-with its error shown, and the current avatar is unchanged. **Discard bone map
-changes** returns to the applied map.
+applies only once all eight joints resolve; until then the import stays one pending
+edit, with its error shown, and the current avatar is unchanged. Each selector change
+edits that map, and the import becomes one step once the map resolves. Undo, or **Discard
+bone map changes**, cancels it. Changing the map of the profile's own avatar is a step too,
+once its model's joints are known; a change that leaves the map unresolved waits in the same
+way.
 
 Mapped joints must form ancestor chains: `body` above the head and both upper
 arms, each upper arm above its forearm, and each forearm above its hand. They
@@ -267,8 +274,9 @@ motions. A plugin's workshop facet describes each of its kinds' tunable numbers 
 `AVATAR_MOTION_CONTROLS`: a label, a unit, a range, a step, a default and a `path` of object keys
 and array indices into the configuration, or a list of them repeated over a list in the
 configuration; see [motion controls](workshop-plugins.md#motion-controls). Each motion shows its
-controls and a reset to their defaults; a change goes to the draft profile, where the kind checks
-it again, and through Save and Revert. Motions that did not change keep moving, and the changed
+controls and a reset to their defaults. A change is a step of the profile, where the kind
+checks it again against the avatar's model, so the controls wait until that model's joints
+are known; a scrub is one step. Motions that did not change keep moving, and the changed
 one restarts from rest. **Sway** rocks the upper body about the waist for a few seconds and
 **Jolt** kicks it once, in the running game, so a setting can be judged without playing. Only the
 Workshop reads the controls, checked against the registered motion kinds, and releases contain
@@ -391,7 +399,7 @@ under its file name without `.glb`.
   profile's avatar;
   one that does not fit stops the build or the server, naming the file.
 - Settings beside a hammer or pot, or without a model, stop it too.
-- An avatar without the file maps its joints when picked, as before.
+- An avatar without the file maps its joints when picked.
 
 **Picking.** Workshop / Character's **Skinned avatar (GLB)**, **One-model hammer (GLB)**
 and **Pot model (GLB)** sections list the server's models of their part. **Use server
@@ -399,10 +407,11 @@ avatar** (hammer, pot) applies the chosen one as if that file were chosen from t
 in the character profile. An avatar takes its settings file's bone map, driver, hair and motions; without one, it maps
 Mixamo-style joints or opens its bone map. Workshop / Project / Model library offers the same models with
 **Add server avatar** (hammer, pot), an avatar with its settings file's bone map, driver, hair and motions and the open
-character's hold settings. The character downloads one model at a time and is not
-held meanwhile: if it changes before the model arrives, for example through another import,
-Revert or opening a project, that change wins and the model is not used. The model library
-holds the open project while a model downloads for it, so the project cannot change first.
+character's hold settings. The download is part of the import, one pending edit that Undo
+cancels, and the character stays editable meanwhile: if that part changes before the model
+arrives, for example through another import of it or opening a project, that change wins and
+the model is not used. Adding a server model to the model library is a pending edit in the
+same way.
 
 **Delivery.** The models never ship with the Workshop. A build lists only their names,
 sizes, SHA-256 digests and avatars' settings, and writes the files to `dist-content/models/<sha256>.glb` for a
@@ -634,7 +643,7 @@ Registering a malformed strategy or kind fails with a `PluginError` instead; see
 
 ## Releases with two characters
 
-`GAME_SPRITES` selects the release's character profile, as before.
+`GAME_SPRITES` selects the release's character profile.
 `GAME_ALTERNATE_SPRITES` adds a second one, typically a 2D sprite character and
 a skinned 3D avatar:
 
@@ -662,7 +671,7 @@ load completely before play. Switching, including mid-level, only swaps what is
 attached and visible: nothing reloads, and live physics, the timer and the level
 continue. Its figure is stored for the next death; swapping during death retargets
 the existing corpse immediately. An inactive profile is detached from the scene and does no per-frame
-work. A release with only `GAME_SPRITES` behaves exactly as before and shows no
+work. A release with only `GAME_SPRITES` has one character and shows no
 control.
 
 ## Model library and runtime swaps
@@ -754,8 +763,10 @@ game.characterSelection(); // { active: 1, count: 2, types: ['sprite-2d', 'avata
 the same `characterModels` loader. Its `createAlternateCharacter()`
 returns the second profile's `SpriteRig`, and `selectCharacter(index)` switches
 profiles. `SpriteRig` stays independent of Three.js model loading: its
-`characterAssets.prepare(document, signal)` option loads and validates a
-document's models before the rig commits it. Without a host, documents with models are rejected.
+`characterAssets` option loads and validates a document's models before the rig commits
+it, with `prepare(document, signal)`, and says when none of its model loads is still
+running, with `whenIdle(signal)`; see the [sprite contract](sprites.md#game-agnostic-contract).
+Without a host, documents with models are rejected.
 
 ### Presenter architecture
 

@@ -18,6 +18,11 @@ import type {
   SpriteSkin,
 } from '../skeleton-data';
 import type { SpriteLayer } from '../sprite-data';
+import { SpriteError } from '../sprite-data';
+import { selectionEntry, selectionIds } from './character-commands';
+import type { ProjectCommandInfo } from './document/project-commands';
+import type { Selection } from './document/project-document';
+import type { SpriteLayerEdit } from './document/visual-contract';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
 import type { SpriteAnchorInput, SpriteEditorSnapshot, SpriteEditorState } from './sprite-state';
@@ -38,6 +43,8 @@ const DEFAULT_HAIR_GRAVITY = 9.81;
 
 type PreviewMode = 'live' | 'direction' | 'clip' | 'frame';
 type StatusKind = 'ready' | 'draft' | 'busy' | 'error';
+// What a skeleton step selects, named in its selection by kind.
+type Target = 'bone' | 'direction' | 'clip' | 'keyframe' | 'ik' | 'hair' | 'collider' | 'vertex';
 
 interface SelectOption {
   readonly value: string;
@@ -276,6 +283,8 @@ export function createSkeletonEditor(options: {
   targetIds: readonly string[];
   signal: AbortSignal;
 }): { dispose(): void } {
+  const { state } = options;
+  const { commands } = state;
   const events = new AbortController();
   const listen = { signal: events.signal };
   let disposed = false;
@@ -861,7 +870,7 @@ export function createSkeletonEditor(options: {
   }
 
   function expectSkeleton(): SkeletonDefinition {
-    const skeleton = options.state.snapshot().document.skeleton;
+    const skeleton = state.definition().skeleton;
     if (skeleton === null) throw new UiError('Create a skeleton first.');
     return skeleton;
   }
@@ -896,7 +905,7 @@ export function createSkeletonEditor(options: {
 
   function applyPreview(): void {
     try {
-      options.state.setPreview(previewFor(options.state.snapshot().document.skeleton));
+      state.setPreview(previewFor(state.definition().skeleton));
     } catch (error) {
       if (error instanceof UiError || error instanceof SkeletonError) {
         setMessage(error.message);
@@ -907,11 +916,87 @@ export function createSkeletonEditor(options: {
     }
   }
 
-  function updateSkeleton(mutator: (draft: MutableSkeleton) => void): void {
-    const draft = cloneSkeleton(expectSkeleton());
-    mutator(draft);
+  const info = (label: string, section: string, select: Selection | null): ProjectCommandInfo =>
+    ({ label, place: { tab: 'sprites', section, select }, coalesce: null });
+  // A step on layer `id`, which Undo and Redo select again, along with the targets `select` names.
+  const layerInfo = (label: string, id: string, select: Selection = { before: [], after: [] }): ProjectCommandInfo => {
+    const layer = selectionEntry('layer', id);
+    return info(label, 'sprites-skeleton-layer', { before: [layer, ...select.before], after: [layer, ...select.after] });
+  };
+
+  function selectionOf(target: Target): string | null {
+    switch (target) {
+      case 'bone': return selectedBoneId;
+      case 'direction': return selectedDirection;
+      case 'clip': return selectedClipId;
+      case 'keyframe': return selectedClipId === null ? null : String(selectedFrameIndexByClip.get(selectedClipId) ?? 0);
+      case 'ik': return selectedIkId;
+      case 'hair': return selectedHairId;
+      case 'collider': return selectedColliderId;
+      case 'vertex': return String(selectedVertexIndex);
+    }
+  }
+
+  // The editor's selection of `targets`, as a step records it.
+  function selection(...targets: Target[]): string[] {
+    return targets.flatMap((target) => {
+      const id = selectionOf(target);
+      return id === null ? [] : [selectionEntry(target, id)];
+    });
+  }
+
+  // A step that leaves the selection of `targets` as it is.
+  function keeping(...targets: Target[]): Selection {
+    const entries = selection(...targets);
+    return { before: entries, after: entries };
+  }
+
+  // A step that adds the `target` named `id`, which it selects.
+  function adding(target: Target, id: string): Selection {
+    return { before: selection(target), after: [selectionEntry(target, id)] };
+  }
+
+  // A step that deletes the `target` named `id` from `entries`, selecting the first that remains.
+  function deleting(target: Target, entries: readonly { readonly id: string }[], id: string | null): Selection {
+    const next = entries.find((entry) => entry.id !== id)?.id;
+    return { before: selection(target), after: next === undefined ? [] : [selectionEntry(target, next)] };
+  }
+
+  // Takes up the selection a Sprites step recorded: its own after it, the earlier one after Undo. render() settles any
+  // target the profile no longer has.
+  function restore(entries: readonly string[]): void {
+    for (const id of selectionIds(entries, 'bone')) selectedBoneId = id;
+    for (const id of selectionIds(entries, 'direction')) selectedDirection = validateDirection(id);
+    for (const id of selectionIds(entries, 'clip')) selectedClipId = id;
+    for (const index of selectionIds(entries, 'keyframe')) {
+      if (selectedClipId !== null) selectedFrameIndexByClip.set(selectedClipId, Number.parseInt(index, 10));
+    }
+    for (const id of selectionIds(entries, 'ik')) selectedIkId = id;
+    for (const id of selectionIds(entries, 'hair')) selectedHairId = id;
+    for (const id of selectionIds(entries, 'collider')) selectedColliderId = id;
+    for (const index of selectionIds(entries, 'vertex')) selectedVertexIndex = Number.parseInt(index, 10);
+  }
+
+  // After a step, the preview follows the profile's skeleton; `then` updates what the step's selection does not cover.
+  function applied(then?: () => void): void {
+    then?.();
+    if (previewMode !== 'live') applyPreview();
+    render();
+  }
+
+  // One step: a skeleton built from the profile's own as the step runs. Form values and the selection it makes are read
+  // before it, so a refusal leaves the editor as it was; the step's own event selects what it made.
+  function updateSkeleton(
+    label: string, section: string, select: Selection | null, build: (draft: MutableSkeleton) => void, then?: () => void,
+  ): void {
     clearMessage();
-    options.state.setSkeleton(draft, { preview: previewFor(draft) });
+    if (!state.apply(commands.skeleton((current) => {
+      if (current === null) throw new SpriteError('Create a skeleton first.');
+      const draft = cloneSkeleton(current);
+      build(draft);
+      return draft;
+    }, info(label, section, select)))) return;
+    applied(then);
   }
 
   function withUiErrors(action: () => void): void {
@@ -1075,13 +1160,13 @@ export function createSkeletonEditor(options: {
 
   function render(force = false): void {
     if (disposed) return;
-    const snapshot = options.state.snapshot();
+    const snapshot = state.snapshot();
     ensureSelections(snapshot);
     const skeleton = snapshot.document.skeleton;
     const layer = selectedLayer(snapshot);
-    const disabledAll = snapshot.restoring || snapshot.busy;
     const spritesEnabled = snapshot.document.characterRiggingType === 'sprite-2d';
-    const previewDisabled = disabledAll || !spritesEnabled;
+    // Previews pose the rig, so they wait until it shows the profile.
+    const previewDisabled = snapshot.rendering.kind !== 'ready' || !spritesEnabled;
     previewUnavailable.hidden = spritesEnabled;
     const clip = currentClip(skeleton);
     const frame = currentFrame(clip);
@@ -1095,18 +1180,18 @@ export function createSkeletonEditor(options: {
 
     let message: string;
     let kind: StatusKind;
-    if (snapshot.restoring) {
-      message = 'Restoring sprite rig…';
-      kind = 'busy';
-    } else if (snapshot.busy) {
-      message = 'Updating sprite rig…';
-      kind = 'busy';
-    } else if (localMessage !== null) {
+    if (localMessage !== null) {
       message = localMessage.text;
       kind = localMessage.kind;
     } else if (snapshot.error !== null) {
       message = snapshot.error;
       kind = 'error';
+    } else if (snapshot.rendering.kind === 'failed') {
+      message = `The character could not be shown: ${snapshot.rendering.error.message}`;
+      kind = 'error';
+    } else if (snapshot.rendering.kind === 'loading') {
+      message = 'Loading the character… Previews wait until it shows.';
+      kind = 'busy';
     } else if (!spritesEnabled) {
       message = 'Sprite rendering and pose preview are inactive in Mesh parts and Avatar modes. Select 2D sprites in Character to preview this retained 2D rig.';
       kind = snapshot.dirty ? 'draft' : 'ready';
@@ -1133,17 +1218,17 @@ export function createSkeletonEditor(options: {
     syncSelectOptions(anchorSelect, anchorOptions);
     const anchorValue = skeleton?.anchor ?? defaultAnchorId;
     if (anchorSelect.value !== anchorValue) anchorSelect.value = anchorValue;
-    createButton.disabled = disabledAll || skeleton !== null;
-    deleteSkeletonButton.disabled = disabledAll || skeleton === null;
-    anchorSelect.disabled = disabledAll || skeleton === null;
+    createButton.disabled = skeleton !== null;
+    deleteSkeletonButton.disabled = skeleton === null;
+    anchorSelect.disabled = skeleton === null;
 
     const boneOptions = skeleton === null ? [{ value: '', label: 'No bones yet' }] : skeleton.bones.map(item => ({ value: item.id, label: `${item.name} (${item.id})` }));
     syncSelectOptions(boneSelect, boneOptions);
-    boneSelect.disabled = disabledAll || skeleton === null;
+    boneSelect.disabled = skeleton === null;
     if (boneSelect.value !== (selectedBoneId ?? '')) boneSelect.value = selectedBoneId ?? '';
-    bonesGroup.disabled = disabledAll || skeleton === null;
-    addRootBoneButton.disabled = disabledAll || skeleton === null || skeleton.bones.length >= SKELETON_LIMITS.bones;
-    addChildBoneButton.disabled = disabledAll || bone === null || skeleton === null || skeleton.bones.length >= SKELETON_LIMITS.bones;
+    bonesGroup.disabled = skeleton === null;
+    addRootBoneButton.disabled = skeleton === null || skeleton.bones.length >= SKELETON_LIMITS.bones;
+    addChildBoneButton.disabled = bone === null || skeleton === null || skeleton.bones.length >= SKELETON_LIMITS.bones;
     setText(boneId, bone?.id ?? '—');
     syncSelectOptions(boneParentSelect, skeleton === null || bone === null ? [{ value: '', label: 'No parent' }] : [
       { value: '', label: 'No parent' },
@@ -1165,22 +1250,22 @@ export function createSkeletonEditor(options: {
     }
     renderDiagram(skeleton, layer);
 
-    layerGroup.disabled = disabledAll || layer === null;
+    layerGroup.disabled = layer === null;
     setText(layerLabel, layer === null ? 'Select a layer in Sprites to edit its rigging.' : `Layer: ${layer.name}`);
     syncSelectOptions(layerBoneSelect, buildBoneOptions(skeleton, 'Legacy anchor space'));
     if (layerBoneSelect.value !== (layer?.bone ?? '')) layerBoneSelect.value = layer?.bone ?? '';
-    applyRigidButton.disabled = disabledAll || layer === null || skeleton === null;
+    applyRigidButton.disabled = layer === null || skeleton === null;
     const flipbook = layer?.flipbook !== undefined;
     flipbookNote.hidden = !flipbook;
     setChecked(tileToggle, layer !== null && layer.tileLength !== null);
-    tileToggle.disabled = disabledAll || layer === null || layer.skin !== null || flipbook;
-    tileLengthInput.disabled = disabledAll || layer === null || layer.skin !== null || flipbook || !tileToggle.checked;
+    tileToggle.disabled = layer === null || layer.skin !== null || flipbook;
+    tileLengthInput.disabled = layer === null || layer.skin !== null || flipbook || !tileToggle.checked;
     setNumberInputValue(tileLengthInput, layer?.tileLength ?? 1, force);
-    applyTileButton.disabled = disabledAll || layer === null || layer.skin !== null || flipbook;
+    applyTileButton.disabled = layer === null || layer.skin !== null || flipbook;
     for (const direction of FACING_DIRECTIONS) {
       const input = directionInputs.get(direction)!;
       setChecked(input, layer?.directions.includes(direction) ?? false);
-      input.disabled = disabledAll || layer === null || flipbook;
+      input.disabled = layer === null || flipbook;
     }
     if (skeleton !== null) {
       syncSelectOptions(meshBonesSelect, skeleton.bones.map(item => ({ value: item.id, label: `${item.name} (${item.id})` })));
@@ -1188,15 +1273,15 @@ export function createSkeletonEditor(options: {
     } else {
       syncSelectOptions(meshBonesSelect, [{ value: '', label: 'Create a skeleton first', disabled: true }]);
     }
-    meshBonesSelect.disabled = disabledAll || skeleton === null || layer === null;
+    meshBonesSelect.disabled = skeleton === null || layer === null;
     if (layer !== null && layer.skin !== null) {
       setNumberInputValue(meshColumnsInput, layer.skin.columns, force);
       setNumberInputValue(meshRowsInput, layer.skin.rows, force);
     }
-    meshColumnsInput.disabled = disabledAll || skeleton === null || layer === null;
-    meshRowsInput.disabled = disabledAll || skeleton === null || layer === null;
-    bindMeshButton.disabled = disabledAll || skeleton === null || layer === null || flipbook;
-    switchRigidButton.disabled = disabledAll || skeleton === null || layer?.skin === null;
+    meshColumnsInput.disabled = skeleton === null || layer === null;
+    meshRowsInput.disabled = skeleton === null || layer === null;
+    bindMeshButton.disabled = skeleton === null || layer === null || flipbook;
+    switchRigidButton.disabled = skeleton === null || layer?.skin === null;
     const skin = layer?.skin ?? null;
     weightsSection.classList.toggle('is-disabled', skin === null);
     weightsSection.setAttribute('aria-disabled', skin === null ? 'true' : 'false');
@@ -1217,8 +1302,8 @@ export function createSkeletonEditor(options: {
         const influence = weights[index];
         if (row.bone.value !== (influence?.bone ?? '')) row.bone.value = influence?.bone ?? '';
         setNumberInputValue(row.weight, influence?.weight ?? 0, force);
-        row.bone.disabled = disabledAll;
-        row.weight.disabled = disabledAll;
+        row.bone.disabled = false;
+        row.weight.disabled = false;
       }
     } else {
       syncSelectOptions(weightVertexSelect, [{ value: '0', label: 'Bind a mesh first', disabled: true }]);
@@ -1231,22 +1316,22 @@ export function createSkeletonEditor(options: {
         row.weight.disabled = true;
       }
     }
-    weightVertexSelect.disabled = disabledAll || skin === null;
-    applyWeightsButton.disabled = disabledAll || skin === null;
+    weightVertexSelect.disabled = skin === null;
+    applyWeightsButton.disabled = skin === null;
 
-    poseGroup.disabled = disabledAll || skeleton === null || bone === null;
+    poseGroup.disabled = skeleton === null || bone === null;
     if (directionSelect.value !== selectedDirection) directionSelect.value = selectedDirection;
     setText(selectionNote, bone === null ? 'Select a bone above to edit offsets.' : `Editing ${bone.name} (${bone.id}) for ${titleCase(selectedDirection)}.`);
     setNumberInputValue(poseXInput, poseEditorValue(selectedPose, 'x'), force);
     setNumberInputValue(poseYInput, poseEditorValue(selectedPose, 'y'), force);
     setNumberInputValue(poseRotationInput, poseEditorValue(selectedPose, 'rotation'), force);
-    poseXInput.disabled = disabledAll || skeleton === null || bone === null || fixed;
-    poseYInput.disabled = disabledAll || skeleton === null || bone === null || fixed;
-    poseRotationInput.disabled = disabledAll || skeleton === null || bone === null;
-    applyPoseButton.disabled = disabledAll || skeleton === null || bone === null;
-    clearPoseButton.disabled = disabledAll || skeleton === null || bone === null || selectedPose === null;
+    poseXInput.disabled = skeleton === null || bone === null || fixed;
+    poseYInput.disabled = skeleton === null || bone === null || fixed;
+    poseRotationInput.disabled = skeleton === null || bone === null;
+    applyPoseButton.disabled = skeleton === null || bone === null;
+    clearPoseButton.disabled = skeleton === null || bone === null || selectedPose === null;
 
-    animationGroup.disabled = disabledAll || skeleton === null;
+    animationGroup.disabled = skeleton === null;
     const clipOptions = skeleton === null || skeleton.clips.length === 0 ? [{ value: '', label: 'No clips yet' }] : skeleton.clips.map(item => ({ value: item.id, label: item.name }));
     syncSelectOptions(defaultClipSelect, [{ value: '', label: 'No default clip' }, ...(skeleton?.clips.map(item => ({ value: item.id, label: item.name })) ?? [])]);
     if (defaultClipSelect.value !== (skeleton?.animation ?? '')) defaultClipSelect.value = skeleton?.animation ?? '';
@@ -1256,9 +1341,9 @@ export function createSkeletonEditor(options: {
     setTextInputValue(clipNameInput, clip?.name ?? '', force);
     setNumberInputValue(clipDurationInput, clip?.duration ?? 1, force);
     setChecked(clipLoopInput, clip?.loop ?? true);
-    addClipButton.disabled = disabledAll || skeleton === null || skeleton.clips.length >= SKELETON_LIMITS.clips;
-    applyClipButton.disabled = disabledAll || clip === null;
-    deleteClipButton.disabled = disabledAll || clip === null;
+    addClipButton.disabled = skeleton === null || skeleton.clips.length >= SKELETON_LIMITS.clips;
+    applyClipButton.disabled = clip === null;
+    deleteClipButton.disabled = clip === null;
     if (clip !== null) {
       syncSelectOptions(frameSelect, clip.frames.map((entry, index) => ({ value: String(index), label: frameLabel(entry, index) })));
       const frameIndex = selectedFrameIndexByClip.get(clip.id) ?? 0;
@@ -1280,17 +1365,17 @@ export function createSkeletonEditor(options: {
     setNumberInputValue(frameXInput, poseEditorValue(selectedFramePose, 'x'), force);
     setNumberInputValue(frameYInput, poseEditorValue(selectedFramePose, 'y'), force);
     setNumberInputValue(frameRotationInput, poseEditorValue(selectedFramePose, 'rotation'), force);
-    const frameDisabled = disabledAll || clip === null || frame === null;
-    frameSelect.disabled = disabledAll || clip === null;
-    frameTimeInput.disabled = disabledAll || clip === null;
+    const frameDisabled = clip === null || frame === null;
+    frameSelect.disabled = clip === null;
+    frameTimeInput.disabled = clip === null;
     frameXInput.disabled = frameDisabled || fixed;
     frameYInput.disabled = frameDisabled || fixed;
     frameRotationInput.disabled = frameDisabled;
-    addFrameButton.disabled = disabledAll || clip === null;
-    replaceFrameButton.disabled = disabledAll || frame === null;
-    deleteFrameButton.disabled = disabledAll || frame === null || clip?.frames.length === 1;
-    applyFramePoseButton.disabled = disabledAll || frame === null || bone === null;
-    clearFramePoseButton.disabled = disabledAll || frame === null || bone === null || selectedFramePose === null;
+    addFrameButton.disabled = clip === null;
+    replaceFrameButton.disabled = frame === null;
+    deleteFrameButton.disabled = frame === null || clip?.frames.length === 1;
+    applyFramePoseButton.disabled = frame === null || bone === null;
+    clearFramePoseButton.disabled = frame === null || bone === null || selectedFramePose === null;
     previewModeSelect.disabled = previewDisabled || skeleton === null;
     previewConstraintsSelect.disabled = previewDisabled || skeleton === null || previewMode === 'live';
     previewLiveButton.disabled = !spritesEnabled || snapshot.preview === null && !snapshot.directionalPreview;
@@ -1298,7 +1383,7 @@ export function createSkeletonEditor(options: {
     if (previewConstraintsSelect.value !== previewConstraints) previewConstraintsSelect.value = previewConstraints;
     previewTimeControl.input.disabled = previewDisabled || previewMode !== 'clip' || clip === null;
 
-    ikGroup.disabled = disabledAll || skeleton === null;
+    ikGroup.disabled = skeleton === null;
     const blankBones = buildBoneOptions(skeleton, 'Select a bone');
     syncSelectOptions(ikSelect, skeleton === null || skeleton.ik.length === 0
       ? [{ value: '', label: 'No IK constraints yet' }]
@@ -1332,11 +1417,11 @@ export function createSkeletonEditor(options: {
       setNumberInputValue(ikOffsetYInput, 0, true);
       setNumberInputValue(ikRotationInput, 0, true);
     }
-    addIkButton.disabled = disabledAll || skeleton === null || skeleton.ik.length >= SKELETON_LIMITS.ik;
-    applyIkButton.disabled = disabledAll || ik === null;
-    deleteIkButton.disabled = disabledAll || ik === null;
+    addIkButton.disabled = skeleton === null || skeleton.ik.length >= SKELETON_LIMITS.ik;
+    applyIkButton.disabled = ik === null;
+    deleteIkButton.disabled = ik === null;
 
-    hairGroup.disabled = disabledAll || skeleton === null;
+    hairGroup.disabled = skeleton === null;
     syncSelectOptions(hairSelect, skeleton === null || skeleton.hair.length === 0
       ? [{ value: '', label: 'No hair chains yet' }]
       : skeleton.hair.map(entry => ({ value: entry.id, label: `${entry.bones[0]} → ${entry.bones[entry.bones.length - 1]}` })));
@@ -1363,11 +1448,11 @@ export function createSkeletonEditor(options: {
       setNumberInputValue(hairRadiusInput, 0.12, force);
       setText(hairSummary, 'Choose a root and tip. The chain follows parent links between them.');
     }
-    addHairButton.disabled = disabledAll || skeleton === null || skeleton.hair.length >= SKELETON_LIMITS.hair;
-    applyHairButton.disabled = disabledAll || hair === null;
-    deleteHairButton.disabled = disabledAll || hair === null;
+    addHairButton.disabled = skeleton === null || skeleton.hair.length >= SKELETON_LIMITS.hair;
+    applyHairButton.disabled = hair === null;
+    deleteHairButton.disabled = hair === null;
 
-    colliderGroup.disabled = disabledAll || skeleton === null;
+    colliderGroup.disabled = skeleton === null;
     syncSelectOptions(colliderSelect, skeleton === null || skeleton.colliders.length === 0
       ? [{ value: '', label: 'No colliders yet' }]
       : skeleton.colliders.map(entry => ({ value: entry.id, label: `${entry.bone} (${entry.radius.toFixed(2)})` })));
@@ -1385,41 +1470,45 @@ export function createSkeletonEditor(options: {
       setNumberInputValue(colliderXInput, 0, force);
       setNumberInputValue(colliderYInput, 0, force);
     }
-    addColliderButton.disabled = disabledAll || skeleton === null || skeleton.colliders.length >= SKELETON_LIMITS.colliders;
-    applyColliderButton.disabled = disabledAll || collider === null;
-    deleteColliderButton.disabled = disabledAll || collider === null;
+    addColliderButton.disabled = skeleton === null || skeleton.colliders.length >= SKELETON_LIMITS.colliders;
+    applyColliderButton.disabled = collider === null;
+    deleteColliderButton.disabled = collider === null;
   }
 
   createButton.addEventListener('click', () => withUiErrors(() => {
     const id = 'bone-1';
+    const anchor = anchorSelect.value;
     clearMessage();
+    if (!state.apply(commands.skeleton((current) => {
+      if (current !== null) throw new SpriteError('The character already has a skeleton.');
+      return {
+        anchor,
+        bones: [{ id, name: 'Bone 1', parent: null, x: 0, y: 0, rotation: 0, length: DEFAULT_BONE_LENGTH }],
+        poses: [],
+        clips: [],
+        animation: null,
+        ik: [],
+        hair: [],
+        colliders: [],
+      };
+    }, info('Create skeleton', 'sprites-skeleton-rig', adding('bone', id))))) return;
     previewMode = 'live';
-    options.state.setSkeleton({
-      anchor: anchorSelect.value,
-      bones: [{ id, name: 'Bone 1', parent: null, x: 0, y: 0, rotation: 0, length: DEFAULT_BONE_LENGTH }],
-      poses: [],
-      clips: [],
-      animation: null,
-      ik: [],
-      hair: [],
-      colliders: [],
-    }, { preview: null });
-    selectedBoneId = id;
     render(true);
   }), listen);
 
   deleteSkeletonButton.addEventListener('click', () => withUiErrors(() => {
-    const snapshot = options.state.snapshot();
-    const problem = skeletonDeleteProblem(snapshot);
+    const problem = skeletonDeleteProblem(state.snapshot());
     if (problem !== null) throw new UiError(problem);
     clearMessage();
+    if (!state.apply(commands.skeleton(() => null,
+      info('Delete skeleton', 'sprites-skeleton-rig', { before: selection('bone'), after: [] })))) return;
     previewMode = 'live';
-    options.state.setSkeleton(null, { preview: null });
     render(true);
   }), listen);
 
   anchorSelect.addEventListener('change', () => withUiErrors(() => {
-    updateSkeleton((draft) => { draft.anchor = anchorSelect.value; });
+    const anchor = anchorSelect.value;
+    updateSkeleton('Set skeleton anchor', 'sprites-skeleton-rig', null, (draft) => { draft.anchor = anchor; });
   }), listen);
 
   boneSelect.addEventListener('change', () => {
@@ -1429,18 +1518,19 @@ export function createSkeletonEditor(options: {
   }, listen);
 
   addRootBoneButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const id = nextId('bone', draft.bones.map(item => item.id));
+    const id = nextId('bone', expectSkeleton().bones.map(item => item.id));
+    updateSkeleton('Add root bone', 'sprites-skeleton-bones', adding('bone', id), (draft) => {
       draft.bones.push({ id, name: `Bone ${draft.bones.length + 1}`, parent: null, x: 0, y: 0, rotation: 0, length: DEFAULT_BONE_LENGTH });
-      selectedBoneId = id;
     });
   }), listen);
 
   addChildBoneButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const parent = draft.bones.find(item => item.id === selectedBoneId);
-      if (!parent) throw new UiError('Select a parent bone first.');
-      const id = nextId('bone', draft.bones.map(item => item.id));
+    const parentId = selectedBoneId;
+    if (parentId === null) throw new UiError('Select a parent bone first.');
+    const id = nextId('bone', expectSkeleton().bones.map(item => item.id));
+    updateSkeleton('Add child bone', 'sprites-skeleton-bones', adding('bone', id), (draft) => {
+      const parent = draft.bones.find(item => item.id === parentId);
+      if (!parent) throw new SpriteError('The selected parent bone is missing.');
       draft.bones.push({
         id,
         name: `Bone ${draft.bones.length + 1}`,
@@ -1450,21 +1540,22 @@ export function createSkeletonEditor(options: {
         rotation: 0,
         length: Math.max(0.1, Math.min(SKELETON_LIMITS.length, parent.length * 0.75)),
       });
-      selectedBoneId = id;
     });
   }), listen);
 
   applyBoneButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const index = draft.bones.findIndex(item => item.id === selectedBoneId);
-      if (index < 0) throw new UiError('Select a bone first.');
+    const boneId = selectedBoneId;
+    if (boneId === null) throw new UiError('Select a bone first.');
+    const name = readText(boneNameInput, 'Bone name');
+    const parent = boneParentSelect.value || null;
+    const x = readNumber(boneXInput, 'Bone X');
+    const y = readNumber(boneYInput, 'Bone Y');
+    const length = readNumber(boneLengthInput, 'Bone length');
+    const rotation = readNumber(boneRotationInput, 'Bone rotation');
+    updateSkeleton(`Apply bone ${name}`, 'sprites-skeleton-bones', keeping('bone'), (draft) => {
+      const index = draft.bones.findIndex(item => item.id === boneId);
+      if (index < 0) throw new SpriteError('The selected bone is missing.');
       const current = draft.bones[index];
-      const name = readText(boneNameInput, 'Bone name');
-      const parent = boneParentSelect.value || null;
-      const x = readNumber(boneXInput, 'Bone X');
-      const y = readNumber(boneYInput, 'Bone Y');
-      const length = readNumber(boneLengthInput, 'Bone length');
-      const rotation = readNumber(boneRotationInput, 'Bone rotation');
       draft.bones[index] = { ...current, name, parent, x, y, length, rotation };
       draft.bones = draft.bones.map(item => isTipAttached(item, current)
         ? { ...item, x: length, y: 0 }
@@ -1473,14 +1564,15 @@ export function createSkeletonEditor(options: {
   }), listen);
 
   deleteBoneButton.addEventListener('click', () => withUiErrors(() => {
-    const snapshot = options.state.snapshot();
+    const snapshot = state.snapshot();
     const skeleton = expectSkeleton();
-    if (selectedBoneId === null) throw new UiError('Select a bone first.');
-    const problem = boneDeleteProblem(snapshot, skeleton, selectedBoneId);
+    const boneId = selectedBoneId;
+    if (boneId === null) throw new UiError('Select a bone first.');
+    const problem = boneDeleteProblem(snapshot, skeleton, boneId);
     if (problem !== null) throw new UiError(problem);
-    updateSkeleton((draft) => {
-      draft.bones = draft.bones.filter(item => item.id !== selectedBoneId);
-      selectedBoneId = draft.bones[0]?.id ?? null;
+    const name = skeleton.bones.find(item => item.id === boneId)?.name ?? boneId;
+    updateSkeleton(`Delete bone ${name}`, 'sprites-skeleton-bones', deleting('bone', skeleton.bones, boneId), (draft) => {
+      draft.bones = draft.bones.filter(item => item.id !== boneId);
     });
   }), listen);
 
@@ -1494,13 +1586,23 @@ export function createSkeletonEditor(options: {
     render(true);
   }, listen);
 
-  applyRigidButton.addEventListener('click', () => withUiErrors(() => {
-    const snapshot = options.state.snapshot();
+  // The selected layer, and a skeleton when its rigging needs one.
+  function rigLayer(needsSkeleton: string | null): SpriteLayer {
+    const snapshot = state.snapshot();
     const layer = selectedLayer(snapshot);
     if (layer === null) throw new UiError('Select a sprite layer first.');
-    if (snapshot.document.skeleton === null) throw new UiError('Create a skeleton before binding a bone.');
+    if (needsSkeleton !== null && snapshot.document.skeleton === null) throw new UiError(needsSkeleton);
+    return layer;
+  }
+
+  function editLayer(layer: SpriteLayer, label: string, edit: SpriteLayerEdit, select?: Selection): void {
     clearMessage();
-    options.state.updateLayer(layer.id, { bone: layerBoneSelect.value || null, skin: null });
+    if (state.apply(commands.layer(layer.id, edit, layerInfo(label, layer.id, select)))) applied();
+  }
+
+  applyRigidButton.addEventListener('click', () => withUiErrors(() => {
+    const layer = rigLayer('Create a skeleton before binding a bone.');
+    editLayer(layer, 'Bind layer to bone', { bone: layerBoneSelect.value || null, skin: null });
   }), listen);
 
   tileToggle.addEventListener('change', () => {
@@ -1508,16 +1610,14 @@ export function createSkeletonEditor(options: {
   }, listen);
 
   applyTileButton.addEventListener('click', () => withUiErrors(() => {
-    const layer = selectedLayer(options.state.snapshot());
-    if (layer === null) throw new UiError('Select a sprite layer first.');
+    const layer = rigLayer(null);
     if (layer.skin !== null) throw new UiError('Turn off mesh binding before using tile mode.');
-    clearMessage();
-    options.state.updateLayer(layer.id, { tileLength: tileToggle.checked ? readNumber(tileLengthInput, 'Tile length') : null });
+    editLayer(layer, 'Apply tile', { tileLength: tileToggle.checked ? readNumber(tileLengthInput, 'Tile length') : null });
   }), listen);
 
   for (const direction of FACING_DIRECTIONS) {
     directionInputs.get(direction)?.addEventListener('change', () => {
-      const layer = selectedLayer(options.state.snapshot());
+      const layer = selectedLayer(state.snapshot());
       if (layer === null) return;
       const directions = FACING_DIRECTIONS.filter(entry => directionInputs.get(entry)?.checked === true);
       if (directions.length === 0) {
@@ -1526,8 +1626,7 @@ export function createSkeletonEditor(options: {
         render();
         return;
       }
-      clearMessage();
-      options.state.updateLayer(layer.id, { directions });
+      editLayer(layer, 'Set visible directions', { directions });
     }, listen);
   }
 
@@ -1537,28 +1636,20 @@ export function createSkeletonEditor(options: {
   }, listen);
 
   bindMeshButton.addEventListener('click', () => withUiErrors(() => {
-    const snapshot = options.state.snapshot();
-    const layer = selectedLayer(snapshot);
-    if (layer === null) throw new UiError('Select a sprite layer first.');
-    if (snapshot.document.skeleton === null) throw new UiError('Create a skeleton before binding a mesh.');
+    const layer = rigLayer('Create a skeleton before binding a mesh.');
     if (meshBoneSelection === null || meshBoneSelection.size === 0) throw new UiError('Choose at least one influencing bone.');
+    const columns = readInteger(meshColumnsInput, 'Mesh columns');
+    const rows = readInteger(meshRowsInput, 'Mesh rows');
     clearMessage();
-    options.state.bindMesh(layer.id, {
-      columns: readInteger(meshColumnsInput, 'Mesh columns'),
-      rows: readInteger(meshRowsInput, 'Mesh rows'),
-      bones: [...meshBoneSelection],
-    });
-    selectedVertexIndex = 0;
-    render(true);
+    const select = { before: selection('vertex'), after: [selectionEntry('vertex', '0')] };
+    const bind = { columns, rows, bones: [...meshBoneSelection] };
+    if (!state.apply(commands.bindMesh(layer.id, bind, layerInfo('Bind mesh', layer.id, select)))) return;
+    applied();
   }), listen);
 
   switchRigidButton.addEventListener('click', () => withUiErrors(() => {
-    const snapshot = options.state.snapshot();
-    const layer = selectedLayer(snapshot);
-    if (layer === null) throw new UiError('Select a sprite layer first.');
-    if (snapshot.document.skeleton === null) throw new UiError('Create a skeleton before switching bindings.');
-    clearMessage();
-    options.state.updateLayer(layer.id, { skin: null, bone: layerBoneSelect.value || null });
+    const layer = rigLayer('Create a skeleton before switching bindings.');
+    editLayer(layer, 'Switch back to rigid', { skin: null, bone: layerBoneSelect.value || null });
   }), listen);
 
   weightVertexSelect.addEventListener('change', () => {
@@ -1568,9 +1659,8 @@ export function createSkeletonEditor(options: {
   }, listen);
 
   applyWeightsButton.addEventListener('click', () => withUiErrors(() => {
-    const snapshot = options.state.snapshot();
-    const layer = selectedLayer(snapshot);
-    if (layer?.skin === null || layer === null) throw new UiError('Bind a mesh before editing weights.');
+    const layer = rigLayer(null);
+    if (layer.skin === null) throw new UiError('Bind a mesh before editing weights.');
     const influences = weightRows.flatMap(row => {
       if (row.bone.value === '') return [];
       return [{ bone: row.bone.value, weight: readNumber(row.weight, 'Weight value') }];
@@ -1578,8 +1668,7 @@ export function createSkeletonEditor(options: {
     const weights = layer.skin.weights.map(entry => entry.map(weight => ({ ...weight })));
     weights[selectedVertexIndex] = influences;
     const skin: SpriteSkin = validateSkin({ ...layer.skin, weights });
-    clearMessage();
-    options.state.updateLayer(layer.id, { skin, bone: null, tileLength: null });
+    editLayer(layer, 'Apply vertex weights', { skin, bone: null, tileLength: null }, keeping('vertex'));
   }), listen);
 
   directionSelect.addEventListener('change', () => {
@@ -1589,46 +1678,60 @@ export function createSkeletonEditor(options: {
     if (previewMode !== 'live') applyPreview();
   }, listen);
 
+  // Offsets this bone may hold; tip-attached IK and hair bones only rotate.
+  function offset(draft: MutableSkeleton, boneId: string, x: number, y: number, rotation: number, where: string): BonePose | null {
+    if (fixedJointIds(draft).has(boneId) && (Math.abs(x) > JOINT_EPSILON || Math.abs(y) > JOINT_EPSILON)) {
+      throw new SpriteError(`Tip-attached IK and hair bones may rotate, but cannot translate in ${where}.`);
+    }
+    return Math.abs(x) <= JOINT_EPSILON && Math.abs(y) <= JOINT_EPSILON && Math.abs(rotation) <= JOINT_EPSILON
+      ? null
+      : { bone: boneId, x, y, rotation };
+  }
+
+  // The selected clip of the draft, as the step runs.
+  function draftClip(draft: MutableSkeleton, clipId: string | null): MutableSkeleton['clips'][number] {
+    const clip = draft.clips.find(entry => entry.id === clipId);
+    if (!clip) throw new SpriteError('The selected clip is missing.');
+    return clip;
+  }
+
   applyPoseButton.addEventListener('click', () => withUiErrors(() => {
-    if (selectedBoneId === null) throw new UiError('Select a bone first.');
     const boneId = selectedBoneId;
-    updateSkeleton((draft) => {
-      const constrained = fixedJointIds(draft).has(boneId);
-      const x = readNumber(poseXInput, 'Directional offset X');
-      const y = readNumber(poseYInput, 'Directional offset Y');
-      const rotation = readNumber(poseRotationInput, 'Directional rotation');
-      if (constrained && (Math.abs(x) > JOINT_EPSILON || Math.abs(y) > JOINT_EPSILON)) {
-        throw new UiError('Tip-attached IK and hair bones may rotate, but cannot translate in saved poses.');
-      }
-      const index = draft.poses.findIndex(entry => entry.direction === selectedDirection);
-      const value = Math.abs(x) <= JOINT_EPSILON && Math.abs(y) <= JOINT_EPSILON && Math.abs(rotation) <= JOINT_EPSILON
-        ? null
-        : { bone: boneId, x, y, rotation };
+    if (boneId === null) throw new UiError('Select a bone first.');
+    const direction = selectedDirection;
+    const x = readNumber(poseXInput, 'Directional offset X');
+    const y = readNumber(poseYInput, 'Directional offset Y');
+    const rotation = readNumber(poseRotationInput, 'Directional rotation');
+    updateSkeleton('Apply directional offset', 'sprites-skeleton-pose', keeping('bone', 'direction'), (draft) => {
+      const value = offset(draft, boneId, x, y, rotation, 'saved poses');
+      const index = draft.poses.findIndex(entry => entry.direction === direction);
       if (index < 0) {
-        if (value !== null) draft.poses = [...draft.poses, { direction: selectedDirection, pose: [value] }];
+        if (value !== null) draft.poses = [...draft.poses, { direction, pose: [value] }];
       } else {
         const pose = upsertPose(draft.poses[index].pose, boneId, value);
         if (pose.length === 0) draft.poses = draft.poses.filter((_, entryIndex) => entryIndex !== index);
-        else draft.poses[index] = { direction: selectedDirection, pose };
+        else draft.poses[index] = { direction, pose };
       }
       draft.poses = sortDirectionalPoses(draft.poses);
     });
   }), listen);
 
   clearPoseButton.addEventListener('click', () => withUiErrors(() => {
-    if (selectedBoneId === null) throw new UiError('Select a bone first.');
     const boneId = selectedBoneId;
-    updateSkeleton((draft) => {
-      const index = draft.poses.findIndex(entry => entry.direction === selectedDirection);
+    if (boneId === null) throw new UiError('Select a bone first.');
+    const direction = selectedDirection;
+    updateSkeleton('Clear directional offset', 'sprites-skeleton-pose', keeping('bone', 'direction'), (draft) => {
+      const index = draft.poses.findIndex(entry => entry.direction === direction);
       if (index < 0) return;
       const pose = upsertPose(draft.poses[index].pose, boneId, null);
       if (pose.length === 0) draft.poses = draft.poses.filter((_, entryIndex) => entryIndex !== index);
-      else draft.poses[index] = { direction: selectedDirection, pose };
+      else draft.poses[index] = { direction, pose };
     });
   }), listen);
 
   defaultClipSelect.addEventListener('change', () => withUiErrors(() => {
-    updateSkeleton((draft) => { draft.animation = defaultClipSelect.value || null; });
+    const animation = defaultClipSelect.value || null;
+    updateSkeleton('Set default clip', 'sprites-skeleton-animation', null, (draft) => { draft.animation = animation; });
   }), listen);
 
   clipSelect.addEventListener('change', () => {
@@ -1639,48 +1742,44 @@ export function createSkeletonEditor(options: {
   }, listen);
 
   addClipButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const id = nextId('clip', draft.clips.map(item => item.id));
-      const duration = readNumber(clipDurationInput, 'Clip duration');
-      draft.clips.push({
-        id,
-        name: readText(clipNameInput, 'Clip name'),
-        duration,
-        loop: clipLoopInput.checked,
-        frames: [{ time: 0, pose: [] }],
-      });
-      selectedClipId = id;
-      selectedFrameIndexByClip.set(id, 0);
-      previewTimeControl.setValue(0, { disabled: previewMode !== 'clip' });
-    });
+    const duration = readNumber(clipDurationInput, 'Clip duration');
+    const name = readText(clipNameInput, 'Clip name');
+    const loop = clipLoopInput.checked;
+    const id = nextId('clip', expectSkeleton().clips.map(item => item.id));
+    updateSkeleton(`Add clip ${name}`, 'sprites-skeleton-animation', framing(id, 0), (draft) => {
+      draft.clips.push({ id, name, duration, loop, frames: [{ time: 0, pose: [] }] });
+    }, () => { previewTimeControl.setValue(0, { disabled: previewMode !== 'clip' }); });
   }), listen);
 
   applyClipButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const clip = draft.clips.find(entry => entry.id === selectedClipId);
-      if (!clip) throw new UiError('Select a clip first.');
-      const duration = readNumber(clipDurationInput, 'Clip duration');
+    const clipId = selectedClipId;
+    if (clipId === null) throw new UiError('Select a clip first.');
+    const duration = readNumber(clipDurationInput, 'Clip duration');
+    const name = readText(clipNameInput, 'Clip name');
+    const loop = clipLoopInput.checked;
+    updateSkeleton(`Apply clip ${name}`, 'sprites-skeleton-animation', keeping('clip'), (draft) => {
+      const clip = draftClip(draft, clipId);
       if (clip.frames.some(frame => frame.time > duration)) {
-        throw new UiError('Existing keyframe times must stay within the clip duration.');
+        throw new SpriteError('Existing keyframe times must stay within the clip duration.');
       }
-      clip.name = readText(clipNameInput, 'Clip name');
+      clip.name = name;
       clip.duration = duration;
-      clip.loop = clipLoopInput.checked;
+      clip.loop = loop;
     });
   }), listen);
 
   deleteClipButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const index = draft.clips.findIndex(entry => entry.id === selectedClipId);
-      if (index < 0) throw new UiError('Select a clip first.');
-      const deletedId = draft.clips[index].id;
-      draft.clips = draft.clips.filter((_, clipIndex) => clipIndex !== index);
-      if (draft.animation === deletedId) draft.animation = null;
-      selectedClipId = draft.clips[0]?.id ?? null;
-      if (previewMode === 'clip' || previewMode === 'frame') {
-        previewMode = 'live';
-      }
-    });
+    const clipId = selectedClipId;
+    if (clipId === null) throw new UiError('Select a clip first.');
+    const skeleton = expectSkeleton();
+    const name = skeleton.clips.find(entry => entry.id === clipId)?.name ?? clipId;
+    // Undo selects the clip's keyframe again as well.
+    const select = { ...deleting('clip', skeleton.clips, clipId), before: selection('clip', 'keyframe') };
+    updateSkeleton(`Delete clip ${name}`, 'sprites-skeleton-animation', select, (draft) => {
+      draftClip(draft, clipId);
+      draft.clips = draft.clips.filter(entry => entry.id !== clipId);
+      if (draft.animation === clipId) draft.animation = null;
+    }, () => { if (previewMode === 'clip' || previewMode === 'frame') previewMode = 'live'; });
   }), listen);
 
   frameSelect.addEventListener('change', () => {
@@ -1690,79 +1789,90 @@ export function createSkeletonEditor(options: {
     if (previewMode === 'frame') applyPreview();
   }, listen);
 
+  // The keyframe times of clip `clipId`, in order; none when the clip has gone, which its step then refuses.
+  function frameTimes(clipId: string): number[] {
+    return expectSkeleton().clips.find(entry => entry.id === clipId)?.frames.map(entry => entry.time) ?? [];
+  }
+
+  // A keyframe step's selection: the clip's keyframe selected now, then the one at `index`.
+  function framing(clipId: string, index: number): Selection {
+    const after = [selectionEntry('clip', clipId), selectionEntry('keyframe', String(index))];
+    return { before: selection('clip', 'keyframe'), after };
+  }
+
   addFrameButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const clip = draft.clips.find(entry => entry.id === selectedClipId);
-      if (!clip) throw new UiError('Select a clip first.');
-      const time = readNumber(frameTimeInput, 'Keyframe time');
+    const clipId = selectedClipId;
+    if (clipId === null) throw new UiError('Select a clip first.');
+    const time = readNumber(frameTimeInput, 'Keyframe time');
+    const sourceIndex = selectedFrameIndexByClip.get(clipId) ?? 0;
+    const index = [...frameTimes(clipId), time].sort((left, right) => left - right)
+      .findIndex(entry => Math.abs(entry - time) <= JOINT_EPSILON);
+    updateSkeleton('Add keyframe', 'sprites-skeleton-animation', framing(clipId, index), (draft) => {
+      const clip = draftClip(draft, clipId);
       if (clip.frames.some(entry => Math.abs(entry.time - time) <= JOINT_EPSILON)) {
-        throw new UiError('This clip already has a keyframe at that time. Use Replace keyframe instead.');
+        throw new SpriteError('This clip already has a keyframe at that time. Use Replace keyframe instead.');
       }
-      const sourceIndex = selectedFrameIndexByClip.get(clip.id) ?? 0;
       const source = clip.frames[sourceIndex] ?? clip.frames[0];
       clip.frames = [...clip.frames, { time, pose: source ? clonePose(source.pose) : [] }].sort((left, right) => left.time - right.time);
-      selectedFrameIndexByClip.set(clip.id, clip.frames.findIndex(entry => Math.abs(entry.time - time) <= JOINT_EPSILON));
     });
   }), listen);
 
   replaceFrameButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const clip = draft.clips.find(entry => entry.id === selectedClipId);
-      if (!clip) throw new UiError('Select a clip first.');
-      const index = selectedFrameIndexByClip.get(clip.id) ?? 0;
-      const current = clip.frames[index];
-      if (!current) throw new UiError('Select a keyframe first.');
-      const time = readNumber(frameTimeInput, 'Keyframe time');
-      if (clip.frames.some((entry, entryIndex) => entryIndex !== index && Math.abs(entry.time - time) <= JOINT_EPSILON)) {
-        throw new UiError('Another keyframe already uses that time.');
+    const clipId = selectedClipId;
+    if (clipId === null) throw new UiError('Select a clip first.');
+    const time = readNumber(frameTimeInput, 'Keyframe time');
+    const at = selectedFrameIndexByClip.get(clipId) ?? 0;
+    const index = frameTimes(clipId).map((entry, entryIndex) => entryIndex === at ? time : entry).sort((left, right) => left - right)
+      .findIndex(entry => Math.abs(entry - time) <= JOINT_EPSILON);
+    updateSkeleton('Replace keyframe', 'sprites-skeleton-animation', framing(clipId, index), (draft) => {
+      const clip = draftClip(draft, clipId);
+      const current = clip.frames[at];
+      if (!current) throw new SpriteError('The selected keyframe is missing.');
+      if (clip.frames.some((entry, entryIndex) => entryIndex !== at && Math.abs(entry.time - time) <= JOINT_EPSILON)) {
+        throw new SpriteError('Another keyframe already uses that time.');
       }
       current.time = time;
       clip.frames = [...clip.frames].sort((left, right) => left.time - right.time);
-      selectedFrameIndexByClip.set(clip.id, clip.frames.findIndex(entry => Math.abs(entry.time - time) <= JOINT_EPSILON));
     });
   }), listen);
 
   deleteFrameButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const clip = draft.clips.find(entry => entry.id === selectedClipId);
-      if (!clip) throw new UiError('Select a clip first.');
-      if (clip.frames.length <= 1) throw new UiError('A clip must keep at least one keyframe.');
-      const index = selectedFrameIndexByClip.get(clip.id) ?? 0;
-      clip.frames = clip.frames.filter((_, frameIndex) => frameIndex !== index);
-      selectedFrameIndexByClip.set(clip.id, Math.max(0, Math.min(index, clip.frames.length - 1)));
+    const clipId = selectedClipId;
+    if (clipId === null) throw new UiError('Select a clip first.');
+    const at = selectedFrameIndexByClip.get(clipId) ?? 0;
+    const index = Math.max(0, Math.min(at, frameTimes(clipId).length - 2));
+    updateSkeleton('Delete keyframe', 'sprites-skeleton-animation', framing(clipId, index), (draft) => {
+      const clip = draftClip(draft, clipId);
+      if (clip.frames.length <= 1) throw new SpriteError('A clip must keep at least one keyframe.');
+      clip.frames = clip.frames.filter((_, frameIndex) => frameIndex !== at);
     });
   }), listen);
 
   applyFramePoseButton.addEventListener('click', () => withUiErrors(() => {
-    if (selectedBoneId === null) throw new UiError('Select a bone first.');
     const boneId = selectedBoneId;
-    updateSkeleton((draft) => {
-      const clip = draft.clips.find(entry => entry.id === selectedClipId);
-      if (!clip) throw new UiError('Select a clip first.');
-      const frame = clip.frames[selectedFrameIndexByClip.get(clip.id) ?? 0];
-      if (!frame) throw new UiError('Select a keyframe first.');
-      const constrained = fixedJointIds(draft).has(boneId);
-      const x = readNumber(frameXInput, 'Keyframe offset X');
-      const y = readNumber(frameYInput, 'Keyframe offset Y');
-      const rotation = readNumber(frameRotationInput, 'Bone rotation');
-      if (constrained && (Math.abs(x) > JOINT_EPSILON || Math.abs(y) > JOINT_EPSILON)) {
-        throw new UiError('Tip-attached IK and hair bones may rotate, but cannot translate in keyframes.');
-      }
-      const value = Math.abs(x) <= JOINT_EPSILON && Math.abs(y) <= JOINT_EPSILON && Math.abs(rotation) <= JOINT_EPSILON
-        ? null
-        : { bone: boneId, x, y, rotation };
-      frame.pose = upsertPose(frame.pose, boneId, value);
+    if (boneId === null) throw new UiError('Select a bone first.');
+    const clipId = selectedClipId;
+    if (clipId === null) throw new UiError('Select a clip first.');
+    const at = selectedFrameIndexByClip.get(clipId) ?? 0;
+    const x = readNumber(frameXInput, 'Keyframe offset X');
+    const y = readNumber(frameYInput, 'Keyframe offset Y');
+    const rotation = readNumber(frameRotationInput, 'Bone rotation');
+    updateSkeleton('Apply keyframe offset', 'sprites-skeleton-animation', keeping('bone', 'clip', 'keyframe'), (draft) => {
+      const frame = draftClip(draft, clipId).frames[at];
+      if (!frame) throw new SpriteError('The selected keyframe is missing.');
+      frame.pose = upsertPose(frame.pose, boneId, offset(draft, boneId, x, y, rotation, 'keyframes'));
     });
   }), listen);
 
   clearFramePoseButton.addEventListener('click', () => withUiErrors(() => {
-    if (selectedBoneId === null) throw new UiError('Select a bone first.');
     const boneId = selectedBoneId;
-    updateSkeleton((draft) => {
-      const clip = draft.clips.find(entry => entry.id === selectedClipId);
-      if (!clip) throw new UiError('Select a clip first.');
-      const frame = clip.frames[selectedFrameIndexByClip.get(clip.id) ?? 0];
-      if (!frame) throw new UiError('Select a keyframe first.');
+    if (boneId === null) throw new UiError('Select a bone first.');
+    const clipId = selectedClipId;
+    if (clipId === null) throw new UiError('Select a clip first.');
+    const at = selectedFrameIndexByClip.get(clipId) ?? 0;
+    updateSkeleton('Clear keyframe offset', 'sprites-skeleton-animation', keeping('bone', 'clip', 'keyframe'), (draft) => {
+      const frame = draftClip(draft, clipId).frames[at];
+      if (!frame) throw new SpriteError('The selected keyframe is missing.');
       frame.pose = upsertPose(frame.pose, boneId, null);
     });
   }), listen);
@@ -1772,7 +1882,7 @@ export function createSkeletonEditor(options: {
     if (value !== 'live' && value !== 'direction' && value !== 'clip' && value !== 'frame') throw new UiError('Choose a valid preview mode.');
     previewMode = value;
     clearMessage();
-    if (previewMode === 'live') options.state.setPreview(null);
+    if (previewMode === 'live') state.setPreview(null);
     else applyPreview();
     render();
   }), listen);
@@ -1788,7 +1898,7 @@ export function createSkeletonEditor(options: {
   previewLiveButton.addEventListener('click', () => {
     clearMessage();
     previewMode = 'live';
-    options.state.setPreview(null);
+    state.setPreview(null);
     render();
   }, listen);
 
@@ -1798,48 +1908,41 @@ export function createSkeletonEditor(options: {
     render(true);
   }, listen);
 
+  const readIk = (): Omit<MutableSkeleton['ik'][number], 'id'> => ({
+    upper: ikUpperSelect.value,
+    lower: ikLowerSelect.value,
+    hand: ikHandSelect.value,
+    target: ikTargetSelect.value,
+    bend: ikBendSelect.value === '-1' ? -1 : 1,
+    mix: readNumber(ikMixInput, 'IK mix'),
+    offsetX: readNumber(ikOffsetXInput, 'Grip offset X'),
+    offsetY: readNumber(ikOffsetYInput, 'Grip offset Y'),
+    handRotation: readNumber(ikRotationInput, 'Wrist rotation'),
+  });
+
   addIkButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const id = nextId('ik', draft.ik.map(entry => entry.id));
-      draft.ik.push({
-        id,
-        upper: ikUpperSelect.value,
-        lower: ikLowerSelect.value,
-        hand: ikHandSelect.value,
-        target: ikTargetSelect.value,
-        bend: ikBendSelect.value === '-1' ? -1 : 1,
-        mix: readNumber(ikMixInput, 'IK mix'),
-        offsetX: readNumber(ikOffsetXInput, 'Grip offset X'),
-        offsetY: readNumber(ikOffsetYInput, 'Grip offset Y'),
-        handRotation: readNumber(ikRotationInput, 'Wrist rotation'),
-      });
-      selectedIkId = id;
+    const value = readIk();
+    const id = nextId('ik', expectSkeleton().ik.map(entry => entry.id));
+    updateSkeleton('Add IK', 'sprites-skeleton-ik', adding('ik', id), (draft) => {
+      draft.ik.push({ ...value, id });
     });
   }), listen);
 
   applyIkButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const index = draft.ik.findIndex(entry => entry.id === selectedIkId);
-      if (index < 0) throw new UiError('Select an IK constraint first.');
-      draft.ik[index] = {
-        ...draft.ik[index],
-        upper: ikUpperSelect.value,
-        lower: ikLowerSelect.value,
-        hand: ikHandSelect.value,
-        target: ikTargetSelect.value,
-        bend: ikBendSelect.value === '-1' ? -1 : 1,
-        mix: readNumber(ikMixInput, 'IK mix'),
-        offsetX: readNumber(ikOffsetXInput, 'Grip offset X'),
-        offsetY: readNumber(ikOffsetYInput, 'Grip offset Y'),
-        handRotation: readNumber(ikRotationInput, 'Wrist rotation'),
-      };
+    const ikId = selectedIkId;
+    if (ikId === null) throw new UiError('Select an IK constraint first.');
+    const value = readIk();
+    updateSkeleton('Apply IK', 'sprites-skeleton-ik', keeping('ik'), (draft) => {
+      const index = draft.ik.findIndex(entry => entry.id === ikId);
+      if (index < 0) throw new SpriteError('The selected IK constraint is missing.');
+      draft.ik[index] = { ...draft.ik[index], ...value };
     });
   }), listen);
 
   deleteIkButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      draft.ik = draft.ik.filter(entry => entry.id !== selectedIkId);
-      selectedIkId = draft.ik[0]?.id ?? null;
+    const ikId = selectedIkId;
+    updateSkeleton('Delete IK', 'sprites-skeleton-ik', deleting('ik', expectSkeleton().ik, ikId), (draft) => {
+      draft.ik = draft.ik.filter(entry => entry.id !== ikId);
     });
   }), listen);
 
@@ -1849,43 +1952,44 @@ export function createSkeletonEditor(options: {
     render(true);
   }, listen);
 
-  const readHairChain = (): MutableSkeleton['hair'][number] => {
-    const skeleton = expectSkeleton();
+  // The chain from the chosen root to the chosen tip, through the bones' parent links as the step finds them.
+  const readHairChain = (): ((draft: MutableSkeleton) => Omit<MutableSkeleton['hair'][number], 'id'>) => {
     const rootBone = hairRootSelect.value;
     const tipBone = hairTipSelect.value;
-    const bones = pathFromRootToTip(skeleton, rootBone, tipBone);
-    if (bones === null) throw new UiError('Hair tip must descend from the chosen hair root through parent links.');
-    return {
-      id: '',
-      bones: [...bones],
-      stiffness: readNumber(hairStiffnessInput, 'Hair stiffness'),
-      damping: readNumber(hairDampingInput, 'Hair damping'),
-      gravity: readNumber(hairGravityInput, 'Hair gravity'),
-      radius: readNumber(hairRadiusInput, 'Collision radius'),
+    const stiffness = readNumber(hairStiffnessInput, 'Hair stiffness');
+    const damping = readNumber(hairDampingInput, 'Hair damping');
+    const gravity = readNumber(hairGravityInput, 'Hair gravity');
+    const radius = readNumber(hairRadiusInput, 'Collision radius');
+    return (draft) => {
+      const bones = pathFromRootToTip(draft, rootBone, tipBone);
+      if (bones === null) throw new SpriteError('Hair tip must descend from the chosen hair root through parent links.');
+      return { bones: [...bones], stiffness, damping, gravity, radius };
     };
   };
 
   addHairButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const chain = readHairChain();
-      const id = nextId('hair', draft.hair.map(entry => entry.id));
-      draft.hair.push({ ...chain, id });
-      selectedHairId = id;
+    const chain = readHairChain();
+    const id = nextId('hair', expectSkeleton().hair.map(entry => entry.id));
+    updateSkeleton('Add hair', 'sprites-skeleton-hair', adding('hair', id), (draft) => {
+      draft.hair.push({ ...chain(draft), id });
     });
   }), listen);
 
   applyHairButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const index = draft.hair.findIndex(entry => entry.id === selectedHairId);
-      if (index < 0) throw new UiError('Select a hair chain first.');
-      draft.hair[index] = { ...readHairChain(), id: draft.hair[index].id };
+    const hairId = selectedHairId;
+    if (hairId === null) throw new UiError('Select a hair chain first.');
+    const chain = readHairChain();
+    updateSkeleton('Apply hair', 'sprites-skeleton-hair', keeping('hair'), (draft) => {
+      const index = draft.hair.findIndex(entry => entry.id === hairId);
+      if (index < 0) throw new SpriteError('The selected hair chain is missing.');
+      draft.hair[index] = { ...chain(draft), id: hairId };
     });
   }), listen);
 
   deleteHairButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      draft.hair = draft.hair.filter(entry => entry.id !== selectedHairId);
-      selectedHairId = draft.hair[0]?.id ?? null;
+    const hairId = selectedHairId;
+    updateSkeleton('Delete hair', 'sprites-skeleton-hair', deleting('hair', expectSkeleton().hair, hairId), (draft) => {
+      draft.hair = draft.hair.filter(entry => entry.id !== hairId);
     });
   }), listen);
 
@@ -1895,8 +1999,7 @@ export function createSkeletonEditor(options: {
     render(true);
   }, listen);
 
-  const readCollider = (): MutableSkeleton['colliders'][number] => ({
-    id: '',
+  const readCollider = (): Omit<MutableSkeleton['colliders'][number], 'id'> => ({
     bone: colliderBoneSelect.value,
     x: readNumber(colliderXInput, 'Collider offset X'),
     y: readNumber(colliderYInput, 'Collider offset Y'),
@@ -1904,29 +2007,38 @@ export function createSkeletonEditor(options: {
   });
 
   addColliderButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const id = nextId('collider', draft.colliders.map(entry => entry.id));
-      draft.colliders.push({ ...readCollider(), id });
-      selectedColliderId = id;
+    const value = readCollider();
+    const id = nextId('collider', expectSkeleton().colliders.map(entry => entry.id));
+    updateSkeleton('Add collider', 'sprites-skeleton-colliders', adding('collider', id), (draft) => {
+      draft.colliders.push({ ...value, id });
     });
   }), listen);
 
   applyColliderButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      const index = draft.colliders.findIndex(entry => entry.id === selectedColliderId);
-      if (index < 0) throw new UiError('Select a collider first.');
-      draft.colliders[index] = { ...readCollider(), id: draft.colliders[index].id };
+    const colliderId = selectedColliderId;
+    if (colliderId === null) throw new UiError('Select a collider first.');
+    const value = readCollider();
+    updateSkeleton('Apply collider', 'sprites-skeleton-colliders', keeping('collider'), (draft) => {
+      const index = draft.colliders.findIndex(entry => entry.id === colliderId);
+      if (index < 0) throw new SpriteError('The selected collider is missing.');
+      draft.colliders[index] = { ...value, id: colliderId };
     });
   }), listen);
 
   deleteColliderButton.addEventListener('click', () => withUiErrors(() => {
-    updateSkeleton((draft) => {
-      draft.colliders = draft.colliders.filter(entry => entry.id !== selectedColliderId);
-      selectedColliderId = draft.colliders[0]?.id ?? null;
+    const colliderId = selectedColliderId;
+    updateSkeleton('Delete collider', 'sprites-skeleton-colliders', deleting('collider', expectSkeleton().colliders, colliderId), (draft) => {
+      draft.colliders = draft.colliders.filter(entry => entry.id !== colliderId);
     });
   }), listen);
 
-  const unsubscribe = options.state.subscribe(() => render(false));
+  // Each Sprites step's event carries the selection it recorded: Undo takes up the one before it, Redo and the step
+  // itself the one after.
+  const unsubscribe = state.subscribe((event) => {
+    const select = event.step?.place.tab === 'sprites' ? event.step.place.select : null;
+    if (select !== null && event.cause !== null) restore(event.cause === 'undo' ? select.before : select.after);
+    render(false);
+  });
   options.signal.addEventListener('abort', () => dispose(), { once: true, signal: events.signal });
   options.mount.append(root);
   render(true);

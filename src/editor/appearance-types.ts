@@ -1,12 +1,12 @@
 import type { VisualPartId } from '../character';
 import { ModelError as AppearanceError, MODEL_LIMITS } from '../model-data';
-import { validateAlignment } from '../appearance-profile';
+import { validateAppearanceParts } from '../appearance-profile';
 import type { VisualAlignment } from '../appearance-profile';
 export { ModelError as AppearanceError, MODEL_LIMITS } from '../model-data';
-export { DEFAULT_ARM_IK, ARM_SIDES } from '../character';
-export type { ArmIkSettings, ArmSide, VisualPartId } from '../character';
+export { DEFAULT_ARM_IK } from '../character';
+export type { ArmIkSettings, VisualPartId } from '../character';
 export {
-  ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS, DEFAULT_ALIGNMENT, validateAlignment, validateArmIk,
+  ALIGNMENT_FIELDS, ARM_IK_FIELDS, ARM_IK_LIMITS, DEFAULT_ALIGNMENT,
 } from '../appearance-profile';
 export type { VisualAlignment } from '../appearance-profile';
 
@@ -26,28 +26,39 @@ export const VISUAL_PARTS = [
   { id: 'hammer-head', label: 'Hammer head', hint: 'Fit the model to the collision overlay. Importing does not change grip geometry or mass. Hidden while the character profile has a hammer model.' },
 ] as const;
 
-export function isVisualPart(value: unknown): value is VisualPartId {
-  return typeof value === 'string' && VISUAL_PARTS.some((part) => part.id === value);
+export interface SavedAppearancePart {
+  readonly schemaVersion: 1;
+  readonly part: VisualPartId;
+  readonly name: string;
+  readonly alignment: Readonly<VisualAlignment>;
+  readonly file: {
+    readonly sha256: string;
+    readonly bytes: number;
+    readonly blob: Blob;
+  };
 }
 
-export interface StoredVisual {
-  schemaVersion: 1;
-  slot: VisualPartId;
-  name: string;
-  data: Blob;
-  alignment: VisualAlignment;
-}
-
-export function validateStoredVisual(value: unknown, slot: VisualPartId): StoredVisual {
+export function validateSavedAppearancePart(value: unknown, part: VisualPartId): SavedAppearancePart {
   if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length !== 5 ||
-    Reflect.get(value, 'schemaVersion') !== 1 || Reflect.get(value, 'slot') !== slot) {
+    !['schemaVersion', 'part', 'name', 'alignment', 'file'].every((key) => Object.hasOwn(value, key)) ||
+    Reflect.get(value, 'schemaVersion') !== 1 || Reflect.get(value, 'part') !== part) {
     throw new AppearanceError('The saved model record has an unsupported format.');
   }
-  const name: unknown = Reflect.get(value, 'name');
-  const data: unknown = Reflect.get(value, 'data');
-  if (typeof name !== 'string' || name.length === 0 || name.length > 255 ||
-    !(data instanceof Blob) || data.size === 0 || data.size > MODEL_LIMITS.bytes) {
-    throw new AppearanceError('The saved model file is missing or exceeds the import limit.');
+  const file: unknown = Reflect.get(value, 'file');
+  if (typeof file !== 'object' || file === null || Array.isArray(file) || Object.keys(file).length !== 3 ||
+    !['sha256', 'bytes', 'blob'].every((key) => Object.hasOwn(file, key))) {
+    throw new AppearanceError('The saved model file descriptor is invalid.');
   }
-  return { schemaVersion: 1, slot, name, data, alignment: validateAlignment(Reflect.get(value, 'alignment')) };
+  const sha256: unknown = Reflect.get(file, 'sha256');
+  const bytes: unknown = Reflect.get(file, 'bytes');
+  const blob: unknown = Reflect.get(file, 'blob');
+  if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256) ||
+    typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > MODEL_LIMITS.bytes ||
+    !(blob instanceof Blob) || blob.size !== bytes) {
+    throw new AppearanceError('The saved model bytes or digest are invalid.');
+  }
+  const entry = validateAppearanceParts([{
+    part, name: Reflect.get(value, 'name'), alignment: Reflect.get(value, 'alignment'),
+  }])[0]!;
+  return Object.freeze({ schemaVersion: 1, ...entry, file: Object.freeze({ sha256, bytes, blob }) });
 }

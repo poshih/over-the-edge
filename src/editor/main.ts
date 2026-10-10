@@ -15,7 +15,6 @@ import { createCharacterModelLoader } from '../character-model-loader';
 import { createCourseArt } from '../course-art-view';
 import { createEnemyModels } from '../enemy-models';
 import { levelSpawn, validateLevel } from '../level';
-import type { AvatarHoldSettings } from '../model-library';
 import { createPhantomPlayback } from '../phantom-playback';
 import { artFile } from '../project';
 import { Appearance } from './appearance';
@@ -31,15 +30,20 @@ import { createProjectFileRetention } from './document/file-retention';
 import { createFileStore } from './document/files';
 import type { FileStore } from './document/files';
 import { createHistory } from './document/history';
+import { createImportRunner } from './document/import-runner';
 import { createProjectCommands, UNTITLED_GAME_TITLE } from './document/project-commands';
-import type { SectionName, SectionValues } from './document/project-document';
+import type { DocumentArmIk, SectionName, SectionValues } from './document/project-document';
 import { createProjectImports } from './document/project-imports';
 import { createProjectProjection } from './document/project-projection';
+import { DEFAULT_VISUAL_VALUES } from './document/visual-values';
 import { createHistoryControls } from './history-controls';
 import { PRACTICES, practiceById } from './practices';
 import type { PracticeId } from './practices';
 import { createUI } from './ui';
 import { createSpriteEditor } from './sprite-editor';
+import { SpriteEditorState } from './sprite-state';
+import { createVisualLoading } from './visual-loading';
+import { createVisualSaves } from './visual-saves';
 import type { EditorAction, GameUi, HudState, WorkshopState } from './ui-types';
 import { DEFAULT_AUDIO_OUTPUT } from '../audio';
 import { AUDIO, createAudioOutput } from '../game-audio';
@@ -101,6 +105,17 @@ function startupFailed(error: unknown): never {
   try { disposeWorkshop(); } finally { throw error; }
 }
 
+let teardownQueued = false;
+function workshopFailed(error: unknown): never {
+  showFatal(`The Workshop failed: ${error instanceof Error ? error.message : String(error)}`);
+  // A projection can fail inside a document notification; teardown waits until History has unwound.
+  if (!teardownQueued) {
+    teardownQueued = true;
+    queueMicrotask(disposeWorkshop);
+  }
+  throw error;
+}
+
 // Consumer construction is also fatal: never keep a runtime session whose Game or HUD could not be built.
 function boot<T>(create: () => T, discard?: (value: T) => void): T {
   try {
@@ -128,6 +143,7 @@ function newGame(files: FileStore): SectionValues {
     media: Object.freeze([]),
     models: Object.freeze({ avatar: Object.freeze([]), hammer: Object.freeze([]), pot: Object.freeze([]) }),
     'characters/alternate': null,
+    ...DEFAULT_VISUAL_VALUES,
   };
 }
 
@@ -135,11 +151,15 @@ function newGame(files: FileStore): SectionValues {
 // browser's copy of the project; the editors' own browser saves do not open at start.
 const opensProject = publishedProject !== null;
 const client = new ProjectClient();
+const initialization = boot(() => new AbortController(), (value) => value.abort());
+let restoringVisuals = !opensProject;
 // The open project's files, wherever their bytes are, and its document, which only its history changes.
 const files = boot(() => createFileStore({ client }), (value) => value.dispose());
 const history = boot(() => createHistory(newGame(files), { files }), (value) => value.dispose());
 // The level's first listener, so every other one finds its indexes current.
 const level = boot(() => new LevelState(history.document), (value) => value.dispose());
+const runner = boot(() => createImportRunner({ history, files }), (value) => value.dispose());
+const saves = boot(() => createVisualSaves({ files, browserAppearance: !opensProject }), (value) => value.dispose());
 let debug = false;
 // Where attempts start: a starting point, or where the designer placed the player in the Level tab to
 // test part of the course. Placing the player never moves the level's own start.
@@ -185,6 +205,7 @@ const game = boot(() => new Game({
     }
   },
 }), (value) => value.dispose());
+boot(() => game.setCharacter({ armIk: history.document.get('arm-ik') }));
 // The look, media, library and course resources the document's sections make. It hears each change before the game's
 // follower below, so the game has new course artwork before a level that draws it.
 const projection = boot(() => createProjectProjection({
@@ -201,17 +222,21 @@ const projection = boot(() => createProjectProjection({
     audio.setSettings(look.audio);
   },
 }), (value) => value.dispose());
-// The game follows the document: the level by the objects each change touched, then the settings, once per change.
+// The game follows the document: the level by changed objects, then settings and elbow hints, once per change.
 boot(() => history.document.subscribeAll((changes) => {
   let settings: GameSettings | null = null;
+  let armIk: DocumentArmIk | null = null;
   for (const change of changes) {
     if (change.section === 'level') game.applyLevel(levelChange(change));
     else if (change.section === 'settings') settings = change.after;
+    else if (change.section === 'arm-ik') armIk = change.after;
   }
-  if (settings === null) return;
-  game.setSettings(settings);
-  // Character's handle length and grips follow the rig.
-  spriteEditor.setHammerRig(game.simulation.rigGeometry);
+  if (settings !== null) {
+    game.setSettings(settings);
+    // Character's handle length and grips follow the rig.
+    spriteEditor.setHammerRig(game.simulation.rigGeometry);
+  }
+  if (armIk !== null) game.setCharacter({ armIk });
 }), (unsubscribe) => unsubscribe());
 // A level replaced whole is played from its start. Heard before the Level tab, which shows where play starts.
 boot(() => history.document.subscribe('level', (change) => {
@@ -233,42 +258,49 @@ const levelChecks = boot(() => createLevelChecks({
     project: () => plugins?.projectSnapshot() ?? null,
   },
 }), (value) => value.dispose());
+// Visual commands and projections exist independently of their DOM editors.
+const state = boot(() => new SpriteEditorState({
+  history, rig: game.view.character.sprites, runner, saves, avatarRigs,
+  targetIds: SPRITE_TARGET_IDS,
+  describeModel: (source, usage) => game.view.character.characterModelReport(source, usage),
+  onNotice: (message, kind) => runtimeNotice(message, kind),
+  onFault: workshopFailed,
+  anchors: VISUAL_PARTS.map(({ id, label }) => {
+    const binding = game.view.character.visuals.get(id);
+    if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);
+    const size = binding.bounds.getSize(new Vector3());
+    const center = binding.bounds.getCenter(new Vector3());
+    return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
+  }),
+}), (value) => value.dispose());
+const rig = boot(() => new AppearanceRig(game.view.character.visuals), (value) => value.dispose());
+const appearance = boot(() => new Appearance({
+  history, files, rig, runner, saves,
+  onNotice: (message, kind) => runtimeNotice(message, kind),
+  onFault: workshopFailed,
+}), (value) => value.dispose());
+const visualLoading = boot(() => createVisualLoading({ canvas, character: state, appearance }), (value) => value.dispose());
+boot(() => visualLoading.setRestoring(restoringVisuals));
 // Every edit of a project section is one of these commands, which the history applies; edits that wait for a file or a
 // bake are imports, each a pending edit until it is ready.
 const commands = boot(() => createProjectCommands({
   document: history.document, level, files, plugins: workshopPlugins, avatarRigs,
-  primary: () => spriteEditor.validatedDocument(),
+  characterCommands: state.commands, appearanceCommands: appearance.commands,
   levelSelection: () => levelEditor.selection(),
 }));
 const imports = boot(() => createProjectImports({
-  history, commands, files, projection, avatarRigs, holdSettings,
+  history, commands, files, projection, avatarRigs, runner,
   prepareLevel: () => levelEditor.preparePlay(),
 }), (value) => value.dispose());
 // The page keeps the bytes of every file Undo can still bring back before a save deletes them from the server.
 const retention = boot(() => createProjectFileRetention({ files }), (value) => value.dispose());
-// The open project, created before the editors so each can save into it; it reads them only once started.
+// The open project, created before the editors so each can save into it.
 const project: ProjectSession = boot(() => new ProjectSession({
-  history, level, files, retention, commands, imports, projection, avatarRigs, client, plugins: workshopPlugins,
-  workspace: {
-    prepareLevel: () => levelEditor.preparePlay(),
-    markLevelSaved: (definition) => levelEditor.markSaved(definition),
-    hasPendingLevelEdits: () => levelEditor.hasPendingEdits(),
-    character: {
-      draft: () => spriteEditor.snapshot().document,
-      hasContent: () => spriteEditor.snapshot().hasContent,
-      validated: () => spriteEditor.validatedDocument(),
-      load: (document, options) => spriteEditor.loadDocument(document, options),
-      prepare: (document, options) => spriteEditor.prepareDocument(document, options),
-    },
-    appearance: {
-      armIk: () => appearance.armIkSettings(),
-      loadArmIk: (settings) => appearance.previewArmIk(settings),
-      parts: () => appearance.exportParts(),
-      load: (parts) => appearance.replaceParts(parts),
-    },
-    get ready() { return Promise.all([appearanceRestored, spriteEditor.ready]); },
-    notice: (message, kind) => ui.notice(message, kind),
-  },
+  history, files, retention, commands, imports, projection, avatarRigs, client, plugins: workshopPlugins,
+  prepareLevel: () => levelEditor.preparePlay(),
+  markLevelSaved: (definition) => levelEditor.markSaved(definition),
+  hasPendingLevelEdits: () => levelEditor.hasPendingEdits(),
+  notice: (message, kind) => runtimeNotice(message, kind),
   published: publishedProject,
 }), (value) => value.dispose());
 // Play is recorded for phantoms unless this browser turned recording off.
@@ -317,6 +349,16 @@ const ui: GameUi = boot(() => createUI({
   onPractice: resetPractice,
   projectSave: project, serverCopies,
 }), (value) => value.dispose());
+// Only standalone browser values are installed; keep the HUD, header and notices available during their read.
+const authoring = boot(() => {
+  const panel = ui.historyMount.closest<HTMLElement>('.workshop');
+  if (panel === null) throw new Error('The Workshop authoring surface is required.');
+  return panel;
+});
+const authoringInert = authoring.inert;
+if (restoringVisuals) authoring.inert = true;
+const exposeAuthoring = (): void => { authoring.inert = authoringInert; };
+cleanup.push(exposeAuthoring);
 runtimeNotice = (message, kind = 'info') => ui.notice(message, kind);
 // The readout shows the HUD as the game's look sets it, and the header keeps legible over its sky.
 boot(() => game.subscribeLook((look) => {
@@ -326,37 +368,23 @@ boot(() => game.subscribeLook((look) => {
 for (const { message, kind } of startupNotices.splice(0)) ui.notice(message, kind);
 // The game header names the open level, following each rename and each level opened.
 ui.setLevelName(level.definition().name);
-const rig = boot(() => new AppearanceRig(game.view.character.visuals), (value) => value.dispose());
-const appearance = boot(() => new Appearance(rig, ui.notice, { browserStore: !opensProject }), (value) => value.dispose());
-boot(() => createAppearanceUI({ mount: ui.appearanceMount, appearance, onNotice: ui.notice, projectSave: project, serverCopies }),
-  (value) => value.dispose());
-boot(() => appearance.subscribe(() => game.setCharacter({
-  armIk: appearance.armIkSettings(),
-})), (unsubscribe) => unsubscribe());
+boot(() => createAppearanceUI({
+  mount: ui.appearanceMount, appearance, history, saves, onNotice: ui.notice, onFault: workshopFailed, projectSave: project, serverCopies,
+}), (value) => value.dispose());
 const spriteEditor = boot(() => createSpriteEditor({
-  mount: ui.spriteMount, characterMount: ui.characterMount, rig: game.view.character.sprites, onNotice: ui.notice,
-  describeModel: (source, usage) => game.view.character.characterModelReport(source, usage),
+  mount: ui.spriteMount, characterMount: ui.characterMount, state, onNotice: ui.notice,
   viewport: { canvas, project: (point) => game.view.project(point) },
-  targetIds: SPRITE_TARGET_IDS,
   hammerRig: game.simulation.rigGeometry,
   naturalArms: () => game.view.character.naturalArmLengths(),
   serverModels,
   // The Character tab's handle length edits the same game setting as Physics.
   settingsEditing: { history, commands },
-  applySavedProfile: !opensProject,
   projectSave: project, serverCopies,
   motion: {
     kinds: avatarRigs.motionIds, controls: () => workshopPlugins.motionControls(),
     subscribe: (listener) => workshopPlugins.subscribe(() => listener()),
     preview: (kind) => game.view.character.previewMotion(kind),
   },
-  anchors: VISUAL_PARTS.map(({ id, label }) => {
-    const binding = game.view.character.visuals.get(id);
-    if (!binding) throw new Error(`Missing sprite anchor: ${id}.`);
-    const size = binding.bounds.getSize(new Vector3());
-    const center = binding.bounds.getCenter(new Vector3());
-    return { id, label, width: size.x, height: size.y, offset: { x: center.x, y: center.y, z: center.z } };
-  }),
 }), (value) => value.dispose());
 const collisionOverlay = boot(() => {
   const overlay = new CollisionOverlay(game.simulation.world, () => game.view.character.armPoses());
@@ -436,7 +464,6 @@ const levelEditor = boot(() => createLevelEditor({
     },
   },
 }), (value) => value.dispose());
-const appearanceRestored = boot(() => appearance.restore());
 // Physics / Hammer head shapes the default hammer's head, a game setting, and each library hammer's own.
 boot(() => createHammerHeadEditor({ mount: ui.hammerHeadMount, history, commands, projection }),
   (value) => value.dispose());
@@ -456,13 +483,6 @@ boot(() => createHistoryControls({
   tabPane: ui.tabPane,
   notice: ui.notice,
 }), (value) => value.dispose());
-
-// The open character's grips, arm lengths and arm forward distance, which a library avatar takes; the character keeps
-// its own draft until it joins the document.
-function holdSettings(): AvatarHoldSettings {
-  const { armForwardDistance, grips, arms } = spriteEditor.snapshot().document;
-  return { armForwardDistance, grips, arms };
-}
 
 // Tells `listener` once per document change touching `sections`, after every section's own listeners, so the level's
 // indexes are current whatever else the change touched.
@@ -498,8 +518,8 @@ const practice = (): PracticeId | null => typeof origin === 'string' ? origin : 
 
 function updateWorkshop(state: WorkshopState): void {
   plugins?.setWorkshop(state);
-  spriteEditor.setActive(state.open && state.tab === 'sprites');
-  const nextEditing = state.open && state.tab === 'level';
+  spriteEditor.setActive(!restoringVisuals && state.open && state.tab === 'sprites');
+  const nextEditing = !restoringVisuals && state.open && state.tab === 'level';
   if (nextEditing !== editing) {
     editing = nextEditing;
     if (editing) {
@@ -546,12 +566,13 @@ function perform(action: EditorAction, options: UiActionOptions = {}): void {
 const gameContext = () => ({ practice: practice(), placedPlayer: typeof origin === 'string' ? null : origin, debug });
 const gameState = () => workshopGameState(game, gameContext());
 
-plugins = boot(() => new WorkshopPluginHost({
+const pluginHost = boot(() => new WorkshopPluginHost({
   registry: workshopPlugins, ui, game, canvas, history, level, commands, imports, projection,
-  character: spriteEditor, appearance,
+  character: { commands: state.commands, imports: state.imports }, appearance,
   control: { restart, placePlayer, state: gameState },
   notice: ui.notice,
 }), (value) => value.dispose());
+plugins = pluginHost;
 
 const rendering = () => game.view.statistics();
 const diagnostics = Object.freeze({
@@ -566,10 +587,10 @@ const diagnostics = Object.freeze({
   settings: () => game.settings(),
   history: () => history.state(),
   appearance: () => appearance.snapshot(),
-  sprites: () => ({ ...spriteEditor.snapshot(), rendering: game.view.character.sprites.inspect() }),
+  sprites: () => ({ ...state.snapshot(), rig: game.view.character.sprites.inspect() }),
   events: () => game.eventState(),
   gameProject: () => ({ ...project.snapshot(), playback: audio.inspect() ?? null, parts: game.view.character.partModels() }),
-  plugins: () => plugins.inspect(),
+  plugins: () => pluginHost.inspect(),
   level: () => ({
     definition: level.definition(),
     terrain: game.simulation.terrainState(),
@@ -586,8 +607,46 @@ declare global {
 }
 window.gettingOver = diagnostics;
 cleanup.push(() => { delete window.gettingOver; });
-boot(() => updateWorkshop(ui.workshopState()));
-void project.start().then(() => plugins.start()).catch((error: unknown) => startupFailed(error));
+async function restoreVisuals(): Promise<void> {
+  try {
+    const read = await saves.readStartup(initialization.signal);
+    try {
+      if (initialization.signal.aborted) return;
+      if (read.kind === 'refused') ui.notice(read.error.message, 'error');
+      else if (read.kind === 'read' && !opensProject) {
+        // Install the saved character's exact root, so its save fingerprint is clean.
+        const document = history.document;
+        const roots = Object.fromEntries(document.sections().map((section) => [section, document.get(section)])) as unknown as SectionValues;
+        history.load(Object.freeze({ ...roots, ...read.value }));
+      }
+    } finally {
+      if (read.kind === 'read') read.release();
+    }
+  } finally {
+    visualLoading.setRestoring(false);
+  }
+}
+
+async function startWorkshop(): Promise<void> {
+  if (opensProject) {
+    updateWorkshop(ui.workshopState());
+    // These saves are only Revert targets; they neither gate authoring nor delay project discovery.
+    await Promise.all([restoreVisuals(), project.start()]);
+  } else {
+    await restoreVisuals();
+  }
+  if (initialization.signal.aborted) return;
+  state.activate();
+  appearance.activate();
+  restoringVisuals = false;
+  exposeAuthoring();
+  updateWorkshop(ui.workshopState());
+  if (!opensProject) await project.start();
+  if (initialization.signal.aborted) return;
+  projection.activate();
+  pluginHost.start();
+}
+void startWorkshop().catch((error: unknown) => startupFailed(error));
 const hudState: HudState = { debug, practice: practice(), recording: recorder.on, capturing: false, recordingNote: recordingNote() };
 boot(() => game.start((state) => {
   hudState.debug = debug;

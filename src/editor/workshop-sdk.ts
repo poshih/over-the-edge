@@ -180,7 +180,8 @@ export interface WorkshopUiKit {
 // The open project
 
 // The open project as the Workshop holds it, unsaved changes included. Read-only and the same object until the project
-// changes; plugins' data is not part of it.
+// changes; plugins' data is not part of it. Its primary character and appearance parts are the project's values, which the
+// game shows once their images and models load.
 export interface WorkshopProjectSnapshot {
   readonly title: string;
   readonly settings: GameSettings;
@@ -209,15 +210,16 @@ export interface WorkshopProject {
 export type WorkshopRefusal = Error;
 
 /**
- * Every edit the built-in tabs make, through the same operations: each is validated, changes the draft, marks it
- * unsaved and goes through Save, Revert, export and conflict handling as it does in its tab. Each returns the refusal,
- * or null when the edit applied or changed nothing. Each but the character's and the appearance's is a step of the
- * Workshop's undo history, joining the plugin's open group or named "<plugin>: <operation>", such as "<plugin>: theme",
- * "<plugin>: upsert" or "<plugin>: media.add". Outside a group, calls of one operation each within a second of the last
- * merge into one step. A history-backed edit waiting for a file or a bake commits an open group before it starts and
- * becomes a step of its own once ready; until then Undo, or another project opening, cancels it and it resolves null.
- * It resolves `plugin-stopped` if the plugin stops first. Until character and appearance join the document, their calls
- * commit an open group before delegating, and are neither grouped nor undone.
+ * Every edit the built-in tabs make, through the same operations: each is validated, changes the project's document as
+ * a step of the Workshop's undo history, marks the project unsaved and goes through Save, Revert, export and conflict
+ * handling as it does in its tab. Each returns the refusal, or null when the edit applied or changed nothing. Its step
+ * joins the plugin's open group or is named "<plugin>: <operation>", such as "<plugin>: theme", "<plugin>: upsert",
+ * "<plugin>: character.grips" or "<plugin>: media.add". Outside a group, calls of one operation each within a second of
+ * the last merge into one step. An edit that returns a promise waits for a file, a bake or its check: it commits an
+ * open group before it starts and becomes a step of its own once ready; until then Undo, or another project opening,
+ * cancels it and it resolves null. It resolves `plugin-stopped` if the plugin stops first. An applied edit is in the
+ * project's document, and in snapshot(), once the call returns or resolves; the game shows new character images and
+ * models, and new appearance models, once they load, the newest value winning.
  */
 export interface WorkshopEdits {
   title(value: string): WorkshopRefusal | null;
@@ -230,7 +232,8 @@ export interface WorkshopEdits {
   alternate(document: SpriteDocument | null): WorkshopRefusal | null;
   readonly appearance: {
     armIk(value: ArmIkSettings): WorkshopRefusal | null;
-    // Exactly these Mesh-parts models; parts not listed return to their procedural visuals.
+    // Exactly these Mesh-parts models, imported as Appearance imports them; parts not listed return to their procedural
+    // visuals. The game shows each model once it loads, after the project takes them.
     parts(parts: readonly { readonly part: VisualPartId; readonly name: string; readonly blob: Blob; readonly alignment: VisualAlignment }[]):
       Promise<WorkshopRefusal | null>;
   };
@@ -275,9 +278,11 @@ export interface WorkshopLevelEdits {
 }
 
 export interface WorkshopCharacterEdits {
-  // Replaces the whole profile, loading its models.
+  // Replaces the whole profile, checked as an imported one is; the character loads its images and models after the
+  // project takes it.
   document(value: SpriteDocument): Promise<WorkshopRefusal | null>;
-  // Live edits, as Character's controls make them.
+  // As Character's controls edit them. avatarMotion checks each motion against the joints of the profile's avatar model,
+  // so it refuses until that model's joint report is known, as it is at once after the avatar's import.
   riggingType(value: CharacterRiggingType): WorkshopRefusal | null;
   armForwardDistance(value: number): WorkshopRefusal | null;
   waistLean(value: number): WorkshopRefusal | null;
@@ -393,7 +398,8 @@ export interface WorkshopGame {
   placePlayer(position: Point): void;
   // Explicit plain-data control and gameplay readings, built on request; no engine diagnostics.
   state(): WorkshopGameState;
-  // The loaded imported avatar, or null while the character shows none.
+  // The loaded imported avatar, or null while the character shows none; while a new avatar model loads, it lags the
+  // project's profile.
   avatar(): WorkshopAvatar | null;
   // Runs the engine's Sway or Jolt, as Character's buttons do, or a preview of the plugin's own, whose offsets are kept
   // within WORKSHOP_PREVIEW_LIMITS.distance of the player; null ends the plugin's own preview. A preview ends early on a

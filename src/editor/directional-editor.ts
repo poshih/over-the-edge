@@ -7,7 +7,11 @@ import {
 } from '../directional-data';
 import type { DirectionalPresentation, DirectionalRule } from '../directional-data';
 import { FACING_DIRECTIONS } from '../skeleton-data';
+import { SpriteError } from '../sprite-data';
 import type { SpriteRig } from '../sprite-rig';
+import { HistoryBusyError } from './document/history';
+import type { Command, Transaction } from './document/history';
+import type { ProjectCommandInfo } from './document/project-commands';
 import type { SpriteEditorState } from './sprite-state';
 import './directional-editor.css';
 
@@ -104,19 +108,23 @@ export function createDirectionalEditor(options: {
   leavePreview(): void;
   dispose(): void;
 } {
+  const { state } = options;
   const events = new AbortController();
   const listen = { signal: events.signal };
-  let snapshot = options.state.snapshot();
+  let snapshot = state.snapshot();
   let active = false;
   let disposed = false;
   let localError: string | null = null;
   let requestedAim: number | null = null;
-  let drag: { pointer: number; handle: Handle } | null = null;
+  // A boundary drag is one transaction, applied live and committed on release; aim drags only preview.
+  let drag: { readonly pointer: number; readonly handle: Handle; readonly transaction: Transaction | null } | null = null;
   let diagramSettings: DirectionalPresentation | null = null;
   let diagramDirection = -1;
   let viewportDirty = true;
   let viewportRect: DOMRect | null = null;
   let socketFrame = 0;
+  const info = (label: string): ProjectCommandInfo =>
+    ({ label, place: { tab: 'sprites', section: 'sprites-directional', select: null }, coalesce: null });
 
   function defaultAnchor(): string {
     return snapshot.document.presentation?.pivot.anchor ?? snapshot.document.skeleton?.anchor ?? snapshot.anchors[0].id;
@@ -136,7 +144,7 @@ export function createDirectionalEditor(options: {
     </label>
     <p class="appearance-format">Off keeps normal facing selection and safe automatic head tilt.
       Enabling replaces that default, including when authored rotation is disabled.
-      Edits are draft-only. Static sprite placement rotation stays separate.</p>
+      Edits are steps Undo takes back. Static sprite placement rotation stays separate.</p>
     <p id="directional-error" class="directional-error" role="alert" aria-atomic="true" hidden></p>
     <p class="appearance-format directional-status" role="status" aria-live="polite"></p>
     <div class="directional-diagram-mount"></div>
@@ -208,7 +216,7 @@ export function createDirectionalEditor(options: {
         direction order around one turn. Invalid edits are rejected, never reordered or repaired.
         CW hold extends below the start; CCW hold extends beyond the end. Both holds plus the sector must span less than 360.</p>
     </fieldset>
-    <button type="button" class="button directional-reset">Reset directional defaults (draft)</button>
+    <button type="button" class="button directional-reset">Reset directional defaults</button>
     <p class="appearance-format">These settings are part of the character / sprite profile: use its Save and
       Revert below. Aim and displayed runtime values are never saved.</p>
   `;
@@ -303,7 +311,7 @@ export function createDirectionalEditor(options: {
     const fields = new Map<RuleField, HTMLInputElement>();
     for (const column of RULE_COLUMNS) {
       fields.set(column.key, addCell(column.label, column.min, column.max, value =>
-        changeSettings(current => ({
+        changeSettings(`Set ${direction} ${column.label.replace(/ \(.*\)$/, '').toLowerCase()}`, current => ({
           ...current,
           directions: current.directions.map((rule, at) => at === index ? { ...rule, [column.key]: value } : rule),
         }))));
@@ -322,7 +330,7 @@ export function createDirectionalEditor(options: {
     input.min = String(-DIRECTIONAL_LIMITS.pivot);
     input.max = String(DIRECTIONAL_LIMITS.pivot);
     input.addEventListener('change', () => commitNumber(input, value =>
-      changeSettings(current => ({ ...current, pivot: { ...current.pivot, [key]: value } }))), listen);
+      changeSettings(`Set pivot ${key.toUpperCase()}`, current => ({ ...current, pivot: { ...current.pivot, [key]: value } }))), listen);
   }
 
   type Choice = { label: HTMLLabelElement; input: HTMLInputElement; text: Text };
@@ -355,7 +363,7 @@ export function createDirectionalEditor(options: {
   function renderError(): void {
     const message = localError ?? snapshot.error;
     errorText.hidden = message === null;
-    setText(errorText, message === null ? '' : `${message} The last valid draft remains active.`);
+    setText(errorText, message === null ? '' : `${message} The last valid settings remain active.`);
   }
 
   function clearLocalError(): void {
@@ -363,17 +371,29 @@ export function createDirectionalEditor(options: {
     aimInput.removeAttribute('aria-invalid');
   }
 
-  function changeSettings(change: (current: DirectionalPresentation) => DirectionalPresentation): boolean {
-    const current = snapshot.document.presentation;
-    if (current === null) {
-      localError = 'Enable directional presentation before editing its settings.';
-      renderError();
-      return false;
-    }
+  // The presentation edit `change` makes of the profile's own as the step runs.
+  function presentationCommand(label: string, change: (current: DirectionalPresentation) => DirectionalPresentation): Command {
+    return state.commands.presentation((current) => {
+      if (current === null) throw new SpriteError('Enable directional presentation before editing its settings.');
+      return change(current);
+    }, info(label));
+  }
+
+  // One step, or, while a boundary drag is open, part of its transaction.
+  function changeSettings(label: string, change: (current: DirectionalPresentation) => DirectionalPresentation): boolean {
     clearLocalError();
-    const accepted = options.state.setPresentation(change(current)) === null;
+    const command = presentationCommand(label, change);
+    const transaction = drag?.transaction ?? null;
+    if (transaction === null || transaction.done) {
+      const accepted = state.apply(command);
+      renderError();
+      return accepted;
+    }
+    // A refused position is shown here, not as a notice for every pointer move.
+    const refusal = transaction.apply(command.run);
+    if (refusal !== null) localError = refusal.message;
     renderError();
-    return accepted;
+    return refusal === null;
   }
 
   function commitNumber(input: HTMLInputElement, change: (value: number) => boolean): void {
@@ -381,7 +401,7 @@ export function createDirectionalEditor(options: {
   }
 
   function setBoundary(index: number, angle: number): boolean {
-    return changeSettings(current => ({
+    return changeSettings(`Move ${FACING_DIRECTIONS[index]} boundary`, current => ({
       ...current, boundaries: current.boundaries.map((value, at) => at === index ? angle : value),
     }));
   }
@@ -395,15 +415,17 @@ export function createDirectionalEditor(options: {
     }
     clearLocalError();
     const radians = angle * DEGREES_TO_RADIANS;
-    const accepted = options.state.setDirectionalPreview({ aim: { x: Math.cos(radians), y: Math.sin(radians) } });
+    const accepted = state.setDirectionalPreview({ aim: { x: Math.cos(radians), y: Math.sin(radians) } });
     if (accepted) requestedAim = angle;
     aimInput.setAttribute('aria-invalid', String(!accepted));
     renderError();
   }
 
+  // Aim previews pose the rig, so they wait until it shows the profile; boundaries edit the profile itself.
   function canDrag(handle: Handle): boolean {
-    return active && !snapshot.busy && !snapshot.restoring &&
-      (handle.kind === 'aim' ? snapshot.document.characterRiggingType === 'sprite-2d' : snapshot.document.presentation !== null);
+    return active && (handle.kind === 'aim'
+      ? snapshot.document.characterRiggingType === 'sprite-2d' && snapshot.rendering.kind === 'ready'
+      : snapshot.document.presentation !== null);
   }
 
   function handleAngle(handle: Handle): number {
@@ -415,18 +437,31 @@ export function createDirectionalEditor(options: {
     else setBoundary(handle.index, angle);
   }
 
+  // A held arrow key's moves of one boundary are one step, sealed when the key or focus is let go.
+  function boundaryKey(index: number): string {
+    return `sprites/directional/boundary/${index}`;
+  }
+
   function wireHandle(node: SVGElement, handle: Handle): void {
     node.addEventListener('pointerdown', event => {
       if (event.button !== 0 || !event.isPrimary || drag !== null || !canDrag(handle)) return;
       event.preventDefault();
       event.stopPropagation();
       node.focus({ preventScroll: true });
-      drag = { pointer: event.pointerId, handle };
+      const transaction = handle.kind === 'boundary'
+        ? state.history.begin(info(`Drag ${FACING_DIRECTIONS[handle.index]} boundary`)) : null;
+      drag = { pointer: event.pointerId, handle, transaction };
       diagram.setPointerCapture(event.pointerId);
       movePointer(event);
     }, listen);
     node.addEventListener('keydown', event => {
-      if (!canDrag(handle)) return;
+      if (event.key === 'Escape' && drag !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        endDrag('cancel');
+        return;
+      }
+      if (drag !== null || !canDrag(handle)) return;
       const step = event.shiftKey ? KEYBOARD_LARGE_STEP : KEYBOARD_STEP;
       let angle = handleAngle(handle);
       switch (event.key) {
@@ -440,22 +475,30 @@ export function createDirectionalEditor(options: {
       }
       event.preventDefault();
       event.stopPropagation();
-      applyHandle(handle, normalizeDegrees(angle));
+      const target = normalizeDegrees(angle);
+      if (handle.kind === 'aim') previewAim(target);
+      else state.history.coalescing(boundaryKey(handle.index), `Move ${FACING_DIRECTIONS[handle.index]} boundary`,
+        () => setBoundary(handle.index, target));
     }, listen);
+    if (handle.kind === 'boundary') {
+      const seal = (): void => state.history.seal(boundaryKey(handle.index));
+      node.addEventListener('keyup', seal, listen);
+      node.addEventListener('blur', seal, listen);
+    }
   }
 
   function movePointer(event: PointerEvent): void {
     if (drag === null || drag.pointer !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    if (!canDrag(drag.handle)) {
-      cancelDrag();
+    if (drag.transaction?.done === true || !canDrag(drag.handle)) {
+      endDrag('commit');
       return;
     }
     const rect = diagram.getBoundingClientRect();
     const scale = Math.min(rect.width, rect.height) / DIAGRAM_SIZE;
     if (scale <= 0) {
-      cancelDrag();
+      endDrag('cancel');
       localError = 'The direction diagram must be visible before dragging a handle.';
       renderError();
       return;
@@ -470,29 +513,43 @@ export function createDirectionalEditor(options: {
     applyHandle(drag.handle, normalizeDegrees(Math.atan2(y, x) / DEGREES_TO_RADIANS));
   }
 
-  function cancelDrag(): void {
+  // Ends the drag and lets go of the pointer. 'commit' keeps what it applied as one step and 'cancel' restores the
+  // presentation, recording nothing; 'drop' leaves the history alone, as for a transaction another edit, Undo or an
+  // opened project ended, which the history tells its listeners of.
+  function endDrag(outcome: 'commit' | 'cancel' | 'drop'): void {
     const previous = drag;
+    if (previous === null) return;
     drag = null;
-    if (previous !== null && diagram.hasPointerCapture(previous.pointer)) diagram.releasePointerCapture(previous.pointer);
+    if (diagram.hasPointerCapture(previous.pointer)) diagram.releasePointerCapture(previous.pointer);
+    const transaction = previous.transaction;
+    if (outcome === 'drop' || transaction === null || transaction.done) return;
+    if (outcome === 'commit') transaction.commit();
+    else transaction.cancel();
   }
 
   diagram.addEventListener('pointermove', movePointer, listen);
   diagram.addEventListener('pointerup', event => {
     if (drag?.pointer !== event.pointerId) return;
     movePointer(event);
-    cancelDrag();
+    endDrag('commit');
   }, listen);
-  diagram.addEventListener('pointercancel', cancelDrag, listen);
-  diagram.addEventListener('lostpointercapture', cancelDrag, listen);
+  diagram.addEventListener('pointercancel', () => endDrag('cancel'), listen);
+  diagram.addEventListener('lostpointercapture', () => endDrag('cancel'), listen);
+  // The history ends an open transaction when anything else changes the project; the drag lets go at once.
+  const unsubscribeHistory = state.history.subscribe(() => {
+    if (drag?.transaction?.done === true) endDrag('drop');
+  });
 
   enabled.addEventListener('change', () => {
     clearLocalError();
-    options.state.setPresentation(enabled.checked ? createDirectionalPresentation(defaultAnchor()) : null);
+    const value = enabled.checked ? createDirectionalPresentation(defaultAnchor()) : null;
+    state.apply(state.commands.presentation(() => value,
+      info(value === null ? 'Turn off directional presentation' : 'Use directional presentation')));
     renderError();
   }, listen);
-  hysteresis.addEventListener('change', () => changeSettings(current => ({ ...current, hysteresis: hysteresis.checked })), listen);
-  rotation.addEventListener('change', () => changeSettings(current => ({ ...current, rotation: rotation.checked })), listen);
-  pivotAnchor.addEventListener('change', () => changeSettings(current => ({
+  hysteresis.addEventListener('change', () => changeSettings('Set directional hysteresis', current => ({ ...current, hysteresis: hysteresis.checked })), listen);
+  rotation.addEventListener('change', () => changeSettings('Set aim rotation', current => ({ ...current, rotation: rotation.checked })), listen);
+  pivotAnchor.addEventListener('change', () => changeSettings('Set pivot anchor', current => ({
     ...current, pivot: { ...current.pivot, anchor: pivotAnchor.value },
   })), listen);
   aimInput.addEventListener('change', () => previewAim(aimInput.valueAsNumber), listen);
@@ -500,7 +557,8 @@ export function createDirectionalEditor(options: {
   previewLive.addEventListener('click', leavePreview, listen);
   resetButton.addEventListener('click', () => {
     clearLocalError();
-    options.state.setPresentation(createDirectionalPresentation(defaultAnchor()));
+    const value = createDirectionalPresentation(defaultAnchor());
+    state.apply(state.commands.presentation(() => value, info('Reset directional defaults')));
     renderError();
   }, listen);
 
@@ -522,7 +580,7 @@ export function createDirectionalEditor(options: {
         input.type = 'checkbox';
         const text = document.createTextNode('');
         label.append(input, text);
-        input.addEventListener('change', () => changeSettings(current => ({
+        input.addEventListener('change', () => changeSettings(key === 'layers' ? 'Set controlled layers' : 'Set controlled bones', current => ({
           ...current,
           [key]: input.checked ? [...current[key], item.id] : current[key].filter(id => id !== item.id),
         })), listen);
@@ -538,14 +596,11 @@ export function createDirectionalEditor(options: {
 
   function render(): void {
     if (disposed) return;
-    const busy = snapshot.busy || snapshot.restoring;
     const spritesEnabled = snapshot.document.characterRiggingType === 'sprite-2d';
-    if (busy) {
-      cancelDrag();
-      clearLocalError();
-    }
+    // Aim previews pose the rig, so they wait until it shows the profile.
+    const previewable = active && spritesEnabled && snapshot.rendering.kind === 'ready';
+    if (drag?.handle.kind === 'aim' && !previewable) endDrag('commit');
     if (!spritesEnabled) {
-      cancelDrag();
       overlay.hidden = true;
       for (const readout of [currentAim, currentDirection, currentTarget, currentDisplayed]) setText(readout, '—');
       setText(previewMode, 'Sprite previews are inactive in Mesh parts and Avatar modes. Select 2D sprites in Character to preview the retained artwork.');
@@ -553,8 +608,7 @@ export function createDirectionalEditor(options: {
     const configured = snapshot.document.presentation !== null;
     settings = snapshot.document.presentation ?? createDirectionalPresentation(defaultAnchor());
     enabled.checked = configured;
-    enabled.disabled = busy;
-    group.disabled = busy || !configured;
+    group.disabled = !configured;
     hysteresis.checked = settings.hysteresis;
     rotation.checked = settings.rotation;
     pivotAnchor.value = settings.pivot.anchor;
@@ -578,20 +632,19 @@ export function createDirectionalEditor(options: {
       attribute(boundary.handle, 'cx', String(point.x));
       attribute(boundary.handle, 'cy', String(point.y));
       attribute(boundary.handle, 'aria-valuenow', angleText(settings.boundaries[index]));
-      attribute(boundary.handle, 'aria-disabled', String(busy || !configured || !active));
-      attribute(boundary.handle, 'tabindex', busy || !configured || !active ? '-1' : '0');
+      attribute(boundary.handle, 'aria-disabled', String(!configured || !active));
+      attribute(boundary.handle, 'tabindex', !configured || !active ? '-1' : '0');
     }
-    attribute(aimHandle, 'aria-disabled', String(busy || !active || !spritesEnabled));
-    attribute(aimHandle, 'tabindex', busy || !active || !spritesEnabled ? '-1' : '0');
-    aimInput.disabled = busy || !active || !spritesEnabled;
-    previewStart.disabled = busy || !active || !spritesEnabled;
+    attribute(aimHandle, 'aria-disabled', String(!previewable));
+    attribute(aimHandle, 'tabindex', previewable ? '0' : '-1');
+    aimInput.disabled = !previewable;
+    previewStart.disabled = !previewable;
     previewLive.disabled = !spritesEnabled || snapshot.preview === null && !snapshot.directionalPreview;
-    resetButton.disabled = busy || !configured;
-    setText(status, snapshot.restoring ? 'Restoring the saved sprite document...' :
-      snapshot.busy ? 'Working on the sprite document...' :
-      !spritesEnabled ? 'Sprite rendering and directional preview are disabled in 3D. Authored settings remain editable.' :
+    resetButton.disabled = !configured;
+    setText(status, !spritesEnabled ? 'Sprite rendering and directional preview are disabled in 3D. Authored settings remain editable.' :
+      snapshot.rendering.kind === 'loading' ? 'Loading the character... The aim preview waits until it shows.' :
       !configured ? options.presentationState().headTracking.reason :
-      snapshot.dirty ? 'Directional settings are part of the unsaved sprite draft.' : 'Directional settings are saved on this device.');
+      snapshot.dirty ? 'Directional settings are part of the unsaved character profile.' : 'Directional settings are saved on this device.');
     renderError();
     diagramSettings = null;
   }
@@ -705,10 +758,10 @@ export function createDirectionalEditor(options: {
   }
 
   function leavePreview(): void {
-    cancelDrag();
+    endDrag('commit');
     requestedAim = null;
     clearLocalError();
-    options.state.leavePreview();
+    state.leavePreview();
     renderError();
   }
 
@@ -724,22 +777,38 @@ export function createDirectionalEditor(options: {
   }
 
   options.mount.append(root);
-  const unsubscribe = options.state.subscribe(() => {
-    snapshot = options.state.snapshot();
+  const unsubscribe = state.subscribe(() => {
+    snapshot = state.snapshot();
     if (!snapshot.directionalPreview) requestedAim = null;
     render();
   });
   options.signal.addEventListener('abort', dispose, { ...listen, once: true });
 
+  // A gesture's transaction ends with the editor, recording nothing. While History tells its listeners of a change it
+  // refuses the cancel, changing nothing, so the cancel then waits until they have heard it; anything else is thrown.
+  function cancelOwned(transaction: Transaction): void {
+    try {
+      transaction.cancel();
+    } catch (error) {
+      if (!(error instanceof HistoryBusyError)) throw error;
+      queueMicrotask(() => { if (!transaction.done) transaction.cancel(); });
+    }
+  }
+
   function dispose(): void {
     if (disposed) return;
-    leavePreview();
+    const transaction = drag?.transaction ?? null;
+    endDrag('drop');
+    requestedAim = null;
+    state.leavePreview();
     disposed = true;
     unsubscribe();
+    unsubscribeHistory();
     observer.disconnect();
     events.abort();
     overlay.remove();
     root.remove();
+    if (transaction !== null && !transaction.done) cancelOwned(transaction);
   }
 
   return { setActive, updatePreview, leavePreview, dispose };

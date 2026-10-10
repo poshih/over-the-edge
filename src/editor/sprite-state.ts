@@ -1,36 +1,29 @@
-import type { PreparedSpriteReplacement, SpriteRig } from '../sprite-rig';
-import {
-  EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
-  validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
-  DEFAULT_CHARACTER_RIGGING_TYPE, validateCharacterRiggingType, validateArmForwardDistance, validateArms, validateGrips, validateWaistLean,
-  FLIPBOOK_LIMITS, flipbookSizeMessage, spriteLayerImages, SPRITE_FILE_BYTES, SPRITE_SCHEMA_VERSION,
-} from '../sprite-data';
-import type { SpriteDocument, SpriteFlipbook, SpriteImage, SpriteLayer, SpriteOffset } from '../sprite-data';
-import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
-import { DEFAULT_WAIST_LEAN } from '../waist-lean';
-import { sameArms } from '../character-arms';
-import { DEFAULT_GRIPS, sameGrips } from '../grips';
-import { DirectionalError, sameDirectionalPresentation, validateDirectionalPresentation } from '../directional-data';
-import type { DirectionalPresentation } from '../directional-data';
-import { FACING_DIRECTIONS, SKELETON_LIMITS, SkeletonError, validateSkeleton, validateSkeletonPreview } from '../skeleton-data';
-import type { FacingDirection, SkeletonDefinition, SkeletonPreview, SpriteSkin } from '../skeleton-data';
-import { autoWeights, restPose } from '../skeleton-pose';
-import {
-  AVATAR_MODEL_ID, CharacterModelError, characterAssets, CHARACTER_MODEL_LIMITS, encodeModel,
-  HAMMER_MODEL_ID, hasCharacterAssets, isAvatarJoint, NO_AVATAR_HAIR, POT_MODEL_ID, sameCharacterAssets,
-} from '../character-profile';
-import type {
-  AvatarBoneMap, AvatarHair, AvatarJointId, AvatarModelSettings, CharacterAssets, CharacterModel,
-  PartialAvatarBoneMap, PropModelRole,
-} from '../character-profile';
-import { NO_AVATAR_MOTION, sameAvatarMotion, validateAvatarMotion } from '../avatar-motion-data';
-import type { AvatarMotionEntry } from '../avatar-motion-data';
 import { AvatarMotionError } from '../avatar-motion';
-import { inspectCharacterModel, resolveAvatarHair, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
+import type { AvatarRigRegistry } from '../avatar-rig';
+import { DEFAULT_ARM_FORWARD_DISTANCE } from '../character-depth';
+import { resolveAvatarJoints } from '../character-model-inspect';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
-import { STANDARD_AVATAR_DRIVER } from '../avatar-driver';
-import type { AvatarDriver } from '../avatar-driver';
-import { VisualStore, VisualStoreError } from './visual-store';
+import { CharacterModelError, characterModel, hasCharacterAssets } from '../character-profile';
+import type { AvatarJointId, PartialAvatarBoneMap } from '../character-profile';
+import { DirectionalError } from '../directional-data';
+import { DEFAULT_GRIPS, sameGrips } from '../grips';
+import { SkeletonError, validateSkeletonPreview } from '../skeleton-data';
+import type { SkeletonDefinition, SkeletonPreview } from '../skeleton-data';
+import { DEFAULT_CHARACTER_RIGGING_TYPE, EMPTY_SPRITES, SpriteError } from '../sprite-data';
+import type { SpriteDocument, SpriteLayer, SpriteOffset } from '../sprite-data';
+import type { PreparedSpriteReplacement, SpriteRig } from '../sprite-rig';
+import { DEFAULT_WAIST_LEAN } from '../waist-lean';
+import { createCharacterCommands, selectionIds } from './character-commands';
+import type { PrimaryCommands } from './character-commands';
+import { createCharacterImports } from './character-imports';
+import type { AvatarMapping, CharacterImports } from './character-imports';
+import type { Command, History } from './document/history';
+import type { ImportRunner } from './document/import-runner';
+import { applyProjectCommand } from './document/project-commands';
+import type { ChangeCause, SectionChange, StepInfo } from './document/project-document';
+import type { EditOutcome } from './document/project-imports';
+import type { ProjectionState, VisualProjectionEvent } from './document/visual-contract';
+import type { VisualSaves } from './visual-saves';
 
 export interface SpriteAnchorInput {
   readonly id: string;
@@ -38,23 +31,6 @@ export interface SpriteAnchorInput {
   readonly width: number;
   readonly height: number;
   readonly offset: SpriteOffset;
-}
-
-export interface SpriteLayerEdit {
-  readonly name?: string;
-  readonly anchor?: string;
-  readonly width?: number;
-  readonly height?: number;
-  readonly x?: number;
-  readonly y?: number;
-  readonly z?: number;
-  readonly rotation?: number;
-  readonly bone?: string | null;
-  readonly directions?: readonly FacingDirection[];
-  readonly skin?: SpriteSkin | null;
-  readonly tileLength?: number | null;
-  // null returns the layer to its first frame as a single image.
-  readonly flipbook?: SpriteFlipbook | null;
 }
 
 // A typed model or avatar-motion failure: a CharacterModelError code with the joints it concerns, or an
@@ -66,7 +42,7 @@ export interface CharacterModelIssue {
   readonly motion: string | null;
 }
 
-// The imported avatar shown in Character: the draft's model, or an import awaiting a complete bone map.
+// The imported avatar shown in Character: the profile's, or an import waiting for a complete bone map.
 export interface AvatarModelState {
   readonly name: string;
   readonly pending: boolean;
@@ -78,205 +54,163 @@ export interface AvatarModelState {
 }
 
 export interface SpriteEditorSnapshot {
-  readonly restoring: boolean;
-  readonly busy: boolean;
-  // Changes whenever the draft or the pending avatar is replaced.
-  readonly revision: number;
-  readonly error: string | null;
+  // The document's primary character, the exact root.
+  readonly document: SpriteDocument;
+  // What the character rig shows of it.
+  readonly rendering: ProjectionState<SpriteDocument, SpriteError>;
+  // This browser's save of the profile, which Revert restores; null when there is none.
+  readonly saved: SpriteDocument | null;
+  readonly saving: boolean;
   readonly dirty: boolean;
   readonly hasContent: boolean;
+  // The last refused edit, until the profile changes.
+  readonly error: string | null;
   readonly anchors: readonly SpriteAnchorInput[];
-  readonly document: SpriteDocument;
-  readonly saved: SpriteDocument | null;
   readonly selectedLayerId: string | null;
   readonly externalSources: boolean;
   readonly preview: SkeletonPreview | null;
   readonly directionalPreview: boolean;
-  // The typed failure behind `error`, when a character model or bone map caused it.
+  // The typed failure behind `error`, or behind a failed rendering, when a character model or bone map caused it.
   readonly modelIssue: CharacterModelIssue | null;
   readonly avatarModel: AvatarModelState | null;
   readonly hammerModel: { readonly name: string } | null;
   readonly potModel: { readonly name: string } | null;
 }
 
-// A whole profile staged to replace the draft, for a caller that commits it together with a change of its own.
-export interface PreparedPrimary {
-  // Checks `accept`, the caller's final identity guard, then shows the profile, makes it the draft and runs `applied`,
-  // the caller's own change, in one synchronous call. False changed nothing: declined, cancelled or refused.
-  commit(accept: () => boolean, applied: () => void): boolean;
-  // Lets go of what was staged, leaving the draft and the character as they were. Idempotent.
-  cancel(): void;
+export interface SpriteStateOptions {
+  readonly history: History;
+  readonly rig: SpriteRig;
+  readonly anchors: readonly SpriteAnchorInput[];
+  readonly targetIds: readonly string[];
+  readonly avatarRigs: AvatarRigRegistry;
+  readonly runner: ImportRunner;
+  readonly saves: VisualSaves;
+  // Reports of the models the character rig has loaded, which list an avatar's joints.
+  readonly describeModel: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
+  readonly onNotice: (message: string, kind: 'info' | 'error') => void;
+  // An unexpected failure while the rig follows the document.
+  readonly onFault: (error: unknown) => void;
 }
 
-interface PendingAvatar {
-  readonly name: string;
-  readonly source: string;
-  readonly report: CharacterModelReport;
-  readonly boneMap: PartialAvatarBoneMap;
-  readonly driver: AvatarDriver;
-  readonly hair: AvatarHair;
-  readonly motion: readonly AvatarMotionEntry[];
-  readonly issue: CharacterModelIssue;
+const STATUS: VisualProjectionEvent = Object.freeze({ cause: null, step: null });
+const EXTERNAL_IMAGES = 'This sprite document references external image URL(s). Export preserves those public references. ' +
+  'Never use links containing credentials or private/internal addresses.';
+
+function isExternal(source: string): boolean {
+  return !source.startsWith('data:');
 }
 
-interface StoredSprites {
-  readonly id: 'active';
-  readonly document: SpriteDocument;
+function loading(value: SpriteDocument): ProjectionState<SpriteDocument, SpriteError> {
+  return Object.freeze({ kind: 'loading', value });
 }
 
-function isEmbedded(source: string): boolean {
-  return source.startsWith('data:');
+function ready(value: SpriteDocument): ProjectionState<SpriteDocument, SpriteError> {
+  return Object.freeze({ kind: 'ready', value });
 }
 
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+function failed(value: SpriteDocument, error: SpriteError): ProjectionState<SpriteDocument, SpriteError> {
+  return Object.freeze({ kind: 'failed', value, error });
 }
 
-function isDocumentError(error: unknown): error is SpriteError | SkeletonError | DirectionalError {
-  return error instanceof SpriteError || error instanceof SkeletonError || error instanceof DirectionalError;
+// The rig's refusal; anything else is a bug.
+function failure(error: unknown): SpriteError {
+  if (error instanceof SpriteError) return error;
+  if (error instanceof SkeletonError || error instanceof DirectionalError) return new SpriteError(error.message, { cause: error });
+  throw error;
 }
 
-function nextId(prefix: string, taken: ReadonlySet<string>): string {
-  let index = taken.size + 1;
-  let candidate = `${prefix}-${index}`;
-  while (taken.has(candidate)) {
-    index += 1;
-    candidate = `${prefix}-${index}`;
+function issueOf(error: Error | null): CharacterModelIssue | null {
+  if (error instanceof CharacterModelError) {
+    return Object.freeze({ code: error.code, message: error.message, joints: error.joints, motion: null });
   }
-  return candidate;
-}
-
-const DEFAULT_FLIPBOOK_HYSTERESIS = 1;
-// Numeric collation orders frame-2 before frame-10, independent of the browser locale.
-const FRAME_ORDER = new Intl.Collator('en', { numeric: true });
-
-function sameFlipbook(left: SpriteFlipbook | undefined, right: SpriteFlipbook | undefined): boolean {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  return left.startAngle === right.startAngle && left.hysteresis === right.hysteresis &&
-    left.images.length === right.images.length && left.images.every((id, index) => id === right.images[index]);
-}
-
-function sameLayer(left: SpriteLayer, right: SpriteLayer): boolean {
-  return left === right || left.id === right.id && left.name === right.name &&
-    left.anchor === right.anchor && left.image === right.image &&
-    left.width === right.width && left.height === right.height &&
-    left.rotation === right.rotation &&
-    left.offset.x === right.offset.x && left.offset.y === right.offset.y && left.offset.z === right.offset.z &&
-    left.bone === right.bone && left.tileLength === right.tileLength &&
-    left.directions.length === right.directions.length && left.directions.every((value, index) => value === right.directions[index]) &&
-    (left.skin === right.skin || JSON.stringify(left.skin) === JSON.stringify(right.skin)) &&
-    sameFlipbook(left.flipbook, right.flipbook);
-}
-
-// Drops images no layer displays any more, as the document format requires.
-function usedImages(images: readonly SpriteImage[], layers: readonly SpriteLayer[]): readonly SpriteImage[] {
-  const used = new Set(layers.flatMap(spriteLayerImages));
-  return images.every(image => used.has(image.id)) ? images : Object.freeze(images.filter(image => used.has(image.id)));
-}
-
-function sameDocument(left: SpriteDocument, right: SpriteDocument): boolean {
-  if (left === right) return true;
-  if (left.characterRiggingType !== right.characterRiggingType || left.armForwardDistance !== right.armForwardDistance ||
-    left.waistLean !== right.waistLean || !sameGrips(left.grips, right.grips) || !sameArms(left.arms, right.arms)) return false;
-  if (!sameCharacterAssets(left, right)) return false;
-  if (left.layers.length !== right.layers.length || left.images.length !== right.images.length) return false;
-  return (left.skeleton === right.skeleton || JSON.stringify(left.skeleton) === JSON.stringify(right.skeleton)) &&
-    sameDirectionalPresentation(left.presentation, right.presentation) &&
-    left.layers.every((layer, index) => sameLayer(layer, right.layers[index])) &&
-    (left.images === right.images || left.images.every((image, index) => {
-      const other = right.images[index];
-      return image === other || image.id === other.id && image.name === other.name && image.source === other.source;
-    }));
-}
-
-const PROP_MODEL_IDS: Readonly<Record<PropModelRole, string>> = { hammer: HAMMER_MODEL_ID, pot: POT_MODEL_ID };
-
-function issueOf(error: CharacterModelError | AvatarMotionError): CharacterModelIssue {
-  return error instanceof CharacterModelError
-    ? Object.freeze({ code: error.code, message: error.message, joints: error.joints, motion: null })
-    : Object.freeze({ code: error.code, message: error.message, joints: Object.freeze([]), motion: error.motion });
-}
-
-function modelName(file: File): string {
-  const name = file.name.replace(/\.glb$/i, '').trim().slice(0, CHARACTER_MODEL_LIMITS.name);
-  return name.length > 0 ? name : 'Character model';
-}
-
-// The sprite fields of a document, without any character assets.
-function spriteFields(document: SpriteDocument) {
-  return {
-    characterRiggingType: document.characterRiggingType, armForwardDistance: document.armForwardDistance,
-    waistLean: document.waistLean, grips: document.grips, arms: document.arms,
-    images: document.images, layers: document.layers, skeleton: document.skeleton, presentation: document.presentation,
-  };
-}
-
-function fitWithinAnchor(anchor: SpriteAnchorInput, size: { width: number; height: number }): { width: number; height: number } {
-  const scale = Math.min(anchor.width / size.width, anchor.height / size.height);
-  if (!Number.isFinite(scale) || scale <= 0) {
-    throw new SpriteError(`Anchor "${anchor.id}" has no usable size to fit this image.`);
+  if (error instanceof AvatarMotionError) {
+    return Object.freeze({ code: error.code, message: error.message, joints: Object.freeze([]), motion: error.motion });
   }
-  return { width: size.width * scale, height: size.height * scale };
+  return null;
+}
+
+export function isDefaultCharacter(profile: SpriteDocument): boolean {
+  return profile === EMPTY_SPRITES || profile.characterRiggingType === DEFAULT_CHARACTER_RIGGING_TYPE &&
+    profile.armForwardDistance === DEFAULT_ARM_FORWARD_DISTANCE && profile.waistLean === DEFAULT_WAIST_LEAN &&
+    sameGrips(profile.grips, DEFAULT_GRIPS) && profile.arms === null && !hasCharacterAssets(profile) &&
+    profile.layers.length === 0 && profile.images.length === 0 && profile.skeleton === null && profile.presentation === null;
+}
+
+// A pose preview the new skeleton still accepts. One it refuses, such as one of a deleted clip, ends with the step.
+function keptPreview(preview: SkeletonPreview | null, skeleton: SkeletonDefinition | null): SkeletonPreview | null {
+  if (preview === null || skeleton === null) return null;
+  try {
+    return validateSkeletonPreview(preview, skeleton);
+  } catch (error) {
+    if (error instanceof SkeletonError) return null;
+    throw error;
+  }
+}
+
+// The rig calls that take its layers from `applied` to `desired`: any changed in place, or one added last or removed, the
+// others the same objects in the same order; null otherwise.
+function layerSteps(rig: SpriteRig, applied: readonly SpriteLayer[], desired: readonly SpriteLayer[]): (() => void)[] | null {
+  if (desired.length === applied.length) {
+    const changed: { readonly layer: SpriteLayer; readonly growth: number }[] = [];
+    for (let index = 0; index < desired.length; index++) {
+      const layer = desired[index];
+      if (layer === applied[index]) continue;
+      if (layer.id !== applied[index].id) return null;
+      changed.push({ layer, growth: (layer.skin?.weights.length ?? 0) - (applied[index].skin?.weights.length ?? 0) });
+    }
+    // Shrinking meshes go first, so no rig in between exceeds the weighted-vertex budget both ends keep within.
+    return changed.sort((left, right) => left.growth - right.growth).map(({ layer }) => () => rig.upsert(layer));
+  }
+  if (desired.length === applied.length + 1) {
+    const layer = desired[applied.length];
+    return applied.every((entry, index) => entry === desired[index]) ? [() => rig.upsert(layer)] : null;
+  }
+  if (desired.length === applied.length - 1) {
+    const index = applied.findIndex((entry, at) => entry !== desired[at]);
+    const removed = applied[index];
+    return desired.every((entry, at) => entry === applied[at < index ? at : at + 1]) ? [() => rig.remove(removed.id)] : null;
+  }
+  return null;
 }
 
 /**
- * Non-DOM controller for the authored sprite document: owns the draft/saved split, the
- * IndexedDB round-trip and the SpriteRig calls. `sprite-editor.ts` renders this state.
+ * The primary character as Character and Sprites edit it: the document's profile, changed only through `commands` and
+ * `imports`, which the history applies. The character rig follows the document asynchronously, the newest profile
+ * winning: ordinary edits update it in place, and a change of images or models, or of more than one of the type,
+ * layers, skeleton and presentation, loads the profile whole. A whole load goes on while newer profiles need what it
+ * loads, and then shows the newest. Outside the document the state keeps only the selected layer, previews, the rig's
+ * progress and the last refusal.
  */
 export class SpriteEditorState {
+  readonly history: History;
+  readonly commands: PrimaryCommands;
+  readonly imports: CharacterImports;
+  readonly anchors: readonly SpriteAnchorInput[];
+  readonly targetIds: readonly string[];
   private readonly rig: SpriteRig;
-  private readonly anchors: readonly SpriteAnchorInput[];
-  private readonly anchorMap: ReadonlyMap<string, SpriteAnchorInput>;
-  private readonly anchorIds: ReadonlySet<string>;
-  private readonly targetIds: ReadonlySet<string>;
+  private readonly saves: VisualSaves;
   private readonly notice: (message: string, kind: 'info' | 'error') => void;
-  private readonly describeModel: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
-  private pending: PendingAvatar | null = null;
-  private modelIssue: CharacterModelIssue | null = null;
-  private avatarState: { key: readonly unknown[]; value: AvatarModelState | null } = { key: [], value: null };
-  private readonly store = new VisualStore<StoredSprites>({
-    database: 'over-the-edge:sprites', store: 'documents', keyPath: 'id',
-  });
-  private readonly listeners = new Set<() => void>();
+  private readonly fault: (error: unknown) => void;
+  private readonly listeners = new Set<(event: VisualProjectionEvent) => void>();
   private readonly lifecycle = new AbortController();
-  private draftDocument: SpriteDocument = EMPTY_SPRITES;
-  // Counts every replacement of the draft or the pending avatar, so work that finishes later, such as
-  // a download, can tell whether the character changed since it began.
-  private revision = 0;
-  // Resolved whenever the state stops restoring or finishes an operation.
-  private readonly settledWaiters: (() => void)[] = [];
-  private saved: SpriteDocument | null = null;
-  private selectedLayerId: string | null = null;
+  private readonly unsubscribe: () => void;
+  // The profile the rig shows; null until it shows one, and after an in-place change failed until it loads one whole.
+  private applied: SpriteDocument | null = null;
+  private rendering: ProjectionState<SpriteDocument, SpriteError>;
+  // The whole preparation the rig runs, and the profile it prepares.
+  private operation: { readonly root: SpriteDocument; readonly controller: AbortController } | null = null;
+  private draining = false;
+  private active = false;
+  private selectedLayerId: string | null;
   private preview: SkeletonPreview | null = null;
   private directionalPreview = false;
-  private restoring = true;
-  private busy = false;
-  private error: string | null = null;
+  private refusal: Error | null = null;
+  private saving = false;
+  private avatarKey: readonly unknown[] = [];
+  private avatarState: AvatarModelState | null = null;
   private disposed = false;
 
-  private get draft(): SpriteDocument { return this.draftDocument; }
-
-  private set draft(document: SpriteDocument) {
-    this.draftDocument = document;
-    this.revision++;
-  }
-
-  private get pendingAvatar(): PendingAvatar | null { return this.pending; }
-
-  private set pendingAvatar(avatar: PendingAvatar | null) {
-    this.pending = avatar;
-    this.revision++;
-  }
-
-  constructor(options: {
-    rig: SpriteRig;
-    anchors: readonly SpriteAnchorInput[];
-    targetIds: readonly string[];
-    onNotice: (message: string, kind: 'info' | 'error') => void;
-    // Reports of models the renderer has loaded, used to list an avatar's joints.
-    describeModel?: (source: string, usage: CharacterModelUsage) => CharacterModelReport | null;
-  }) {
+  constructor(options: SpriteStateOptions) {
     if (options.anchors.length === 0) throw new Error('The sprite editor requires at least one anchor.');
     const seen = new Set<string>();
     for (const anchor of options.anchors) {
@@ -291,562 +225,127 @@ export class SpriteEditorState {
         throw new Error(`Sprite anchor "${anchor.id}" needs a finite offset.`);
       }
     }
+    this.history = options.history;
     this.rig = options.rig;
+    this.saves = options.saves;
+    this.notice = options.onNotice;
+    this.fault = options.onFault;
     this.anchors = Object.freeze(options.anchors.map((anchor) =>
       Object.freeze({ ...anchor, offset: Object.freeze({ ...anchor.offset }) })));
-    this.anchorMap = new Map(this.anchors.map((anchor) => [anchor.id, anchor]));
-    this.anchorIds = new Set(this.anchors.map((anchor) => anchor.id));
-    this.targetIds = new Set(options.targetIds);
-    this.notice = options.onNotice;
-    this.describeModel = options.describeModel ?? (() => null);
+    this.targetIds = Object.freeze([...options.targetIds]);
+    const project = options.history.document;
+    this.commands = createCharacterCommands({
+      document: project, anchors: this.anchors, targetIds: this.targetIds, avatarRigs: options.avatarRigs,
+      describeModel: options.describeModel,
+    });
+    this.imports = createCharacterImports({
+      document: project, runner: options.runner, commands: this.commands, onMapping: () => this.emit(STATUS),
+    });
+    const profile = this.definition();
+    this.rendering = loading(profile);
+    this.selectedLayerId = profile.layers[0]?.id ?? null;
+    this.unsubscribe = project.subscribe('characters/primary', (change, cause, step) => this.follow(change, cause, step));
   }
 
-  // `apply: false` keeps the saved profile only as the Revert target and leaves the draft and the
-  // character unchanged, for a page that opens a project instead.
-  async restore(options: { apply?: boolean } = {}): Promise<void> {
+  // The document's primary character, the exact root.
+  definition(): SpriteDocument {
+    return this.history.document.get('characters/primary');
+  }
+
+  renderingState(): ProjectionState<SpriteDocument, SpriteError> {
+    return this.rendering;
+  }
+
+  // Starts the rig following the document, once the page has opened its first project or save.
+  activate(): void {
+    if (this.active || this.disposed) return;
+    this.active = true;
     try {
-      const entries = await this.store.entries();
-      if (this.disposed) return;
-      if (entries.some((entry) => entry.key !== 'active')) {
-        throw new SpriteError('Saved sprites contain unknown records. Existing records were left untouched.');
-      }
-      const record = entries.find((entry) => entry.key === 'active');
-      if (record === undefined) {
-        this.saved = EMPTY_SPRITES;
-        return;
-      }
-      let document: SpriteDocument;
-      try {
-        document = validateSpriteDocument(this.recordDocument(record.value));
-        validateSpriteAnchors(document, this.anchorIds, this.targetIds);
-      } catch (error) {
-        if (!isDocumentError(error)) throw error;
-        this.reportError(`Saved sprites were invalid and were left untouched in storage: ${error.message}`);
-        return;
-      }
-      if (options.apply === false) {
-        this.saved = document;
-        return;
-      }
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-      this.saved = document;
-      this.selectedLayerId = document.layers[0]?.id ?? null;
-      this.warnExternalSources(document);
+      this.reconcile();
     } catch (error) {
-      if (this.disposed && isAbort(error)) return;
-      if (!(isDocumentError(error) || error instanceof VisualStoreError)) throw error;
-      if (!this.disposed) this.reportError(error.message, error);
-    } finally {
-      this.restoring = false;
-      this.changed();
-      this.settle();
+      this.fault(error);
     }
+    this.emit(STATUS);
+  }
+
+  // Loads the profile whole again after the rig could not show it.
+  retry(): void {
+    if (this.disposed || !this.active || this.draining || this.rendering.kind !== 'failed') return;
+    this.rendering = loading(this.definition());
+    void this.drain(true);
+    this.emit(STATUS);
   }
 
   snapshot(): SpriteEditorSnapshot {
+    const document = this.definition();
+    const saved = this.saves.characterFingerprint();
+    const unshown = this.rendering.kind === 'failed' ? this.rendering.error : null;
     return {
-      restoring: this.restoring,
-      busy: this.busy,
-      revision: this.revision,
-      error: this.error,
-      dirty: this.saved === null || !sameDocument(this.draft, this.saved),
-      hasContent: this.draft.characterRiggingType !== DEFAULT_CHARACTER_RIGGING_TYPE ||
-        this.draft.armForwardDistance !== DEFAULT_ARM_FORWARD_DISTANCE || this.draft.waistLean !== DEFAULT_WAIST_LEAN ||
-        !sameGrips(this.draft.grips, DEFAULT_GRIPS) ||
-        this.draft.arms !== null ||
-        hasCharacterAssets(this.draft) ||
-        this.draft.layers.length > 0 || this.draft.images.length > 0 ||
-        this.draft.skeleton !== null || this.draft.presentation !== null,
+      document,
+      rendering: this.rendering,
+      saved,
+      saving: this.saving,
+      // Saved values are exact roots, so undoing back to one is clean again.
+      dirty: document !== (saved ?? EMPTY_SPRITES),
+      hasContent: !isDefaultCharacter(document),
+      error: this.refusal?.message ?? null,
       anchors: this.anchors,
-      document: this.draft,
-      saved: this.saved,
       selectedLayerId: this.selectedLayerId,
-      externalSources: this.draft.images.some((image) => !isEmbedded(image.source)),
+      externalSources: document.images.some((image) => isExternal(image.source)),
       preview: this.preview,
       directionalPreview: this.directionalPreview,
-      modelIssue: this.error === null ? null : this.modelIssue,
-      avatarModel: this.avatarModelState(),
-      hammerModel: this.draft.hammer === undefined ? null : { name: this.model(this.draft.hammer.model).name },
-      potModel: this.draft.pot === undefined ? null : { name: this.model(this.draft.pot.model).name },
+      modelIssue: issueOf(this.refusal ?? unshown),
+      avatarModel: this.avatarModel(document),
+      hammerModel: document.hammer === undefined ? null : { name: characterModel(document, document.hammer.model).name },
+      potModel: document.pot === undefined ? null : { name: characterModel(document, document.pot.model).name },
     };
   }
 
-  // Validates an imported skinned GLB, suggests a bone map and applies it when complete and valid.
-  // Imports a skinned avatar GLB. `settings`, a server model's own, give it its bone map, driver, hair and motions.
-  // Otherwise its joints map automatically: re-importing the avatar's own GLB keeps its trusted driver, its hair and its
-  // motions, and a different model starts standard, without hair or motions, which are configured for another model's joints.
-  async importAvatarModel(file: File, settings?: AvatarModelSettings): Promise<void> {
-    if (!this.canEdit()) return;
-    await this.run(async () => {
-      const bytes = await this.readModel(file);
-      if (this.disposed) return;
-      const report = inspectCharacterModel(bytes.buffer, 'avatar');
-      const source = encodeModel(bytes);
-      const avatar = this.draft.avatar;
-      const current = avatar === undefined ? null : this.model(avatar.model);
-      const same = avatar !== undefined && current !== null && current.source === source;
-      await this.applyAvatar({
-        name: modelName(file), source, report,
-        ...settings ?? {
-          boneMap: suggestAvatarBoneMap(report),
-          driver: same ? avatar.driver : STANDARD_AVATAR_DRIVER, hair: same ? avatar.hair : NO_AVATAR_HAIR,
-          motion: same ? avatar.motion : NO_AVATAR_MOTION,
-        },
-      });
-    });
-  }
-
-  // Edits the pending or current bone map; a complete, valid map replaces the draft's avatar.
-  async setAvatarBone(joint: AvatarJointId, name: string | null): Promise<void> {
-    if (!this.canEdit()) return;
-    if (!isAvatarJoint(joint)) throw new Error(`Unknown avatar joint "${String(joint)}".`);
-    await this.run(async () => {
-      const base = this.pendingAvatar ?? this.draftAvatar();
-      if (base === null) throw new SpriteError('Import a skinned avatar GLB before editing its bone map.');
-      // Invalid intermediate maps, such as a duplicate while swapping two joints, stay pending.
-      const boneMap: Partial<Record<AvatarJointId, string>> = { ...base.boneMap };
-      if (name === null || name === '') delete boneMap[joint];
-      else boneMap[joint] = name;
-      await this.applyAvatar({
-        name: base.name, source: base.source, report: base.report, boneMap: Object.freeze(boneMap), driver: base.driver, hair: base.hair,
-        motion: base.motion,
-      });
-    });
-  }
-
-  async removeAvatarModel(): Promise<void> {
-    if (!this.canEdit()) return;
-    await this.run(async () => {
-      this.pendingAvatar = null;
-      if (this.draft.avatar === undefined) return;
-      const document = this.characterDocument({ avatar: null });
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-    });
-  }
-
-  cancelAvatarImport(): void {
-    if (this.disposed || this.pendingAvatar === null) return;
-    this.pendingAvatar = null;
-    if (this.error !== null) this.error = null;
-    this.changed();
-  }
-
-  // Replaces the hammer or pot with a static GLB that follows its role's convention.
-  async importPropModel(role: PropModelRole, file: File): Promise<void> {
-    if (!this.canEdit()) return;
-    await this.run(async () => {
-      const bytes = await this.readModel(file);
-      if (this.disposed) return;
-      inspectCharacterModel(bytes.buffer, role);
-      const model = Object.freeze({ id: PROP_MODEL_IDS[role], name: modelName(file), source: encodeModel(bytes) });
-      const document = this.characterDocument({ [role]: model });
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-    });
-  }
-
-  async removePropModel(role: PropModelRole): Promise<void> {
-    if (!this.canEdit()) return;
-    await this.run(async () => {
-      if (this.draft[role] === undefined) return;
-      const document = this.characterDocument({ [role]: null });
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-    });
-  }
-
-
-  subscribe(listener: () => void): () => void {
+  // Tells `listener` now, and after each change of the profile, of the rig's progress and of the editor's own state.
+  subscribe(listener: (event: VisualProjectionEvent) => void): () => void {
     this.listeners.add(listener);
-    listener();
-    return () => this.listeners.delete(listener);
+    listener(STATUS);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  // Applies `command` through the history; a refusal shows in the status and as a notice. False when refused.
+  apply(command: Command): boolean {
+    const refusal = applyProjectCommand(this.history, command);
+    if (refusal !== null) {
+      this.refuse(refusal);
+      return false;
+    }
+    this.clearRefusal();
+    return true;
+  }
+
+  // Reports an import's outcome as apply does; true once its value is the profile's.
+  settle(outcome: EditOutcome<unknown>): boolean {
+    if (this.disposed || outcome.kind === 'cancelled') return false;
+    if (outcome.kind === 'refused') {
+      this.refuse(outcome.error);
+      return false;
+    }
+    this.clearRefusal();
+    return true;
+  }
+
+  // Reports a whole profile's load as settle does, warning when its images are links.
+  settleProfile(outcome: EditOutcome<SpriteDocument>): boolean {
+    if (!this.settle(outcome)) return false;
+    if (outcome.kind === 'applied' && outcome.value.images.some((image) => isExternal(image.source))) {
+      this.notice(EXTERNAL_IMAGES, 'info');
+    }
+    return true;
   }
 
   selectLayer(id: string | null): void {
-    if (id !== null && !this.draft.layers.some((layer) => layer.id === id)) {
+    if (id !== null && !this.definition().layers.some((layer) => layer.id === id)) {
       throw new Error(`Unknown sprite layer "${id}".`);
     }
     if (this.selectedLayerId === id) return;
     this.selectedLayerId = id;
-    this.changed();
-  }
-
-  async addImageLayer(file: File, anchorId: string): Promise<void> {
-    if (!this.canEdit()) return;
-    const anchor = this.anchorMap.get(anchorId);
-    if (anchor === undefined) throw new Error(`Unknown sprite anchor "${anchorId}".`);
-    await this.run(async () => {
-      if (file.type !== 'image/png' && !/\.png$/i.test(file.name)) {
-        throw new SpriteError('Choose one PNG (.png) image file.');
-      }
-      if (file.size === 0 || file.size > SPRITE_LIMITS.imageBytes) {
-        throw new SpriteError(`Choose a PNG image no larger than ${Math.floor(SPRITE_LIMITS.imageBytes / 1024 ** 2)} MiB.`);
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (this.disposed) return;
-      const size = inspectPng(bytes);
-      const source = encodePng(bytes);
-      const existing = this.draft.images.find((image) => image.source === source);
-      let images = this.draft.images;
-      let image = existing;
-      if (image === undefined) {
-        if (images.length >= SPRITE_LIMITS.images) {
-          throw new SpriteError(`A sprite document supports at most ${SPRITE_LIMITS.images} images.`);
-        }
-        image = { id: nextId('image', new Set(images.map((candidate) => candidate.id))), name: file.name.replace(/\.png$/i, ''), source };
-        images = [...images, image];
-      }
-      if (this.draft.layers.length >= SPRITE_LIMITS.layers) {
-        throw new SpriteError(`A sprite document supports at most ${SPRITE_LIMITS.layers} layers.`);
-      }
-      const fit = fitWithinAnchor(anchor, size);
-      const layer = validateSpriteLayer({
-        ...DEFAULT_SPRITE_RIGGING,
-        id: nextId('layer', new Set(this.draft.layers.map((candidate) => candidate.id))),
-        name: image.name, anchor: anchor.id, image: image.id,
-        width: fit.width, height: fit.height, offset: { ...anchor.offset }, rotation: 0,
-      });
-      const document = validateSpriteDocument({ ...this.draft, images, layers: [...this.draft.layers, layer] });
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-      this.selectedLayerId = layer.id;
-    });
-  }
-
-  updateLayer(id: string, edit: SpriteLayerEdit): void {
-    if (!this.canEdit()) return;
-    const current = this.draft.layers.find((layer) => layer.id === id);
-    if (current === undefined) throw new Error(`Unknown sprite layer "${id}".`);
-    try {
-      const flipbook = edit.flipbook === undefined ? current.flipbook : edit.flipbook ?? undefined;
-      const layer = validateSpriteLayer({
-        id: current.id, image: flipbook?.images[0] ?? current.image,
-        name: edit.name ?? current.name,
-        anchor: edit.anchor ?? current.anchor,
-        width: edit.width ?? current.width,
-        height: edit.height ?? current.height,
-        offset: { x: edit.x ?? current.offset.x, y: edit.y ?? current.offset.y, z: edit.z ?? current.offset.z },
-        rotation: edit.rotation ?? current.rotation,
-        bone: edit.bone === undefined ? current.bone : edit.bone,
-        directions: edit.directions === undefined ? current.directions : edit.directions,
-        skin: edit.skin === undefined ? current.skin : edit.skin,
-        tileLength: edit.tileLength === undefined ? current.tileLength : edit.tileLength,
-        ...(flipbook === undefined ? {} : { flipbook }),
-      });
-      if (sameLayer(current, layer)) {
-        this.error = null;
-        this.changed();
-        return;
-      }
-      const layers = Object.freeze(this.draft.layers.map(candidate => candidate.id === id ? layer : candidate));
-      const document = Object.freeze({
-        ...this.draft, images: usedImages(this.draft.images, layers), layers,
-      });
-      this.validateDraft(document);
-      this.rig.upsert(layer);
-      this.draft = document;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return;
-    }
-    this.error = null;
-    this.changed();
-  }
-
-  // Frames are ordered by file name; identical PNGs already in the document are reused.
-  async setLayerFlipbookFrames(id: string, files: readonly File[]): Promise<void> {
-    if (!this.canEdit()) return;
-    const current = this.draft.layers.find((layer) => layer.id === id);
-    if (current === undefined) throw new Error(`Unknown sprite layer "${id}".`);
-    await this.run(async () => {
-      if (files.length < FLIPBOOK_LIMITS.minimumFrames || files.length > FLIPBOOK_LIMITS.maximumFrames) {
-        throw new SpriteError(`Choose ${FLIPBOOK_LIMITS.minimumFrames}-${FLIPBOOK_LIMITS.maximumFrames} PNG frames for a flipbook.`);
-      }
-      const ordered = [...files].sort((left, right) => FRAME_ORDER.compare(left.name, right.name));
-      const frames: { name: string; source: string }[] = [];
-      let reference: { id: string; width: number; height: number } | null = null;
-      for (const file of ordered) {
-        if (file.type !== 'image/png' && !/\.png$/i.test(file.name)) {
-          throw new SpriteError(`Flipbook frame "${file.name}" is not a PNG (.png) image.`);
-        }
-        if (file.size === 0 || file.size > SPRITE_LIMITS.imageBytes) {
-          throw new SpriteError(`Flipbook frame "${file.name}" must be a PNG no larger than ${Math.floor(SPRITE_LIMITS.imageBytes / 1024 ** 2)} MiB.`);
-        }
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        if (this.disposed) return;
-        const size = { id: file.name, ...inspectPng(bytes) };
-        if (reference === null) reference = size;
-        else if (size.width !== reference.width || size.height !== reference.height) {
-          throw new SpriteError(flipbookSizeMessage(current.name, size, reference));
-        }
-        frames.push({ name: file.name.replace(/\.png$/i, ''), source: encodePng(bytes) });
-      }
-      const images = [...this.draft.images];
-      const taken = new Set(images.map((image) => image.id));
-      const ids = frames.map((frame) => {
-        const existing = images.find((image) => image.source === frame.source);
-        if (existing !== undefined) return existing.id;
-        const image = { id: nextId('image', taken), name: frame.name, source: frame.source };
-        taken.add(image.id);
-        images.push(image);
-        return image.id;
-      });
-      if (new Set(ids).size !== ids.length) {
-        throw new SpriteError('Two chosen flipbook frames are identical PNGs. Choose a distinct image for every frame.');
-      }
-      const previous = current.flipbook;
-      const halfSpacing = FLIPBOOK_LIMITS.angle / ids.length / 2;
-      const layer = validateSpriteLayer({
-        ...current, image: ids[0], directions: [...FACING_DIRECTIONS],
-        flipbook: {
-          images: ids,
-          startAngle: previous?.startAngle ?? 0,
-          hysteresis: previous !== undefined && previous.hysteresis < halfSpacing
-            ? previous.hysteresis : Math.min(DEFAULT_FLIPBOOK_HYSTERESIS, halfSpacing / 2),
-        },
-      });
-      const layers = this.draft.layers.map((candidate) => candidate.id === id ? layer : candidate);
-      const document = validateSpriteDocument({
-        ...this.draft, images: usedImages(images, layers), layers,
-      });
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-      this.selectedLayerId = id;
-    });
-  }
-
-  deleteLayer(id: string): void {
-    if (!this.canEdit()) return;
-    if (!this.draft.layers.some((layer) => layer.id === id)) throw new Error(`Unknown sprite layer "${id}".`);
-    const layers = Object.freeze(this.draft.layers.filter((layer) => layer.id !== id));
-    const document = Object.freeze({
-      ...this.draft, images: usedImages(this.draft.images, layers), layers,
-    });
-    try {
-      this.validateDraft(document);
-      this.rig.remove(id);
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return;
-    }
-    this.error = null;
-    this.draft = document;
-    if (this.selectedLayerId === id) this.selectedLayerId = layers[0]?.id ?? null;
-    this.changed();
-  }
-
-  async save(): Promise<void> {
-    if (!this.canEdit()) return;
-    await this.run(async () => {
-      const document = validateSpriteDocument(this.draft);
-      this.validateDraft(document);
-      await this.store.write({ id: 'active', document });
-      if (this.disposed) return;
-      this.saved = document;
-      this.draft = document;
-    });
-  }
-
-  setCharacterRiggingType(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const characterRiggingType = validateCharacterRiggingType(value, this.draft.layers.length);
-      if (characterRiggingType === this.draft.characterRiggingType) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      const document = Object.freeze({ ...this.draft, characterRiggingType });
-      this.validateDraft(document);
-      this.rig.setCharacterRiggingType(characterRiggingType);
-      this.draft = document;
-      this.preview = null;
-      this.directionalPreview = false;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
-  }
-
-  setArmForwardDistance(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const armForwardDistance = validateArmForwardDistance(value);
-      if (armForwardDistance === this.draft.armForwardDistance) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      const document = Object.freeze({ ...this.draft, armForwardDistance });
-      this.validateDraft(document);
-      this.rig.setArmForwardDistance(armForwardDistance);
-      this.draft = document;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
-  }
-
-  setWaistLean(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const waistLean = validateWaistLean(value);
-      if (waistLean === this.draft.waistLean) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      const document = Object.freeze({ ...this.draft, waistLean });
-      this.validateDraft(document);
-      this.rig.setWaistLean(waistLean);
-      this.draft = document;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
-  }
-
-  // Live: the imported avatar's motions change in place, each kind re-validating its configuration against the model.
-  setAvatarMotion(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const avatar = this.draft.avatar;
-      if (avatar === undefined) throw new SpriteError('Import a skinned avatar GLB before configuring its motions.');
-      const motion = validateAvatarMotion(value);
-      if (sameAvatarMotion(motion, avatar.motion)) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      const document = Object.freeze({ ...this.draft, avatar: Object.freeze({ ...avatar, motion }) });
-      this.validateDraft(document);
-      this.rig.setAvatarMotion(motion);
-      this.draft = document;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
-  }
-
-  // Live, like arm forward distance: only where the hands hold the handle changes.
-  setGrips(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const grips = validateGrips(value);
-      if (sameGrips(grips, this.draft.grips)) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      const document = Object.freeze({ ...this.draft, grips });
-      this.validateDraft(document);
-      this.rig.setGrips(grips);
-      this.draft = document;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
-  }
-
-  // Live: stretches the character's arms in every type; null returns to each type's own lengths.
-  setArms(value: unknown): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const arms = validateArms(value);
-      if (sameArms(arms, this.draft.arms)) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      const document = Object.freeze({ ...this.draft, arms });
-      this.validateDraft(document);
-      this.rig.setArms(arms);
-      this.draft = document;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
-  }
-
-  setSkeleton(value: SkeletonDefinition | null, options: { preview?: SkeletonPreview | null } = {}): void {
-    if (!this.canEdit()) return;
-    try {
-      const skeleton = value === null ? null : validateSkeleton(value);
-      const document = Object.freeze({ ...this.draft, skeleton });
-      this.validateDraft(document);
-      let preview = options.preview === undefined ? this.preview : options.preview;
-      if (skeleton === null) {
-        if (options.preview !== undefined && preview !== null) throw new SpriteError('A preview requires a skeleton.');
-        preview = null;
-      } else if (preview !== null) {
-        const current = preview;
-        const missingClip = current.clip !== null && !skeleton.clips.some(clip => clip.id === current.clip);
-        const missingBone = current.pose.some(pose => !skeleton.bones.some(bone => bone.id === pose.bone));
-        preview = options.preview === undefined && (missingClip || missingBone) ? null : validateSkeletonPreview(current, skeleton);
-      }
-      this.rig.configureSkeleton(skeleton, { preview });
-      this.rig.setDirectionalPreview(null);
-      this.preview = preview;
-      this.directionalPreview = false;
-      this.draft = document;
-      this.error = null;
-      this.changed();
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-    }
+    this.emit(STATUS);
   }
 
   setPreview(value: SkeletonPreview | null): void {
@@ -854,46 +353,24 @@ export class SpriteEditorState {
       this.leavePreview();
       return;
     }
-    if (!this.canEdit()) return;
+    const refused = this.previewRefusal();
+    if (refused !== null) {
+      this.refuse(refused);
+      return;
+    }
     try {
-      const skeleton = this.draft.skeleton;
+      const skeleton = this.definition().skeleton;
       if (skeleton === null) throw new SpriteError('Create a skeleton before previewing a pose.');
       const preview = validateSkeletonPreview(value, skeleton);
       this.rig.setPreview(preview);
       this.preview = preview;
       this.directionalPreview = false;
-      this.error = null;
-      this.changed();
     } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
+      this.refuse(failure(error));
+      return;
     }
-  }
-
-  setPresentation(value: DirectionalPresentation | null): Error | null {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    try {
-      const presentation = value === null ? null : validateDirectionalPresentation(value);
-      const document = Object.freeze({ ...this.draft, presentation });
-      this.validateDraft(document);
-      if (sameDirectionalPresentation(this.draft.presentation, presentation)) {
-        if (this.error !== null) {
-          this.error = null;
-          this.changed();
-        }
-        return null;
-      }
-      this.rig.configurePresentation(presentation);
-      this.draft = document;
-      this.error = null;
-      this.changed();
-      return null;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error;
-    }
+    this.refusal = null;
+    this.emit(STATUS);
   }
 
   setDirectionalPreview(value: { readonly aim: { readonly x: number; readonly y: number } } | null): boolean {
@@ -902,26 +379,29 @@ export class SpriteEditorState {
       this.rig.setDirectionalPreview(null);
       if (this.directionalPreview) {
         this.directionalPreview = false;
-        this.changed();
+        this.emit(STATUS);
       }
       return true;
     }
-    if (!this.canEdit()) return false;
+    const refused = this.previewRefusal();
+    if (refused !== null) {
+      this.refuse(refused);
+      return false;
+    }
     try {
       if (![value.aim.x, value.aim.y].every(Number.isFinite) || value.aim.x === 0 && value.aim.y === 0) {
-        throw new DirectionalError('Preview aim must be a finite, nonzero vector.');
+        throw new SpriteError('Preview aim must be a finite, nonzero vector.');
       }
-      const notify = !this.directionalPreview || this.preview !== null || this.error !== null;
+      const notify = !this.directionalPreview || this.preview !== null || this.refusal !== null;
       this.rig.setDirectionalPreview(value);
       this.preview = null;
       this.directionalPreview = true;
-      this.error = null;
+      this.refusal = null;
       // Aim movement is transient; subscribers only need preview-mode transitions.
-      if (notify) this.changed();
+      if (notify) this.emit(STATUS);
       return true;
     } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
+      this.refuse(failure(error));
       return false;
     }
   }
@@ -929,458 +409,297 @@ export class SpriteEditorState {
   leavePreview(): void {
     if (this.disposed) return;
     const changed = this.preview !== null || this.directionalPreview;
-    this.rig.setDirectionalPreview(null);
-    if (this.preview !== null) this.rig.setPreview(null);
-    this.preview = null;
-    this.directionalPreview = false;
-    if (changed) this.changed();
+    this.endPreviews();
+    if (changed) this.emit(STATUS);
   }
 
-  bindMesh(id: string, options: { columns: number; rows: number; bones: readonly string[] }): void {
-    if (!this.canEdit()) return;
+  // Stores the profile as this browser's save; the document and its history stay as they are.
+  async save(): Promise<void> {
+    if (this.disposed || this.saving) return;
+    const value = this.definition();
+    this.saving = true;
+    this.emit(STATUS);
     try {
-      const layer = this.draft.layers.find(candidate => candidate.id === id);
-      if (!layer || !this.draft.skeleton) throw new SpriteError('Select a layer and create a skeleton before binding a mesh.');
-      const { columns, rows } = options;
-      if (![columns, rows].every(value => Number.isInteger(value) && value >= 1 && value <= SKELETON_LIMITS.grid)) {
-        throw new SpriteError(`Mesh columns and rows must be whole numbers from 1 to ${SKELETON_LIMITS.grid}.`);
-      }
-      let xOffset = layer.offset.x, yOffset = layer.offset.y, rotation = layer.rotation;
-      if (layer.bone !== null) {
-        const bone = restPose(this.draft.skeleton).find(candidate => candidate.id === layer.bone);
-        if (bone === undefined) throw new SpriteError('The attached bone is missing.');
-        xOffset = bone.x + layer.offset.x * Math.cos(bone.angle) - layer.offset.y * Math.sin(bone.angle);
-        yOffset = bone.y + layer.offset.x * Math.sin(bone.angle) + layer.offset.y * Math.cos(bone.angle);
-        rotation = ((rotation + bone.angle * 180 / Math.PI) % 360 + 540) % 360 - 180;
-      }
-      const angle = rotation * Math.PI / 180;
-      const positions = [];
-      for (let row = 0; row <= rows; row++) for (let column = 0; column <= columns; column++) {
-        const x = (column / columns - 0.5) * layer.width;
-        const y = (0.5 - row / rows) * layer.height;
-        positions.push({
-          x: xOffset + x * Math.cos(angle) - y * Math.sin(angle),
-          y: yOffset + x * Math.sin(angle) + y * Math.cos(angle),
-        });
-      }
-      const skin = { columns, rows, weights: autoWeights(this.draft.skeleton, positions, options.bones) };
-      this.updateLayer(id, { skin, bone: null, tileLength: null, x: xOffset, y: yOffset, rotation });
+      const result = await this.saves.saveCharacter(value, this.lifecycle.signal);
+      if (result.kind === 'refused') this.refuse(result.error);
     } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
+      if (!this.lifecycle.signal.aborted) this.fault(error);
+    } finally {
+      this.saving = false;
+      this.emit(STATUS);
     }
   }
 
-  async revert(): Promise<void> {
-    if (!this.canEdit()) return;
-    this.pendingAvatar = null;
-    const saved = this.saved;
-    if (saved === null) {
-      this.reportError('No saved sprite layout was successfully loaded. Save a valid layout before reverting.');
-      return;
-    }
-    await this.run(async () => {
-      await this.replaceRig(saved);
-      if (this.disposed) return;
-      this.draft = saved;
-      if (this.selectedLayerId === null || !saved.layers.some((layer) => layer.id === this.selectedLayerId)) {
-        this.selectedLayerId = saved.layers[0]?.id ?? null;
-      }
-    });
+  exportDocument(): string {
+    return JSON.stringify(this.definition());
   }
 
-  async newDocument(): Promise<void> {
-    if (!this.canEdit()) return;
-    this.pendingAvatar = null;
-    await this.run(async () => {
-      await this.replaceRig(EMPTY_SPRITES);
-      if (this.disposed) return;
-      this.draft = EMPTY_SPRITES;
-      this.selectedLayerId = null;
-    });
+  // The rig's directional readouts, of what it shows.
+  presentationState(): ReturnType<SpriteRig['presentationState']> {
+    return this.rig.presentationState();
   }
 
-  async importDocument(file: File): Promise<void> {
-    if (!this.canEdit()) return;
-    this.pendingAvatar = null;
-    await this.run(async () => {
-      if (file.size > SPRITE_FILE_BYTES) {
-        throw new SpriteError(`Profile JSON must be at most ${Math.floor(SPRITE_FILE_BYTES / 1024 ** 2)} MiB.`);
-      }
-      const text = await file.text();
-      if (this.disposed) return;
-      const document = parseSpriteDocument(text);
-      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-      this.selectedLayerId = document.layers[0]?.id ?? null;
-      this.warnExternalSources(document);
-    });
-  }
-
-  // Replaces the draft with a whole profile. Refuses while an operation is in progress, unless `wait`
-  // asks it to wait for the operation instead: a project replacing the whole character, having let go
-  // of the previous project, must not find it busy.
-  async loadDocument(document: SpriteDocument, options: { readonly wait?: boolean } = {}): Promise<boolean> {
-    if (options.wait === true) {
-      while (!this.disposed && (this.restoring || this.busy)) await new Promise<void>((resolve) => this.settledWaiters.push(resolve));
-      if (this.disposed) return false;
-    } else if (!this.canEdit()) {
-      return false;
-    }
-    this.pendingAvatar = null;
-    let loaded = false;
-    await this.run(async () => {
-      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-      this.selectedLayerId = document.layers[0]?.id ?? null;
-      loaded = true;
-      this.warnExternalSources(document);
-    });
-    return loaded;
-  }
-
-  // Stages a whole profile, as loadDocument loads one, without showing it: the draft and the character change only when
-  // the preparation commits, in one synchronous call with the caller's own change. The editor stays busy until it
-  // commits or cancels, and `signal` aborting or the editor closing cancels it.
-  async prepareDocument(document: SpriteDocument, options: { readonly signal: AbortSignal }): Promise<PreparedPrimary | SpriteError> {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    const signal = AbortSignal.any([this.lifecycle.signal, options.signal]);
-    const settled = (): void => {
-      this.busy = false;
-      this.changed();
-      this.settle();
-    };
-    const cancelled = (): SpriteError => new SpriteError(this.disposed
-      ? 'The character editor closed before the operation finished.' : 'Loading the character profile was cancelled.');
-    this.busy = true;
-    this.error = null;
-    this.changed();
-    let replacement: PreparedSpriteReplacement;
-    try {
-      this.validateDraft(document);
-      this.leavePreview();
-      replacement = await this.rig.prepareReplacement(document, { signal });
-    } catch (error) {
-      settled();
-      if (isAbort(error)) return cancelled();
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return error instanceof SpriteError ? error : new SpriteError(error.message, { cause: error });
-    }
-    let phase: 'staged' | 'cancelled' | 'committed' = 'staged';
-    const cancel = (): void => {
-      if (phase !== 'staged') return;
-      phase = 'cancelled';
-      signal.removeEventListener('abort', cancel);
-      replacement.cancel();
-      settled();
-    };
-    if (signal.aborted) {
-      cancel();
-      return cancelled();
-    }
-    signal.addEventListener('abort', cancel, { once: true });
-    return Object.freeze({
-      commit: (accept: () => boolean, applied: () => void): boolean => {
-        if (phase === 'committed') throw new Error('The prepared character profile was already committed.');
-        if (phase === 'cancelled') return false;
-        let accepted = false;
-        try {
-          accepted = accept();
-        } finally {
-          if (!accepted) cancel();
-        }
-        if (!accepted) return false;
-        signal.removeEventListener('abort', cancel);
-        try {
-          replacement.commit();
-        } catch (error) {
-          phase = 'cancelled';
-          settled();
-          // Only the rig closing aborts it now: the editor's own cancellation already ended this preparation.
-          if (isAbort(error)) return false;
-          if (!isDocumentError(error)) throw error;
-          this.reportError(error.message, error);
-          return false;
-        }
-        phase = 'committed';
-        this.pendingAvatar = null;
-        this.draft = document;
-        this.selectedLayerId = document.layers[0]?.id ?? null;
-        this.preview = null;
-        this.directionalPreview = false;
-        try {
-          applied();
-        } finally {
-          settled();
-          this.warnExternalSources(document);
-        }
-        return true;
-      },
-      cancel,
-    });
-  }
-
-  // Replaces the draft with a whole profile as an edit, validated and loaded as an imported profile is. Returns the
-  // refusal, or null once the profile shows.
-  async setDocument(value: SpriteDocument): Promise<Error | null> {
-    const refused = this.editable();
-    if (refused !== null) return refused;
-    this.pendingAvatar = null;
-    return this.run(async () => {
-      const document = validateSpriteDocument(value);
-      validateSpriteAnchors(document, this.anchorIds, this.targetIds);
-      await this.replaceRig(document);
-      if (this.disposed) return;
-      this.draft = document;
-      this.selectedLayerId = document.layers[0]?.id ?? null;
-      this.warnExternalSources(document);
-    });
-  }
-
-  validatedDraft(): SpriteDocument | null {
-    try {
-      const document = validateSpriteDocument(this.draft);
-      this.validateDraft(document);
-      return document;
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return null;
-    }
-  }
-
-  exportDocument(): string | null {
-    if (!this.canEdit()) return null;
-    try {
-      const document = validateSpriteDocument(this.draft);
-      this.validateDraft(document);
-      return JSON.stringify(document);
-    } catch (error) {
-      if (!isDocumentError(error)) throw error;
-      this.reportError(error.message, error);
-      return null;
-    }
+  flipbookState(id: string): ReturnType<SpriteRig['flipbookState']> {
+    return this.rig.flipbookState(id);
   }
 
   dispose(): void {
     if (this.disposed) return;
-    this.leavePreview();
+    this.endPreviews();
     this.disposed = true;
+    this.unsubscribe();
     this.lifecycle.abort(new DOMException('The sprite editor was disposed.', 'AbortError'));
+    this.imports.dispose();
     this.listeners.clear();
-    this.store.close();
-    this.settle();
   }
 
-  private recordDocument(value: unknown): unknown {
-    if (typeof value !== 'object' || value === null || Array.isArray(value) ||
-      Object.keys(value).length !== 2 || Reflect.get(value, 'id') !== 'active') {
-      throw new SpriteError('The saved sprite record is malformed.');
+  // Heard as each step sets the profile: the history is never held for the rig.
+  private follow(change: SectionChange<'characters/primary'>, cause: ChangeCause, step: StepInfo | null): void {
+    this.refusal = null;
+    this.select(change.after, cause, step);
+    try {
+      this.reconcile();
+    } catch (error) {
+      this.fault(error);
     }
-    return Reflect.get(value, 'document');
+    this.emit({ cause, step });
   }
 
-  private warnExternalSources(document: SpriteDocument): void {
-    if (document.images.some((image) => !isEmbedded(image.source))) {
-      this.notice(
-        'This sprite document references external image URL(s). Export preserves those public references. ' +
-        'Never use links containing credentials or private/internal addresses.', 'info',
-      );
+  // Undo selects the layer a Sprites step had selected before it, Redo and edits the one after it.
+  private select(profile: SpriteDocument, cause: ChangeCause, step: StepInfo | null): void {
+    const select = step?.place.tab === 'sprites' ? step.place.select : null;
+    const wanted = select === null ? [] : selectionIds(cause === 'undo' ? select.before : select.after, 'layer');
+    const listed = wanted.find((id) => profile.layers.some((layer) => layer.id === id));
+    if (listed !== undefined) this.selectedLayerId = listed;
+    else if (!profile.layers.some((layer) => layer.id === this.selectedLayerId)) this.selectedLayerId = profile.layers[0]?.id ?? null;
+  }
+
+  // Takes the rig toward the document's profile: in place when it can, else through the one whole preparation. That
+  // preparation goes on while the newest profile needs something only it loads and nothing it does not, so it never
+  // restarts a load the newest still needs; otherwise it is cancelled, and the drain takes the newest without it.
+  private reconcile(): void {
+    if (this.disposed) return;
+    const root = this.definition();
+    if (!this.active || this.draining) {
+      const operation = this.operation;
+      if (operation !== null && operation.root !== root && this.rig.replacementNeeds(root, operation.root) !== 'prepared') {
+        operation.controller.abort();
+      }
+      this.rendering = loading(root);
+      return;
+    }
+    if (this.applied === root) {
+      this.rendering = ready(root);
+      return;
+    }
+    const steps = this.applied === null ? null : this.incremental(this.applied, root);
+    if (steps !== null) {
+      this.showSteps(root, steps);
+      return;
+    }
+    this.rendering = loading(root);
+    void this.drain(false);
+  }
+
+  // One whole preparation at a time, of the newest profile. It commits the profile the document holds by then, its own
+  // or a newer one it loaded all the new images and models for, built at once from those and what the rig shows; any
+  // other is cancelled. The rig drains its native work before it changes again, so nothing obsolete shows or is
+  // reported ready.
+  private async drain(whole: boolean): Promise<void> {
+    this.draining = true;
+    this.endPreviews();
+    try {
+      for (;;) {
+        await this.rig.whenIdle(this.lifecycle.signal);
+        const root = this.definition();
+        if (this.applied === root) {
+          this.rendering = ready(root);
+          return;
+        }
+        const steps = whole || this.applied === null ? null : this.incremental(this.applied, root);
+        whole = false;
+        if (steps !== null) {
+          this.showSteps(root, steps);
+          return;
+        }
+        const controller = new AbortController();
+        const signal = AbortSignal.any([controller.signal, this.lifecycle.signal]);
+        this.operation = { root, controller };
+        let prepared: PreparedSpriteReplacement;
+        try {
+          prepared = await this.rig.prepareReplacement(root, { signal });
+        } catch (error) {
+          // A cancelled preparation is silent and a refused one shows only while the document holds its profile;
+          // failure() throws anything else on to onFault.
+          if (signal.aborted && error instanceof DOMException && error.name === 'AbortError') continue;
+          const refusal = failure(error);
+          if (root !== this.definition()) continue;
+          this.rendering = failed(root, refusal);
+          return;
+        } finally {
+          this.operation = null;
+        }
+        if (signal.aborted) {
+          prepared.cancel();
+          continue;
+        }
+        const desired = this.definition();
+        try {
+          prepared.commit(desired === root ? undefined : desired);
+        } catch (error) {
+          this.rendering = failed(desired, failure(error));
+          return;
+        }
+        this.applied = desired;
+        this.rendering = ready(desired);
+        return;
+      }
+    } catch (error) {
+      if (!this.lifecycle.signal.aborted) this.fault(error);
+    } finally {
+      this.draining = false;
+      this.emit(STATUS);
     }
   }
 
-  private async replaceRig(document: SpriteDocument): Promise<void> {
-    this.validateDraft(document);
-    this.leavePreview();
-    await this.rig.replace(document, { signal: this.lifecycle.signal });
+  // Shows `root` through `steps`, in place. A refusal may leave some of them done, so the rig's state is known again
+  // only once it loads a profile whole.
+  private showSteps(root: SpriteDocument, steps: readonly (() => void)[]): void {
+    try {
+      for (const step of steps) step();
+    } catch (error) {
+      this.applied = null;
+      this.rendering = failed(root, failure(error));
+      return;
+    }
+    this.applied = root;
+    this.rendering = ready(root);
+  }
+
+  // The rig calls that take it from showing `applied` to showing `desired` in place, or null when only a whole
+  // replacement can: images added, models or the avatar's model, bone map, driver or hair changed, or more than one of
+  // the type, layers, skeleton and presentation. The arm, grip and lean settings and the avatar's motions check nothing
+  // else, so any of them change alongside.
+  private incremental(applied: SpriteDocument, desired: SpriteDocument): (() => void)[] | null {
+    const keys = new Set([...Object.keys(applied), ...Object.keys(desired)]) as Set<keyof SpriteDocument>;
+    const changed = [...keys].filter((key) => applied[key] !== desired[key]);
+    const rig = this.rig;
+    const settings: (() => void)[] = [];
+    let structure: (() => void)[] | null = null;
+    for (const key of changed) {
+      let steps: (() => void)[] | null;
+      switch (key) {
+        case 'images': {
+          const shown = new Set(applied.images);
+          if (!changed.includes('layers') || !desired.images.every((image) => shown.has(image))) return null;
+          continue;
+        }
+        case 'armForwardDistance': settings.push(() => rig.setArmForwardDistance(desired.armForwardDistance)); continue;
+        case 'waistLean': settings.push(() => rig.setWaistLean(desired.waistLean)); continue;
+        case 'grips': settings.push(() => rig.setGrips(desired.grips)); continue;
+        case 'arms': settings.push(() => rig.setArms(desired.arms)); continue;
+        case 'avatar': {
+          const before = applied.avatar;
+          const after = desired.avatar;
+          if (before === undefined || after === undefined || before.model !== after.model || before.boneMap !== after.boneMap ||
+            before.driver !== after.driver || before.hair !== after.hair) return null;
+          settings.push(() => rig.setAvatarMotion(after.motion));
+          continue;
+        }
+        case 'layers': steps = layerSteps(rig, applied.layers, desired.layers); break;
+        case 'characterRiggingType':
+          steps = [() => {
+            rig.setCharacterRiggingType(desired.characterRiggingType);
+            this.preview = null;
+            this.directionalPreview = false;
+          }];
+          break;
+        case 'skeleton':
+          steps = [() => {
+            const preview = keptPreview(this.preview, desired.skeleton);
+            rig.configureSkeleton(desired.skeleton, { preview });
+            rig.setDirectionalPreview(null);
+            this.preview = preview;
+            this.directionalPreview = false;
+          }];
+          break;
+        case 'presentation': steps = [() => rig.configurePresentation(desired.presentation)]; break;
+        default: return null;
+      }
+      // These check one another, so only one of them changes in place.
+      if (steps === null || structure !== null) return null;
+      structure = steps;
+    }
+    return structure === null ? settings : [...structure, ...settings];
+  }
+
+  // Previews pose the rig as it shows the document, so they wait until it does.
+  private previewRefusal(): SpriteError | null {
+    if (this.disposed) return new SpriteError('The character editor is closed.');
+    return this.active && !this.draining && this.applied === this.definition() ? null
+      : new SpriteError('Wait for the character to load before previewing it.');
+  }
+
+  private endPreviews(): void {
+    if (this.preview === null && !this.directionalPreview) return;
+    this.rig.setDirectionalPreview(null);
+    if (this.preview !== null) this.rig.setPreview(null);
     this.preview = null;
     this.directionalPreview = false;
   }
 
-  private validateDraft(document: SpriteDocument): void {
-    validateSpriteRigging(document.layers, document.skeleton);
-    validateSpriteAnchors(document, this.anchorIds, this.targetIds);
-    validateSpriteBudget(document);
-  }
-
-  private async readModel(file: File): Promise<Uint8Array<ArrayBuffer>> {
-    if (!/\.glb$/i.test(file.name) || file.name.length > 255) {
-      throw new CharacterModelError('invalid-model', 'Choose one binary glTF (.glb) file.');
-    }
-    if (file.size === 0 || file.size > CHARACTER_MODEL_LIMITS.bytes) {
-      throw new CharacterModelError('model-limits', `Choose a GLB file no larger than ${CHARACTER_MODEL_LIMITS.bytes / 1024 ** 2} MiB.`);
-    }
-    return new Uint8Array(await file.arrayBuffer());
-  }
-
-  private model(id: string): CharacterModel {
-    const model = this.draft.models?.find(candidate => candidate.id === id);
-    if (model === undefined) throw new SpriteError(`The character profile is missing model "${id}".`);
-    return model;
-  }
-
-  private draftAvatar(): Omit<PendingAvatar, 'issue'> | null {
-    const avatar = this.draft.avatar;
-    if (avatar === undefined) return null;
-    const model = this.model(avatar.model);
-    const report = this.describeModel(model.source, 'avatar');
-    if (report === null) throw new SpriteError('The avatar model is still loading; try again once it appears.');
-    return {
-      name: model.name, source: model.source, report, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair,
-      motion: avatar.motion,
-    };
-  }
-
-  // Keeps an import pending, with its typed issue, until its bone map and hair resolve against the model.
-  private async applyAvatar(candidate: Omit<PendingAvatar, 'issue'>): Promise<void> {
-    try {
-      resolveAvatarHair(candidate.report, resolveAvatarJoints(candidate.report, candidate.boneMap), candidate.hair);
-    } catch (error) {
-      if (!(error instanceof CharacterModelError)) throw error;
-      this.pendingAvatar = Object.freeze({ ...candidate, issue: issueOf(error) });
-      throw error;
-    }
-    const current = this.draft.avatar === undefined ? null : this.model(this.draft.avatar.model);
-    const model = current !== null && current.source === candidate.source && current.name === candidate.name
-      ? current : Object.freeze({ id: AVATAR_MODEL_ID, name: candidate.name, source: candidate.source });
-    const document = this.characterDocument({
-      avatar: {
-        model, boneMap: candidate.boneMap as AvatarBoneMap, driver: candidate.driver, hair: candidate.hair, motion: candidate.motion,
-      },
-    });
-    await this.replaceRig(document);
-    if (this.disposed) return;
-    this.draft = document;
-    this.pendingAvatar = null;
-  }
-
-  // A validated draft with the avatar, hammer or pot replaced (or removed with null), other fields kept.
-  private characterDocument(changes: {
-    avatar?: {
-      model: CharacterModel; boneMap: AvatarBoneMap; driver: AvatarDriver; hair: AvatarHair; motion: readonly AvatarMotionEntry[];
-    } | null;
-    hammer?: CharacterModel | null;
-    pot?: CharacterModel | null;
-  }): SpriteDocument {
-    const avatar = changes.avatar === undefined
-      ? this.draft.avatar === undefined ? null
-        : { model: this.model(this.draft.avatar.model), boneMap: this.draft.avatar.boneMap, driver: this.draft.avatar.driver,
-          hair: this.draft.avatar.hair, motion: this.draft.avatar.motion }
-      : changes.avatar;
-    const prop = (role: PropModelRole): CharacterModel | null => {
-      const change = changes[role];
-      if (change !== undefined) return change;
-      const current = this.draft[role];
-      return current === undefined ? null : this.model(current.model);
-    };
-    const hammer = prop('hammer');
-    const pot = prop('pot');
-    // Role order keeps the saved model list stable: avatar, hammer, pot.
-    const models = [avatar?.model, hammer, pot].filter((model): model is CharacterModel => model !== null && model !== undefined);
-    const assets: CharacterAssets = characterAssets({
-      models: models.length === 0 ? undefined : models,
-      avatar: avatar === null ? undefined
-        : { model: avatar.model.id, boneMap: avatar.boneMap, driver: avatar.driver, hair: avatar.hair, motion: avatar.motion },
-      hammer: hammer === null ? undefined : { model: hammer.id },
-      pot: pot === null ? undefined : { model: pot.id },
-    });
-    return validateSpriteDocument({
-      schemaVersion: SPRITE_SCHEMA_VERSION, ...spriteFields(this.draft), ...assets,
-    });
-  }
-
-  private avatarModelState(): AvatarModelState | null {
-    const pending = this.pendingAvatar;
-    const avatar = this.draft.avatar;
-    const source = pending?.source ?? (avatar === undefined ? null : this.model(avatar.model).source);
-    const report = pending?.report ?? (source === null ? null : this.describeModel(source, 'avatar'));
-    const key = [pending, avatar, this.draft.models, report];
-    if (key.length === this.avatarState.key.length && key.every((value, index) => value === this.avatarState.key[index])) {
-      return this.avatarState.value;
-    }
+  // The avatar Character shows: one waiting for its bone map, or the profile's, whose joints wait for its model's
+  // report. Kept while what it shows stays the same.
+  private avatarModel(document: SpriteDocument): AvatarModelState | null {
+    const mapping: AvatarMapping | null = this.imports.mapping();
+    const avatar = document.avatar;
+    const model = avatar === undefined ? null : characterModel(document, avatar.model);
+    const report = model === null ? null : this.commands.report(model, 'avatar');
+    const key = [mapping, avatar, model, report];
+    if (key.length === this.avatarKey.length && key.every((value, index) => value === this.avatarKey[index])) return this.avatarState;
     let value: AvatarModelState | null = null;
-    if (pending !== null) {
+    if (mapping !== null) {
       value = {
-        name: pending.name, pending: true, joints: pending.report.joints.map(joint => joint.name),
-        boneMap: pending.boneMap, issue: pending.issue, unmapped: [],
+        name: mapping.name, pending: true, joints: mapping.report.joints.map((joint) => joint.name),
+        boneMap: mapping.boneMap, issue: issueOf(mapping.issue), unmapped: [],
       };
-    } else if (avatar !== undefined) {
+    } else if (avatar !== undefined && model !== null) {
       let unmapped: AvatarModelState['unmapped'] = [];
       let issue: CharacterModelIssue | null = null;
       if (report !== null) {
         try {
-          unmapped = resolveAvatarJoints(report, avatar.boneMap).unmapped.map(joint => ({ name: joint.name, follows: joint.follows }));
+          unmapped = resolveAvatarJoints(report, avatar.boneMap).unmapped.map((joint) => ({ name: joint.name, follows: joint.follows }));
         } catch (error) {
           if (!(error instanceof CharacterModelError)) throw error;
           issue = issueOf(error);
         }
       }
       value = {
-        name: this.model(avatar.model).name, pending: false, joints: report?.joints.map(joint => joint.name) ?? null,
+        name: model.name, pending: false, joints: report?.joints.map((joint) => joint.name) ?? null,
         boneMap: avatar.boneMap, issue, unmapped,
       };
     }
-    this.avatarState = { key, value };
+    this.avatarKey = key;
+    this.avatarState = value;
     return value;
   }
 
-  private canEdit(): boolean {
-    return this.editable() === null;
+  private refuse(error: Error): void {
+    if (this.disposed) return;
+    const repeated = this.refusal?.message === error.message;
+    this.refusal = error;
+    if (!repeated) this.notice(error.message, 'error');
+    this.emit(STATUS);
   }
 
-  // Why the draft cannot change now, reported, or null when it can.
-  private editable(): SpriteError | null {
-    if (this.disposed) return new SpriteError('The character editor is closed.');
-    if (this.restoring || this.busy) {
-      const refusal = new SpriteError('Wait for the current sprite operation to finish before editing.');
-      this.notice(refusal.message, 'error');
-      return refusal;
-    }
-    return null;
+  private clearRefusal(): void {
+    if (this.refusal === null) return;
+    this.refusal = null;
+    this.emit(STATUS);
   }
 
-  // Keeps the typed code of character-model failures next to the message.
-  private reportError(message: string, error?: unknown): void {
-    this.modelIssue = error instanceof CharacterModelError || error instanceof AvatarMotionError ? issueOf(error) : null;
-    const repeated = this.error === message;
-    this.error = message;
-    if (!this.disposed) {
-      if (!repeated) this.notice(message, 'error');
-      this.changed();
-    }
-  }
-
-  // Runs one operation, reporting a refusal; returns the refusal, or null when the operation finished.
-  private async run(operation: () => Promise<void>): Promise<Error | null> {
-    this.busy = true;
-    this.error = null;
-    this.changed();
-    try {
-      await operation();
-      return null;
-    } catch (error) {
-      if (this.disposed && isAbort(error)) return new SpriteError('The character editor closed before the operation finished.');
-      if (!(isDocumentError(error) || error instanceof VisualStoreError)) throw error;
-      if (!this.disposed) this.reportError(error.message, error);
-      return error;
-    } finally {
-      this.busy = false;
-      this.changed();
-      this.settle();
-    }
-  }
-
-  private settle(): void {
-    for (const resolve of this.settledWaiters.splice(0)) resolve();
-  }
-
-  private changed(): void {
-    if (!this.disposed) for (const listener of this.listeners) listener();
+  private emit(event: VisualProjectionEvent): void {
+    if (this.disposed) return;
+    for (const listener of [...this.listeners]) listener(event);
   }
 }
