@@ -473,11 +473,18 @@ trigger goes on, so an intro film never interrupts testing. A game-only release 
 
 ### Undo and redo
 
-The Workshop keeps one undo history for the open project, shared by every tab. It records
-the level's edits: those made in **Level**, or by a Workshop plugin's
-[level edits](docs/workshop-plugins.md#the-project), become its steps. Game settings,
-characters, appearance, the project's other sections and plugins' own data change outside
-it, and Undo leaves them as they are.
+The Workshop keeps one undo history for the open project, shared by every tab. Each edit of
+the level, the game settings, the title, theme, HUD, audio, enemy art, media, course
+artwork, model library or alternate character, or of a Workshop plugin's own data, is one
+of its steps, whether made in **Level**, **Physics** or **Project**, with Character's
+**Handle length** or by a [Workshop plugin](docs/workshop-plugins.md#the-project). The
+character profile, appearance models and arm IK, which **Character**, **Sprites** and
+**Appearance** edit, change outside it, and Undo leaves them as they are. A change from
+outside the history, such as a server update, cuts it at the sections it changes: Undo
+loses the newest step that changed one of them and every step before that, and Redo loses
+every step, so Undo never writes over a change it did not make. **Swap with current
+character**, in Project, changes the character profile as well as the alternate character,
+so it applies outside the history too and cuts it at the alternate character.
 
 **Undo** and **Redo** lead the Workshop header's tools on every tab. Each names the step
 it would take back or put back, with the tab it was made in, as in
@@ -487,22 +494,27 @@ or **Ctrl+Y** redoes, while the Workshop is open and the mouse is not captured; 
 field, the browser's own undo edits the text instead.
 
 Undo takes back the newest change, whichever tab made it: a step, or an edit still waiting
-for its data, which it cancels, its button saying **Cancel** with the edit's name. The
-Workshop stays on the tab shown: when the step's tab is not shown, a notice says what was
-undone or redone and in which tab, and when it is, the section where the step was made
-opens. Each undo and redo is announced to screen readers, and on touch screens, where tips
-do not show, a notice says it too. While a project opens, is imported or updates from the
-server, while course artwork or a media file is imported, and while this browser's
+for its data, such as an import whose file is still being read or checked, or game settings
+still downloading from the server, which it cancels, its button saying **Cancel** with the
+edit's name. The Workshop stays on the tab shown: when the step's tab is not shown, a notice
+says what was undone or redone and in which tab, and when it is, the section where the step
+was made opens. Each undo and redo is announced to screen readers, and on touch screens,
+where tips do not show, a notice says it too. While a project opens, is imported or updates
+from the server, and while this browser's
 [kept changes](docs/projects.md#publishing-a-workshop-with-its-project) come back through
-**Restore into the project**, Undo and Redo are unavailable, and their tips say they wait
-for the project.
+**Restore into the project** with the character profile, appearance models or arm IK among
+them, Undo and Redo are unavailable, and their tips say they wait for the project.
 
 The history keeps at most **200** steps and about **64 MiB**, dropping the oldest first; the
-newest step always stays, however large. Step names are cut to 80 characters. Some
-adjustments repeated within a second make one step, unless another level edit, Undo or Redo
-comes in between. The history belongs to the page, so a reload starts it empty. See
+newest step always stays, however large. Files count too: a step counts the size of each
+file it removes, and of each it adds from this page, as an import does, since the history
+may have to keep their bytes; removing a 64 MiB media file drops older steps. Step names are
+cut to 80 characters. A slider's or colour picker's scrub is one step, and so is a run of
+the same adjustment, each within a second of the last, such as presses of a slider's step
+buttons, unless another edit, Undo or Redo comes in between. The history belongs to the
+page, so a reload starts it empty. See
 [Working in the Workshop](docs/projects.md#working-in-the-workshop) for how it meets saving,
-opening projects, the project server, course artwork and media.
+the project's files, opening projects and the project server.
 
 ## Physics architecture
 
@@ -677,11 +689,12 @@ the grid, or ten with Shift) or remove it with **Remove point** or Delete. Moved
 points snap to the **Snap grid**, which the slider below the canvas sets from 1 mm to 10 cm
 (5 mm until you change it; the browser remembers your choice); the canvas draws grids of
 2 cm and more between its 10 cm lines. **Mirror** keeps both sides of the
-handle alike, and **Sledge**, **Round** and **Pick** start from a preset. The outline is
-always the smallest convex one around its points, so a head can be a block, a disc, a
-wedge or a pointed pick, never hooked: 3-12 points within 0.6 m of the centre, which
-stays inside. The head's mass stays **Hammer head mass**, and its outline sets how that
-mass turns. A head changes in place, without restarting the run, and the built-in
+handle alike, and **Sledge**, **Round** and **Pick** start from a preset. Each change, or a
+run of arrow-key nudges to one point, is one step of the [undo history](#undo-and-redo). The
+outline is always the smallest convex one around its points, so a head can be a block, a
+disc, a wedge or a pointed pick, never hooked: 3-12 points within 0.6 m of the centre,
+which stays inside. The head's mass stays **Hammer head mass**, and its outline sets how
+that mass turns. A head changes in place, without restarting the run, and the built-in
 hammer mesh, the debug overlay, framing and how near the hands come follow it; imported
 hammer models and sprites keep their own artwork. Phantoms draw the default head.
 
@@ -736,11 +749,11 @@ profile containing every physics setting, the hammer rig, all cursor settings an
 the death settings.
 Reusing a name keeps both versions. Choose an entry in **Past game settings**,
 then **Load game settings** to apply it. Selecting an entry alone does not
-change the game. History survives reloads; loading remains manual.
+change the game. Saved profiles survive reloads; loading remains manual.
 
 **Export settings JSON** downloads the current complete profile as
 `game-settings.json`. **Import settings JSON** validates and applies a profile;
-save it under a name if you also want it in browser history. Files are limited
+save it under a name if you also want to keep it in this browser. Files are limited
 to **64 KiB**, with strict schema, field, and numeric-range validation. A bad
 import leaves current settings and saved profiles unchanged. If settings change
 while a file is being read, the import is canceled rather than overwriting the
@@ -751,9 +764,9 @@ so saves from different tabs do not overwrite one shared record. Nothing is
 uploaded unless you save to your own project server: **Save to project** writes the
 settings into the open [project](docs/projects.md), and **Server game settings** shares
 named [copies](docs/projects.md#server-copies). Settings use
-**schema version 20**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
+**schema version 21**, with `physics`, `rig`, `cursor` and `death` sections; files and saves
 in any other version are rejected, not converted. Browser snapshots use storage format
-**12**; earlier storage keys are not read. Unreadable current-format saves are marked and
+**13**; earlier storage keys are not read. Unreadable current-format saves are marked and
 retained, while other valid snapshots remain available.
 
 Profiles contain gameplay configuration, not saved body trajectories, levels,
@@ -761,6 +774,9 @@ or character artwork. Height and peak readouts describe the current attempt.
 
 Saved profiles preserve their stored hammer friction. **Defaults** restores
 all built-in physics, rig, cursor and death settings without changing saved profiles.
+Loading a saved profile or a **Server game settings** copy, importing a file and
+**Defaults** each replace the game settings as one step of the
+[undo history](#undo-and-redo).
 
 The practice positions make the important behaviors easy to revisit: resting
 on a ledge, smooth ground pushes, launches, and vaulting a low block. The

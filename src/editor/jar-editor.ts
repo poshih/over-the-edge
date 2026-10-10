@@ -1,9 +1,12 @@
 import { RIG } from '../config';
 import {
-  DEFAULT_POT_OUTLINE, POT_OUTLINE_LIMITS, POT_OUTLINE_TOP, PotOutlineError, potMeasures, validatePotOutline,
+  DEFAULT_POT_OUTLINE, POT_OUTLINE_LIMITS, POT_OUTLINE_TOP, PotOutlineError, potMeasures, samePotOutline, validatePotOutline,
 } from '../pot-outline';
 import type { PotOutline } from '../pot-outline';
-import { createOutlineEditor } from './outline-editor';
+import type { History } from './document/history';
+import { applyProjectCommand } from './document/project-commands';
+import type { ProjectCommands } from './document/project-commands';
+import { createOutlineEditor, outlineStepLabel } from './outline-editor';
 import type { OutlineEditor } from './outline-editor';
 
 function regularJar(radius: number, sides: number): PotOutline {
@@ -26,14 +29,15 @@ function metres(value: number): string {
 
 /**
  * Physics / Jar: the jar's collision outline, a game setting, shaped on a canvas around the player's root, with the
- * shoulder hinge above it and the highest its top may reach. Mirror keeps its left and right alike.
+ * shoulder hinge above it and the highest its top may reach. Mirror keeps its left and right alike. Each change is an
+ * undo step.
  */
 export function createJarEditor(options: {
   readonly mount: HTMLElement;
-  readonly pot: () => PotOutline;
-  // Stores the new outline; false when it was refused, which the store reports.
-  readonly setPot: (pot: PotOutline) => boolean;
+  readonly history: History;
+  readonly commands: ProjectCommands;
 }): OutlineEditor {
+  const { history, commands } = options;
   return createOutlineEditor({
     key: 'jar', noun: 'jar outline', chooser: null,
     canvasLabel: 'Jar outline: the player\'s root at the centre, the shoulder hinge above it',
@@ -58,7 +62,15 @@ export function createJarEditor(options: {
     fallback: DEFAULT_POT_OUTLINE,
   }, {
     mount: options.mount,
-    outlines: () => [{ id: null, name: 'Jar', outline: options.pot() }],
-    setOutline: (_id, outline) => options.setPot(outline),
+    history,
+    outlines: () => [{ id: null, name: 'Jar', outline: history.document.get('settings').rig.pot }],
+    apply: (edit) => applyProjectCommand(history, commands.pot(edit.before, edit.after, {
+      label: outlineStepLabel(edit.action, 'jar outline'),
+      place: { tab: 'physics', section: 'physics-jar', select: null },
+      coalesce: edit.action.kind === 'nudge' ? edit.action.key : null,
+    })),
+    subscribe: (listener) => history.document.subscribe('settings', (change, cause) => {
+      if (!samePotOutline(change.before.rig.pot, change.after.rig.pot)) listener(cause);
+    }),
   });
 }

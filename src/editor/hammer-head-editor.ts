@@ -1,15 +1,14 @@
 import { RIG } from '../config';
-import { DEFAULT_HAMMER_HEAD, HAMMER_HEAD_LIMITS, HammerHeadError, hammerHeadBack, validateHammerHead } from '../hammer-head';
+import {
+  DEFAULT_HAMMER_HEAD, HAMMER_HEAD_LIMITS, HammerHeadError, hammerHeadBack, sameHammerHead, validateHammerHead,
+} from '../hammer-head';
 import type { HammerHead } from '../hammer-head';
-import { createOutlineEditor } from './outline-editor';
+import type { History } from './document/history';
+import { applyProjectCommand } from './document/project-commands';
+import type { ProjectCommandInfo, ProjectCommands } from './document/project-commands';
+import type { ProjectProjection } from './document/project-projection';
+import { createOutlineEditor, outlineStepLabel } from './outline-editor';
 import type { OutlineEditor } from './outline-editor';
-
-// A hammer whose head the editor shapes: the default hammer (id null), whose head is a game setting, or a library hammer.
-export interface HeadedHammer {
-  readonly id: string | null;
-  readonly name: string;
-  readonly head: HammerHead;
-}
 
 export type HammerHeadEditor = OutlineEditor;
 
@@ -36,15 +35,23 @@ function metres(value: number): string {
 
 /**
  * Physics / Hammer head: each hammer's collision outline, shaped on a canvas around the head's centre, where the
- * handle ends. Mirror keeps the two sides of the handle alike.
+ * handle ends. Mirror keeps the two sides of the handle alike. The default hammer's head is a game setting and a library
+ * hammer's is its own; each change is an undo step.
  */
 export function createHammerHeadEditor(options: {
   readonly mount: HTMLElement;
-  // The default hammer first, then the library's hammers.
-  readonly hammers: () => readonly HeadedHammer[];
-  // Stores a hammer's new head; false when it was refused, which the store reports.
-  readonly setHead: (id: string | null, head: HammerHead) => boolean;
+  readonly history: History;
+  readonly commands: ProjectCommands;
+  readonly projection: ProjectProjection;
 }): HammerHeadEditor {
+  const { history, commands, projection } = options;
+  // What a step calls the head it shapes: the default hammer's (id null) or a library hammer's.
+  const headName = (id: string | null): string => {
+    if (id === null) return 'Default hammer head';
+    const hammer = projection.libraryHammers().find((candidate) => candidate.id === id);
+    if (hammer === undefined) throw new Error(`Missing library hammer: ${id}.`);
+    return `${hammer.name} head`;
+  };
   return createOutlineEditor({
     key: 'hammer-head', noun: 'hammer head outline',
     chooser: { label: 'Hammer', name: (hammer) => hammer.id === null ? hammer.name : `Library: ${hammer.name}` },
@@ -67,7 +74,27 @@ export function createHammerHeadEditor(options: {
     fallback: DEFAULT_HAMMER_HEAD,
   }, {
     mount: options.mount,
-    outlines: () => options.hammers().map((hammer) => ({ id: hammer.id, name: hammer.name, outline: hammer.head })),
-    setOutline: options.setHead,
+    history,
+    // The default hammer first, then the library's hammers.
+    outlines: () => [
+      { id: null, name: 'Default hammer', outline: history.document.get('settings').rig.head },
+      ...projection.libraryHammers().map((hammer) => ({ id: hammer.id, name: hammer.name, outline: hammer.head })),
+    ],
+    apply: (edit) => {
+      const info: ProjectCommandInfo = {
+        label: outlineStepLabel(edit.action, headName(edit.id)),
+        place: { tab: 'physics', section: 'physics-head', select: null },
+        coalesce: edit.action.kind === 'nudge' ? edit.action.key : null,
+      };
+      return applyProjectCommand(history, edit.id === null
+        ? commands.defaultHammerHead(edit.before, edit.after, info)
+        : commands.libraryHammerHead(edit.id, edit.before, edit.after, info));
+    },
+    // The batch, heard after every section's listeners, so the projection's library hammers are current.
+    subscribe: (listener) => history.document.subscribeAll((changes, cause) => {
+      if (changes.some((change) => change.section === 'settings'
+        ? !sameHammerHead(change.before.rig.head, change.after.rig.head)
+        : change.section === 'models' && change.before.hammer !== change.after.hammer)) listener(cause);
+    }),
   });
 }

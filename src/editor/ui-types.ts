@@ -1,8 +1,10 @@
 import type { InputMode, UiAction, UiActionOptions } from '../config';
-import type { GameSettings } from '../game-settings';
 import type { HudSettings } from '../hud';
 import type { HudFrame } from '../hud-readouts';
 import type { RuntimePlugins } from '../plugins/runtime';
+import type { History } from './document/history';
+import type { ProjectCommands } from './document/project-commands';
+import type { ProjectImports } from './document/project-imports';
 import type { PracticeId } from './practices';
 import type { ProjectSaveTarget } from './project-save';
 import type { ServerCopies } from './server-copies';
@@ -34,14 +36,16 @@ export interface WorkshopState {
 export interface UiOptions {
   mount: HTMLElement;
   plugins: RuntimePlugins;
+  // The project's game settings, which Physics shows and edits through commands, each a step.
+  history: History;
+  commands: ProjectCommands;
+  imports: ProjectImports;
   // Physics diagnostics only, requested while its tab is visible, never as part of the HUD frame.
   readStatus: () => { readonly contacts: number; readonly hingeLoad: number | null; readonly sliderLoad: number | null };
-  initialSettings: Readonly<GameSettings>;
   initialInputMode: InputMode;
   onAction: (action: EditorAction, options?: UiActionOptions) => void;
   onWorkshopChange: (state: WorkshopState) => void;
   onPractice: (practice: PracticeId) => void;
-  onSettingsChange: (settings: GameSettings) => void;
   // The open server project, for Physics' Save to project, and the copies shared on the server.
   projectSave: ProjectSaveTarget;
   serverCopies: ServerCopies;
@@ -70,9 +74,6 @@ export interface GameUi {
   workshopState: () => WorkshopState;
   closeWorkshop: () => void;
   update: (frame: HudFrame, state: HudState) => void;
-  // Applies a complete settings profile, e.g. from a project, as if loaded in Physics.
-  applySettings: (settings: GameSettings) => void;
-  settings: () => GameSettings;
   setHud: (hud: HudSettings) => void;
   // Names the open level in the game header; null for a level with no name.
   setLevelName: (name: string | null) => void;

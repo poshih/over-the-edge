@@ -1,12 +1,12 @@
 import { element, setText } from '../dom';
 import type { SpriteRig } from '../sprite-rig';
 import { FLIPBOOK_LIMITS, SPRITE_FIELDS, SPRITE_LIMITS } from '../sprite-data';
-import type { SpriteDocument, SpriteLayer } from '../sprite-data';
+import type { SpriteDocument, SpriteError, SpriteLayer } from '../sprite-data';
 import { createRangeControl } from './range-control';
 import { createJsonDownload } from './json-download';
 import type { RangeControl } from './range-control';
 import { SpriteEditorState } from './sprite-state';
-import type { SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
+import type { PreparedPrimary, SpriteAnchorInput, SpriteEditorSnapshot } from './sprite-state';
 import type { CharacterModelReport, CharacterModelUsage } from '../character-model-inspect';
 import type { CharacterArms } from '../character-arms';
 import type { RigGeometry } from '../rig';
@@ -14,6 +14,7 @@ import { createSkeletonEditor } from './skeleton-editor';
 import { createDirectionalEditor } from './directional-editor';
 import type { DirectionalViewport } from './directional-editor';
 import { createCharacterEditor } from './character-editor';
+import type { DocumentSettingsEditing } from './character-editor';
 import type { AvatarMotionControls } from './avatar-motion-controls';
 import type { LeanPreview } from '../waist-lean';
 import { createProjectSaveButton } from './project-save';
@@ -49,8 +50,8 @@ export interface SpriteEditorOptions {
   hammerRig: RigGeometry;
   // Each arm as the current character type draws it without the profile's own arm lengths.
   naturalArms: () => CharacterArms;
-  // Sets the game's handle length from the Character tab.
-  onHandleLength: (length: number) => void;
+  // The project's game settings, whose handle length the Character tab edits.
+  readonly settingsEditing: DocumentSettingsEditing;
   // The avatars, hammers and pots this Workshop's server shares, for the Character tab.
   serverModels: ServerModels;
   // False when the page opens a project instead: the saved profile is then only the Revert target.
@@ -79,6 +80,8 @@ export interface SpriteEditorHandle {
   readonly edits: CharacterEdits;
   // Replaces the draft with a whole profile, for example from a project; false if it was rejected.
   loadDocument: (document: SpriteDocument, options?: { readonly wait?: boolean }) => Promise<boolean>;
+  // Stages a whole profile without showing it, for a caller that commits it together with its own change.
+  prepareDocument(document: SpriteDocument, options: { readonly signal: AbortSignal }): Promise<PreparedPrimary | SpriteError>;
   // The validated draft, or null after reporting why it cannot be saved.
   validatedDocument: () => SpriteDocument | null;
   setActive: (active: boolean) => void;
@@ -481,7 +484,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
   }));
   const characterEditor = createCharacterEditor({
     mount: options.characterMount, state, hammerRig: options.hammerRig,
-    naturalArms: options.naturalArms, onHandleLength: options.onHandleLength, actions: documentActions,
+    naturalArms: options.naturalArms, settingsEditing: options.settingsEditing, actions: documentActions,
     serverModels: options.serverModels, onNotice: options.onNotice, signal: events.signal,
     projectSave: options.projectSave, serverCopies: options.serverCopies, motion: options.motion,
   });
@@ -512,6 +515,7 @@ export function createSpriteEditor(options: SpriteEditorOptions): SpriteEditorHa
       setPresentation: (value) => state.setPresentation(value),
     }),
     loadDocument: (document, options) => state.loadDocument(document, options),
+    prepareDocument: (document, options) => state.prepareDocument(document, options),
     validatedDocument: () => state.validatedDraft(),
     setActive: (value) => {
       active = value;

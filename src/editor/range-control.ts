@@ -13,14 +13,39 @@ interface RangeSpec {
   description?: string;
 }
 
-export function createRangeControl(field: RangeSpec, options: {
+// What groups a scrub into one undo step: History, or anything that coalesces and seals as it does.
+export interface ScrubHistory {
+  coalescing<R>(key: string, label: string, run: () => R): R;
+  seal(key: string): void;
+}
+
+export interface RangeControlOptions {
   id: string;
   name: string;
   signal: AbortSignal;
   onInput: (value: number) => void;
   // How the readout shows a value; by default the number and the field's unit.
   format?: (value: number) => string;
-}): RangeControl {
+  // Makes each scrub one undo step, keyed by the input's ID and named stepLabel ("Set <label>" by default).
+  history?: ScrubHistory;
+  stepLabel?: string;
+}
+
+// Edits made on each input event take the input's ID as their undo key, and change seals it: a scrub, a held arrow key
+// or a burst of clicks whose gaps are each under a second is one step.
+export function bindScrubInput(input: HTMLInputElement, options: {
+  readonly history: ScrubHistory;
+  readonly label: string;
+  readonly signal: AbortSignal;
+  readonly onInput: () => void;
+}): void {
+  if (input.id === '') throw new Error('A scrubbed input needs an ID, its undo key.');
+  input.addEventListener('input', () => options.history.coalescing(input.id, options.label, options.onInput),
+    { signal: options.signal });
+  input.addEventListener('change', () => options.history.seal(input.id), { signal: options.signal });
+}
+
+export function createRangeControl(field: RangeSpec, options: RangeControlOptions): RangeControl {
   const row = document.createElement('div');
   row.className = 'tuning-field';
   const heading = document.createElement('div');
@@ -63,10 +88,14 @@ export function createRangeControl(field: RangeSpec, options: {
   };
   decrease.addEventListener('click', () => step('down'), { signal: options.signal });
   increase.addEventListener('click', () => step('up'), { signal: options.signal });
-  input.addEventListener('input', () => {
+  const changed = (): void => {
     updateButtons();
     options.onInput(input.valueAsNumber);
-  }, { signal: options.signal });
+  };
+  if (options.history === undefined) input.addEventListener('input', changed, { signal: options.signal });
+  else bindScrubInput(input, {
+    history: options.history, label: options.stepLabel ?? `Set ${field.label}`, signal: options.signal, onInput: changed,
+  });
   heading.append(label, output);
   controls.append(decrease, input, increase);
   row.append(heading, controls);

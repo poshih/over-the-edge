@@ -1,73 +1,56 @@
 import { validateAppearanceParts } from '../appearance-profile';
 import { checkAppearanceModel } from '../appearance-model';
 import type { VisualAlignment } from '../appearance-profile';
-import { audioSources, DEFAULT_AUDIO, validateAudio } from '../audio-settings';
 import type { AudioSettings } from '../audio-settings';
 import type { ArmIkSettings, VisualPartId } from '../character';
-import type { AvatarModelSettings } from '../character-profile';
 import { embeddedModel } from '../character-profile';
 import { checkCharacterModels } from '../character-model-check';
-import { ART_LIMITS, ArtError, artName } from '../art-types';
 import type { DecorationArt } from '../decoration-art';
-import { unknownDecorationModels } from '../decoration-models';
-import { validateCoursePackage } from '../course-package';
 import { STARTER_LEVEL } from '../default-course';
-import { DEFAULT_ENEMY_ART, enemyArtAssets, validateEnemyArt } from '../enemy-art-data';
 import type { EnemyArtSettings } from '../enemy-art-data';
-import { SPECIES_CLIP_ROLES } from '../enemy-motion-data';
-import type { EnemyClipRole } from '../enemy-motion-data';
-import type { EnemyBake } from '../enemy-model-check';
-import { ENEMY_SPECIES } from '../enemy-types';
-import type { EnemySpecies } from '../enemy-types';
-import { defaultEnemyClips } from './enemy-clips';
-import type { GameSettings } from '../game-settings';
 import { Disposal } from '../disposal';
-import { DEFAULT_HUD, validateHud } from '../hud';
 import type { HudSettings } from '../hud';
 import { validateLevel } from '../level';
 import type { LevelDefinition } from '../level';
-import { checkMediaBytes, MEDIA_LIMITS, mediaFile, mediaKind, mediaPathForFile, mediaType } from '../media';
-import { meshTerrain } from '../mesh-collision';
-import type { MeshTerrain } from '../mesh-collision';
-import { MeshBaker } from './mesh-baker';
+import { mediaFile, mediaKind } from '../media';
 import {
   appearanceFile, artFile, checkBundleSize, checkFileBudget, checkProjectReferences, defaultProjectManifest, inSection, isProjectDataError,
-  loadProjectContent, packProjectBundle, parseProjectCharacter, PROJECT_FILES, PROJECT_FORMAT, PROJECT_LIMITS,
-  PROJECT_SCHEMA_VERSION, projectFileRefs, projectFileType, ProjectError, projectTitle, unpackProjectBundle, validateMediaIndex,
-  validateProjectArt, validateProjectCharacter, validateProjectId, validateProjectManifest,
+  loadProjectContent, packProjectBundle, PROJECT_FILES, PROJECT_FORMAT, PROJECT_LIMITS, PROJECT_SCHEMA_VERSION, projectFileRefs,
+  projectFileType, ProjectError, unpackProjectBundle, validateProjectArt, validateProjectCharacter, validateProjectId, validateProjectManifest,
 } from '../project';
 import type { ProjectArt, ProjectBundle, ProjectContent, ProjectManifest } from '../project';
 import { EMPTY_SPRITES } from '../sprite-data';
 import type { SpriteDocument } from '../sprite-data';
-import { decodeBase64 } from '../sprite-fields';
-import { MODEL_LIMITS } from '../model-data';
-import {
-  checkLibraryModel, checkModelLibrary, libraryAvatarSettings, libraryEntries, libraryHammerHead, libraryIdForName, libraryModelFile,
-  MODEL_LIBRARY_LIMITS, newAvatarEntry, PART_ROLES, validateAvatarSettings, validateModelLibrary,
-} from '../model-library';
-import type {
-  AvatarHoldSettings, LibraryAvatarEntry, LibraryAvatarSettings, LibraryEntry, LibraryHammerEntry, ModelLibrary, PartRole,
-} from '../model-library';
-import type { HammerHead } from '../hammer-head';
+import { SpriteError } from '../sprite-fields';
+import { checkModelLibrary, libraryModelFile, PART_ROLES } from '../model-library';
+import type { LibraryEntry, PartRole } from '../model-library';
 import type { AvatarRigRegistry } from '../avatar-rig';
-import { DEFAULT_THEME, validateTheme } from '../theme';
 import type { GameTheme } from '../theme';
-import { DEFAULT_LOOK, NO_COURSE_ARTWORK } from '../game-look';
-import type { CourseArtwork, GameLook } from '../game-look';
-import { NO_PLUGIN_DATA, pluginDataIn, pluginOfSection, pluginSection, validatePluginData, withPluginData } from '../plugin-data';
+import { pluginDataIn, pluginOfSection, pluginSection, validatePluginData, validateProjectPlugins } from '../plugin-data';
 import type { PluginData } from '../plugin-data';
 import { sameJson } from '../bounded-json';
-import { sha256Hex } from '../sha256';
+import { PluginError } from '../plugins/kernel';
 import { ProjectApiError, ProjectClient } from './project-client';
 import type { PublishRecord, ServerHealth, ServerProjectSummary, ServerRevisions } from './project-client';
 import { ProjectCopyStore } from './project-copy';
-import type { ProjectCopy } from './project-copy';
+import type { ProjectCopy, ProjectCopyFiles } from './project-copy';
 import { DEFAULT_COURSE_FILES, openDefaultCourse } from './default-course-files';
-import { downloadPublishedFile, loadPublishedProject } from './published-project';
-import type { OpenedFile, OpenedProject, PublishedFile, PublishedProject } from './published-project';
-import { ServerModelError } from './server-models';
+import { loadPublishedProject } from './published-project';
+import type { OpenedFile, OpenedProject, PublishedProject } from './published-project';
 import type { History } from './document/history';
+import type { BinarySectionName, FileHandle, FileStore } from './document/files';
+import type { PreparedFileWrite, ProjectFileRetention, ServerFileWrite } from './document/file-retention';
+import { UNTITLED_GAME_TITLE } from './document/project-commands';
+import type { ProjectCommandInfo, ProjectCommands, ProjectPlugins } from './document/project-commands';
+import type { ProjectImports } from './document/project-imports';
+import type { LibraryModel, ProjectProjection } from './document/project-projection';
+import type {
+  DocumentArt, DocumentMedia, DocumentModel, DocumentModels, FrozenPluginData, PluginSectionName,
+  SectionName, SectionValue, SectionValues, SomeSectionChange,
+} from './document/project-document';
+import { adapterFor, SECTION_ADAPTERS } from './document/sections';
 import type { LevelState } from './level-state';
+import type { PreparedPrimary } from './sprite-state';
 
 // The engine's sections. Besides them, each Workshop plugin's data is a section of its own, `plugins/<id>`.
 export const PROJECT_SECTIONS = [
@@ -84,14 +67,16 @@ export function isProjectSection(name: string): name is ProjectSectionName {
   return (PROJECT_SECTIONS as readonly string[]).includes(name) || pluginOfSection(name) !== null;
 }
 
-// The Workshop's plugins, as the project needs them: which it has, and each one's own check of its data, which returns
-// the plugin's typed refusal or null.
-export interface ProjectPlugins {
-  has(id: string): boolean;
-  validate(id: string, data: PluginData): Error | null;
+const NO_PLUGINS: ProjectPlugins = Object.freeze({ has: () => false, validate: () => null });
+const BINARY_SECTIONS: readonly BinarySectionName[] = ['art', 'media', 'models'];
+
+function isDocumentSection(name: ProjectSectionName): name is SectionName {
+  return Object.hasOwn(SECTION_ADAPTERS.builtin, name) || pluginOfSection(name) !== null;
 }
 
-const NO_PLUGINS: ProjectPlugins = Object.freeze({ has: () => false, validate: () => null });
+function restoreInfo(): ProjectCommandInfo {
+  return { label: 'Restore kept changes', place: { tab: 'project', section: null, select: null }, coalesce: null };
+}
 
 // Server writes happen in this order, so new files exist before references and references go before removals. Plugin
 // sections reference nothing, so they go last.
@@ -122,13 +107,13 @@ export interface ProjectWorkspace {
   // Records `level` as the saved version; null records unsaved changes.
   markLevelSaved(level: LevelDefinition | null): void;
   hasPendingLevelEdits(): boolean;
-  readonly settings: { get(): GameSettings; load(settings: GameSettings): void };
   readonly character: {
     draft(): SpriteDocument;
     hasContent(): boolean;
     validated(): SpriteDocument | null;
     // Refuses while the character is busy, unless `wait` asks it to wait for the character instead.
     load(document: SpriteDocument, options?: { readonly wait?: boolean }): Promise<boolean>;
+    prepare(document: SpriteDocument, options: { readonly signal: AbortSignal }): Promise<PreparedPrimary | SpriteError>;
   };
   readonly appearance: {
     armIk(): Readonly<ArmIkSettings>;
@@ -137,82 +122,22 @@ export interface ProjectWorkspace {
     load(parts: readonly AppearanceFile[]): Promise<boolean>;
   };
   readonly ready: Promise<unknown>;
-  onLook(look: ProjectLook): void;
   notice(message: string, kind: 'info' | 'error'): void;
 }
 
 export interface ProjectSessionOptions {
-  workspace: ProjectWorkspace;
-  history: History;
-  level: LevelState;
-  avatarRigs: AvatarRigRegistry;
-  plugins?: ProjectPlugins;
-  client?: ProjectClient;
-  published?: PublishedProject | null;
-}
-
-export interface ProjectLook {
-  // How the game looks, as the project stands, saved or not.
-  readonly game: GameLook;
-  readonly audio: AudioSettings;
-  readonly resolveMedia: (source: string) => string;
-  // Changes whenever media files change, so caches of their contents can be dropped.
-  readonly mediaVersion: number;
-}
-
-// Where a binary file's bytes are. The page reads them only when it uses the file: to preview, upload or export it.
-interface FileSource {
-  // Bytes in this page (picked, imported or kept in this browser's copy), or null for a file only held elsewhere.
-  readonly blob: Blob | null;
-  // The server project that holds the file, or null; the bound project holds it when this is its ID.
-  readonly server: string | null;
-  // The published project's file with these bytes, or null.
-  readonly published: PublishedFile | null;
-}
-
-interface MediaItem extends FileSource {
-  readonly path: string;
-  // What media elements play: an object URL of the page's bytes, or the server project's or published project's URL.
-  readonly url: string;
-  readonly bytes: number;
-}
-
-interface ArtItem extends FileSource {
-  readonly id: string;
-  readonly name: string;
-  readonly bytes: number;
-}
-
-// The course artwork: the GLBs and the decoration models they draw.
-interface CourseArt {
-  assets: ArtItem[];
-  decorations: DecorationArt;
-}
-
-// One model in the project's library. A file the page does not hold stays on the server or the site until needed.
-interface LibraryItem extends FileSource {
-  readonly role: PartRole;
-  readonly entry: LibraryEntry | LibraryAvatarEntry;
-  // Identifies the item's GLB in this page: it changes whenever the file may have.
-  readonly key: number;
-  // The GLB's size, as its holder reported it.
-  readonly bytes: number;
-}
-
-// A library model as the Workshop shows it.
-export interface LibraryModel {
-  readonly role: PartRole;
-  readonly id: string;
-  readonly name: string;
-  readonly key: number;
-  // An avatar's settings, the same object until they change; null for a hammer or pot.
-  readonly avatar: LibraryAvatarSettings | null;
-  // A hammer's head outline, the same object until it changes; null for an avatar or pot.
-  readonly head: HammerHead | null;
-}
-
-function libraryOf(items: readonly LibraryItem[]): ModelLibrary {
-  return validateModelLibrary(Object.fromEntries(PART_ROLES.map((role) => [role, items.filter((item) => item.role === role).map((item) => item.entry)])));
+  readonly workspace: ProjectWorkspace;
+  readonly history: History;
+  readonly level: LevelState;
+  readonly files: FileStore;
+  readonly retention: ProjectFileRetention;
+  readonly commands: ProjectCommands;
+  readonly imports: ProjectImports;
+  readonly projection: ProjectProjection;
+  readonly avatarRigs: AvatarRigRegistry;
+  readonly plugins?: ProjectPlugins;
+  readonly client?: ProjectClient;
+  readonly published?: PublishedProject | null;
 }
 
 interface Binding {
@@ -232,7 +157,7 @@ export interface PlayedVersion {
   readonly course: string;
 }
 
-// The page plays the version while its level is still this object, its settings this text and its enemy art this object:
+// The page plays the version while its level, settings and enemy art are still these roots:
 // their synced fingerprints when the project said which version they are.
 interface BoundVersion extends PlayedVersion {
   readonly level: unknown;
@@ -263,6 +188,12 @@ interface KeptChanges {
   readonly copy: ProjectCopy;
   readonly project: string;
   readonly sections: readonly ProjectSectionName[];
+}
+
+export interface AppliedProjectSections {
+  readonly names: readonly ProjectSectionName[];
+  readonly level: LevelDefinition;
+  readonly fingerprints: SectionRecord<unknown>;
 }
 
 function sameCopy(a: CopyState | null, b: CopyState | null): boolean {
@@ -321,28 +252,44 @@ class SessionClosed extends Error {
   }
 }
 
+class ProjectBindingLost extends ProjectError {
+  constructor(id: string, unavailable: readonly string[] = []) {
+    super(`Project "${id}" is missing or was replaced on the server. This page keeps its project and undo history. `
+      + (unavailable.length === 0 ? 'Save as stores this page\'s project on the server again.'
+        : `${unavailable.length} file${unavailable.length === 1 ? ' is' : 's are'} no longer available: ${unavailable.slice(0, 2).join(', ')}. `
+          + `Replace or remove ${unavailable.length === 1 ? 'it' : 'them'} before Save as or this browser's copy can keep the project.`));
+    this.name = 'ProjectBindingLost';
+  }
+}
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 function isExpected(error: unknown): error is Error {
   return error instanceof ProjectApiError || isProjectDataError(error) || error instanceof SyntaxError || error instanceof DOMException ||
-    error instanceof ServerModelError;
+    error instanceof PluginError;
 }
 
 /**
- * The open game project: owns the project-only sections (title, look, HUD, audio, enemies, media,
- * alternate character, course artwork) and moves every section between the document, the Workshop's editors,
- * project bundle files and the self-hosted project server. In a Workshop built with a project it
- * opens that published project and keeps the open project, with its changes, in this browser.
+ * Opens, saves and reconciles the document with project files, the server and this browser's copy.
+ * The primary character and appearance stay with their editors until they join the document.
  */
 export class ProjectSession {
   private readonly workspace: ProjectWorkspace;
   private readonly history: History;
   private readonly level: LevelState;
-  private readonly unsubscribeLevel: () => void;
+  private readonly files: FileStore;
+  private readonly retention: ProjectFileRetention;
+  private readonly commands: ProjectCommands;
+  private readonly imports: ProjectImports;
+  private readonly projection: ProjectProjection;
+  private readonly unsubscribeDocument: () => void;
   private readonly historyHolds = new Set<() => void>();
-  // Async edits belong to the project they began in, not one opened while their files or models arrived.
+  private readonly fileWork = new Set<() => void>();
+  private readonly primaryPreparations = new Set<AbortController>();
+  private readonly keptRestores = new Set<AbortController>();
+  // Openings and external-owner work belong to the project they began in.
   private generation = 0;
   // The avatar drivers this Workshop accepts; the composed Kinds registry reaches every validator.
   private readonly avatarRigs: AvatarRigRegistry;
@@ -353,36 +300,7 @@ export class ProjectSession {
   private readonly lifecycle = new AbortController();
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
   private readonly blobIds = new WeakMap<Blob, number>();
-  // Each course mesh's collision by turn, `${id}:${turn}`, each baked once: an asset ID names its GLB's bytes, so it never
-  // goes stale.
-  private readonly meshTerrains = new Map<string, Promise<MeshTerrain>>();
-  // Bakes them off the page's thread.
-  private readonly baker = new MeshBaker();
-  // The clips and root motion of each enemy model read this session, by asset ID.
-  private readonly enemyBakes = new Map<string, Promise<EnemyBake>>();
   private nextBlobId = 1;
-  private title = 'Untitled game';
-  private theme: GameTheme = DEFAULT_THEME;
-  private hud: HudSettings = DEFAULT_HUD;
-  private audio: AudioSettings = DEFAULT_AUDIO;
-  private enemies: EnemyArtSettings = DEFAULT_ENEMY_ART;
-  // The page starts on the built-in course, which DEFAULT_LEVEL draws with these meshes.
-  private art: CourseArt = openedArt(openDefaultCourse(this.title));
-  // The look last given to the game, and its course artwork, kept while they stay the same so the game redraws nothing.
-  private gameLook: GameLook = DEFAULT_LOOK;
-  private artwork: CourseArtwork = NO_COURSE_ARTWORK;
-  // Whether the project the page edits has opened; until then the game draws no course artwork, so the meshes of a
-  // course replaced at start never load.
-  private courseShown = false;
-  private media = new Map<string, MediaItem>();
-  private mediaVersion = 0;
-  private library: LibraryItem[] = [];
-  private nextLibraryKey = 1;
-  // One settings object per avatar entry, so views can tell when an avatar's settings changed.
-  private readonly avatarSettings = new WeakMap<LibraryAvatarEntry, LibraryAvatarSettings>();
-  private alternate: SpriteDocument | null = null;
-  // Each plugin's data, the same object until it changes; data for a plugin this Workshop lacks stays as it came.
-  private pluginData: Readonly<Record<string, PluginData>> = NO_PLUGIN_DATA;
   private binding: Binding | null = null;
   // The project a Save as moves the page to, while that project lacks some of its sections: the page is bound to it, but
   // remembers the project it came from and keeps this browser's copy until the move completes.
@@ -420,8 +338,6 @@ export class ProjectSession {
   // Changes this browser kept to the Workshop's own project, found when it opened from the server at start.
   private kept: KeptChanges | null = null;
   private readonly checkedCharacters = new WeakSet<SpriteDocument>();
-  // The settings' JSON, worked out once per settings object.
-  private settingsJson: { readonly settings: GameSettings; readonly text: string } | null = null;
   // Each character draft validated once, so repeated saves do not report the same problem again.
   private readonly validatedDrafts = new WeakMap<SpriteDocument, SpriteDocument | null>();
 
@@ -429,17 +345,29 @@ export class ProjectSession {
     this.workspace = options.workspace;
     this.history = options.history;
     this.level = options.level;
+    this.files = options.files;
+    this.retention = options.retention;
+    this.commands = options.commands;
+    this.imports = options.imports;
+    this.projection = options.projection;
     this.avatarRigs = options.avatarRigs;
     this.plugins = options.plugins ?? NO_PLUGINS;
     this.client = options.client ?? new ProjectClient();
     this.published = options.published ?? null;
     this.copy = this.published === null ? null : new ProjectCopyStore([...this.published.files, ...DEFAULT_COURSE_FILES]);
-    this.unsubscribeLevel = this.history.document.subscribe('level', (change) => {
-      const saved = this.synced?.level;
-      const written = this.copyWritten?.fingerprints.level;
+    this.unsubscribeDocument = this.history.document.subscribeAll((changes) => {
       const bound = this.binding?.version ?? null;
-      const played = bound !== null && bound.settings === this.settingsText() && bound.enemies === this.enemies ? bound.level : undefined;
-      if ([saved, written, played].some((value) => (change.before === value) !== (change.after === value))) this.changed('status');
+      const status = changes.some((change) => {
+        const name = change.section;
+        const plugin = pluginOfSection(name) !== null;
+        const before = plugin && change.before === null ? undefined : change.before;
+        const after = plugin && change.after === null ? undefined : change.after;
+        const version = bound !== null && VERSIONED.some((section) => section === name)
+          ? bound[name as (typeof VERSIONED)[number]] : undefined;
+        return [this.synced?.[name], this.copyWritten?.fingerprints[name], version]
+          .some((value) => (before === value) !== (after === value));
+      });
+      if (status) this.changed('status');
     });
   }
 
@@ -452,7 +380,6 @@ export class ProjectSession {
     await this.workspace.ready;
     if (this.disposed) return;
     if (generation === this.generation) this.synced = this.fingerprints();
-    this.applyLook();
     await this.refreshServer();
     if (this.disposed) return;
     // Discovery never blocks editing; a project the designer chose meanwhile owns the page.
@@ -474,8 +401,7 @@ export class ProjectSession {
       }
     }
     if (this.disposed) return;
-    this.courseShown = true;
-    this.applyLook();
+    this.projection.activate();
     this.poller = setInterval(() => { void this.poll(); }, POLL_MS);
     this.saver = setInterval(() => { void this.autosave(); }, SAVE_MS);
     // Leaving the page saves, or stores in this browser, the latest changes at once.
@@ -491,19 +417,22 @@ export class ProjectSession {
   }
 
   snapshot(): ProjectSnapshot {
+    const document = this.history.document;
+    const art = document.get('art');
     return {
-      title: this.title,
+      title: document.get('title'),
       binding: this.binding === null ? null : { id: this.binding.id, revision: this.binding.revision },
       server: this.server, projects: this.projects, busy: this.busy,
       dirty: this.dirtySections(), conflicts: [...this.conflicts],
-      theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
-      art: { assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations },
-      media: [...this.media.values()].map((item) => ({ path: item.path, bytes: item.bytes, kind: mediaKind(item.path) })),
-      library: this.library.map(({ role, entry, key }) => ({
-        role, id: entry.id, name: entry.name, key, avatar: role === 'avatar' ? this.settingsOf(entry as LibraryAvatarEntry) : null,
-        head: role === 'hammer' ? (entry as LibraryHammerEntry).head : null,
-      })),
-      alternate: this.alternate, plugins: Object.keys(this.pluginData), publish: this.publishRecord, error: this.error,
+      theme: document.get('theme'), hud: document.get('hud'), audio: document.get('audio'), enemies: document.get('enemies'),
+      art: { assets: art.assets.map(({ id, name }) => ({ id, name })), decorations: art.decorations },
+      media: document.get('media').map((item) => ({ path: item.path, bytes: item.file.bytes, kind: mediaKind(item.path) })),
+      library: this.projection.libraryModels(),
+      alternate: document.get('characters/alternate'),
+      plugins: document.sections().flatMap((section) => {
+        const id = pluginOfSection(section);
+        return id === null ? [] : [id];
+      }), publish: this.publishRecord, error: this.error,
       published: this.published === null ? null : {
         title: this.published.title, version: this.published.version,
         origin: this.origin === this.published.version ? 'current' : this.origin === null ? 'none' : 'outdated',
@@ -531,36 +460,6 @@ export class ProjectSession {
     return this.manifestDraft();
   }
 
-  // A plugin's data in the open project, or null without any.
-  pluginDataOf(id: string): PluginData | null {
-    return pluginDataIn(this.pluginData, id);
-  }
-
-  // Replaces a plugin's data, or removes it with null. The data must fit the engine's limits and pass the plugin's own
-  // validation; it then saves like any section. Returns the refusal, the plugin's own typed error when its validation
-  // refused, which is also reported; null when the data changed or was already the same.
-  setPluginData(id: string, value: unknown): Error | null {
-    try {
-      const data = value === null ? null : validatePluginData(id, value);
-      if (data !== null) {
-        const refusal = this.plugins.validate(id, data);
-        if (refusal !== null) {
-          this.report(pluginRefusal(id, refusal));
-          return refusal;
-        }
-      }
-      const current = pluginDataIn(this.pluginData, id);
-      if (data === null ? current === null : current !== null && sameJson(current, data)) return null;
-      this.pluginData = withPluginData(this.pluginData, id, data);
-      this.changed('content');
-      return null;
-    } catch (error) {
-      if (!isProjectDataError(error)) throw error;
-      this.report(error);
-      return error;
-    }
-  }
-
   // Unsaved work that exists only in this page, including level drafts no browser copy stores. A
   // Workshop built with a project warns for every section instead, and while this browser's copy
   // keeps the project only changes not stored there yet count.
@@ -574,379 +473,6 @@ export class ProjectSession {
     return this.dirtySections().some((name) => name !== 'level' && name !== 'characters/primary' && name !== 'settings');
   }
 
-  resolveMedia = (source: string): string => this.media.get(source)?.url ?? source;
-
-  // Each edit returns its refusal, which is also reported, or null when it applied.
-  setTitle(value: string): Error | null {
-    try {
-      this.title = projectTitle(value);
-      this.changed('status');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  setTheme(value: unknown): Error | null { return this.setSection(() => { this.theme = validateTheme(value); }); }
-  setHud(value: unknown): Error | null { return this.setSection(() => { this.hud = validateHud(value); }); }
-
-  // Pixel art, models or neither for the enemies. Only enemyModel and enemyClips give a species a model or change it,
-  // since they bake the motion its clips travel; a model no species draws any more leaves the course artwork. The
-  // project is checked whole before anything changes.
-  setEnemies(value: unknown): Error | null {
-    try {
-      const enemies = inSection('enemies', () => validateEnemyArt(value));
-      for (const species of ENEMY_SPECIES) {
-        const entry = enemies[species];
-        if (entry?.type === 'model' && JSON.stringify(entry) !== JSON.stringify(this.enemies[species])) {
-          throw new ProjectError(`Import the ${species}'s 3D model in Enemy art, and choose its clips there.`, { section: 'enemies' });
-        }
-      }
-      const assets = this.withoutDroppedModels(enemies, this.art.assets);
-      const art = { assets: assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations };
-      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.history.document.get('level'));
-      this.enemies = enemies;
-      this.commitDependencies({ ...this.art, assets }, null);
-      this.changed('content');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  // `assets` without the GLBs of the models the enemies draw now that `enemies` no longer draws: an enemy model's GLB
-  // stays in the course artwork only while a species draws it.
-  private withoutDroppedModels(enemies: EnemyArtSettings, assets: ArtItem[]): ArtItem[] {
-    const species = new Set(ENEMY_SPECIES);
-    const drawn = enemyArtAssets(enemies, species);
-    const dropped = new Set([...enemyArtAssets(this.enemies, species)].filter((id) => !drawn.has(id)));
-    return dropped.size === 0 ? assets : assets.filter((asset) => !dropped.has(asset.id));
-  }
-
-  setAudio(value: unknown): Error | null {
-    return this.setSection(() => {
-      const audio = validateAudio(value);
-      const missing = audioSources(audio).filter((source) => source.startsWith('/') && !this.media.has(source));
-      if (missing.length > 0) throw new ProjectError(`Add ${missing[0]} to the media library first.`, { section: 'audio' });
-      this.audio = audio;
-    });
-  }
-
-  // The added file's /media/ path, or the refusal.
-  async addMedia(file: File): Promise<string | Error> {
-    return this.edit(async (generation) => {
-      const path = mediaPathForFile(file.name);
-      if (path === null) throw new ProjectError('Choose a .webm, .mp4, .mp3, .ogg, .wav or .m4a file with a letter or digit in its name.', { section: 'media' });
-      if (file.size === 0 || file.size > MEDIA_LIMITS.bytes) throw new ProjectError(`Media files hold 1 byte to ${MEDIA_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'media' });
-      // The signature is at the start; the server checks the whole file again on upload.
-      const bytes = await file.slice(0, 64).arrayBuffer();
-      this.requireActive(generation);
-      checkMediaBytes(path, new Uint8Array(bytes));
-      validateMediaIndex([...[...this.media.keys()].filter((existing) => existing !== path).map((existing) => ({ path: existing })), { path }]);
-      const total = [...this.media.values()].reduce((sum, item) => sum + (item.path === path ? 0 : item.bytes), file.size);
-      if (total > MEDIA_LIMITS.totalBytes) throw new ProjectError(`The media library holds at most ${MEDIA_LIMITS.totalBytes / 1024 ** 2} MiB.`, { section: 'media' });
-      if (this.media.get(path)?.blob === file) return path;
-      this.replaceMedia(path, { path, blob: file, server: null, published: null, url: URL.createObjectURL(file), bytes: file.size });
-      this.changed('content');
-      return path;
-    }, true);
-  }
-
-  removeMedia(path: string): Error | null {
-    try {
-      if (!this.media.has(path)) return null;
-      const manifest = { ...this.draftManifest(), media: [...this.media.keys()].filter((existing) => existing !== path).map((existing) => ({ path: existing })) };
-      checkProjectReferences(validateProjectManifest(manifest), this.history.document.get('level'));
-      this.replaceMedia(path, null);
-      this.changed('content');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  // The course artwork's static GLBs, which the level places as terrain meshes and course artwork maps onto decorations;
-  // not its enemy models.
-  courseMeshes(): readonly { readonly id: string; readonly name: string }[] {
-    const models = enemyArtAssets(this.enemies, new Set(ENEMY_SPECIES));
-    return this.art.assets.filter(({ id }) => !models.has(id)).map(({ id, name }) => ({ id, name }));
-  }
-
-  // The decoration models the course artwork draws, by model ID, as the project stands.
-  decorationArt(): DecorationArt {
-    return this.art.decorations;
-  }
-
-  // The decoration models the course artwork draws, by model ID, each with the name of the GLB drawing it.
-  decorationModels(): readonly { readonly id: string; readonly name: string }[] {
-    const names = new Map(this.art.assets.map((asset) => [asset.id, asset.name]));
-    return Object.entries(this.art.decorations).map(([id, asset]) => ({ id, name: names.get(asset) ?? asset }));
-  }
-
-  // A course mesh's GLB, from this page, the server project that holds it or the published project.
-  async courseMeshBlob(id: string): Promise<Blob> {
-    const asset = this.art.assets.find((candidate) => candidate.id === id);
-    if (asset === undefined) throw new ProjectError(`The course artwork has no mesh ${id}.`, { section: 'art' });
-    return this.artBlob(asset);
-  }
-
-  // A course mesh turned `turn` radians about its vertical axis, ready to place: its collision is the shape its GLB
-  // declares, or else the turned mesh's slice on the obstacle line or its projection along the view, baked off the page's
-  // thread. Or the refusal, reported, when its GLB cannot be read or those outlines cannot be traced.
-  async courseMeshTerrain(id: string, turn: number): Promise<MeshTerrain | Error> {
-    const key = `${id}:${turn}`;
-    let terrain = this.meshTerrains.get(key);
-    if (terrain === undefined) {
-      const baking = this.baker.bake(id, async () => (await this.courseMeshBlob(id)).arrayBuffer(), turn);
-      // A bake that failed is tried again next time.
-      baking.catch(() => { if (this.meshTerrains.get(key) === baking) this.meshTerrains.delete(key); });
-      this.meshTerrains.set(key, baking);
-      terrain = baking;
-    }
-    try {
-      return await terrain;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  // Adds a GLB to the course artwork as a mesh to place, checked like releases check it; the same GLB again adds
-  // nothing. The mesh ready to place, or the refusal.
-  async addCourseMesh(file: File): Promise<{ readonly id: string; readonly name: string; readonly terrain: MeshTerrain } | Error> {
-    return this.edit(async (generation) => {
-      if (file.size === 0 || file.size > ART_LIMITS.bytes) {
-        throw new ArtError(`Choose a GLB file no larger than ${ART_LIMITS.bytes / 1024 ** 2} MiB.`);
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      this.requireActive(generation);
-      const id = `asset-${await sha256Hex(bytes)}`;
-      this.requireActive(generation);
-      const terrain = meshTerrain(id, bytes.buffer);
-      this.meshTerrains.set(`${id}:0`, Promise.resolve(terrain));
-      const existing = this.art.assets.find((asset) => asset.id === id);
-      if (existing !== undefined) return { id, name: existing.name, terrain };
-      const name = artName(file.name.replace(/\.glb$/i, '').slice(0, 80) || 'Mesh');
-      const blob = new Blob([bytes], { type: 'model/gltf-binary' });
-      const assets = [...this.art.assets, { id, name, blob, server: null, published: null, bytes: blob.size }];
-      inSection('art', () => validateProjectArt({ assets: assets.map((asset) => ({ id: asset.id, name: asset.name })), decorations: this.art.decorations }));
-      checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
-      this.commitDependencies({ ...this.art, assets }, null);
-      this.changed('content');
-      return { id, name, terrain };
-    }, true);
-  }
-
-  // An enemy model GLB of the course artwork: its clips, with their lengths, and every clip's root motion, read off the
-  // page's thread once a session. Or the refusal, reported.
-  async enemyClips(assetId: string): Promise<EnemyBake | Error> {
-    try {
-      return await this.enemyBake(assetId);
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  // Draws `species` as the skinned GLB `file`, which joins the course artwork: each of its roles plays the clip its name
-  // suggests, and its moves travel as that clip does. The refusal, or null once it draws.
-  async addEnemyModel(species: EnemySpecies, file: File): Promise<Error | null> {
-    return this.edit(async (generation) => {
-      if (file.size === 0 || file.size > ART_LIMITS.bytes) {
-        throw new ArtError(`Choose a GLB file no larger than ${ART_LIMITS.bytes / 1024 ** 2} MiB.`);
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      this.requireActive(generation);
-      const id = `asset-${await sha256Hex(bytes)}`;
-      this.requireActive(generation);
-      const bake = this.baker.bakeEnemy(bytes.slice().buffer);
-      this.enemyBakes.set(id, bake);
-      bake.catch(() => { if (this.enemyBakes.get(id) === bake) this.enemyBakes.delete(id); });
-      const { clips } = await bake;
-      this.requireActive(generation);
-      const blob = new Blob([bytes], { type: 'model/gltf-binary' });
-      const name = artName(file.name.replace(/\.glb$/i, '').slice(0, 80) || 'Enemy');
-      const refusal = await this.useEnemyModel(species, id, defaultEnemyClips(species, clips.map((clip) => clip.name)),
-        { id, name, blob, server: null, published: null, bytes: blob.size }, generation);
-      this.requireActive(generation);
-      return refusal;
-    }, true);
-  }
-
-  // Chooses the clip each of `species`' roles plays, its motion baked from that clip. The refusal, or null.
-  async setEnemyClips(species: EnemySpecies, clips: Readonly<Partial<Record<EnemyClipRole, string>>>): Promise<Error | null> {
-    return this.edit(async (generation) => {
-      const entry = this.enemies[species];
-      if (entry?.type !== 'model') throw new ProjectError(`The ${species} is not drawn by a model.`, { section: 'enemies' });
-      const refusal = await this.useEnemyModel(species, entry.asset, { ...entry.clips, ...clips }, null, generation);
-      this.requireActive(generation);
-      return refusal;
-    });
-  }
-
-  private enemyBake(assetId: string): Promise<EnemyBake> {
-    let bake = this.enemyBakes.get(assetId);
-    if (bake === undefined) {
-      const reading = this.courseMeshBlob(assetId).then(async (blob) => this.baker.bakeEnemy(await blob.arrayBuffer()));
-      // A bake that failed is tried again next time.
-      reading.catch(() => { if (this.enemyBakes.get(assetId) === reading) this.enemyBakes.delete(assetId); });
-      this.enemyBakes.set(assetId, reading);
-      bake = reading;
-    }
-    return bake;
-  }
-
-  // Draws `species` with the course artwork asset `id` playing `clips`, `added` joining the course artwork unless it is
-  // there already; the project is checked whole before anything changes. Throws the refusal.
-  private async useEnemyModel(species: EnemySpecies, id: string, clips: Readonly<Partial<Record<EnemyClipRole, string>>>,
-    added: ArtItem | null, generation: number): Promise<null> {
-    const bake = await this.enemyBake(id);
-    this.requireActive(generation);
-    const motion = Object.fromEntries(SPECIES_CLIP_ROLES[species].map((role) => {
-      const name = clips[role];
-      const baked = name === undefined ? undefined : bake.motion[name];
-      if (baked === undefined) throw new ProjectError(`Choose one of the model's clips for the ${species}'s ${role}.`, { section: 'enemies' });
-      return [role, baked];
-    }));
-    const enemies = inSection('enemies', () => validateEnemyArt({ ...this.enemies, [species]: { type: 'model', asset: id, clips, motion } }));
-    const kept = this.withoutDroppedModels(enemies, this.art.assets);
-    const assets = added === null || kept.some((asset) => asset.id === id) ? kept : [...kept, added];
-    const art = { assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
-    inSection('art', () => validateProjectArt(art));
-    checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
-    checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art, enemies }), this.history.document.get('level'));
-    this.enemies = enemies;
-    this.commitDependencies({ ...this.art, assets }, null);
-    this.changed('content');
-    return null;
-  }
-
-  // Removes a GLB from the course artwork; the refusal while the level places it, a decoration draws it or an enemy model
-  // is it.
-  removeCourseMesh(id: string): Error | null {
-    try {
-      if (!this.art.assets.some((asset) => asset.id === id)) return null;
-      const species = Object.entries(this.enemies).flatMap(([name, entry]) => entry?.type === 'model' && entry.asset === id ? [name] : []);
-      if (species.length > 0) {
-        throw new ProjectError(`The mesh draws the ${species.join(', ')}; give ${species.length === 1 ? 'it' : 'them'} pixel art in Enemy art first.`, { section: 'art' });
-      }
-      const assets = this.art.assets.filter((asset) => asset.id !== id);
-      const decorations = Object.entries(this.art.decorations).filter(([, asset]) => asset === id).map(([model]) => model);
-      if (decorations.length > 0) {
-        throw new ProjectError(`The mesh draws the decoration model ${decorations.join(', ')}; import a course package without it first.`, { section: 'art' });
-      }
-      const art = { assets: assets.map(({ id: asset, name }) => ({ id: asset, name })), decorations: this.art.decorations };
-      checkProjectReferences(validateProjectManifest({ ...this.draftManifest(), art }), this.history.document.get('level'));
-      this.commitDependencies({ ...this.art, assets }, null);
-      this.changed('content');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  // Downloads a file as one of the session's operations, so the open project cannot change while it
-  // arrives. Null when another operation is running or the download failed, which is reported.
-  async download(label: string, source: () => Promise<File>): Promise<File | null> {
-    const result: { file: File | null } = { file: null };
-    const finished = await this.run(label, async () => { result.file = await source(); });
-    return finished ? result.file : null;
-  }
-
-  // Adds a GLB to the model library for one part, checked like releases check it. A new avatar uses `model` (its bone
-  // map, driver and hair) or maps its joints automatically, and takes the open character's grips, arm lengths and arm
-  // forward distance. Returns the new model, or the refusal.
-  async addLibraryModel(role: PartRole, file: File, model?: AvatarModelSettings): Promise<LibraryModel | Error> {
-    return this.edit(async (generation) => {
-      if (file.size === 0 || file.size > MODEL_LIMITS.bytes) {
-        throw new ProjectError(`Choose a GLB file no larger than ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`, { section: 'models' });
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      this.requireActive(generation);
-      const taken = new Set(this.library.filter((item) => item.role === role).map((item) => item.entry.id));
-      const stem = libraryIdForName(file.name);
-      let id = stem;
-      for (let suffix = 2; taken.has(id); suffix++) id = `${stem.slice(0, MODEL_LIBRARY_LIMITS.id - String(suffix).length - 1)}-${suffix}`;
-      const base = { id, name: file.name.replace(/\.glb$/i, '').trim().slice(0, MODEL_LIBRARY_LIMITS.name) || id };
-      const settings = this.characterAvatarSettings();
-      // A new hammer starts with the game's default head.
-      const entry = role === 'hammer' ? { ...base, head: this.workspace.settings.get().rig.head }
-        : role !== 'avatar' ? base : model === undefined
-          ? inSection('models', () => newAvatarEntry(bytes, base, settings, this.avatarRigs))
-          : { ...base, ...model, ...settings };
-      inSection('models', () => checkLibraryModel(role, entry, bytes, this.avatarRigs));
-      const blob = new Blob([bytes], { type: 'model/gltf-binary' });
-      const items = [...this.library, { role, entry, key: this.nextLibraryKey++, blob, server: null, published: null, bytes: blob.size }];
-      inSection('models', () => libraryOf(items));
-      this.library = items;
-      this.changed('content');
-      return this.snapshot().library.find((model) => model.role === role && model.id === id)!;
-    });
-  }
-
-  removeLibraryModel(role: PartRole, id: string): void {
-    this.library = this.library.filter((item) => item.role !== role || item.entry.id !== id);
-    this.changed('content');
-  }
-
-  // Changes a library avatar's bone map and settings; the bone map must resolve against its model.
-  // The library's hammers with their heads, without the rest of a snapshot.
-  libraryHammers(): readonly { readonly id: string; readonly name: string; readonly head: HammerHead }[] {
-    return this.library.flatMap(({ role, entry }) => role === 'hammer' ? [{ id: entry.id, name: entry.name, head: (entry as LibraryHammerEntry).head }] : []);
-  }
-
-  // Gives a library hammer a new head outline; the refusal, reported, when the outline is not a valid head.
-  setLibraryHammerHead(id: string, head: HammerHead): Error | null {
-    try {
-      const item = this.libraryItem('hammer', id);
-      const entry: LibraryHammerEntry = Object.freeze({ id, name: item.entry.name, head: inSection('models', () => libraryHammerHead(head)) });
-      this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
-      this.changed('content');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  async setLibraryAvatar(id: string, settings: LibraryAvatarSettings): Promise<Error | null> {
-    return this.edit(async (generation) => {
-      const item = this.libraryItem('avatar', id);
-      const entry: LibraryAvatarEntry = Object.freeze({
-        id, name: item.entry.name, ...inSection('models', () => validateAvatarSettings(settings as unknown as Record<string, unknown>)),
-      });
-      const blob = await this.libraryBlob('avatar', id);
-      this.requireActive(generation);
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      this.requireActive(generation);
-      inSection('models', () => checkLibraryModel('avatar', entry, bytes, this.avatarRigs));
-      if (!this.library.includes(item)) {
-        throw new ProjectError(`Library avatar "${id}" changed while its model was checked; try again.`, { section: 'models' });
-      }
-      this.library = this.library.map((candidate) => candidate === item ? { ...item, entry } : candidate);
-      this.changed('content');
-      return null;
-    });
-  }
-
-  // Gives a library avatar the open character's grips, arm lengths and arm forward distance.
-  async useCharacterSettings(id: string): Promise<Error | null> {
-    const item = this.library.find((candidate) => candidate.role === 'avatar' && candidate.entry.id === id);
-    if (item === undefined) return this.refuse(new ProjectError(`The project has no library avatar "${id}".`, { section: 'models' }));
-    return this.setLibraryAvatar(id, { ...libraryAvatarSettings(item.entry as LibraryAvatarEntry), ...this.characterAvatarSettings() });
-  }
-
-  private settingsOf(entry: LibraryAvatarEntry): LibraryAvatarSettings {
-    let settings = this.avatarSettings.get(entry);
-    if (settings === undefined) {
-      settings = libraryAvatarSettings(entry);
-      this.avatarSettings.set(entry, settings);
-    }
-    return settings;
-  }
-
-  private characterAvatarSettings(): AvatarHoldSettings {
-    const { armForwardDistance, grips, arms } = this.workspace.character.draft();
-    return { armForwardDistance, grips, arms };
-  }
-
   // Runs the same embedded-GLB and rig checks a release and the project server run, with this
   // Workshop's registry. A profile with an external model is left to the runtime loader, so an
   // editor-only profile that cannot be packaged never fails here.
@@ -955,130 +481,51 @@ export class ProjectSession {
     checkCharacterModels(document, label, this.avatarRigs);
   }
 
-  // A library model's GLB, from this page, the server project that holds it or the published project.
-  async libraryBlob(role: PartRole, id: string): Promise<Blob> {
-    return this.libraryItemBlob(this.libraryItem(role, id));
-  }
-
-  private libraryItemBlob(item: LibraryItem): Promise<Blob> {
-    return this.fileBlob(item, (project) => this.client.libraryModelUrl(project, item.role, item.entry.id), 'model/gltf-binary',
-      { section: 'models', label: `Library ${item.role} "${item.entry.name}"` });
-  }
-
-  private mediaBlob(item: MediaItem): Promise<Blob> {
-    return this.fileBlob(item, (project) => this.client.mediaUrl(project, item.path), mediaType(item.path),
-      { section: 'media', label: `Media file ${item.path}` });
-  }
-
-  private artBlob(asset: ArtItem): Promise<Blob> {
-    return this.fileBlob(asset, (project) => this.client.artUrl(project, asset.id), 'model/gltf-binary',
-      { section: 'art', label: `Course artwork ${asset.name}` });
-  }
-
-  // A file's bytes: this page's, or downloaded now from the server project that holds it or the published project.
-  private async fileBlob(source: FileSource, serverUrl: (project: string) => string, type: string,
-    file: { readonly section: ProjectSectionName; readonly label: string }): Promise<Blob> {
-    if (source.blob !== null) return source.blob;
-    if (source.server !== null) return this.client.blob(serverUrl(source.server));
-    if (source.published !== null) return new Blob([await downloadPublishedFile(source.published, this.lifecycle.signal)], { type });
-    throw new ProjectError(`${file.label} is not available in this page.`, { section: file.section });
-  }
-
-  private libraryItem(role: PartRole, id: string): LibraryItem {
-    const item = this.library.find((candidate) => candidate.role === role && candidate.entry.id === id);
-    if (item === undefined) throw new ProjectError(`The project has no library ${role} "${id}".`, { section: 'models' });
-    return item;
-  }
-
-  useCurrentAsAlternate(): boolean {
-    const document = this.workspace.character.validated();
-    if (document === null) return false;
-    this.alternate = document;
-    this.changed('content');
-    return true;
-  }
-
+  // The primary stays outside the document: adopt both characters synchronously, cutting only a changed alternate.
   async swapCharacters(): Promise<boolean> {
-    const result = await this.edit(async (generation) => {
-      const alternate = this.alternate;
+    const generation = this.generation;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([this.lifecycle.signal, controller.signal]);
+    this.primaryPreparations.add(controller);
+    let prepared: PreparedPrimary | null = null;
+    try {
+      this.requireActive(generation);
+      const alternate = this.history.document.get('characters/alternate');
+      const draft = this.workspace.character.draft();
       const current = this.workspace.character.validated();
       if (alternate === null || current === null) return false;
-      const loaded = await this.workspace.character.load(alternate);
-      this.requireActive(generation);
-      if (!loaded) return false;
-      this.alternate = current;
-      this.changed('content');
-      return true;
-    });
-    return result instanceof Error ? false : result;
-  }
-
-  async importAlternate(file: File): Promise<boolean> {
-    const result = await this.edit(async (generation) => {
-      const text = await file.text();
-      this.requireActive(generation);
-      const document = parseProjectCharacter(text);
-      this.checkCharacterProfile(document, 'alternate character');
-      this.alternate = document;
-      this.changed('content');
-      return true;
-    });
-    return result instanceof Error ? false : result;
-  }
-
-  alternateCharacter(): SpriteDocument | null {
-    return this.alternate;
-  }
-
-  removeAlternate(): void {
-    this.alternate = null;
-    this.changed('content');
-  }
-
-  // Makes `document` the project's alternate character, or removes it with null; the refusal, reported, or null.
-  setAlternate(document: SpriteDocument | null): Error | null {
-    try {
-      if (document === null) {
-        if (this.alternate === null) return null;
-        this.removeAlternate();
-        return null;
+      const result = await this.workspace.character.prepare(alternate, { signal });
+      if (result instanceof SpriteError) {
+        if (!signal.aborted) this.report(result);
+        return false;
       }
-      const validated = validateProjectCharacter(document);
-      this.checkCharacterProfile(validated, 'alternate character');
-      this.alternate = validated;
-      this.changed('content');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  // A course package from `npm run pack:course`: its level replaces the current one, with its GLBs, and the enemies'
-  // models keep theirs. Returns the refusal, or null once imported.
-  async importCoursePackage(file: File): Promise<Error | null> {
-    return this.attempt('Importing course package', async () => {
-      if (file.size > 96 * 1024 * 1024) throw new ArtError('Course packages are limited to 96 MiB.');
-      const text = await file.text();
-      this.requireActive();
-      const pack = validateCoursePackage(JSON.parse(text));
-      const packed: ArtItem[] = pack.assets.map((asset) => {
-        const blob = new Blob([decodeBase64(asset.source.slice('data:model/gltf-binary;base64,'.length))], { type: 'model/gltf-binary' });
-        return { id: asset.id, name: asset.name, blob, server: null, published: null, bytes: blob.size };
+      prepared = result;
+      let changes: readonly SomeSectionChange[] = [];
+      return prepared.commit(() => {
+        this.requireActive(generation);
+        if (signal.aborted) return false;
+        if (this.history.document.get('characters/alternate') !== alternate) {
+          throw new ProjectError('The alternate character changed while the swap was prepared; try again.', { section: 'characters/alternate' });
+        }
+        if (this.workspace.character.draft() !== draft) {
+          throw new ProjectError('The primary character changed while the swap was prepared; try again.', { section: 'characters/primary' });
+        }
+        changes = this.commands.alternate(current, {
+          label: 'Swap characters', place: { tab: 'project', section: 'project-characters', select: null }, coalesce: null,
+        }).run(this.history.document);
+        return true;
+      }, () => {
+        if (changes.length > 0) this.history.external(changes, 'edit');
+        this.changed('content');
       });
-      const models = enemyArtAssets(this.enemies, new Set(ENEMY_SPECIES));
-      const assets = [...packed, ...this.art.assets.filter((asset) => models.has(asset.id) && !packed.some((item) => item.id === asset.id))];
-      checkFileBudget('art', assets.reduce((sum, asset) => sum + asset.bytes, 0));
-      checkProjectReferences(validateProjectManifest({
-        ...this.draftManifest(), art: { assets: assets.map(({ id, name }) => ({ id, name })), decorations: pack.decorations },
-      }), pack.level);
-      // The course meshes come before the level, which draws them as soon as it loads.
-      this.generation++;
-      this.commitDependencies({ assets, decorations: pack.decorations }, null,
-        () => this.history.load({ level: this.level.check(pack.level) }));
-      this.workspace.notice(`Imported the course package: ${pack.level.objects.length} objects and ${packed.length} GLBs.`, 'info');
-      this.changed('content');
-      return null;
-    }, true);
+    } catch (error) {
+      this.refuse(error);
+      return false;
+    } finally {
+      prepared?.cancel();
+      this.primaryPreparations.delete(controller);
+      controller.abort();
+    }
   }
 
   async refreshServer(): Promise<void> {
@@ -1111,7 +558,7 @@ export class ProjectSession {
   // Starts a new game from the built-in course and defaults, not yet saved anywhere.
   async newProject(): Promise<boolean> {
     return this.run('Starting a new project', async () => {
-      await this.applyContent(openDefaultCourse('Untitled game'));
+      await this.applyContent(openDefaultCourse(UNTITLED_GAME_TITLE));
       this.requireActive();
       await this.storeCopy();
       this.requireActive();
@@ -1124,13 +571,17 @@ export class ProjectSession {
 
   async open(id: string): Promise<boolean> {
     return this.run(`Opening ${id}`, async () => {
+      const generation = this.generation;
       // The level first: reading it numbers a level version the project lost, which the project's answer then says.
       const level = await this.client.section(id, 'level');
+      this.requireActive(generation);
       const project = await this.client.project(id);
+      this.requireActive(generation);
       const read = async (name: string) => (await this.client.section(id, name)).value;
       const primary = project.manifest.characters.primary === null ? null : await read('characters/primary');
       const alternate = project.manifest.characters.alternate === null ? null : await read('characters/alternate');
       const models = await Promise.all(project.manifest.appearance.map(async (part) => this.client.blob(this.client.modelUrl(id, part.part))));
+      this.requireActive(generation);
       await this.applyServerProject(project.manifest, project, {
         level: level.value, levelRevision: level.revision ?? project.sections.level!, primary, alternate, models, sizes: fileSizes(project.files),
       });
@@ -1167,22 +618,24 @@ export class ProjectSession {
     let result: { bundle: ProjectBundle; filename: string } | null = null;
     await this.run('Exporting project file', async () => {
       this.prepareLevel();
-      const draft = this.captureDraft();
+      const roots = this.documentValues();
       const parts = this.workspace.appearance.parts();
-      const media = [...this.media.values()];
-      const assets = [...this.art.assets];
-      const library = this.library;
-      // A project too large for one project file is refused before its files download.
-      const sizes = new Map<string, number>([
-        ...parts.map((part) => [appearanceFile(part.part), part.blob.size] as const),
-        ...media.map((item) => [mediaFile(item.path), item.bytes] as const),
-        ...assets.map((asset) => [artFile(asset.id), asset.bytes] as const),
-        ...library.map((item) => [libraryModelFile(item.role, item.entry.id), item.bytes] as const),
-      ]);
-      checkBundleSize({ manifest: draft.manifest, level: draft.level, characters: { primary: draft.primary, alternate: draft.alternate } },
-        (ref) => sizes.get(ref.path) ?? 0);
-      const content = await this.captureFiles(draft, parts, media, assets, library);
-      result = { bundle: packProjectBundle(content), filename: `${this.binding?.id ?? projectFileName(this.title)}.project.json` };
+      const draft = this.captureDraft(roots, parts);
+      const binaries = this.binaryFiles(roots);
+      const release = this.retainFiles(binaries.map(({ file }) => file));
+      try {
+        // A project too large for one project file is refused before its files download.
+        const sizes = new Map<string, number>([
+          ...parts.map((part) => [appearanceFile(part.part), part.blob.size] as const),
+          ...binaries.map(({ path, file }) => [path, file.bytes] as const),
+        ]);
+        checkBundleSize({ manifest: draft.manifest, level: draft.level, characters: { primary: draft.primary, alternate: draft.alternate } },
+          (ref) => sizes.get(ref.path) ?? 0);
+        const content = await this.captureFiles(draft, parts, binaries);
+        result = { bundle: packProjectBundle(content), filename: `${this.binding?.id ?? projectFileName(roots.title)}.project.json` };
+      } finally {
+        release();
+      }
     });
     return result;
   }
@@ -1204,8 +657,10 @@ export class ProjectSession {
     if (binding === null || this.conflicts.size === 0) return false;
     return this.run('Loading the project\'s version', async () => {
       const names = [...this.conflicts];
-      await this.loadFromServer(binding, names, false);
-      this.workspace.notice(`Loaded the project's ${names.join(', ')}.`, 'info');
+      const applied = await this.loadFromServer(binding, names, false);
+      if (applied.length > 0) this.workspace.notice(`Loaded the project's ${applied.join(', ')}.`, 'info');
+      const remaining = names.filter((name) => !applied.includes(name));
+      if (remaining.length > 0) throw new ProjectError(`${remaining.join(', ')} changed here while loading; choose which version to keep again.`);
     }, true);
   }
 
@@ -1218,17 +673,62 @@ export class ProjectSession {
       this.report(new ProjectError(`Open "${kept.project}" to restore the changes this browser kept to it.`));
       return false;
     }
-    return this.run('Restoring this browser\'s changes', async () => {
-      await this.applyChanges(kept.copy.content, kept.sections);
-      this.kept = null;
+    if (kept.sections.includes('level') && !this.workspace.prepareLevel()) return false;
+    const binding = this.binding;
+    const complete = async (): Promise<void> => {
+      if (this.kept !== kept || this.binding !== binding) throw new ProjectError('The project changed while its kept changes were restored.');
       await this.copy!.clear();
+      this.kept = null;
       this.workspace.notice(`Restored your changes to ${kept.sections.join(', ')}; they save to the project now.`, 'info');
-    }, true);
+      this.changed('status');
+    };
+    if (kept.sections.some((name) => !isDocumentSection(name))) {
+      return this.run('Restoring this browser\'s changes', async () => {
+        await this.applyChanges(kept.copy.content, kept.sections);
+        await complete();
+      }, true);
+    }
+    const leases = new Set<() => void>();
+    const controller = new AbortController();
+    this.keptRestores.add(controller);
+    let closed = false;
+    try {
+      const outcome = await this.imports.sections(async (signal) => {
+        const reading = await this.readDocumentSections(kept.copy.content.manifest, kept.sections, contentValues(kept.copy.content),
+          new Map(), kept.copy.content, signal);
+        if (closed || signal.aborted) {
+          reading.release();
+          throw new DOMException('Restoring the kept changes was cancelled.', 'AbortError');
+        }
+        leases.add(reading.release);
+        if (this.kept !== kept || this.binding !== binding) throw new ProjectError('The project changed while its kept changes loaded.');
+        return reading.values;
+      }, { info: restoreInfo(), signal: AbortSignal.any([this.lifecycle.signal, controller.signal]) });
+      if (outcome.kind === 'cancelled') return false;
+      if (outcome.kind === 'refused') {
+        this.report(outcome.error);
+        return false;
+      }
+      await complete();
+      return true;
+    } catch (error) {
+      this.refuse(error);
+      return false;
+    } finally {
+      closed = true;
+      this.keptRestores.delete(controller);
+      const disposal = new Disposal();
+      disposal.run(() => controller.abort());
+      for (const release of leases) disposal.run(release);
+      leases.clear();
+      disposal.finish();
+    }
   }
 
   async discardKept(): Promise<boolean> {
     if (this.kept === null) return false;
     return this.run('Discarding this browser\'s changes', async () => {
+      this.cancelKeptRestores();
       await this.copy!.clear();
       this.kept = null;
       this.workspace.notice('Discarded the changes this browser kept.', 'info');
@@ -1245,8 +745,9 @@ export class ProjectSession {
   // The same object until the version changes; cheap enough for every physics step.
   playedVersion(): PlayedVersion | null {
     const bound = this.binding?.version ?? null;
-    return bound !== null && bound.level === this.history.document.get('level') && bound.settings === this.settingsText() &&
-      bound.enemies === this.enemies ? bound : null;
+    const document = this.history.document;
+    return bound !== null && bound.level === document.get('level') && bound.settings === document.get('settings') &&
+      bound.enemies === document.get('enemies') ? bound : null;
   }
 
   // The project server as this page last found it; null before the first check.
@@ -1287,41 +788,47 @@ export class ProjectSession {
   // project.
   async saveAs(id: string): Promise<boolean> {
     return this.run('Saving to the server', async () => {
+      const generation = this.generation;
+      const previous = this.binding;
       const valid = validateProjectId(id);
       this.prepareLevel();
       // Every section is checked before anything is written.
       this.captureDraft();
-      const names = new Set(this.sectionNames());
+      if (this.binding?.id !== valid) this.files.forgetProject(valid);
+      for (const { path, file } of this.binaryFiles(this.documentValues())) {
+        const locations = this.files.locations(file);
+        if (locations.page === null && locations.published.length === 0 && locations.servers.length === 0) {
+          throw new ProjectError(`${path} is not available in this page.`);
+        }
+      }
       let binding: Binding;
       if (this.binding !== null && this.binding.id === valid) binding = this.binding;
       else {
-        // Replacing a project deletes its files, so the page needs its own source for every file it kept there.
-        const sources: FileSource[] = [...this.media.values(), ...this.art.assets, ...this.library];
-        if (sources.some((source) => source.server === valid && source.blob === null && source.published === null)) {
-          throw new ProjectError(`Some of this page's files are kept only in project "${valid}"; save as another project ID.`);
-        }
         // The project starts as an empty game, then takes this page's files and every section.
-        const state = await this.client.putBundle(valid, packProjectBundle(loadProjectContent(defaultProjectManifest(this.title), () => STARTER_LEVEL)));
-        // Files the page kept there are gone, so they are sent again from the page's own sources.
-        for (const [path, item] of this.media) if (item.server === valid) this.media.set(path, { ...item, server: null });
-        this.art = { ...this.art, assets: this.art.assets.map((asset) => asset.server === valid ? { ...asset, server: null } : asset) };
-        this.library = this.library.map((item) => item.server === valid ? { ...item, server: null } : item);
+        const state = await this.replaceServerProject(valid,
+          packProjectBundle(loadProjectContent(defaultProjectManifest(this.history.document.get('title')), () => STARTER_LEVEL)));
+        if (previous !== null) this.requireBinding(previous);
+        this.requireActive(generation);
         binding = { id: valid, revision: state.revision, sections: { ...state.sections }, version: null };
+        // The document and its imports stay put; discovery and work tied to the old binding do not.
+        this.invalidateBinding();
         this.binding = binding;
         this.moving = valid;
         this.syncedModels.clear();
         // Nothing of the page is in the new project yet, so a section the writes below do not reach stays unsaved and
         // saves like any change; the move completes once every section is stored.
-        for (const name of names) this.synced![name] = UNSAVED;
+        this.synced ??= {};
+        for (const name of this.sectionNames()) this.synced[name] = UNSAVED;
         this.workspace.markLevelSaved(null);
       }
       // The page's version replaces the project's, conflicts included.
       this.conflicts.clear();
+      const names = new Set(this.sectionNames());
       this.requireSaved(await this.write(binding, names, names));
-      this.applyLook();
       this.projects = await this.client.list();
+      this.requireBinding(binding);
       this.workspace.notice(`Saved the whole project as "${valid}" on the project server.`, 'info');
-    });
+    }, this.binding?.id !== id);
   }
 
   async publish(): Promise<PublishRecord | null> {
@@ -1335,9 +842,11 @@ export class ProjectSession {
     const id = binding.id;
     let record: PublishRecord | null = null;
     await this.run('Publishing', async () => {
+      this.requireBinding(binding);
       record = await this.client.publish(id);
+      this.requireBinding(binding);
       this.publishRecord = record;
-      this.workspace.notice(`Published "${this.title}": ${record.files} files, ${(record.bytes / 1024 / 1024).toFixed(1)} MiB, in ${
+      this.workspace.notice(`Published "${this.history.document.get('title')}": ${record.files} files, ${(record.bytes / 1024 / 1024).toFixed(1)} MiB, in ${
         (record.durationMs / 1000).toFixed(1)} s. Open ${record.url} to play it.`, 'info');
     });
     return record;
@@ -1346,16 +855,17 @@ export class ProjectSession {
   dispose(): void {
     this.disposed = true;
     const disposal = new Disposal();
-    disposal.run(() => this.unsubscribeLevel());
+    disposal.run(() => this.unsubscribeDocument());
     disposal.run(() => this.lifecycle.abort());
+    disposal.run(() => this.cancelPrimaryPreparations());
+    disposal.run(() => this.cancelKeptRestores());
+    disposal.run(() => this.imports.invalidateProject());
     if (this.poller !== null) clearInterval(this.poller);
     if (this.saver !== null) clearInterval(this.saver);
     if (this.copyTimer !== null) clearInterval(this.copyTimer);
     for (const release of [...this.historyHolds]) disposal.run(release);
+    for (const release of [...this.fileWork]) disposal.run(release);
     disposal.run(() => this.copy?.dispose());
-    disposal.run(() => this.baker.dispose());
-    for (const item of this.media.values()) if (item.blob !== null) disposal.run(() => URL.revokeObjectURL(item.url));
-    this.media.clear();
     this.listeners.clear();
     disposal.finish();
   }
@@ -1435,7 +945,7 @@ export class ProjectSession {
       const problems = await this.write(binding, names, new Set());
       if (problems.size > 0) message = [...problems].map(([name, reason]) => `${name}: ${reason}`).join(' ');
     } catch (error) {
-      if (error instanceof SessionClosed) return;
+      if (error instanceof SessionClosed || error instanceof ProjectBindingLost) return;
       if (!isExpected(error)) throw error;
       if (this.disposed) return;
       if (error instanceof ProjectApiError && error.status === 412 && error.section !== null) {
@@ -1456,6 +966,7 @@ export class ProjectSession {
   // cannot be saved or also changed in the project.
   private async saveEverything(binding: Binding): Promise<boolean> {
     while (this.saving !== null) await this.saving;
+    if (this.disposed || this.binding !== binding) return false;
     if (this.conflicts.size > 0) {
       this.report(new ProjectError(`${[...this.conflicts].join(', ')} also changed in the project; keep your version or use the project's in Project first.`));
       return false;
@@ -1471,93 +982,202 @@ export class ProjectSession {
   }
 
   // Writes `names`, changed sections, to the bound server project and returns the ones that cannot be saved yet, with
-  // why. A section in `overwrite` replaces the project's version even if that changed meanwhile; any other section
-  // that changed there fails with a conflict (412).
+  // why. `overwrite` takes the project's current version as its starting point; a concurrent binary change still
+  // refuses (412), because its file proofs and preservation must remain current.
   private async write(binding: Binding, names: ReadonlySet<ProjectSectionName>,
     overwrite: ReadonlySet<ProjectSectionName>): Promise<Map<ProjectSectionName, string>> {
     // Exactly what this save sends; edits made while its requests run stay unsaved.
-    const baseline = this.fingerprints();
-    const savedLevel = this.history.document.get('level');
+    const generation = this.generation;
+    this.requireBinding(binding);
+    const roots = this.documentValues();
     const parts = this.workspace.appearance.parts();
-    const media = [...this.media.values()];
-    const assets = [...this.art.assets];
-    const library = this.library;
-    const alternate = this.alternate;
+    const baseline = this.fingerprints(roots, parts);
+    const alternate = roots['characters/alternate'];
     const wanted = new Set(names);
     // An alternate needs its primary stored first, even when the primary itself did not change.
     if (wanted.has('characters/alternate') && alternate !== null) wanted.add('characters/primary');
-    const { values, problems } = this.capture(wanted);
+    const { values, problems } = this.capture(wanted, roots, parts);
     if (problems.has('characters/primary') && wanted.has('characters/alternate') && alternate !== null) {
       problems.set('characters/alternate', 'waits for the primary character.');
     }
     const saving = new Set([...wanted].filter((name) => !problems.has(name)));
-    const revision = (name: ProjectSectionName): number | undefined => overwrite.has(name) ? undefined : binding.sections[name] ?? 0;
-    // Only the written section's revision: other sections may have changed meanwhile, for the next poll.
-    const adopt = (name: ProjectSectionName, state: ServerRevisions): void => {
-      binding.sections[name] = state.sections[name] ?? 0;
-    };
-    // New files first, so the sections that reference them validate on the server. A file the project lacks is read from
-    // wherever this page has it, one at a time.
-    if (saving.has('media')) {
-      for (const item of media) {
-        if (item.server === binding.id) continue;
-        adopt('media', await this.client.putMedia(binding.id, item.path, await this.mediaBlob(item), revision('media')));
-        // A file only another server project held plays from this one now.
-        const url = item.blob === null && item.published === null ? this.client.mediaUrl(binding.id, item.path) : item.url;
-        if (this.media.get(item.path) === item) this.media.set(item.path, { ...item, server: binding.id, url });
+    const release = this.retainFiles(this.binaryFiles(roots).map(({ file }) => file));
+    try {
+      // A forced binary save starts at the server's current revision, not the conflicted one. Its file proofs and
+      // preservation must still hold when the request writes.
+      const expected = { ...binding.sections };
+      const forced = BINARY_SECTIONS.filter((name) => saving.has(name) && overwrite.has(name));
+      // Check the project's identity before trusting remote holds or write preconditions.
+      const current = await this.projectRevisions(binding);
+      this.requireActive(generation);
+      for (const name of forced) expected[name] = current.sections[name] ?? 0;
+      const revision = (name: ProjectSectionName): number | undefined => overwrite.has(name) && !BINARY_SECTIONS.some((section) => section === name)
+        ? undefined : expected[name] ?? 0;
+      // Only the written section's revision: other sections may have changed meanwhile, for the next poll.
+      const adopt = (name: ProjectSectionName, state: ServerRevisions): void => {
+        this.checkProject(binding, state);
+        binding.sections[name] = state.sections[name] ?? 0;
+        expected[name] = binding.sections[name]!;
+      };
+      const held = (file: FileHandle, section: BinarySectionName, path: string): boolean => this.files.locations(file).servers
+        .some((source) => source.project === binding.id && source.path === path && source.revision === (expected[section] ?? 0));
+      // New files first, so the sections that reference them validate on the server. A file the project lacks is read from
+      // wherever this page has it, one at a time.
+      if (saving.has('media')) {
+        for (const item of roots.media) {
+          const path = mediaFile(item.path);
+          if (held(item.file, 'media', path)) continue;
+          const blob = await this.files.blob(item.file, this.lifecycle.signal);
+          this.requireActive(generation);
+          adopt('media', await this.writeFiles(binding, {
+            section: 'media', files: [{ path, file: item.file }], replacesSection: false,
+          }, () => this.client.putMedia(binding.id, item.path, blob, revision('media')),
+          [{ file: item.file, path, url: this.client.mediaUrl(binding.id, item.path) }]));
+          this.requireActive(generation);
+        }
       }
-    }
-    if (saving.has('art')) {
-      const uploaded = new Set<string>();
-      for (const asset of assets) {
-        if (asset.server === binding.id) continue;
-        adopt('art', await this.client.postArt(binding.id, await this.artBlob(asset), asset.name, revision('art')));
-        uploaded.add(asset.id);
+      if (saving.has('art')) {
+        for (const asset of roots.art.assets) {
+          const path = artFile(asset.id);
+          if (held(asset.file, 'art', path)) continue;
+          const blob = await this.files.blob(asset.file, this.lifecycle.signal);
+          this.requireActive(generation);
+          adopt('art', await this.writeFiles(binding, {
+            section: 'art', files: [{ path, file: asset.file }], replacesSection: false,
+          }, () => this.client.postArt(binding.id, blob, asset.name, revision('art')),
+          [{ file: asset.file, path, url: this.client.artUrl(binding.id, asset.id) }]));
+          this.requireActive(generation);
+        }
       }
-      this.art = { ...this.art, assets: this.art.assets.map((asset) => uploaded.has(asset.id) ? { ...asset, server: binding.id } : asset) };
-    }
-    if (saving.has('appearance')) {
-      for (const part of parts) {
-        if (this.syncedModels.get(part.part) === part.blob) continue;
-        adopt('appearance', await this.client.putModel(binding.id, part.part, part.blob, part.name, revision('appearance')));
-        this.syncedModels.set(part.part, part.blob);
+      if (saving.has('appearance')) {
+        for (const part of parts) {
+          if (this.syncedModels.get(part.part) === part.blob) continue;
+          adopt('appearance', await this.client.putModel(binding.id, part.part, part.blob, part.name, revision('appearance')));
+          this.requireActive(generation);
+          this.syncedModels.set(part.part, part.blob);
+        }
       }
-    }
-    if (saving.has('models')) {
-      for (const item of library) {
-        if (item.server === binding.id) continue;
-        adopt('models', await this.client.putLibraryModel(binding.id, item.role, item.entry, await this.libraryItemBlob(item), revision('models')));
-        this.library = this.library.map((candidate) => candidate === item ? { ...item, server: binding.id } : candidate);
+      if (saving.has('models')) {
+        for (const role of PART_ROLES) for (const item of roots.models[role]) {
+          const path = libraryModelFile(role, item.entry.id);
+          if (held(item.file, 'models', path)) continue;
+          const blob = await this.files.blob(item.file, this.lifecycle.signal);
+          this.requireActive(generation);
+          adopt('models', await this.writeFiles(binding, {
+            section: 'models', files: [{ path, file: item.file }], replacesSection: false,
+          }, () => this.client.putLibraryModel(binding.id, role, item.entry, blob, revision('models')),
+          [{ file: item.file, path, url: this.client.libraryModelUrl(binding.id, role, item.entry.id) }]));
+          this.requireActive(generation);
+        }
       }
+      // The server checks a level against the stored course artwork, which may lack decoration models the page's artwork
+      // maps, while the stored level may draw ones the page's artwork drops: both artworks together go first, so the level
+      // passes, and the page's own follows it.
+      if (saving.has('level') && saving.has('art')) {
+        const page = values.get('art') as ProjectArt;
+        const project = await this.client.project(binding.id);
+        this.requireActive(generation);
+        this.checkProject(binding, project);
+        const stored = inSection('art', () => validateProjectArt(project.manifest.art));
+        const combined = [...stored.assets, ...page.assets.filter((asset) => !stored.assets.some((known) => known.id === asset.id))];
+        const both = inSection('art', () => validateProjectArt({ assets: combined, decorations: { ...stored.decorations, ...page.decorations } }));
+        const registered = this.serverFileValues(project.manifest, project, fileSizes(project.files), ['art']).get('art') as DocumentArt;
+        const pageFiles = new Map(roots.art.assets.map((asset) => [asset.id, asset.file]));
+        const files = registered.assets.map((asset) => ({ path: artFile(asset.id), file: pageFiles.get(asset.id) ?? asset.file }));
+        for (const asset of roots.art.assets) if (!stored.assets.some((known) => known.id === asset.id)) files.push({ path: artFile(asset.id), file: asset.file });
+        adopt('art', await this.writeFiles(binding, { section: 'art', files, replacesSection: true },
+          () => this.client.putSection(binding.id, 'art', both, revision('art'))));
+        this.requireActive(generation);
+      }
+      // The server removes an alternate before the primary it depends on, and adds them the other way round.
+      const order: ProjectSectionName[] = [...alternate !== null ? SAVE_ORDER : SAVE_ORDER.flatMap((name) =>
+        name === 'characters/primary' ? ['characters/alternate', name] as const : name === 'characters/alternate' ? [] : [name]),
+      ...[...saving].filter((name) => pluginOfSection(name) !== null).sort()];
+      for (const name of order) {
+        if (!saving.has(name)) continue;
+        const state = BINARY_SECTIONS.some((section) => section === name)
+          ? await this.writeFiles(binding, this.sectionFileWrite(roots, name as BinarySectionName),
+            () => this.client.putSection(binding.id, name, values.get(name), revision(name)))
+          : await this.client.putSection(binding.id, name, values.get(name), revision(name));
+        this.requireActive(generation);
+        adopt(name, state);
+        this.markSynced(name, baseline[name]);
+        this.conflicts.delete(name);
+        this.adoptVersion(binding, state);
+        if (name === 'level') this.workspace.markLevelSaved(roots.level);
+        if (name === 'appearance') this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
+        this.changed('status');
+      }
+      await this.settleMove(binding);
+      return problems;
+    } catch (error) {
+      if (isExpected(error)) this.requireBinding(binding);
+      throw error;
+    } finally {
+      release();
     }
-    // The server checks a level against the stored course artwork, which may lack decoration models the page's artwork
-    // maps, while the stored level may draw ones the page's artwork drops: both artworks together go first, so the level
-    // passes, and the page's own follows it.
-    if (saving.has('level') && saving.has('art')) {
-      const page = values.get('art') as ProjectArt;
-      const storedValue = (await this.client.section(binding.id, 'art')).value;
-      const stored = inSection('art', () => validateProjectArt(storedValue));
-      const combined = [...stored.assets, ...page.assets.filter((asset) => !stored.assets.some((known) => known.id === asset.id))];
-      const both = inSection('art', () => validateProjectArt({ assets: combined, decorations: { ...stored.decorations, ...page.decorations } }));
-      adopt('art', await this.client.putSection(binding.id, 'art', both, revision('art')));
+  }
+
+  private async writeFiles(binding: Binding, write: ServerFileWrite, send: () => Promise<ServerRevisions>,
+    uploads: readonly { readonly file: FileHandle; readonly path: string; readonly url: string }[] = []): Promise<ServerRevisions> {
+    this.requireBinding(binding);
+    const project = binding.id;
+    const prepared = await this.retention.prepare(project, write, this.lifecycle.signal);
+    try {
+      this.requireBinding(binding);
+      let state: ServerRevisions;
+      try {
+        state = await send();
+      } catch (error) {
+        if (unanswered(error)) prepared.uncertain();
+        throw error;
+      }
+      if (!this.disposed) {
+        this.checkProject(binding, state);
+        const revision = state.sections[write.section];
+        if (revision === undefined || !Number.isSafeInteger(revision) || revision < 1) {
+          prepared.uncertain();
+          throw new ProjectError(`The server did not acknowledge ${write.section}.`, { section: write.section });
+        }
+        for (const { file, path, url } of uploads) this.files.uploaded(file, { project, section: write.section, revision, path, url });
+        prepared.finish(revision);
+      }
+      return state;
+    } finally {
+      prepared.release();
     }
-    // The server removes an alternate before the primary it depends on, and adds them the other way round.
-    const order: ProjectSectionName[] = [...alternate !== null ? SAVE_ORDER : SAVE_ORDER.flatMap((name) =>
-      name === 'characters/primary' ? ['characters/alternate', name] as const : name === 'characters/alternate' ? [] : [name]),
-    ...[...saving].filter((name) => pluginOfSection(name) !== null).sort()];
-    for (const name of order) {
-      if (!saving.has(name)) continue;
-      const state = await this.client.putSection(binding.id, name, values.get(name), revision(name));
-      adopt(name, state);
-      this.markSynced(name, baseline[name]);
-      this.conflicts.delete(name);
-      this.adoptVersion(binding, state);
-      if (name === 'level') this.workspace.markLevelSaved(savedLevel);
-      if (name === 'appearance') this.syncedModels = new Map(parts.map((part) => [part.part, part.blob]));
-      this.changed('status');
+  }
+
+  private async replaceServerProject(project: string, bundle: ProjectBundle): Promise<ServerRevisions> {
+    const prepared: { readonly section: BinarySectionName; readonly write: PreparedFileWrite }[] = [];
+    try {
+      for (const section of BINARY_SECTIONS) {
+        prepared.push({ section, write: await this.retention.prepare(project, { section, files: [], replacesSection: true }, this.lifecycle.signal) });
+      }
+      this.requireActive();
+      let state: ServerRevisions;
+      try {
+        state = await this.client.putBundle(project, bundle);
+      } catch (error) {
+        if (unanswered(error)) for (const entry of prepared) entry.write.uncertain();
+        throw error;
+      }
+      if (!this.disposed) {
+        for (const { section } of prepared) {
+          const revision = state.sections[section];
+          if (revision === undefined || !Number.isSafeInteger(revision) || revision < 1) {
+            for (const entry of prepared) entry.write.uncertain();
+            throw new ProjectError(`The server did not acknowledge ${section}.`, { section });
+          }
+        }
+        for (const { section, write } of prepared) write.finish(state.sections[section]!);
+      }
+      return state;
+    } finally {
+      const disposal = new Disposal();
+      for (const { write } of prepared) disposal.run(() => write.release());
+      disposal.finish();
     }
-    await this.settleMove(binding);
-    return problems;
   }
 
   // A Save as completes once its project holds every section, however the last one got there: the page remembers the
@@ -1572,14 +1192,15 @@ export class ProjectSession {
   // The given sections as the server stores them, each checked on its own as the server checks it, so a section that
   // cannot be saved yet (a character mid-edit, a level naming a missing file) holds back only itself; the reasons come
   // back by section.
-  private capture(names: ReadonlySet<ProjectSectionName>): { values: Map<ProjectSectionName, unknown>; problems: Map<ProjectSectionName, string> } {
-    const manifest = this.manifestDraft();
+  private capture(names: ReadonlySet<ProjectSectionName>, roots: SectionValues, parts: readonly AppearanceFile[]):
+    { values: Map<ProjectSectionName, unknown>; problems: Map<ProjectSectionName, string> } {
+    const manifest = this.manifestDraft(roots, parts);
     const value: Record<BuiltinSectionName, () => unknown> = {
       title: () => manifest.title,
-      level: () => this.levelDraft(manifest),
+      level: () => this.levelDraft(manifest, roots.level),
       settings: () => manifest.settings,
-      'characters/primary': () => this.primaryDraft(),
-      'characters/alternate': () => this.alternate === null ? null : this.checkedCharacter(this.alternate, 'alternate character'),
+      'characters/primary': () => this.primaryDraft(roots['characters/alternate']),
+      'characters/alternate': () => roots['characters/alternate'] === null ? null : this.checkedCharacter(roots['characters/alternate'], 'alternate character'),
       'arm-ik': () => manifest.armIk,
       appearance: () => manifest.appearance,
       models: () => manifest.models,
@@ -1606,42 +1227,56 @@ export class ProjectSession {
 
   // Loads `names` from the bound server project into the page, as saved.
   private async loadFromServer(binding: Binding, names: readonly ProjectSectionName[], protectEdits: boolean): Promise<readonly ProjectSectionName[]> {
-    const generation = this.generation;
-    this.requireActive(generation);
-    // The level first: reading it numbers a level version the project lost, which the project's answer then says. It
-    // may be older than that answer, so its own revision, when it has one, says which it is.
-    const level = names.includes('level') ? await this.client.section(binding.id, 'level') : null;
-    this.requireActive(generation);
-    const levelRevision = level?.revision ?? null;
-    const project = await this.client.project(binding.id);
-    this.requireActive(generation);
-    const values = new Map<ProjectSectionName, unknown>();
-    if (level !== null) values.set('level', level.value);
-    for (const name of names) {
-      if (name === 'characters/primary' || name === 'characters/alternate') {
-        values.set(name, project.manifest.characters[name === 'characters/primary' ? 'primary' : 'alternate'] === null ? null
-          : (await this.client.section(binding.id, name)).value);
-        this.requireActive(generation);
+    this.requireBinding(binding);
+    try {
+      const before = this.fingerprints();
+      // The level first: reading it numbers a level version the project lost, which the project's answer then says. It
+      // may be older than that answer, so its own revision, when it has one, says which it is.
+      const level = names.includes('level') ? await this.client.section(binding.id, 'level') : null;
+      this.requireBinding(binding);
+      const levelRevision = level?.revision ?? null;
+      const project = await this.client.project(binding.id);
+      this.checkProject(binding, project);
+      const values = new Map<ProjectSectionName, unknown>();
+      if (level !== null) values.set('level', level.value);
+      for (const name of names) {
+        if (name === 'characters/primary' || name === 'characters/alternate') {
+          values.set(name, project.manifest.characters[name === 'characters/primary' ? 'primary' : 'alternate'] === null ? null
+            : (await this.client.section(binding.id, name)).value);
+          this.requireBinding(binding);
+        }
       }
+      const models = names.includes('appearance')
+        ? await Promise.all(project.manifest.appearance.map((part) => this.client.blob(this.client.modelUrl(binding.id, part.part)))) : [];
+      this.requireBinding(binding);
+      const current = this.fingerprints();
+      const dirty = new Set(protectEdits ? this.dirtySections() : []);
+      const applying = names.filter((name) => {
+        if (current[name] === before[name] && !dirty.has(name)) return true;
+        this.conflicts.add(name);
+        return false;
+      });
+      const sizes = fileSizes(project.files);
+      for (const [name, value] of this.serverFileValues(project.manifest, project, sizes, applying)) values.set(name, value);
+      const applied = await this.applySections(project.manifest, applying, values, models, binding.id, 'server', sizes, null, protectEdits);
+      this.requireBinding(binding);
+      if (applied.names.includes('appearance')) this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
+      for (const name of applied.names) binding.sections[name] = name === 'level' && levelRevision !== null ? levelRevision : project.sections[name] ?? 0;
+      for (const name of applied.names) {
+        this.markSynced(name, applied.fingerprints[name]);
+        this.conflicts.delete(name);
+      }
+      if (applied.names.includes('level')) this.workspace.markLevelSaved(applied.level);
+      this.adoptVersion(binding, project);
+      const conflicting = names.filter((name) => !applied.names.includes(name));
+      if (conflicting.length > 0) {
+        this.workspace.notice(`${conflicting.join(', ')} changed here while the project's version loaded; choose which version to keep in Project.`, 'error');
+      }
+      return applied.names;
+    } catch (error) {
+      if (isExpected(error)) this.requireBinding(binding);
+      throw error;
     }
-    const models = names.includes('appearance')
-      ? await Promise.all(project.manifest.appearance.map((part) => this.client.blob(this.client.modelUrl(binding.id, part.part)))) : [];
-    this.requireActive(generation);
-    const applied = await this.applySections(project.manifest, names, values, models, binding.id, 'server', fileSizes(project.files), null, protectEdits);
-    this.requireActive(generation);
-    if (applied.names.includes('appearance')) this.syncedModels = new Map(this.workspace.appearance.parts().map((part) => [part.part, part.blob]));
-    for (const name of applied.names) binding.sections[name] = name === 'level' && levelRevision !== null ? levelRevision : project.sections[name] ?? 0;
-    for (const name of applied.names) {
-      this.markSynced(name, applied.fingerprints[name]);
-      this.conflicts.delete(name);
-    }
-    if (applied.names.includes('level')) this.workspace.markLevelSaved(applied.level);
-    this.adoptVersion(binding, project);
-    const conflicting = names.filter((name) => !applied.names.includes(name));
-    if (conflicting.length > 0) {
-      this.workspace.notice(`${conflicting.join(', ')} changed here while the project's version loaded; choose which version to keep in Project.`, 'error');
-    }
-    return applied.names;
   }
 
   // A copy that holds changes, or another project, reopens; otherwise the published project opens.
@@ -1727,8 +1362,8 @@ export class ProjectSession {
     return this.binding === null && (state.origin !== this.published?.version || state.dirty.length > 0);
   }
 
-  private copyState(): CopyState {
-    const fingerprints = this.fingerprints();
+  private copyState(roots: SectionValues = this.documentValues(), parts: readonly AppearanceFile[] = this.workspace.appearance.parts()): CopyState {
+    const fingerprints = this.fingerprints(roots, parts);
     const synced = this.synced;
     return { fingerprints, origin: this.origin, dirty: synced === null ? [] : this.sectionNames().filter((name) => fingerprints[name] !== synced[name]) };
   }
@@ -1767,7 +1402,9 @@ export class ProjectSession {
   private async writeCopy(): Promise<void> {
     const copy = this.copy;
     if (copy === null || !this.keeping || this.moving !== null || this.disposed) return;
-    const state = this.copyState();
+    const roots = this.documentValues();
+    const parts = this.workspace.appearance.parts();
+    const state = this.copyState(roots, parts);
     this.copySeen = null;
     if (!this.copyWanted(state)) {
       if (!this.copyStored) return;
@@ -1782,9 +1419,10 @@ export class ProjectSession {
       return;
     }
     if (sameCopy(state, this.copyWritten)) return;
-    const files = this.copyFiles();
+    const files = this.copyFiles(roots, parts, state.fingerprints);
     // Not a complete project yet, for example while a trigger uses a sound not in the media library.
     if (files === null) return;
+    const release = this.retainFiles(this.binaryFiles(roots).map(({ file }) => file));
     try {
       await copy.write({ origin: state.origin, dirty: state.dirty }, files);
       this.copyWritten = state;
@@ -1794,60 +1432,74 @@ export class ProjectSession {
     } catch (error) {
       this.copyFailed = state;
       this.report(error);
+    } finally {
+      release();
     }
     this.changed('status');
   }
 
   // The open project's files for this browser's copy, checked like an export but without notices;
   // null while the page does not hold a valid project.
-  private copyFiles(): Map<string, unknown> | null {
+  private copyFiles(roots: SectionValues = this.documentValues(), parts: readonly AppearanceFile[] = this.workspace.appearance.parts(),
+    sectionFingerprints: SectionRecord<unknown> = this.fingerprints(roots, parts)): ProjectCopyFiles | null {
     const document = this.workspace.character.draft();
-    const primary = this.workspace.character.hasContent() || this.alternate !== null ? document : null;
-    const level = this.history.document.get('level');
+    const alternate = roots['characters/alternate'];
+    const primary = this.workspace.character.hasContent() || alternate !== null ? document : null;
+    const level = roots.level;
     let manifest: ProjectManifest;
     try {
       manifest = validateProjectManifest({
-        ...this.draftManifest(),
-        characters: { primary: primary === null ? null : PROJECT_FILES.primary, alternate: this.alternate === null ? null : PROJECT_FILES.alternate },
+        ...this.draftManifest(roots, parts),
+        characters: { primary: primary === null ? null : PROJECT_FILES.primary, alternate: alternate === null ? null : PROJECT_FILES.alternate },
       });
       checkProjectReferences(manifest, level);
       if (primary !== null) this.checkedCharacter(primary, 'primary character');
-      if (this.alternate !== null) this.checkedCharacter(this.alternate, 'alternate character');
+      if (alternate !== null) this.checkedCharacter(alternate, 'alternate character');
     } catch (error) {
       if (isProjectDataError(error)) return null;
       throw error;
     }
-    const files = new Map<string, unknown>([[PROJECT_FILES.manifest, manifest], [PROJECT_FILES.level, level]]);
-    if (primary !== null) files.set(PROJECT_FILES.primary, primary);
-    if (this.alternate !== null) files.set(PROJECT_FILES.alternate, this.alternate);
-    for (const part of this.workspace.appearance.parts()) files.set(appearanceFile(part.part), part.blob);
-    // A file the published project serves stays on the site; the copy keeps only the page's own bytes.
-    const sources = new Map<string, FileSource>([
-      ...[...this.media.values()].map((item) => [mediaFile(item.path), item] as const),
-      ...this.art.assets.map((asset) => [artFile(asset.id), asset] as const),
-      ...this.library.map((item) => [libraryModelFile(item.role, item.entry.id), item] as const),
-    ]);
-    for (const [path, source] of sources) {
-      const file = source.blob ?? source.published;
-      // Only a server project holds it, which a copy cannot refer to.
-      if (file === null) return null;
-      files.set(path, file);
+    const values = new Map<string, unknown>([[PROJECT_FILES.manifest, manifest], [PROJECT_FILES.level, level]]);
+    const fingerprints = new Map<string, unknown>([[PROJECT_FILES.manifest, sectionFingerprints], [PROJECT_FILES.level, level]]);
+    if (primary !== null) {
+      values.set(PROJECT_FILES.primary, primary);
+      fingerprints.set(PROJECT_FILES.primary, document);
     }
-    return files;
+    if (alternate !== null) {
+      values.set(PROJECT_FILES.alternate, alternate);
+      fingerprints.set(PROJECT_FILES.alternate, alternate);
+    }
+    for (const part of parts) {
+      values.set(appearanceFile(part.part), part.blob);
+      fingerprints.set(appearanceFile(part.part), this.blobId(part.blob));
+    }
+    // A file the published project serves stays on the site; the copy keeps only the page's own bytes.
+    for (const { path, file } of this.binaryFiles(roots)) {
+      const source = this.files.copySource(file);
+      // Only a server project holds it, which a copy cannot refer to.
+      if (source === null) return null;
+      values.set(path, source);
+      fingerprints.set(path, file);
+    }
+    return { values, fingerprints };
   }
 
   // Applies server changes to sections this page has not changed; changed ones become conflicts.
   private async poll(): Promise<void> {
     const binding = this.binding;
     if (binding === null || this.busy !== null || this.saving !== null || this.disposed || document.visibilityState !== 'visible') return;
+    const known = { revision: binding.revision, sections: { ...binding.sections } };
     let state: ServerRevisions;
     try {
-      state = await this.client.revisions(binding.id);
+      state = await this.projectRevisions(binding, known);
     } catch (error) {
       if (!isExpected(error)) throw error;
       return;
     }
-    if (this.disposed || this.binding !== binding || this.busy !== null || this.saving !== null) return;
+    // A completed save can supersede a poll's answer without a project restart.
+    if (this.disposed || this.binding !== binding || this.busy !== null || this.saving !== null ||
+      binding.revision !== known.revision || !sameSections(binding.sections, known.sections)) return;
+    this.checkProject(binding, state);
     this.adoptVersion(binding, state);
     // binding.revision is the server revision this page has fully reconciled with.
     if (state.revision === binding.revision) return;
@@ -1875,7 +1527,7 @@ export class ProjectSession {
           applied = await this.loadFromServer(binding, applying, true);
         } catch (error) {
           // Stop retrying every poll; keeping this page's version or using the project's resolves it.
-          for (const name of applying) this.conflicts.add(name);
+          if (this.binding === binding) for (const name of applying) this.conflicts.add(name);
           throw error;
         }
         if (applied.length > 0) this.workspace.notice(`Updated ${applied.join(', ')} from the project server.`, 'info');
@@ -1892,8 +1544,12 @@ export class ProjectSession {
     const values = new Map<ProjectSectionName, unknown>([
       ['level', files.level], ['characters/primary', files.primary], ['characters/alternate', files.alternate],
     ]);
+    this.files.forgetProject(state.id);
+    this.imports.invalidateProject();
     this.unbind();
-    const applied = await this.applySections(manifest, this.wholeProject(manifest), values, files.models, state.id, 'open', files.sizes);
+    const names = this.wholeProject(manifest);
+    for (const [name, value] of this.serverFileValues(manifest, state, files.sizes, names)) values.set(name, value);
+    const applied = await this.applySections(manifest, names, values, files.models, state.id, 'open', files.sizes);
     this.requireActive();
     // The level came on its own, maybe older than the project's answer: its own revision says which it is.
     const binding: Binding = { id: state.id, revision: state.revision, sections: { ...state.sections, level: files.levelRevision }, version: null };
@@ -1913,167 +1569,383 @@ export class ProjectSession {
   // published project does.
   private async applySections(manifest: ProjectManifest, names: readonly ProjectSectionName[], values: ReadonlyMap<ProjectSectionName, unknown>,
     models: readonly Blob[], serverId: string | null, mode: 'open' | 'server' | 'edit', sizes: ReadonlyMap<string, number> = new Map(),
-    opened: OpenedProject | null = null, protectEdits = false): Promise<{
-      readonly names: readonly ProjectSectionName[]; readonly level: LevelDefinition; readonly fingerprints: SectionRecord<unknown>;
-    }> {
+    opened: OpenedProject | null = null, protectEdits = false): Promise<AppliedProjectSections> {
     const generation = this.generation;
     this.requireActive(generation);
+    const before = this.fingerprints();
     const has = new Set(names);
     const loadedFingerprints: SectionRecord<unknown> = {};
     const retainClean = (pending: readonly ProjectSectionName[]): void => {
-      if (!protectEdits) return;
-      const dirty = new Set(this.dirtySections());
+      if (mode !== 'server') return;
+      const current = this.fingerprints();
+      const dirty = new Set(protectEdits ? this.dirtySections() : []);
       for (const name of pending) {
-        if (!has.has(name) || !dirty.has(name)) continue;
+        if (!has.has(name) || (current[name] === before[name] && !dirty.has(name))) continue;
         has.delete(name);
         this.conflicts.add(name);
       }
     };
     retainClean(names);
-    const level = has.has('level') ? validateLevel(values.get('level')) : null;
-    const checkReferences = (): void => {
-      if (!(['level', 'art', 'media', 'enemies', 'audio'] as const).some((name) => has.has(name))) return;
-      const current = level !== null && has.has('level') ? level : this.history.document.get('level');
-      const prospective = validateProjectManifest({
-        ...this.draftManifest(),
-        art: has.has('art') ? manifest.art : {
-          assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations,
-        },
-        media: has.has('media') ? manifest.media : [...this.media.keys()].map((path) => ({ path })),
-        enemies: has.has('enemies') ? manifest.enemies : this.enemies,
-        audio: has.has('audio') ? manifest.audio : this.audio,
-      });
-      const stranded = unknownDecorationModels(current, prospective.art.decorations);
-      if (stranded.length > 0) {
-        throw new ProjectError(stranded.slice(0, 8).join(' ') + (stranded.length > 8 ? ` (${stranded.length - 8} more)` : ''),
-          { section: has.has('level') ? 'level' : 'art' });
+    if (serverId !== null && opened !== null) throw new Error('An opening has one source for its files.');
+    const reading = await this.readDocumentSections(manifest, [...has].filter((name) => mode !== 'server' || name !== 'level'),
+      values, sizes, opened, this.lifecycle.signal);
+    let prepared: PreparedPrimary | null = null;
+    let controller: AbortController | null = null;
+    try {
+      this.requireActive(generation);
+      retainClean(names);
+      const incoming = (): Partial<SectionValues> => Object.freeze(Object.fromEntries(
+        Object.entries(reading.values).filter(([name]) => has.has(name as ProjectSectionName)),
+      )) as Partial<SectionValues>;
+      const check = (): readonly SomeSectionChange[] => mode === 'edit'
+        ? this.commands.sections(incoming(), restoreInfo()).run(this.history.document)
+        : this.adoptionChanges(incoming());
+      // The command checks the raw server level once. Its delta already has everything merge needs except the kind.
+      const serverChanges = mode === 'server' ? this.adoptionChanges(Object.freeze({
+        ...incoming(), ...(has.has('level') ? { level: values.get('level') } : {}),
+      }) as Partial<SectionValues>).map((change): SomeSectionChange => change.section !== 'level' ? change : Object.freeze({
+        ...change, delta: Object.freeze({ ...change.delta, kind: 'edit' as const }),
+      })).filter((change) => pluginOfSection(change.section) === null) : null;
+      if (serverChanges === null) check();
+      const primary = has.has('characters/primary') ? values.get('characters/primary') === null ? EMPTY_SPRITES
+        : validateProjectCharacter(values.get('characters/primary')) : null;
+      if (primary !== null) this.checkCharacterProfile(primary, 'primary character');
+      const parts = has.has('appearance') ? validateAppearanceParts(manifest.appearance).map((part, index) => {
+        const blob = models[index];
+        if (blob === undefined) throw new ProjectError(`${appearanceFile(part.part)} is missing.`, { section: 'appearance' });
+        return { ...part, blob };
+      }) : null;
+      for (const part of parts ?? []) {
+        const bytes = await part.blob.arrayBuffer();
+        this.requireActive(generation);
+        inSection('appearance', () => checkAppearanceModel(bytes));
       }
-      checkProjectReferences(prospective, current);
-    };
-    checkReferences();
-    const primary = has.has('characters/primary') ? values.get('characters/primary') === null ? EMPTY_SPRITES
-      : validateProjectCharacter(values.get('characters/primary')) : null;
-    const alternate = has.has('characters/alternate') ? values.get('characters/alternate') === null ? null
-      : validateProjectCharacter(values.get('characters/alternate')) : undefined;
-    if (primary !== null) this.checkCharacterProfile(primary, 'primary character');
-    if (alternate !== undefined && alternate !== null) this.checkCharacterProfile(alternate, 'alternate character');
-    const parts = has.has('appearance') ? validateAppearanceParts(manifest.appearance).map((part, index) => ({ ...part, blob: models[index]! })) : null;
-    // Each plugin checks its incoming data; a plugin this Workshop lacks keeps its data as it came.
-    const plugins = names.flatMap((name) => {
-      if (!has.has(name)) return [];
-      const id = pluginOfSection(name);
-      return id === null ? [] : [id];
-    });
-    for (const id of plugins) {
-      const data = pluginDataIn(manifest.plugins, id);
-      if (data === null || !this.plugins.has(id)) continue;
-      const refusal = this.plugins.validate(id, data);
-      if (refusal !== null) throw pluginRefusal(id, refusal);
-    }
-    // Models the runtime would refuse fail here, before anything in the page changes.
-    for (const part of parts ?? []) {
-      const bytes = await part.blob.arrayBuffer();
-      this.requireActive(generation);
-      inSection('appearance', () => checkAppearanceModel(bytes));
-    }
-    // A project that replaces the whole character has already let go of the previous project, so it waits
-    // for a character operation in progress; a sync keeps refusing, which records the conflict.
-    retainClean(['characters/primary']);
-    if (primary !== null && has.has('characters/primary')) {
-      const loaded = await this.workspace.character.load(primary, { wait: mode !== 'server' });
-      this.requireActive(generation);
-      if (!loaded) throw new ProjectError('The project character could not be loaded; see Character.', { section: 'characters/primary' });
-      loadedFingerprints['characters/primary'] = primary;
-    }
-    retainClean(['appearance']);
-    if (parts !== null && has.has('appearance')) {
-      const loaded = await this.workspace.appearance.load(parts);
-      this.requireActive(generation);
-      if (!loaded) throw new ProjectError('Some appearance models could not be loaded; see Appearance.', { section: 'appearance' });
-      loadedFingerprints.appearance = this.fingerprints().appearance;
-    }
-    this.requireActive(generation);
-    // The remaining sections commit synchronously; edits made during downloads or model loads win over a poll.
-    retainClean(names.filter((name) => name !== 'characters/primary' && name !== 'appearance'));
-    checkReferences();
-    if (mode === 'open') this.generation++;
-    let art: CourseArt | null = null;
-    if (has.has('art') && opened !== null) art = openedArt(opened);
-    else if (has.has('art')) {
-      const existing = new Map(this.art.assets.map((asset) => [asset.id, asset]));
-      art = {
-        decorations: manifest.art.decorations,
-        // An asset is named by its content, so bytes the page already has for it stay usable.
-        assets: manifest.art.assets.map((asset) => {
-          const known = existing.get(asset.id);
-          return {
-            ...asset, blob: known?.blob ?? null, published: known?.published ?? null, server: serverId,
-            bytes: sizes.get(artFile(asset.id)) ?? known?.bytes ?? 0,
-          };
-        }),
+      // Whole openings and mixed restores retain the native wait for an external character operation.
+      if (mode !== 'server' && primary !== null && has.has('characters/primary')) {
+        const loaded = await this.workspace.character.load(primary, { wait: true });
+        this.requireActive(generation);
+        if (!loaded) throw new ProjectError('The project character could not be loaded; see Character.', { section: 'characters/primary' });
+        loadedFingerprints['characters/primary'] = primary;
+      }
+      retainClean(['appearance']);
+      if (parts !== null && has.has('appearance')) {
+        const loaded = await this.workspace.appearance.load(parts);
+        this.requireActive(generation);
+        if (!loaded) throw new ProjectError('Some appearance models could not be loaded; see Appearance.', { section: 'appearance' });
+        loadedFingerprints.appearance = this.fingerprints().appearance;
+      }
+      const finalChanges = (): readonly SomeSectionChange[] => {
+        this.requireActive(generation);
+        retainClean(names.filter((name) => name !== 'characters/primary' && name !== 'appearance'));
+        if (mode === 'edit' && has.has('level')) this.prepareLevel();
+        // Recheck the prospective references immediately before synchronous adoption.
+        if (serverChanges === null) return check();
+        const changes = serverChanges.filter((change) => has.has(change.section));
+        const plugins = Object.freeze(Object.fromEntries(
+          Object.entries(incoming()).filter(([section]) => pluginOfSection(section) !== null),
+        )) as Partial<SectionValues>;
+        // Facets and the combined plugin count can change while external owners load.
+        if (Object.keys(plugins).length > 0) changes.push(...this.adoptionChanges(plugins));
+        if (['level', 'art', 'media', 'enemies', 'audio'].some((name) => has.has(name as ProjectSectionName))) {
+          this.checkAdoptedReferences(manifest, changes);
+        }
+        return changes;
       };
-    }
-    if (has.has('settings')) this.workspace.settings.load(manifest.settings);
-    if (has.has('characters/alternate') && alternate !== undefined) this.alternate = alternate;
-    if (has.has('arm-ik')) this.workspace.appearance.loadArmIk(manifest.armIk);
-    if (has.has('title')) this.title = manifest.title;
-    if (has.has('theme')) this.theme = manifest.theme;
-    if (has.has('hud')) this.hud = manifest.hud;
-    if (has.has('enemies')) this.enemies = manifest.enemies;
-    // A server project's library files stay on the server until the Workshop needs them.
-    if (has.has('models')) {
-      if (opened !== null) this.library = this.openedLibrary(opened);
-      else if (serverId !== null) this.library = libraryEntries(manifest.models).map(({ role, entry }) => ({
-        role, entry, key: this.nextLibraryKey++, blob: null, server: serverId, published: null,
-        bytes: sizes.get(libraryModelFile(role, entry.id)) ?? 0,
-      }));
-    }
-    let media: Map<string, MediaItem> | null = null;
-    if (has.has('media') && opened !== null) media = openedMedia(opened);
-    else if (has.has('media') && serverId !== null) {
-      media = new Map();
-      for (const entry of manifest.media) {
-        media.set(entry.path, {
-          path: entry.path, blob: null, server: serverId, published: null, url: this.client.mediaUrl(serverId, entry.path),
-          bytes: sizes.get(mediaFile(entry.path)) ?? this.media.get(entry.path)?.bytes ?? 0,
+      const adopt = (changes: readonly SomeSectionChange[]): void => {
+        if (has.has('arm-ik')) {
+          this.workspace.appearance.loadArmIk(manifest.armIk);
+          loadedFingerprints['arm-ik'] = this.fingerprints()['arm-ik'];
+        }
+        if (mode === 'open') {
+          this.invalidateProject();
+          this.history.load(Object.freeze({
+            ...this.documentValues(), ...Object.fromEntries(changes.map((change) => [change.section, change.after])),
+          }) as SectionValues);
+        } else if (mode === 'server') {
+          const next = [...changes];
+          const changed = new Set(next.map((change) => change.section));
+          // A new revision cuts even when its value equals the page's.
+          for (const name of names) if (has.has(name) && isDocumentSection(name) && !changed.has(name)) {
+            next.push(unchangedSection(this.history, name));
+          }
+          if (next.length > 0) this.history.external(withConsumerCuts(this.history, next));
+        } else {
+          if (changes.length > 0) this.history.external(withConsumerCuts(this.history, changes), 'edit');
+        }
+      };
+      retainClean(['characters/primary']);
+      if (mode === 'server' && primary !== null && has.has('characters/primary')) {
+        const draft = this.workspace.character.draft();
+        controller = new AbortController();
+        this.primaryPreparations.add(controller);
+        const result = await this.workspace.character.prepare(primary, { signal: AbortSignal.any([controller.signal, this.lifecycle.signal]) });
+        if (result instanceof SpriteError) throw new ProjectError(`The project character could not be loaded: ${result.message}`, {
+          section: 'characters/primary', cause: result,
         });
-      }
-    }
-    // Audio references media, so it follows the library.
-    if (has.has('audio')) this.audio = manifest.audio;
-    for (const id of plugins) {
-      if (has.has(pluginSection(id))) this.pluginData = withPluginData(this.pluginData, id, pluginDataIn(manifest.plugins, id));
-    }
-    // Install the level's files before its listeners run; a coupled restore cuts after its command.
-    this.commitDependencies(art, media, () => {
-      if (level === null || !has.has('level')) return;
-      if (mode === 'open') this.history.load({ level: this.level.check(level) });
-      else if (mode === 'server') {
-        const change = this.level.merge(level);
-        if (change === null) this.history.cut(['level']);
-        else this.history.external([change]);
+        prepared = result;
+        let changes: readonly SomeSectionChange[] = [];
+        let accepted = false;
+        const committed = prepared.commit(() => {
+          this.requireActive(generation);
+          retainClean(['characters/primary']);
+          if (!has.has('characters/primary')) return false;
+          if (this.workspace.character.draft() !== draft) throw new ProjectError('The character changed while the project loaded.', { section: 'characters/primary' });
+          changes = finalChanges();
+          accepted = true;
+          return true;
+        }, () => {
+          loadedFingerprints['characters/primary'] = primary;
+          adopt(changes);
+        });
+        if (!committed) {
+          this.requireActive(generation);
+          if (has.has('characters/primary')) {
+            const current = this.workspace.character.draft();
+            if (!accepted || !sameJson(current, primary)) {
+              throw new ProjectError('The project character could not be loaded; see Character.', { section: 'characters/primary' });
+            }
+            loadedFingerprints['characters/primary'] = current;
+          }
+          adopt(finalChanges());
+        }
       } else {
-        const refusal = this.history.apply(this.level.command({
-          label: 'Restore kept level',
-          place: { tab: 'project', section: null, select: null },
-        }, (state) => state.replace(level)));
-        if (refusal !== null) throw refusal;
+        adopt(finalChanges());
       }
-    });
-    if (mode !== 'server') {
-      const lacking = plugins.filter((id) => pluginDataIn(manifest.plugins, id) !== null && !this.plugins.has(id));
-      if (lacking.length > 0) {
-        this.workspace.notice(`This project keeps data for the Workshop plugin${lacking.length === 1 ? '' : 's'} ${lacking.map((id) => `"${id}"`).join(', ')
-        }, which this Workshop does not have. ${lacking.length === 1 ? 'Its data stays' : 'Their data stays'} unchanged.`, 'info');
+      if (mode !== 'server') {
+        const lacking = names.flatMap((name) => {
+          const id = pluginOfSection(name);
+          return has.has(name) && id !== null && pluginDataIn(manifest.plugins, id) !== null && !this.plugins.has(id) ? [id] : [];
+        });
+        if (lacking.length > 0) this.workspace.notice(`This project keeps data for the Workshop plugin${lacking.length === 1 ? '' : 's'} ${
+          lacking.map((id) => `"${id}"`).join(', ')}, which this Workshop does not have. ${
+          lacking.length === 1 ? 'Its data stays' : 'Their data stays'} unchanged.`, 'info');
+      }
+      this.changed('content');
+      return {
+        names: names.filter((name) => has.has(name)), level: this.history.document.get('level'),
+        // Edits to an external owner after its load stay unsaved.
+        fingerprints: { ...this.fingerprints(), ...loadedFingerprints },
+      };
+    } finally {
+      const disposal = new Disposal();
+      disposal.run(() => prepared?.cancel());
+      if (controller !== null) {
+        this.primaryPreparations.delete(controller);
+        disposal.run(() => controller?.abort());
+      }
+      disposal.run(() => reading.release());
+      disposal.finish();
+    }
+  }
+
+  private checkAdoptedReferences(manifest: ProjectManifest, changes: readonly SomeSectionChange[]): void {
+    const document = this.history.document;
+    let level = document.get('level');
+    let art = document.get('art');
+    let media = document.get('media');
+    let enemies = document.get('enemies');
+    let audio = document.get('audio');
+    for (const change of changes) {
+      switch (change.section) {
+        case 'level': level = change.after; break;
+        case 'art': art = change.after; break;
+        case 'media': media = change.after; break;
+        case 'enemies': enemies = change.after; break;
+        case 'audio': audio = change.after; break;
       }
     }
-    this.changed('content');
-    return {
-      names: names.filter((name) => has.has(name)),
-      level: this.history.document.get('level'),
-      // Edits to a loaded editor while the other loads finish stay unsaved.
-      fingerprints: { ...this.fingerprints(), ...loadedFingerprints },
+    checkProjectReferences({
+      ...manifest, art: { assets: art.assets.map(({ id, name }) => ({ id, name })), decorations: art.decorations },
+      media: media.map(({ path }) => ({ path })), enemies, audio,
+    }, level);
+  }
+
+  private adoptionChanges(values: Partial<SectionValues>): readonly SomeSectionChange[] {
+    const document = this.history.document;
+    // Adoption records no selection; the command validates a raw level before anything reads its objects.
+    const info: ProjectCommandInfo = {
+      ...restoreInfo(), place: { tab: 'project', section: null, select: { before: [], after: [] } },
     };
+    const entries = Object.entries(values);
+    const builtin = Object.freeze(Object.fromEntries(entries.filter(([section]) => pluginOfSection(section) === null))) as Partial<SectionValues>;
+    const plugins = Object.freeze(Object.fromEntries(entries.filter(([section]) => pluginOfSection(section) !== null))) as Partial<SectionValues>;
+    const changes = [...this.commands.sections(builtin, info).run(document)];
+    const unchecked = new Map<PluginSectionName, FrozenPluginData>();
+    for (;;) {
+      const checking = unchecked.size === 0 ? plugins : Object.freeze(Object.fromEntries(
+        Object.entries(plugins).filter(([section]) => !unchecked.has(section as PluginSectionName)),
+      )) as Partial<SectionValues>;
+      try {
+        changes.push(...this.commands.sections(checking, info).run(document));
+        break;
+      } catch (error) {
+        if (!(error instanceof PluginError) || error.code !== 'plugin-failed' || error.plugin === null) throw error;
+        const section = pluginSection(error.plugin);
+        const value = plugins[section];
+        if (value === undefined || value === null || unchecked.has(section)) throw error;
+        unchecked.set(section, value);
+      }
+    }
+    if (unchecked.size > 0) {
+      // A failed facet cannot block adoption; engine JSON and combined section limits still apply.
+      const prospective: Record<string, PluginData> = {};
+      for (const section of document.sections()) {
+        const id = pluginOfSection(section);
+        if (id === null) continue;
+        const value = document.get(pluginSection(id));
+        if (value !== null) prospective[id] = value.data;
+      }
+      for (const section of Object.keys(plugins)) {
+        const id = pluginOfSection(section)!;
+        const value = plugins[pluginSection(id)]!;
+        if (value === null) delete prospective[id];
+        else prospective[id] = value.data;
+      }
+      validateProjectPlugins(prospective);
+      for (const [section, value] of unchecked) {
+        const before = document.get(section);
+        if (before !== null && sameJson(before.data, value.data)) continue;
+        changes.push(adapterFor(section).change(before, value));
+      }
+    }
+    return Object.freeze(changes);
+  }
+
+  // File revisions and sizes come from the same server listing; an unread path is never assumed to have known bytes.
+  private serverFileValues(manifest: ProjectManifest, state: ServerRevisions & { readonly id: string }, sizes: ReadonlyMap<string, number>,
+    names: readonly ProjectSectionName[]): Map<ProjectSectionName, unknown> {
+    const has = new Set(names);
+    const values = new Map<ProjectSectionName, unknown>();
+    const file = (section: BinarySectionName, path: string, url: string): FileHandle => {
+      const bytes = sizes.get(path);
+      if (bytes === undefined || !Number.isSafeInteger(bytes) || bytes < 1) {
+        throw new ProjectError(`The project did not list the size of ${path}.`, { section });
+      }
+      const revision = state.sections[section];
+      if (revision === undefined || !Number.isSafeInteger(revision) || revision < 0) {
+        throw new ProjectError(`The project did not list the revision of ${section}.`, { section });
+      }
+      return this.files.registerServer({ project: state.id, section, revision, path, url }, bytes);
+    };
+    if (has.has('art')) values.set('art', Object.freeze({
+      decorations: manifest.art.decorations,
+      assets: Object.freeze(manifest.art.assets.map((asset) => Object.freeze({
+        ...asset, file: file('art', artFile(asset.id), this.client.artUrl(state.id, asset.id)),
+      }))),
+    } satisfies DocumentArt));
+    if (has.has('media')) values.set('media', Object.freeze(manifest.media.map(({ path }) => Object.freeze({
+      path, file: file('media', mediaFile(path), this.client.mediaUrl(state.id, path)),
+    }))) satisfies DocumentMedia);
+    const models = <E extends LibraryEntry>(role: PartRole, entries: readonly E[]): readonly DocumentModel<E>[] => Object.freeze(entries.map((entry) =>
+      Object.freeze({ entry, file: file('models', libraryModelFile(role, entry.id), this.client.libraryModelUrl(state.id, role, entry.id)) })));
+    if (has.has('models')) values.set('models', Object.freeze({
+      avatar: models('avatar', manifest.models.avatar), hammer: models('hammer', manifest.models.hammer), pot: models('pot', manifest.models.pot),
+    } satisfies DocumentModels));
+    return values;
+  }
+
+  private async readDocumentSections(manifest: ProjectManifest, names: readonly ProjectSectionName[], raw: ReadonlyMap<ProjectSectionName, unknown>,
+    sizes: ReadonlyMap<string, number>, opened: OpenedProject | null, signal: AbortSignal):
+    Promise<{ readonly values: Partial<SectionValues>; release(): void }> {
+    const has = new Set(names);
+    const values = new Map<SectionName, SectionValues[SectionName]>();
+    const releases: (() => void)[] = [];
+    const release = (): void => {
+      const disposal = new Disposal();
+      for (const done of releases.splice(0)) disposal.run(done);
+      disposal.finish();
+    };
+    const refs = new Map(projectFileRefs(manifest).filter((ref) => ref.binary).map((ref) => [ref.path, ref]));
+    const file = async (path: string, section: BinarySectionName): Promise<FileHandle> => {
+      signal.throwIfAborted();
+      const source = opened?.files.get(path);
+      const ref = refs.get(path);
+      if (source === undefined || ref === undefined) throw new ProjectError(`${path} is missing.`, { section });
+      const bytes = source instanceof Blob ? source.size : source.bytes;
+      if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > ref.maxBytes) throw new ProjectError(`${path} has an invalid size.`, { section });
+      if (source instanceof Blob) {
+        const staged = await this.files.stagePage(source, signal);
+        releases.push(staged.release);
+        signal.throwIfAborted();
+        return staged.handle;
+      }
+      const handle = this.files.registerPublished(source);
+      releases.push(this.files.retain([handle], 'work'));
+      return handle;
+    };
+    const models = async <E extends LibraryEntry>(role: PartRole, entries: readonly E[]): Promise<readonly DocumentModel<E>[]> => {
+      const items: DocumentModel<E>[] = [];
+      for (const entry of entries) items.push(Object.freeze({ entry, file: await file(libraryModelFile(role, entry.id), 'models') }));
+      return Object.freeze(items);
+    };
+    try {
+      signal.throwIfAborted();
+      const builtin = {
+        title: manifest.title, settings: manifest.settings, theme: manifest.theme, hud: manifest.hud, audio: manifest.audio, enemies: manifest.enemies,
+      } as const;
+      for (const name of Object.keys(builtin) as (keyof typeof builtin)[]) if (has.has(name)) values.set(name, builtin[name]);
+      if (has.has('level')) values.set('level', validateLevel(raw.get('level')));
+      if (has.has('characters/alternate')) {
+        values.set('characters/alternate', raw.get('characters/alternate') === null ? null : validateProjectCharacter(raw.get('characters/alternate')));
+      }
+      if (opened !== null) {
+        // Refuse the whole section's budget before hashing any of its page files.
+        for (const section of BINARY_SECTIONS) if (has.has(section)) {
+          const kind = section === 'models' ? 'model' : section;
+          const total = [...refs.values()].filter((ref) => ref.kind === kind).reduce((sum, ref) => {
+            const source = opened.files.get(ref.path);
+            if (source === undefined) throw new ProjectError(`${ref.path} is missing.`, { section });
+            return sum + (source instanceof Blob ? source.size : source.bytes);
+          }, 0);
+          checkFileBudget(kind, total);
+        }
+        if (has.has('art')) {
+          const assets: DocumentArt['assets'][number][] = [];
+          for (const asset of manifest.art.assets) assets.push(Object.freeze({ ...asset, file: await file(artFile(asset.id), 'art') }));
+          values.set('art', Object.freeze({ assets: Object.freeze(assets), decorations: manifest.art.decorations }));
+        }
+        if (has.has('media')) {
+          const media: DocumentMedia[number][] = [];
+          for (const entry of manifest.media) media.push(Object.freeze({ path: entry.path, file: await file(mediaFile(entry.path), 'media') }));
+          values.set('media', Object.freeze(media));
+        }
+        if (has.has('models')) values.set('models', Object.freeze({
+          avatar: await models('avatar', manifest.models.avatar), hammer: await models('hammer', manifest.models.hammer),
+          pot: await models('pot', manifest.models.pot),
+        }));
+      } else {
+        for (const section of BINARY_SECTIONS) if (has.has(section)) {
+          if (!raw.has(section)) throw new ProjectError(`The project did not list the files of ${section}.`, { section });
+          const value = raw.get(section) as SectionValue<typeof section>;
+          const handles = adapterFor(section).files(value);
+          releases.push(this.files.retain(handles, 'work'));
+          for (const { path, file } of this.sectionFileWriteValue(section, value).files) {
+            if (sizes.get(path) !== file.bytes) throw new ProjectError(`${path} does not match the project's file listing.`, { section });
+          }
+          values.set(section, value);
+        }
+      }
+      for (const name of names) {
+        const id = pluginOfSection(name);
+        if (id === null) continue;
+        const data = pluginDataIn(manifest.plugins, id);
+        if (data === null) values.set(pluginSection(id), null);
+        else {
+          let bytes = 0;
+          const checked = validatePluginData(id, data, (size) => { bytes = size; });
+          if (checked === null) throw new Error('Non-null plugin data validated as null.');
+          values.set(pluginSection(id), Object.freeze({ data: checked, bytes }));
+        }
+      }
+      signal.throwIfAborted();
+      return Object.freeze({ values: Object.freeze(Object.fromEntries(values)) as Partial<SectionValues>, release });
+    } catch (error) {
+      const disposal = new Disposal();
+      disposal.run(() => { throw error; });
+      disposal.run(release);
+      disposal.finish();
+      throw error;
+    }
   }
 
   // Replaces the page's game with a whole project opened from a project file, this browser's copy, the published project
@@ -2082,6 +1954,7 @@ export class ProjectSession {
     this.requireActive();
     // Appearance models the page cannot show fail here, before anything in the page changes.
     const appearance = appearanceBlobs(content);
+    this.imports.invalidateProject();
     this.unbind();
     const applied = await this.applySections(content.manifest, this.wholeProject(content.manifest), contentValues(content),
       appearance, null, 'open', new Map(), content);
@@ -2091,7 +1964,6 @@ export class ProjectSession {
     this.workspace.markLevelSaved(applied.level);
     this.keeping = true;
     this.changed('content');
-    this.applyLook();
   }
 
   // Restores `names` from `content`, a browser copy, as edits to the open project.
@@ -2100,17 +1972,59 @@ export class ProjectSession {
       'edit', new Map(), content);
   }
 
-  // The library of a project opened from anywhere but a server: the page's bytes or the published project's files.
-  private openedLibrary(content: OpenedProject): LibraryItem[] {
-    return libraryEntries(content.manifest.models).map(({ role, entry }) => ({
-      role, entry, key: this.nextLibraryKey++, ...openedSource(content, libraryModelFile(role, entry.id)),
-    }));
+  private async projectRevisions(binding: Binding, known: Pick<Binding, 'revision' | 'sections'> = binding): Promise<ServerRevisions> {
+    this.requireBinding(binding);
+    let state: ServerRevisions;
+    try {
+      state = await this.client.revisions(binding.id, this.lifecycle.signal);
+    } catch (error) {
+      this.requireBinding(binding);
+      // Only this project-level read proves absence; a missing file does not.
+      if (error instanceof ProjectApiError && error.status === 404) throw this.forgetBoundProject(binding);
+      throw error;
+    }
+    this.checkProject(binding, state, known);
+    return state;
+  }
+
+  private checkProject(binding: Binding, state: ServerRevisions, known: Pick<Binding, 'revision' | 'sections'> = binding): void {
+    this.requireBinding(binding);
+    if (state.revision < known.revision || Object.entries(known.sections).some(([name, revision]) => (state.sections[name] ?? 0) < revision)) {
+      throw this.forgetBoundProject(binding);
+    }
+  }
+
+  private forgetBoundProject(binding: Binding): ProjectBindingLost {
+    this.requireBinding(binding);
+    this.files.forgetProject(binding.id);
+    const names = this.sectionNames();
+    this.unbind();
+    const synced: SectionRecord<unknown> = {};
+    for (const name of names) synced[name] = UNSAVED;
+    this.synced = synced;
+    this.syncedModels.clear();
+    this.publishRecord = null;
+    this.saveSeen = null;
+    this.saveFailure = null;
+    this.copySeen = null;
+    this.copyFailed = null;
+    this.keeping = true;
+    this.workspace.markLevelSaved(null);
+    const unavailable = this.binaryFiles(this.documentValues()).filter(({ file }) => {
+      const locations = this.files.locations(file);
+      return locations.page === null && locations.published.length === 0 && locations.servers.length === 0;
+    }).map(({ path }) => path);
+    const refusal = new ProjectBindingLost(binding.id, unavailable);
+    this.workspace.notice(refusal.message, 'error');
+    this.changed('status');
+    void this.storeCopy();
+    return refusal;
   }
 
   // Before a whole project replaces the page's game: a failure part way must not leave the page
   // bound to the previous server project while holding the new project's data.
   private unbind(): void {
-    this.generation++;
+    this.invalidateBinding();
     this.binding = null;
     this.moving = null;
     this.origin = null;
@@ -2118,49 +2032,52 @@ export class ProjectSession {
     this.forget();
   }
 
-  private setMedia(next: Map<string, MediaItem>): void {
-    for (const [path, item] of this.media) if (item.blob !== null && next.get(path) !== item) URL.revokeObjectURL(item.url);
-    this.media = next;
-    this.mediaVersion++;
+  private invalidateProject(): void {
+    this.imports.invalidateProject();
+    this.invalidateBinding();
   }
 
-  // Only removed artwork/media references cut level history; uploads relocate sources outside this boundary.
-  private commitDependencies(art: CourseArt | null, media: Map<string, MediaItem> | null, applyLevel?: () => void): void {
-    this.requireActive();
-    let removed = false;
-    if (art !== null) {
-      const decorations = Object.entries(art.decorations);
-      const sameDecorations = decorations.length === Object.keys(this.art.decorations).length &&
-        decorations.every(([id, asset]) => this.art.decorations[id] === asset);
-      const assets = new Set(art.assets.map((asset) => asset.id));
-      removed = this.art.assets.some((asset) => !assets.has(asset.id)) ||
-        Object.keys(this.art.decorations).some((id) => !Object.hasOwn(art.decorations, id));
-      this.art = { ...art, decorations: sameDecorations ? this.art.decorations : art.decorations };
-    }
-    if (media !== null) {
-      removed ||= [...this.media.keys()].some((path) => !media.has(path));
-      this.setMedia(media);
-    }
-    try {
-      this.applyLook();
-      applyLevel?.();
-    } finally {
-      if (removed) this.history.cut(['level']);
-    }
+  private invalidateBinding(): void {
+    this.generation++;
+    this.cancelPrimaryPreparations();
+    this.cancelKeptRestores();
   }
 
-  private draftManifest(): ProjectManifest {
+  private cancelPrimaryPreparations(): void {
+    for (const controller of this.primaryPreparations) controller.abort();
+    this.primaryPreparations.clear();
+  }
+
+  private cancelKeptRestores(): void {
+    for (const controller of this.keptRestores) controller.abort();
+    this.keptRestores.clear();
+  }
+
+  private retainFiles(files: readonly FileHandle[]): () => void {
+    const release = this.files.retain([...new Set(files)], 'work');
+    const done = (): void => {
+      if (!this.fileWork.delete(done)) return;
+      release();
+    };
+    this.fileWork.add(done);
+    return done;
+  }
+
+  private draftManifest(roots: SectionValues = this.documentValues(), parts: readonly AppearanceFile[] = this.workspace.appearance.parts()): ProjectManifest {
     return validateProjectManifest({
-      format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title: this.title, level: PROJECT_FILES.level,
-      art: validateProjectArt({ assets: this.art.assets.map(({ id, name }) => ({ id, name })), decorations: this.art.decorations }),
-      settings: this.workspace.settings.get(),
+      format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, title: roots.title, level: PROJECT_FILES.level,
+      art: { assets: roots.art.assets.map(({ id, name }) => ({ id, name })), decorations: roots.art.decorations },
+      settings: roots.settings,
       characters: { primary: null, alternate: null },
       armIk: this.workspace.appearance.armIk(),
-      appearance: this.workspace.appearance.parts().map(({ part, name, alignment }) => ({ part, name, alignment })),
-      models: libraryOf(this.library),
-      theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
-      media: [...this.media.keys()].map((path) => ({ path })),
-      plugins: this.pluginData,
+      appearance: parts.map(({ part, name, alignment }) => ({ part, name, alignment })),
+      models: Object.fromEntries(PART_ROLES.map((role) => [role, roots.models[role].map((item) => item.entry)])),
+      theme: roots.theme, hud: roots.hud, audio: roots.audio, enemies: roots.enemies,
+      media: roots.media.map(({ path }) => ({ path })),
+      plugins: Object.fromEntries(Object.entries(roots).flatMap(([name, value]) => {
+        const id = pluginOfSection(name);
+        return id === null || value === null ? [] : [[id, (value as SectionValues[`plugins/${string}`])!.data]];
+      })),
     });
   }
 
@@ -2172,26 +2089,29 @@ export class ProjectSession {
   }
 
   // Everything except binary files, validated together with the level's references.
-  private captureDraft(): { manifest: ProjectManifest; level: LevelDefinition; primary: SpriteDocument | null; alternate: SpriteDocument | null } {
-    const manifest = this.manifestDraft();
-    const primary = this.primaryDraft();
-    if (this.alternate !== null) this.checkedCharacter(this.alternate, 'alternate character');
-    return { manifest, level: this.levelDraft(manifest), primary, alternate: this.alternate };
+  private captureDraft(roots: SectionValues = this.documentValues(), parts: readonly AppearanceFile[] = this.workspace.appearance.parts()):
+    { manifest: ProjectManifest; level: LevelDefinition; primary: SpriteDocument | null; alternate: SpriteDocument | null } {
+    const manifest = this.manifestDraft(roots, parts);
+    const alternate = roots['characters/alternate'];
+    const primary = this.primaryDraft(alternate);
+    if (alternate !== null) this.checkedCharacter(alternate, 'alternate character');
+    return { manifest, level: this.levelDraft(manifest, roots.level), primary, alternate };
   }
 
   // The manifest of this page's project, referring to the characters it holds.
-  private manifestDraft(): ProjectManifest {
-    const primary = this.workspace.character.hasContent() || this.alternate !== null;
+  private manifestDraft(roots: SectionValues = this.documentValues(), parts: readonly AppearanceFile[] = this.workspace.appearance.parts()): ProjectManifest {
+    const alternate = roots['characters/alternate'];
+    const primary = this.workspace.character.hasContent() || alternate !== null;
     return validateProjectManifest({
-      ...this.draftManifest(),
-      characters: { primary: primary ? PROJECT_FILES.primary : null, alternate: this.alternate === null ? null : PROJECT_FILES.alternate },
+      ...this.draftManifest(roots, parts),
+      characters: { primary: primary ? PROJECT_FILES.primary : null, alternate: alternate === null ? null : PROJECT_FILES.alternate },
     });
   }
 
   // The primary character as a project stores it, or null when the project has none. Each draft is validated once:
   // the character editor reports a draft it refuses.
-  private primaryDraft(): SpriteDocument | null {
-    if (!this.workspace.character.hasContent() && this.alternate === null) return null;
+  private primaryDraft(alternate: SpriteDocument | null): SpriteDocument | null {
+    if (!this.workspace.character.hasContent() && alternate === null) return null;
     const draft = this.workspace.character.draft();
     let document = this.validatedDrafts.get(draft);
     if (document === undefined) {
@@ -2213,21 +2133,19 @@ export class ProjectSession {
   }
 
   // The level as a project stores it, with every media and artwork reference found in `manifest`.
-  private levelDraft(manifest: ProjectManifest): LevelDefinition {
-    const level = this.history.document.get('level');
+  private levelDraft(manifest: ProjectManifest, level: LevelDefinition): LevelDefinition {
     checkProjectReferences(manifest, level);
     return level;
   }
 
   // The binary files for a captured draft, each read from wherever this page has it.
   private async captureFiles(draft: ReturnType<ProjectSession['captureDraft']>, parts: readonly AppearanceFile[],
-    media: readonly MediaItem[], assets: readonly ArtItem[], library: readonly LibraryItem[]): Promise<ProjectContent> {
+    binaries: ServerFileWrite['files']): Promise<ProjectContent> {
     const files = new Map<string, Uint8Array>();
     const bytes = async (blob: Blob): Promise<Uint8Array> => new Uint8Array(await blob.arrayBuffer());
     for (const part of parts) files.set(appearanceFile(part.part), await bytes(part.blob));
-    for (const item of media) files.set(mediaFile(item.path), await bytes(await this.mediaBlob(item)));
-    for (const asset of assets) files.set(artFile(asset.id), await bytes(await this.artBlob(asset)));
-    for (const item of library) files.set(libraryModelFile(item.role, item.entry.id), await bytes(await this.libraryItemBlob(item)));
+    for (const { path, file } of binaries) files.set(path, await bytes(await this.files.blob(file, this.lifecycle.signal)));
+    this.requireActive();
     return loadProjectContent(draft.manifest, (ref) => ref.kind === 'level' ? draft.level
       : ref.kind === 'character' ? (ref.path === PROJECT_FILES.primary ? draft.primary : draft.alternate) : files.get(ref.path));
   }
@@ -2235,7 +2153,10 @@ export class ProjectSession {
   // Every section this page knows of: the engine's, and each plugin section that has data here, was synced or appears
   // among `revisions`.
   private sectionNames(revisions: Readonly<Record<string, unknown>> = {}): ProjectSectionName[] {
-    const plugins = new Set(Object.keys(this.pluginData));
+    const plugins = new Set(this.history.document.sections().flatMap((section) => {
+      const id = pluginOfSection(section);
+      return id === null ? [] : [id];
+    }));
     for (const record of [this.synced ?? {}, this.binding?.sections ?? {}, revisions]) {
       for (const name of Object.keys(record)) {
         const id = pluginOfSection(name);
@@ -2248,7 +2169,10 @@ export class ProjectSession {
   // Every section of a whole project replacing this page's: the engine's, the plugin sections it brings and those this
   // page holds, which it removes.
   private wholeProject(manifest: ProjectManifest): ProjectSectionName[] {
-    const plugins = new Set([...Object.keys(manifest.plugins), ...Object.keys(this.pluginData)]);
+    const plugins = new Set([...Object.keys(manifest.plugins), ...this.history.document.sections().flatMap((section) => {
+      const id = pluginOfSection(section);
+      return id === null ? [] : [id];
+    })]);
     return [...PROJECT_SECTIONS, ...[...plugins].sort().map(pluginSection)];
   }
 
@@ -2259,37 +2183,47 @@ export class ProjectSession {
   }
 
   // Each section's current value as a fingerprint: equal while the section is unchanged.
-  fingerprints(): SectionRecord<unknown> {
-    const blob = (value: Blob | null): number => {
-      if (value === null) return 0;
-      let id = this.blobIds.get(value);
-      if (id === undefined) {
-        id = this.nextBlobId++;
-        this.blobIds.set(value, id);
-      }
-      return id;
-    };
+  fingerprints(roots: SectionValues = this.documentValues(), parts: readonly AppearanceFile[] = this.workspace.appearance.parts()): SectionRecord<unknown> {
     return {
-      title: this.title,
-      level: this.history.document.get('level'),
-      settings: this.settingsText(),
+      ...roots,
       'characters/primary': this.workspace.character.draft(),
-      'characters/alternate': this.alternate,
       'arm-ik': JSON.stringify(this.workspace.appearance.armIk()),
-      appearance: JSON.stringify(this.workspace.appearance.parts().map((part) => [part.part, part.name, blob(part.blob), part.alignment])),
-      models: JSON.stringify(this.library.map((item) => [item.role, item.entry, blob(item.blob)])),
-      theme: this.theme, hud: this.hud, audio: this.audio, enemies: this.enemies,
-      art: JSON.stringify([this.art.assets.map((asset) => [asset.id, asset.name]), this.art.decorations]),
-      media: JSON.stringify([...this.media.values()].map((item) => [item.path, blob(item.blob)])),
-      ...Object.fromEntries(Object.entries(this.pluginData).map(([id, data]) => [pluginSection(id), data])),
+      appearance: JSON.stringify(parts.map((part) => [part.part, part.name, this.blobId(part.blob), part.alignment])),
     };
   }
 
-  // The settings' JSON, the same string while the settings object is the same.
-  private settingsText(): string {
-    const settings = this.workspace.settings.get();
-    if (this.settingsJson?.settings !== settings) this.settingsJson = { settings, text: JSON.stringify(settings) };
-    return this.settingsJson.text;
+  private blobId(blob: Blob): number {
+    let id = this.blobIds.get(blob);
+    if (id === undefined) {
+      id = this.nextBlobId++;
+      this.blobIds.set(blob, id);
+    }
+    return id;
+  }
+
+  private documentValues(): SectionValues {
+    const document = this.history.document;
+    return Object.freeze(Object.fromEntries(document.sections().map((section) => [section, document.get(section)]))) as unknown as SectionValues;
+  }
+
+  private sectionFileWriteValue(section: BinarySectionName, value: SectionValue<BinarySectionName>): ServerFileWrite {
+    switch (section) {
+      case 'art': return { section, files: (value as DocumentArt).assets.map((asset) => ({ path: artFile(asset.id), file: asset.file })), replacesSection: true };
+      case 'media': return { section, files: (value as DocumentMedia).map((item) => ({ path: mediaFile(item.path), file: item.file })), replacesSection: true };
+      case 'models': {
+        const models = value as DocumentModels;
+        return { section, files: PART_ROLES.flatMap((role) => models[role].map((item) => ({ path: libraryModelFile(role, item.entry.id), file: item.file }))),
+          replacesSection: true };
+      }
+    }
+  }
+
+  private sectionFileWrite(roots: SectionValues, section: BinarySectionName): ServerFileWrite {
+    return this.sectionFileWriteValue(section, roots[section]);
+  }
+
+  private binaryFiles(roots: SectionValues): ServerFileWrite['files'] {
+    return BINARY_SECTIONS.flatMap((section) => this.sectionFileWrite(roots, section).files);
   }
 
   // Takes the project's level version from a server answer whose level, settings and enemies revisions are the ones this
@@ -2297,6 +2231,7 @@ export class ProjectSession {
   // Versions never change, so the binding stays right however the project moves on; answers about other revisions leave
   // it.
   private adoptVersion(binding: Binding, state: ServerRevisions): void {
+    this.checkProject(binding, state);
     const level = state.level;
     if (level === null || VERSIONED.some((name) => state.sections[name] !== binding.sections[name])) return;
     const synced = this.synced!;
@@ -2310,46 +2245,6 @@ export class ProjectSession {
     this.changed('status');
   }
 
-  private replaceMedia(path: string, item: MediaItem | null): void {
-    const next = new Map(this.media);
-    if (item === null) next.delete(path);
-    else next.set(path, item);
-    this.commitDependencies(null, next);
-  }
-
-  private setSection(update: () => void): Error | null {
-    try {
-      update();
-      this.applyLook();
-      this.changed('status');
-      return null;
-    } catch (error) {
-      return this.refuse(error);
-    }
-  }
-
-  private applyLook(): void {
-    const art = this.courseArtwork();
-    const look = this.gameLook;
-    if (look.theme !== this.theme || look.hud !== this.hud || look.enemies !== this.enemies || look.art !== art) {
-      this.gameLook = Object.freeze({ theme: this.theme, hud: this.hud, enemies: this.enemies, art });
-    }
-    this.workspace.onLook({ game: this.gameLook, audio: this.audio, resolveMedia: this.resolveMedia, mediaVersion: this.mediaVersion });
-  }
-
-  // The course artwork as the game draws it, none until the project has opened: the same object while its GLBs and the
-  // decoration models they draw stay the same.
-  private courseArtwork(): CourseArtwork {
-    if (!this.courseShown) return NO_COURSE_ARTWORK;
-    const { assets, decorations } = this.art;
-    const previous = this.artwork;
-    if (previous.decorations !== decorations || previous.assets.length !== assets.length ||
-      previous.assets.some((asset, index) => asset.id !== assets[index]!.id || asset.name !== assets[index]!.name)) {
-      this.artwork = Object.freeze({ assets: Object.freeze(assets.map(({ id, name }) => Object.freeze({ id, name }))), decorations });
-    }
-    return this.artwork;
-  }
-
   private async run(label: string, task: () => Promise<void>, held = false): Promise<boolean> {
     return await this.attempt(label, task, held) === undefined;
   }
@@ -2357,6 +2252,11 @@ export class ProjectSession {
   private requireActive(generation = this.generation): void {
     if (this.disposed) throw new SessionClosed();
     if (generation !== this.generation) throw new ProjectError('The project was replaced while this operation was running. Try again.');
+  }
+
+  private requireBinding(binding: Binding): void {
+    this.requireActive();
+    if (this.binding !== binding) throw new ProjectBindingLost(binding.id);
   }
 
   private holdHistory(): () => void {
@@ -2367,26 +2267,6 @@ export class ProjectSession {
     };
     this.historyHolds.add(done);
     return done;
-  }
-
-  // Single-section edits stay concurrent; only artwork/media imports hold Undo while their data arrives.
-  private async edit<T>(task: (generation: number) => Promise<T>, held = false): Promise<T | Error> {
-    const generation = this.generation;
-    let release: (() => void) | null = null;
-    try {
-      this.requireActive(generation);
-      if (held) release = this.holdHistory();
-      const result = await task(generation);
-      this.requireActive(generation);
-      return result;
-    } catch (error) {
-      if (isExpected(error)) {
-        try { this.requireActive(generation); } catch (refusal) { return this.refuse(refusal); }
-      }
-      return this.refuse(error);
-    } finally {
-      release?.();
-    }
   }
 
   // Runs one operation, reporting a typed refusal; project boundaries hold Undo/Redo while they wait.
@@ -2434,7 +2314,7 @@ export class ProjectSession {
 
   // Reports a refusal and returns it; anything but an expected refusal is a programmer error and propagates.
   private refuse(error: unknown): Error {
-    if (error instanceof SessionClosed) return error;
+    if (error instanceof SessionClosed || error instanceof ProjectBindingLost) return error;
     if (this.disposed && isExpected(error)) return new SessionClosed();
     this.report(error);
     return error as Error;
@@ -2498,13 +2378,6 @@ function openedContent(content: ProjectContent): OpenedProject {
   return Object.freeze({ manifest: content.manifest, level: content.level, characters: content.characters, files });
 }
 
-// A plugin's refusal of its data as the project reports it, naming the plugin's section and its error code.
-function pluginRefusal(id: string, refusal: Error): ProjectError {
-  const code = Reflect.get(refusal, 'code');
-  return new ProjectError(`${pluginSection(id)}: ${refusal.message}${typeof code === 'string' ? ` (${code})` : ''}`,
-    { section: pluginSection(id), cause: refusal });
-}
-
 // An opened project's appearance models, which the page holds: Appearance shows them as soon as the project opens.
 function appearanceBlobs(content: OpenedProject): Blob[] {
   return content.manifest.appearance.map((part) => {
@@ -2514,26 +2387,39 @@ function appearanceBlobs(content: OpenedProject): Blob[] {
   });
 }
 
-// A file of a project opened from anywhere but a server: the page's bytes or the published project's file, with its size.
-function openedSource(content: OpenedProject, path: string): FileSource & { readonly bytes: number } {
-  const file = content.files.get(path)!;
-  return file instanceof Blob ? { blob: file, server: null, published: null, bytes: file.size } : { blob: null, server: null, published: file, bytes: file.bytes };
+function unanswered(error: unknown): boolean {
+  return error instanceof ProjectApiError && (error.status === 0 || error.status >= 500) ||
+    error instanceof DOMException && error.name === 'AbortError' || error instanceof SyntaxError;
 }
 
-// An opened project's media: the page's bytes play from object URLs, published files from the site.
-function openedMedia(content: OpenedProject): Map<string, MediaItem> {
-  return new Map(content.manifest.media.map((entry) => {
-    const source = openedSource(content, mediaFile(entry.path));
-    return [entry.path, { path: entry.path, ...source, url: source.blob === null ? source.published!.url : URL.createObjectURL(source.blob) }];
-  }));
+function unchangedSection<S extends SectionName>(history: History, section: S): SomeSectionChange {
+  const value = history.document.get(section);
+  return adapterFor(section).change(value, value) as SomeSectionChange;
 }
 
-function openedArt(content: OpenedProject): CourseArt {
-  const { art } = content.manifest;
-  return {
-    decorations: art.decorations,
-    assets: art.assets.map((asset) => ({ ...asset, ...openedSource(content, artFile(asset.id)) })),
-  };
+function withConsumerCuts(history: History, changes: readonly SomeSectionChange[]): readonly SomeSectionChange[] {
+  const consumers = new Set<SectionName>();
+  for (const change of changes) {
+    if (change.before === change.after) continue;
+    if (change.section === 'art') {
+      const assets = new Set(change.after.assets.map((asset) => asset.id));
+      if (change.before.assets.some((asset) => !assets.has(asset.id)) ||
+        Object.keys(change.before.decorations).some((id) => !Object.hasOwn(change.after.decorations, id))) {
+        consumers.add('level');
+        consumers.add('enemies');
+      }
+    } else if (change.section === 'media') {
+      const paths = new Set(change.after.map((file) => file.path));
+      if (change.before.some((file) => !paths.has(file.path))) {
+        consumers.add('level');
+        consumers.add('audio');
+      }
+    }
+  }
+  if (consumers.size === 0) return changes;
+  const named = new Set(changes.map((change) => change.section));
+  // Equal-value changes cut without changing the consumers' roots.
+  return [...changes, ...[...consumers].filter((section) => !named.has(section)).map((section) => unchangedSection(history, section))];
 }
 
 function fileSizes(files: readonly { readonly path: string; readonly bytes: number }[]): Map<string, number> {

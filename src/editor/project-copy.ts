@@ -48,6 +48,11 @@ export interface ProjectCopy {
   readonly content: OpenedProject;
 }
 
+export interface ProjectCopyFiles {
+  readonly values: ReadonlyMap<string, unknown>;
+  readonly fingerprints: ReadonlyMap<string, unknown>;
+}
+
 // A stored published file: its size and SHA-256 name its bytes in any deployment that still serves them.
 function publishedReference(value: unknown): { sha256: string; bytes: number } | null {
   if (typeof value !== 'object' || value === null || value instanceof Blob) return null;
@@ -69,7 +74,7 @@ export class ProjectCopyStore {
   // getRandomValues, unlike randomUUID, also works on plain-HTTP addresses.
   private readonly writer = Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => byte.toString(16).padStart(2, '0')).join('');
   private sequence = 0;
-  // The stored files as last read or written, or null when unknown: the next write then starts afresh.
+  // The stored files' fingerprints, never their payloads; null makes the next write start afresh.
   private stored: Map<string, unknown> | null = null;
   // The mark of the copy this page last wrote or opened, and of the copy it last read.
   private mark: WriteMark | null = null;
@@ -110,13 +115,16 @@ export class ProjectCopyStore {
     return { origin, dirty, content: Object.freeze({ ...documents, files }) };
   }
 
-  // After the page opened the copy it read: `files` are the page's values for what the store holds.
-  adopt(files: ReadonlyMap<string, unknown>): void {
-    this.stored = new Map(files);
+  // After the page opened the copy it read.
+  adopt(files: ProjectCopyFiles): void {
+    this.stored = new Map(files.fingerprints);
     this.mark = this.readMark;
   }
 
-  async write(state: { origin: string | null; dirty: readonly string[] }, files: ReadonlyMap<string, unknown>): Promise<void> {
+  async write(state: { readonly origin: string | null; readonly dirty: readonly string[] }, files: ProjectCopyFiles): Promise<void> {
+    if (files.values.size !== files.fingerprints.size || [...files.values.keys()].some((path) => !files.fingerprints.has(path))) {
+      throw new Error('Every browser-copy file needs a fingerprint.');
+    }
     const previous = this.stored;
     const expected = this.mark;
     const mark: WriteMark = { writer: this.writer, sequence: ++this.sequence };
@@ -127,11 +135,13 @@ export class ProjectCopyStore {
         const kept = previous !== null && sameMark(writeMark(Reflect.get(current.result ?? {}, 'value')), expected) ? previous : null;
         if (kept === null) store.clear();
         store.put({ path: STATE, value: { schemaVersion: VERSION, origin: state.origin, dirty: [...state.dirty], ...mark } });
-        for (const [path, value] of files) if (kept?.get(path) !== value) store.put({ path, value });
-        for (const path of kept?.keys() ?? []) if (!files.has(path)) store.delete(path);
+        for (const [path, value] of files.values) {
+          if (kept === null || !kept.has(path) || kept.get(path) !== files.fingerprints.get(path)) store.put({ path, value });
+        }
+        for (const path of kept?.keys() ?? []) if (!files.values.has(path)) store.delete(path);
       };
     }), 'could not be saved; browser storage may be blocked or full. Export the project file to keep your changes');
-    this.stored = new Map(files);
+    this.stored = new Map(files.fingerprints);
     this.mark = mark;
   }
 

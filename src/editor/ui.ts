@@ -1,7 +1,6 @@
 import type { Tuning } from '../config';
 import {
-  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEATH_FIELDS, DEFAULT_GAME_SETTINGS, GameSettingsError, RIG_FIELDS, TUNING_FIELDS,
-  validateGameSettings, withRig,
+  CURSOR_FIELDS, CURSOR_RETURN_FIELDS, DEATH_FIELDS, DEFAULT_GAME_SETTINGS, RIG_FIELDS, TUNING_FIELDS, withRig,
 } from '../game-settings';
 import type { CursorSettings, DeathSettings, GameSettings } from '../game-settings';
 import { minReachLimit, rigGeometry } from '../rig';
@@ -9,6 +8,7 @@ import type { RigSettings } from '../rig';
 import { element, setPressed, setText } from '../dom';
 import { createGameUI, DESKTOP_QUERY } from './game-ui';
 import { inputModeForPointer } from '../input';
+import { applyProjectCommand } from './document/project-commands';
 import { PRACTICES } from './practices';
 import { createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
@@ -46,7 +46,6 @@ const TUNING_SECTIONS: Readonly<Record<TuningGroup, Omit<WorkshopSection, 'title
 };
 
 export function createUI(options: UiOptions): GameUi {
-  let settings = validateGameSettings(options.initialSettings);
   let selectedTab: WorkshopTab = 'physics';
   const events = new AbortController();
   const listen = { signal: events.signal };
@@ -214,8 +213,8 @@ export function createUI(options: UiOptions): GameUi {
   const practiceDescription = element<HTMLElement>(root, '.practice-description');
   setText(element(root, '.practice-count'), `${PRACTICES.length} STARTING POINTS`);
 
-  function renderSettings(next: GameSettings): void {
-    settings = next;
+  // Shows the project's game settings; the controls keep no settings of their own.
+  function renderSettings(settings: GameSettings): void {
     const tuning = settings.physics;
     for (const field of TUNING_FIELDS) {
       const control = controls.get(field.key);
@@ -251,19 +250,16 @@ export function createUI(options: UiOptions): GameUi {
       control.row.classList.toggle('is-inactive', !settings.cursor.returnToHammer);
     }
   }
-  function commitSettings(next: GameSettings): void {
-    const valid = validateGameSettings(next);
-    options.onSettingsChange(valid);
-    renderSettings(valid);
-  }
-  function editSettings(next: GameSettings): void {
-    try {
-      commitSettings(next);
-    } catch (error) {
-      if (!(error instanceof GameSettingsError)) throw error;
-      renderSettings(settings);
-      notice(error.message, 'error');
-    }
+  // Applies the settings `build` makes from the project's as one step, which a scrub's input events share; a refusal is
+  // reported and the controls show the project's settings again. False when refused.
+  function editSettings(label: string, section: string | null, build: (current: GameSettings) => GameSettings): boolean {
+    const refusal = applyProjectCommand(options.history, options.commands.settings(build, {
+      label, place: { tab: 'physics', section, select: null }, coalesce: null,
+    }));
+    if (refusal === null) return true;
+    renderSettings(options.history.document.get('settings'));
+    notice(refusal.message, 'error');
+    return false;
   }
   for (const practice of PRACTICES) {
     const button = document.createElement('button');
@@ -296,9 +292,11 @@ export function createUI(options: UiOptions): GameUi {
       group = tuningSection({ ...TUNING_SECTIONS[field.group], title: field.group }, field.group);
       groups.set(field.group, group);
     }
+    const label = `Set ${field.label}`;
     const control = createRangeControl(field, {
-      id: `tuning-${field.key}`, name: field.key, signal: events.signal,
-      onInput: (value) => editSettings({ ...settings, physics: { ...settings.physics, [field.key]: value } }),
+      id: `tuning-${field.key}`, name: field.key, signal: events.signal, history: options.history, stepLabel: label,
+      onInput: (value) => editSettings(label, TUNING_SECTIONS[field.group].id,
+        (current) => ({ ...current, physics: { ...current.physics, [field.key]: value } })),
     });
     if (field.key === 'handleDamping') {
       const reason = document.createElement('p');
@@ -320,9 +318,10 @@ export function createUI(options: UiOptions): GameUi {
     'Characters with sliding grips need arms that reach about the maximum extension; fixed grips need arms that reach as far as the handle slides.';
   rigGroup.append(rigHelp);
   for (const field of RIG_FIELDS) {
+    const label = `Set ${field.label}`;
     const control = createRangeControl(field, {
-      id: `rig-${field.key}`, name: field.key, signal: events.signal,
-      onInput: (value) => editSettings(withRig(settings, { ...settings.rig, [field.key]: value })),
+      id: `rig-${field.key}`, name: field.key, signal: events.signal, history: options.history, stepLabel: label,
+      onInput: (value) => editSettings(label, 'physics-rig', (current) => withRig(current, { ...current.rig, [field.key]: value })),
     });
     rigControls.set(field.key, control);
     rigGroup.append(control.row);
@@ -348,9 +347,11 @@ export function createUI(options: UiOptions): GameUi {
     'The cursor moves freely within the dead zone around the target, then drags the target along, so it can reach the dead zone past the radius.';
   cursorGroup.append(cursorHelp);
   for (const field of CURSOR_FIELDS) {
+    const label = `Set ${field.label}`;
     const control = createRangeControl(field, {
-      id: `cursor-${field.key}`, name: field.key, signal: events.signal,
-      onInput: (value) => editSettings({ ...settings, cursor: { ...settings.cursor, [field.key]: value } }),
+      id: `cursor-${field.key}`, name: field.key, signal: events.signal, history: options.history, stepLabel: label,
+      onInput: (value) => editSettings(label, 'physics-cursor',
+        (current) => ({ ...current, cursor: { ...current.cursor, [field.key]: value } })),
     });
     cursorControls.set(field.key, control);
     cursorGroup.append(control.row);
@@ -368,14 +369,17 @@ export function createUI(options: UiOptions): GameUi {
     'the target eases toward the head plus the return offset, and the cursor moves with it; aiming always comes first. ' +
     'X goes right and Y goes up, in world metres; the offset does not turn with the hammer.';
   returnToggle.setAttribute('aria-describedby', returnHelp.id);
-  returnToggle.addEventListener('change', () => editSettings({
-    ...settings, cursor: { ...settings.cursor, returnToHammer: returnToggle.checked },
-  }), listen);
+  returnToggle.addEventListener('change', () => editSettings(
+    `Turn ${returnToggle.checked ? 'on' : 'off'} Return target to hammer`, 'physics-cursor',
+    (current) => ({ ...current, cursor: { ...current.cursor, returnToHammer: returnToggle.checked } }),
+  ), listen);
   cursorGroup.append(returnLabel, returnHelp);
   for (const field of CURSOR_RETURN_FIELDS) {
+    const label = `Set ${field.label}`;
     const control = createRangeControl(field, {
-      id: `cursor-${field.key}`, name: field.key, signal: events.signal,
-      onInput: (value) => editSettings({ ...settings, cursor: { ...settings.cursor, [field.key]: value } }),
+      id: `cursor-${field.key}`, name: field.key, signal: events.signal, history: options.history, stepLabel: label,
+      onInput: (value) => editSettings(label, 'physics-cursor',
+        (current) => ({ ...current, cursor: { ...current.cursor, [field.key]: value } })),
     });
     cursorControls.set(field.key, control);
     cursorGroup.append(control.row);
@@ -394,9 +398,10 @@ export function createUI(options: UiOptions): GameUi {
     'Respawn wait controls placement, while the HUD controls only text and fade.';
   deathGroup.append(deathHelp);
   for (const field of DEATH_FIELDS) {
+    const label = `Set ${field.label}`;
     const control = createRangeControl(field, {
-      id: `death-${field.key}`, name: field.key, signal: events.signal,
-      onInput: value => editSettings({ ...settings, death: { ...settings.death, [field.key]: value } }),
+      id: `death-${field.key}`, name: field.key, signal: events.signal, history: options.history, stepLabel: label,
+      onInput: value => editSettings(label, 'physics-death', (current) => ({ ...current, death: { ...current.death, [field.key]: value } })),
     });
     deathControls.set(field.key, control); deathGroup.append(control.row);
   }
@@ -448,8 +453,9 @@ export function createUI(options: UiOptions): GameUi {
     }
   }, listen);
   element<HTMLButtonElement>(root, '.defaults-tuning').addEventListener('click', () => {
-    commitSettings(DEFAULT_GAME_SETTINGS);
-    notice('All game settings restored to defaults. Your saved profiles were not changed.', 'info');
+    if (editSettings('Reset game settings to defaults', null, () => DEFAULT_GAME_SETTINGS)) {
+      notice('All game settings restored to defaults. Your saved profiles were not changed.', 'info');
+    }
   }, listen);
   const contacts = element<HTMLElement>(root, '.contact-value');
   const hinge = element<HTMLElement>(root, '.hinge-effort-value');
@@ -484,11 +490,11 @@ export function createUI(options: UiOptions): GameUi {
     }
     if (state.practice === null) setText(practiceDescription, 'Where you placed the player in Workshop / Level. Reset returns there.');
   }
-  renderSettings(settings);
+  renderSettings(options.history.document.get('settings'));
   createGameSettingsUI({
     mount: savedSettingsMount, serverMount: serverSettingsMount, signal: events.signal,
+    history: options.history, commands: options.commands, imports: options.imports, onNotice: notice,
     projectSave: options.projectSave, serverCopies: options.serverCopies,
-    getSettings: () => settings, onLoad: commitSettings, onNotice: notice,
   });
   rememberSections(panel, events.signal);
   keepClosingHeadingsInView(panel, events.signal);
@@ -517,17 +523,18 @@ export function createUI(options: UiOptions): GameUi {
     search.focus();
   }, listen);
   renderWorkshop(desktop.matches ? 'open' : 'closed');
+  // Every change of the settings shows here, whoever made it: an edit, Undo or Redo, another project or the server.
+  const unsubscribeSettings = options.history.document.subscribe('settings', (change) => renderSettings(change.after));
   return {
     projectMount, characterMount, appearanceMount, spriteMount, levelMount, hammerHeadMount, jarMount, addTab, pluginSections, workshopState,
     historyMount, tabLabel, tabPane,
     closeWorkshop: () => setWorkshop('closed'),
     update, notice,
-    applySettings: commitSettings,
-    settings: () => settings,
     setHud: hud.setHud,
     setLevelName: hud.setLevelName,
     setSceneTone: hud.setSceneTone,
     dispose: () => {
+      unsubscribeSettings();
       events.abort();
       document.body.classList.remove(WORKSHOP_CLASS);
       hud.dispose();

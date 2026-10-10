@@ -4,7 +4,7 @@ import type { HammerHead } from '../hammer-head';
 import { PART_ROLES } from '../model-library';
 import type { PartRole } from '../model-library';
 import type { PartModel } from '../character-view';
-import type { LibraryModel } from './project-session';
+import type { LibraryModel } from './document/project-projection';
 
 // The game: it shows part models, a library hammer's with its head in the physics.
 export interface PartModelHost {

@@ -6,10 +6,13 @@ import type { CourseMesh, MeshTerrain } from '../mesh-collision';
 import { enemyModelBake } from '../enemy-model-check';
 import type { EnemyBake } from '../enemy-model-check';
 
+type ForgetMesh = { readonly kind: 'forget'; readonly assetId: string };
+
 export type MeshBakeRequest =
   | { readonly kind: 'mesh'; readonly assetId: string; readonly bytes: ArrayBuffer }
   | { readonly kind: 'bake'; readonly id: number; readonly assetId: string; readonly turn: number }
-  | { readonly kind: 'enemy'; readonly id: number; readonly bytes: ArrayBuffer };
+  | { readonly kind: 'enemy'; readonly id: number; readonly bytes: ArrayBuffer }
+  | ForgetMesh;
 
 export type MeshBakeResponse =
   | { readonly id: number; readonly terrain: MeshTerrain }
@@ -25,6 +28,10 @@ function reason(error: unknown): string {
 
 addEventListener('message', (event: MessageEvent<MeshBakeRequest>) => {
   const request = event.data;
+  if (request.kind === 'forget') {
+    meshes.delete(request.assetId);
+    return;
+  }
   if (request.kind === 'mesh') {
     try {
       meshes.set(request.assetId, readCourseMesh(request.bytes));

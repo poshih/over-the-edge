@@ -16,7 +16,8 @@ export interface JsonLimits {
 
 // Copies and freezes `value`, refusing with `refuse(message)` when it is not finite JSON data within `limits`. `label`
 // names it in messages, for example "Avatar driver configuration".
-export function boundedJson(value: unknown, limits: JsonLimits, label: string, refuse: (message: string) => Error): JsonValue {
+export function boundedJson(value: unknown, limits: JsonLimits, label: string, refuse: (message: string) => Error,
+  measured?: (bytes: number) => void): JsonValue {
   const encoder = new TextEncoder();
   let values = 0;
   let textBytes = 0;
@@ -45,7 +46,9 @@ export function boundedJson(value: unknown, limits: JsonLimits, label: string, r
     })));
   };
   const json = visit(value, 0);
-  if (encoder.encode(JSON.stringify(json)).byteLength > limits.bytes) throw refuse(`${label} exceeds its byte budget.`);
+  const bytes = encoder.encode(JSON.stringify(json)).byteLength;
+  if (bytes > limits.bytes) throw refuse(`${label} exceeds its byte budget.`);
+  measured?.(bytes);
   return json;
 }
 

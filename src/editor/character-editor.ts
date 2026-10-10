@@ -17,10 +17,14 @@ import {
 import type { GripPlacement } from '../grips';
 import { HAMMER_MODEL_HANDLE, HAMMER_MODEL_HEAD_END } from '../hammer-handle-fit';
 import { clamp } from '../math';
+import { withRig } from '../game-settings';
 import { RIG_LIMITS } from '../rig';
 import type { RigGeometry } from '../rig';
 import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
 import { validateProjectCharacter } from '../project';
+import type { History } from './document/history';
+import { applyProjectCommand } from './document/project-commands';
+import type { ProjectCommands } from './document/project-commands';
 import { createProjectSaveButton } from './project-save';
 import type { ProjectSaveTarget } from './project-save';
 import { createRangeControl } from './range-control';
@@ -79,6 +83,12 @@ const GRIP_RANGE_ENDS = [
   { end: 'to', label: 'Head-end limit', toward: 'the head' },
 ] as const;
 
+// The project's game settings, whose handle length the Character tab edits as Physics does.
+export interface DocumentSettingsEditing {
+  readonly history: History;
+  readonly commands: ProjectCommands;
+}
+
 export function createCharacterEditor(options: {
   readonly mount: HTMLElement;
   readonly state: SpriteEditorState;
@@ -86,8 +96,8 @@ export function createCharacterEditor(options: {
   readonly hammerRig: RigGeometry;
   // Each arm as the current character type draws it without the profile's own arm lengths.
   readonly naturalArms: () => CharacterArms;
-  // Sets the game's handle length, a physics setting shared by every character.
-  readonly onHandleLength: (length: number) => void;
+  // Edits the game's handle length, a physics setting shared by every character.
+  readonly settingsEditing: DocumentSettingsEditing;
   readonly actions: {
     save(): void;
     revert(): void;
@@ -505,7 +515,18 @@ export function createCharacterEditor(options: {
     description: 'The game\'s handle length, shared by every character. Changing it rebuilds the player and restarts the run.',
   }, {
     id: 'character-handle-length', name: 'characterHandleLength', signal: events.signal,
-    onInput: value => options.onHandleLength(value),
+    history: options.settingsEditing.history, stepLabel: 'Set Handle length',
+    onInput: value => {
+      const { history, commands } = options.settingsEditing;
+      const refusal = applyProjectCommand(history, commands.settings(
+        (current) => withRig(current, { ...current.rig, handleLength: value }),
+        { label: 'Set Handle length', place: { tab: 'character', section: 'character-grips', select: null }, coalesce: null },
+      ));
+      if (refusal === null) return;
+      // The control shows the game's handle length again.
+      renderRig();
+      options.onNotice(refusal.message, 'error');
+    },
   });
   element(root, '.character-handle-control').append(handleLength.row);
   const boneSelects = new Map<AvatarJointId, HTMLSelectElement>();

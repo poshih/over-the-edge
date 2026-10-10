@@ -1,6 +1,8 @@
 import type { Point } from '../config';
 import { element, setPressed, setText } from '../dom';
+import type { ChangeCause } from './document/project-document';
 import { createRangeControl } from './range-control';
+import type { ScrubHistory } from './range-control';
 import './outline-editor.css';
 
 // A convex collision outline about a centre, in metres with y up, counter-clockwise.
@@ -14,9 +16,46 @@ export interface EditedOutline {
 }
 
 export interface OutlineEditor {
-  // The outlines changed elsewhere: shows them, once a drag in progress ends.
-  refresh(): void;
   dispose(): void;
+}
+
+// What changed an outline: a moved or added point, a removed one, mirroring, a starting shape, or an arrow key's nudge,
+// whose step takes the nudges after it while they share `key`.
+export type OutlineAction =
+  | { readonly kind: 'drag' | 'add' | 'remove' | 'mirror' }
+  | { readonly kind: 'preset'; readonly name: string }
+  | { readonly kind: 'nudge'; readonly key: string };
+
+// One change of one outline, over the exact outline it replaces.
+export interface OutlineEdit {
+  readonly id: string | null;
+  readonly before: Outline;
+  readonly after: Outline;
+  readonly action: OutlineAction;
+}
+
+export interface OutlineEditorOptions {
+  readonly mount: HTMLElement;
+  // Seals a burst of nudges once the arrow key lifts.
+  readonly history: ScrubHistory;
+  // The outlines to shape, as the project holds them.
+  readonly outlines: () => readonly EditedOutline[];
+  // Applies one change as a command; returns its refusal, or null.
+  readonly apply: (edit: OutlineEdit) => Error | null;
+  // Hears every change of the outlines, with its cause; returns the unsubscribe.
+  readonly subscribe: (listener: (cause: ChangeCause) => void) => () => void;
+}
+
+// A step's name: what an action did to `outline`, as in "Move jar outline point".
+export function outlineStepLabel(action: OutlineAction, outline: string): string {
+  switch (action.kind) {
+    case 'drag': return `Move ${outline} point`;
+    case 'add': return `Add ${outline} point`;
+    case 'remove': return `Remove ${outline} point`;
+    case 'nudge': return `Nudge ${outline} point`;
+    case 'mirror': return `Mirror ${outline}`;
+    case 'preset': return `Start ${outline} from ${action.name}`;
+  }
 }
 
 // What one kind of outline brings to the editor: its limits and checks, how it mirrors, where to start and what the
@@ -61,6 +100,10 @@ const FINEST_DRAWN = 20;
 const DRAG_PIXELS = 3;
 // The canvas half-width at which points and marks have their base sizes, in metres; wider canvases scale them up.
 const BASE_VIEW = 0.7;
+// Where each arrow key nudges the selected point, in grid steps.
+const NUDGES: Readonly<Record<string, Readonly<Point>>> = {
+  ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, ArrowUp: { x: 0, y: 1 }, ArrowDown: { x: 0, y: -1 },
+};
 
 function cross(o: Readonly<Point>, a: Readonly<Point>, b: Readonly<Point>): number {
   return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
@@ -102,14 +145,10 @@ function sameOutline(left: Outline, right: Outline): boolean {
  * A collision outline shaped on a canvas around its centre. Points drag, an edge takes a new point where it is
  * pressed, the arrow keys nudge the selected point and Delete removes it; moved and added points snap to the chosen
  * grid. The outline is always the smallest convex one around its points, so it can never fold in. Mirror keeps its
- * two halves alike. Each change applies once the pointer lifts.
+ * two halves alike. Each change applies once the pointer lifts, as one undo step; a burst of nudges is one step. The
+ * outline shown is the project's, or a drag's preview of it.
  */
-export function createOutlineEditor(kind: OutlineKind, options: {
-  readonly mount: HTMLElement;
-  readonly outlines: () => readonly EditedOutline[];
-  // Stores an outline; false when it was refused, which the store reports.
-  readonly setOutline: (id: string | null, outline: Outline) => boolean;
-}): OutlineEditor {
+export function createOutlineEditor(kind: OutlineKind, options: OutlineEditorOptions): OutlineEditor {
   const events = new AbortController();
   const listen = { signal: events.signal };
   const root = options.mount;
@@ -248,19 +287,23 @@ export function createOutlineEditor(kind: OutlineKind, options: {
   showSnap();
 
   let outlines: readonly EditedOutline[] = [];
-  // The chosen outline's id and the outline shown: as stored, or a drag's.
+  // The chosen outline's id and the outline shown: as the project holds it, or a drag's preview.
   let chosen: string | null = null;
   let stored: Outline = kind.fallback;
   let shown: Outline = stored;
   let selected: number | null = null;
   let mirror = false;
   // A drag in progress: the points it moves, which may lie inside the outline for now, and which of them move; where
-  // the press was, how far the pressed point lies from the pointer, and whether it has moved yet.
+  // the press was, how far the pressed point lies from the pointer, whether it has moved yet, and whether its point is
+  // a new one, added on an edge.
   let drag: {
     readonly pointerId: number; readonly points: Point[]; readonly index: number; readonly partner: number | null;
-    readonly start: Readonly<Point>; readonly offset: Readonly<Point>; moved: boolean;
+    readonly start: Readonly<Point>; readonly offset: Readonly<Point>; moved: boolean; readonly added: boolean;
   } | null = null;
-  let stale = false;
+  // The nudges of one point: one key, kept while that point stays selected in the chosen outline wherever the outline's
+  // order puts it, so a held arrow key or a quick burst is one step.
+  let nudge: { readonly key: string; readonly outline: string | null; readonly at: Readonly<Point> } | null = null;
+  let nudges = 0;
   const pointElements: SVGCircleElement[] = [];
   const edgeElements: SVGLineElement[] = [];
 
@@ -281,12 +324,23 @@ export function createOutlineEditor(kind: OutlineKind, options: {
     }
   }
 
-  function commit(next: Outline): void {
-    const edited = current();
-    if (edited === undefined) return;
-    if (options.setOutline(edited.id, next)) stored = next;
-    shown = stored;
-    render();
+  // Applies `next` over the chosen outline as the project holds it now, then shows what the project holds; a refusal
+  // shows its reason.
+  function apply(next: Outline, action: OutlineAction): void {
+    const edited = options.outlines().find((candidate) => candidate.id === chosen);
+    if (edited !== undefined && !sameOutline(next, edited.outline)) {
+      const refusal = options.apply({ id: edited.id, before: edited.outline, after: next, action });
+      if (refusal !== null) setText(problem, refusal.message);
+    }
+    refresh();
+  }
+
+  // Ends a drag without applying it.
+  function stopDrag(): void {
+    if (drag === null) return;
+    const { pointerId } = drag;
+    drag = null;
+    if (svg.hasPointerCapture(pointerId)) svg.releasePointerCapture(pointerId);
   }
 
   function render(): void {
@@ -331,24 +385,21 @@ export function createOutlineEditor(kind: OutlineKind, options: {
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-preset]')) button.disabled = edited === undefined;
   }
 
-  // Shows the outlines and the chosen one as stored.
+  // Shows the outlines as the project holds them; a drag in progress keeps its preview. An outline changed elsewhere keeps
+  // its selected point while it has one, and mirroring while it is still mirrored.
   function refresh(): void {
-    if (drag !== null) {
-      stale = true;
-      return;
-    }
-    stale = false;
     outlines = options.outlines();
     if (current() === undefined) chosen = outlines[0]?.id ?? null;
     const keep = select.value;
     select.replaceChildren(...outlines.map((entry) => new Option(kind.chooser?.name(entry) ?? entry.name, entry.id ?? '')));
     select.value = outlines.some((entry) => (entry.id ?? '') === keep) ? keep : chosen ?? '';
     const next = current()?.outline ?? kind.fallback;
-    if (next !== stored) {
-      stored = next;
-      if (selected !== null && selected >= stored.length) selected = null;
+    if (!sameOutline(next, stored)) {
+      if (selected !== null && selected >= next.length) selected = null;
+      if (mirror && !symmetric(next)) mirror = false;
     }
-    shown = stored;
+    stored = next;
+    if (drag === null) shown = stored;
     render();
   }
 
@@ -375,13 +426,13 @@ export function createOutlineEditor(kind: OutlineKind, options: {
 
   // A pressed point keeps its place until the pointer moves it. A point added on an edge is not selected until it
   // joins the outline.
-  function startDrag(event: PointerEvent, points: Point[], index: number): void {
+  function startDrag(event: PointerEvent, points: Point[], index: number, added: boolean): void {
     svg.setPointerCapture(event.pointerId);
     selected = index < stored.length ? index : null;
     const at = pointer(event);
     drag = {
       pointerId: event.pointerId, points, index, partner: partnerOf(points, index), start: { x: event.clientX, y: event.clientY },
-      offset: { x: points[index]!.x - at.x, y: points[index]!.y - at.y }, moved: false,
+      offset: { x: points[index]!.x - at.x, y: points[index]!.y - at.y }, moved: false, added,
     };
     render();
   }
@@ -405,16 +456,14 @@ export function createOutlineEditor(kind: OutlineKind, options: {
   function endDrag(event: PointerEvent): void {
     if (drag === null || event.pointerId !== drag.pointerId) return;
     if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
-    const at = drag.points[drag.index]!;
-    const moved = drag.moved;
+    const { points, index, moved, added } = drag;
     drag = null;
-    if (moved && !sameOutline(shown, stored)) commit(shown);
+    if (moved && !sameOutline(shown, stored)) apply(shown, { kind: added ? 'add' : 'drag' });
     else shown = stored;
     // The dragged point stays selected unless it folded into the outline.
-    const index = indexOf(stored, at);
-    selected = index < 0 ? null : index;
-    if (stale) refresh();
-    else render();
+    const found = indexOf(stored, points[index]!);
+    selected = found < 0 ? null : found;
+    render();
   }
 
   svg.addEventListener('pointerdown', (event) => {
@@ -424,18 +473,18 @@ export function createOutlineEditor(kind: OutlineKind, options: {
     if (target?.classList.contains('outline-editor-point')) {
       event.preventDefault();
       (target as SVGCircleElement).focus({ preventScroll: true });
-      startDrag(event, stored.map((point) => ({ ...point })), index);
+      startDrag(event, stored.map((point) => ({ ...point })), index, false);
     } else if (target?.classList.contains('outline-editor-edge')) {
       event.preventDefault();
-      const added = mirror && Math.abs(across(snap(pointer(event), grid))) > 1e-9 ? 2 : 1;
-      if (stored.length + added > kind.vertices.max) {
+      const count = mirror && Math.abs(across(snap(pointer(event), grid))) > 1e-9 ? 2 : 1;
+      if (stored.length + count > kind.vertices.max) {
         setText(problem, `A ${kind.noun} has at most ${kind.vertices.max} points.`);
         return;
       }
       const points = stored.map((point) => ({ ...point }));
       points.push(snap(pointer(event), grid));
-      if (added === 2) points.push(mirrored(points[points.length - 1]!));
-      startDrag(event, points, points.length - added);
+      if (count === 2) points.push(mirrored(points[points.length - 1]!));
+      startDrag(event, points, points.length - count, true);
     }
   }, listen);
   svg.addEventListener('pointermove', moveDrag, listen);
@@ -445,8 +494,7 @@ export function createOutlineEditor(kind: OutlineKind, options: {
     if (drag === null || event.pointerId !== drag.pointerId) return;
     drag = null;
     shown = stored;
-    if (stale) refresh();
-    else render();
+    render();
   };
   svg.addEventListener('pointercancel', cancelDrag, listen);
   svg.addEventListener('lostpointercapture', cancelDrag, listen);
@@ -464,7 +512,7 @@ export function createOutlineEditor(kind: OutlineKind, options: {
     const next = outlineOf(points);
     if (next === null) return;
     selected = null;
-    commit(next);
+    apply(next, { kind: 'remove' });
   }
 
   svg.addEventListener('keydown', (event) => {
@@ -474,30 +522,49 @@ export function createOutlineEditor(kind: OutlineKind, options: {
       remove(selected);
       return;
     }
-    const moves: Record<string, Point> = { ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, ArrowUp: { x: 0, y: 1 }, ArrowDown: { x: 0, y: -1 } };
-    const move = moves[event.key];
-    if (move === undefined) return;
+    if (!Object.hasOwn(NUDGES, event.key)) return;
+    const move = NUDGES[event.key]!;
     event.preventDefault();
     const distance = (event.shiftKey ? 10 : 1) * grid / 1000;
+    const from = stored[selected]!;
     const points = stored.map((point) => ({ ...point }));
     const partner = partnerOf(points, selected);
     // A point on the mirror line moves only along it, before it snaps.
-    const pinned = mirror && partner === null && Math.abs(across(points[selected]!)) < 1e-9;
-    const moved = { x: points[selected]!.x + move.x * distance, y: points[selected]!.y + move.y * distance };
+    const pinned = mirror && partner === null && Math.abs(across(from)) < 1e-9;
+    const moved = { x: from.x + move.x * distance, y: from.y + move.y * distance };
     const at = snap(pinned ? onLine(moved) : moved, grid);
     points[selected] = at;
     if (partner !== null) points[partner] = mirrored(at);
     const next = outlineOf(points);
-    // A point pushed inside the outline leaves it; the selection keeps to a point that is still there.
     if (next === null) return;
-    const index = indexOf(next, at);
-    commit(next);
+    // The point keeps its key however the outline reorders it; another point or outline takes a new one.
+    if (nudge === null || nudge.outline !== chosen || indexOf(stored, nudge.at) !== selected) {
+      nudge = { key: `outline:${kind.key}:${++nudges}`, outline: chosen, at: from };
+    }
+    const { key } = nudge;
+    const previous = stored;
+    apply(next, { kind: 'nudge', key });
+    // The selection follows the point to its place in the outline the project now holds, where it stays put when the
+    // nudge was refused; a point pushed inside the outline leaves it, and the selection with it.
+    const index = indexOf(stored, stored === previous ? from : at);
     selected = index < 0 ? null : index;
+    nudge = selected === null ? null : { key, outline: chosen, at: stored[selected]! };
     render();
+    // Focus moves with the point, keeping its key.
     if (selected !== null) pointElements[selected]?.focus({ preventScroll: true });
+  }, listen);
+  // Releasing the arrow key seals the point's step: a nudge more than a second later starts a step of its own.
+  svg.addEventListener('keyup', (event) => {
+    if (nudge !== null && Object.hasOwn(NUDGES, event.key)) options.history.seal(nudge.key);
+  }, listen);
+  // Focus leaving the outline lets its key go, so its step takes no more nudges; focus moving between points keeps it.
+  svg.addEventListener('focusout', (event) => {
+    if (!(event.relatedTarget instanceof Node && svg.contains(event.relatedTarget))) nudge = null;
   }, listen);
 
   select.addEventListener('change', () => {
+    // A drag goes with the outline it shapes.
+    stopDrag();
     chosen = select.value === '' ? null : select.value;
     selected = null;
     stored = current()?.outline ?? kind.fallback;
@@ -509,10 +576,12 @@ export function createOutlineEditor(kind: OutlineKind, options: {
   mirrorButton.addEventListener('click', () => {
     mirror = !mirror;
     if (mirror) {
-      // The side where the mirrored coordinate is positive, mirrored onto the other.
+      // The side where the mirrored coordinate is positive, mirrored onto the other; an outline already mirrored stays.
       const kept = stored.filter((point) => across(point) >= 0);
       const next = outlineOf(kept.length >= 2 ? kept : stored);
-      if (next !== null && next !== stored) commit(next);
+      if (next !== null) apply(next, { kind: 'mirror' });
+      // Mirroring stays on only once the outline is mirrored.
+      mirror = symmetric(stored);
     }
     render();
   }, listen);
@@ -523,18 +592,28 @@ export function createOutlineEditor(kind: OutlineKind, options: {
     button.addEventListener('click', () => {
       const preset = kind.presets[Number(button.dataset.preset)]!;
       selected = null;
-      mirror = symmetric(preset.outline);
       setText(problem, '');
-      commit(preset.outline);
+      apply(preset.outline, { kind: 'preset', name: preset.label });
+      mirror = symmetric(stored);
+      render();
     }, listen);
   }
 
   refresh();
   mirror = symmetric(stored);
   render();
+  // Undo, Redo, another project or the server end a drag at once, as an edit does that changes the outline dragged:
+  // its release must not put back what they changed.
+  const unsubscribe = options.subscribe((cause) => {
+    if (drag !== null) {
+      const next = options.outlines().find((candidate) => candidate.id === chosen)?.outline;
+      if (cause !== 'edit' || next === undefined || !sameOutline(next, stored)) stopDrag();
+    }
+    refresh();
+  });
   return {
-    refresh,
     dispose(): void {
+      unsubscribe();
       events.abort();
       root.replaceChildren();
     },

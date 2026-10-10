@@ -1,24 +1,34 @@
 // Runs the manifest's workshop facets (docs/workshop-plugins.md). Once the project is open, each plugin
 // starts with a host of its own: its places in the Workshop, the project, its own data and the running game. Each is
 // isolated: an error it throws stops it alone, and everything it added goes with it. A change to a workshop facet restarts
-// the plugins and keeps the project's unsaved changes.
+// the plugins and keeps the project's unsaved changes; Undo then stops short of the changed plugins' data, which their
+// old facets checked.
 import workshopFacets from 'virtual:game-plugins/workshop';
 import kinds, { plugins as manifestPlugins } from 'virtual:game-plugins/kinds';
+import { ALIGNMENT_FIELDS, ARM_IK_FIELDS } from '../appearance-profile';
+import type { AppearancePart } from '../appearance-profile';
+import type { ArmIkSettings } from '../character';
 import type { Point } from '../config';
 import type { Game } from '../game';
-import type { GameSettings } from '../game-settings';
+import type { MediaEntry } from '../media';
+import type { ModelLibrary } from '../model-library';
 import type { PluginData } from '../plugin-data';
-import { isPluginId } from '../plugin-data';
+import { isPluginId, pluginOfSection, pluginSection } from '../plugin-data';
+import { ProjectError } from '../project';
+import type { ProjectArt } from '../project';
 import type { PresentationPreview } from '../character-view';
 import { SCENE_LAYER_CONTRACT } from '../scene-layer';
 import type { SceneLayer } from '../scene-layer';
 import type { Appearance } from './appearance';
-import type { History } from './document/history';
-import type { SectionChange } from './document/project-document';
+import type { Command, History } from './document/history';
+import type { ProjectCommandInfo, ProjectCommands, ProjectPlugins } from './document/project-commands';
+import type {
+  DocumentArt, DocumentMedia, DocumentModels, ProjectDocument, SectionChange, SomeSectionChange, StepPlace,
+} from './document/project-document';
+import type { EditOutcome, ImportOptions, ProjectImports } from './document/project-imports';
+import type { ProjectProjection } from './document/project-projection';
 import type { WorkshopGameState } from './game-state';
 import type { LevelState } from './level-state';
-import { PROJECT_SECTIONS } from './project-session';
-import type { ProjectPlugins, ProjectSession } from './project-session';
 import type { SpriteEditorHandle } from './sprite-editor';
 import type { GameUi, PluginSectionTab, PluginWorkshopTab, WorkshopState } from './ui-types';
 import { apply1, attributed, call0, call1, call2, checkInstance, PluginError, pluginFailure, pluginRefusal } from '../plugins/kernel';
@@ -42,13 +52,18 @@ const SECTION_TABS: readonly WorkshopSectionTab[] = ['character', 'level', 'phys
 const POINTER_TYPES: Readonly<Record<string, WorkshopPointerEvent['type']>> = {
   pointerdown: 'down', pointermove: 'move', pointerup: 'up', pointercancel: 'cancel',
 };
+// A plugin's steps belong to no tab or section.
+const PLUGIN_PLACE: StepPlace = Object.freeze({ tab: null, section: null, select: null });
 
-type RegistryEvent = { readonly kind: 'replaced' } | { readonly kind: 'failed'; readonly id: string; readonly error: Error };
+type RegistryEvent =
+  // `changed`: the plugins whose facet came, went or changed.
+  | { readonly kind: 'replaced'; readonly changed: readonly string[] }
+  | { readonly kind: 'failed'; readonly id: string; readonly error: Error };
 
 /**
  * The workshop facets as this page has them, and what the project needs of them: which plugins the Workshop has, and
- * each one's check of its data. A hot update replaces them. A plugin that fails stays stopped until then,
- * and its data stays as it is, no longer checked.
+ * each one's check of its data. A hot update replaces them. A plugin that fails stays stopped until then, its data as it
+ * is, and its check of that data refuses with its failure.
  */
 export class WorkshopPluginRegistry implements ProjectPlugins {
   private definitions: ReadonlyMap<string, WorkshopFacet> = new Map();
@@ -57,7 +72,8 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
   private reach: Attributed<LevelReachSource> = attributed(null, LEVEL_REACH.id, ENGINE_LEVEL_REACH);
   private readonly kinds: Kinds;
   private problem: PluginError | null = null;
-  private readonly failures = new Set<string>();
+  // Each failed plugin's failure, until a hot update.
+  private readonly failures = new Map<string, PluginError>();
   // Each plugin's last error, kept across hot updates.
   private readonly errors = new Map<string, Error>();
   private readonly listeners = new Set<(event: RegistryEvent) => void>();
@@ -103,11 +119,14 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
     return this.definitions.has(id);
   }
 
-  // The plugin's check of its data: its typed refusal, or null. A plugin whose check throws anything else has failed:
-  // it stops, and its data, this one included, is no longer checked, so a faulty plugin never holds the project back.
-  validate(id: string, data: PluginData): Error | null {
+  // The plugin's check of its data: its typed refusal, or null. A check that throws anything else fails the plugin, which
+  // stops. Until its facet changes, a failed plugin's check refuses with its failure rather than pass data it cannot
+  // check; a project opening or a server update takes such data unchecked itself.
+  validate(id: string, data: PluginData): PluginError | null {
     const plugin = this.definitions.get(id);
-    if (plugin?.validate === undefined || this.failures.has(id)) return null;
+    if (plugin?.validate === undefined) return null;
+    const failed = this.failures.get(id);
+    if (failed !== undefined) return failed;
     // A typed data refusal is not a thrown plugin fault. Intercept it before the adapter attributes thrown faults.
     let refusal: PluginError | null = null;
     const validate = attributed(id, null, (value: PluginData) => {
@@ -120,21 +139,30 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
       apply1(validate, 'validate', data);
       return refusal;
     } catch (error) {
-      this.fail(id, error, 'validate');
-      return null;
+      return this.failure(id, error, 'validate');
     }
   }
 
   fail(id: string, error: unknown, action: string): void {
-    if (!this.definitions.has(id) || this.failures.has(id)) return;
-    const failure = pluginFailure(error, id, null, action);
-    this.failures.add(id);
+    if (this.definitions.has(id)) this.failure(id, error, action);
+  }
+
+  // The plugin's failure, recorded and told once. It is `plugin-failed` whatever error caused it, so its check of its data
+  // refuses as a failed plugin's.
+  private failure(id: string, error: unknown, action: string): PluginError {
+    const recorded = this.failures.get(id);
+    if (recorded !== undefined) return recorded;
+    const fault = pluginFailure(error, id, null, action);
+    const failure = fault.code === 'plugin-failed' ? fault : new PluginError('plugin-failed', fault.message, id, null, { cause: fault });
+    this.failures.set(id, failure);
     this.errors.set(id, failure);
     for (const listener of this.listeners) listener({ kind: 'failed', id, error: failure });
+    return failure;
   }
 
   // Composition is atomic at load and hot update; invalid facets keep the project's data but cannot run.
   replace(value: unknown): void {
+    const previous = this.definitions;
     this.failures.clear();
     try {
       const composed = composeWorkshop(value, this.kinds);
@@ -152,7 +180,9 @@ export class WorkshopPluginRegistry implements ProjectPlugins {
       this.problem = error;
       if (error.plugin !== null) this.errors.set(error.plugin, error);
     }
-    for (const listener of this.listeners) listener({ kind: 'replaced' });
+    const changed = Object.freeze([...new Set([...previous.keys(), ...this.definitions.keys()])]
+      .filter((id) => previous.get(id) !== this.definitions.get(id)));
+    for (const listener of this.listeners) listener({ kind: 'replaced', changed });
   }
 
   subscribe(listener: (event: RegistryEvent) => void): () => void {
@@ -175,22 +205,59 @@ export interface WorkshopPluginHostOptions {
   readonly ui: GameUi;
   readonly game: Game;
   readonly canvas: HTMLCanvasElement;
-  readonly project: ProjectSession;
   readonly history: History;
   readonly level: LevelState;
+  readonly commands: ProjectCommands;
+  readonly imports: ProjectImports;
+  readonly projection: ProjectProjection;
   readonly character: Pick<SpriteEditorHandle, 'snapshot' | 'subscribe' | 'edits'>;
   readonly appearance: Appearance;
-  // Physics' edit of the game settings, which reports a refusal as Physics does and returns it.
-  readonly settings: (value: GameSettings) => Error | null;
   readonly control: { restart(): void; placePlayer(position: Point): void; state(): WorkshopGameState };
   readonly notice: (message: string, kind: 'info' | 'error') => void;
 }
 
-type Fingerprints = ReturnType<ProjectSession['fingerprints']>;
+// A plugin's data in the open project, or null without any.
+function pluginData(document: ProjectDocument, id: string): PluginData | null {
+  return document.get(pluginSection(id))?.data ?? null;
+}
 
-// Whether the engine's sections are unchanged; plugins' data is not part of the project they read.
-function sameProject(a: Fingerprints, b: Fingerprints): boolean {
-  return PROJECT_SECTIONS.every((name) => a[name] === b[name]);
+// A view of a document section as plugins read it, worked out once per value, so it stays the same object while the
+// section does.
+function sectionView<K extends object, V>(view: (value: K) => V): (value: K) => V {
+  const views = new WeakMap<K, V>();
+  return (value) => {
+    let shown = views.get(value);
+    if (shown === undefined) {
+      shown = view(value);
+      views.set(value, shown);
+    }
+    return shown;
+  };
+}
+
+const libraryView = sectionView((models: DocumentModels): ModelLibrary => Object.freeze({
+  avatar: Object.freeze(models.avatar.map(({ entry }) => entry)),
+  hammer: Object.freeze(models.hammer.map(({ entry }) => entry)),
+  pot: Object.freeze(models.pot.map(({ entry }) => entry)),
+}));
+const artView = sectionView((art: DocumentArt): ProjectArt => Object.freeze({
+  assets: Object.freeze(art.assets.map(({ id, name }) => Object.freeze({ id, name }))), decorations: art.decorations,
+}));
+const mediaView = sectionView((media: DocumentMedia): readonly MediaEntry[] =>
+  Object.freeze(media.map(({ path }) => Object.freeze({ path }))));
+
+// The appearance's arm IK and parts, which it keeps outside the document: `current` while their values are the same, so
+// the snapshot stays the same object.
+function keptArmIk(current: Readonly<ArmIkSettings> | null, next: Readonly<ArmIkSettings>): Readonly<ArmIkSettings> {
+  return current !== null && ARM_IK_FIELDS.every(({ key }) => current[key] === next[key]) ? current : Object.freeze(next);
+}
+
+function keptParts(current: readonly AppearancePart[] | null, next: ReturnType<Appearance['exportParts']>): readonly AppearancePart[] {
+  if (current !== null && current.length === next.length && next.every(({ part, name, alignment }, index) => {
+    const kept = current[index]!;
+    return kept.part === part && kept.name === name && ALIGNMENT_FIELDS.every(({ key }) => kept.alignment[key] === alignment[key]);
+  })) return current;
+  return Object.freeze(next.map(({ part, name, alignment }) => Object.freeze({ part, name, alignment: Object.freeze(alignment) })));
 }
 
 // `edits` whose operations first call `live`.
@@ -215,6 +282,9 @@ interface MountRecord {
 class RunningPlugin {
   readonly id: string;
   readonly controller = new AbortController();
+  // Aborted the moment the plugin starts stopping, before its stop removes the rest: edits it left waiting for a file or a
+  // bake never finish.
+  readonly waiting = new AbortController();
   readonly mounts = new Map<string, MountRecord>();
   readonly overlays = new Set<SceneLayer>();
   readonly pointerListeners = new Set<(event: WorkshopPointerEvent) => void>();
@@ -223,7 +293,7 @@ class RunningPlugin {
   // The data its listeners last heard of.
   data: PluginData | null;
   paused = false;
-  // Set at once on a failure or stop: nothing of the plugin runs after it, and its host refuses everything.
+  // Set at once on a failure or stop, by halt(): nothing of the plugin runs after it, and its host refuses everything.
   stopping = false;
   private readonly registry: WorkshopPluginRegistry;
 
@@ -248,13 +318,24 @@ class RunningPlugin {
 
   fail(error: unknown, action: string): void {
     if (this.stopping) return;
-    this.stopping = true;
+    this.halt();
     this.registry.fail(this.id, error, action);
+  }
+
+  // Stops the plugin at once; its stop removes what it added, outside the failing call.
+  halt(): void {
+    this.stopping = true;
+    this.waiting.abort();
   }
 
   // Refuses a host operation once the plugin has stopped, so late work of a stopped plugin adds nothing.
   live(): void {
-    if (this.stopping) throw new PluginError('plugin-stopped', `Workshop plugin "${this.id}" has stopped.`, this.id);
+    if (this.stopping) throw this.stopped();
+  }
+
+  // The refusal of everything a stopped plugin asks of its host.
+  stopped(): PluginError {
+    return new PluginError('plugin-stopped', `Workshop plugin "${this.id}" has stopped.`, this.id);
   }
 }
 
@@ -269,11 +350,14 @@ export class WorkshopPluginHost {
   private readonly unsubscribe: (() => void)[] = [];
   private started = false;
   private workshop: WorkshopState;
-  // The snapshot plugins read and the sections it shows; `stale` once anything may have changed them.
-  private snapshotCache: { readonly fingerprints: Fingerprints; readonly snapshot: WorkshopProjectSnapshot } | null = null;
+  // The snapshot plugins read, `stale` once anything it shows may have changed. The character and the appearance keep
+  // theirs outside the document, so it reads them again only when they tell of a change.
+  private snapshotCache: WorkshopProjectSnapshot | null = null;
   private stale = true;
+  private characterStale = true;
+  private appearanceStale = true;
   // What plugins' project listeners last heard of, and whether a batch of changes is waiting to be told.
-  private told: Fingerprints | null = null;
+  private told: WorkshopProjectSnapshot | null = null;
   private telling = false;
   private drag: { readonly plugin: RunningPlugin; readonly pointerId: number } | null = null;
   private preview: { readonly plugin: RunningPlugin; readonly preview: PresentationPreview } | null = null;
@@ -281,13 +365,17 @@ export class WorkshopPluginHost {
   constructor(options: WorkshopPluginHostOptions) {
     this.options = options;
     this.workshop = options.ui.workshopState();
-    const changed = (): void => this.projectChanged();
     this.unsubscribe.push(
       options.registry.subscribe((event) => this.registryChanged(event)),
-      options.project.subscribe(changed),
-      options.history.document.subscribe('level', changed),
-      options.character.subscribe(changed),
-      options.appearance.subscribe(changed),
+      options.history.document.subscribeAll((changes) => this.documentChanged(changes)),
+      options.character.subscribe(() => {
+        this.characterStale = true;
+        this.projectChanged();
+      }),
+      options.appearance.subscribe(() => {
+        this.appearanceStale = true;
+        this.projectChanged();
+      }),
     );
     const signal = this.lifecycle.signal;
     // In the capture phase, before the game's own canvas listeners, so a drag a plugin takes never reaches the game.
@@ -316,11 +404,6 @@ export class WorkshopPluginHost {
     for (const plugin of this.running.values()) for (const mount of plugin.mounts.values()) this.updateMount(mount);
   }
 
-  // The game settings changed; they are part of the project plugins read.
-  settingsChanged(): void {
-    this.projectChanged();
-  }
-
   inspect() {
     const registry = this.options.registry;
     return {
@@ -338,10 +421,10 @@ export class WorkshopPluginHost {
   }
 
   private startAll(): void {
-    this.told = this.options.project.fingerprints();
+    this.told = this.snapshot();
     for (const { id, facet } of this.options.registry.plugins) {
       if (this.options.registry.failed(id)) continue;
-      const plugin = new RunningPlugin(id, this.options.registry, this.options.project.pluginDataOf(id));
+      const plugin = new RunningPlugin(id, this.options.registry, pluginData(this.options.history.document, id));
       const host = this.createHost(plugin);
       this.running.set(plugin.id, plugin);
       plugin.guard(() => facet.start(host), 'start')();
@@ -361,12 +444,15 @@ export class WorkshopPluginHost {
       this.options.notice(`Workshop plugin "${event.id}" failed and stopped: ${event.error.message}`, 'error');
       const plugin = this.running.get(event.id);
       if (plugin === undefined) return;
-      plugin.stopping = true;
+      plugin.halt();
       // Outside the failing call, which may be the game's frame or another plugin's notification.
       queueMicrotask(() => { if (this.running.get(event.id) === plugin) this.stop(event.id); });
       return;
     }
     for (const id of [...this.running.keys()].reverse()) this.stop(id);
+    // Undo never checks the data it restores: steps holding data an old facet checked, or none did, go before the new
+    // facets start.
+    if (event.changed.length > 0) this.options.history.cut(event.changed.map(pluginSection));
     if (this.showFacetError()) return;
     if (!this.started) return;
     this.startAll();
@@ -379,7 +465,7 @@ export class WorkshopPluginHost {
     const plugin = this.running.get(id);
     if (plugin === undefined) return;
     this.running.delete(id);
-    plugin.stopping = true;
+    plugin.halt();
     plugin.controller.abort();
     for (const mount of [...plugin.mounts.values()]) mount.remove();
     for (const layer of [...plugin.overlays]) this.options.game.view.removeLayer(layer);
@@ -392,9 +478,20 @@ export class WorkshopPluginHost {
     if (plugin.paused) this.options.game.setPause({ reason: `plugin:${id}`, paused: false });
   }
 
-  // Something the project's snapshot holds may have changed. Plugins hear of real changes once per batch.
+  // A batch of the document's changes. Plugins' data is not part of the snapshot, though its listeners hear of it.
+  private documentChanged(changes: readonly SomeSectionChange[]): void {
+    if (changes.some((change) => pluginOfSection(change.section) === null)) this.projectChanged();
+    else this.schedule();
+  }
+
+  // Something the project's snapshot holds may have changed.
   private projectChanged(): void {
     this.stale = true;
+    this.schedule();
+  }
+
+  // Plugins hear of changes a microtask later, once per batch, outside the notification that told of them.
+  private schedule(): void {
     if (this.telling || this.running.size === 0) return;
     this.telling = true;
     queueMicrotask(() => {
@@ -404,16 +501,17 @@ export class WorkshopPluginHost {
   }
 
   private tell(): void {
-    const { project } = this.options;
+    if (this.running.size === 0) return;
+    const { document } = this.options.history;
     for (const plugin of this.running.values()) {
-      const data = project.pluginDataOf(plugin.id);
+      const data = pluginData(document, plugin.id);
       if (data === plugin.data) continue;
       plugin.data = data;
       for (const listener of plugin.dataListeners) listener(data);
     }
-    const fingerprints = project.fingerprints();
-    if (this.told !== null && sameProject(this.told, fingerprints)) return;
-    this.told = fingerprints;
+    const snapshot = this.snapshot();
+    if (snapshot === this.told) return;
+    this.told = snapshot;
     for (const plugin of this.running.values()) for (const listener of plugin.projectListeners) listener();
   }
 
@@ -422,25 +520,33 @@ export class WorkshopPluginHost {
     return this.snapshot();
   }
 
+  // Built from the document's sections, the character's draft and the appearance: the same object while they stay the same.
   private snapshot(): WorkshopProjectSnapshot {
     const cached = this.snapshotCache;
-    if (cached !== null && !this.stale) return cached.snapshot;
-    const { project, history, character, appearance } = this.options;
-    const fingerprints = project.fingerprints();
-    if (cached !== null && sameProject(cached.fingerprints, fingerprints)) {
-      this.stale = false;
-      return cached.snapshot;
-    }
-    const manifest = project.manifest();
-    const snapshot: WorkshopProjectSnapshot = Object.freeze({
-      title: manifest.title, settings: manifest.settings, level: history.document.get('level'),
-      characters: Object.freeze({ primary: character.snapshot().document, alternate: project.alternateCharacter() }),
-      library: manifest.models, theme: manifest.theme, hud: manifest.hud, audio: manifest.audio, enemies: manifest.enemies,
-      art: manifest.art, media: manifest.media, armIk: appearance.armIkSettings(), appearance: manifest.appearance,
-    });
-    this.snapshotCache = { fingerprints, snapshot };
+    if (cached !== null && !this.stale) return cached;
+    const { history: { document }, character, appearance } = this.options;
+    const primary = cached === null || this.characterStale ? character.snapshot().document : cached.characters.primary;
+    const alternate = document.get('characters/alternate');
+    const outside = cached === null || this.appearanceStale ? {
+      armIk: keptArmIk(cached?.armIk ?? null, appearance.armIkSettings()),
+      appearance: keptParts(cached?.appearance ?? null, appearance.exportParts()),
+    } : cached;
+    const snapshot: WorkshopProjectSnapshot = {
+      title: document.get('title'), settings: document.get('settings'), level: document.get('level'),
+      characters: cached !== null && cached.characters.primary === primary && cached.characters.alternate === alternate
+        ? cached.characters : Object.freeze({ primary, alternate }),
+      library: libraryView(document.get('models')), theme: document.get('theme'), hud: document.get('hud'),
+      audio: document.get('audio'), enemies: document.get('enemies'), art: artView(document.get('art')),
+      media: mediaView(document.get('media')), armIk: outside.armIk, appearance: outside.appearance,
+    };
     this.stale = false;
-    return snapshot;
+    this.characterStale = false;
+    this.appearanceStale = false;
+    if (cached !== null && (Object.keys(snapshot) as (keyof WorkshopProjectSnapshot)[]).every((key) => snapshot[key] === cached[key])) {
+      return cached;
+    }
+    this.snapshotCache = Object.freeze(snapshot);
+    return this.snapshotCache;
   }
 
   private updateMount(mount: MountRecord): void {
@@ -502,10 +608,10 @@ export class WorkshopPluginHost {
       edit: checkedEdits(this.createEdits(plugin), live),
     });
     const data: WorkshopPluginData = Object.freeze({
-      get: () => options.project.pluginDataOf(plugin.id),
+      get: () => pluginData(options.history.document, plugin.id),
       set: (value: PluginData | null) => {
         live();
-        return options.project.setPluginData(plugin.id, value);
+        return this.edit(plugin, 'Set data', `plugin:${plugin.id}:data`, (info) => options.commands.pluginData(plugin.id, value, info));
       },
       subscribe: (callback: (value: PluginData | null) => void) => listener(plugin.dataListeners, callback),
     });
@@ -528,7 +634,9 @@ export class WorkshopPluginHost {
         return this.mount(plugin, section.id, created.body, (state) => state.open && state.tab === tab && created.root.open,
           () => created.root.remove(), created.root);
       },
-      ui: createWorkshopUiKit({ prefix: `plugin_${plugin.id}`, signal, guard: (callback) => plugin.guard(callback), notice }),
+      ui: createWorkshopUiKit({
+        prefix: `plugin_${plugin.id}`, plugin: plugin.id, history: options.history, signal, guard: (callback) => plugin.guard(callback), notice,
+      }),
       project,
       data,
       game: this.createGame(plugin),
@@ -708,33 +816,53 @@ export class WorkshopPluginHost {
     this.options.game.setInputBlock({ reason: `plugin:${drag.plugin.id}`, blocked: false });
   }
 
-  // The engine's edit operations, as the built-in tabs make them: each reports a refusal as its tab does, and returns it.
+  // One step named "<plugin>: <operation>" in no tab; the same key's calls within a second merge into it, as keyed commands
+  // do. Its refusal is reported, as its tab reports it, and returned.
+  private edit(plugin: RunningPlugin, operation: string, key: string,
+    command: (info: ProjectCommandInfo) => Command): WorkshopRefusal | null {
+    const { history } = this.options;
+    try {
+      return this.refused(plugin, history.apply(command({ label: `${plugin.id}: ${operation}`, place: PLUGIN_PLACE, coalesce: key })));
+    } finally {
+      history.seal(key);
+    }
+  }
+
+  // An edit that waits for a file or a bake: a pending edit, then a step of its own. It ends with the plugin, so a stopped
+  // plugin's late file or bake changes nothing, and the call refuses as a stopped plugin's calls do. Cancelled by Undo or
+  // by another project opening, it changed nothing.
+  private async load<T>(plugin: RunningPlugin, operation: string,
+    run: (options: ImportOptions) => Promise<EditOutcome<T>>): Promise<WorkshopRefusal | null> {
+    const outcome = await run({
+      info: { label: `${plugin.id}: ${operation}`, place: PLUGIN_PLACE, coalesce: null }, signal: plugin.waiting.signal,
+    });
+    if (outcome.kind === 'refused') return this.refused(plugin, outcome.error);
+    return outcome.kind === 'cancelled' && plugin.stopping ? plugin.stopped() : null;
+  }
+
+  // A plugin that stopped meanwhile, as one whose check of its data fails does, was reported as it stopped.
+  private refused(plugin: RunningPlugin, refusal: Error | null): Error | null {
+    if (refusal !== null && !plugin.stopping) this.options.notice(refusal.message, 'error');
+    return refusal;
+  }
+
+  // The engine's edit operations, as the built-in tabs make them: steps of the Workshop's history, but for the
+  // character's and the appearance's, which keep their own.
   private createEdits(plugin: RunningPlugin): WorkshopEdits {
-    const { options } = this;
-    const project = options.project;
-    const character = options.character.edits;
-    const level = (operation: keyof WorkshopLevelEdits,
-      build: (level: LevelState) => SectionChange<'level'> | null): WorkshopRefusal | null => {
-      const key = `plugin:${plugin.id}:level:${operation}`;
-      try {
-        const refusal = options.history.apply(options.level.command({
-          label: `${plugin.id}: ${operation}`,
-          place: { tab: null, section: null, select: null },
-          coalesce: key,
-        }, build));
-        if (refusal !== null) options.notice(refusal.message, 'error');
-        return refusal;
-      } finally {
-        options.history.seal(key);
-      }
-    };
+    const { level, commands, imports, projection, appearance } = this.options;
+    const character = this.options.character.edits;
+    const project = (operation: string, command: (info: ProjectCommandInfo) => Command): WorkshopRefusal | null =>
+      this.edit(plugin, operation, `plugin:${plugin.id}:${operation}`, command);
+    const levelEdit = (operation: keyof WorkshopLevelEdits,
+      build: (state: LevelState) => SectionChange<'level'> | null): WorkshopRefusal | null =>
+      this.edit(plugin, operation, `plugin:${plugin.id}:level:${operation}`, (info) => level.command(info, build));
     const levelEdits: WorkshopLevelEdits = {
-      upsert: (object) => level('upsert', (state) => state.upsert(object)),
-      remove: (id) => level('remove', (state) => state.remove(id)),
-      edit: (batch) => level('edit', (state) => state.edit(batch)),
-      labels: (labels) => level('labels', (state) => state.metadata({ labels })),
-      name: (name) => level('name', (state) => state.metadata({ name })),
-      replace: (definition) => level('replace', (state) => state.merge(definition)),
+      upsert: (object) => levelEdit('upsert', (state) => state.upsert(object)),
+      remove: (id) => levelEdit('remove', (state) => state.remove(id)),
+      edit: (batch) => levelEdit('edit', (state) => state.edit(batch)),
+      labels: (labels) => levelEdit('labels', (state) => state.metadata({ labels })),
+      name: (name) => levelEdit('name', (state) => state.metadata({ name })),
+      replace: (definition) => levelEdit('replace', (state) => state.merge(definition)),
     };
     const characterEdits: WorkshopCharacterEdits = {
       document: (value) => character.setDocument(value),
@@ -747,40 +875,37 @@ export class WorkshopPluginHost {
       presentation: (value) => character.setPresentation(value),
     };
     const edits: WorkshopEdits = {
-      title: (value) => project.setTitle(value),
-      settings: (value) => options.settings(value),
+      title: (value) => project('title', (info) => commands.title(value, info)),
+      settings: (value) => project('settings', (info) => commands.settings(() => value, info)),
       level: levelEdits,
       character: characterEdits,
-      alternate: (document) => project.setAlternate(document),
+      alternate: (document) => project('alternate', (info) => commands.alternate(document, info)),
       appearance: {
-        armIk: (value) => options.appearance.setArmIk(value),
-        parts: (parts) => options.appearance.setParts(parts),
+        armIk: (value) => appearance.setArmIk(value),
+        parts: (parts) => appearance.setParts(parts),
       },
-      theme: (value) => project.setTheme(value),
-      hud: (value) => project.setHud(value),
-      audio: (value) => project.setAudio(value),
-      enemies: (value) => project.setEnemies(value),
-      enemyModel: (species, file) => project.addEnemyModel(species, file),
-      enemyClips: (species, clips) => project.setEnemyClips(species, clips),
-      coursePackage: (file) => project.importCoursePackage(file),
+      theme: (value) => project('theme', (info) => commands.theme(() => value, info)),
+      hud: (value) => project('hud', (info) => commands.hud(() => value, info)),
+      audio: (value) => project('audio', (info) => commands.audio(() => value, info)),
+      enemies: (value) => project('enemies', (info) => commands.enemies(value, info)),
+      enemyModel: (species, file) => this.load(plugin, 'enemyModel', (options) => imports.enemyModel(species, file, options)),
+      enemyClips: (species, clips) => this.load(plugin, 'enemyClips', (options) => imports.enemyClips(species, clips, options)),
+      coursePackage: (file) => this.load(plugin, 'coursePackage', (options) => imports.coursePackage(file, options)),
       media: {
-        add: async (file) => {
-          const added = await project.addMedia(file);
-          return typeof added === 'string' ? null : added;
-        },
-        remove: (path) => project.removeMedia(path),
+        add: (file) => this.load(plugin, 'media.add', (options) => imports.media(file, options)),
+        remove: (path) => project('media.remove', (info) => commands.mediaRemove(path, info)),
       },
       library: {
-        add: async (role, file) => {
-          const added = await project.addLibraryModel(role, file);
-          return added instanceof Error ? added : null;
+        add: (role, file) => this.load(plugin, 'library.add', (options) => imports.library(role, file, options)),
+        remove: (role, id) => project('library.remove', (info) => commands.libraryRemove(role, id, info)),
+        avatar: (id, settings) => this.load(plugin, 'library.avatar', (options) => imports.libraryAvatar(id, settings, options)),
+        hammerHead: (id, head) => {
+          const hammer = projection.libraryHammers().find((candidate) => candidate.id === id);
+          if (hammer === undefined) {
+            return this.refused(plugin, new ProjectError(`The project has no library hammer "${id}".`, { section: 'models' }));
+          }
+          return project('library.hammerHead', (info) => commands.libraryHammerHead(id, hammer.head, head, info));
         },
-        remove: (role, id) => {
-          project.removeLibraryModel(role, id);
-          return null;
-        },
-        avatar: (id, settings) => project.setLibraryAvatar(id, settings),
-        hammerHead: (id, head) => project.setLibraryHammerHead(id, head),
       },
     };
     return edits;

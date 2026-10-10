@@ -4,25 +4,37 @@ import './style.css';
 import { Vector3 } from 'three';
 import { SPRITE_TARGET_IDS } from '../character';
 import type { PlayerSpawn, Point, UiActionOptions } from '../config';
-import { DEFAULT_LEVEL } from '../default-course';
-import { GameSettingsError, withRig } from '../game-settings';
+import { DEFAULT_COURSE_ART, DEFAULT_LEVEL } from '../default-course';
+import { DEFAULT_ENEMY_ART } from '../enemy-art-data';
+import { DEFAULT_GAME_SETTINGS } from '../game-settings';
 import type { GameSettings } from '../game-settings';
 import { Game } from '../game';
 import { Disposal } from '../disposal';
+import { DEFAULT_HUD } from '../hud';
 import { createCharacterModelLoader } from '../character-model-loader';
 import { createCourseArt } from '../course-art-view';
 import { createEnemyModels } from '../enemy-models';
 import { levelSpawn, validateLevel } from '../level';
+import type { AvatarHoldSettings } from '../model-library';
 import { createPhantomPlayback } from '../phantom-playback';
+import { artFile } from '../project';
 import { Appearance } from './appearance';
 import { AppearanceRig } from '../appearance-rig';
 import { createAppearanceUI } from './appearance-ui';
 import { VISUAL_PARTS } from './appearance-types';
 import { CollisionOverlay } from './collision-overlay';
+import { DEFAULT_COURSE_FILES } from './default-course-files';
 import { createLevelEditor } from './level-editor';
 import { createLevelChecks } from './level-checks';
 import { levelChange, LevelState } from './level-state';
+import { createProjectFileRetention } from './document/file-retention';
+import { createFileStore } from './document/files';
+import type { FileStore } from './document/files';
 import { createHistory } from './document/history';
+import { createProjectCommands, UNTITLED_GAME_TITLE } from './document/project-commands';
+import type { SectionName, SectionValues } from './document/project-document';
+import { createProjectImports } from './document/project-imports';
+import { createProjectProjection } from './document/project-projection';
 import { createHistoryControls } from './history-controls';
 import { PRACTICES, practiceById } from './practices';
 import type { PracticeId } from './practices';
@@ -35,14 +47,12 @@ import { AudioDevice } from '../audio-device';
 import { levelSoundSources } from '../content';
 import { urlMediaHost } from '../media-host';
 import { DEFAULT_AUDIO } from '../audio-settings';
-import { isDarkSky } from '../theme';
+import { DEFAULT_THEME, isDarkSky } from '../theme';
 import { ProjectClient } from './project-client';
 import { ProjectSession } from './project-session';
 import { createProjectEditor } from './project-editor';
 import { createHammerHeadEditor } from './hammer-head-editor';
-import type { HammerHeadEditor } from './hammer-head-editor';
 import { createJarEditor } from './jar-editor';
-import type { OutlineEditor } from './outline-editor';
 import { PlayRecorder } from './play-recorder';
 import { ServerCopies } from './server-copies';
 import { publishedLevel } from './server-levels';
@@ -102,11 +112,33 @@ function boot<T>(create: () => T, discard?: (value: T) => void): T {
   }
 }
 
+// The page starts on a new game: the default settings and look, and the built-in course with its artwork, whose GLBs
+// stay on the site until the course draws them.
+function newGame(files: FileStore): SectionValues {
+  const meshes = new Map(DEFAULT_COURSE_FILES.map((file) => [file.path, file]));
+  const assets = DEFAULT_COURSE_ART.assets.map(({ id, name }) => {
+    const mesh = meshes.get(artFile(id));
+    if (mesh === undefined) throw new Error(`This Workshop is missing the built-in course mesh ${id}.`);
+    return Object.freeze({ id, name, file: files.registerPublished(mesh) });
+  });
+  return {
+    title: UNTITLED_GAME_TITLE, level: validateLevel(DEFAULT_LEVEL), settings: DEFAULT_GAME_SETTINGS, theme: DEFAULT_THEME,
+    hud: DEFAULT_HUD, audio: DEFAULT_AUDIO, enemies: DEFAULT_ENEMY_ART,
+    art: Object.freeze({ assets: Object.freeze(assets), decorations: DEFAULT_COURSE_ART.decorations }),
+    media: Object.freeze([]),
+    models: Object.freeze({ avatar: Object.freeze([]), hammer: Object.freeze([]), pot: Object.freeze([]) }),
+    'characters/alternate': null,
+  };
+}
+
 // A Workshop built with GAME_PROJECT opens that game and keeps it, with its changes, in this
 // browser's copy of the project; the editors' own browser saves do not open at start.
 const opensProject = publishedProject !== null;
 const client = new ProjectClient();
-const history = boot(() => createHistory({ level: validateLevel(DEFAULT_LEVEL) }));
+// The open project's files, wherever their bytes are, and its document, which only its history changes.
+const files = boot(() => createFileStore({ client }), (value) => value.dispose());
+const history = boot(() => createHistory(newGame(files), { files }), (value) => value.dispose());
+// The level's first listener, so every other one finds its indexes current.
 const level = boot(() => new LevelState(history.document), (value) => value.dispose());
 let debug = false;
 // Where attempts start: a starting point, or where the designer placed the player in the Level tab to
@@ -120,20 +152,20 @@ let resolveMedia = (source: string): string => source;
 let mediaVersion = 0;
 // The Workshop plays media from the open project's files, or from the URLs a level names.
 const media = urlMediaHost((source) => resolveMedia(source));
-const audioDevice = boot(() => new AudioDevice(DEFAULT_AUDIO.volume), (value) => value.dispose());
+const audioDevice = boot(() => new AudioDevice(history.document.get('audio').volume), (value) => value.dispose());
 const audio = boot(() => createAudioOutput(runtimePlugins.slot(AUDIO, DEFAULT_AUDIO_OUTPUT), {
-  settings: DEFAULT_AUDIO, media, sounds: levelSoundSources(level.definition()), device: audioDevice,
+  settings: history.document.get('audio'), media, sounds: levelSoundSources(level.definition()), device: audioDevice,
   notice: (message) => runtimeNotice(message, 'error'),
 }), (value) => value.dispose());
 const game = boot(() => new Game({
-  canvas, eventMount: mount, level: level.definition(),
+  canvas, eventMount: mount, level: level.definition(), settings: history.document.get('settings'),
   onFatal: showFatal,
   characterModels: createCharacterModelLoader(),
   decorations: createDecorationView,
   // The course draws the project's GLBs, as its releases draw them, each loaded from the project as the level uses it.
-  courseArt: { create: createCourseArt, fetch: (id) => project.courseMeshBlob(id) },
+  courseArt: { create: createCourseArt, fetch: (id, signal) => projection.courseMeshBlob(id, signal) },
   // Enemies draw their project models as releases draw them, each GLB loaded from the project once a species uses it.
-  enemyModels: { create: createEnemyModels, fetch: (id) => project.courseMeshBlob(id) },
+  enemyModels: { create: createEnemyModels, fetch: (id, signal) => projection.courseMeshBlob(id, signal) },
   media,
   // The Workshop never plays trigger videos: each is skipped at once and its trigger goes on, so testing
   // is never interrupted. Releases play them.
@@ -153,8 +185,36 @@ const game = boot(() => new Game({
     }
   },
 }), (value) => value.dispose());
+// The look, media, library and course resources the document's sections make. It hears each change before the game's
+// follower below, so the game has new course artwork before a level that draws it.
+const projection = boot(() => createProjectProjection({
+  document: history.document, files,
+  onLook: (look) => {
+    resolveMedia = look.resolveMedia;
+    // Replaced or re-added files keep their paths, so drop sounds cached for the old files.
+    if (look.mediaVersion !== mediaVersion) {
+      mediaVersion = look.mediaVersion;
+      audio.setMedia(urlMediaHost(look.resolveMedia));
+    }
+    game.setLook(look.game);
+    audioDevice.setVolume(look.audio.volume);
+    audio.setSettings(look.audio);
+  },
+}), (value) => value.dispose());
+// The game follows the document: the level by the objects each change touched, then the settings, once per change.
+boot(() => history.document.subscribeAll((changes) => {
+  let settings: GameSettings | null = null;
+  for (const change of changes) {
+    if (change.section === 'level') game.applyLevel(levelChange(change));
+    else if (change.section === 'settings') settings = change.after;
+  }
+  if (settings === null) return;
+  game.setSettings(settings);
+  // Character's handle length and grips follow the rig.
+  spriteEditor.setHammerRig(game.simulation.rigGeometry);
+}), (unsubscribe) => unsubscribe());
+// A level replaced whole is played from its start. Heard before the Level tab, which shows where play starts.
 boot(() => history.document.subscribe('level', (change) => {
-  game.applyLevel(levelChange(change));
   if (change.delta.kind === 'replace') origin = 'start';
 }), (unsubscribe) => unsubscribe());
 // Registered before the UI exists; bootstrap changes the document only after the editors mount.
@@ -163,7 +223,6 @@ boot(() => history.document.subscribe('level', (change) => ui.setLevelName(chang
 // The Level tab's checks, which read the game settings and the project only while it is edited.
 const levelChecks = boot(() => createLevelChecks({
   document: history.document,
-  settings: () => game.settings(),
   plugins: {
     checks: () => workshopPlugins.levelChecks(),
     reach: () => workshopPlugins.levelReach(),
@@ -174,19 +233,32 @@ const levelChecks = boot(() => createLevelChecks({
     project: () => plugins?.projectSnapshot() ?? null,
   },
 }), (value) => value.dispose());
+// Every edit of a project section is one of these commands, which the history applies; edits that wait for a file or a
+// bake are imports, each a pending edit until it is ready.
+const commands = boot(() => createProjectCommands({
+  document: history.document, level, files, plugins: workshopPlugins, avatarRigs,
+  primary: () => spriteEditor.validatedDocument(),
+  levelSelection: () => levelEditor.selection(),
+}));
+const imports = boot(() => createProjectImports({
+  history, commands, files, projection, avatarRigs, holdSettings,
+  prepareLevel: () => levelEditor.preparePlay(),
+}), (value) => value.dispose());
+// The page keeps the bytes of every file Undo can still bring back before a save deletes them from the server.
+const retention = boot(() => createProjectFileRetention({ files }), (value) => value.dispose());
 // The open project, created before the editors so each can save into it; it reads them only once started.
 const project: ProjectSession = boot(() => new ProjectSession({
-  history, level, avatarRigs, client, plugins: workshopPlugins,
+  history, level, files, retention, commands, imports, projection, avatarRigs, client, plugins: workshopPlugins,
   workspace: {
     prepareLevel: () => levelEditor.preparePlay(),
     markLevelSaved: (definition) => levelEditor.markSaved(definition),
     hasPendingLevelEdits: () => levelEditor.hasPendingEdits(),
-    settings: { get: () => ui.settings(), load: (settings) => ui.applySettings(settings) },
     character: {
       draft: () => spriteEditor.snapshot().document,
       hasContent: () => spriteEditor.snapshot().hasContent,
       validated: () => spriteEditor.validatedDocument(),
       load: (document, options) => spriteEditor.loadDocument(document, options),
+      prepare: (document, options) => spriteEditor.prepareDocument(document, options),
     },
     appearance: {
       armIk: () => appearance.armIkSettings(),
@@ -195,23 +267,10 @@ const project: ProjectSession = boot(() => new ProjectSession({
       load: (parts) => appearance.replaceParts(parts),
     },
     get ready() { return Promise.all([appearanceRestored, spriteEditor.ready]); },
-    onLook: (look) => {
-      resolveMedia = look.resolveMedia;
-      // Replaced or re-added files keep their paths, so drop sounds cached for the old files.
-      if (look.mediaVersion !== mediaVersion) {
-        mediaVersion = look.mediaVersion;
-        audio.setMedia(urlMediaHost(look.resolveMedia));
-      }
-      game.setLook(look.game);
-      audioDevice.setVolume(look.audio.volume);
-      audio.setSettings(look.audio);
-    },
     notice: (message, kind) => ui.notice(message, kind),
   },
   published: publishedProject,
 }), (value) => value.dispose());
-// The level places only decorations something draws: the library's models and those the project's course artwork maps.
-level.drawDecorationsWith(() => project.decorationArt());
 // Play is recorded for phantoms unless this browser turned recording off.
 const RECORDING_KEY = 'over-the-edge:workshop:recording';
 function recordingPreference(): boolean {
@@ -250,21 +309,12 @@ const published = boot(() => publishedLevel(publishedProject));
 const ui: GameUi = boot(() => createUI({
   mount,
   plugins: runtimePlugins,
+  history, commands, imports,
   readStatus: () => game.simulation.status(),
-  initialSettings: game.settings(),
   initialInputMode: game.input.mode,
   onAction: perform,
   onWorkshopChange: updateWorkshop,
   onPractice: resetPractice,
-  onSettingsChange: (settings) => {
-    game.setSettings(settings);
-    spriteEditor.setHammerRig(game.simulation.rigGeometry);
-    hammerHeads?.refresh();
-    jarEditor?.refresh();
-    plugins?.settingsChanged();
-    // The reach model comes from the rig and grip.
-    levelChecks.invalidate();
-  },
   projectSave: project, serverCopies,
 }), (value) => value.dispose());
 runtimeNotice = (message, kind = 'info') => ui.notice(message, kind);
@@ -292,12 +342,7 @@ const spriteEditor = boot(() => createSpriteEditor({
   naturalArms: () => game.view.character.naturalArmLengths(),
   serverModels,
   // The Character tab's handle length edits the same game setting as Physics.
-  onHandleLength: (handleLength) => {
-    applySettings(() => {
-      const settings = ui.settings();
-      return withRig(settings, { ...settings.rig, handleLength });
-    });
-  },
+  settingsEditing: { history, commands },
   applySavedProfile: !opensProject,
   projectSave: project, serverCopies,
   motion: {
@@ -341,20 +386,32 @@ const levelEditor = boot(() => createLevelEditor({
   decorations: {
     size: (model) => decorations.size(model),
     preview: (object) => decorations.setPreview(object),
-    models: () => project.decorationModels(),
+    models: () => projection.decorationModels(),
     subscribe: (listener) => {
       const unsubscribeView = decorations.subscribe(listener);
-      const unsubscribeProject = project.subscribe((event) => { if (event.kind === 'content') listener(); });
-      return () => { unsubscribeView(); unsubscribeProject(); };
+      const unsubscribeArt = followSections(['art'], listener);
+      return () => { unsubscribeView(); unsubscribeArt(); };
     },
     show: (shown) => decorations.setShown(shown),
   },
   meshes: {
-    list: () => project.courseMeshes(),
-    terrain: (id, turn) => project.courseMeshTerrain(id, turn),
+    list: () => projection.courseMeshes(),
+    // The Level tab drops a turn whose bake is refused; the refusal is reported here.
+    terrain: async (id, turn) => {
+      const terrain = await projection.courseMeshTerrain(id, turn);
+      if (terrain instanceof Error) ui.notice(terrain.message, 'error');
+      return terrain;
+    },
     preview: (turns) => courseMeshes.previewTurns(turns),
-    add: (file) => project.addCourseMesh(file),
-    subscribe: (listener) => project.subscribe((event) => { if (event.kind === 'content') listener(); }),
+    add: (file, signal) => imports.courseMesh(file, {
+      info: {
+        label: `Import mesh ${file.name.replace(/\.glb$/i, '')}`,
+        place: { tab: 'level', section: 'level-build', select: null }, coalesce: null,
+      },
+      signal,
+    }),
+    // Course artwork drawing an enemy is not a course mesh.
+    subscribe: (listener) => followSections(['art', 'enemies'], listener),
   },
   onPlay: () => perform('play'),
   player: {
@@ -381,36 +438,12 @@ const levelEditor = boot(() => createLevelEditor({
 }), (value) => value.dispose());
 const appearanceRestored = boot(() => appearance.restore());
 // Physics / Hammer head shapes the default hammer's head, a game setting, and each library hammer's own.
-let hammerHeads: HammerHeadEditor | null = null;
-hammerHeads = boot(() => createHammerHeadEditor({
-  mount: ui.hammerHeadMount,
-  hammers: () => [
-    // The game's settings, which are current while a settings change is still being shown.
-    { id: null, name: 'Default hammer', head: game.settings().rig.head },
-    ...project.libraryHammers(),
-  ],
-  setHead: (id, head) => {
-    if (id !== null) return project.setLibraryHammerHead(id, head) === null;
-    return applySettings(() => {
-      const settings = game.settings();
-      return withRig(settings, { ...settings.rig, head });
-    }) === null;
-  },
-}), (value) => value.dispose());
-boot(() => project.subscribe((event) => { if (event.kind === 'content') hammerHeads?.refresh(); }),
-  (unsubscribe) => unsubscribe());
+boot(() => createHammerHeadEditor({ mount: ui.hammerHeadMount, history, commands, projection }),
+  (value) => value.dispose());
 // Physics / Jar shapes the jar's collision outline, a game setting.
-let jarEditor: OutlineEditor | null = null;
-jarEditor = boot(() => createJarEditor({
-  mount: ui.jarMount,
-  pot: () => game.settings().rig.pot,
-  setPot: (pot) => applySettings(() => {
-    const settings = game.settings();
-    return withRig(settings, { ...settings.rig, pot });
-  }) === null,
-}), (value) => value.dispose());
+boot(() => createJarEditor({ mount: ui.jarMount, history, commands }), (value) => value.dispose());
 boot(() => createProjectEditor({
-  mount: ui.projectMount, session: project, onNotice: ui.notice,
+  mount: ui.projectMount, session: project, history, commands, imports, projection, onNotice: ui.notice,
   onTestCue: (cue) => audio.preview(cue),
   parts: game,
   serverModels,
@@ -424,16 +457,19 @@ boot(() => createHistoryControls({
   notice: ui.notice,
 }), (value) => value.dispose());
 
-// Applies the game settings `next` builds, as Physics does: a refusal is reported and returned.
-function applySettings(next: () => GameSettings): GameSettingsError | null {
-  try {
-    ui.applySettings(next());
-    return null;
-  } catch (error) {
-    if (!(error instanceof GameSettingsError)) throw error;
-    ui.notice(error.message, 'error');
-    return error;
-  }
+// The open character's grips, arm lengths and arm forward distance, which a library avatar takes; the character keeps
+// its own draft until it joins the document.
+function holdSettings(): AvatarHoldSettings {
+  const { armForwardDistance, grips, arms } = spriteEditor.snapshot().document;
+  return { armForwardDistance, grips, arms };
+}
+
+// Tells `listener` once per document change touching `sections`, after every section's own listeners, so the level's
+// indexes are current whatever else the change touched.
+function followSections(sections: readonly SectionName[], listener: () => void): () => void {
+  return history.document.subscribeAll((changes) => {
+    if (changes.some((change) => sections.includes(change.section))) listener();
+  });
 }
 
 function resetPractice(id: PracticeId): void {
@@ -511,8 +547,8 @@ const gameContext = () => ({ practice: practice(), placedPlayer: typeof origin =
 const gameState = () => workshopGameState(game, gameContext());
 
 plugins = boot(() => new WorkshopPluginHost({
-  registry: workshopPlugins, ui, game, canvas, project, history, level, character: spriteEditor, appearance,
-  settings: (settings) => applySettings(() => settings),
+  registry: workshopPlugins, ui, game, canvas, history, level, commands, imports, projection,
+  character: spriteEditor, appearance,
   control: { restart, placePlayer, state: gameState },
   notice: ui.notice,
 }), (value) => value.dispose());

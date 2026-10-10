@@ -1,4 +1,4 @@
-import type { SpriteRig } from '../sprite-rig';
+import type { PreparedSpriteReplacement, SpriteRig } from '../sprite-rig';
 import {
   EMPTY_SPRITES, parseSpriteDocument, SPRITE_LIMITS, SpriteError, validateSpriteAnchors, validateSpriteDocument,
   validateSpriteLayer, encodePng, inspectPng, DEFAULT_SPRITE_RIGGING, validateSpriteRigging, validateSpriteBudget,
@@ -97,6 +97,15 @@ export interface SpriteEditorSnapshot {
   readonly avatarModel: AvatarModelState | null;
   readonly hammerModel: { readonly name: string } | null;
   readonly potModel: { readonly name: string } | null;
+}
+
+// A whole profile staged to replace the draft, for a caller that commits it together with a change of its own.
+export interface PreparedPrimary {
+  // Checks `accept`, the caller's final identity guard, then shows the profile, makes it the draft and runs `applied`,
+  // the caller's own change, in one synchronous call. False changed nothing: declined, cancelled or refused.
+  commit(accept: () => boolean, applied: () => void): boolean;
+  // Lets go of what was staged, leaving the draft and the character as they were. Idempotent.
+  cancel(): void;
 }
 
 interface PendingAvatar {
@@ -1032,6 +1041,89 @@ export class SpriteEditorState {
       this.warnExternalSources(document);
     });
     return loaded;
+  }
+
+  // Stages a whole profile, as loadDocument loads one, without showing it: the draft and the character change only when
+  // the preparation commits, in one synchronous call with the caller's own change. The editor stays busy until it
+  // commits or cancels, and `signal` aborting or the editor closing cancels it.
+  async prepareDocument(document: SpriteDocument, options: { readonly signal: AbortSignal }): Promise<PreparedPrimary | SpriteError> {
+    const refused = this.editable();
+    if (refused !== null) return refused;
+    const signal = AbortSignal.any([this.lifecycle.signal, options.signal]);
+    const settled = (): void => {
+      this.busy = false;
+      this.changed();
+      this.settle();
+    };
+    const cancelled = (): SpriteError => new SpriteError(this.disposed
+      ? 'The character editor closed before the operation finished.' : 'Loading the character profile was cancelled.');
+    this.busy = true;
+    this.error = null;
+    this.changed();
+    let replacement: PreparedSpriteReplacement;
+    try {
+      this.validateDraft(document);
+      this.leavePreview();
+      replacement = await this.rig.prepareReplacement(document, { signal });
+    } catch (error) {
+      settled();
+      if (isAbort(error)) return cancelled();
+      if (!isDocumentError(error)) throw error;
+      this.reportError(error.message, error);
+      return error instanceof SpriteError ? error : new SpriteError(error.message, { cause: error });
+    }
+    let phase: 'staged' | 'cancelled' | 'committed' = 'staged';
+    const cancel = (): void => {
+      if (phase !== 'staged') return;
+      phase = 'cancelled';
+      signal.removeEventListener('abort', cancel);
+      replacement.cancel();
+      settled();
+    };
+    if (signal.aborted) {
+      cancel();
+      return cancelled();
+    }
+    signal.addEventListener('abort', cancel, { once: true });
+    return Object.freeze({
+      commit: (accept: () => boolean, applied: () => void): boolean => {
+        if (phase === 'committed') throw new Error('The prepared character profile was already committed.');
+        if (phase === 'cancelled') return false;
+        let accepted = false;
+        try {
+          accepted = accept();
+        } finally {
+          if (!accepted) cancel();
+        }
+        if (!accepted) return false;
+        signal.removeEventListener('abort', cancel);
+        try {
+          replacement.commit();
+        } catch (error) {
+          phase = 'cancelled';
+          settled();
+          // Only the rig closing aborts it now: the editor's own cancellation already ended this preparation.
+          if (isAbort(error)) return false;
+          if (!isDocumentError(error)) throw error;
+          this.reportError(error.message, error);
+          return false;
+        }
+        phase = 'committed';
+        this.pendingAvatar = null;
+        this.draft = document;
+        this.selectedLayerId = document.layers[0]?.id ?? null;
+        this.preview = null;
+        this.directionalPreview = false;
+        try {
+          applied();
+        } finally {
+          settled();
+          this.warnExternalSources(document);
+        }
+        return true;
+      },
+      cancel,
+    });
   }
 
   // Replaces the draft with a whole profile as an edit, validated and loaded as an imported profile is. Returns the

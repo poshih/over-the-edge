@@ -1,15 +1,19 @@
-import { inspectCharacterModel, resolveAvatarJoints, suggestAvatarBoneMap } from '../character-model-inspect';
+import { inspectCharacterModel, resolveAvatarJoints } from '../character-model-inspect';
 import type { CharacterModelReport } from '../character-model-inspect';
 import { AVATAR_JOINT_IDS, CharacterModelError } from '../character-profile';
-import type { AvatarBoneMap, AvatarJointId, AvatarModelSettings } from '../character-profile';
+import type { AvatarBoneMap, AvatarJointId, AvatarModelSettings, PartialAvatarBoneMap } from '../character-profile';
 import { element, setText } from '../dom';
 import { MODEL_LIMITS } from '../model-data';
 import { mappedAvatarModel, MODEL_LIBRARY_LIMITS, PART_ROLES } from '../model-library';
 import type { PartRole } from '../model-library';
 import { AVATAR_JOINT_LABELS } from './avatar-joint-labels';
+import type { Command, History } from './document/history';
+import { applyProjectCommand } from './document/project-commands';
+import type { ProjectCommandInfo, ProjectCommands } from './document/project-commands';
+import type { ConfigureAvatar, EditOutcome, FileInput, ProjectImports } from './document/project-imports';
+import type { LibraryModel, ProjectProjection } from './document/project-projection';
 import { LibraryPreview } from './library-preview';
 import type { PartModelHost } from './library-preview';
-import type { LibraryModel, ProjectSession } from './project-session';
 import { createServerModelPicker } from './server-model-picker';
 import { serverModelSettings } from './server-models';
 import type { ServerModels } from './server-models';
@@ -20,16 +24,23 @@ const ROLE_LABELS: Readonly<Record<PartRole, { one: string; many: string }>> = {
   pot: { one: 'pot', many: 'Pots' },
 };
 
-// The avatar whose bone map is open: a GLB being added, or a library entry.
+interface AddingAvatar {
+  readonly kind: 'add';
+  readonly finish: (model: AvatarModelSettings) => void;
+  readonly cancel: () => void;
+  done: boolean;
+}
+
+// The avatar whose bone map is open: a pending import, or a library entry.
 interface BoneEditing {
-  readonly target: { readonly kind: 'add'; readonly file: File } | { readonly kind: 'entry'; readonly key: number };
+  readonly target: AddingAvatar | { readonly kind: 'entry'; readonly key: string };
   readonly name: string;
   readonly report: CharacterModelReport;
-  readonly boneMap: Readonly<Partial<Record<AvatarJointId, string>>>;
+  readonly boneMap: PartialAvatarBoneMap;
   readonly issue: CharacterModelError | null;
 }
 
-function boneIssue(report: CharacterModelReport, boneMap: Partial<Record<AvatarJointId, string>>): CharacterModelError | null {
+function boneIssue(report: CharacterModelReport, boneMap: PartialAvatarBoneMap): CharacterModelError | null {
   try {
     resolveAvatarJoints(report, boneMap);
     return null;
@@ -49,23 +60,37 @@ function avatarSummary(model: LibraryModel): string {
   return `${grips} · ${avatar.arms === null ? 'natural arm lengths' : 'set arm lengths'} · arms ${metres(avatar.armForwardDistance)} forward`;
 }
 
+export interface LibraryEditorOptions {
+  readonly mount: HTMLElement;
+  readonly history: History;
+  readonly commands: ProjectCommands;
+  readonly imports: ProjectImports;
+  readonly projection: ProjectProjection;
+  readonly parts: PartModelHost;
+  readonly serverModels: ServerModels;
+  readonly onNotice: (message: string, kind: 'info' | 'error') => void;
+}
+
 /**
  * Project / Model library: the avatars, hammers and pots a release can swap to, each part on its
  * own. Previews show a library model in the Workshop's game the way a release shows it once the
  * game's backend selects it.
  */
-export function createLibraryEditor(options: {
-  readonly mount: HTMLElement;
-  readonly session: ProjectSession;
-  readonly parts: PartModelHost;
-  // The avatars, hammers and pots this Workshop's server shares.
-  readonly serverModels: ServerModels;
-  readonly onNotice: (message: string, kind: 'info' | 'error') => void;
-}): { dispose(): void } {
-  const { session } = options;
+export function createLibraryEditor(options: LibraryEditorOptions): { dispose(): void } {
+  const { history, commands, imports, projection } = options;
   const events = new AbortController();
   const listen = { signal: events.signal };
   let editing: BoneEditing | null = null;
+  let boneRead: AbortController | null = null;
+  const info = (label: string): ProjectCommandInfo =>
+    ({ label, place: { tab: 'project', section: 'project-models', select: null }, coalesce: null });
+  const apply = (command: Command): void => {
+    const refusal = applyProjectCommand(history, command);
+    if (refusal !== null) options.onNotice(refusal.message, 'error');
+  };
+  function noticeImport<T>(outcome: EditOutcome<T>): void {
+    if (!events.signal.aborted && outcome.kind === 'refused') options.onNotice(outcome.error.message, 'error');
+  }
   const root = document.createElement('div');
   root.className = 'project-library';
   root.innerHTML = `
@@ -117,84 +142,134 @@ export function createLibraryEditor(options: {
 
   const preview = new LibraryPreview({
     host: options.parts,
-    blob: (role, id) => session.libraryBlob(role, id),
-    onChange: () => renderPreview(),
+    blob: (role, id) => projection.libraryBlob(role, id, events.signal),
+    onChange: () => { if (!events.signal.aborted) renderPreview(); },
     onError: (message) => options.onNotice(message, 'error'),
   });
 
-  const library = (): readonly LibraryModel[] => session.snapshot().library;
+  const library = (): readonly LibraryModel[] => projection.libraryModels();
 
-  // `model`, a server avatar's own settings, adds it as it is; otherwise an avatar maps its joints.
-  async function add(role: PartRole, file: File, model?: AvatarModelSettings): Promise<void> {
-    if (model !== undefined) {
-      await commitAdd(file, model);
-      return;
-    }
-    if (role === 'avatar') {
-      let report: CharacterModelReport;
-      try {
-        if (file.size > MODEL_LIMITS.bytes) throw new CharacterModelError('model-limits', `Choose a GLB file no larger than ${MODEL_LIMITS.bytes / 1024 ** 2} MiB.`);
-        report = inspectCharacterModel(await file.arrayBuffer(), 'avatar');
-      } catch (error) {
-        if (!(error instanceof CharacterModelError)) throw error;
-        options.onNotice(`${file.name}: ${error.message}`, 'error');
-        return;
-      }
-      const boneMap = suggestAvatarBoneMap(report);
-      const issue = boneIssue(report, boneMap);
-      // An avatar whose joints do not all map automatically waits for its bone map.
-      if (issue !== null) {
-        editing = { target: { kind: 'add', file }, name: file.name, report, boneMap, issue };
-        render();
-        return;
-      }
-      await commitAdd(file, mappedAvatarModel(boneMap as AvatarBoneMap));
-      return;
-    }
-    const added = await session.addLibraryModel(role, file);
-    if (!(added instanceof Error)) options.onNotice(`Added ${role} "${added.name}" (${added.id}) to the model library.`, 'info');
+  function closeBones(): void {
+    boneRead?.abort();
+    boneRead = null;
+    const current = editing;
+    editing = null;
+    if (current?.target.kind === 'add') current.target.cancel();
   }
 
-  async function commitAdd(file: File, model: AvatarModelSettings): Promise<LibraryModel | null> {
-    const added = await session.addLibraryModel('avatar', file, model);
-    if (added instanceof Error) return null;
-    options.onNotice(`Added avatar "${added.name}" (${added.id}) to the model library.`, 'info');
-    return added;
+  // `model`, a server avatar's own settings, adds it as it is; otherwise an avatar maps its joints.
+  async function add(role: PartRole, input: FileInput, model?: AvatarModelSettings): Promise<void> {
+    const task = new AbortController();
+    const preparation: { target: AddingAvatar | null; release: (() => void) | null } = { target: null, release: null };
+    const configure: ConfigureAvatar = (report, boneMap, signal) => {
+      signal.throwIfAborted();
+      const issue = boneIssue(report, boneMap);
+      if (issue === null) return Promise.resolve(mappedAvatarModel(boneMap as AvatarBoneMap));
+      closeBones();
+      return new Promise<AvatarModelSettings>((resolve, reject) => {
+        const target: AddingAvatar = {
+          kind: 'add', done: false,
+          finish: (settings) => {
+            if (target.done) return;
+            target.done = true;
+            resolve(settings);
+          },
+          cancel: () => task.abort(),
+        };
+        const aborted = (): void => {
+          if (!target.done) {
+            target.done = true;
+            reject(signal.reason);
+          }
+          if (editing?.target === target) {
+            editing = null;
+            if (!events.signal.aborted) renderBones();
+          }
+        };
+        signal.addEventListener('abort', aborted, { once: true });
+        preparation.target = target;
+        preparation.release = () => signal.removeEventListener('abort', aborted);
+        editing = { target, name: input.name, report, boneMap, issue };
+        renderBones();
+      });
+    };
+    try {
+      const outcome = await imports.library(role, input, {
+        info: info(`Add library ${role} ${input.name.replace(/\.glb$/i, '')}`),
+        signal: AbortSignal.any([events.signal, task.signal]),
+        ...(model === undefined ? role === 'avatar' ? { configure } : {} : { model }),
+      });
+      noticeImport(outcome);
+      if (events.signal.aborted) return;
+      if (outcome.kind === 'applied' || outcome.kind === 'unchanged') {
+        const added = outcome.value;
+        const current = editing;
+        if (preparation.target !== null && current?.target === preparation.target) {
+          editing = {
+            ...current, target: { kind: 'entry', key: added.key }, name: added.name, boneMap: added.avatar!.boneMap, issue: null,
+          };
+        }
+        if (outcome.kind === 'applied') options.onNotice(`Added ${role} "${added.name}" (${added.id}) to the model library.`, 'info');
+      }
+    } finally {
+      preparation.release?.();
+      task.abort();
+      if (preparation.target !== null && editing?.target === preparation.target) editing = null;
+      if (!events.signal.aborted) renderBones();
+    }
   }
 
   async function editBones(model: LibraryModel): Promise<void> {
-    let report: CharacterModelReport;
+    closeBones();
+    renderBones();
+    const task = new AbortController();
+    boneRead = task;
+    const signal = AbortSignal.any([events.signal, task.signal]);
     try {
-      report = inspectCharacterModel(await (await session.libraryBlob('avatar', model.id)).arrayBuffer(), 'avatar');
+      const blob = await projection.libraryBlob('avatar', model.id, signal);
+      signal.throwIfAborted();
+      const bytes = await blob.arrayBuffer();
+      signal.throwIfAborted();
+      const report = inspectCharacterModel(bytes, 'avatar');
+      const current = library().find((candidate) => candidate.key === model.key);
+      if (current === undefined) return;
+      editing = { target: { kind: 'entry', key: current.key }, name: current.name, report, boneMap: current.avatar!.boneMap, issue: null };
+      renderBones();
     } catch (error) {
+      if (signal.aborted && error instanceof DOMException && error.name === 'AbortError') return;
       if (!(error instanceof Error)) throw error;
       options.onNotice(`Could not read library avatar "${model.name}": ${error.message}`, 'error');
-      return;
+    } finally {
+      if (boneRead === task) boneRead = null;
     }
-    editing = { target: { kind: 'entry', key: model.key }, name: model.name, report, boneMap: model.avatar!.boneMap, issue: null };
-    render();
   }
 
   // A complete, valid map applies at once; others stay open with their issue.
   async function setBone(joint: AvatarJointId, name: string): Promise<void> {
     const base = editing;
-    if (base === null) return;
+    if (base === null || base.target.kind === 'add' && base.target.done) return;
     const boneMap: Partial<Record<AvatarJointId, string>> = { ...base.boneMap };
     if (name === '') delete boneMap[joint];
     else boneMap[joint] = name;
     const next: BoneEditing = { ...base, boneMap: Object.freeze(boneMap), issue: boneIssue(base.report, boneMap) };
     editing = next;
-    render();
+    renderBones();
     if (next.issue !== null) return;
     if (next.target.kind === 'add') {
-      const added = await commitAdd(next.target.file, mappedAvatarModel(boneMap as AvatarBoneMap));
-      if (added !== null && editing === next) editing = { ...next, target: { kind: 'entry', key: added.key } };
+      next.target.finish(mappedAvatarModel(boneMap as AvatarBoneMap));
     } else {
       const key = next.target.key;
       const model = library().find((candidate) => candidate.key === key);
-      if (model !== undefined) await session.setLibraryAvatar(model.id, { ...model.avatar!, boneMap: boneMap as AvatarBoneMap });
+      if (model !== undefined) {
+        noticeImport(await imports.libraryAvatar(model.id, { ...model.avatar!, boneMap: boneMap as AvatarBoneMap }, {
+          info: info(`Set library avatar ${model.name} bone map`), signal: events.signal,
+        }));
+        if (events.signal.aborted) return;
+        const current = library().find((candidate) => candidate.key === key);
+        if (editing === next && current !== undefined) editing = { ...next, boneMap: current.avatar!.boneMap, issue: null };
+      }
     }
-    render();
+    if (!events.signal.aborted) renderBones();
   }
 
   function entryRow(model: LibraryModel): HTMLLIElement {
@@ -220,10 +295,13 @@ export function createLibraryEditor(options: {
     if (model.avatar !== null) {
       action('Bone map', 'Edit the bone map of', () => { void editBones(model); });
       action('Use character settings', 'Use the open character\'s grips, arm lengths and arm distance for', () => {
-        void session.useCharacterSettings(model.id);
+        void imports.useCharacterSettings(model.id, {
+          info: info(`Use character settings for ${model.name}`), signal: events.signal,
+        }).then(noticeImport);
       });
     }
-    action('Remove', 'Remove', () => session.removeLibraryModel(model.role, model.id));
+    action('Remove', 'Remove', () => apply(commands.libraryRemove(model.role, model.id,
+      info(`Remove library ${model.role} ${model.name}`))));
     row.append(name, detail, actions);
     return row;
   }
@@ -235,11 +313,13 @@ export function createLibraryEditor(options: {
       const select = element<HTMLSelectElement>(root, `#project-library-${role}-preview`);
       const choices = models.filter((model) => model.role === role);
       const values = ['', ...choices.map((model) => model.id)];
-      if (select.options.length !== values.length || [...select.options].some((option, index) => option.value !== values[index])) {
+      const names = ['Character\'s own', ...choices.map((model) => `${model.name} (${model.id})`)];
+      if (select.options.length !== values.length || [...select.options].some((option, index) =>
+        option.value !== values[index] || option.textContent !== names[index])) {
         select.replaceChildren(...values.map((value, index) => {
           const option = document.createElement('option');
           option.value = value;
-          option.textContent = index === 0 ? 'Character\'s own' : `${choices[index - 1]!.name} (${value})`;
+          option.textContent = names[index]!;
           return option;
         }));
       }
@@ -249,17 +329,17 @@ export function createLibraryEditor(options: {
   }
 
   function renderBones(): void {
-    const models = library();
     const current = editing;
     if (current !== null && current.target.kind === 'entry') {
       const key = current.target.key;
-      if (!models.some((model) => model.key === key)) editing = null;
+      if (!library().some((model) => model.key === key)) editing = null;
     }
     bones.hidden = editing === null;
     if (editing === null) return;
     setText(bonesTitle, `Bone map: ${editing.name}`);
     setText(bonesStatus, editing.target.kind === 'add'
-      ? `"${editing.name}" is not added yet: map all eight joints to add it.`
+      ? editing.target.done ? `"${editing.name}" is being added to the library.`
+        : `"${editing.name}" is not added yet: map all eight joints to add it.`
       : editing.issue === null ? 'Changes apply to the library avatar as soon as all eight joints resolve.'
         : 'This map is not applied: fix it to change the library avatar.');
     if (describedJoints !== editing.report) {
@@ -278,6 +358,7 @@ export function createLibraryEditor(options: {
     for (const [joint, select] of boneSelects) {
       const value = editing.boneMap[joint] ?? '';
       if (select.value !== value) select.value = value;
+      select.disabled = editing.target.kind === 'add' && editing.target.done;
       select.setAttribute('aria-invalid', String(issue !== null && (issue.joints.includes(joint) || value !== '' && issue.joints.includes(value))));
     }
     bonesIssue.hidden = issue === null;
@@ -302,13 +383,9 @@ export function createLibraryEditor(options: {
   }
 
   for (const role of PART_ROLES) {
-    // A server model downloads while the open project is held, then is added like a GLB chosen from the computer.
     element(root, `.project-library-part[data-role="${role}"] .project-library-server`).append(createServerModelPicker({
       role, id: `project-library-${role}-server`, action: 'Add', served: options.serverModels, signal: events.signal,
-      take: async (download, model) => {
-        const file = await session.download(`Downloading a server ${ROLE_LABELS[role].one}`, download);
-        if (file !== null) await add(role, file, serverModelSettings(model));
-      },
+      take: (download, model) => add(role, { name: `${model.name}.glb`, read: (signal) => download(signal) }, serverModelSettings(model)),
     }).root);
     const file = element<HTMLInputElement>(root, `#project-library-${role}-file`);
     file.addEventListener('change', () => {
@@ -323,28 +400,38 @@ export function createLibraryEditor(options: {
     }, listen);
   }
   element(root, '.project-library-bones-close').addEventListener('click', () => {
-    editing = null;
-    render();
+    closeBones();
+    renderBones();
   }, listen);
 
-  let shown: readonly LibraryModel[] | null = null;
-  const unsubscribe = session.subscribe((event) => {
-    if (event.kind !== 'content') return;
-    const models = library();
-    // Library rows rebuild only when the library changed.
-    if (shown !== null && shown.length === models.length && shown.every((model, index) =>
-      model.key === models[index]!.key && model.name === models[index]!.name && model.avatar === models[index]!.avatar &&
-      model.head === models[index]!.head)) return;
-    shown = models;
-    preview.refresh(models);
-    render();
+  const unsubscribe = history.document.subscribeAll((changes, cause) => {
+    for (const change of changes) {
+      if (change.section !== 'models') continue;
+      const models = library();
+      const current = editing;
+      if (current?.target.kind === 'entry') {
+        const key = current.target.key;
+        const model = models.find((candidate) => candidate.key === key);
+        if (model === undefined) editing = null;
+        else {
+          const previous = change.before.avatar.find((candidate) => candidate.entry.id === model.id);
+          const reset = cause === 'open' || previous?.entry.boneMap !== model.avatar!.boneMap;
+          editing = {
+            ...current, name: model.name,
+            boneMap: reset ? model.avatar!.boneMap : current.boneMap, issue: reset ? null : current.issue,
+          };
+        }
+      }
+      preview.refresh(models);
+      render();
+    }
   });
   options.mount.append(root);
-  shown = library();
   render();
   return {
     dispose(): void {
       events.abort();
+      closeBones();
       unsubscribe();
       preview.dispose();
       root.remove();

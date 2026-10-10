@@ -1,6 +1,11 @@
-import { GAME_SETTINGS_LIMITS, GameSettingsError, validateGameSettings } from '../game-settings';
+import { GameSettingsError, validateGameSettings } from '../game-settings';
 import type { GameSettings } from '../game-settings';
 import { element } from '../dom';
+import type { History } from './document/history';
+import type { StepPlace } from './document/project-document';
+import { applyProjectCommand } from './document/project-commands';
+import type { ProjectCommands } from './document/project-commands';
+import type { EditOutcome, ProjectImports } from './document/project-imports';
 import { createJsonDownload } from './json-download';
 import { SnapshotError } from './named-snapshots';
 import { createProjectSaveButton } from './project-save';
@@ -13,26 +18,36 @@ import {
 } from './game-settings-store';
 import type { SavedGameSettings } from './game-settings-store';
 
-interface GameSettingsUiOptions {
+export interface GameSettingsUiOptions {
   mount: HTMLElement;
   // Where the settings shared on the server are listed.
   serverMount: HTMLElement;
   signal: AbortSignal;
-  getSettings: () => GameSettings;
-  onLoad: (settings: GameSettings) => void;
+  // The project's game settings: each load is a step, and a file or server copy is a pending edit while it is read.
+  history: History;
+  commands: ProjectCommands;
+  imports: ProjectImports;
   onNotice: (message: string, kind: 'info' | 'error') => void;
   projectSave: ProjectSaveTarget;
   serverCopies: ServerCopies;
 }
 
 export function createGameSettingsUI(options: GameSettingsUiOptions): void {
-  function report(error: unknown, action: 'save' | 'load' | 'import' | 'export'): void {
+  const settings = (): GameSettings => options.history.document.get('settings');
+  const place = (section: string): StepPlace => ({ tab: 'physics', section, select: null });
+
+  // A load the project refused leaves everything as it was.
+  function refused(error: Error): void {
+    options.onNotice(`${error.message} Existing saves and live settings were left unchanged.`, 'error');
+  }
+
+  function report(error: unknown, action: 'save' | 'load' | 'export'): void {
     if (error instanceof DOMException) {
       options.onNotice(action === 'save'
         ? 'Game settings could not be saved. Device storage may be full or blocked; existing saves and live settings are unchanged.'
         : 'The file or device storage is unavailable. Your live settings are unchanged.', 'error');
     } else if (error instanceof GameSettingsError || error instanceof SnapshotError) {
-      options.onNotice(`${error.message} Existing saves and live settings were left unchanged.`, 'error');
+      refused(error);
     } else {
       throw error;
     }
@@ -45,7 +60,7 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
     list: () => listGameSettingsProfiles(localStorage),
     save: (name) => {
       try {
-        return saveGameSettingsProfile(localStorage, name, options.getSettings());
+        return saveGameSettingsProfile(localStorage, name, settings());
       } catch (error) {
         report(error, 'save');
         return null;
@@ -59,8 +74,12 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
         report(error, 'load');
         return null;
       }
-      options.onLoad(saved.settings);
-      return saved;
+      const refusal = applyProjectCommand(options.history, options.commands.settings(() => saved.settings, {
+        label: `Load settings profile ${saved.name}`, place: place('physics-saved'), coalesce: null,
+      }));
+      if (refusal === null) return saved;
+      refused(refusal);
+      return null;
     },
   });
   element(options.mount, '.snapshot-history-help').textContent =
@@ -78,9 +97,8 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
   const fileInput = element<HTMLInputElement>(exchange, '.settings-file');
   const download = createJsonDownload({ mount: options.mount, signal: options.signal });
   const listen = { signal: options.signal };
-  let generation = 0;
-  options.signal.addEventListener('abort', () => { generation++; }, { once: true });
 
+  // One load at a time: the others wait while a file or server copy is read.
   function setImporting(busy: boolean): void {
     picker.setDisabled(busy);
     serverPicker.setDisabled(busy);
@@ -88,38 +106,20 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
     exportButton.disabled = busy;
   }
 
+  // A pending edit while the file is read, which Undo cancels; then one step.
   async function importFile(file: File): Promise<void> {
-    const request = ++generation;
-    const previous = options.getSettings();
-    if (file.size > GAME_SETTINGS_LIMITS.fileBytes) {
-      setImporting(false);
-      report(new GameSettingsError(`Game settings JSON must be at most ${GAME_SETTINGS_LIMITS.fileBytes / 1024} KiB.`), 'import');
-      return;
-    }
     setImporting(true);
+    let outcome: EditOutcome<void>;
     try {
-      const text = await file.text();
-      let value: unknown;
-      try {
-        value = JSON.parse(text);
-      } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-        throw new GameSettingsError('Game settings JSON is malformed.');
-      }
-      const settings = validateGameSettings(value);
-      if (options.signal.aborted || request !== generation) return;
-      if (options.getSettings() !== previous) {
-        options.onNotice('Settings changed while the file was being read. The import was canceled; choose the file again to replace them.', 'info');
-        return;
-      }
-      options.onLoad(settings);
-      options.onNotice('Imported game settings. Saved profiles were kept; save a named profile to retain these settings in this browser.', 'info');
-    } catch (error) {
-      if (!options.signal.aborted && request === generation) report(error, 'import');
-      else if (!(error instanceof GameSettingsError) && !(error instanceof DOMException)) throw error;
+      outcome = await options.imports.settings(file, {
+        info: { label: `Import settings ${file.name}`, place: place('physics-saved'), coalesce: null }, signal: options.signal,
+      });
     } finally {
-      if (!options.signal.aborted && request === generation) setImporting(false);
+      if (!options.signal.aborted) setImporting(false);
     }
+    if (options.signal.aborted || outcome.kind === 'cancelled') return;
+    if (outcome.kind === 'refused') refused(outcome.error);
+    else options.onNotice('Imported game settings. Saved profiles were kept; save a named profile to retain these settings in this browser.', 'info');
   }
 
   importButton.addEventListener('click', () => fileInput.click(), listen);
@@ -130,33 +130,27 @@ export function createGameSettingsUI(options: GameSettingsUiOptions): void {
   }, listen);
   exportButton.addEventListener('click', () => {
     try {
-      download('game-settings.json', `${JSON.stringify(validateGameSettings(options.getSettings()), null, 2)}\n`);
+      download('game-settings.json', `${JSON.stringify(validateGameSettings(settings()), null, 2)}\n`);
       options.onNotice('Exported game-settings.json. Select this file with GAME_SETTINGS when building the game.', 'info');
     } catch (error) {
       report(error, 'export');
     }
   }, listen);
 
-  // The settings a server copy's download started from: a newer edit cancels the load, as it cancels an import.
-  let downloadedOver: GameSettings | null = null;
   const serverPicker = createServerCopyPicker({
     mount: options.serverMount, signal: options.signal, copies: options.serverCopies, kind: 'game-settings',
     id: 'game-settings', noun: 'game settings', plural: 'game settings', placeholder: 'e.g. steady-hammer',
     onNotice: options.onNotice,
-    capture: () => options.getSettings(),
-    apply: (value) => {
-      const settings = validateGameSettings(value);
-      if (options.getSettings() !== downloadedOver) {
-        options.onNotice('Settings changed while the server copy was downloading. The load was canceled; load it again to replace them.', 'info');
-        return false;
-      }
-      options.onLoad(settings);
-      return true;
+    capture: settings,
+    // A pending edit from before the download, which Undo cancels; then one step.
+    load: async (name, read) => {
+      const outcome = await options.imports.serverSettings(name, read, {
+        info: { label: `Load server settings ${name}`, place: place('physics-server'), coalesce: null }, signal: options.signal,
+      });
+      if (outcome.kind === 'refused') refused(outcome.error);
+      return outcome.kind === 'applied' || outcome.kind === 'unchanged';
     },
     afterLoad: 'Saved profiles were kept; save a named profile to keep these settings in this browser.',
-    onLoading: (busy) => {
-      if (busy) downloadedOver = options.getSettings();
-      setImporting(busy);
-    },
+    onLoading: setImporting,
   });
 }

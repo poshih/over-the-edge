@@ -1,14 +1,18 @@
 import { createRangeControl } from './range-control';
+import type { ScrubHistory } from './range-control';
 import type { WorkshopOption, WorkshopRange, WorkshopSelect, WorkshopToggle, WorkshopUiKit } from './workshop-sdk';
 
 /**
  * A Workshop plugin's UI kit (WorkshopUiKit): the Workshop's own controls and styles, so plugin UI looks and behaves like
  * the built-in tabs. Each control's callback runs guarded, so an error it throws stops the plugin, and its listeners go
- * with `signal` when the plugin stops.
+ * with `signal` when the plugin stops. A range's scrub is one undo step, named "<plugin>: <label>".
  */
 export function createWorkshopUiKit(options: {
   // Unique per plugin, for the controls' element IDs.
   readonly prefix: string;
+  // The plugin's ID, which names the steps its ranges make.
+  readonly plugin: string;
+  readonly history: ScrubHistory;
   readonly signal: AbortSignal;
   readonly guard: <A extends unknown[]>(callback: (...args: A) => void) => (...args: A) => void;
   readonly notice: (message: string, kind?: 'info' | 'error') => void;
@@ -29,7 +33,10 @@ export function createWorkshopUiKit(options: {
       const onInput = options.guard((value: number) => spec.onInput(value));
       const control = createRangeControl({
         label: spec.label, min: spec.min, max: spec.max, step: spec.step, unit: spec.unit ?? '', description: spec.description,
-      }, { id: id(), name: spec.label, signal: options.signal, onInput: (value) => onInput(value) });
+      }, {
+        id: id(), name: spec.label, signal: options.signal, onInput: (value) => onInput(value),
+        history: options.history, stepLabel: `${options.plugin}: ${spec.label}`,
+      });
       control.setValue(spec.value);
       return { element: control.row, input: control.input, set: (value, state) => control.setValue(value, state) };
     },

@@ -26,7 +26,7 @@ export function createServerModelPicker(options: {
   // What the button does with the model: "Use" or "Add".
   readonly action: string;
   readonly served: ServerModels;
-  readonly take: (download: () => Promise<File>, model: ServerModel) => Promise<unknown>;
+  readonly take: (download: (signal?: AbortSignal) => Promise<File>, model: ServerModel) => Promise<unknown>;
   readonly signal: AbortSignal;
 }): ServerModelPicker {
   const { role, signal } = options;
@@ -69,7 +69,8 @@ export function createServerModelPicker(options: {
     busy = true;
     render();
     try {
-      await options.take(() => downloadServerModel(options.served, model, signal), model);
+      await options.take((operation) => downloadServerModel(options.served, model,
+        operation === undefined ? signal : AbortSignal.any([signal, operation])), model);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) throw error;
     } finally {

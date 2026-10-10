@@ -41,9 +41,9 @@ export function pluginOfSection(name: string): string | null {
 }
 
 // One plugin's data within the engine's limits. The plugin's own validation runs where it is loaded.
-export function validatePluginData(id: string, value: unknown): PluginData {
+export function validatePluginData(id: string, value: unknown, measured?: (bytes: number) => void): PluginData {
   const section = pluginSection(id);
-  return boundedJson(value, PLUGIN_DATA_LIMITS, `Plugin "${id}" data`, (message) => new ProjectError(message, { section }));
+  return boundedJson(value, PLUGIN_DATA_LIMITS, `Plugin "${id}" data`, (message) => new ProjectError(message, { section }), measured);
 }
 
 // The manifest's `plugins`: each plugin's data by ID, with null data never stored.

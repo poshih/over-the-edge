@@ -70,6 +70,14 @@ export interface CharacterAssetHost {
   prepare(document: SpriteDocument, signal: AbortSignal): Promise<CharacterAssetLease>;
 }
 
+// A whole document staged off screen. Until it commits, showing it at once, or cancels, letting go of what it staged,
+// the rig refuses other changes.
+export interface PreparedSpriteReplacement {
+  // Throws the rig's SpriteError, or the cancellation once its signal aborted or the rig was disposed, showing nothing.
+  commit(): void;
+  cancel(): void;
+}
+
 interface ImageResource {
   readonly bitmap: ImageBitmap;
   readonly texture: THREE.Texture;
@@ -523,6 +531,11 @@ export class SpriteRig {
   }
 
   async replace(document: SpriteDocument, options: { signal: AbortSignal } = { signal: new AbortController().signal }): Promise<void> {
+    (await this.prepareReplacement(document, options)).commit();
+  }
+
+  // Loads a whole document's models and decodes its images without showing it.
+  async prepareReplacement(document: SpriteDocument, options: { readonly signal: AbortSignal }): Promise<PreparedSpriteReplacement> {
     this.assertMutable();
     if (options.signal.aborted) throw cancellation(options.signal);
     document = validateSpriteMetadata(document);
@@ -541,6 +554,14 @@ export class SpriteRig {
     let pixels = 0;
     let bytes = 0;
     let assetLease: CharacterAssetLease | null = null;
+    // Lets go of what the replacement holds once it commits or fails, so the rig takes other changes again.
+    const release = (): void => {
+      options.signal.removeEventListener('abort', abort);
+      assetLease?.release();
+      for (const resource of operation.staged.values()) this.releaseResource(resource);
+      operation.staged.clear();
+      if (this.replacement === operation) this.replacement = null;
+    };
     try {
       if (document.models !== undefined) {
         assetLease = await this.assetHost!.prepare(document, signal);
@@ -585,19 +606,35 @@ export class SpriteRig {
         images.set(image.id, resource);
       }
       checkSignal(signal);
-      const next = this.buildState(document.layers, document.skeleton, images, resources,
-        { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
-          armForwardDistance: document.armForwardDistance, waistLean: document.waistLean, grips: document.grips, arms: document.arms,
-          ...characterAssets(document) });
-      operation.staged.clear();
-      this.commit(next, { preview: null });
-    } finally {
-      options.signal.removeEventListener('abort', abort);
-      assetLease?.release();
-      for (const resource of operation.staged.values()) this.releaseResource(resource);
-      operation.staged.clear();
-      if (this.replacement === operation) this.replacement = null;
+    } catch (error) {
+      release();
+      throw error;
     }
+    let ended = false;
+    return {
+      // Built only now, against the character's presentation as it stands, so nothing staged pairs with a presentation
+      // that moved meanwhile; shown in the same call.
+      commit: () => {
+        if (ended) throw new Error('The sprite replacement has already ended.');
+        ended = true;
+        try {
+          checkSignal(signal);
+          const next = this.buildState(document.layers, document.skeleton, images, resources,
+            { mode: 'replace', presentation: document.presentation, characterRiggingType: document.characterRiggingType,
+              armForwardDistance: document.armForwardDistance, waistLean: document.waistLean, grips: document.grips, arms: document.arms,
+              ...characterAssets(document) });
+          operation.staged.clear();
+          this.commit(next, { preview: null });
+        } finally {
+          release();
+        }
+      },
+      cancel: () => {
+        if (ended) return;
+        ended = true;
+        release();
+      },
+    };
   }
 
   setCharacterRiggingType(value: CharacterRiggingType): void {

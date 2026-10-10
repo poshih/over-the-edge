@@ -1,9 +1,11 @@
+import { Disposal } from '../../disposal';
+import { PLUGIN_DATA_LIMITS, pluginOfSection } from '../../plugin-data';
+import type { FileHandle, FileStore } from './files';
 import type {
-  ChangeCause, ProjectDocument, SectionChange, SectionName, SectionValue, SectionValues, Selection,
+  BuiltinDocumentSectionName, ChangeCause, ProjectDocument, SectionChange, SectionName, SectionValue, SectionValues, Selection,
   SomeSectionChange, StepInfo, StepPlace,
 } from './project-document';
-import { SECTION_ADAPTERS } from './sections';
-import type { SectionAdapter } from './sections';
+import { adapterFor, SECTION_ADAPTERS } from './sections';
 
 export const HISTORY_LIMITS = Object.freeze({ steps: 200, bytes: 64 * 1024 * 1024, label: 80, coalesceMs: 1000 });
 
@@ -58,28 +60,23 @@ export interface History {
   undo(): void;
   redo(): void;
   load(values: SectionValues): void;                // Another project: clears steps and pending edits.
-  external(changes: readonly SomeSectionChange[]): void; // The server's changes: cuts history at those sections.
+  external(changes: readonly SomeSectionChange[], cause?: 'server' | 'edit'): void;
   cut(sections: readonly SectionName[]): void;      // Drops the newest touching step, every older one and all redo.
   hold(): () => void;                               // Undo and Redo wait until every returned release has run.
   state(): HistoryState;
   subscribe(listener: () => void): () => void;      // Hears every change of state().
+  dispose(): void;
+}
+
+export interface HistoryOptions {
+  readonly files: FileStore;
 }
 
 type SectionListener<S extends SectionName> =
   (change: SectionChange<S>, cause: ChangeCause, step: StepInfo | null) => void;
 
-interface SectionSlot<S extends SectionName> {
-  readonly section: S;
-  value: SectionValue<S>;
-  readonly adapter: SectionAdapter<S>;
-  readonly listeners: Set<SectionListener<S>>;
-}
-
-type SectionSlots = { readonly [S in SectionName]: SectionSlot<S> };
-
-function sectionSlot<S extends SectionName>(slots: SectionSlots, section: S): SectionSlot<S> {
-  return slots[section] as SectionSlot<S>;
-}
+type BatchListener = (changes: readonly SomeSectionChange[], cause: ChangeCause, step: StepInfo | null) => void;
+type ChangeListener = (change: SomeSectionChange, cause: ChangeCause, step: StepInfo | null) => void;
 
 interface Link<T> {
   readonly value: T;
@@ -127,11 +124,18 @@ interface StoredStep {
   readonly epoch: number;
   sealedAt: number | null;
   readonly sections: Map<SectionName, Link<StoredStep>>;
+  release: () => void;
+}
+
+interface StepResources {
+  readonly bytes: number;
+  readonly release: () => void;
 }
 
 interface LiveTransaction {
   readonly info: StepInfo;
   changes: readonly SomeSectionChange[];
+  release: () => void;
   done: boolean;
 }
 
@@ -186,11 +190,57 @@ function frozen(value: unknown): void {
   if (!Object.isFrozen(value)) throw new Error('A project section must be frozen.');
 }
 
-export function createHistory(initial: SectionValues): History {
-  const slots: SectionSlots = {
-    level: { section: 'level', value: initial.level, adapter: SECTION_ADAPTERS.level, listeners: new Set() },
-  };
-  for (const slot of Object.values(slots)) frozen(slot.value);
+export function createHistory(initial: SectionValues, options: HistoryOptions): History {
+  const builtin = Object.keys(SECTION_ADAPTERS.builtin) as BuiltinDocumentSectionName[];
+  const values = new Map<SectionName, SectionValue<SectionName>>();
+  const documentFiles = new Map<SectionName, () => void>();
+  const sectionListeners = new Map<SectionName, Set<ChangeListener>>();
+  const batchListeners = new Set<BatchListener>();
+  const refusals = new Set([
+    ...Object.values(SECTION_ADAPTERS.builtin).map((adapter) => adapter.refusal), SECTION_ADAPTERS.plugins.refusal,
+  ]);
+  let names: readonly SectionName[] | null = null;
+  let disposed = false;
+
+  function read<S extends SectionName>(section: S): SectionValue<S> {
+    if (disposed) throw new Error('The project history has closed.');
+    if (values.has(section)) return values.get(section) as SectionValue<S>;
+    if (Object.hasOwn(SECTION_ADAPTERS.builtin, section)) throw new Error(`Missing project section "${section}".`);
+    if (pluginOfSection(section) === null) throw new Error(`Unknown project section "${section}".`);
+    return null as SectionValue<S>;
+  }
+
+  function input(values: SectionValues): readonly SectionName[] {
+    for (const section of builtin) {
+      if (!Object.hasOwn(values, section)) throw new Error(`Missing project section "${section}".`);
+    }
+    const sections = [...new Set([...builtin, ...Object.keys(values) as SectionName[]])];
+    let plugins = 0;
+    for (const section of sections) {
+      adapterFor(section);
+      if (values[section] === undefined) throw new Error(`Missing project section "${section}".`);
+      frozen(values[section]);
+      if (values[section] !== null && !Object.hasOwn(SECTION_ADAPTERS.builtin, section)) plugins++;
+    }
+    if (plugins > PLUGIN_DATA_LIMITS.plugins) throw new Error('The project has too many plugin data sections.');
+    return sections;
+  }
+
+  const initialNames = input(initial);
+  try {
+    for (const section of initialNames) {
+      const value = initial[section];
+      if (value === null && !Object.hasOwn(SECTION_ADAPTERS.builtin, section)) continue;
+      documentFiles.set(section, options.files.retain(adapterFor(section).files(value), 'document'));
+      values.set(section, value);
+    }
+  } catch (error) {
+    const disposal = new Disposal();
+    disposal.run(() => { throw error; });
+    for (const release of documentFiles.values()) disposal.run(release);
+    disposal.finish();
+    throw error;
+  }
   const undoSteps = new Chain<StoredStep>();
   const redoSteps = new Chain<StoredStep>();
   const pendingEdits = new Chain<LivePending>();
@@ -210,23 +260,45 @@ export function createHistory(initial: SectionValues): History {
 
   const document: ProjectDocument = Object.freeze({
     get<S extends SectionName>(section: S): SectionValue<S> {
-      return sectionSlot(slots, section).value;
+      return read(section);
     },
     subscribe<S extends SectionName>(section: S, listener: SectionListener<S>): () => void {
-      const subscribed: SectionListener<S> = (change, cause, info) => listener(change, cause, info);
-      const target = sectionSlot(slots, section).listeners;
+      read(section);
+      const subscribed: ChangeListener = (change, cause, info) => listener(change as SectionChange<S>, cause, info);
+      let target = sectionListeners.get(section);
+      if (target === undefined) {
+        target = new Set();
+        sectionListeners.set(section, target);
+      }
       target.add(subscribed);
-      return () => { target.delete(subscribed); };
+      const subscribers = target;
+      return () => {
+        subscribers.delete(subscribed);
+        if (subscribers.size === 0 && sectionListeners.get(section) === subscribers) sectionListeners.delete(section);
+      };
+    },
+    sections(): readonly SectionName[] {
+      if (disposed) throw new Error('The project history has closed.');
+      if (names === null) names = Object.freeze([...values.keys()].sort());
+      return names;
+    },
+    subscribeAll(listener: BatchListener): () => void {
+      if (disposed) throw new Error('The project history has closed.');
+      const subscribed: BatchListener = (changes, cause, info) => listener(changes, cause, info);
+      batchListeners.add(subscribed);
+      return () => { batchListeners.delete(subscribed); };
     },
   });
 
   function guard(): void {
     if (notifying) throw new Error('A listener cannot change the project while it hears a change.');
+    if (disposed) throw new Error('The project history has closed.');
   }
 
   function notify(changes: readonly SomeSectionChange[] = [], cause: ChangeCause = 'edit',
     info: StepInfo | null = null, callbacks: readonly (() => void)[] = []): void {
-    const sections = changes.map((change) => ({ change, listeners: [...sectionSlot(slots, change.section).listeners] }));
+    const sections = changes.map((change) => ({ change, listeners: [...(sectionListeners.get(change.section) ?? [])] }));
+    const batches = changes.length === 0 ? [] : [...batchListeners];
     const subscribers = [...listeners];
     let failed = false;
     let firstError: unknown;
@@ -241,6 +313,7 @@ export function createHistory(initial: SectionValues): History {
       for (const { change, listeners: sectionListeners } of sections) {
         for (const listener of sectionListeners) tell(() => listener(change, cause, info));
       }
+      for (const listener of batches) tell(() => listener(changes, cause, info));
       for (const listener of subscribers) tell(listener);
     } finally {
       notifying = false;
@@ -254,7 +327,7 @@ export function createHistory(initial: SectionValues): History {
     for (const change of changes) {
       if (seen.has(change.section)) throw new Error('A step can change each section only once.');
       seen.add(change.section);
-      if (sectionSlot(slots, change.section).value !== change.before) {
+      if (read(change.section) !== change.before) {
         throw new Error('A section change must replace the current value.');
       }
       frozen(change.after);
@@ -266,16 +339,46 @@ export function createHistory(initial: SectionValues): History {
   function runCommand(run: Command['run']): readonly SomeSectionChange[] | Error {
     let changes: readonly SomeSectionChange[];
     try { changes = run(document); } catch (error) {
-      for (const adapter of Object.values(SECTION_ADAPTERS)) {
-        if (error instanceof adapter.refusal) return error;
-      }
+      for (const refusal of refusals) if (error instanceof refusal) return error;
       throw error;
     }
     return checked(changes);
   }
 
-  function set(changes: readonly SomeSectionChange[]): void {
-    for (const change of changes) sectionSlot(slots, change.section).value = change.after;
+  function acquireDocument(changes: readonly SomeSectionChange[]): Map<SectionName, () => void> {
+    const leases = new Map<SectionName, () => void>();
+    try {
+      for (const change of changes) {
+        leases.set(change.section, options.files.retain(adapterFor(change.section).files(change.after), 'document'));
+      }
+    } catch (error) {
+      const disposal = new Disposal();
+      disposal.run(() => { throw error; });
+      for (const release of leases.values()) disposal.run(release);
+      disposal.finish();
+      throw error;
+    }
+    return leases;
+  }
+
+  function set(changes: readonly SomeSectionChange[], leases = acquireDocument(changes)): void {
+    for (const change of changes) {
+      const present = values.has(change.section);
+      if (change.after === null && !Object.hasOwn(SECTION_ADAPTERS.builtin, change.section)) values.delete(change.section);
+      else values.set(change.section, change.after);
+      if (present !== values.has(change.section)) names = null;
+    }
+    const disposal = new Disposal();
+    for (const [section, release] of leases) {
+      const previous = documentFiles.get(section);
+      if (values.has(section)) documentFiles.set(section, release);
+      else {
+        documentFiles.delete(section);
+        disposal.run(release);
+      }
+      if (previous !== undefined) disposal.run(previous);
+    }
+    disposal.finish();
   }
 
   function compose(first: readonly SomeSectionChange[], next: readonly SomeSectionChange[]): readonly SomeSectionChange[] {
@@ -283,22 +386,55 @@ export function createHistory(initial: SectionValues): History {
     for (const change of first) changes.set(change.section, change);
     for (const change of next) {
       const previous = changes.get(change.section);
-      const combined = previous === undefined ? change : sectionSlot(slots, change.section).adapter.compose(previous, change);
+      const combined = previous === undefined ? change
+        : adapterFor(change.section).compose(previous, change) as SomeSectionChange | null;
       if (combined === null) changes.delete(change.section);
       else changes.set(change.section, combined);
     }
     return [...changes.values()];
   }
 
-  function bytes(changes: readonly SomeSectionChange[]): number {
-    let total = 0;
-    for (const change of changes) total += sectionSlot(slots, change.section).adapter.bytes(change);
-    return total;
+  function handles(changes: readonly SomeSectionChange[]): readonly FileHandle[] {
+    const files = new Set<FileHandle>();
+    for (const change of changes) {
+      const adapter = adapterFor(change.section);
+      for (const file of adapter.files(change.before)) files.add(file);
+      for (const file of adapter.files(change.after)) files.add(file);
+    }
+    return Object.freeze([...files]);
+  }
+
+  function capture(changes: readonly SomeSectionChange[]): StepResources {
+    const retained = new Set<FileHandle>();
+    const changed = new Set<FileHandle>();
+    const removed = new Set<FileHandle>();
+    let bytes = 0;
+    for (const change of changes) {
+      const adapter = adapterFor(change.section);
+      bytes += adapter.bytes(change);
+      const before = new Set(adapter.files(change.before));
+      const after = new Set(adapter.files(change.after));
+      for (const file of before) {
+        retained.add(file);
+        if (!after.has(file)) { changed.add(file); removed.add(file); }
+      }
+      for (const file of after) {
+        retained.add(file);
+        if (!before.has(file)) changed.add(file);
+      }
+    }
+    for (const file of changed) {
+      const page = options.files.pageBytes(file);
+      // A removal reserves remote bytes before a destructive save lazily preserves them.
+      const charge = page === 0 && removed.has(file) ? file.bytes : page;
+      if (charge > 0) bytes += charge;
+    }
+    return { bytes, release: options.files.retain([...retained], 'history') };
   }
 
   function checkStep(changes: readonly SomeSectionChange[], side: 'before' | 'after'): void {
     for (const change of changes) {
-      if (sectionSlot(slots, change.section).value !== change[side]) {
+      if (read(change.section) !== change[side]) {
         throw new Error('The project changed outside its history.');
       }
     }
@@ -306,7 +442,7 @@ export function createHistory(initial: SectionValues): History {
 
   function inverse(changes: readonly SomeSectionChange[]): readonly SomeSectionChange[] {
     checkStep(changes, 'after');
-    return checked([...changes].reverse().map((change) => sectionSlot(slots, change.section).adapter.invert(change)));
+    return checked([...changes].reverse().map((change) => adapterFor(change.section).invert(change) as SomeSectionChange));
   }
 
   function linkSections(step: StoredStep): void {
@@ -345,8 +481,20 @@ export function createHistory(initial: SectionValues): History {
   }
 
   function clearRedo(): void {
+    const disposal = new Disposal();
+    for (let link = redoSteps.first; link !== null; link = link.next) disposal.run(link.value.release);
     redoSteps.clear();
     redoBytes = 0;
+    disposal.finish();
+  }
+
+  function clearUndo(): void {
+    const disposal = new Disposal();
+    for (let link = undoSteps.first; link !== null; link = link.next) disposal.run(link.value.release);
+    undoSteps.clear();
+    undoBytes = 0;
+    sectionSteps.clear();
+    disposal.finish();
   }
 
   function clearPendingRedo(): void {
@@ -358,12 +506,12 @@ export function createHistory(initial: SectionValues): History {
     while (undoSteps.size > 1 && (undoSteps.size > HISTORY_LIMITS.steps || undoBytes + redoBytes > HISTORY_LIMITS.bytes)) {
       const oldest = undoSteps.first;
       if (oldest === null) throw new Error('History steps are inconsistent.');
-      removeUndo(oldest);
+      removeUndo(oldest).release();
     }
   }
 
-  function record(changes: readonly SomeSectionChange[], info: StepInfo, key: string | null, size: number): StoredStep {
-    const step: StoredStep = { info, changes, bytes: size, order: ++order, key, epoch, sealedAt: null, sections: new Map() };
+  function record(changes: readonly SomeSectionChange[], info: StepInfo, key: string | null, resources: StepResources): StoredStep {
+    const step: StoredStep = { info, changes, ...resources, order: ++order, key, epoch, sealedAt: null, sections: new Map() };
     addUndo(step);
     clearRedo();
     clearPendingRedo();
@@ -379,25 +527,33 @@ export function createHistory(initial: SectionValues): History {
       && redoSteps.size === 0 && (pendingEdits.last === null || pendingEdits.last.value.order < step.order)
       && transaction === null;
     const combined = merge ? compose(step.changes, changes) : changes;
-    const size = bytes(combined);
-    set(changes);
+    const resources = capture(combined);
+    try { set(changes); } catch (error) {
+      resources.release();
+      throw error;
+    }
     if (merge) {
-      if (combined.length === 0) removeUndo(latest);
-      else {
+      const release = step.release;
+      if (combined.length === 0) {
+        removeUndo(latest);
+        resources.release();
+      } else {
         unlinkSections(step);
-        undoBytes += size - step.bytes;
-        step.bytes = size;
+        undoBytes += resources.bytes - step.bytes;
+        step.bytes = resources.bytes;
+        step.release = resources.release;
         step.changes = combined;
         step.info = mergedInfo(step.info, info);
         step.sealedAt = null;
         linkSections(step);
       }
+      release();
       clearRedo();
       clearPendingRedo();
       trim();
       return combined.length === 0 ? null : step;
     }
-    return record(changes, info, key, size);
+    return record(changes, info, key, resources);
   }
 
   function liveTransaction(value: LiveTransaction): void {
@@ -408,12 +564,15 @@ export function createHistory(initial: SectionValues): History {
     liveTransaction(value);
     const changes = value.changes;
     const info = select === undefined ? value.info : withSelection(value.info, selection(select));
-    const size = bytes(changes);
+    const resources = changes.length === 0 ? null : capture(changes);
+    const release = value.release;
     value.done = true;
     value.changes = [];
+    value.release = () => {};
     transaction = null;
     epoch++;
-    if (changes.length > 0) record(changes, info, null, size);
+    if (resources !== null) record(changes, info, null, resources);
+    release();
     notify();
   }
 
@@ -463,6 +622,7 @@ export function createHistory(initial: SectionValues): History {
     if (boundary !== null) {
       while (undoSteps.first !== null) {
         const step = removeUndo(undoSteps.first);
+        step.release();
         if (step === boundary) break;
       }
     }
@@ -496,7 +656,7 @@ export function createHistory(initial: SectionValues): History {
     begin(info): Transaction {
       guard();
       commitOpen();
-      const value: LiveTransaction = { info: stepInfo(info), changes: [], done: false };
+      const value: LiveTransaction = { info: stepInfo(info), changes: [], release: () => {}, done: false };
       transaction = value;
       const result: Transaction = {
         apply(run): Error | null {
@@ -506,8 +666,16 @@ export function createHistory(initial: SectionValues): History {
           if (changes instanceof Error) return changes;
           if (changes.length === 0) return null;
           const combined = compose(value.changes, changes);
-          set(changes);
+          // Uncommitted inverses already need protection from destructive saves.
+          const retained = options.files.retain(handles(combined), 'history');
+          try { set(changes); } catch (error) {
+            retained();
+            throw error;
+          }
+          const release = value.release;
           value.changes = combined;
+          value.release = retained;
+          release();
           notify(changes, 'edit', value.info);
           return null;
         },
@@ -519,10 +687,12 @@ export function createHistory(initial: SectionValues): History {
           guard();
           liveTransaction(value);
           const changes = inverse(value.changes);
+          set(changes);
           value.done = true;
           value.changes = [];
           transaction = null;
-          set(changes);
+          value.release();
+          value.release = () => {};
           notify(changes, 'undo', value.info);
         },
       };
@@ -639,14 +809,16 @@ export function createHistory(initial: SectionValues): History {
       set(changes);
       notify(changes, 'redo', step.info);
     },
-    load(values): void {
+    load(next): void {
       guard();
+      const incoming = input(next);
       const changes: SomeSectionChange[] = [];
-      for (const slot of Object.values(slots)) {
-        const after = values[slot.section];
-        frozen(after);
-        if (slot.value !== after) changes.push(slot.adapter.change(slot.value, after));
+      for (const section of new Set([...values.keys(), ...incoming])) {
+        const before = read(section);
+        const after = Object.hasOwn(next, section) ? next[section] : null;
+        if (before !== after) changes.push(adapterFor(section).change(before, after) as SomeSectionChange);
       }
+      const leases = acquireDocument(changes);
       const callbacks: (() => void)[] = [];
       while (pendingEdits.first !== null) {
         const cancelled = endPending(pendingEdits.first.value, false);
@@ -655,28 +827,39 @@ export function createHistory(initial: SectionValues): History {
       if (transaction !== null) {
         transaction.done = true;
         transaction.changes = [];
+        callbacks.unshift(transaction.release);
+        transaction.release = () => {};
         transaction = null;
       }
-      undoSteps.clear();
-      undoBytes = 0;
-      sectionSteps.clear();
-      clearRedo();
       epoch++;
-      set(changes);
-      notify(changes, 'open', null, callbacks);
+      const disposal = new Disposal();
+      disposal.run(clearUndo);
+      disposal.run(clearRedo);
+      disposal.run(() => set(changes, leases));
+      disposal.run(() => notify(changes, 'open', null, callbacks));
+      disposal.finish();
     },
-    external(changes): void {
+    external(changes, cause = 'server'): void {
       guard();
       commitOpen();
       const next = checked(changes);
       epoch++;
-      const changed = cut(changes.map((change) => change.section));
-      set(next);
-      if (changed || next.length > 0) notify(next, 'server');
+      const leases = acquireDocument(next);
+      let changed: boolean;
+      try { changed = cut(changes.map((change) => change.section)); } catch (error) {
+        const disposal = new Disposal();
+        disposal.run(() => { throw error; });
+        for (const release of leases.values()) disposal.run(release);
+        disposal.finish();
+        throw error;
+      }
+      set(next, leases);
+      if (changed || next.length > 0) notify(next, cause);
     },
     cut(sections): void {
       guard();
       commitOpen();
+      for (const section of sections) adapterFor(section);
       epoch++;
       if (cut(sections)) notify();
     },
@@ -695,6 +878,7 @@ export function createHistory(initial: SectionValues): History {
       let released = false;
       return () => {
         if (released) return;
+        if (disposed) { released = true; return; }
         guard();
         released = true;
         holds--;
@@ -721,9 +905,41 @@ export function createHistory(initial: SectionValues): History {
       });
     },
     subscribe(listener): () => void {
+      if (disposed) throw new Error('The project history has closed.');
       const subscribed = () => listener();
       listeners.add(subscribed);
       return () => { listeners.delete(subscribed); };
+    },
+    dispose(): void {
+      if (disposed) return;
+      guard();
+      const callbacks: (() => void)[] = [];
+      while (pendingEdits.first !== null) {
+        const cancelled = endPending(pendingEdits.first.value, false);
+        if (cancelled !== null) callbacks.push(cancelled);
+      }
+      if (transaction !== null) {
+        transaction.done = true;
+        transaction.changes = [];
+        callbacks.unshift(transaction.release);
+        transaction.release = () => {};
+        transaction = null;
+      }
+      disposed = true;
+      holds = 0;
+      const disposal = new Disposal();
+      disposal.run(clearUndo);
+      disposal.run(clearRedo);
+      for (const release of documentFiles.values()) disposal.run(release);
+      documentFiles.clear();
+      values.clear();
+      names = null;
+      sectionListeners.clear();
+      batchListeners.clear();
+      listeners.clear();
+      notifying = true;
+      try { for (const callback of callbacks) disposal.run(callback); } finally { notifying = false; }
+      disposal.finish();
     },
   };
   return Object.freeze(history);

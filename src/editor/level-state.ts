@@ -3,7 +3,6 @@ import {
   validateLevel, validateLevelLabels, validateLevelMetadata, validateLevelObject, validateTriggerTargets,
 } from '../level';
 import type { LevelChange, LevelDefinition, LevelLabel, LevelObject, StartObject, TriggerObject } from '../level';
-import { NO_DECORATION_ART } from '../decoration-art';
 import type { DecorationArt } from '../decoration-art';
 import { unknownDecorationModels } from '../decoration-models';
 import { ENEMY_LIMITS } from '../enemy-types';
@@ -102,8 +101,6 @@ export class LevelState {
   private startObject: StartObject;
   private readonly tallies = emptyCounts();
   private readonly geometryUse = new Map<string, number>();
-  // The course artwork whose models the level may place besides the decoration library's.
-  private decorationArt: () => DecorationArt = () => NO_DECORATION_ART;
 
   // Follows the document's level: from each change's delta in O(changed), in full when a project opens. Construct it
   // before any other subscriber to the level, so its indexes are current when they hear a change.
@@ -129,24 +126,16 @@ export class LevelState {
     return { ...this.tallies, total: this.objects.size };
   }
 
-  /**
-   * Keeps the level to decorations something draws: the decoration library's models and those `art` maps. Every change
-   * that would place another is refused, as saves and releases refuse it.
-   */
-  drawDecorationsWith(art: () => DecorationArt): void {
-    this.decorationArt = art;
-  }
-
   /** Refuses decorations among `objects` whose model nothing draws, with the message a save gives. */
-  checkDecorations(objects: readonly LevelObject[]): void {
-    const unknown = unknownDecorationModels({ objects }, this.decorationArt());
+  checkDecorations(objects: readonly LevelObject[], decorations = this.document.get('art').decorations): void {
+    const unknown = unknownDecorationModels({ objects }, decorations);
     if (unknown.length > 0) throw new LevelError(unknown.slice(0, 8).join(' ') + (unknown.length > 8 ? ` (${unknown.length - 8} more)` : ''));
   }
 
   // Checks a whole level as replace() does, for a project to open with: the frozen definition, or throws LevelError.
-  check(value: unknown): LevelDefinition {
+  check(value: unknown, decorations?: DecorationArt): LevelDefinition {
     const level = validateLevel(value);
-    this.checkDecorations(level.objects);
+    this.checkDecorations(level.objects, decorations);
     return level;
   }
 
@@ -220,16 +209,16 @@ export class LevelState {
   }
 
   // Another level in place of this one: the game restarts the run.
-  replace(value: unknown): SectionChange<'level'> | null {
-    return this.adopt('replace', value);
+  replace(value: unknown, decorations?: DecorationArt): SectionChange<'level'> | null {
+    return this.adopt('replace', value, decorations);
   }
 
   /**
    * Adopts another version of this level as one incremental edit: only objects that differ are
    * upserted or removed, so an open playtest continues instead of restarting as it does for replace().
    */
-  merge(value: unknown): SectionChange<'level'> | null {
-    return this.adopt('edit', value);
+  merge(value: unknown, decorations?: DecorationArt): SectionChange<'level'> | null {
+    return this.adopt('edit', value, decorations);
   }
 
   // A command whose run returns `build`'s change, or none for null.
@@ -258,8 +247,8 @@ export class LevelState {
 
   // The change to the level `value` whole, in its own object order, keeping every current object JSON-equal to its
   // incoming one. A new order alone is a change with an empty delta.
-  private adopt(kind: LevelDelta['kind'], value: unknown): SectionChange<'level'> | null {
-    const level = this.check(value);
+  private adopt(kind: LevelDelta['kind'], value: unknown, decorations?: DecorationArt): SectionChange<'level'> | null {
+    const level = this.check(value, decorations);
     const before = this.definition();
     const objects: LevelObject[] = [];
     const upsert: LevelObject[] = [];

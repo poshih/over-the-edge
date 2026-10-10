@@ -51,10 +51,10 @@ export class ServerCopies {
     return (await this.client.sharedCopies(kind)).map((copy) => copy.name);
   }
 
-  // A copy's value as stored; the editor validates it.
-  async read(kind: SharedKind, name: string): Promise<unknown> {
+  // A copy's value as stored; the editor validates it. `signal` abandons the download.
+  async read(kind: SharedKind, name: string, signal?: AbortSignal): Promise<unknown> {
     try {
-      return await this.client.sharedCopy(kind, name);
+      return await this.client.sharedCopy(kind, name, signal);
     } catch (error) {
       // A copy edited by hand or by a merge may no longer be JSON.
       if (!(error instanceof SyntaxError)) throw error;

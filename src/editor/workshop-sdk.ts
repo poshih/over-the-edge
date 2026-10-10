@@ -6,8 +6,9 @@
  * When the Workshop's project is open, it starts each facet with a WorkshopHost, through which the
  * plugin adds its tabs and sections, reads the open project, edits it through the operations the built-in tabs use,
  * keeps its own data in the project, and works with the running game. Everything a plugin adds goes when it stops: on
- * an error it throws, or when a workshop facet changes, which restarts the plugins and keeps the project's unsaved changes.
- * A stopped plugin's host then refuses everything that would add or change something, with `plugin-stopped`.
+ * an error it throws, or when a workshop facet changes, which restarts the plugins and keeps the project's unsaved changes;
+ * Undo then stops short of a changed plugin's data, which its old facet checked. A stopped plugin's host then refuses
+ * everything that would add or change something, with `plugin-stopped`.
  * Plugins are the game's trusted code, never content. Releases contain none of their code or data.
  */
 import type { Matrix4 } from 'three';
@@ -71,7 +72,9 @@ export interface WorkshopFacet {
   readonly contributes?: readonly Contribution[];
   // Checks the plugin's own data whenever it loads or changes, refusing with PluginError and a code of the
   // plugin's own. Pure: it may run before the plugin starts, and never touches the page. Anything else it throws stops
-  // the plugin, and its data is then accepted unchecked until its facet changes.
+  // the plugin. Until its facet changes, a plugin stopped by any error fails every check of its data with its
+  // `plugin-failed` failure, so edits and restores of the data refuse, while a project opening or a server update takes it
+  // unchecked. Undo and Redo never run it: they restore data as it was.
   validate?(data: PluginData): void;
   // Starts the plugin once the Workshop's project is open. An error it throws, or a promise it rejects, stops it.
   start(host: WorkshopHost): void | Promise<void>;
@@ -150,7 +153,8 @@ export interface WorkshopToggle {
 }
 
 export interface WorkshopUiKit {
-  // A labelled slider with step buttons and its value, as Physics and Character show them.
+  // A labelled slider with step buttons and its value, as Physics and Character show them. The project and data edits its
+  // onInput makes during one scrub are one undo step, named "<plugin>: <label>".
   range(options: {
     readonly label: string; readonly min: number; readonly max: number; readonly step: number; readonly value: number;
     readonly unit?: string; readonly description?: string; onInput(value: number): void;
@@ -198,13 +202,17 @@ export interface WorkshopProject {
 }
 
 // The engine's typed error for a refused edit (for example LevelError, GameSettingsError, SpriteError and its
-// CharacterModelError and AvatarMotionError, or ProjectError), which the Workshop has also shown.
+// CharacterModelError and AvatarMotionError, ProjectError, or PluginError), which the Workshop has also shown.
 export type WorkshopRefusal = Error;
 
 /**
  * Every edit the built-in tabs make, through the same operations: each is validated, changes the draft, marks it
  * unsaved and goes through Save, Revert, export and conflict handling as it does in its tab. Each returns the refusal,
- * or null when the edit applied or changed nothing.
+ * or null when the edit applied or changed nothing. Each but the character's and the appearance's is a step of the
+ * Workshop's undo history named "<plugin>: <operation>", such as "<plugin>: theme", "<plugin>: upsert" or
+ * "<plugin>: media.add", and calls of one operation each within a second of the last merge into one step. Of those, an
+ * edit that waits for a file or a bake becomes a step of its own once ready; until then Undo, or another project
+ * opening, cancels it and it resolves null, and it resolves `plugin-stopped` if the plugin stops first.
  */
 export interface WorkshopEdits {
   title(value: string): WorkshopRefusal | null;
@@ -239,6 +247,7 @@ export interface WorkshopEdits {
   readonly library: {
     // A GLB for one part; a new avatar maps its joints and takes the character's hold settings, as in Project.
     add(role: PartRole, file: File): Promise<WorkshopRefusal | null>;
+    // Refuses an unknown role or a malformed ID; an ID the library lacks changes nothing.
     remove(role: PartRole, id: string): WorkshopRefusal | null;
     avatar(id: string, settings: LibraryAvatarSettings): Promise<WorkshopRefusal | null>;
     hammerHead(id: string, head: HammerHead): WorkshopRefusal | null;
@@ -278,10 +287,13 @@ export interface WorkshopCharacterEdits {
 // validate; it never interprets the data.
 export interface WorkshopPluginData {
   get(): PluginData | null;
-  // Replaces the data, or removes it with null; returns the refusal, the plugin's own typed error when its validate
-  // refused, or null.
+  // Replaces the data, or removes it with null, as an undo step named "<plugin>: Set data"; sets each within a second of
+  // the last merge into one step. Returns null or the refusal: a PluginError, `invalid-contribution` for data beyond
+  // PLUGIN_DATA_LIMITS or `too-many` when the project already keeps data for as many plugins as they allow; the plugin's
+  // own typed error when its validate refused; or its failure when its validate threw anything else, which stops it.
   set(value: PluginData | null): WorkshopRefusal | null;
-  // Tells `listener` whenever the data changes, by this plugin, a project opening or the server; returns its removal.
+  // Tells `listener` whenever the data changes, by this plugin, Undo or Redo, a project opening or the server; returns its
+  // removal.
   subscribe(listener: (data: PluginData | null) => void): () => void;
 }
 

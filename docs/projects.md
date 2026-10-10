@@ -211,9 +211,13 @@ and the browser warns if something could not be saved yet.
   level, so they save once finished or applied.
 - If the server cannot be reached, saving tries again every few seconds.
 - Saving and exporting are not steps, and the [undo history](../README.md#undo-and-redo)
-  keeps its steps across them. Undoing the level back to what was saved makes it saved
+  keeps its steps across them. Undoing a section back to what was saved makes it saved
   again, so autosave writes nothing and no new level version is made; undoing past a save
   is a change that saves like any other.
+- Undo and Redo bring back the very file a step removed or added, such as a media file, a
+  course mesh or a library model: while the server still holds it, saving uploads nothing.
+  Before a save deletes such a file from the server, the page keeps its own copy while the
+  history may still bring it back; once it is back, the next save uploads it again.
 
 Level's save is **Save to project**, at the top of the Level tab; each other editor's own
 Save also has one under it: Physics' **Save game settings**, Appearance's **Save alignment**
@@ -256,8 +260,7 @@ Everything else keeps its usual tab. Opening or importing a project replaces the
 page's current game, its sprite draft and its browser-saved appearance models; the
 Workshop asks first when there are unsaved changes. Opening any project, from the server,
 a project file, **New project**, the published project or this browser's copy, clears the
-[undo history](../README.md#undo-and-redo) and cancels edits still waiting to finish, and
-so does importing a course package.
+[undo history](../README.md#undo-and-redo) and cancels edits still waiting to finish.
 
 While a server project is open, the page checks the server every two seconds.
 Sections changed on the server, for example by a script, a language model or a tool
@@ -270,14 +273,20 @@ save until you choose, in Project:
 - **Keep my version** saves yours over the project's.
 - **Use the project's** replaces yours.
 
-A level loaded from the server, whether a check brings it or **Use the project's** chooses
-it, cuts the undo history: Undo and Redo lose every step made before it, so Undo never
-writes over someone else's change. Course artwork and media are not in the history, yet
-the level uses them, so removing any of them, in any tab or from the server, cuts it as
-well: a course mesh, a decoration model's entry in the course artwork, a media file, or an
-enemy model's GLB that enemy art drops, such as when its species gets pixel art or another
-model. Adding or replacing them keeps it, since every earlier level still finds what it
-uses: adding a course mesh, a media file or an enemy model, or replacing a media file.
+A section loaded from the server, whether a check brings it or **Use the project's** chooses
+it, cuts the [undo history](../README.md#undo-and-redo) at that section, even when it matches
+yours, so Undo never writes over someone else's change. Course artwork loaded this way that
+drops a GLB or a decoration model's entry also cuts it at the level and enemy art, which may
+use them, and media that drop a file cut it at the level and audio.
+
+If the server no longer finds the open server project, or it comes back with a lower
+revision than the page has seen, as when it is deleted and saved again under the same ID,
+the page stops saving to it. It keeps its project and undo history, with every section
+unsaved, and one notice names the project and says that **Save as project ID** stores the
+page's project on the server again; in a Workshop built with `GAME_PROJECT`, this browser's
+copy keeps it meanwhile. A file only that project held is then unavailable until a step
+puts back a version the page holds, or removes it: a media file among them cannot play,
+saving and **Export project file** stop at it, and this browser's copy waits.
 
 The editor HUD previews the project's HUD labels and units. Opening a project runs
 its level like any imported level, including intro events.
@@ -371,9 +380,10 @@ The page title comes from the project, with the same `GAME_TITLE` rules as relea
   - Opening or saving a server project removes the browser copy.
   - A browser copy that still holds unsaved changes waits in Project instead: **Restore into
     the project** loads them, replacing those sections, and **Discard them** removes them.
-    Restoring the level is one step, **Restore kept level**, which Undo takes back, unless
-    the restore also removes course artwork or media, which cuts the undo history, that
-    step included.
+    Restoring them is one step, **Restore kept changes**, which Undo takes back. Changes that
+    include the character profile, appearance models or arm IK ask first and apply outside
+    the [undo history](../README.md#undo-and-redo), cutting it at the sections they change,
+    as a section loaded from the server does.
 
 **Workshop / Project** says what the page holds: the published project, an older version of
 it or another local project, and whether it is kept in this browser. A site has one copy,
@@ -803,7 +813,8 @@ it previews or edits it, so the library has no total size; see
 data, one JSON document of at most 64 KiB, nesting depth 16 and 8,192 values, for at most
 16 plugins. Each is a section of its own, `plugins/<id>`, with its own revision. The server
 and the project checks hold it to those limits but never interpret it; the Workshop runs the
-plugin's own validation whenever the section loads or changes.
+plugin's own validation whenever the section loads or changes, except on Undo and Redo (see
+[a plugin's own data](workshop-plugins.md#a-plugins-own-data)).
 
 **Course artwork.** Assets come from **Level / Meshes**, `npm run pack:course` packages or the
 API upload; terrain places them as meshes. `decorations` maps decoration model IDs to assets:

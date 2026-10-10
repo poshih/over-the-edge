@@ -1717,7 +1717,7 @@ export function createLevelEditor(options: LevelEditorOptions): LevelEditorHandl
   }
 
   // Waits for a turn's bake, then makes the turn once no drag holds objects, unless a newer turn or its cancelling has
-  // ended it. The project reports a bake it refuses, and the turn goes.
+  // ended it. The Workshop reports a bake the project refuses, and the turn goes.
   async function bake(id: string, entry: Turn): Promise<void> {
     const current = (): boolean => !disposed && turning.get(id) === entry;
     let baked: [MeshTerrain | Error, MeshTerrain | Error];
@@ -2519,11 +2519,11 @@ export function createLevelEditor(options: LevelEditorOptions): LevelEditorHandl
 
   // Arms a mesh once it is read, unless the designer has moved on meanwhile: chosen another mesh, preset or tool, or
   // started a gesture.
-  async function armWhenRead(read: Promise<{ readonly id: string; readonly terrain: MeshTerrain } | Error>): Promise<void> {
+  async function armWhenRead(read: Promise<{ readonly id: string; readonly terrain: MeshTerrain } | Error | null>): Promise<void> {
     const request = ++meshRequest;
     const from = { tool, presetId };
     const mesh = await read;
-    if (mesh instanceof Error || request !== meshRequest || !active || disposed || gesture !== null ||
+    if (mesh === null || mesh instanceof Error || request !== meshRequest || !active || disposed || gesture !== null ||
       tool !== from.tool || presetId !== from.presetId) return;
     armMesh(mesh.id, mesh.terrain);
   }
@@ -2546,11 +2546,20 @@ export function createLevelEditor(options: LevelEditorOptions): LevelEditorHandl
     }));
     // A mesh taken out of the project can no longer be placed or turned: its turns still baking go, and so does a placing
     // waiting for one.
+    let droppedTurn = false;
     for (const [id, entry] of [...turning]) {
-      if (!meshes.some((mesh) => mesh.id === entry.assetId)) stopTurn(id, entry);
+      if (meshes.some((mesh) => mesh.id === entry.assetId)) continue;
+      turning.delete(id);
+      droppedTurn = true;
+      const pending = entry.edit?.pending;
+      // Resource lists can change while the document is notifying.
+      if (pending !== undefined) queueMicrotask(() => { if (!pending.done) pending.cancel(); });
     }
     if (presetId?.startsWith(MESH_PRESET) && !meshes.some((mesh) => presetId === `${MESH_PRESET}${mesh.id}`)) chooseTool('select');
-    else renderControls();
+    else {
+      renderControls();
+      if (droppedTurn) draw();
+    }
   }
 
   element(root, '.level-mesh-import').addEventListener('click', () => { if (active) meshFile.click(); }, listen);
@@ -2558,7 +2567,11 @@ export function createLevelEditor(options: LevelEditorOptions): LevelEditorHandl
     const file = meshFile.files?.[0];
     meshFile.value = '';
     if (file === undefined) return;
-    void armWhenRead(options.meshes.add(file));
+    void armWhenRead(options.meshes.add(file, events.signal).then((outcome) => {
+      if (outcome.kind === 'applied' || outcome.kind === 'unchanged') return outcome.value;
+      if (!events.signal.aborted && outcome.kind === 'refused') onNotice(outcome.error.message, 'error');
+      return null;
+    }));
   }, listen);
   const unsubscribeMeshes = options.meshes.subscribe(renderMeshes);
   // The library offers the project's own models, and outlines and handles follow a decoration's model as drawn, which
@@ -3779,6 +3792,7 @@ export function createLevelEditor(options: LevelEditorOptions): LevelEditorHandl
         camera.set(null);
       }
     },
+    selection,
     snapshot(): LevelEditorSnapshot {
       const current = level.definition();
       const object = selectedObject();

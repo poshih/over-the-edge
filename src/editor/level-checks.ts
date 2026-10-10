@@ -9,9 +9,9 @@ import type { Point } from '../config';
 import type { LevelCheckReport, LevelCheckStop, LevelFinding } from '../course-checks';
 import { createCourseJob } from '../course-snapshot';
 import type { CourseSnapshot } from '../course-snapshot';
-import type { GameSettings } from '../game-settings';
 import { objectLoops } from '../level';
 import type { LevelDefinition, TerrainObject } from '../level';
+import { pluginOfSection } from '../plugin-data';
 import { apply1, attributed, call1, namespaceOf, PluginError } from '../plugins/kernel';
 import type { Attributed } from '../plugins/kernel';
 import type { ProjectDocument } from './document/project-document';
@@ -45,9 +45,8 @@ export interface LevelChecksState {
 }
 
 export interface LevelChecksOptions {
+  // The open project: its level, and the game settings the reach model comes from.
   readonly document: ProjectDocument;
-  // The game settings, which the reach model comes from.
-  readonly settings: () => GameSettings;
   readonly plugins: {
     checks(): ReadonlyMap<string, LevelCheck>;
     reach(): Attributed<LevelReachSource>;
@@ -66,8 +65,6 @@ export interface LevelChecksOptions {
 export interface LevelChecks {
   // Checks only while the Level tab is being edited; on becoming active it checks whatever changed meanwhile.
   setActive(active: boolean): void;
-  // Checks again once edits settle, for a change the checks cannot hear of themselves, such as the game settings.
-  invalidate(): void;
   state(): LevelChecksState;
   // Tells `listener` whenever the state changes; returns its removal.
   subscribe(listener: () => void): () => void;
@@ -159,7 +156,7 @@ export function createLevelChecks(options: LevelChecksOptions): LevelChecks {
       timer = null;
       start();
     }, delay);
-    // Listeners hear only of a change: this runs while the document tells listeners of a level edit.
+    // Listeners hear only of a change: this runs while the document tells listeners of an edit.
     const current = checkedVersion === version && state.current;
     if (!state.checking || state.current !== current) publish({ checking: true, current });
   }
@@ -167,7 +164,7 @@ export function createLevelChecks(options: LevelChecksOptions): LevelChecks {
   // The reach model and goal for this level: the source's, or the engine's when a plugin's fails.
   function plan(level: LevelDefinition): LevelReachPlan {
     const source = options.plugins.reach();
-    const input = { level, settings: options.settings() };
+    const input = { level, settings: options.document.get('settings') };
     if (source.plugin !== null && !options.plugins.failed(source.plugin)) {
       try {
         return checkReachPlan(apply1(source, 'reach', input));
@@ -286,8 +283,15 @@ export function createLevelChecks(options: LevelChecksOptions): LevelChecks {
     return findings;
   }
 
+  // Edits of the level and of the game settings its reach model comes from; with plugins' rules, of anything in the project
+  // they read, which is all but plugins' data.
   const unsubscribe = [
-    options.document.subscribe('level', () => changed()),
+    options.document.subscribeAll((changes) => {
+      const rules = options.plugins.checks().size > 0;
+      if (changes.some(({ section }) => section === 'level' || section === 'settings' || (rules && pluginOfSection(section) === null))) {
+        changed();
+      }
+    }),
     options.plugins.subscribe(() => changed()),
   ];
 
@@ -303,7 +307,6 @@ export function createLevelChecks(options: LevelChecksOptions): LevelChecks {
       }
       if (checkedVersion !== version && running?.version !== version) schedule(0);
     },
-    invalidate: () => changed(),
     state: () => state,
     subscribe(listener) {
       listeners.add(listener);

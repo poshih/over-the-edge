@@ -7,16 +7,21 @@ import { clipSpeed, modelHeight, rootMotion, SPECIES_CLIP_ROLES, walksInPlace } 
 import { ENEMY_SPECIES, ENEMY_SPECS } from '../enemy-types';
 import type { EnemySpecies } from '../enemy-types';
 import { DEFAULT_HUD, HUD_FIELDS } from '../hud';
-import { MEDIA_LIMITS, MEDIA_TYPES } from '../media';
+import { mediaKind, mediaPathForFile, MEDIA_LIMITS, MEDIA_TYPES } from '../media';
 import { projectIdForTitle } from '../project';
 import { readField, writeField } from '../project-fields';
 import type { FieldSpec } from '../project-fields';
 import { DEFAULT_THEME, THEME_FIELDS } from '../theme';
+import type { Command, History } from './document/history';
+import { applyProjectCommand } from './document/project-commands';
+import type { ProjectCommandInfo, ProjectCommands } from './document/project-commands';
+import type { EditOutcome, ProjectImports } from './document/project-imports';
+import type { ProjectProjection } from './document/project-projection';
 import { createJsonDownload } from './json-download';
 import { createLibraryEditor } from './library-editor';
 import type { PartModelHost } from './library-preview';
 import type { ProjectSession, ProjectSnapshot } from './project-session';
-import { createRangeControl } from './range-control';
+import { bindScrubInput, createRangeControl } from './range-control';
 import type { RangeControl } from './range-control';
 import type { ServerModels } from './server-models';
 import { sectionMarkup } from './workshop-section';
@@ -25,7 +30,6 @@ import './project-editor.css';
 const MEDIA_ACCEPT = Object.entries(MEDIA_TYPES).flatMap(([extension, type]) => [`.${extension}`, type]).join(',');
 
 function formatSize(bytes: number): string {
-  if (bytes <= 0) return 'on the server';
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MiB` : `${Math.max(1, Math.round(bytes / 1024))} KiB`;
 }
 
@@ -37,6 +41,10 @@ interface FieldControl {
 export interface ProjectEditorOptions {
   mount: HTMLElement;
   session: ProjectSession;
+  history: History;
+  commands: ProjectCommands;
+  imports: ProjectImports;
+  projection: ProjectProjection;
   onNotice: (message: string, kind: 'info' | 'error') => void;
   // Plays a cue once, so authors can hear their choice.
   onTestCue: (cue: AudioCue) => void;
@@ -48,9 +56,21 @@ export interface ProjectEditorOptions {
 
 /** Workshop / Project: the whole game's identity, look, HUD, audio, enemies, media and files. */
 export function createProjectEditor(options: ProjectEditorOptions) {
-  const { session } = options;
+  const { session, history, commands, imports, projection } = options;
+  const project = history.document;
   const events = new AbortController();
   const listen = { signal: events.signal };
+  const info = (label: string, section: string | null): ProjectCommandInfo =>
+    ({ label, place: { tab: 'project', section, select: null }, coalesce: null });
+  const apply = (command: Command): boolean => {
+    const refusal = applyProjectCommand(history, command);
+    if (refusal === null) return true;
+    options.onNotice(refusal.message, 'error');
+    return false;
+  };
+  function noticeImport<T>(outcome: EditOutcome<T>): void {
+    if (!events.signal.aborted && outcome.kind === 'refused') options.onNotice(outcome.error.message, 'error');
+  }
   const root = document.createElement('div');
   root.className = 'project-editor';
   const downloadJson = createJsonDownload({ mount: root, signal: events.signal });
@@ -201,16 +221,18 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const artList = element<HTMLUListElement>(root, '.project-art-list');
   const courseFile = element<HTMLInputElement>(root, '#project-course-file');
   const buttons = [...root.querySelectorAll<HTMLButtonElement>('button')];
+  let busy = false;
 
   // Generic controls for theme and HUD fields -------------------------------------------------
   const renderFieldGroup = (mount: HTMLElement, prefix: string, fields: readonly FieldSpec[],
-    current: () => object, commit: (value: object) => void): FieldControl[] => {
+    commit: (field: FieldSpec, value: unknown) => void): FieldControl[] => {
     return fields.map((field) => {
       const id = `${prefix}-${field.path.replace(/\./g, '-')}`;
-      const update = (value: unknown): void => commit(writeField(current(), field.path, value));
+      const update = (value: unknown): void => commit(field, value);
       if (field.kind === 'number') {
         const control: RangeControl = createRangeControl({ ...field, description: field.description }, {
           id, name: id, signal: events.signal, onInput: (value) => update(field.integer ? Math.round(value) : value),
+          history, stepLabel: `Set ${field.label}`,
         });
         mount.append(control.row);
         return { path: field.path, set: (value) => control.setValue(value as number) };
@@ -244,7 +266,10 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       input.type = field.kind === 'color' ? 'color' : 'text';
       if (field.kind === 'text') input.maxLength = field.maxLength;
       row.append(label, input);
-      input.addEventListener(field.kind === 'color' ? 'input' : 'change', () => update(input.value), listen);
+      if (field.kind === 'color') bindScrubInput(input, {
+        history, label: `Set ${field.label}`, signal: events.signal, onInput: () => update(input.value),
+      });
+      else input.addEventListener('change', () => update(input.value), listen);
       mount.append(row);
       return {
         path: field.path,
@@ -253,17 +278,20 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     });
   };
   const themeControls = renderFieldGroup(element(root, '.project-theme-fields'), 'project-theme', THEME_FIELDS,
-    () => session.snapshot().theme, (value) => session.setTheme(value));
+    (field, value) => { apply(commands.theme((current) => writeField(current, field.path, value), info(`Set ${field.label}`, 'project-theme'))); });
   const hudControls = renderFieldGroup(element(root, '.project-hud-fields'), 'project-hud', HUD_FIELDS,
-    () => session.snapshot().hud, (value) => session.setHud(value));
+    (field, value) => { apply(commands.hud((current) => writeField(current, field.path, value), info(`Set ${field.label}`, 'project-hud'))); });
 
   // Audio ------------------------------------------------------------------------------------
   const audioMount = element<HTMLDivElement>(root, '.project-audio-fields');
   const clipSelects: { select: HTMLSelectElement; read: (audio: AudioSettings) => AudioClip | null; key: 'music' | AudioCue }[] = [];
-  const commitAudio = (mutate: (audio: AudioSettings) => AudioSettings): void => { session.setAudio(mutate(session.snapshot().audio)); };
+  const commitAudio = (label: string, mutate: (audio: AudioSettings) => AudioSettings): void => {
+    apply(commands.audio(mutate, info(label, 'project-audio')));
+  };
   const master = createRangeControl({ ...AUDIO_VOLUME, label: 'Master volume' }, {
     id: 'project-audio-volume', name: 'project-audio-volume', signal: events.signal,
-    onInput: (value) => commitAudio((audio) => ({ ...audio, volume: value })),
+    history, stepLabel: 'Set Master volume',
+    onInput: (value) => commitAudio('Set Master volume', (audio) => ({ ...audio, volume: value })),
   });
   audioMount.append(master.row);
   const clipVolumes = new Map<'music' | AudioCue, RangeControl>();
@@ -281,7 +309,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     const read = (audio: AudioSettings): AudioClip | null => key === 'music' ? audio.music : audio.cues[key];
     const write = (audio: AudioSettings, clip: AudioClip | null): AudioSettings =>
       key === 'music' ? { ...audio, music: clip } : { ...audio, cues: { ...audio.cues, [key]: clip } };
-    select.addEventListener('change', () => commitAudio((audio) =>
+    select.addEventListener('change', () => commitAudio(`Set ${label}`, (audio) =>
       write(audio, select.value === '' ? null : { source: select.value, volume: read(audio)?.volume ?? 1 })), listen);
     row.append(heading, select);
     if (key !== 'music') {
@@ -295,7 +323,8 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     }
     const volume = createRangeControl({ ...AUDIO_VOLUME, label: `${label} volume` }, {
       id: `project-audio-${key}-volume`, name: `project-audio-${key}-volume`, signal: events.signal,
-      onInput: (value) => commitAudio((audio) => {
+      history, stepLabel: `Set ${label} volume`,
+      onInput: (value) => commitAudio(`Set ${label} volume`, (audio) => {
         const clip = read(audio);
         return clip === null ? audio : write(audio, { ...clip, volume: value });
       }),
@@ -311,7 +340,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   const enemyAreas = new Map<EnemySpecies, HTMLTextAreaElement>();
   // Each species' 3D model: what it is, and the clip each role plays.
   const enemyModels = new Map<EnemySpecies, { readonly status: HTMLParagraphElement; readonly clips: HTMLDivElement }>();
-  // Clip lists arrive later than the snapshot they were asked for; only the latest is shown.
+  // Clip lists arrive later than the value they were asked for; only the latest is shown.
   const enemyReads = new Map<EnemySpecies, number>();
   for (const species of ENEMY_SPECIES) {
     const row = document.createElement('div');
@@ -333,7 +362,9 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     modelFile.addEventListener('change', () => {
       const file = modelFile.files?.[0];
       modelFile.value = '';
-      if (file !== undefined) void session.addEnemyModel(species, file);
+      if (file !== undefined) void imports.enemyModel(species, file, {
+        info: info(`Import ${ENEMY_SPECS[species].label} model`, 'project-enemies'), signal: events.signal,
+      }).then(noticeImport);
     }, listen);
     const status = document.createElement('p');
     status.className = 'appearance-format';
@@ -350,14 +381,14 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       button.addEventListener('click', run, listen);
       actions.append(button);
     };
-    const apply = (art: EnemyArtSettings[EnemySpecies]): void => {
-      session.setEnemies({ ...session.snapshot().enemies, [species]: art });
+    const applyArt = (art: EnemyArtSettings[EnemySpecies]): void => {
+      apply(commands.enemies({ ...project.get('enemies'), [species]: art }, info(`Set ${ENEMY_SPECS[species].label} art`, 'project-enemies')));
     };
     action('Apply art', () => {
-      if (area.value.trim() === '') apply(null);
+      if (area.value.trim() === '') applyArt(null);
       else {
         try {
-          apply(JSON.parse(area.value));
+          applyArt(JSON.parse(area.value));
         } catch (error) {
           if (!(error instanceof SyntaxError)) throw error;
           options.onNotice(`${ENEMY_SPECS[species].label} art is not valid JSON: ${error.message}`, 'error');
@@ -365,7 +396,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       }
     });
     action('Edit built-in art', () => { area.value = JSON.stringify({ type: 'sprite', ...builtInEnemyArt(species) }, null, 1); });
-    action('Use built-in art', () => { area.value = ''; apply(null); });
+    action('Use built-in art', () => { area.value = ''; applyArt(null); });
     action('Import 3D model', () => modelFile.click());
     row.append(label, area, actions, modelFile, status, clips);
     enemyMount.append(row);
@@ -374,9 +405,9 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   }
 
   // Shows the species' model: its GLB, and for each role a choice of its clips with how fast the clip travels.
-  function renderEnemyModel(species: EnemySpecies, snapshot: ProjectSnapshot): void {
+  function renderEnemyModel(species: EnemySpecies): void {
     const view = enemyModels.get(species)!;
-    const entry = snapshot.enemies[species];
+    const entry = project.get('enemies')[species];
     const read = (enemyReads.get(species) ?? 0) + 1;
     enemyReads.set(species, read);
     if (entry?.type !== 'model') {
@@ -384,11 +415,16 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       view.clips.replaceChildren();
       return;
     }
-    const name = snapshot.art.assets.find((asset) => asset.id === entry.asset)?.name ?? entry.asset;
+    const name = project.get('art').assets.find((asset) => asset.id === entry.asset)?.name ?? entry.asset;
     view.status.textContent = `3D model "${name}". Each role plays a clip, and the enemy moves as far as the clip travels. ` +
       'Use built-in art, or apply pixel art, to stop drawing it as a model; its GLB then leaves the course artwork unless another enemy uses it.';
-    void session.enemyClips(entry.asset).then((bake) => {
-      if (enemyReads.get(species) !== read || bake instanceof Error) return;
+    view.clips.replaceChildren();
+    void projection.enemyClips(entry.asset).then((bake) => {
+      if (events.signal.aborted || enemyReads.get(species) !== read) return;
+      if (bake instanceof Error) {
+        options.onNotice(bake.message, 'error');
+        return;
+      }
       view.clips.replaceChildren(...SPECIES_CLIP_ROLES[species].map((role) => {
         const field = document.createElement('label');
         field.className = 'appearance-label';
@@ -405,7 +441,11 @@ export function createProjectEditor(options: ProjectEditorOptions) {
           return option;
         }));
         select.value = entry.clips[role] ?? '';
-        select.addEventListener('change', () => { void session.setEnemyClips(species, { [role]: select.value }); });
+        select.addEventListener('change', () => {
+          void imports.enemyClips(species, { [role]: select.value }, {
+            info: info(`Set ${ENEMY_SPECS[species].label} ${role} clip`, 'project-enemies'), signal: events.signal,
+          }).then(noticeImport);
+        }, listen);
         field.append(select);
         return field;
       }));
@@ -413,16 +453,28 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   }
 
   // Rendering ---------------------------------------------------------------------------------
-  let previousContent: ProjectSnapshot | null = null;
-  function renderContent(snapshot: ProjectSnapshot): void {
-    if (document.activeElement !== title) title.value = snapshot.title;
-    idInput.placeholder = snapshot.binding?.id ?? projectIdForTitle(snapshot.title);
-    for (const control of themeControls) control.set(readField(snapshot.theme, control.path));
-    for (const control of hudControls) control.set(readField(snapshot.hud, control.path));
-    master.setValue(snapshot.audio.volume);
-    const audioPaths = snapshot.media.filter((item) => item.kind === 'audio').map((item) => item.path);
+  function renderTitle(): void {
+    const value = project.get('title');
+    if (document.activeElement !== title) title.value = value;
+    idInput.placeholder = session.openProject() ?? projectIdForTitle(value);
+  }
+
+  function renderTheme(): void {
+    const theme = project.get('theme');
+    for (const control of themeControls) control.set(readField(theme, control.path));
+  }
+
+  function renderHud(): void {
+    const hud = project.get('hud');
+    for (const control of hudControls) control.set(readField(hud, control.path));
+  }
+
+  function renderAudio(): void {
+    const audio = project.get('audio');
+    master.setValue(audio.volume);
+    const audioPaths = project.get('media').filter((item) => mediaKind(item.path) === 'audio').map((item) => item.path);
     for (const { select, read, key } of clipSelects) {
-      const clip = read(snapshot.audio);
+      const clip = read(audio);
       const choices = ['', ...audioPaths, ...(clip !== null && !audioPaths.includes(clip.source) ? [clip.source] : [])];
       if (select.options.length !== choices.length || [...select.options].some((option, index) => option.value !== choices[index])) {
         select.replaceChildren(...choices.map((value) => {
@@ -435,41 +487,57 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       select.value = clip?.source ?? '';
       clipVolumes.get(key)!.setValue(clip?.volume ?? 1, { disabled: clip === null });
     }
-    if (previousContent === null || previousContent.enemies !== snapshot.enemies) {
-      for (const [species, area] of enemyAreas) {
-        const art = snapshot.enemies[species];
-        if (document.activeElement !== area) area.value = art?.type === 'sprite' ? JSON.stringify(art, null, 1) : '';
-        renderEnemyModel(species, snapshot);
-      }
+  }
+
+  function renderEnemies(): void {
+    const enemies = project.get('enemies');
+    for (const [species, area] of enemyAreas) {
+      const art = enemies[species];
+      if (document.activeElement !== area) area.value = art?.type === 'sprite' ? JSON.stringify(art, null, 1) : '';
+      renderEnemyModel(species);
     }
-    mediaList.replaceChildren(...snapshot.media.map((item) => {
+  }
+
+  function renderMedia(): void {
+    const media = project.get('media');
+    mediaList.replaceChildren(...media.map((item) => {
       const entry = document.createElement('li');
       const name = document.createElement('span');
       name.className = 'project-media-path';
       name.textContent = item.path;
       const detail = document.createElement('span');
       detail.className = 'project-media-detail';
-      detail.textContent = `${item.kind} · ${formatSize(item.bytes)}`;
+      detail.textContent = `${mediaKind(item.path)} · ${formatSize(item.file.bytes)}`;
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'button';
       remove.textContent = 'Remove';
       remove.setAttribute('aria-label', `Remove ${item.path}`);
-      remove.addEventListener('click', () => { session.removeMedia(item.path); }, listen);
+      remove.addEventListener('click', () => { apply(commands.mediaRemove(item.path, info(`Remove ${item.path}`, 'project-media'))); }, listen);
       entry.append(name, detail, remove);
       return entry;
     }));
-    if (snapshot.media.length === 0) {
+    if (media.length === 0) {
       const empty = document.createElement('li');
       empty.className = 'project-media-empty';
       empty.textContent = 'No media files yet.';
       mediaList.append(empty);
     }
-    alternateStatus.textContent = snapshot.alternate === null
+  }
+
+  function renderAlternate(): void {
+    const alternate = project.get('characters/alternate');
+    alternateStatus.textContent = alternate === null
       ? 'No alternate character. The standalone game shows no character choice.'
-      : `Alternate character: ${snapshot.alternate.characterRiggingType}. Players can switch in the standalone game's corner control.`;
-    const models = Object.keys(snapshot.art.decorations);
-    artList.replaceChildren(...snapshot.art.assets.map((asset) => {
+      : `Alternate character: ${alternate.characterRiggingType}. Players can switch in the standalone game's corner control.`;
+    element<HTMLButtonElement>(root, '.project-alternate-swap').disabled = busy || alternate === null;
+    element<HTMLButtonElement>(root, '.project-alternate-remove').disabled = busy || alternate === null;
+  }
+
+  function renderArt(): void {
+    const art = project.get('art');
+    const models = Object.keys(art.decorations);
+    artList.replaceChildren(...art.assets.map((asset) => {
       const entry = document.createElement('li');
       const name = document.createElement('span');
       name.className = 'project-media-path';
@@ -479,15 +547,16 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       remove.className = 'button';
       remove.textContent = 'Remove';
       remove.setAttribute('aria-label', `Remove ${asset.name}`);
-      remove.addEventListener('click', () => { session.removeCourseMesh(asset.id); }, listen);
+      remove.addEventListener('click', () => {
+        apply(commands.courseMeshRemove(asset.id, info(`Remove mesh ${asset.name}`, 'project-art')));
+      }, listen);
       entry.append(name, remove);
       return entry;
     }));
-    artStatus.textContent = snapshot.art.assets.length === 0
+    artStatus.textContent = art.assets.length === 0
       ? 'No meshes yet: terrain draws as its collision extruded, and decorations as their built-in models.'
       : models.length === 0 ? 'Decorations draw their built-in models.'
         : `The meshes draw the decoration model${models.length === 1 ? '' : 's'} ${models.join(', ')}.`;
-    previousContent = snapshot;
   }
 
   function renderStatus(snapshot: ProjectSnapshot): void {
@@ -515,7 +584,7 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     keptStatus.textContent = snapshot.kept === null ? '' : `This browser kept unsaved changes to ${snapshot.kept.join(', ')} from an ` +
       'earlier session. Restoring them replaces those sections of the project.';
     reopenButton.hidden = published === null;
-    idInput.placeholder = snapshot.binding?.id ?? projectIdForTitle(snapshot.title);
+    idInput.placeholder = snapshot.binding?.id ?? projectIdForTitle(project.get('title'));
     const server = snapshot.server;
     const available = server !== null && server.available;
     serverStatus.textContent = server === null ? 'Looking for the project server…'
@@ -535,12 +604,11 @@ export function createProjectEditor(options: ProjectEditorOptions) {
       }));
       list.value = choices.includes(selected) ? selected : snapshot.binding?.id ?? choices[0] ?? '';
     }
-    const busy = snapshot.busy !== null;
+    busy = snapshot.busy !== null;
     for (const button of buttons) button.disabled = busy;
     element<HTMLButtonElement>(root, '.project-publish').disabled = busy || snapshot.binding === null;
     element<HTMLButtonElement>(root, '.project-open').disabled = busy || choices.length === 0;
-    element<HTMLButtonElement>(root, '.project-alternate-swap').disabled = busy || snapshot.alternate === null;
-    element<HTMLButtonElement>(root, '.project-alternate-remove').disabled = busy || snapshot.alternate === null;
+    renderAlternate();
     publishStatus.replaceChildren();
     const record = snapshot.publish;
     if (record !== null && snapshot.binding !== null && record.id === snapshot.binding.id) {
@@ -556,21 +624,33 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     }
   }
 
-  const unsubscribe = session.subscribe((event) => {
-    const snapshot = session.snapshot();
-    if (event.kind === 'content') renderContent(snapshot);
-    renderStatus(snapshot);
+  const unsubscribe = session.subscribe(() => renderStatus(session.snapshot()));
+  const unsubscribeContent = project.subscribeAll((changes) => {
+    const changed = new Set(changes.map((change) => change.section));
+    if (changed.has('title')) renderTitle();
+    if (changed.has('theme')) renderTheme();
+    if (changed.has('hud')) renderHud();
+    if (changed.has('audio') || changed.has('media')) renderAudio();
+    if (changed.has('enemies')) renderEnemies();
+    else if (changed.has('art')) for (const species of ENEMY_SPECIES) renderEnemyModel(species);
+    if (changed.has('media')) renderMedia();
+    if (changed.has('characters/alternate')) renderAlternate();
+    if (changed.has('art')) renderArt();
   });
 
   // Actions -----------------------------------------------------------------------------------
   const confirmReplace = (action: string): boolean => session.dirtySections().length === 0 ||
     window.confirm(`${action} replaces the current game in the Workshop. Unsaved changes (${session.dirtySections().join(', ')}) will be lost. Continue?`);
-  title.addEventListener('change', () => { if (session.setTitle(title.value) !== null) title.value = session.snapshot().title; }, listen);
+  title.addEventListener('change', () => {
+    if (!apply(commands.title(title.value, info('Rename game', null)))) title.value = project.get('title');
+  }, listen);
   element(root, '.project-keep-mine').addEventListener('click', () => { void session.keepMyVersions(); }, listen);
   element(root, '.project-use-project').addEventListener('click', () => { void session.useProjectVersions(); }, listen);
   element(root, '.project-restore').addEventListener('click', () => {
     const sections = session.snapshot().kept ?? [];
-    if (window.confirm(`Restore this browser's changes to ${sections.join(', ')}? They replace the project's version of those sections.`)) {
+    if (sections.length === 0) return;
+    const mixed = sections.some((section) => section === 'characters/primary' || section === 'arm-ik' || section === 'appearance');
+    if (!mixed || window.confirm(`Restore this browser's changes to ${sections.join(', ')}? They replace the project's version of those sections.`)) {
       void session.restoreKept();
     }
   }, listen);
@@ -610,26 +690,51 @@ export function createProjectEditor(options: ProjectEditorOptions) {
     fileInput.value = '';
     if (file !== undefined && confirmReplace('Importing a project file')) void session.importBundle(file);
   }, listen);
-  element(root, '.project-theme-reset').addEventListener('click', () => { session.setTheme(DEFAULT_THEME); renderContent(session.snapshot()); }, listen);
-  element(root, '.project-hud-reset').addEventListener('click', () => { session.setHud(DEFAULT_HUD); renderContent(session.snapshot()); }, listen);
+  element(root, '.project-theme-reset').addEventListener('click', () => {
+    const before = project.get('theme');
+    apply(commands.theme(() => DEFAULT_THEME, info('Reset theme', 'project-theme')));
+    if (project.get('theme') === before) renderTheme();
+  }, listen);
+  element(root, '.project-hud-reset').addEventListener('click', () => {
+    const before = project.get('hud');
+    apply(commands.hud(() => DEFAULT_HUD, info('Reset HUD', 'project-hud')));
+    if (project.get('hud') === before) renderHud();
+  }, listen);
   mediaFile.addEventListener('change', () => {
     const file = mediaFile.files?.[0];
     mediaFile.value = '';
-    if (file !== undefined) void session.addMedia(file).then((path) => { if (typeof path === 'string') options.onNotice(`Added ${path} to the media library.`, 'info'); });
+    if (file === undefined) return;
+    const path = mediaPathForFile(file.name);
+    const verb = project.get('media').some((item) => item.path === path) ? 'Replace' : 'Add';
+    void imports.media(file, { info: info(`${verb} ${path ?? file.name}`, 'project-media'), signal: events.signal }).then((outcome) => {
+      noticeImport(outcome);
+      if (!events.signal.aborted && outcome.kind === 'applied') options.onNotice(`Added ${outcome.value} to the media library.`, 'info');
+    });
   }, listen);
-  element(root, '.project-alternate-current').addEventListener('click', () => { session.useCurrentAsAlternate(); }, listen);
+  element(root, '.project-alternate-current').addEventListener('click', () => {
+    apply(commands.currentAsAlternate(info('Use current character as alternate', 'project-characters')));
+  }, listen);
   element(root, '.project-alternate-swap').addEventListener('click', () => { void session.swapCharacters(); }, listen);
   element(root, '.project-alternate-import').addEventListener('click', () => alternateFile.click(), listen);
   alternateFile.addEventListener('change', () => {
     const file = alternateFile.files?.[0];
     alternateFile.value = '';
-    if (file !== undefined) void session.importAlternate(file);
+    if (file !== undefined) void imports.alternate(file, {
+      info: info(`Import alternate ${file.name}`, 'project-characters'), signal: events.signal,
+    }).then(noticeImport);
   }, listen);
-  element(root, '.project-alternate-remove').addEventListener('click', () => session.removeAlternate(), listen);
+  element(root, '.project-alternate-remove').addEventListener('click', () => {
+    apply(commands.alternate(null, info('Remove alternate character', 'project-characters')));
+  }, listen);
   courseFile.addEventListener('change', () => {
     const file = courseFile.files?.[0];
     courseFile.value = '';
-    if (file !== undefined && confirmReplace('Importing a course package')) void session.importCoursePackage(file);
+    if (file !== undefined) void imports.coursePackage(file, {
+      info: info(`Import course package ${file.name}`, 'project-art'), signal: events.signal,
+    }).then((outcome) => {
+      noticeImport(outcome);
+      if (!events.signal.aborted && outcome.kind === 'applied') options.onNotice(`Imported course package "${file.name}".`, 'info');
+    });
   }, listen);
   window.addEventListener('beforeunload', (event) => {
     if (!session.hasUnsavedProjectChanges()) return;
@@ -638,16 +743,25 @@ export function createProjectEditor(options: ProjectEditorOptions) {
   }, listen);
 
   const library = createLibraryEditor({
-    mount: element(root, '.project-library-mount'), session, parts: options.parts, serverModels: options.serverModels,
+    mount: element(root, '.project-library-mount'), history, commands, imports, projection,
+    parts: options.parts, serverModels: options.serverModels,
     onNotice: options.onNotice,
   });
   options.mount.append(root);
-  renderContent(session.snapshot());
+  renderTitle();
+  renderTheme();
+  renderHud();
+  renderAudio();
+  renderEnemies();
+  renderMedia();
+  renderAlternate();
+  renderArt();
   renderStatus(session.snapshot());
   return {
     dispose(): void {
       events.abort();
       unsubscribe();
+      unsubscribeContent();
       library.dispose();
       root.remove();
     },

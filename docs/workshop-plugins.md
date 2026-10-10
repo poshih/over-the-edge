@@ -61,13 +61,14 @@ plugin's ID comes from the manifest, as `host.plugin`.
   `dispose`, and preview `offset` are synchronous; a promise-like result is
   `invalid-contribution` and stops that plugin. `validate` keeps a thrown typed data refusal
   separate from failure: a refusal blocks the data operation, while another throw or a
-  promise-like return stops the plugin and leaves its data unchecked.
+  promise-like return stops the plugin (see [its own data](#a-plugins-own-data)).
 - Stopping removes everything the plugin added: its tabs and sections, overlays, listeners,
   preview, pause and drag. A stopped plugin's host then refuses anything that would add or
   change something, with `plugin-stopped`.
 - Changing a workshop facet, or anything one imports, stops the plugins and starts them again;
-  the project, with its unsaved changes, stays. Facets that become invalid run no plugins until
-  they are fixed.
+  the project, with its unsaved changes, stays. Undo never checks the data it puts back, so the
+  [undo history](../README.md#undo-and-redo) is cut at the data of each plugin whose facet
+  changed. Facets that become invalid run no plugins until they are fixed.
 - `window.gettingOver.plugins()` lists the manifest's plugins, each with its facets, whether its
   workshop facet runs and its last error, and says why no workshop facets run while they are
   invalid.
@@ -94,7 +95,9 @@ plugin's ID comes from the manifest, as `host.plugin`.
   changing `shown`. IDs are unique among a plugin's tabs and sections.
 - `host.ui` builds the Workshop's own controls: `range` (a slider with step buttons, as in
   Physics), `button`, `select`, `toggle`, `group` (a titled group of controls), `note` and
-  `notice`. Their callbacks are guarded like the plugin's other callbacks. Create
+  `notice`. Their callbacks are guarded like the plugin's other callbacks. During a `range`'s
+  scrub, the steps its `onInput` makes merge into one step of the
+  [undo history](../README.md#undo-and-redo), named `<plugin id>: <label>`. Create
   `const group = host.ui.group('Title');`, append each range/select/toggle's `.element`
   to it, and mount it with `mount.element.append(group)`. When the tab's content is at
   least 560px wide (excluding the navigation column), these label-and-control units
@@ -124,30 +127,40 @@ conflict handling as in its tab. Each returns the engine's typed error when it r
 the Workshop has shown as it shows its own, or `null`. A plugin changes the project no other
 way.
 
-Each level edit is a step of the Workshop's [undo history](../README.md#undo-and-redo), named
-`<plugin id>: <operation>`, such as `my-game: upsert`, with no tab. A plugin's calls of one
-operation within a second of its first call are one step, unless another level edit, Undo or
-Redo comes in between. A `replace` step holds only the objects that differ, so Undo and Redo
-change only those too and a playtest goes on. A refused edit, or one that changes nothing,
-records no step. The plugin's other edits are not steps; course packages, course artwork and
-media meet the history as in [Working in the Workshop](projects.md#working-in-the-workshop).
+Every edit but those of the primary character, arm IK and appearance parts, which change
+outside the history as in their tabs, is a step of the Workshop's
+[undo history](../README.md#undo-and-redo), named `<plugin id>: <operation>`, such as
+`my-game: upsert` or `my-game: media.add`, with no tab. A plugin's calls of one operation, each
+within a second of the last, are one step, unless another edit, Undo or Redo comes in between.
+An edit that waits for a file or a bake, `enemyModel`, `enemyClips`, `coursePackage`,
+`media.add`, `library.add` or `library.avatar`, becomes a step of its own once ready; until
+then Undo, or another project opening, cancels it, and it resolves `null`, or `plugin-stopped`
+if the plugin stops first. A `replace` step holds only the objects that differ, so Undo and
+Redo change only those too and a playtest goes on. A refused edit, or one that changes
+nothing, records no step.
 
 ## A plugin's own data
 
 Each plugin may keep one JSON document in the open project: `host.data.get()`,
 `host.data.set(value)` (`null` removes it) and `host.data.subscribe(listener)`, which hears of
-every change, by the plugin, a project opening or the server.
+every change: by the plugin, Undo or Redo, a project opening or the server. A `set` that
+changes the data is a step of the [undo history](../README.md#undo-and-redo), named
+`<plugin id>: Set data`, and sets each within a second of the last are one step, unless
+another edit, Undo or Redo comes in between.
 
 - It is stored in `project.json` under `plugins.<id>`, the plugin's ID from the manifest, and is
   the project section `plugins/<id>`. The engine saves, reverts, exports and conflict-checks it
   like any other section, but never interprets it.
 - It is limited to 64 KiB, nesting depth 16 and 8,192 values (`PLUGIN_DATA_LIMITS`); a project
   holds data for at most 16 plugins.
-- The plugin's `validate(data)` runs whenever the section loads or changes. It refuses with a
-  `PluginError` of its own code (lowercase letters, digits and hyphens, starting with a letter),
-  which `data.set` returns. Anything else it throws is a failure: the plugin stops, and its data
-  is accepted unchecked until the workshop facets change, so a faulty plugin never holds the
-  project back.
+- The plugin's `validate(data)` runs whenever the section loads or changes, but not on Undo or
+  Redo, which put back data as it was. It refuses with a `PluginError` of its own code
+  (lowercase letters, digits and hyphens, starting with a letter), which `data.set` returns.
+  Anything else it throws is a failure: the plugin stops, and the `data.set` or kept-changes
+  restore it was checking is refused with that failure. Until the workshop facets change, a
+  failed plugin's data is refused the same way, whatever stopped the plugin, except by a
+  project opening or a server update, which takes it unchecked, so a faulty plugin never
+  blocks opening a project.
 - A project holding data for a plugin the Workshop lacks opens with a notice naming the plugin,
   and that section stays unchanged.
 - Scripts reach it at `/api/projects/{id}/plugins/{plugin}`; see [projects](projects.md#api-for-scripts-and-language-models).

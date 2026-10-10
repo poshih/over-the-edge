@@ -79,6 +79,20 @@ const NO_SERVER: ServerHealth = Object.freeze({ available: false });
 
 const JSON_TYPE = 'application/json';
 
+function unanswered(): ProjectApiError {
+  return new ProjectApiError(0, 'offline', 'The project server did not answer. Check that npm run dev or npm run studio is running.');
+}
+
+// A successful answer's body lost on its way fails as no answer would, so a write it acknowledged stays unacknowledged.
+async function delivered<T>(body: Promise<T>): Promise<T> {
+  try {
+    return await body;
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw unanswered();
+  }
+}
+
 /** Talks to the self-hosted project server that `npm run dev` and `npm run studio` provide. */
 export class ProjectClient {
   private readonly base: string;
@@ -116,16 +130,16 @@ export class ProjectClient {
     return this.json('GET', `/projects/${encodeURIComponent(id)}`);
   }
 
-  revisions(id: string): Promise<ServerRevisions> {
-    return this.json('GET', `/projects/${encodeURIComponent(id)}/revision`);
+  revisions(id: string, signal?: AbortSignal): Promise<ServerRevisions> {
+    return this.json('GET', `/projects/${encodeURIComponent(id)}/revision`, { signal });
   }
 
   // A section's value and revision; the revision is null when its ETag is missing, as some proxies drop it, and a
   // weak ETag, as compressing proxies make it, still counts.
-  async section(id: string, name: string): Promise<{ value: unknown; revision: number | null }> {
-    const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/${name}`);
+  async section(id: string, name: string, signal?: AbortSignal): Promise<{ value: unknown; revision: number | null }> {
+    const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/${name}`, { signal });
     const tag = /^(?:W\/)?"([0-9]{1,15})"$/.exec(response.headers.get('etag') ?? '');
-    return { value: await response.json(), revision: tag === null ? null : Number(tag[1]) };
+    return { value: await delivered(response.json()), revision: tag === null ? null : Number(tag[1]) };
   }
 
   // Every level version of the project, oldest first.
@@ -140,7 +154,7 @@ export class ProjectClient {
   // One phantom recording's bytes, still to be decoded.
   async phantom(id: string, version: number, name: string, signal?: AbortSignal): Promise<Uint8Array> {
     const response = await this.request('GET', `/projects/${encodeURIComponent(id)}/level/versions/${version}/phantoms/${encodeURIComponent(name)}`, { signal });
-    return new Uint8Array(await response.arrayBuffer());
+    return new Uint8Array(await delivered(response.arrayBuffer()));
   }
 
   // Stores one clip of a play session as a phantom recording of the level's `version`; sending a clip again replaces it.
@@ -154,8 +168,9 @@ export class ProjectClient {
     return this.json('PUT', `/projects/${encodeURIComponent(id)}/${name}`, { body: JSON.stringify(value), type: JSON_TYPE, revision });
   }
 
-  async blob(url: string): Promise<Blob> {
-    return (await this.request('GET', url.slice(this.base.length))).blob();
+  // Fetched afresh: a cached copy could predate an overwrite of its path.
+  async blob(url: string, signal?: AbortSignal): Promise<Blob> {
+    return delivered((await this.request('GET', url.slice(this.base.length), { signal, cache: 'no-cache' })).blob());
   }
 
   modelUrl(id: string, part: string): string {
@@ -213,8 +228,8 @@ export class ProjectClient {
     return (await this.json<{ copies: SharedCopySummary[] }>('GET', `/shared/${kind}`)).copies;
   }
 
-  sharedCopy(kind: SharedKind, name: string): Promise<unknown> {
-    return this.json('GET', `/shared/${kind}/${encodeURIComponent(name)}`);
+  sharedCopy(kind: SharedKind, name: string, signal?: AbortSignal): Promise<unknown> {
+    return this.json('GET', `/shared/${kind}/${encodeURIComponent(name)}`, { signal });
   }
 
   // Stores a copy every Workshop page can load, replacing any copy with that name.
@@ -222,12 +237,14 @@ export class ProjectClient {
     return this.json('PUT', `/shared/${kind}/${encodeURIComponent(name)}`, { body: JSON.stringify(value), type: JSON_TYPE });
   }
 
-  private async json<T>(method: string, path: string, options: { body?: BodyInit; type?: string; revision?: number } = {}): Promise<T> {
-    return (await this.request(method, path, options)).json() as Promise<T>;
+  private async json<T>(method: string, path: string, options: {
+    body?: BodyInit; type?: string; revision?: number; signal?: AbortSignal;
+  } = {}): Promise<T> {
+    return delivered((await this.request(method, path, options)).json() as Promise<T>);
   }
 
   private async request(method: string, path: string, options: {
-    body?: BodyInit; type?: string; revision?: number; headers?: Record<string, string>; signal?: AbortSignal;
+    body?: BodyInit; type?: string; revision?: number; headers?: Record<string, string>; signal?: AbortSignal; cache?: RequestCache;
   } = {}): Promise<Response> {
     const headers: Record<string, string> = { Accept: JSON_TYPE, ...options.headers };
     if (method !== 'GET') headers['X-Studio-Request'] = '1';
@@ -235,26 +252,30 @@ export class ProjectClient {
     if (options.revision !== undefined) headers['If-Match'] = `"${options.revision}"`;
     let response: Response;
     try {
-      response = await fetch(`${this.base}${path}`, { method, headers, body: options.body, credentials: 'same-origin', signal: options.signal });
+      response = await fetch(`${this.base}${path}`, {
+        method, headers, body: options.body, credentials: 'same-origin', signal: options.signal, cache: options.cache,
+      });
     } catch (error) {
       if (!(error instanceof TypeError)) throw error;
-      throw new ProjectApiError(0, 'offline', 'The project server did not answer. Check that npm run dev or npm run studio is running.');
+      throw unanswered();
     }
     if (response.ok) return response;
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch (error) {
+      // An error body that is not JSON, or is lost on its way, leaves the status that did arrive.
+      if (!(error instanceof SyntaxError || error instanceof TypeError)) throw error;
+    }
     let message = `The project server answered ${response.status}.`;
     let code = 'http';
     let section: string | null = null;
-    try {
-      const body: unknown = await response.json();
-      const error = typeof body === 'object' && body !== null ? Reflect.get(body, 'error') : null;
-      if (typeof error === 'object' && error !== null) {
-        message = String(Reflect.get(error, 'message') ?? message);
-        code = String(Reflect.get(error, 'code') ?? code);
-        const value = Reflect.get(error, 'section');
-        section = typeof value === 'string' ? value : null;
-      }
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
+    const detail = typeof body === 'object' && body !== null ? Reflect.get(body, 'error') : null;
+    if (typeof detail === 'object' && detail !== null) {
+      message = String(Reflect.get(detail, 'message') ?? message);
+      code = String(Reflect.get(detail, 'code') ?? code);
+      const value = Reflect.get(detail, 'section');
+      section = typeof value === 'string' ? value : null;
     }
     throw new ProjectApiError(response.status, code, message, section);
   }

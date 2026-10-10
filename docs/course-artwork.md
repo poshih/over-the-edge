@@ -237,9 +237,11 @@ static.
 A course package is one JSON file holding a level and the GLBs it draws, for
 [level-file builds](../README.md#game-only-release) and for importing into a project with
 **Project / Course artwork / Import course package**, which replaces the level and brings
-the GLBs. Importing one clears the [undo history](../README.md#undo-and-redo), as opening a
-project does. Pack one from a level JSON, exported from **Workshop / Level**, and an assets
-file listing GLBs relative to itself:
+the GLBs without asking, as one step of the [undo history](../README.md#undo-and-redo): Undo
+puts back the level and course artwork from before. Like **New level**, it first applies
+trigger event edits not yet applied, and an unfinished outline must be finished or cancelled
+first. Pack one from a level JSON, exported from **Workshop / Level**, and an assets file
+listing GLBs relative to itself:
 
 ```json
 {

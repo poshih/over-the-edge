@@ -3,6 +3,7 @@ import type { DecorationCategory } from '../decoration-models';
 import type { DecorationObject, LevelDefinition, LevelObject, StartObject } from '../level';
 import type { MeshTerrain } from '../mesh-collision';
 import type { History } from './document/history';
+import type { AddedCourseMesh, EditOutcome } from './document/project-imports';
 import type { LevelChecks } from './level-checks';
 import type { LevelState } from './level-state';
 import type { ProjectSaveTarget } from './project-save';
@@ -48,13 +49,13 @@ export interface LevelEditorOptions {
   meshes: {
     list: () => readonly { readonly id: string; readonly name: string }[];
     // A mesh turned `turn` radians about its vertical axis, ready to place with its collision baked for that turn; or the
-    // refusal, which the project reports.
+    // project's refusal, which the Workshop has reported.
     terrain: (id: string, turn: number) => Promise<MeshTerrain | Error>;
     // Draws each placed terrain object `turns` lists, by ID, at its listed turn before the level holds it, each axis
     // keeping its scale, until the next call; the rest as the level turns them.
     preview: (turns: ReadonlyMap<string, number>) => void;
-    // Adds a GLB to the project's meshes: it, ready to place, or the refusal, which the project reports.
-    add: (file: File) => Promise<{ readonly id: string; readonly terrain: MeshTerrain } | Error>;
+    // Adds a GLB to the project's meshes, ready to place; a cancelled import arms nothing.
+    add(file: File, signal: AbortSignal): Promise<EditOutcome<AddedCourseMesh>>;
     // Calls `listener` whenever the meshes may have changed.
     subscribe: (listener: () => void) => () => void;
   };
@@ -152,6 +153,8 @@ export interface LevelEditorHandle {
   // Whether work the level does not hold yet is pending: unapplied trigger events, an outline, a bake or a level file.
   hasPendingEdits(): boolean;
   setMode(mode: 'edit' | 'inactive'): void;
+  // The selected objects' IDs, as a step records them.
+  selection(): readonly string[];
   snapshot(): LevelEditorSnapshot;
   dispose(): void;
 }

@@ -46,6 +46,13 @@ export class MeshBaker {
     return answer;
   }
 
+  forget(assetId: string): void {
+    this.delivered.delete(assetId);
+    if (this.worker === null) return;
+    const request: MeshBakeRequest = { kind: 'forget', assetId };
+    this.worker.postMessage(request);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -62,7 +69,7 @@ export class MeshBaker {
     if (delivery === undefined) {
       const sending = bytes().then((data) => {
         // A worker replaced meanwhile never gets it; the bake below sends it again to the new one.
-        if (worker !== this.worker) return;
+        if (worker !== this.worker || this.delivered.get(assetId) !== sending) return;
         const request: MeshBakeRequest = { kind: 'mesh', assetId, bytes: data };
         worker.postMessage(request, [data]);
       });
@@ -76,6 +83,7 @@ export class MeshBaker {
       if (retried) throw new ArtError(`The mesh could not be baked: ${this.failure}.`);
       return this.send(assetId, bytes, turn, true);
     }
+    if (this.delivered.get(assetId) !== delivery) throw new ArtError('The mesh was released before its bake.');
     const id = ++this.next;
     const answer = new Promise<MeshTerrain>((resolve, reject) => this.waiting.set(id, {
       resolve: (response) => { if ('terrain' in response) resolve(response.terrain); else reject(new ArtError('The baker answered another request.')); },
@@ -112,6 +120,7 @@ export class MeshBaker {
   }
 
   private fail(message: string): void {
+    this.delivered.clear();
     const waiting = [...this.waiting.values()];
     this.waiting.clear();
     for (const { reject } of waiting) reject(new ArtError(message));
